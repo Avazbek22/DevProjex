@@ -345,6 +345,180 @@ public sealed class TerminalWorkspaceCommandParserTests
 	}
 
 	[Fact]
+	public void EmptyFileSystemPrefixCompletesFromTheProjectDirectory()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.CreateDirectory("child");
+		var context = new TerminalWorkspaceCommandParseContext(
+			[".cs"],
+			WorkingDirectory: workspace.Path);
+
+		var completion = _parser.GetCompletion("open ", 5, context);
+
+		Assert.Contains(completion.Candidates, static item => item.Token == "child");
+	}
+
+	[Fact]
+	public void ProfileLoadCompletionUsesTheSameNamedAndExplicitPathRulesAsExecution()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var profiles = workspace.CreateDirectory("profiles");
+		workspace.WriteFile("project/custom.json", "{}");
+		workspace.WriteFile("profiles/named.json", "{}");
+		var context = new TerminalWorkspaceCommandParseContext(
+			[".cs"],
+			WorkingDirectory: project,
+			ProfileDirectory: profiles);
+
+		var named = _parser.GetCompletion("profile load na", 15, context);
+		var ambiguous = _parser.GetCompletion("profile load cus", 16, context);
+		var explicitPath = _parser.GetCompletion("profile load ./cus", 18, context);
+
+		Assert.Contains(named.Candidates, static item => item.Token == "named");
+		Assert.DoesNotContain(ambiguous.Candidates, static item => item.Token == "custom.json");
+		Assert.Contains(explicitPath.Candidates, static item => item.Token == "./custom.json");
+		Assert.Equal(
+			Path.GetFullPath(Path.Combine(profiles, "named.json")),
+			TerminalPortableProfilePathResolver.Resolve("named", project, profiles));
+		Assert.Equal(
+			Path.GetFullPath(Path.Combine(profiles, "custom.json")),
+			TerminalPortableProfilePathResolver.Resolve("custom.json", project, profiles));
+		Assert.Equal(
+			Path.GetFullPath(Path.Combine(project, "custom.json")),
+			TerminalPortableProfilePathResolver.Resolve("./custom.json", project, profiles));
+	}
+
+	[Fact]
+	public void ProfileLoadCompletionFiltersBeforeApplyingTheCandidateLimit()
+	{
+		using var workspace = new TemporaryDirectory();
+		var profiles = workspace.CreateDirectory("profiles");
+		for (var index = 0; index < 120; index++)
+			workspace.WriteFile($"profiles/a-{index:D3}.json", "{}");
+		workspace.WriteFile("profiles/z-target.json", "{}");
+		var context = new TerminalWorkspaceCommandParseContext(
+			[".cs"],
+			WorkingDirectory: workspace.Path,
+			ProfileDirectory: profiles);
+
+		var completion = _parser.GetCompletion("profile load z-", 15, context);
+
+		Assert.Contains(completion.Candidates, static item => item.Token == "z-target");
+	}
+
+	[Fact]
+	public async Task ExportCompletionAndPreparationResolveRelativeDestinationsFromTheProject()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/src/App.cs", "class App { }");
+		var expectedDestination = workspace.WriteFile("context.md", "existing");
+		var context = new TerminalWorkspaceCommandParseContext(
+			[".cs"],
+			WorkingDirectory: project);
+		var completion = _parser.GetCompletion("export context ../con", 21, context);
+		var journalCompletion = _parser.GetCompletion(
+			"mcp log export ../con",
+			"mcp log export ../con".Length,
+			context);
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			project,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+
+		var summary = await controller.PrepareContextExportAsync(
+			state,
+			ProjectContextView.TreeContent,
+			ProjectContextDocumentFormat.Markdown,
+			"../context.md",
+			overwrite: false,
+			TestContext.Current.CancellationToken);
+
+		Assert.Contains(completion.Candidates, static item => item.Token == "../context.md");
+		Assert.Contains(journalCompletion.Candidates, static item => item.Token == "../context.md");
+		Assert.Equal(
+			Path.GetFullPath(expectedDestination),
+			TerminalWorkspaceSession.ResolveAgentJournalExportDestination(
+				project,
+				"../context.md"));
+		Assert.Equal(Path.GetFullPath(expectedDestination), summary.Destination);
+		Assert.Equal(TerminalExportDestinationState.Conflict, summary.DestinationState);
+
+		var contextDestination = Path.Combine(workspace.Path, "written.md");
+		var exportedContext = await controller.ExportContextAsync(
+			state,
+			ProjectContextView.TreeContent,
+			ProjectContextDocumentFormat.Markdown,
+			"../written.md",
+			overwrite: false,
+			TestContext.Current.CancellationToken);
+		Assert.Equal(Path.GetFullPath(contextDestination), exportedContext);
+		Assert.True(File.Exists(contextDestination));
+
+		var projectDestination = Path.Combine(workspace.Path, "project-copy");
+		var exportedProject = await controller.ExportProjectAsync(
+			state,
+			ProjectCopyExportFormat.Folder,
+			"../project-copy",
+			overwrite: false,
+			TestContext.Current.CancellationToken);
+		Assert.Equal(Path.GetFullPath(projectDestination), exportedProject);
+		Assert.True(Directory.Exists(projectDestination));
+	}
+
+	[Fact]
+	public void CompletionContextCanCarryTheKnownProjectTree()
+	{
+		var contextType = typeof(TerminalWorkspaceCommandParseContext);
+
+		Assert.NotNull(contextType.GetProperty("KnownProjectPaths"));
+		Assert.NotNull(contextType.GetProperty("KnownProjectFiles"));
+	}
+
+	[Fact]
+	public void SelectAndRelatedCompletionUseTheKnownProjectTree()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("disk-only.cs", "class DiskOnly { }");
+		var context = new TerminalWorkspaceCommandParseContext(
+			[".cs"],
+			WorkingDirectory: workspace.Path,
+			KnownProjectPaths: ["virtual", "virtual/App.cs"],
+			KnownProjectFiles: ["virtual/App.cs"]);
+
+		var select = _parser.GetCompletion("select virtual/A", 16, context);
+		var related = _parser.GetCompletion("related virtual/A", 17, context);
+
+		Assert.Contains(select.Candidates, static candidate => candidate.Token == "virtual/App.cs");
+		Assert.Contains(related.Candidates, static candidate => candidate.Token == "virtual/App.cs");
+		Assert.DoesNotContain(select.Candidates, static candidate => candidate.Token == "disk-only.cs");
+		Assert.DoesNotContain(related.Candidates, static candidate => candidate.Token == "disk-only.cs");
+	}
+
+	[Fact]
+	public void FileSystemCompletionKeepsTheDeterministicFirstHundredCandidates()
+	{
+		using var workspace = new TemporaryDirectory();
+		var profiles = workspace.CreateDirectory("profiles");
+		for (var index = 149; index >= 0; index--)
+			workspace.WriteFile($"profiles/profile-{index:D3}.json", "{}");
+		var context = new TerminalWorkspaceCommandParseContext(
+			[".cs"],
+			WorkingDirectory: workspace.Path,
+			ProfileDirectory: profiles);
+
+		var completion = _parser.GetCompletion("profile load ", "profile load ".Length, context);
+
+		Assert.Equal(100, completion.Candidates.Count);
+		Assert.Equal("profile-000", completion.Candidates[0].Token);
+		Assert.Equal("profile-099", completion.Candidates[^1].Token);
+	}
+
+	[Fact]
 	public void CompletionOffersAPathForContextExportWithoutAnExplicitFormat()
 	{
 		using var workspace = new TemporaryDirectory();

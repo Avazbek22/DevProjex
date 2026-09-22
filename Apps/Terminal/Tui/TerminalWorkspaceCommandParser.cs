@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Text;
 using DevProjex.Terminal.CommandLine;
 
@@ -6,6 +7,9 @@ namespace DevProjex.Terminal.Tui;
 
 internal sealed class TerminalWorkspaceCommandParser
 {
+	private const int MaximumFileSystemCompletionCandidates = 100;
+	private static readonly ConditionalWeakTable<TreeNodeDescriptor, KnownProjectCompletionPaths>
+		KnownProjectPathsCache = new();
 	private static readonly string[] ToggleValues = ["on", "off"];
 	private static readonly string[] GitModeValues =
 		["off", "gitignore", "tracked", "staged", "changes", "diff:<ref>..<ref>"];
@@ -43,7 +47,8 @@ internal sealed class TerminalWorkspaceCommandParser
 		int argumentIndex,
 		IReadOnlyList<ParsedToken> tokens,
 		string current,
-		TerminalWorkspaceCommandParseContext context);
+		TerminalWorkspaceCommandParseContext context,
+		CancellationToken cancellationToken);
 
 	private sealed record GrammarHandler(GrammarParser Parse, GrammarCompleter Complete);
 
@@ -111,6 +116,20 @@ internal sealed class TerminalWorkspaceCommandParser
 
 	internal static int RegisteredGrammarCount => GrammarHandlers.Count;
 
+	internal static (
+		IReadOnlyList<string> Paths,
+		IReadOnlyList<string> Files) GetKnownProjectCompletionPaths(
+		TreeNodeDescriptor root,
+		string sourceRoot)
+	{
+		ArgumentNullException.ThrowIfNull(root);
+		ArgumentException.ThrowIfNullOrWhiteSpace(sourceRoot);
+		var known = KnownProjectPathsCache.GetValue(
+			root,
+			key => BuildKnownProjectCompletionPaths(key, sourceRoot));
+		return (known.Paths, known.Files);
+	}
+
 	public TerminalWorkspaceCommandParseResult Parse(
 		string? text,
 		TerminalWorkspaceCommandParseContext? context = null)
@@ -146,8 +165,26 @@ internal sealed class TerminalWorkspaceCommandParser
 		string? text,
 		int cursorPosition,
 		TerminalWorkspaceCommandParseContext? context = null)
+		=> GetCompletionCore(text, cursorPosition, context, CancellationToken.None);
+
+	public ValueTask<TerminalWorkspaceCommandCompletion> GetCompletionAsync(
+		string? text,
+		int cursorPosition,
+		TerminalWorkspaceCommandParseContext? context,
+		CancellationToken cancellationToken)
 	{
-		var target = ResolveCompletionTarget(text, cursorPosition, context);
+		return new ValueTask<TerminalWorkspaceCommandCompletion>(Task.Run(
+			() => GetCompletionCore(text, cursorPosition, context, cancellationToken),
+			cancellationToken));
+	}
+
+	private static TerminalWorkspaceCommandCompletion GetCompletionCore(
+		string? text,
+		int cursorPosition,
+		TerminalWorkspaceCommandParseContext? context,
+		CancellationToken cancellationToken)
+	{
+		var target = ResolveCompletionTarget(text, cursorPosition, context, cancellationToken);
 		if (target is null)
 			return TerminalWorkspaceCommandCompletion.Empty;
 
@@ -166,7 +203,17 @@ internal sealed class TerminalWorkspaceCommandParser
 		int cursorPosition,
 		TerminalWorkspaceCommandParseContext? context = null)
 	{
-		var target = ResolveCompletionTarget(text, cursorPosition, context);
+		context ??= TerminalWorkspaceCommandParseContext.Empty;
+		var ghostContext = context with
+		{
+			WorkingDirectory = null,
+			ProfileDirectory = null
+		};
+		var target = ResolveCompletionTarget(
+			text,
+			cursorPosition,
+			ghostContext,
+			CancellationToken.None);
 		if (target is null)
 			return TerminalWorkspaceCommandGhostCompletion.Empty;
 		if (target.Value.SchemaKey is { } schemaKey)
@@ -181,7 +228,8 @@ internal sealed class TerminalWorkspaceCommandParser
 	private static CompletionTarget? ResolveCompletionTarget(
 		string? text,
 		int cursorPosition,
-		TerminalWorkspaceCommandParseContext? context)
+		TerminalWorkspaceCommandParseContext? context,
+		CancellationToken cancellationToken)
 	{
 		text ??= string.Empty;
 		context ??= TerminalWorkspaceCommandParseContext.Empty;
@@ -228,7 +276,8 @@ internal sealed class TerminalWorkspaceCommandParser
 			argumentIndex,
 			tokens,
 			current,
-			context);
+			context,
+			cancellationToken);
 		var schemaKey = atNewToken && tokens.Count == 1
 			? definition.SchemaKey
 			: null;
@@ -766,7 +815,8 @@ internal sealed class TerminalWorkspaceCommandParser
 		int argumentIndex,
 		IReadOnlyList<ParsedToken> tokens,
 		string current,
-		TerminalWorkspaceCommandParseContext context) =>
+		TerminalWorkspaceCommandParseContext context,
+		CancellationToken cancellationToken) =>
 		argumentIndex switch
 		{
 			0 => new CompletionCandidateSource(SetTargets),
@@ -781,7 +831,8 @@ internal sealed class TerminalWorkspaceCommandParser
 		int argumentIndex,
 		IReadOnlyList<ParsedToken> tokens,
 		string current,
-		TerminalWorkspaceCommandParseContext context) =>
+		TerminalWorkspaceCommandParseContext context,
+		CancellationToken cancellationToken) =>
 		argumentIndex switch
 		{
 			0 => new CompletionCandidateSource(AggregateTargets),
@@ -793,18 +844,22 @@ internal sealed class TerminalWorkspaceCommandParser
 		int argumentIndex,
 		IReadOnlyList<ParsedToken> tokens,
 		string current,
-		TerminalWorkspaceCommandParseContext context) =>
+		TerminalWorkspaceCommandParseContext context,
+		CancellationToken cancellationToken) =>
 		argumentIndex >= 0 ? ResolveTypeCompletions(tokens, context) : default;
 
 	private static CompletionCandidateSource CompleteSelect(
 		int argumentIndex,
 		IReadOnlyList<ParsedToken> tokens,
 		string current,
-		TerminalWorkspaceCommandParseContext context)
+		TerminalWorkspaceCommandParseContext context,
+		CancellationToken cancellationToken)
 	{
 		if (argumentIndex < 0)
 			return default;
-		var paths = ResolvePathCompletions(current, context.WorkingDirectory);
+		var paths = context.KnownProjectPaths is { } knownPaths
+			? ResolveKnownPathCompletions(current, knownPaths)
+			: ResolvePathCompletions(current, context.WorkingDirectory, cancellationToken);
 		return argumentIndex == 0
 			? new CompletionCandidateSource(["all", .. paths], ToggleValues)
 			: new CompletionCandidateSource(paths, ToggleValues);
@@ -814,21 +869,24 @@ internal sealed class TerminalWorkspaceCommandParser
 		int argumentIndex,
 		IReadOnlyList<ParsedToken> tokens,
 		string current,
-		TerminalWorkspaceCommandParseContext context) =>
+		TerminalWorkspaceCommandParseContext context,
+		CancellationToken cancellationToken) =>
 		argumentIndex == 0 ? new CompletionCandidateSource(CliChoiceSets.ContextView.Tokens) : default;
 
 	private static CompletionCandidateSource CompleteFormat(
 		int argumentIndex,
 		IReadOnlyList<ParsedToken> tokens,
 		string current,
-		TerminalWorkspaceCommandParseContext context) =>
+		TerminalWorkspaceCommandParseContext context,
+		CancellationToken cancellationToken) =>
 		argumentIndex == 0 ? new CompletionCandidateSource(CliChoiceSets.ContextDocumentFormat.Tokens) : default;
 
 	private static CompletionCandidateSource CompleteExport(
 		int argumentIndex,
 		IReadOnlyList<ParsedToken> tokens,
 		string current,
-		TerminalWorkspaceCommandParseContext context)
+		TerminalWorkspaceCommandParseContext context,
+		CancellationToken cancellationToken)
 	{
 		if (argumentIndex == 0)
 			return new CompletionCandidateSource(ExportTargets);
@@ -838,10 +896,13 @@ internal sealed class TerminalWorkspaceCommandParser
 		{
 			return new CompletionCandidateSource(
 				CliChoiceSets.ContextDocumentFormat.Tokens,
-				ResolvePathCompletions(current, context.WorkingDirectory));
+				ResolvePathCompletions(current, context.WorkingDirectory, cancellationToken));
 		}
 		if (argumentIndex == 2 && isContext || argumentIndex == 1 && tokens.Count > 1)
-			return new CompletionCandidateSource(ResolvePathCompletions(current, context.WorkingDirectory));
+			return new CompletionCandidateSource(ResolvePathCompletions(
+				current,
+				context.WorkingDirectory,
+				cancellationToken));
 		return default;
 	}
 
@@ -849,7 +910,8 @@ internal sealed class TerminalWorkspaceCommandParser
 		int argumentIndex,
 		IReadOnlyList<ParsedToken> tokens,
 		string current,
-		TerminalWorkspaceCommandParseContext context) =>
+		TerminalWorkspaceCommandParseContext context,
+		CancellationToken cancellationToken) =>
 		argumentIndex switch
 		{
 			0 => new CompletionCandidateSource(CliChoiceSets.ContextView.Tokens),
@@ -861,15 +923,24 @@ internal sealed class TerminalWorkspaceCommandParser
 		int argumentIndex,
 		IReadOnlyList<ParsedToken> tokens,
 		string current,
-		TerminalWorkspaceCommandParseContext context) =>
+		TerminalWorkspaceCommandParseContext context,
+		CancellationToken cancellationToken) =>
 		argumentIndex switch
 		{
 			0 => new CompletionCandidateSource(ProfileTargets),
 			1 when tokens.Count > 1 &&
+				string.Equals(tokens[1].Value, "load", StringComparison.OrdinalIgnoreCase) &&
+				TerminalPortableProfilePathResolver.IsExplicitPath(current) =>
+				new CompletionCandidateSource(ResolvePathCompletions(
+					current,
+					context.WorkingDirectory,
+					cancellationToken)),
+			1 when tokens.Count > 1 &&
 				string.Equals(tokens[1].Value, "load", StringComparison.OrdinalIgnoreCase) =>
-				new CompletionCandidateSource(
-					ResolveProfileNameCompletions(context.ProfileDirectory),
-					ResolvePathCompletions(current, context.WorkingDirectory)),
+				new CompletionCandidateSource(ResolveProfileNameCompletions(
+					current,
+					context.ProfileDirectory,
+					cancellationToken)),
 			_ => default
 		};
 
@@ -877,16 +948,21 @@ internal sealed class TerminalWorkspaceCommandParser
 		int argumentIndex,
 		IReadOnlyList<ParsedToken> tokens,
 		string current,
-		TerminalWorkspaceCommandParseContext context) =>
+		TerminalWorkspaceCommandParseContext context,
+		CancellationToken cancellationToken) =>
 		argumentIndex == 0
-			? new CompletionCandidateSource(ResolvePathCompletions(current, context.WorkingDirectory))
+			? new CompletionCandidateSource(ResolvePathCompletions(
+				current,
+				context.WorkingDirectory,
+				cancellationToken))
 			: default;
 
 	private static CompletionCandidateSource CompleteMcpConnection(
 		int argumentIndex,
 		IReadOnlyList<ParsedToken> tokens,
 		string current,
-		TerminalWorkspaceCommandParseContext context) =>
+		TerminalWorkspaceCommandParseContext context,
+		CancellationToken cancellationToken) =>
 		argumentIndex switch
 		{
 			0 => new CompletionCandidateSource(McpTargets, McpClients),
@@ -898,7 +974,10 @@ internal sealed class TerminalWorkspaceCommandParser
 				new CompletionCandidateSource(McpLogTargets),
 			2 when tokens.Count > 2 && string.Equals(tokens[1].Value, "log", StringComparison.OrdinalIgnoreCase) &&
 								string.Equals(tokens[2].Value, "export", StringComparison.OrdinalIgnoreCase) =>
-				new CompletionCandidateSource(ResolvePathCompletions(current, context.WorkingDirectory)),
+				new CompletionCandidateSource(ResolvePathCompletions(
+					current,
+					context.WorkingDirectory,
+					cancellationToken)),
 			3 when tokens.Count > 3 && string.Equals(tokens[1].Value, "log", StringComparison.OrdinalIgnoreCase) &&
 								string.Equals(tokens[2].Value, "export", StringComparison.OrdinalIgnoreCase) =>
 				new CompletionCandidateSource(McpLogFormats, ["session", "last"]),
@@ -915,10 +994,15 @@ internal sealed class TerminalWorkspaceCommandParser
 		int argumentIndex,
 		IReadOnlyList<ParsedToken> tokens,
 		string current,
-		TerminalWorkspaceCommandParseContext context)
+		TerminalWorkspaceCommandParseContext context,
+		CancellationToken cancellationToken)
 	{
 		if (argumentIndex == 0)
-			return new CompletionCandidateSource(ResolvePathCompletions(current, context.WorkingDirectory));
+		{
+			return new CompletionCandidateSource(context.KnownProjectFiles is { } knownFiles
+				? ResolveKnownPathCompletions(current, knownFiles)
+				: ResolvePathCompletions(current, context.WorkingDirectory, cancellationToken));
+		}
 		if ((tokens.Count >= 2 && string.Equals(tokens[^1].Value, "--direction", StringComparison.OrdinalIgnoreCase)) ||
 			(current.Length > 0 && tokens.Count >= 3 &&
 			 string.Equals(tokens[^2].Value, "--direction", StringComparison.OrdinalIgnoreCase)))
@@ -945,31 +1029,37 @@ internal sealed class TerminalWorkspaceCommandParser
 		int argumentIndex,
 		IReadOnlyList<ParsedToken> tokens,
 		string current,
-		TerminalWorkspaceCommandParseContext context) =>
+		TerminalWorkspaceCommandParseContext context,
+		CancellationToken cancellationToken) =>
 		argumentIndex == 0 ? new CompletionCandidateSource(LanguageCodes) : default;
 
 	private static CompletionCandidateSource CompleteHelp(
 		int argumentIndex,
 		IReadOnlyList<ParsedToken> tokens,
 		string current,
-		TerminalWorkspaceCommandParseContext context) =>
+		TerminalWorkspaceCommandParseContext context,
+		CancellationToken cancellationToken) =>
 		argumentIndex == 0 ? new CompletionCandidateSource(context.VerbTokens) : default;
 
 	private static CompletionCandidateSource NoCompletions(
 		int argumentIndex,
 		IReadOnlyList<ParsedToken> tokens,
 		string current,
-		TerminalWorkspaceCommandParseContext context) => default;
+		TerminalWorkspaceCommandParseContext context,
+		CancellationToken cancellationToken) => default;
 
-	private static IReadOnlyList<string> ResolvePathCompletions(string current, string? workingDirectory)
+	private static IReadOnlyList<string> ResolvePathCompletions(
+		string current,
+		string? workingDirectory,
+		CancellationToken cancellationToken)
 	{
+		if (string.IsNullOrWhiteSpace(workingDirectory))
+			return [];
 		try
 		{
-			var baseDirectory = workingDirectory ?? Directory.GetCurrentDirectory();
-			var expanded = TerminalPathPickerModel.ExpandPath(current);
-			var absolute = Path.GetFullPath(Path.IsPathRooted(expanded)
-				? expanded
-				: Path.Combine(baseDirectory, expanded));
+			cancellationToken.ThrowIfCancellationRequested();
+			var baseDirectory = Path.GetFullPath(workingDirectory);
+			var absolute = TerminalWorkspacePathResolver.Resolve(current, baseDirectory);
 			var directory = Directory.Exists(absolute) ? absolute : Path.GetDirectoryName(absolute);
 			var prefix = Directory.Exists(absolute) ? string.Empty : Path.GetFileName(absolute);
 			if (directory is null || !Directory.Exists(directory))
@@ -979,14 +1069,20 @@ internal sealed class TerminalWorkspaceCommandParser
 				current.LastIndexOf(Path.DirectorySeparatorChar),
 				current.LastIndexOf(Path.AltDirectorySeparatorChar));
 			var displayDirectory = separatorIndex >= 0 ? current[..(separatorIndex + 1)] : null;
-			return Directory.EnumerateFileSystemEntries(directory)
-				.Where(path => Path.GetFileName(path).StartsWith(prefix, StringComparison.CurrentCultureIgnoreCase))
-				.OrderBy(static path => path, ProjectTreePathIdentity.CanonicalComparer)
-				.Take(100)
-				.Select(path => displayDirectory is not null
+			var matches = new List<string>(MaximumFileSystemCompletionCandidates + 1);
+			foreach (var path in Directory.EnumerateFileSystemEntries(directory))
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				if (!Path.GetFileName(path).StartsWith(prefix, StringComparison.CurrentCultureIgnoreCase))
+					continue;
+				AddBoundedCompletionCandidate(
+					matches,
+					displayDirectory is not null
 					? displayDirectory + Path.GetFileName(path)
-					: rooted ? path : Path.GetRelativePath(baseDirectory, path))
-				.ToArray();
+					: rooted ? path : Path.GetRelativePath(baseDirectory, path),
+					ProjectTreePathIdentity.CanonicalComparer);
+			}
+			return matches;
 		}
 		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
 			ArgumentException or NotSupportedException)
@@ -995,24 +1091,116 @@ internal sealed class TerminalWorkspaceCommandParser
 		}
 	}
 
-	private static IReadOnlyList<string> ResolveProfileNameCompletions(string? profileDirectory)
+	private static IReadOnlyList<string> ResolveProfileNameCompletions(
+		string current,
+		string? profileDirectory,
+		CancellationToken cancellationToken)
 	{
 		if (string.IsNullOrWhiteSpace(profileDirectory))
 			return [];
 		try
 		{
-			return Directory.EnumerateFiles(profileDirectory, "*.json", SearchOption.TopDirectoryOnly)
-				.Select(Path.GetFileNameWithoutExtension)
-				.Where(static name => !string.IsNullOrWhiteSpace(name))
-				.Order(StringComparer.CurrentCultureIgnoreCase)
-				.Take(100)
-				.ToArray()!;
+			var names = new List<string>(MaximumFileSystemCompletionCandidates + 1);
+			foreach (var path in Directory.EnumerateFiles(
+				profileDirectory,
+				"*.json",
+				SearchOption.TopDirectoryOnly))
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				var name = Path.GetFileNameWithoutExtension(path);
+				if (string.IsNullOrWhiteSpace(name) ||
+					!name.StartsWith(current, StringComparison.CurrentCultureIgnoreCase))
+					continue;
+				AddBoundedCompletionCandidate(
+					names,
+					name,
+					StringComparer.CurrentCultureIgnoreCase);
+			}
+			return names;
 		}
 		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
 			ArgumentException or NotSupportedException)
 		{
 			return [];
 		}
+	}
+
+	private static void AddBoundedCompletionCandidate(
+		List<string> candidates,
+		string candidate,
+		IComparer<string> comparer)
+	{
+		var index = candidates.BinarySearch(candidate, comparer);
+		if (index < 0)
+			index = ~index;
+		else
+		{
+			while (index > 0 && comparer.Compare(candidates[index - 1], candidate) == 0)
+				index--;
+			while (index < candidates.Count && comparer.Compare(candidates[index], candidate) == 0 &&
+				   StringComparer.Ordinal.Compare(candidates[index], candidate) <= 0)
+			{
+				index++;
+			}
+		}
+		candidates.Insert(index, candidate);
+		if (candidates.Count > MaximumFileSystemCompletionCandidates)
+			candidates.RemoveAt(MaximumFileSystemCompletionCandidates);
+	}
+
+	private static IReadOnlyList<string> ResolveKnownPathCompletions(
+		string current,
+		IReadOnlyList<string> knownPaths)
+	{
+		var usesBackslash = current.Contains('\\');
+		var explicitRelativePrefix = current.StartsWith("./", StringComparison.Ordinal) ||
+			current.StartsWith(".\\", StringComparison.Ordinal);
+		var normalizedCurrent = current.Replace('\\', '/');
+		if (explicitRelativePrefix)
+			normalizedCurrent = normalizedCurrent[2..];
+
+		var matches = new List<string>(Math.Min(
+			knownPaths.Count,
+			MaximumFileSystemCompletionCandidates));
+		foreach (var path in knownPaths)
+		{
+			var normalizedPath = path.Replace('\\', '/');
+			if (!normalizedPath.StartsWith(normalizedCurrent, StringComparison.OrdinalIgnoreCase))
+				continue;
+			var display = explicitRelativePrefix ? "./" + normalizedPath : normalizedPath;
+			matches.Add(usesBackslash ? display.Replace('/', '\\') : display);
+			if (matches.Count == MaximumFileSystemCompletionCandidates)
+				break;
+		}
+		return matches;
+	}
+
+	private static KnownProjectCompletionPaths BuildKnownProjectCompletionPaths(
+		TreeNodeDescriptor root,
+		string sourceRoot)
+	{
+		var paths = new List<string>();
+		var files = new List<string>();
+		var stack = new Stack<TreeNodeDescriptor>();
+		for (var index = root.Children.Count - 1; index >= 0; index--)
+			stack.Push(root.Children[index]);
+		while (stack.Count > 0)
+		{
+			var node = stack.Pop();
+			var relativePath = ProjectSelectionPath.NormalizeRelative(
+				Path.GetRelativePath(sourceRoot, node.FullPath));
+			if (relativePath.Length > 0 && relativePath != ".")
+			{
+				paths.Add(relativePath);
+				if (!node.IsDirectory)
+					files.Add(relativePath);
+			}
+			for (var index = node.Children.Count - 1; index >= 0; index--)
+				stack.Push(node.Children[index]);
+		}
+		paths.Sort(ProjectTreePathIdentity.CanonicalComparer);
+		files.Sort(ProjectTreePathIdentity.CanonicalComparer);
+		return new KnownProjectCompletionPaths(paths, files);
 	}
 
 	private static CompletionCandidateSource ResolveTypeCompletions(
@@ -1329,4 +1517,22 @@ internal sealed class TerminalWorkspaceCommandParser
 	private sealed record TokenizationResult(
 		IReadOnlyList<ParsedToken> Tokens,
 		TerminalWorkspaceCommandError? Error);
+
+	private sealed record KnownProjectCompletionPaths(
+		IReadOnlyList<string> Paths,
+		IReadOnlyList<string> Files);
+}
+
+internal static class TerminalWorkspacePathResolver
+{
+	public static string Resolve(string value, string workingDirectory)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+		var expanded = TerminalPathPickerModel.ExpandPath(value);
+		if (expanded.Length == 0)
+			return Path.GetFullPath(workingDirectory);
+		return Path.IsPathRooted(expanded)
+			? Path.GetFullPath(expanded)
+			: Path.GetFullPath(expanded, Path.GetFullPath(workingDirectory));
+	}
 }
