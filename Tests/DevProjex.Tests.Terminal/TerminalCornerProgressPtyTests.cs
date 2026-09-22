@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -202,6 +203,118 @@ public sealed class TerminalCornerProgressPtyTests
 		await ExitAsync(terminal);
 	}
 
+	[Fact(Timeout = 120_000)]
+	public async Task CopyWaitsForSuccessfulSettingsRefreshAndUsesThePublishedRedaction()
+	{
+		const string secret = "ghp_a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL";
+		using var project = CreateProject();
+		project.WriteFile("src/Secrets.cs", secret);
+		string? dataRoot = null;
+		await using var terminal = await StartAsync(
+			project.Path,
+			columns: 120,
+			rows: 36,
+			plain: false,
+			new Dictionary<string, string>
+			{
+				[TerminalProgressCheckpointProtocol.PhasesVariable] = "background-refresh"
+			},
+			path => dataRoot = path,
+			useProgressCheckpointHost: true);
+
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync(":view content\r", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"ghp_a7D9mQ2x",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync(":set hide-secrets on\r", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Hide secrets: enabled",
+			cancellationToken: TestContext.Current.CancellationToken);
+		var checkpointRoot = GetCheckpointRoot(dataRoot);
+		await WaitForCheckpointAsync(checkpointRoot, "background-refresh");
+		var rawOutputLengthBeforeCopy = terminal.RawOutput.Length;
+		await terminal.SendAsync(":copy content text\r", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Building preview",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.DoesNotContain("Copied: Content", terminal.CaptureScreen(), StringComparison.Ordinal);
+		Assert.DoesNotContain(
+			"\u001b]52;c;",
+			terminal.RawOutput[rawOutputLengthBeforeCopy..],
+			StringComparison.Ordinal);
+
+		ReleaseCheckpoint(checkpointRoot, "background-refresh");
+		await terminal.WaitForScreenAsync(
+			"Copied: Content",
+			timeout: TimeSpan.FromSeconds(45),
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"DEVPROJEX_REDACTED[github-pat#1]",
+			cancellationToken: TestContext.Current.CancellationToken);
+		var clipboardPayload = TryDecodeLastOsc52Payload(
+			terminal.RawOutput[rawOutputLengthBeforeCopy..]);
+		if (clipboardPayload is not null)
+		{
+			Assert.DoesNotContain(secret, clipboardPayload, StringComparison.Ordinal);
+			Assert.Contains("DEVPROJEX_REDACTED[github-pat#1]", clipboardPayload, StringComparison.Ordinal);
+		}
+		await ExitAsync(terminal);
+	}
+
+	[Fact(Timeout = 120_000)]
+	public async Task CopyDoesNotPublishClipboardPayloadWhenSettingsRefreshFails()
+	{
+		const string secret = "ghp_a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL";
+		using var project = CreateGitProject();
+		project.WriteFile("src/Secrets.cs", $"internal static class Secrets {{ private const string Token = \"{secret}\"; }}");
+		string? dataRoot = null;
+		await using var terminal = await StartAsync(
+			project.Path,
+			columns: 120,
+			rows: 36,
+			plain: false,
+			new Dictionary<string, string>
+			{
+				[TerminalProgressCheckpointProtocol.PhasesVariable] = "background-refresh"
+			},
+			path => dataRoot = path,
+			useProgressCheckpointHost: true);
+
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		File.WriteAllText(Path.Combine(project.Path, ".git", "index"), "not-a-git-index");
+		await terminal.SendAsync(":set git tracked\r", TestContext.Current.CancellationToken);
+		var checkpointRoot = GetCheckpointRoot(dataRoot);
+		await WaitForCheckpointAsync(checkpointRoot, "background-refresh");
+		var rawOutputLengthBeforeCopy = terminal.RawOutput.Length;
+		await terminal.SendAsync(":copy\r", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Building preview",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.DoesNotContain(
+			"\u001b]52;c;",
+			terminal.RawOutput[rawOutputLengthBeforeCopy..],
+			StringComparison.Ordinal);
+
+		ReleaseCheckpoint(checkpointRoot, "background-refresh");
+		await terminal.WaitForScreenAsync(
+			"DPX-GIT-TRACKED-INDEX-UNAVAILABLE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		var completed = await terminal.WaitForScreenWithoutAsync(
+			"Building preview",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.DoesNotContain("Copied: Tree", completed, StringComparison.Ordinal);
+		var copyOutput = terminal.RawOutput[rawOutputLengthBeforeCopy..];
+		Assert.DoesNotContain("\u001b]52;c;", copyOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain(Convert.ToBase64String(Encoding.UTF8.GetBytes(secret)), copyOutput, StringComparison.Ordinal);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await ExitAsync(terminal);
+	}
+
 	private static async Task FocusFirstContentOptionAsync(
 		TerminalPtyHarness terminal,
 		bool plain = false)
@@ -314,6 +427,18 @@ public sealed class TerminalCornerProgressPtyTests
 		File.WriteAllText(
 			Path.Combine(root, TerminalProgressCheckpointProtocol.GetReleaseFileName(checkpoint)),
 			checkpoint);
+
+	private static string? TryDecodeLastOsc52Payload(string output)
+	{
+		const string marker = "\u001b]52;c;";
+		var markerIndex = output.LastIndexOf(marker, StringComparison.Ordinal);
+		if (markerIndex < 0)
+			return null;
+		var encodedStart = markerIndex + marker.Length;
+		var encodedEnd = output.IndexOf('\a', encodedStart);
+		Assert.True(encodedEnd > encodedStart, "The OSC 52 clipboard payload was incomplete.");
+		return Encoding.UTF8.GetString(Convert.FromBase64String(output[encodedStart..encodedEnd]));
+	}
 
 	private static async Task ExitAsync(TerminalPtyHarness terminal)
 	{

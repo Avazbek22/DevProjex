@@ -25,6 +25,7 @@ internal partial class AgentJournalWindow : Window
     private CancellationTokenSource? _watchSession;
     private string? _loadedSessionId;
     private string? _watchedSessionId;
+    private long _sessionLoadGeneration;
     private long _lastObservedSequence;
     private int _callRefreshRequested;
     private int _callRefreshRunning;
@@ -147,6 +148,7 @@ internal partial class AgentJournalWindow : Window
             return false;
         _currentProjectRoot = normalized;
         _viewModel.SetCurrentProjectAvailable(normalized is not null);
+        Interlocked.Increment(ref _sessionLoadGeneration);
         _loadedSessionId = null;
         StopWatchingSession();
         return true;
@@ -162,15 +164,27 @@ internal partial class AgentJournalWindow : Window
             var session = _viewModel.SelectedSession?.Session;
             if (session is null)
                 return;
+            _ = ValidateExportDestination(session, path);
             var receipt = await _reader.ReadReceiptAsync(session.Id, cancellationToken);
             if (receipt is null)
                 return;
             var text = json ? _formatter.FormatJson(receipt) : _formatter.FormatMarkdown(receipt);
-            await File.WriteAllTextAsync(
+            await AtomicFileOutput.WriteAsync(
                 path,
-                text,
-                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
-                cancellationToken);
+                overwrite: true,
+                async (destination, writeCancellationToken) =>
+                {
+                    await using var writer = new StreamWriter(
+                        destination,
+                        new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+                        bufferSize: 1024,
+                        leaveOpen: true);
+                    await writer.WriteAsync(text.AsMemory(), writeCancellationToken)
+                        .ConfigureAwait(false);
+                    await writer.FlushAsync(writeCancellationToken).ConfigureAwait(false);
+                },
+                cancellationToken,
+                destination => ValidateExportDestination(session, destination));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -184,9 +198,16 @@ internal partial class AgentJournalWindow : Window
 
     internal async Task<int> ClearCurrentScopeAsync(CancellationToken cancellationToken = default)
     {
+        var root = _viewModel.CurrentProjectOnly ? _currentProjectRoot : null;
+        return await ClearScopeAsync(root, cancellationToken);
+    }
+
+    private async Task<int> ClearScopeAsync(
+        string? root,
+        CancellationToken cancellationToken)
+    {
         try
         {
-            var root = _viewModel.CurrentProjectOnly ? _currentProjectRoot : null;
             var removed = await _reader.ClearAsync(root, cancellationToken);
             await RefreshAsync(cancellationToken);
             return removed;
@@ -216,6 +237,7 @@ internal partial class AgentJournalWindow : Window
     {
         _refreshTimer.Stop();
         _refreshTimer.Tick -= OnRefreshTimerTick;
+        Interlocked.Increment(ref _sessionLoadGeneration);
         StopWatchingSession();
         _lifetime.Cancel();
         _lifetime.Dispose();
@@ -264,22 +286,17 @@ internal partial class AgentJournalWindow : Window
                 Title = _localization["AgentJournal.Export"],
                 SuggestedFileName = $"devprojex-journal-{_viewModel.SelectedSession.Session.Id}",
                 DefaultExtension = "md",
+                ShowOverwritePrompt = true,
                 FileTypeChoices = [markdown, json]
             });
             if (file is null)
                 return;
 
-            var receipt = await _reader.ReadReceiptAsync(
-                _viewModel.SelectedSession.Session.Id,
-                _lifetime.Token);
-            if (receipt is null)
-                return;
+            var destinationPath = file.TryGetLocalPath();
+            if (string.IsNullOrWhiteSpace(destinationPath))
+                throw new IOException("A local file destination is required.");
             var exportJson = string.Equals(Path.GetExtension(file.Name), ".json", StringComparison.OrdinalIgnoreCase);
-            var text = exportJson ? _formatter.FormatJson(receipt) : _formatter.FormatMarkdown(receipt);
-            await using var stream = await file.OpenWriteAsync();
-            stream.SetLength(0);
-            await using var writer = new StreamWriter(stream, new UTF8Encoding(false));
-            await writer.WriteAsync(text.AsMemory(), _lifetime.Token);
+            await ExportSelectedToPathAsync(destinationPath, exportJson, _lifetime.Token);
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
         {
@@ -292,13 +309,14 @@ internal partial class AgentJournalWindow : Window
 
     private async void OnClear(object? sender, RoutedEventArgs e)
     {
-        var projectName = _currentProjectRoot is null
+        var root = _viewModel.CurrentProjectOnly ? _currentProjectRoot : null;
+        var projectName = root is null
             ? string.Empty
-            : Path.GetFileName(Path.TrimEndingDirectorySeparator(_currentProjectRoot));
+            : Path.GetFileName(Path.TrimEndingDirectorySeparator(root));
         var confirmed = await MessageDialog.ShowConfirmationAsync(
             this,
             _localization["AgentJournal.Clear.Title"],
-            _viewModel.CurrentProjectOnly
+            root is not null
                 ? _localization.Format("AgentJournal.Clear.ProjectMessage", projectName)
                 : _localization["AgentJournal.Clear.AllMessage"],
             _localization["AgentJournal.Clear"],
@@ -306,7 +324,38 @@ internal partial class AgentJournalWindow : Window
             width: 430,
             height: 170);
         if (confirmed)
-            await ClearCurrentScopeAsync(_lifetime.Token);
+            await ClearScopeAsync(root, _lifetime.Token);
+    }
+
+    private string ValidateExportDestination(
+        AgentJournalSession session,
+        string destination)
+    {
+        var resolved = Path.GetFullPath(destination);
+        var directory = Path.GetDirectoryName(resolved);
+        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+        {
+            throw new DirectoryNotFoundException(
+                "The output destination parent directory does not exist.");
+        }
+        if (Directory.Exists(resolved))
+            throw new AtomicFileOutputConflictException(resolved);
+
+        IEnumerable<string> sourceRoots = session.Roots
+            .Select(static root => root.ConfiguredPath);
+        if (_currentProjectRoot is { } currentProjectRoot)
+            sourceRoots = sourceRoots.Append(currentProjectRoot);
+        foreach (var root in sourceRoots
+                     .Where(static root => !string.IsNullOrWhiteSpace(root))
+                     .Distinct(PathComparer.Default))
+        {
+            resolved = ExactFileOutputDestinationPolicy.Resolve(
+                root,
+                resolved,
+                overwrite: true);
+        }
+
+        return resolved;
     }
 
     private Task ShowOperationErrorAsync(string key, Exception exception)
@@ -358,6 +407,7 @@ internal partial class AgentJournalWindow : Window
         var session = _viewModel.SelectedSession?.Session;
         if (session is null)
         {
+            Interlocked.Increment(ref _sessionLoadGeneration);
             _loadedSessionId = null;
             StopWatchingSession();
             _viewModel.ReplaceCalls([]);
@@ -366,15 +416,22 @@ internal partial class AgentJournalWindow : Window
         }
 
         var selectionChanged = !string.Equals(_loadedSessionId, session.Id, StringComparison.Ordinal);
+        var generation = selectionChanged || reloadSelected
+            ? Interlocked.Increment(ref _sessionLoadGeneration)
+            : Volatile.Read(ref _sessionLoadGeneration);
         if (selectionChanged || reloadSelected)
         {
             var calls = await _reader.ReadCallsAsync(session.Id, cancellationToken);
+            if (!IsCurrentSessionLoad(generation, session.Id))
+                return;
             _viewModel.ReplaceCalls(calls.Select(CreateCallRow).ToArray());
             _lastObservedSequence = calls.Count == 0
                 ? 0
                 : calls.Max(static call => call.Sequence);
             _loadedSessionId = session.Id;
         }
+        if (!IsCurrentSessionLoad(generation, session.Id))
+            return;
         _viewModel.FooterText = FormatFooter(session);
 
         if (!session.IsLive)
@@ -429,7 +486,8 @@ internal partial class AgentJournalWindow : Window
 
     private async Task ReloadSelectedCallsAsync(string sessionId, CancellationToken cancellationToken)
     {
-        if (!string.Equals(_loadedSessionId, sessionId, StringComparison.Ordinal))
+        var generation = Volatile.Read(ref _sessionLoadGeneration);
+        if (!IsCurrentLoadedSession(generation, sessionId))
             return;
         if (_reader is IAgentJournalActivityReader activityReader)
         {
@@ -437,7 +495,7 @@ internal partial class AgentJournalWindow : Window
                 sessionId,
                 Volatile.Read(ref _lastObservedSequence),
                 cancellationToken);
-            if (activity is null)
+            if (activity is null || !IsCurrentLoadedSession(generation, sessionId))
                 return;
             if (!activity.RequiresReset)
             {
@@ -449,10 +507,23 @@ internal partial class AgentJournalWindow : Window
             }
         }
         var calls = await _reader.ReadCallsAsync(sessionId, cancellationToken);
+        if (!IsCurrentLoadedSession(generation, sessionId))
+            return;
         _viewModel.ReplaceCalls(calls.Select(CreateCallRow).ToArray());
         if (calls.Count > 0)
             Volatile.Write(ref _lastObservedSequence, calls.Max(static call => call.Sequence));
     }
+
+    private bool IsCurrentLoadedSession(long generation, string sessionId) =>
+        IsCurrentSessionLoad(generation, sessionId) &&
+        string.Equals(_loadedSessionId, sessionId, StringComparison.Ordinal);
+
+    private bool IsCurrentSessionLoad(long generation, string sessionId) =>
+        Volatile.Read(ref _sessionLoadGeneration) == generation &&
+        string.Equals(
+            _viewModel.SelectedSession?.Session.Id,
+            sessionId,
+            StringComparison.Ordinal);
 
     private void StopWatchingSession()
     {

@@ -7,7 +7,13 @@ namespace DevProjex.Terminal.Tui;
 
 internal sealed class TerminalWorkspaceCommandLineView : View
 {
-	private readonly Func<string, int, TerminalWorkspaceCommandCompletion> _complete;
+	private const int MaximumCompletionCacheEntries = 32;
+	private static readonly TimeSpan CompletionCacheLifetime = TimeSpan.FromSeconds(2);
+	private readonly IApplication _application;
+	private readonly Func<string, int, CancellationToken, ValueTask<TerminalWorkspaceCommandCompletion>>
+		_completeAsync;
+	private readonly Func<string, int, TerminalWorkspaceCommandCompletion>? _completeSynchronously;
+	private readonly bool _prefetchCompletion;
 	private readonly Func<string, int, TerminalWorkspaceCommandGhostCompletion> _completeGhost;
 	private readonly Func<string, string> _localize;
 	private readonly TerminalCommandHistory _history;
@@ -17,11 +23,21 @@ internal sealed class TerminalWorkspaceCommandLineView : View
 	private readonly TerminalTransparentTextEditor _input;
 	private readonly TerminalLiteralLabel _ghost;
 	private readonly TerminalLiteralLabel _result;
+	private readonly object _completionSync = new();
+	private readonly Dictionary<CompletionRequestKey, LinkedListNode<CompletionCacheEntry>>
+		_completionCache = [];
+	private readonly LinkedList<CompletionCacheEntry> _completionLru = [];
 	private IReadOnlyList<TerminalWorkspaceCommandCompletionCandidate> _cycleCandidates = [];
 	private string? _cycleSeedText;
 	private int _cycleSeedCursor;
 	private int _cycleIndex = -1;
 	private bool _applyingCompletion;
+	private bool _cycleWhenCompletionArrives;
+	private bool _disposed;
+	private long _completionVersion;
+	private CompletionRequestKey? _activeCompletionRequest;
+	private CancellationTokenSource? _completionCts;
+	private Task? _completionTask;
 	private string _resultText = string.Empty;
 	private bool _resultSuccess;
 
@@ -33,8 +49,55 @@ internal sealed class TerminalWorkspaceCommandLineView : View
 		TerminalCommandHistory history,
 		bool plain,
 		bool useUnicode)
+		: this(
+			application,
+			(text, cursor, _) => ValueTask.FromResult(complete(text, cursor)),
+			complete,
+			prefetchCompletion: false,
+			completeGhost,
+			localize,
+			history,
+			plain,
+			useUnicode)
 	{
-		_complete = complete;
+	}
+
+	public TerminalWorkspaceCommandLineView(
+		IApplication application,
+		Func<string, int, CancellationToken, ValueTask<TerminalWorkspaceCommandCompletion>> complete,
+		Func<string, int, TerminalWorkspaceCommandGhostCompletion> completeGhost,
+		Func<string, string> localize,
+		TerminalCommandHistory history,
+		bool plain,
+		bool useUnicode)
+		: this(
+			application,
+			complete,
+			completeSynchronously: null,
+			prefetchCompletion: true,
+			completeGhost,
+			localize,
+			history,
+			plain,
+			useUnicode)
+	{
+	}
+
+	private TerminalWorkspaceCommandLineView(
+		IApplication application,
+		Func<string, int, CancellationToken, ValueTask<TerminalWorkspaceCommandCompletion>> completeAsync,
+		Func<string, int, TerminalWorkspaceCommandCompletion>? completeSynchronously,
+		bool prefetchCompletion,
+		Func<string, int, TerminalWorkspaceCommandGhostCompletion> completeGhost,
+		Func<string, string> localize,
+		TerminalCommandHistory history,
+		bool plain,
+		bool useUnicode)
+	{
+		_application = application;
+		_completeAsync = completeAsync;
+		_completeSynchronously = completeSynchronously;
+		_prefetchCompletion = prefetchCompletion;
 		_completeGhost = completeGhost;
 		_localize = localize;
 		_history = history;
@@ -101,9 +164,26 @@ internal sealed class TerminalWorkspaceCommandLineView : View
 	public bool IsEditing { get; private set; }
 	public bool IsShowingResult => Visible && _result.Visible;
 	public string InputText => _input.Value;
+	internal int CompletionCacheCount
+	{
+		get
+		{
+			lock (_completionSync)
+				return _completionCache.Count;
+		}
+	}
+	internal Task? ActiveCompletionTask
+	{
+		get
+		{
+			lock (_completionSync)
+				return _completionTask;
+		}
+	}
 
 	public void Open(string initialText = "")
 	{
+		CancelPendingCompletion(clearCache: true);
 		IsEditing = true;
 		Visible = true;
 		_result.Visible = false;
@@ -122,6 +202,7 @@ internal sealed class TerminalWorkspaceCommandLineView : View
 		Visible = false;
 		_result.Visible = false;
 		ResetCompletionCycle();
+		CancelPendingCompletion(clearCache: true);
 		SetNeedsDraw();
 	}
 
@@ -209,12 +290,30 @@ internal sealed class TerminalWorkspaceCommandLineView : View
 			_cycleSeedCursor = TerminalTextPosition.RuneToUtf16Index(
 				_cycleSeedText,
 				_input.InsertionPoint);
-			_cycleCandidates = _complete(_cycleSeedText, _cycleSeedCursor).Candidates;
+			var key = new CompletionRequestKey(_cycleSeedText, _cycleSeedCursor);
+			if (TryGetCachedCompletion(key, out var cached))
+			{
+				_cycleCandidates = cached.Candidates;
+			}
+			else if (_completeSynchronously is { } complete)
+			{
+				_cycleCandidates = complete(_cycleSeedText, _cycleSeedCursor).Candidates;
+			}
+			else
+			{
+				ScheduleCompletion(key, cycleWhenReady: true);
+				return;
+			}
 			_cycleIndex = -1;
 		}
 		if (_cycleCandidates.Count == 0)
 			return;
 
+		ApplyNextCompletionCandidate();
+	}
+
+	private void ApplyNextCompletionCandidate()
+	{
 		_cycleIndex = (_cycleIndex + 1) % _cycleCandidates.Count;
 		var candidate = _cycleCandidates[_cycleIndex];
 		_applyingCompletion = true;
@@ -229,7 +328,7 @@ internal sealed class TerminalWorkspaceCommandLineView : View
 		{
 			_applyingCompletion = false;
 		}
-		UpdateGhost();
+		UpdateGhost(prefetchCompletion: false);
 	}
 
 	private void SetInputText(string text)
@@ -248,21 +347,37 @@ internal sealed class TerminalWorkspaceCommandLineView : View
 		UpdateGhost();
 	}
 
-	private void UpdateGhost()
+	private void UpdateGhost(bool prefetchCompletion = true)
 	{
 		var text = InputText;
 		if (!IsEditing || _input.InsertionPoint < text.EnumerateRunes().Count())
 		{
+			CancelPendingCompletion(clearCache: false);
 			HideGhost();
 			return;
 		}
 
+		var cursorPosition = TerminalTextPosition.RuneToUtf16Index(
+			text,
+			_input.InsertionPoint);
 		var completion = _completeGhost(
 			text,
-			TerminalTextPosition.RuneToUtf16Index(text, _input.InsertionPoint));
-		var ghost = completion.SchemaKey is { } schemaKey
+			cursorPosition);
+		RenderGhost(completion.GhostSuffix, completion.SchemaKey);
+		if (_prefetchCompletion && prefetchCompletion)
+		{
+			ScheduleCompletion(
+				new CompletionRequestKey(text, cursorPosition),
+				cycleWhenReady: false);
+		}
+	}
+
+	private void RenderGhost(string? ghostSuffix, string? schemaKey)
+	{
+		var text = InputText;
+		var ghost = schemaKey is not null
 			? " " + _localize(schemaKey)
-			: completion.GhostSuffix;
+			: ghostSuffix;
 		if (string.IsNullOrEmpty(ghost))
 		{
 			HideGhost();
@@ -291,6 +406,216 @@ internal sealed class TerminalWorkspaceCommandLineView : View
 		_ghost.SetNeedsDraw();
 	}
 
+	private void ScheduleCompletion(CompletionRequestKey key, bool cycleWhenReady)
+	{
+		if (TryGetCachedCompletion(key, out var cached))
+		{
+			if (cycleWhenReady)
+				ApplyCompletionCycle(key, cached);
+			else if (IsCurrentCompletionRequest(key))
+				RenderGhost(cached.GhostSuffix, cached.SchemaKey);
+			return;
+		}
+
+		CancellationTokenSource? previous;
+		CancellationTokenSource current;
+		long version;
+		lock (_completionSync)
+		{
+			if (_disposed)
+				return;
+			if (_activeCompletionRequest == key && _completionCts is { IsCancellationRequested: false })
+			{
+				_cycleWhenCompletionArrives |= cycleWhenReady;
+				return;
+			}
+
+			previous = _completionCts;
+			current = new CancellationTokenSource();
+			_completionCts = current;
+			_activeCompletionRequest = key;
+			_cycleWhenCompletionArrives = cycleWhenReady;
+			version = ++_completionVersion;
+		}
+		previous?.Cancel();
+		previous?.Dispose();
+		var completionTask = ResolveCompletionAsync(key, version, current);
+		lock (_completionSync)
+		{
+			if (version == _completionVersion &&
+				_activeCompletionRequest == key &&
+				ReferenceEquals(_completionCts, current))
+			{
+				_completionTask = completionTask;
+			}
+		}
+	}
+
+	private async Task ResolveCompletionAsync(
+		CompletionRequestKey key,
+		long version,
+		CancellationTokenSource requestCts)
+	{
+		try
+		{
+			var completion = await Task.Run(
+				async () => await _completeAsync(
+						key.Text,
+						key.CursorPosition,
+						requestCts.Token)
+					.ConfigureAwait(false),
+				requestCts.Token).ConfigureAwait(false);
+			requestCts.Token.ThrowIfCancellationRequested();
+			InvokeOnUiThread(() => ApplyCompletionResult(key, version, requestCts, completion));
+		}
+		catch (OperationCanceledException) when (requestCts.IsCancellationRequested)
+		{
+			ClearFailedCompletion(key, version, requestCts);
+		}
+		catch
+		{
+			ClearFailedCompletion(key, version, requestCts);
+			// Completion is optional and must never interrupt command editing.
+		}
+	}
+
+	private void ClearFailedCompletion(
+		CompletionRequestKey key,
+		long version,
+		CancellationTokenSource requestCts)
+	{
+		lock (_completionSync)
+		{
+			if (version != _completionVersion ||
+				_activeCompletionRequest != key ||
+				!ReferenceEquals(_completionCts, requestCts))
+			{
+				return;
+			}
+
+			_activeCompletionRequest = null;
+			_completionCts = null;
+			_completionTask = null;
+			_cycleWhenCompletionArrives = false;
+		}
+		requestCts.Dispose();
+	}
+
+	private void ApplyCompletionResult(
+		CompletionRequestKey key,
+		long version,
+		CancellationTokenSource requestCts,
+		TerminalWorkspaceCommandCompletion completion)
+	{
+		bool cycleWhenReady;
+		lock (_completionSync)
+		{
+			if (_disposed || requestCts.IsCancellationRequested ||
+				version != _completionVersion ||
+				_activeCompletionRequest != key ||
+				!ReferenceEquals(_completionCts, requestCts))
+			{
+				return;
+			}
+
+			cycleWhenReady = _cycleWhenCompletionArrives;
+			_cycleWhenCompletionArrives = false;
+			_activeCompletionRequest = null;
+			_completionCts = null;
+			_completionTask = null;
+			AddCachedCompletion(key, completion);
+		}
+		requestCts.Dispose();
+		if (!IsCurrentCompletionRequest(key))
+			return;
+
+		if (cycleWhenReady)
+			ApplyCompletionCycle(key, completion);
+		else
+			RenderGhost(completion.GhostSuffix, completion.SchemaKey);
+	}
+
+	private void ApplyCompletionCycle(
+		CompletionRequestKey key,
+		TerminalWorkspaceCommandCompletion completion)
+	{
+		if (!IsCurrentCompletionRequest(key))
+			return;
+		_cycleSeedText = key.Text;
+		_cycleSeedCursor = key.CursorPosition;
+		_cycleCandidates = completion.Candidates;
+		_cycleIndex = -1;
+		if (_cycleCandidates.Count > 0)
+			ApplyNextCompletionCandidate();
+	}
+
+	private bool IsCurrentCompletionRequest(CompletionRequestKey key)
+	{
+		if (!IsEditing || !string.Equals(InputText, key.Text, StringComparison.Ordinal))
+			return false;
+		return TerminalTextPosition.RuneToUtf16Index(
+			InputText,
+			_input.InsertionPoint) == key.CursorPosition;
+	}
+
+	private bool TryGetCachedCompletion(
+		CompletionRequestKey key,
+		out TerminalWorkspaceCommandCompletion completion)
+	{
+		lock (_completionSync)
+		{
+			if (!_completionCache.TryGetValue(key, out var node))
+			{
+				completion = TerminalWorkspaceCommandCompletion.Empty;
+				return false;
+			}
+			if (DateTimeOffset.UtcNow - node.Value.CreatedUtc > CompletionCacheLifetime)
+			{
+				_completionCache.Remove(key);
+				_completionLru.Remove(node);
+				completion = TerminalWorkspaceCommandCompletion.Empty;
+				return false;
+			}
+			_completionLru.Remove(node);
+			_completionLru.AddFirst(node);
+			completion = node.Value.Completion;
+			return true;
+		}
+	}
+
+	private void AddCachedCompletion(
+		CompletionRequestKey key,
+		TerminalWorkspaceCommandCompletion completion)
+	{
+		if (_completionCache.Remove(key, out var previous))
+			_completionLru.Remove(previous);
+		var entry = new CompletionCacheEntry(key, completion, DateTimeOffset.UtcNow);
+		var node = _completionLru.AddFirst(entry);
+		_completionCache.Add(key, node);
+		while (_completionCache.Count > MaximumCompletionCacheEntries)
+		{
+			var oldest = _completionLru.Last!;
+			_completionLru.RemoveLast();
+			_completionCache.Remove(oldest.Value.Key);
+		}
+	}
+
+	private void InvokeOnUiThread(Action action)
+	{
+		if (_application is null)
+		{
+			action();
+			return;
+		}
+		try
+		{
+			_application.Invoke(action);
+		}
+		catch (ObjectDisposedException)
+		{
+		}
+	}
+
 	private void HideGhost()
 	{
 		_ghost.Visible = false;
@@ -306,6 +631,45 @@ internal sealed class TerminalWorkspaceCommandLineView : View
 		_cycleSeedCursor = 0;
 		_cycleIndex = -1;
 	}
+
+	private void CancelPendingCompletion(bool clearCache)
+	{
+		CancellationTokenSource? pending;
+		lock (_completionSync)
+		{
+			pending = _completionCts;
+			_completionCts = null;
+			_completionTask = null;
+			_activeCompletionRequest = null;
+			_cycleWhenCompletionArrives = false;
+			_completionVersion++;
+			if (clearCache)
+			{
+				_completionCache.Clear();
+				_completionLru.Clear();
+			}
+		}
+		pending?.Cancel();
+		pending?.Dispose();
+	}
+
+	protected override void Dispose(bool disposing)
+	{
+		if (disposing)
+		{
+			lock (_completionSync)
+				_disposed = true;
+			CancelPendingCompletion(clearCache: true);
+		}
+		base.Dispose(disposing);
+	}
+
+	private readonly record struct CompletionRequestKey(string Text, int CursorPosition);
+
+	private sealed record CompletionCacheEntry(
+		CompletionRequestKey Key,
+		TerminalWorkspaceCommandCompletion Completion,
+		DateTimeOffset CreatedUtc);
 }
 
 internal static class TerminalTextPosition

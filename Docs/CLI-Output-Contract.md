@@ -311,6 +311,9 @@ are different results. `writtenMatches` is the number of entries in `matches`.
 When matches were observed but no complete matching line fits, text and Markdown
 emit `[Matches omitted]`; when selected sources were left uninspected, an otherwise
 empty result emits `[Search partial]`. Neither state is described as `[No matches]`.
+When a declaration body is included, text and Markdown print its project-relative
+address followed by an executable `devprojex export context ... --view content`
+command for reading that file through the CLI; they never print an MCP-only call.
 
 ## Related-files JSON
 
@@ -470,8 +473,9 @@ returns usage exit code `2`.
 Each `sessions` item contains `id`, `startedUtc`, nullable `endedUtc`, `pid`,
 `processStartUtc`, `clientName`, `clientVersion`, `mode`, `roots`, `toolSet`,
 `serverVersion`, `hidePrivateData`, `totals`, and `isLive`. Each root contains
-`configuredPath` and `name`. `mode` is `Live` or `Standard`; `toolSet` is `Full`
-or `Reduced`. `totals` contains `calls`, `resultCharacters`, `estimatedTokens`,
+`configuredPath` and `name`. `mode` is `live` or `standard`; `toolSet` is `full`
+or `reduced`. The session-list and receipt forms use the same camel-case enum
+spelling. `totals` contains `calls`, `resultCharacters`, `estimatedTokens`,
 `filesDelivered`, `secretsMasked`, `privateDataMasked`, and `errors`.
 
 With `--session ID` or `--last`, JSON uses the same `schema` and `version` and

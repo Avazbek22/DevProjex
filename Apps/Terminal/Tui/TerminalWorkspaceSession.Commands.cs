@@ -184,7 +184,7 @@ internal sealed partial class TerminalWorkspaceSession
 		try
 		{
 			var result = _state.SetSelection(command.Values, enabled);
-			if (result.ChangedNodes > 0)
+			if (result.SelectionChanged)
 			{
 				RefreshWorkspace();
 				ScheduleSelectionProjection();
@@ -254,9 +254,7 @@ internal sealed partial class TerminalWorkspaceSession
 		_previewSearchQuery = query.Length == 0 ? null : query;
 		if (query.Length == 0)
 		{
-			CancelPreviewSearch(clearQuery: true);
-			_preview.ClearSearch();
-			UpdatePanelTitles();
+			ClearPreviewSearch();
 		}
 		else
 		{
@@ -800,20 +798,43 @@ internal sealed partial class TerminalWorkspaceSession
 			preferredHeight: 27);
 	}
 
-	private TerminalWorkspaceCommandParseContext BuildCommandParseContext() =>
-		_screen == TerminalWorkspaceScreen.Welcome
-			? new([], new HashSet<TerminalWorkspaceCommandVerb>
-			{
-				TerminalWorkspaceCommandVerb.Open,
-				TerminalWorkspaceCommandVerb.Recent,
-				TerminalWorkspaceCommandVerb.Language,
-				TerminalWorkspaceCommandVerb.Help,
-				TerminalWorkspaceCommandVerb.Quit
-			})
-			: new(
-				_state?.Plan.AvailableExtensions ?? [],
-				WorkingDirectory: _state?.Plan.SourceRoot ?? Directory.GetCurrentDirectory(),
-				ProfileDirectory: ResolvePortableProfileDirectory());
+	private TerminalWorkspaceCommandParseContext BuildCommandParseContext(
+		bool includeKnownProjectPaths = true)
+	{
+		if (_screen == TerminalWorkspaceScreen.Welcome)
+		{
+			return new TerminalWorkspaceCommandParseContext(
+				[],
+				new HashSet<TerminalWorkspaceCommandVerb>
+				{
+					TerminalWorkspaceCommandVerb.Open,
+					TerminalWorkspaceCommandVerb.Recent,
+					TerminalWorkspaceCommandVerb.Language,
+					TerminalWorkspaceCommandVerb.Help,
+					TerminalWorkspaceCommandVerb.Quit
+				},
+				WorkingDirectory: Directory.GetCurrentDirectory());
+		}
+
+		if (_state?.Plan is not { } plan)
+		{
+			return new TerminalWorkspaceCommandParseContext(
+				[],
+				WorkingDirectory: Directory.GetCurrentDirectory());
+		}
+		if (!includeKnownProjectPaths)
+			return new TerminalWorkspaceCommandParseContext(plan.AvailableExtensions);
+
+		var knownPaths = TerminalWorkspaceCommandParser.GetKnownProjectCompletionPaths(
+			plan.EffectiveTree,
+			plan.SourceRoot);
+		return new TerminalWorkspaceCommandParseContext(
+			plan.AvailableExtensions,
+			WorkingDirectory: plan.SourceRoot,
+			ProfileDirectory: ResolvePortableProfileDirectory(),
+			KnownProjectPaths: knownPaths.Paths,
+			KnownProjectFiles: knownPaths.Files);
+	}
 
 	private void OpenCommandLine(string initialText = "")
 	{

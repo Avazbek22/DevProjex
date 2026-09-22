@@ -48,6 +48,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private readonly CancellationTokenSource _settingsPersistenceCts = new();
 	private readonly SemaphoreSlim _operationGate = new(1, 1);
 	private readonly TerminalBackgroundTaskTracker _backgroundTasks = new();
+	private TaskCompletionSource _settingsRefreshStateChanged = CreateSettingsRefreshSignal();
+	private SettingsRefreshPublication _settingsRefreshPublication = SettingsRefreshPublication.None;
 	private readonly WorkspaceFocusModel _focus = new();
 	private readonly AsyncOperationCoordinator _operations;
 	private readonly TerminalSelectionProfilePersistenceCoordinator _selectionProfilePersistence;
@@ -78,6 +80,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private bool _discardSelectionProfilePersistenceOnExit;
 	private bool _previewSearchInProgress;
 	private bool _compressionUnavailableNotified;
+	private int _repositoryStateInconsistent;
 	private bool _agentActivityEnabled;
 	private int _agentJournalRefreshInProgress;
 	private IReadOnlyList<LiveSessionRecord> _liveSessions = [];
@@ -562,8 +565,15 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		};
 		var commandLine = new TerminalWorkspaceCommandLineView(
 			_application,
-			(text, cursor) => _commandParser.GetCompletion(text, cursor, BuildCommandParseContext()),
-			(text, cursor) => _commandParser.GetGhostCompletion(text, cursor, BuildCommandParseContext()),
+			(text, cursor, cancellationToken) => _commandParser.GetCompletionAsync(
+				text,
+				cursor,
+				BuildCommandParseContext(),
+				cancellationToken),
+			(text, cursor) => _commandParser.GetGhostCompletion(
+				text,
+				cursor,
+				BuildCommandParseContext(includeKnownProjectPaths: false)),
 			L,
 			_commandHistory,
 			_options.Plain,
@@ -1255,6 +1265,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 
 	private void ShowWorkspace(TerminalWorkspaceState state)
 	{
+		var previousProjectRoot = _state?.Plan.SourceRoot;
 		CancelWorkspaceRefreshes();
 		ClearRoot();
 		_screen = TerminalWorkspaceScreen.Workspace;
@@ -1277,6 +1288,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			}
 		}
 		_state = state;
+		SetRepositoryStateInconsistent(false);
 		lock (_localProfileBaselineSync)
 			_localProfileBaseline = CaptureLocalProfile(state);
 		if (state.Plan.GitReadiness.Mode is { } mode && GitScopeSelection.IsPersistent(mode))
@@ -1417,14 +1429,15 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		};
 		var commandLine = new TerminalWorkspaceCommandLineView(
 			_application,
-			(text, cursor) => _commandParser.GetCompletion(
+			(text, cursor, cancellationToken) => _commandParser.GetCompletionAsync(
 				text,
 				cursor,
-				BuildCommandParseContext()),
+				BuildCommandParseContext(),
+				cancellationToken),
 			(text, cursor) => _commandParser.GetGhostCompletion(
 				text,
 				cursor,
-				BuildCommandParseContext()),
+				BuildCommandParseContext(includeKnownProjectPaths: false)),
 			L,
 			_commandHistory,
 			_options.Plain,
@@ -1459,7 +1472,11 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		RefreshContextControls();
 		tree.SetFocus();
 		RefreshWorkspace();
-		RefreshLiveSessions(force: true);
+		RefreshLiveSessions(
+			force: true,
+			resetOpeningBaseline: ShouldResetAgentJournalOpeningBaseline(
+				previousProjectRoot,
+				state.Plan.SourceRoot));
 		ApplyWorkspaceLayout();
 		UpdateWorkspaceFocus();
 		CompleteRootTransition();
@@ -2472,11 +2489,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			if (_activePane == TerminalWorkspacePane.Preview &&
 				_preview.SearchQuery.Length > 0)
 			{
-				CancelPreviewSearch(clearQuery: true);
-				_preview.ClearSearch();
-				_previewSearchQuery = null;
-				UpdatePanelTitles();
-				UpdateFooter();
+				ClearPreviewSearch(updateFooter: true);
 				return;
 			}
 			TryLeaveWorkspace(() => ShowWelcome());
@@ -2841,16 +2854,12 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_previewSearchQuery = query;
 		if (string.IsNullOrWhiteSpace(query))
 		{
-			_preview.ClearSearch();
-			UpdatePanelTitles();
+			ClearPreviewSearch();
 			return;
 		}
 		if (!PreviewTextDocumentSearch.CanSearch(query.Trim()))
 		{
-			_previewSearchQuery = null;
-			CancelPreviewSearch(clearQuery: true);
-			_preview.ClearSearch();
-			UpdatePanelTitles();
+			ClearPreviewSearch();
 			ShowNotice(
 				L("Terminal.Tui.Search"),
 				L("Terminal.Tui.Preview.SearchTooShort"),
@@ -2871,16 +2880,12 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var normalizedQuery = query.Trim();
 		if (normalizedQuery.Length == 0)
 		{
-			CancelPreviewSearch(clearQuery: true);
-			_preview.ClearSearch();
-			UpdatePanelTitles();
+			ClearPreviewSearch();
 			return;
 		}
 		if (!PreviewTextDocumentSearch.CanSearch(normalizedQuery))
 		{
-			CancelPreviewSearch(clearQuery: true);
-			_preview.ClearSearch();
-			UpdatePanelTitles();
+			ClearPreviewSearch();
 			return;
 		}
 
@@ -2992,6 +2997,15 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			_previewSearchQuery = null;
 	}
 
+	private void ClearPreviewSearch(bool updateFooter = false)
+	{
+		CancelPreviewSearch(clearQuery: true);
+		_preview?.ClearSearch();
+		UpdatePanelTitles();
+		if (updateFooter)
+			UpdateFooter();
+	}
+
 	private void MovePreviewSearch(bool reverse)
 	{
 		if (_preview is null || _preview.SearchQuery.Length == 0)
@@ -3087,6 +3101,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	{
 		if (_state is null)
 			return;
+		if (!EnsureRepositoryExportAllowed(originatedFromCommandLine))
+			return;
 		var selectedFormat = requestedFormat ?? _format;
 		var defaultPath = BuildDefaultExportPath(
 			_state.Plan.SourceRoot,
@@ -3109,13 +3125,11 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			return;
 		}
 		_exportDestinations.Remember(TerminalExportKind.Context, destination);
-		var pendingSettingsRefresh = _operations.GetTask(WorkspaceOperationKind.SettingsRefresh);
-
 		TrackActiveOperation(RunExportWorkflowAsync(
 			L("Terminal.Tui.ExportContext"),
 			async token =>
 			{
-				await AwaitPendingSettingsRefreshAsync(pendingSettingsRefresh, token).ConfigureAwait(false);
+				await AwaitLatestSettingsRefreshAsync(token).ConfigureAwait(false);
 				return await _controller.PrepareContextExportAsync(
 					_state,
 					_previewView,
@@ -3150,6 +3164,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	{
 		if (_state is null)
 			return;
+		if (!EnsureRepositoryExportAllowed(originatedFromCommandLine))
+			return;
 		var selectedKind = requestedFormat ?? ProjectCopyExportFormat.Folder;
 		var exportKind = selectedKind == ProjectCopyExportFormat.Zip
 			? TerminalExportKind.Zip
@@ -3170,13 +3186,11 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			return;
 		}
 		_exportDestinations.Remember(exportKind, destination);
-		var pendingSettingsRefresh = _operations.GetTask(WorkspaceOperationKind.SettingsRefresh);
-
 		TrackActiveOperation(RunExportWorkflowAsync(
 			L("Terminal.Tui.ExportProject"),
 			async token =>
 			{
-				await AwaitPendingSettingsRefreshAsync(pendingSettingsRefresh, token).ConfigureAwait(false);
+				await AwaitLatestSettingsRefreshAsync(token).ConfigureAwait(false);
 				return await _controller.PrepareProjectExportAsync(
 					_state,
 					selectedKind,
@@ -3198,13 +3212,109 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			originatedFromCommandLine));
 	}
 
-	private static async Task AwaitPendingSettingsRefreshAsync(
-		Task? pendingSettingsRefresh,
+	private Task AwaitLatestSettingsRefreshAsync(CancellationToken cancellationToken) =>
+		AwaitLatestSettingsRefreshAsync(
+			() =>
+			{
+				var stateChanged = Volatile.Read(ref _settingsRefreshStateChanged).Task;
+				var publication = Volatile.Read(ref _settingsRefreshPublication);
+				return (
+					_operations.GetTask(WorkspaceOperationKind.SettingsRefresh),
+					_settingsDraftSelection is not null,
+					stateChanged,
+					publication.RequestId,
+					publication.Outcome);
+			},
+			cancellationToken);
+
+	internal static async Task AwaitLatestSettingsRefreshAsync(
+		Func<(
+			Task? PendingRefresh,
+			bool HasDraft,
+			Task StateChanged,
+			long RequestId,
+			SettingsRefreshOutcome Outcome)> capture,
 		CancellationToken cancellationToken)
 	{
-		if (pendingSettingsRefresh is not null)
-			await pendingSettingsRefresh.WaitAsync(cancellationToken).ConfigureAwait(false);
+		ArgumentNullException.ThrowIfNull(capture);
+		var observed = capture();
+		if (!observed.HasDraft && observed.PendingRefresh is null)
+			return;
+
+		var relevantRequestId = observed.RequestId;
+		while (true)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			observed = capture();
+			if (observed.RequestId > relevantRequestId)
+				relevantRequestId = observed.RequestId;
+
+			if (!observed.HasDraft && observed.PendingRefresh is null)
+			{
+				if (observed.RequestId == relevantRequestId)
+				{
+					switch (observed.Outcome)
+					{
+						case SettingsRefreshOutcome.Applied:
+							return;
+						case SettingsRefreshOutcome.Failed:
+							throw new TerminalWorkspaceOperationException(
+								"DPX-TUI-SETTINGS-REFRESH-FAILED");
+					}
+				}
+			}
+
+			var nextTransition = observed.PendingRefresh is { IsCompleted: false } pendingRefresh
+				? Task.WhenAny(pendingRefresh, observed.StateChanged)
+				: observed.StateChanged;
+			await nextTransition.WaitAsync(cancellationToken).ConfigureAwait(false);
+		}
 	}
+
+	private static TaskCompletionSource CreateSettingsRefreshSignal() =>
+		new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+	private void SignalSettingsRefreshStateChanged()
+	{
+		var next = CreateSettingsRefreshSignal();
+		var previous = Interlocked.Exchange(ref _settingsRefreshStateChanged, next);
+		previous.TrySetResult();
+	}
+
+	private void SetSettingsRefreshOutcome(
+		long requestId,
+		SettingsRefreshOutcome outcome)
+	{
+		var current = Volatile.Read(ref _settingsRefreshPublication);
+		if (current.RequestId > requestId)
+			return;
+
+		Volatile.Write(
+			ref _settingsRefreshPublication,
+			new SettingsRefreshPublication(requestId, outcome));
+		SignalSettingsRefreshStateChanged();
+	}
+
+	private bool EnsureRepositoryExportAllowed(bool originatedFromCommandLine)
+	{
+		var inconsistent = Volatile.Read(ref _repositoryStateInconsistent) != 0;
+		if (IsRepositoryExportAllowed(inconsistent))
+			return true;
+
+		const string code = "DPX-TUI-REPOSITORY-STATE-INCONSISTENT";
+		var message = L("Terminal.Tui.Error.OperationFailed");
+		if (originatedFromCommandLine)
+			ShowCommandResult($"{message} ({code})", success: false);
+		else
+			ShowError(code, message);
+		return false;
+	}
+
+	internal static bool IsRepositoryExportAllowed(bool repositoryStateInconsistent) =>
+		!repositoryStateInconsistent;
+
+	private void SetRepositoryStateInconsistent(bool value) =>
+		Volatile.Write(ref _repositoryStateInconsistent, value ? 1 : 0);
 
 	internal static string BuildDefaultExportPath(
 		string sourceRoot,
@@ -3276,11 +3386,15 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			return;
 		TrackActiveOperation(RunOperationAsync(
 			L("Terminal.Tui.SaveProfile"),
-			async token => await _controller.SavePortableProfileAsync(
-				_state,
-				destination,
-				overwrite: false,
-				token).ConfigureAwait(false),
+			async token =>
+			{
+				await AwaitLatestSettingsRefreshAsync(token).ConfigureAwait(false);
+				return await _controller.SavePortableProfileAsync(
+					_state,
+					destination,
+					overwrite: false,
+					token).ConfigureAwait(false);
+			},
 			originatedFromCommandLine: originatedFromCommandLine));
 	}
 
@@ -3891,7 +4005,9 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var selectedPathFrontier = state.BuildSelectedPathFrontier();
 		var preferredGitMode = _settingsDraftPreferredGitMode ?? _preferredGitMode;
 		var originatedFromCommandLine = _settingsDraftOriginatedFromCommandLine;
+		var expectedRevision = state.Revision;
 		var requestId = Interlocked.Increment(ref _settingsRefreshRequestId);
+		SetSettingsRefreshOutcome(requestId, SettingsRefreshOutcome.Pending);
 		var operationCts = _operations.Start(WorkspaceOperationKind.SettingsRefresh);
 		var cancellationToken = operationCts.Token;
 		var cornerProgressId = BeginCornerProgress(L("Terminal.Tui.Progress.UpdatingOptions"));
@@ -3906,11 +4022,13 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				selectedPathFrontier,
 				preferredGitMode,
 				originatedFromCommandLine,
+				expectedRevision,
 				requestId,
 				operationCts,
 				cancellationToken,
 				cornerProgressId),
 			CancellationToken.None));
+		SignalSettingsRefreshStateChanged();
 	}
 
 	private async Task RunSettingsRefreshAsync(
@@ -3923,11 +4041,13 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		IReadOnlyCollection<string>? selectedPathFrontier,
 		GitFilteringMode preferredGitMode,
 		bool originatedFromCommandLine,
+		long expectedRevision,
 		long requestId,
 		CancellationTokenSource operationCts,
 		CancellationToken cancellationToken,
 		long cornerProgressId)
 	{
+		var retryAfterSelectionProjection = false;
 		try
 		{
 			var requiresStructuralRefresh = TerminalWorkspaceController.RequiresStructuralRefresh(
@@ -3971,10 +4091,16 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			{
 				if (!IsCurrentSettingsRefresh(state, operationCts, requestId))
 					return false;
+				if (!CanPublishSettingsRefresh(state, expectedRevision))
+				{
+					retryAfterSelectionProjection = true;
+					return false;
+				}
 
 				_controller.ApplySettingsPlan(state, result);
 				_gitCliAvailable = gitCliAvailable;
 				_preferredGitMode = preferredGitMode;
+				SetSettingsRefreshOutcome(requestId, SettingsRefreshOutcome.Applied);
 				ClearSettingsDraft();
 				RefreshWorkspace();
 				ScheduleLocalProfilePersistence();
@@ -3991,6 +4117,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			{
 				await InvokeAsync(() =>
 				{
+					SetSettingsRefreshOutcome(requestId, SettingsRefreshOutcome.Failed);
 					ClearSettingsDraft();
 					RefreshWorkspace();
 					return true;
@@ -4003,7 +4130,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			{
 				await CompleteCornerProgressAsync(cornerProgressId).ConfigureAwait(false);
 				cornerProgressId = 0;
-				await RollbackFailedSettingsRefreshAsync().ConfigureAwait(false);
+				await RollbackFailedSettingsRefreshAsync(requestId).ConfigureAwait(false);
 				await ShowSettingsFailureAsync(
 					exception.Code,
 					ResolveValidationErrorMessage(exception.Code),
@@ -4016,7 +4143,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			{
 				await CompleteCornerProgressAsync(cornerProgressId).ConfigureAwait(false);
 				cornerProgressId = 0;
-				await RollbackFailedSettingsRefreshAsync().ConfigureAwait(false);
+				await RollbackFailedSettingsRefreshAsync(requestId).ConfigureAwait(false);
 				await ShowSettingsFailureAsync(
 					"DPX-TUI-OPERATION-FAILED",
 					L("Terminal.Tui.Error.OperationFailed"),
@@ -4027,6 +4154,71 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		{
 			await CompleteCornerProgressAsync(cornerProgressId).ConfigureAwait(false);
 			_operations.Complete(WorkspaceOperationKind.SettingsRefresh, operationCts);
+			SignalSettingsRefreshStateChanged();
+		}
+
+		if (retryAfterSelectionProjection)
+			await RescheduleSettingsRefreshAfterProjectionAsync(state, requestId).ConfigureAwait(false);
+	}
+
+	internal static bool CanPublishSettingsRefresh(
+		TerminalWorkspaceState state,
+		long expectedRevision)
+	{
+		ArgumentNullException.ThrowIfNull(state);
+		return state.Revision == expectedRevision;
+	}
+
+	private async Task RescheduleSettingsRefreshAfterProjectionAsync(
+		TerminalWorkspaceState state,
+		long requestId)
+	{
+		try
+		{
+			await AwaitLatestSelectionProjectionAsync(_sessionCts.Token).ConfigureAwait(false);
+			await InvokeAsync(() =>
+			{
+				if (_stopping ||
+					!ReferenceEquals(_state, state) ||
+					Volatile.Read(ref _settingsRefreshRequestId) != requestId ||
+					_settingsDraftSelection is null)
+				{
+					return false;
+				}
+
+				ScheduleSettingsRefresh();
+				return true;
+			}).ConfigureAwait(false);
+		}
+		catch (OperationCanceledException) when (_sessionCts.IsCancellationRequested)
+		{
+		}
+	}
+
+	private async Task AwaitLatestSelectionProjectionAsync(CancellationToken cancellationToken)
+	{
+		while (true)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var requestId = Volatile.Read(ref _projectionRequestId);
+			var pendingProjection = _operations.GetTask(WorkspaceOperationKind.Projection);
+			if (pendingProjection is null)
+				return;
+
+			try
+			{
+				await pendingProjection.WaitAsync(cancellationToken).ConfigureAwait(false);
+			}
+			catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+			{
+				// A newer selection projection owns the workspace state.
+			}
+
+			if (Volatile.Read(ref _projectionRequestId) == requestId &&
+				_operations.GetTask(WorkspaceOperationKind.Projection) is null)
+			{
+				return;
+			}
 		}
 	}
 
@@ -4038,10 +4230,11 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			? ShowCommandFailureAsync(code, message)
 			: ShowFailureAsync(code, message);
 
-	private async Task RollbackFailedSettingsRefreshAsync()
+	private async Task RollbackFailedSettingsRefreshAsync(long requestId)
 	{
 		await InvokeAsync(() =>
 		{
+			SetSettingsRefreshOutcome(requestId, SettingsRefreshOutcome.Failed);
 			ClearSettingsDraft();
 			RefreshWorkspace();
 			return true;
@@ -5487,11 +5680,14 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		{
 			return false;
 		}
-		FlushPendingWorkspacePersistence();
-		if (!TryFlushLocalProfilePersistence(exiting: false))
-			return false;
-		leave();
-		return true;
+		return RunOrDeferWorkspaceTransition(() =>
+		{
+			FlushPendingWorkspacePersistence();
+			if (!TryFlushLocalProfilePersistence(exiting: false))
+				return false;
+			leave();
+			return true;
+		});
 	}
 
 	private bool TryExitWorkspace()
@@ -5504,11 +5700,58 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		}
 		if (!Confirm(L("Terminal.Tui.Exit"), L("Terminal.Tui.ConfirmExit")))
 			return false;
-		FlushPendingWorkspacePersistence();
-		if (!TryFlushLocalProfilePersistence(exiting: true))
-			return false;
-		RequestExit();
+		return RunOrDeferWorkspaceTransition(() =>
+		{
+			FlushPendingWorkspacePersistence();
+			if (!TryFlushLocalProfilePersistence(exiting: true))
+				return false;
+			RequestExit();
+			return true;
+		});
+	}
+
+	private bool RunOrDeferWorkspaceTransition(Func<bool> transition)
+	{
+		ArgumentNullException.ThrowIfNull(transition);
+		if (_settingsDraftSelection is null &&
+			_operations.GetTask(WorkspaceOperationKind.SettingsRefresh) is null)
+		{
+			return transition();
+		}
+
+		var operationCts = ReplaceActiveOperation();
+		TrackActiveOperation(RunWorkspaceTransitionAfterSettingsRefreshAsync(
+			operationCts,
+			transition));
 		return true;
+	}
+
+	private async Task RunWorkspaceTransitionAfterSettingsRefreshAsync(
+		CancellationTokenSource operationCts,
+		Func<bool> transition)
+	{
+		try
+		{
+			await AwaitLatestSettingsRefreshAsync(operationCts.Token).ConfigureAwait(false);
+			await InvokeAsync(transition).ConfigureAwait(false);
+		}
+		catch (OperationCanceledException) when (
+			operationCts.IsCancellationRequested || _sessionCts.IsCancellationRequested)
+		{
+		}
+		catch
+		{
+			if (!_stopping)
+			{
+				await ShowFailureAsync(
+					"DPX-TUI-OPERATION-FAILED",
+					L("Terminal.Tui.Error.OperationFailed")).ConfigureAwait(false);
+			}
+		}
+		finally
+		{
+			ReleaseActiveOperation(operationCts);
+		}
 	}
 
 	private bool TryFlushLocalProfilePersistence(bool exiting)
@@ -5587,6 +5830,23 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	{
 		public string Code { get; } = code;
 		public string? Detail { get; } = detail;
+	}
+
+	internal enum SettingsRefreshOutcome
+	{
+		None,
+		Pending,
+		Applied,
+		Failed
+	}
+
+	private sealed record SettingsRefreshPublication(
+		long RequestId,
+		SettingsRefreshOutcome Outcome)
+	{
+		public static SettingsRefreshPublication None { get; } = new(
+			RequestId: 0,
+			Outcome: SettingsRefreshOutcome.None);
 	}
 }
 

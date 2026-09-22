@@ -50,16 +50,20 @@ internal sealed record TerminalAgentJournalSnapshot(
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
 		ArgumentNullException.ThrowIfNull(activity);
-		var paths = previous is not null && string.Equals(
+		var canReusePrevious = previous is not null &&
+			!activity.RequiresReset && string.Equals(
 			previous.Session.Id,
 			activity.Session.Id,
-			StringComparison.Ordinal)
-			? new Dictionary<string, long>(previous.DeliveredPathCalls, ProjectTreePathIdentity.CanonicalComparer)
+			StringComparison.Ordinal);
+		var paths = canReusePrevious
+			? new Dictionary<string, long>(previous!.DeliveredPathCalls, ProjectTreePathIdentity.CanonicalComparer)
 			: new Dictionary<string, long>(ProjectTreePathIdentity.CanonicalComparer);
 		var rootIndex = ResolveRootIndex(projectRoot, activity.Session.Roots);
-		foreach (var call in activity.AppendedCalls.Where(call =>
+		var matchingCalls = activity.AppendedCalls.Where(call =>
 			call.Sequence > baselineSequence &&
-			(call.RootIndex == rootIndex || activity.Session.Roots.Count == 1 && call.RootIndex is null)))
+			(call.RootIndex == rootIndex || activity.Session.Roots.Count == 1 && call.RootIndex is null))
+			.ToArray();
+		foreach (var call in matchingCalls)
 		{
 			foreach (var delivered in call.DeliveredPaths.Distinct(ProjectTreePathIdentity.CanonicalComparer))
 			{
@@ -69,10 +73,17 @@ internal sealed record TerminalAgentJournalSnapshot(
 		}
 		return new TerminalAgentJournalSnapshot(
 			activity.Session,
-			activity.LatestCall,
+			matchingCalls.OrderBy(static call => call.Sequence).LastOrDefault() ??
+			(canReusePrevious ? previous!.LatestCall : null),
 			activity.Session.Totals.Calls,
 			paths);
 	}
+
+	internal static long ResolveOpeningBaseline(bool sessionExistedAtWorkspaceOpen, long latestSequence) =>
+		sessionExistedAtWorkspaceOpen ? Math.Max(0, latestSequence) : 0;
+
+	internal static long ResolveReadCursor(AgentJournalActivitySnapshot activity) =>
+		Math.Max(0, activity.LatestCall?.Sequence ?? 0);
 
 	private static int ResolveRootIndex(string projectRoot, IReadOnlyList<AgentJournalRoot> roots)
 	{

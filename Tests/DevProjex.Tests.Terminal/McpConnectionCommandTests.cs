@@ -221,9 +221,10 @@ public sealed class McpConnectionCommandTests
 			launchService);
 
 		Assert.Equal(CommandLineExitCodes.RuntimeError, run.ExitCode);
-		Assert.Contains("server is connected", run.Environment.StandardOutput, StringComparison.OrdinalIgnoreCase);
-		Assert.Contains("No supported terminal", run.Environment.StandardOutput, StringComparison.Ordinal);
-		Assert.Contains("codex", run.Environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Empty(run.Environment.StandardOutput);
+		Assert.Contains("server is connected", run.Environment.StandardError, StringComparison.OrdinalIgnoreCase);
+		Assert.Contains("No supported terminal", run.Environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("codex", run.Environment.StandardError, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -340,9 +341,31 @@ public sealed class McpConnectionCommandTests
 			["mcp", "connect", project, "--client", "codex", "--language", "en"]);
 
 		Assert.Equal(CommandLineExitCodes.RuntimeError, run.ExitCode);
-		Assert.Contains("Codex was not found.", run.Environment.StandardOutput, StringComparison.Ordinal);
-		Assert.Contains("[mcp_servers.devprojex]", run.Environment.StandardOutput, StringComparison.Ordinal);
-		Assert.Empty(run.Environment.StandardError);
+		Assert.Empty(run.Environment.StandardOutput);
+		Assert.Contains("Codex was not found.", run.Environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("[mcp_servers.devprojex]", run.Environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task Connect_RestorationExplanationIsWrittenToStandardError()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var connectionService = new StubMcpConnectionService
+		{
+			Result = new McpConnectionResult(
+				McpConnectionStatus.ProcessFailed,
+				"Codex registration failed. The previous configuration was restored.")
+		};
+
+		var run = await RunAsync(
+			workspace,
+			connectionService,
+			["mcp", "connect", project, "--client", "codex", "--language", "en"]);
+
+		Assert.Equal(CommandLineExitCodes.RuntimeError, run.ExitCode);
+		Assert.Empty(run.Environment.StandardOutput);
+		Assert.Contains("previous configuration was restored", run.Environment.StandardError, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -368,6 +391,7 @@ public sealed class McpConnectionCommandTests
 		Assert.Contains("path-one", run.Environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("path-two", run.Environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("mcpServers", run.Environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Empty(run.Environment.StandardError);
 	}
 
 	private static async Task<CommandRun> RunAsync(

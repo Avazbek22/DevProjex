@@ -254,7 +254,7 @@ public sealed class SearchCommandHandler(
 				contentCharacters);
 			if (!namesWritten)
 				symbols = symbols with { AnnotatedHits = 0 };
-			AppendDeclarationSection(rendered.Output, symbols.Declarations, preview, contentCharacters);
+			AppendDeclarationSection(rendered.Output, symbols.Declarations, preview, request, contentCharacters);
 
 			var matches = rendered.WrittenHits.Select(hit =>
 			{
@@ -439,6 +439,7 @@ public sealed class SearchCommandHandler(
 		StringBuilder output,
 		IReadOnlyList<McpSearchDeclaration> declarations,
 		McpSearchDeclarationPreview? preview,
+		SearchCommandRequest request,
 		int maximumCharacters)
 	{
 		if (declarations.Count == 0)
@@ -461,17 +462,16 @@ public sealed class SearchCommandHandler(
 			return;
 		if (preview is { IsAddressable: true, Text.Length: > 0 })
 		{
-			var arguments = JsonSerializer.Serialize(new
-			{
-				path = preview.Declaration.RelativePath,
-				symbol = preview.Declaration.Name
-			});
+			var commandArguments = BuildDeclarationReadArguments(
+				request,
+				preview.Declaration.RelativePath);
+			var readCommand = string.Join(' ', commandArguments.Select(QuoteArgument));
 			var body = new StringBuilder()
 				.AppendLine()
 				.Append("Best declaration body (1 of ")
 				.Append(declarations.Count.ToString(CultureInfo.InvariantCulture))
 				.AppendLine("):")
-				.Append("get_file ").AppendLine(arguments)
+				.Append("Read declaration file: ").AppendLine(readCommand)
 				.Append("lines ").Append(preview.Declaration.StartLine.ToString(CultureInfo.InvariantCulture))
 				.Append('-').Append(preview.Declaration.EndLine.ToString(CultureInfo.InvariantCulture)).AppendLine()
 				.Append(preview.Text);
@@ -486,6 +486,86 @@ public sealed class SearchCommandHandler(
 				section.Append(body);
 		}
 		output.Append(section);
+	}
+
+	internal static string ResolveDeclarationReadSource(SearchCommandRequest request)
+	{
+		ArgumentNullException.ThrowIfNull(request);
+		if (string.IsNullOrWhiteSpace(request.RepositorySourceUrl))
+			return request.ProjectPath;
+
+		var safeSource = RepositoryUrlUtility.ToSafeDisplay(request.RepositorySourceUrl);
+		return safeSource.Length > 0 ? safeSource : request.ProjectPath;
+	}
+
+	internal static IReadOnlyList<string> BuildDeclarationReadArguments(
+		SearchCommandRequest request,
+		string relativePath)
+	{
+		ArgumentNullException.ThrowIfNull(request);
+		ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
+		var arguments = new List<string>
+		{
+			"devprojex", "export", "context", ResolveDeclarationReadSource(request)
+		};
+		if (!string.IsNullOrWhiteSpace(request.RepositoryBranch))
+		{
+			arguments.Add("--branch");
+			arguments.Add(request.RepositoryBranch);
+		}
+		arguments.AddRange(
+		[
+			"--view", "content", "--format", "text", "-o", "-",
+			"--profile", "standard", "--select", relativePath
+		]);
+		if (request.Selection.GitMode is { } gitMode)
+		{
+			arguments.Add("--git-mode");
+			arguments.Add(GitScopeSelection.ToToken(gitMode, request.Selection.GitDiffRange));
+		}
+		foreach (var exclusion in request.Selection.Exclusions ?? [])
+		{
+			arguments.Add("--exclude");
+			arguments.Add(ProjectSelectionTokens.ToToken(exclusion));
+		}
+		if (request.Selection.Exclusions is { Count: 0 })
+		{
+			arguments.Add("--exclude");
+			arguments.Add("none");
+		}
+		if (request.Selection.HideSecrets == true)
+			arguments.Add("--hide-secrets");
+		if (request.Selection.HidePrivateData == true)
+			arguments.Add("--hide-private-data");
+		if (request.Selection.CompressCode == true)
+			arguments.Add("--compress-code");
+		if (request.Selection.StripComments == true)
+			arguments.Add("--strip-comments");
+		if (request.Selection.StripBlankLines == true)
+			arguments.Add("--strip-blank-lines");
+		foreach (var root in request.Selection.Roots ?? [])
+		{
+			arguments.Add("--root");
+			arguments.Add(root);
+		}
+		foreach (var extension in request.Selection.Extensions ?? [])
+		{
+			arguments.Add("--extension");
+			arguments.Add(extension);
+		}
+		return arguments;
+	}
+
+	private static string QuoteArgument(string value)
+	{
+		if (value.Length > 0 && value.All(static character =>
+			char.IsAsciiLetterOrDigit(character) || character is '_' or '-' or '.' or '/' or ':'))
+		{
+			return value;
+		}
+		return OperatingSystem.IsWindows()
+			? "\"" + value.Replace("\"", "\"\"", StringComparison.Ordinal) + "\""
+			: "'" + value.Replace("'", "'\"'\"'", StringComparison.Ordinal) + "'";
 	}
 
 	private static string RenderText(SearchResult result)

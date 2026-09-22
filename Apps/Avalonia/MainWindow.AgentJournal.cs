@@ -10,6 +10,7 @@ public partial class MainWindow
     private CancellationTokenSource? _agentActivityWatchCts;
     private string? _agentActivitySessionId;
     private long _agentActivityLatestSequence;
+    private AgentJournalCall? _agentActivityLatestCall;
     private string? _agentDeliveryBaselineSessionId;
     private long _agentDeliveryBaselineSequence;
     private bool _captureAgentDeliveryBaseline;
@@ -78,29 +79,55 @@ public partial class MainWindow
             }
 
             IReadOnlyList<AgentJournalCall> calls;
-            AgentJournalCall? latestCall;
+            AgentJournalCall? snapshotLatestCall = null;
+            var sameSession = string.Equals(
+                _agentActivitySessionId,
+                session.Id,
+                StringComparison.Ordinal);
+            var cursorSequence = sameSession
+                ? Volatile.Read(ref _agentActivityLatestSequence)
+                : 0;
+            var requiresReset = false;
             if (_agentJournalReader is IAgentJournalActivityReader activityReader)
             {
-                var afterSequence = string.Equals(_agentActivitySessionId, session.Id, StringComparison.Ordinal)
-                    ? Volatile.Read(ref _agentActivityLatestSequence)
-                    : 0;
                 var activity = await activityReader.ReadActivityAsync(
                     session.Id,
-                    afterSequence,
+                    cursorSequence,
                     refreshCts.Token);
                 if (activity is null)
                     return;
                 session = activity.Session;
                 calls = activity.AppendedCalls;
-                latestCall = activity.LatestCall;
-                if (activity.RequiresReset)
+                snapshotLatestCall = activity.LatestCall;
+                cursorSequence = Math.Max(
+                    cursorSequence,
+                    snapshotLatestCall?.Sequence ?? 0);
+                if (calls.Count > 0)
+                {
+                    cursorSequence = Math.Max(
+                        cursorSequence,
+                        calls.Max(static call => call.Sequence));
+                }
+                requiresReset = activity.RequiresReset;
+                if (requiresReset)
+                {
                     calls = await _agentJournalReader.ReadCallsAsync(session.Id, refreshCts.Token);
+                    cursorSequence = Math.Max(
+                        cursorSequence,
+                        calls.Count == 0 ? 0 : calls.Max(static call => call.Sequence));
+                }
             }
             else
             {
                 calls = await _agentJournalReader.ReadCallsAsync(session.Id, refreshCts.Token);
-                latestCall = null;
+                cursorSequence = calls.Count == 0
+                    ? 0
+                    : calls.Max(static call => call.Sequence);
             }
+            sameSession = string.Equals(
+                _agentActivitySessionId,
+                session.Id,
+                StringComparison.Ordinal);
             var baselineSequence = string.Equals(
                 _agentDeliveryBaselineSessionId,
                 session.Id,
@@ -109,19 +136,27 @@ public partial class MainWindow
                 : 0;
             if (_captureAgentDeliveryBaseline)
             {
-                baselineSequence = latestCall?.Sequence ?? calls.LastOrDefault()?.Sequence ?? 0;
+                baselineSequence = cursorSequence;
                 _agentDeliveryBaselineSessionId = session.Id;
                 _agentDeliveryBaselineSequence = baselineSequence;
             }
-            var counts = string.Equals(_agentActivitySessionId, session.Id, StringComparison.Ordinal)
+            var counts = sameSession && !requiresReset
                 ? new Dictionary<string, int>(_agentDeliveryCounts, PathComparer.Default)
                 : new Dictionary<string, int>(PathComparer.Default);
             AddDeliveredPathCounts(counts, projectRoot, session, calls, baselineSequence);
             var rootIndex = ResolveAgentJournalRootIndex(projectRoot, session.Roots);
-            latestCall ??= calls
-                .Where(call => call.RootIndex == rootIndex || session.Roots.Count == 1 && call.RootIndex is null)
+            var latestCall = calls
+                .Where(call => MatchesAgentJournalRoot(call, rootIndex, session.Roots.Count))
                 .OrderByDescending(static call => call.Sequence)
                 .FirstOrDefault();
+            if (snapshotLatestCall is not null &&
+                MatchesAgentJournalRoot(snapshotLatestCall, rootIndex, session.Roots.Count) &&
+                (latestCall is null || snapshotLatestCall.Sequence > latestCall.Sequence))
+            {
+                latestCall = snapshotLatestCall;
+            }
+            if (latestCall is null && sameSession && !requiresReset)
+                latestCall = _agentActivityLatestCall;
             refreshCts.Token.ThrowIfCancellationRequested();
 
             await Dispatcher.UIThread.InvokeAsync(() =>
@@ -146,7 +181,8 @@ public partial class MainWindow
                     }
                 }
                 _agentActivitySessionId = session.Id;
-                _agentActivityLatestSequence = latestCall?.Sequence ?? 0;
+                _agentActivityLatestSequence = cursorSequence;
+                _agentActivityLatestCall = latestCall;
                 _captureAgentDeliveryBaseline = false;
                 _agentDeliveryCounts = counts;
                 ApplyAgentDeliveryTrace();
@@ -224,6 +260,7 @@ public partial class MainWindow
         _agentActivityWatchCts = null;
         _agentActivitySessionId = null;
         _agentActivityLatestSequence = 0;
+        _agentActivityLatestCall = null;
         if (!preserveDeliveryBaseline)
         {
             _agentDeliveryBaselineSessionId = null;
@@ -335,7 +372,7 @@ public partial class MainWindow
         foreach (var call in calls)
         {
             if (call.Sequence <= baselineSequence ||
-                call.RootIndex != rootIndex && !(session.Roots.Count == 1 && call.RootIndex is null))
+                !MatchesAgentJournalRoot(call, rootIndex, session.Roots.Count))
                 continue;
             foreach (var path in call.DeliveredPaths)
                 AddDeliveredPath(counts, projectRoot, path, 1);
@@ -351,6 +388,13 @@ public partial class MainWindow
                 return index;
         return -1;
     }
+
+    private static bool MatchesAgentJournalRoot(
+        AgentJournalCall call,
+        int rootIndex,
+        int rootCount) =>
+        rootIndex >= 0 &&
+        (call.RootIndex == rootIndex || rootCount == 1 && call.RootIndex is null);
 
     private static void AddDeliveredPath(
         Dictionary<string, int> counts,

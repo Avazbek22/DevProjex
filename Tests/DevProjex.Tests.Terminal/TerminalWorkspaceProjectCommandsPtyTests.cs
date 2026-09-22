@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using DevProjex.Infrastructure.ProjectProfiles;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -165,6 +166,178 @@ public sealed class TerminalWorkspaceProjectCommandsPtyTests
 	}
 
 	[Fact(Timeout = 120_000)]
+	public async Task ProfileLoadPublishesThePortableSelectionToTheLocalProfile()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/src/Inside.cs", "class Inside { }");
+		workspace.WriteFile("project/docs/Outside.cs", "class Outside { }");
+		var profilePath = workspace.WriteFile(
+			"loaded.json",
+			"""
+			{
+			  "schemaVersion": 2,
+			  "kind": "devprojex-profile",
+			  "selection": {
+			    "roots": null,
+			    "extensions": [".cs"],
+			    "selectedPaths": ["src"],
+			    "gitMode": "none",
+			    "exclusions": [],
+			    "hideSecrets": true,
+			    "hidePrivateData": false,
+			    "compressCode": false,
+			    "stripComments": false,
+			    "stripBlankLines": false
+			  }
+			}
+			""");
+		string? dataRoot = null;
+		await using var terminal = await StartWorkspaceAsync(
+			project,
+			initializeDataRoot: path => dataRoot = path);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.SendAsync(
+			$":profile load \"{profilePath}\"\r",
+			TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"[x] Hide secrets",
+			timeout: TimeSpan.FromSeconds(45),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var persisted = await WaitForLocalProfileAsync(dataRoot!, project);
+		Assert.Equal(["src"], persisted.SelectedPaths);
+		Assert.Contains(IgnoreOptionId.HideSecrets, persisted.SelectedIgnoreOptions);
+		await QuitAsync(terminal);
+	}
+
+	[Fact(Timeout = 150_000)]
+	public async Task LocalProfilePersistenceDoesNotRollBackAnExternalChangeAfterAMerge()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/src/App.cs", "class App { }");
+		string? dataRoot = null;
+		void InitializeProfile(string path)
+		{
+			dataRoot = path;
+			new ProjectProfileStore(() => path).SaveProfile(
+				project,
+				CreateProfileWithContentStates());
+		}
+
+		await using var terminal = await StartWorkspaceAsync(
+			project,
+			initializeDataRoot: InitializeProfile,
+			profile: "local");
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var externalStore = new ProjectProfileStore(() => dataRoot!);
+		externalStore.SaveProfile(
+			project,
+			CreateProfileWithContentStates(hidePrivateData: true));
+
+		await terminal.SendAsync(
+			":set hide-secrets on\r",
+			TestContext.Current.CancellationToken);
+		await WaitForLocalProfileAsync(
+			dataRoot!,
+			project,
+			static profile =>
+				profile.SelectedIgnoreOptions.Contains(IgnoreOptionId.HideSecrets) &&
+				profile.SelectedIgnoreOptions.Contains(IgnoreOptionId.HidePrivateData));
+
+		await terminal.SendAsync(
+			":set compress-code on\r",
+			TestContext.Current.CancellationToken);
+		var persisted = await WaitForLocalProfileAsync(
+			dataRoot!,
+			project,
+			static profile => profile.SelectedIgnoreOptions.Contains(IgnoreOptionId.CompressCode));
+
+		Assert.Contains(IgnoreOptionId.HidePrivateData, persisted.SelectedIgnoreOptions);
+		await QuitAsync(terminal);
+	}
+
+	[Fact]
+	public void ProfileResetPreparesDefaultWorkspaceBeforeDeletingLocalProfile()
+	{
+		var source = ReadProjectCommandsSource();
+		var resetStart = source.IndexOf(
+			"private void BeginResetProfile",
+			StringComparison.Ordinal);
+		Assert.InRange(resetStart, 0, source.Length - 1);
+		var resetEnd = source.IndexOf(
+			"private void BeginApplyProfile",
+			resetStart,
+			StringComparison.Ordinal);
+		Assert.InRange(resetEnd, resetStart + 1, source.Length);
+		var resetBody = source[resetStart..resetEnd];
+		var prepare = resetBody.IndexOf(".OpenAsync(", StringComparison.Ordinal);
+		var commit = resetBody.IndexOf("TryDeleteProfileWithResult(", StringComparison.Ordinal);
+
+		Assert.InRange(prepare, 0, resetBody.Length - 1);
+		Assert.InRange(commit, 0, resetBody.Length - 1);
+		Assert.True(
+			prepare < commit,
+			"The default workspace must be prepared before the local profile is deleted.");
+	}
+
+	[Fact]
+	public void ProfileResetPublishesPreparedDefaultsAfterDeleteWithoutCheckingCancellation()
+	{
+		var source = ReadProjectCommandsSource();
+		var resetStart = source.IndexOf(
+			"private void BeginResetProfile",
+			StringComparison.Ordinal);
+		Assert.InRange(resetStart, 0, source.Length - 1);
+		var resetEnd = source.IndexOf(
+			"private void BeginApplyProfile",
+			resetStart,
+			StringComparison.Ordinal);
+		Assert.InRange(resetEnd, resetStart + 1, source.Length);
+		var resetBody = source[resetStart..resetEnd];
+		var commit = resetBody.IndexOf("TryDeleteProfileWithResult(", StringComparison.Ordinal);
+		var publish = resetBody.IndexOf("ShowWorkspace(replacement)", commit, StringComparison.Ordinal);
+		Assert.InRange(commit, 0, resetBody.Length - 1);
+		Assert.InRange(publish, commit + 1, resetBody.Length);
+		var committedTransition = resetBody[commit..publish];
+
+		Assert.DoesNotContain("operationCts.Token", committedTransition, StringComparison.Ordinal);
+		Assert.DoesNotContain("_operations.IsCurrent", committedTransition, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void ProfileResetTreatsLocalProfileFlushAsARequiredPrecondition()
+	{
+		var source = ReadProjectCommandsSource();
+		var resetStart = source.IndexOf(
+			"private TerminalWorkspaceCommandExecutionResult ResetCurrentProfile()",
+			StringComparison.Ordinal);
+		var resetEnd = source.IndexOf(
+			"private void BeginApplyProfile",
+			resetStart,
+			StringComparison.Ordinal);
+		Assert.InRange(resetStart, 0, source.Length - 1);
+		Assert.InRange(resetEnd, resetStart + 1, source.Length);
+		var resetBody = source[resetStart..resetEnd];
+
+		Assert.Contains("if (!FlushLocalProfilePersistence())", resetBody, StringComparison.Ordinal);
+	}
+
+	private static string ReadProjectCommandsSource() => File.ReadAllText(Path.Combine(
+		PublishedApplicationLocator.FindRepositoryRoot(),
+		"Apps",
+		"Terminal",
+		"Tui",
+		"TerminalWorkspaceSession.ProjectCommands.cs"));
+
+	[Fact(Timeout = 120_000)]
 	public async Task NewCommandsReportStrictTokensAndNearestCandidates()
 	{
 		using var project = new TemporaryDirectory();
@@ -181,13 +354,59 @@ public sealed class TerminalWorkspaceProjectCommandsPtyTests
 		await QuitAsync(terminal);
 	}
 
-	private static Task<TerminalPtyHarness> StartWorkspaceAsync(string projectPath) =>
+	private static Task<TerminalPtyHarness> StartWorkspaceAsync(
+		string projectPath,
+		Action<string>? initializeDataRoot = null,
+		string profile = "standard") =>
 		TerminalPtyHarness.StartAsync(
 			projectPath,
-			["tui", projectPath, "--profile", "standard", "--screen", "inline", "--no-mouse", "--language", "en"],
+			["tui", projectPath, "--profile", profile, "--screen", "inline", "--no-mouse", "--language", "en"],
 			columns: 160,
 			rows: 40,
+			initializeDataRoot: initializeDataRoot,
 			cancellationToken: TestContext.Current.CancellationToken);
+
+	private static async Task<ProjectSelectionProfile> WaitForLocalProfileAsync(
+		string dataRoot,
+		string projectPath,
+		Func<ProjectSelectionProfile, bool>? predicate = null)
+	{
+		var store = new ProjectProfileStore(() => dataRoot);
+		var deadline = DateTimeOffset.UtcNow.AddSeconds(5);
+		do
+		{
+			if (store.TryLoadProfile(projectPath, out var profile) &&
+				(predicate is null || predicate(profile)))
+			{
+				return profile;
+			}
+			await Task.Delay(50, TestContext.Current.CancellationToken);
+		}
+		while (DateTimeOffset.UtcNow < deadline);
+
+		Assert.Fail("The local profile was not published after the portable profile was loaded.");
+		return null!;
+	}
+
+	private static ProjectSelectionProfile CreateProfileWithContentStates(
+		bool hidePrivateData = false)
+	{
+		var states = Enum.GetValues<IgnoreOptionId>().ToDictionary(
+			static option => option,
+			option => option == IgnoreOptionId.HidePrivateData && hidePrivateData);
+		return new ProjectSelectionProfile(
+			SelectedRootFolders: [],
+			SelectedExtensions: [".cs"],
+			SelectedIgnoreOptions: states.Where(static pair => pair.Value)
+				.Select(static pair => pair.Key)
+				.ToArray(),
+			ExtensionStates: new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+			{
+				[".cs"] = true
+			},
+			IgnoreOptionStates: states,
+			SelectedPaths: null);
+	}
 
 	private static Task<TerminalPtyHarness> StartWelcomeAsync(
 		string workingDirectory,
