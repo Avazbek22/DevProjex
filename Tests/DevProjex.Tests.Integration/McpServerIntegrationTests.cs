@@ -7063,6 +7063,34 @@ public sealed partial class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task RelatedFilesReportsFilesExcludedByTheAccumulatedFactBudget()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Target.cs"), "sealed class Target { }\n");
+		var dependencyFacts = new DependencyFactsEngine(
+			new TreeSitterDependencyFactExtractor(),
+			new FileDependencyConfigurationProvider(),
+			new DependencyFactsLimits(MaximumAccumulatedFactBytes: 1));
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			dependencyFactsEngine: dependencyFacts);
+
+		var result = await server.CallAsync(
+			"related_files",
+			new Dictionary<string, object?> { ["path"] = "Target.cs" });
+		var text = ExtractSpotlightBody(Text(result));
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.Contains(
+			"[Dependency facts limited] Target.cs — index fact memory limit exceeded",
+			text,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain("[Dependency extraction failed] Target.cs", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task GetFileScalarAndBatchSymbolReadsShareAddressHeaders()
 	{
 		using var workspace = new TemporaryDirectory();

@@ -981,15 +981,79 @@ internal sealed record McpStoredResultContext(
 	int Revision,
 	McpStoredResultKind Kind);
 
-internal sealed record McpStoredJournalContext(
-	string SourceRoot,
-	int? Revision,
-	IReadOnlyList<McpStoredJournalPath> Paths);
+internal sealed class McpStoredJournalContext
+{
+	private readonly McpStoredJournalRange[] _ranges;
+
+	public McpStoredJournalContext(
+		string sourceRoot,
+		int? revision,
+		IReadOnlyList<McpStoredJournalPath> paths)
+	{
+		SourceRoot = sourceRoot;
+		Revision = revision;
+		Paths = paths;
+		_ranges = paths
+			.SelectMany(static path => path.LineRanges.Select(range =>
+				new McpStoredJournalRange(path, range.StartLine, range.EndLine)))
+			.OrderBy(static range => range.StartLine)
+			.ThenBy(static range => range.EndLine)
+			.ThenBy(static range => range.Path.RelativePath, StringComparer.Ordinal)
+			.ToArray();
+	}
+
+	public string SourceRoot { get; }
+	public int? Revision { get; }
+	public IReadOnlyList<McpStoredJournalPath> Paths { get; }
+
+	public IReadOnlyList<McpStoredJournalPath> PathsForPage(int startLine, int endLine)
+	{
+		if (_ranges.Length == 0)
+			return [];
+		var low = 0;
+		var high = _ranges.Length;
+		while (low < high)
+		{
+			var middle = low + ((high - low) >> 1);
+			if (_ranges[middle].StartLine < startLine)
+				low = middle + 1;
+			else
+				high = middle;
+		}
+
+		var first = low;
+		while (first > 0 && _ranges[first - 1].EndLine >= startLine)
+			first--;
+		var result = new List<McpStoredJournalPath>();
+		var seen = new HashSet<string>(PathComparer.Default);
+		for (var index = first; index < _ranges.Length; index++)
+		{
+			var range = _ranges[index];
+			if (range.StartLine > endLine)
+				break;
+			if (range.EndLine >= startLine && seen.Add(range.Path.RelativePath))
+				result.Add(range.Path);
+		}
+		return result;
+	}
+
+	private readonly record struct McpStoredJournalRange(
+		McpStoredJournalPath Path,
+		int StartLine,
+		int EndLine);
+}
 
 internal sealed record McpStoredJournalPath(
 	string RelativePath,
 	long SecretsMasked,
-	long PrivateDataMasked);
+	long PrivateDataMasked,
+	IReadOnlyList<McpStoredLineRange> LineRanges);
+
+internal readonly record struct McpStoredLineRange(int StartLine, int EndLine)
+{
+	public bool Intersects(int startLine, int endLine) =>
+		StartLine <= endLine && startLine <= EndLine;
+}
 
 internal readonly record struct McpPackLineCheckpoint(int LineNumber, long ByteOffset);
 

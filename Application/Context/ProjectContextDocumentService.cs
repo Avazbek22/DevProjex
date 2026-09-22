@@ -40,7 +40,10 @@ public sealed record ProjectContextWriteResult(
 	ImportanceRankingReport? Ranking = null)
 {
 	public static ProjectContextWriteResult Empty { get; } = new([]);
+	public IReadOnlyList<ProjectContextFileLineRange> FileLineRanges { get; init; } = [];
 }
+
+public sealed record ProjectContextFileLineRange(string Path, int StartLine, int EndLine);
 
 public sealed class ProjectContextDocumentService(
 	TreeExportService treeExportService,
@@ -53,6 +56,7 @@ public sealed class ProjectContextDocumentService(
 {
 	private const int SchemaVersion = 1;
 	private const string Kind = "devprojex-context";
+	private const int TextFileHeadingAndSpacerLineCount = 2;
 	private const int StructuredTreeFlushNodeInterval = 512;
 	private const int MaximumBoundedReadAhead = 8;
 	internal const long MaximumCompleteSnapshotReadAheadRetainedBytes = 4L * 1024 * 1024;
@@ -133,7 +137,8 @@ public sealed class ProjectContextDocumentService(
 		IProgress<ProjectCopyExportProgress>? writeProgress = null,
 		long? maximumEstimatedTokens = null,
 		ImportanceRankingReport? ranking = null,
-		ProjectContextTokenBudgetReport? precomputedTokenBudget = null)
+		ProjectContextTokenBudgetReport? precomputedTokenBudget = null,
+		bool captureFileLineRanges = false)
 	{
 		_ = await WriteCompleteWithReportAsync(
 				plan,
@@ -146,7 +151,8 @@ public sealed class ProjectContextDocumentService(
 				writeProgress,
 				maximumEstimatedTokens,
 				ranking,
-				precomputedTokenBudget)
+				precomputedTokenBudget,
+				captureFileLineRanges)
 			.ConfigureAwait(false);
 	}
 
@@ -161,7 +167,8 @@ public sealed class ProjectContextDocumentService(
 		IProgress<ProjectCopyExportProgress>? writeProgress = null,
 		long? maximumEstimatedTokens = null,
 		ImportanceRankingReport? ranking = null,
-		ProjectContextTokenBudgetReport? precomputedTokenBudget = null)
+		ProjectContextTokenBudgetReport? precomputedTokenBudget = null,
+		bool captureFileLineRanges = false)
 	{
 		ArgumentNullException.ThrowIfNull(plan);
 		ArgumentNullException.ThrowIfNull(destination);
@@ -190,12 +197,15 @@ public sealed class ProjectContextDocumentService(
 					effectivePathRedaction,
 					writeProgress,
 					maximumEstimatedTokens,
-					ranking)
+					ranking,
+					captureFileLineRanges)
 				.ConfigureAwait(false);
 		}
 		using var tokenBudget = CreateTokenBudget(maximumEstimatedTokens, plan.SourceRoot, precomputedTokenBudget);
+		var lineTracker = captureFileLineRanges ? new ProjectContextLineTrackingStream(destination) : null;
+		var outputDestination = (Stream?)lineTracker ?? destination;
 		using var cancellationDestination = new CancellationBoundWriteStream(
-			destination,
+			outputDestination,
 			cancellationToken);
 
 		switch (format)
@@ -212,6 +222,7 @@ public sealed class ProjectContextDocumentService(
 						tokenBudget,
 						orderedPaths,
 						ranking,
+						lineTracker,
 						cancellationToken)
 					.ConfigureAwait(false);
 				break;
@@ -227,6 +238,7 @@ public sealed class ProjectContextDocumentService(
 						tokenBudget,
 						orderedPaths,
 						ranking,
+						lineTracker,
 						cancellationToken)
 					.ConfigureAwait(false);
 				break;
@@ -242,6 +254,7 @@ public sealed class ProjectContextDocumentService(
 						tokenBudget,
 						orderedPaths,
 						ranking,
+						lineTracker,
 						cancellationToken)
 					.ConfigureAwait(false);
 				break;
@@ -257,13 +270,17 @@ public sealed class ProjectContextDocumentService(
 						tokenBudget,
 						orderedPaths,
 						ranking,
+						lineTracker,
 						cancellationToken)
 					.ConfigureAwait(false);
 				break;
 			default:
 				throw new ArgumentOutOfRangeException(nameof(format), format, null);
 		}
-		return new ProjectContextWriteResult([], tokenBudget?.CreateReport(), ranking);
+		return new ProjectContextWriteResult([], tokenBudget?.CreateReport(), ranking)
+		{
+			FileLineRanges = lineTracker?.Ranges ?? []
+		};
 	}
 
 	public async Task<ProjectContextWriteResult> WritePreparedCompleteAsync(
@@ -279,7 +296,8 @@ public sealed class ProjectContextDocumentService(
 		long? maximumEstimatedTokens = null,
 		ImportanceRankingReport? ranking = null,
 		ProjectContextTokenBudgetReport? precomputedTokenBudget = null,
-		bool preserveContentMetrics = false)
+		bool preserveContentMetrics = false,
+		bool captureFileLineRanges = false)
 	{
 		ArgumentNullException.ThrowIfNull(prepared);
 		var analyzer = CreatePreparedAnalyzer(prepared);
@@ -290,8 +308,8 @@ public sealed class ProjectContextDocumentService(
 				path => analyzer.IsApplicationOwnedImmutableContent(path))
 			.ConfigureAwait(false);
 		var pathRedaction = outputPathRedactionDecision ??
-		                    OutputRootPathPresentation.CaptureRedactionDecision(
-			                    CreateTransformationContext(plan));
+							OutputRootPathPresentation.CaptureRedactionDecision(
+								CreateTransformationContext(plan));
 		plan = preserveContentMetrics ? plan : await RefreshStructuredContentMetricsAsync(
 				plan,
 				view,
@@ -318,7 +336,8 @@ public sealed class ProjectContextDocumentService(
 				writeProgress,
 				maximumEstimatedTokens,
 				ranking,
-				precomputedTokenBudget)
+				precomputedTokenBudget,
+				captureFileLineRanges)
 			.ConfigureAwait(false);
 		return result with { UnscannableFiles = prepared.UnscannableFiles };
 	}
@@ -464,7 +483,7 @@ public sealed class ProjectContextDocumentService(
 			if (shouldValidate is not null && !shouldValidate(path))
 				continue;
 			if (ranking.SourceVersions.TryGetValue(Path.GetFullPath(path), out var expectedVersion) &&
-			    !await expectedVersion.IsCurrentAsync(path, cancellationToken).ConfigureAwait(false))
+				!await expectedVersion.IsCurrentAsync(path, cancellationToken).ConfigureAwait(false))
 			{
 				throw new IOException(
 					"Selected source content changed during importance ranking; repeat the export.");
@@ -491,11 +510,11 @@ public sealed class ProjectContextDocumentService(
 		var rankingEntriesByFullPath = CreateRankingEntryLookup(ranking);
 		var detailTokenResolver = CreateDetailTokenResolver(plan);
 		await foreach (var source in OpenSourceSnapshotsInOrderAsync(
-			               plan.SourceRoot,
-			               orderedPaths,
-			               ranking?.SourceVersions,
-			               validateDuringUtf8Copy: false,
-			               cancellationToken).ConfigureAwait(false))
+						   plan.SourceRoot,
+						   orderedPaths,
+						   ranking?.SourceVersions,
+						   validateDuringUtf8Copy: false,
+						   cancellationToken).ConfigureAwait(false))
 		{
 			await using var snapshot = source.Snapshot;
 			var file = CreateCompleteFileDocument(
@@ -612,7 +631,7 @@ public sealed class ProjectContextDocumentService(
 		CancellationToken cancellationToken)
 	{
 		if (!IncludesContent(view) ||
-		    format is not (ProjectContextDocumentFormat.Json or ProjectContextDocumentFormat.Xml))
+			format is not (ProjectContextDocumentFormat.Json or ProjectContextDocumentFormat.Xml))
 		{
 			return plan;
 		}
@@ -625,7 +644,7 @@ public sealed class ProjectContextDocumentService(
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			if (preparedMetrics.TryGetValue(Path.GetFullPath(path), out var metrics) &&
-			    !metrics.IsEstimated)
+				!metrics.IsEstimated)
 			{
 				orderedMetrics.Add(metrics);
 				continue;
@@ -767,7 +786,8 @@ public sealed class ProjectContextDocumentService(
 		OutputPathRedactionDecision? pathRedaction,
 		IProgress<ProjectCopyExportProgress>? writeProgress,
 		long? maximumEstimatedTokens,
-		ImportanceRankingReport? ranking)
+		ImportanceRankingReport? ranking,
+		bool captureFileLineRanges)
 	{
 		var context = CreateTransformationContext(plan)!;
 		var preparer = new SecretRedactionOutputPreparer(contentAnalyzer);
@@ -812,9 +832,11 @@ public sealed class ProjectContextDocumentService(
 				useSourceMappedStructuredPaths,
 				writeProgress,
 				maximumEstimatedTokens,
-				ranking)
+				ranking,
+				precomputedTokenBudget: null,
+				captureFileLineRanges)
 			.ConfigureAwait(false);
-		return new ProjectContextWriteResult(prepared.UnscannableFiles, writeResult.TokenBudget, writeResult.Ranking);
+		return writeResult with { UnscannableFiles = prepared.UnscannableFiles };
 	}
 
 	private async Task WriteCompleteTextAsync(
@@ -828,6 +850,7 @@ public sealed class ProjectContextDocumentService(
 		ProjectContextTokenBudgetAccumulator? tokenBudget,
 		IReadOnlyList<string> orderedPaths,
 		ImportanceRankingReport? ranking,
+		ProjectContextLineTrackingStream? lineTracker,
 		CancellationToken cancellationToken)
 	{
 		await using var streamWriter = CreateStreamWriter(destination);
@@ -861,11 +884,11 @@ public sealed class ProjectContextDocumentService(
 		if (includesContent)
 		{
 			await foreach (var source in OpenSourceSnapshotsInOrderAsync(
-				               plan.SourceRoot,
-				               orderedPaths,
-				               ranking?.SourceVersions,
-				               validateDuringUtf8Copy: false,
-				               cancellationToken).ConfigureAwait(false))
+							   plan.SourceRoot,
+							   orderedPaths,
+							   ranking?.SourceVersions,
+							   validateDuringUtf8Copy: false,
+							   cancellationToken).ConfigureAwait(false))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
 				var index = source.Index;
@@ -877,14 +900,14 @@ public sealed class ProjectContextDocumentService(
 					contentPathMapper,
 					pathRedaction);
 				if (tokenBudget is not null &&
-				    !TryIncludeInBudget(
-					    tokenBudget,
-					    file.Path,
-					    source.Path,
-					    file.Metrics?.CharCount ?? 0,
-					    rankingEntriesByFullPath,
-					    index,
-					    detailTokenResolver))
+					!TryIncludeInBudget(
+						tokenBudget,
+						file.Path,
+						source.Path,
+						file.Metrics?.CharCount ?? 0,
+						rankingEntriesByFullPath,
+						index,
+						detailTokenResolver))
 				{
 					ReportProgress(writeProgress, index + 1, orderedPaths.Count);
 					continue;
@@ -893,6 +916,14 @@ public sealed class ProjectContextDocumentService(
 				{
 					await WriteLineAsync(writer, null, cancellationToken).ConfigureAwait(false);
 					await WriteLineAsync(writer, null, cancellationToken).ConfigureAwait(false);
+				}
+				if (lineTracker is not null)
+				{
+					await streamWriter.FlushAsync(cancellationToken).ConfigureAwait(false);
+					var contentStartLine = lineTracker.CurrentLine + writer.BufferedLineEndingCount;
+					lineTracker.BeginFile(
+						source.Path,
+						Math.Max(1, contentStartLine - TextFileHeadingAndSpacerLineCount));
 				}
 
 				await writer.WriteAsync(
@@ -924,6 +955,11 @@ public sealed class ProjectContextDocumentService(
 							.ConfigureAwait(false);
 					}
 				}
+				if (lineTracker is not null)
+				{
+					await streamWriter.FlushAsync(cancellationToken).ConfigureAwait(false);
+					lineTracker.EndFile();
+				}
 				hasOutput = true;
 				ReportProgress(writeProgress, index + 1, orderedPaths.Count);
 			}
@@ -943,6 +979,7 @@ public sealed class ProjectContextDocumentService(
 		ProjectContextTokenBudgetAccumulator? tokenBudget,
 		IReadOnlyList<string> orderedPaths,
 		ImportanceRankingReport? ranking,
+		ProjectContextLineTrackingStream? lineTracker,
 		CancellationToken cancellationToken)
 	{
 		await using var writer = CreateStreamWriter(destination);
@@ -997,11 +1034,11 @@ public sealed class ProjectContextDocumentService(
 		{
 			var processedFiles = 0;
 			await foreach (var source in OpenSourceSnapshotsInOrderAsync(
-				               plan.SourceRoot,
-				               orderedPaths,
-				               ranking?.SourceVersions,
-				               validateDuringUtf8Copy: true,
-				               cancellationToken).ConfigureAwait(false))
+							   plan.SourceRoot,
+							   orderedPaths,
+							   ranking?.SourceVersions,
+							   validateDuringUtf8Copy: true,
+							   cancellationToken).ConfigureAwait(false))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
 				var path = source.Path;
@@ -1012,20 +1049,25 @@ public sealed class ProjectContextDocumentService(
 					contentPathMapper,
 					pathRedaction);
 				if (tokenBudget is not null &&
-				    !TryIncludeInBudget(
-					    tokenBudget,
-					    file.Path,
-					    source.Path,
-					    file.Metrics?.CharCount ?? 0,
-					    rankingEntriesByFullPath,
-					    source.Index,
-					    detailTokenResolver))
+					!TryIncludeInBudget(
+						tokenBudget,
+						file.Path,
+						source.Path,
+						file.Metrics?.CharCount ?? 0,
+						rankingEntriesByFullPath,
+						source.Index,
+						detailTokenResolver))
 				{
 					ReportProgress(writeProgress, ++processedFiles, orderedPaths.Count);
 					continue;
 				}
 				await WriteLineAsync(writer, null, cancellationToken).ConfigureAwait(false);
 				await WriteLineAsync(writer, null, cancellationToken).ConfigureAwait(false);
+				if (lineTracker is not null)
+				{
+					await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
+					lineTracker.BeginFile(source.Path);
+				}
 				await writer.WriteAsync("## ".AsMemory(), cancellationToken).ConfigureAwait(false);
 				await WriteLineAsync(writer, BuildMarkdownCodeSpan(file.Path), cancellationToken)
 					.ConfigureAwait(false);
@@ -1070,6 +1112,11 @@ public sealed class ProjectContextDocumentService(
 					await WriteLineAsync(writer, null, cancellationToken).ConfigureAwait(false);
 					await writer.WriteAsync(fence.AsMemory(), cancellationToken).ConfigureAwait(false);
 				}
+				if (lineTracker is not null)
+				{
+					await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
+					lineTracker.EndFile();
+				}
 				ReportProgress(writeProgress, ++processedFiles, orderedPaths.Count);
 			}
 		}
@@ -1088,6 +1135,7 @@ public sealed class ProjectContextDocumentService(
 		ProjectContextTokenBudgetAccumulator? tokenBudget,
 		IReadOnlyList<string> orderedPaths,
 		ImportanceRankingReport? ranking,
+		ProjectContextLineTrackingStream? lineTracker,
 		CancellationToken cancellationToken)
 	{
 		using var writer = new Utf8JsonWriter(destination, new JsonWriterOptions
@@ -1126,11 +1174,11 @@ public sealed class ProjectContextDocumentService(
 		{
 			var processedFiles = 0;
 			await foreach (var source in OpenSourceSnapshotsInOrderAsync(
-				               plan.SourceRoot,
-				               orderedPaths,
-				               ranking?.SourceVersions,
-				               validateDuringUtf8Copy: false,
-				               cancellationToken).ConfigureAwait(false))
+							   plan.SourceRoot,
+							   orderedPaths,
+							   ranking?.SourceVersions,
+							   validateDuringUtf8Copy: false,
+							   cancellationToken).ConfigureAwait(false))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
 				var path = source.Path;
@@ -1141,17 +1189,22 @@ public sealed class ProjectContextDocumentService(
 					contentPathMapper,
 					pathRedaction);
 				if (tokenBudget is not null &&
-				    !TryIncludeInBudget(
-					    tokenBudget,
-					    file.Path,
-					    source.Path,
-					    file.Metrics?.CharCount ?? 0,
-					    rankingEntriesByFullPath,
-					    source.Index,
-					    detailTokenResolver))
+					!TryIncludeInBudget(
+						tokenBudget,
+						file.Path,
+						source.Path,
+						file.Metrics?.CharCount ?? 0,
+						rankingEntriesByFullPath,
+						source.Index,
+						detailTokenResolver))
 				{
 					ReportProgress(writeProgress, ++processedFiles, orderedPaths.Count);
 					continue;
+				}
+				if (lineTracker is not null)
+				{
+					await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
+					lineTracker.BeginFile(source.Path);
 				}
 				writer.WriteStartObject();
 				writer.WriteString("path", NormalizePath(file.Path));
@@ -1182,6 +1235,11 @@ public sealed class ProjectContextDocumentService(
 						isFinalSegment: true);
 				}
 				writer.WriteEndObject();
+				if (lineTracker is not null)
+				{
+					await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
+					lineTracker.EndFile();
+				}
 				ReportProgress(writeProgress, ++processedFiles, orderedPaths.Count);
 			}
 		}
@@ -1212,6 +1270,7 @@ public sealed class ProjectContextDocumentService(
 		ProjectContextTokenBudgetAccumulator? tokenBudget,
 		IReadOnlyList<string> orderedPaths,
 		ImportanceRankingReport? ranking,
+		ProjectContextLineTrackingStream? lineTracker,
 		CancellationToken cancellationToken)
 	{
 		using var writer = XmlWriter.Create(destination, new XmlWriterSettings
@@ -1255,11 +1314,11 @@ public sealed class ProjectContextDocumentService(
 		{
 			var processedFiles = 0;
 			await foreach (var source in OpenSourceSnapshotsInOrderAsync(
-				               plan.SourceRoot,
-				               orderedPaths,
-				               ranking?.SourceVersions,
-				               validateDuringUtf8Copy: false,
-				               cancellationToken).ConfigureAwait(false))
+							   plan.SourceRoot,
+							   orderedPaths,
+							   ranking?.SourceVersions,
+							   validateDuringUtf8Copy: false,
+							   cancellationToken).ConfigureAwait(false))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
 				var path = source.Path;
@@ -1270,17 +1329,22 @@ public sealed class ProjectContextDocumentService(
 					contentPathMapper,
 					pathRedaction);
 				if (tokenBudget is not null &&
-				    !TryIncludeInBudget(
-					    tokenBudget,
-					    file.Path,
-					    source.Path,
-					    file.Metrics?.CharCount ?? 0,
-					    rankingEntriesByFullPath,
-					    source.Index,
-					    detailTokenResolver))
+					!TryIncludeInBudget(
+						tokenBudget,
+						file.Path,
+						source.Path,
+						file.Metrics?.CharCount ?? 0,
+						rankingEntriesByFullPath,
+						source.Index,
+						detailTokenResolver))
 				{
 					ReportProgress(writeProgress, ++processedFiles, orderedPaths.Count);
 					continue;
+				}
+				if (lineTracker is not null)
+				{
+					await writer.FlushAsync().ConfigureAwait(false);
+					lineTracker.BeginFile(source.Path);
 				}
 				writer.WriteStartElement("file");
 				WriteSanitizedXmlAttributeString(writer, "path", NormalizePath(file.Path));
@@ -1319,6 +1383,11 @@ public sealed class ProjectContextDocumentService(
 					writer.WriteEndElement();
 				}
 				writer.WriteEndElement();
+				if (lineTracker is not null)
+				{
+					await writer.FlushAsync().ConfigureAwait(false);
+					lineTracker.EndFile();
+				}
 				ReportProgress(writeProgress, ++processedFiles, orderedPaths.Count);
 			}
 		}
@@ -1396,7 +1465,7 @@ public sealed class ProjectContextDocumentService(
 				var path = orderedPaths[index];
 				RankingSourceVersion? expectedVersion = null;
 				if (sourceVersions is not null &&
-				    sourceVersions.TryGetValue(Path.GetFullPath(path), out var capturedVersion))
+					sourceVersions.TryGetValue(Path.GetFullPath(path), out var capturedVersion))
 				{
 					expectedVersion = capturedVersion;
 				}
@@ -1463,7 +1532,7 @@ public sealed class ProjectContextDocumentService(
 		try
 		{
 			var isApplicationOwnedImmutable = contentAnalyzer is PreparedSecretFileContentAnalyzer preparedAnalyzer &&
-			                                  preparedAnalyzer.IsApplicationOwnedImmutableContent(path);
+											  preparedAnalyzer.IsApplicationOwnedImmutableContent(path);
 			snapshot = await OpenSourceSnapshotAsync(
 					projectRoot,
 					path,
@@ -1564,7 +1633,7 @@ public sealed class ProjectContextDocumentService(
 		CancellationToken cancellationToken)
 	{
 		if (contentAnalyzer is PreparedSecretFileContentAnalyzer preparedAnalyzer &&
-		    preparedAnalyzer.IsApplicationOwnedImmutableContent(path))
+			preparedAnalyzer.IsApplicationOwnedImmutableContent(path))
 		{
 			// Application-owned prepared content is immutable and was captured through this policy.
 			// Source-backed pass-through entries still require the checks below when they are opened.
@@ -1578,7 +1647,7 @@ public sealed class ProjectContextDocumentService(
 			return new UnavailableSourceSnapshot(unavailable);
 
 		var snapshot = captureRawContentIdentity &&
-		               contentAnalyzer is IRawContentIdentityFileContentAnalyzer identityAnalyzer
+					   contentAnalyzer is IRawContentIdentityFileContentAnalyzer identityAnalyzer
 			? await identityAnalyzer
 				.OpenCompleteSnapshotWithRawContentIdentityAsync(path, cancellationToken)
 				.ConfigureAwait(false)
@@ -1880,9 +1949,9 @@ public sealed class ProjectContextDocumentService(
 	{
 		var length = Math.Min(value.Length, maximumLength);
 		return length > 0 &&
-		       length < value.Length &&
-		       char.IsHighSurrogate(value[length - 1]) &&
-		       char.IsLowSurrogate(value[length])
+			   length < value.Length &&
+			   char.IsHighSurrogate(value[length - 1]) &&
+			   char.IsLowSurrogate(value[length])
 			? length - 1
 			: length;
 	}
@@ -1956,7 +2025,7 @@ public sealed class ProjectContextDocumentService(
 			output.Append("## ").AppendLine(BuildMarkdownCodeSpan(file.Path));
 			output.AppendLine();
 			if (file.Classification != FileContentClassification.Text &&
-			    !file.IsOmitted)
+				!file.IsOmitted)
 			{
 				output.Append('_')
 					.Append(GetOmissionText(file.Classification))
@@ -2246,10 +2315,10 @@ public sealed class ProjectContextDocumentService(
 		ProjectSourceIdentity? identity)
 	{
 		if (identity is not
-		    {
-			    SourceType: ProjectSourceType.GitClone,
-			    RepositoryUrl.Length: > 0
-		    })
+			{
+				SourceType: ProjectSourceType.GitClone,
+				RepositoryUrl.Length: > 0
+			})
 		{
 			return;
 		}
@@ -2598,10 +2667,10 @@ public sealed class ProjectContextDocumentService(
 		ProjectSourceIdentity? identity)
 	{
 		if (identity is not
-		    {
-			    SourceType: ProjectSourceType.GitClone,
-			    RepositoryUrl.Length: > 0
-		    })
+			{
+				SourceType: ProjectSourceType.GitClone,
+				RepositoryUrl.Length: > 0
+			})
 		{
 			return;
 		}
@@ -2797,9 +2866,9 @@ public sealed class ProjectContextDocumentService(
 	private static void ValidateView(ProjectContextView view)
 	{
 		if (view is not (
-			    ProjectContextView.Tree or
-			    ProjectContextView.Content or
-			    ProjectContextView.TreeContent))
+				ProjectContextView.Tree or
+				ProjectContextView.Content or
+				ProjectContextView.TreeContent))
 		{
 			throw new ArgumentOutOfRangeException(nameof(view), view, null);
 		}
@@ -2808,10 +2877,10 @@ public sealed class ProjectContextDocumentService(
 	private static void ValidateDocumentFormat(ProjectContextDocumentFormat format)
 	{
 		if (format is not (
-			    ProjectContextDocumentFormat.Text or
-			    ProjectContextDocumentFormat.Markdown or
-			    ProjectContextDocumentFormat.Json or
-			    ProjectContextDocumentFormat.Xml))
+				ProjectContextDocumentFormat.Text or
+				ProjectContextDocumentFormat.Markdown or
+				ProjectContextDocumentFormat.Json or
+				ProjectContextDocumentFormat.Xml))
 		{
 			throw new ArgumentOutOfRangeException(nameof(format), format, null);
 		}
@@ -2882,10 +2951,10 @@ public sealed class ProjectContextDocumentService(
 	private static string GetHumanReadableContentDisplayRoot(ProjectContextPlan plan)
 	{
 		if (plan.SourceIdentity is not
-		    {
-			    SourceType: ProjectSourceType.GitClone,
-			    SourceReference.Length: > 0
-		    } identity)
+			{
+				SourceType: ProjectSourceType.GitClone,
+				SourceReference.Length: > 0
+			} identity)
 		{
 			return plan.SourceRoot;
 		}
@@ -2912,16 +2981,16 @@ public sealed class ProjectContextDocumentService(
 			return TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(plan.SourceRoot);
 
 		if (plan.SourceIdentity is not
-		    {
-			    SourceType: ProjectSourceType.GitClone,
-			    SourceReference.Length: > 0
-		    } identity)
+			{
+				SourceType: ProjectSourceType.GitClone,
+				SourceReference.Length: > 0
+			} identity)
 		{
 			return null;
 		}
 
 		return WebPathPresentation.TryCreatePathMapper(plan.SourceRoot, identity.SourceReference)
-		       ?? TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(plan.SourceRoot);
+			   ?? TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(plan.SourceRoot);
 	}
 
 	private static string EscapeMarkdownHeading(string value) =>
@@ -2981,19 +3050,19 @@ public sealed class ProjectContextDocumentService(
 			throw new ArgumentOutOfRangeException(nameof(classification), classification, null);
 
 		return omissionMessageProvider?.Invoke(classification) ??
-		       classification switch
-		{
-			FileContentClassification.Binary => "Binary file; content omitted.",
-			FileContentClassification.TooLarge => "File is too large for interactive preview.",
-			FileContentClassification.Unreadable => "File could not be read.",
-			FileContentClassification.AccessDenied => "Access denied while reading file.",
-			FileContentClassification.Missing => "File disappeared while it was being read.",
-			FileContentClassification.UnsupportedEncoding => "Text encoding is unsupported.",
-			_ => throw new ArgumentOutOfRangeException(
-				nameof(classification),
-				classification,
-				null)
-		};
+			   classification switch
+			   {
+				   FileContentClassification.Binary => "Binary file; content omitted.",
+				   FileContentClassification.TooLarge => "File is too large for interactive preview.",
+				   FileContentClassification.Unreadable => "File could not be read.",
+				   FileContentClassification.AccessDenied => "Access denied while reading file.",
+				   FileContentClassification.Missing => "File disappeared while it was being read.",
+				   FileContentClassification.UnsupportedEncoding => "Text encoding is unsupported.",
+				   _ => throw new ArgumentOutOfRangeException(
+					   nameof(classification),
+					   classification,
+					   null)
+			   };
 	}
 
 	private sealed record ContextFileReadResult(

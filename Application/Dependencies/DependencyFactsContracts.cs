@@ -166,4 +166,5 @@ public sealed record DependencyFactsLimits(
 	int MaximumCachedFiles = 8_192,
 	int MaximumCachedIndexes = 16,
 	long MaximumFileCacheBytes = 64L * 1024 * 1024,
-	long MaximumIndexCacheBytes = 128L * 1024 * 1024);
+	long MaximumIndexCacheBytes = 128L * 1024 * 1024,
+	long MaximumAccumulatedFactBytes = 128L * 1024 * 1024);

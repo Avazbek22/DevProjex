@@ -26,6 +26,18 @@ if (args.FirstOrDefault() == "live-roots")
 	return;
 }
 
+if (args.FirstOrDefault() == "pack-attribution")
+{
+	PackAttributionBenchmark.Run(args[1..]);
+	return;
+}
+
+if (args.FirstOrDefault() == "search-retention")
+{
+	SearchRetentionBenchmark.Run(args[1..]);
+	return;
+}
+
 var options = BenchmarkOptions.Parse(args);
 var temporaryCorpus = options.SyntheticFileCount is null ? null : SyntheticCorpus.Create(options.SyntheticFileCount.Value);
 var root = temporaryCorpus?.Path ?? options.Root ?? throw new ArgumentException("Specify --root or --synthetic-files.");
@@ -150,6 +162,99 @@ internal sealed record BenchmarkOperation(
 
 internal readonly record struct Sample(double ElapsedMilliseconds, long ClientAllocatedBytes, int ResponseCharacters);
 
+internal static class SearchRetentionBenchmark
+{
+	private const int FileCount = 2_000;
+	private const int SourceCharacters = 32 * 1024;
+	private const int CandidateCapacity = 5_000;
+
+	public static void Run(string[] arguments)
+	{
+		var repetitions = 5;
+		if (arguments.Length > 0)
+		{
+			if (arguments.Length != 2 || arguments[0] != "--repetitions")
+				throw new ArgumentException("Only --repetitions is supported.");
+			repetitions = int.Parse(arguments[1], CultureInfo.InvariantCulture);
+		}
+		if (repetitions < 3)
+			throw new ArgumentOutOfRangeException(nameof(repetitions));
+
+		Console.WriteLine(
+			"matching_percent,legacy_median_retained_bytes,legacy_spread_bytes,indexed_median_retained_bytes,indexed_spread_bytes,indexed_peak_bound_bytes");
+		foreach (var matchingPercent in new[] { 1, 50, 100 })
+		{
+			var matchingFiles = checked(FileCount * matchingPercent / 100);
+			var legacy = Enumerable.Range(0, repetitions)
+				.Select(_ => MeasureLegacy(matchingFiles))
+				.Order()
+				.ToArray();
+			var indexed = Enumerable.Range(0, repetitions)
+				.Select(_ => MeasureIndexed(matchingFiles))
+				.Order()
+				.ToArray();
+			var indexedMedian = indexed[indexed.Length / 2];
+			Console.WriteLine(string.Join(',',
+				matchingPercent.ToString(CultureInfo.InvariantCulture),
+				legacy[legacy.Length / 2].ToString(CultureInfo.InvariantCulture),
+				(legacy[^1] - legacy[0]).ToString(CultureInfo.InvariantCulture),
+				indexedMedian.ToString(CultureInfo.InvariantCulture),
+				(indexed[^1] - indexed[0]).ToString(CultureInfo.InvariantCulture),
+				checked(indexedMedian + SourceCharacters * sizeof(char)).ToString(CultureInfo.InvariantCulture)));
+		}
+	}
+
+	private static long MeasureLegacy(int matchingFiles)
+	{
+		Collect();
+		var before = GC.GetTotalMemory(forceFullCollection: false);
+		var retained = new Dictionary<string, string>(matchingFiles, StringComparer.Ordinal);
+		for (var index = 0; index < matchingFiles; index++)
+		{
+			var path = $"src/File{index:D5}.cs";
+			retained.Add(path, string.Concat(path, new string('x', SourceCharacters - path.Length)));
+		}
+		Collect();
+		var bytes = Math.Max(0, GC.GetTotalMemory(forceFullCollection: false) - before);
+		GC.KeepAlive(retained);
+		return bytes;
+	}
+
+	private static long MeasureIndexed(int matchingFiles)
+	{
+		Collect();
+		var before = GC.GetTotalMemory(forceFullCollection: false);
+		var collector = new McpSearchCandidateCollector(CandidateCapacity, int.MaxValue);
+		for (var index = 0; index < matchingFiles; index++)
+		{
+			var path = $"src/File{index:D5}.cs";
+			var text = $"needle-{index:D5}";
+			collector.Consider(new McpSearchCandidate(
+				new McpSearchRenderedGroup(
+					path,
+					path,
+					[1],
+					[new McpSearchGroupLine(1, IsMatch: true, text)]),
+				1,
+				0,
+				text,
+				text.Length,
+				ProtectedLines: [new McpSearchProtectedLine(1, 1)]));
+		}
+		Collect();
+		var bytes = Math.Max(0, GC.GetTotalMemory(forceFullCollection: false) - before);
+		GC.KeepAlive(collector);
+		return bytes;
+	}
+
+	private static void Collect()
+	{
+		GC.Collect();
+		GC.WaitForPendingFinalizers();
+		GC.Collect();
+	}
+}
+
 internal static class SearchDeclarationBenchmark
 {
 	public static void Run(string[] arguments)
@@ -251,6 +356,101 @@ internal static class SearchDeclarationBenchmark
 		double ElapsedMilliseconds,
 		long AllocatedBytes,
 		long VisitedDeclarations);
+}
+
+internal static class PackAttributionBenchmark
+{
+	public static void Run(string[] arguments)
+	{
+		var repetitions = 5;
+		if (arguments.Length > 0)
+		{
+			if (arguments.Length != 2 || arguments[0] != "--repetitions")
+				throw new ArgumentException("Only --repetitions is supported.");
+			repetitions = int.Parse(arguments[1], CultureInfo.InvariantCulture);
+		}
+		if (repetitions < 3)
+			throw new ArgumentOutOfRangeException(nameof(repetitions));
+
+		Console.WriteLine(
+			"files,legacy_median_ms,legacy_spread_ms,indexed_median_ms,indexed_spread_ms,legacy_median_alloc_bytes,indexed_median_alloc_bytes");
+		foreach (var count in new[] { 1_000, 10_000, 100_000 })
+		{
+			var paths = Enumerable.Range(0, count)
+				.Select(index => new McpStoredJournalPath(
+					$"src/File{index:D6}.cs",
+					0,
+					0,
+					[new McpStoredLineRange(index * 3 + 1, index * 3 + 2)]))
+				.ToArray();
+			var context = new McpStoredJournalContext("root", null, paths);
+			var selected = paths[count / 2];
+			var page = $"header\n{selected.RelativePath}\nbody";
+			var startLine = count / 2 * 3 + 1;
+			_ = MeasureLegacy(paths, page);
+			_ = MeasureIndexed(context, startLine);
+			var legacy = Enumerable.Range(0, repetitions)
+				.Select(_ => MeasureLegacy(paths, page))
+				.ToArray();
+			var indexed = Enumerable.Range(0, repetitions)
+				.Select(_ => MeasureIndexed(context, startLine))
+				.ToArray();
+			if (legacy.SelectMany(static sample => sample.Paths).Select(static path => path.RelativePath)
+					.SequenceEqual(indexed.SelectMany(static sample => sample.Paths).Select(static path => path.RelativePath)) is false)
+			{
+				throw new InvalidOperationException("Attribution result changed.");
+			}
+			var legacyElapsed = legacy.Select(static sample => sample.ElapsedMilliseconds).Order().ToArray();
+			var indexedElapsed = indexed.Select(static sample => sample.ElapsedMilliseconds).Order().ToArray();
+			var legacyAllocations = legacy.Select(static sample => sample.AllocatedBytes).Order().ToArray();
+			var indexedAllocations = indexed.Select(static sample => sample.AllocatedBytes).Order().ToArray();
+			Console.WriteLine(string.Join(',',
+				count.ToString(CultureInfo.InvariantCulture),
+				FormatValue(MedianValue(legacyElapsed)),
+				FormatValue(legacyElapsed[^1] - legacyElapsed[0]),
+				FormatValue(MedianValue(indexedElapsed)),
+				FormatValue(indexedElapsed[^1] - indexedElapsed[0]),
+				MedianValue(legacyAllocations).ToString(CultureInfo.InvariantCulture),
+				MedianValue(indexedAllocations).ToString(CultureInfo.InvariantCulture)));
+		}
+	}
+
+	private static PackAttributionSample MeasureLegacy(
+		IReadOnlyList<McpStoredJournalPath> paths,
+		string page)
+	{
+		var allocated = GC.GetAllocatedBytesForCurrentThread();
+		var timer = Stopwatch.StartNew();
+		var result = paths.Where(path => page.Contains(path.RelativePath, StringComparison.Ordinal)).ToArray();
+		timer.Stop();
+		return new PackAttributionSample(
+			timer.Elapsed.TotalMilliseconds,
+			GC.GetAllocatedBytesForCurrentThread() - allocated,
+			result);
+	}
+
+	private static PackAttributionSample MeasureIndexed(
+		McpStoredJournalContext context,
+		int startLine)
+	{
+		var allocated = GC.GetAllocatedBytesForCurrentThread();
+		var timer = Stopwatch.StartNew();
+		var result = context.PathsForPage(startLine, startLine + 1);
+		timer.Stop();
+		return new PackAttributionSample(
+			timer.Elapsed.TotalMilliseconds,
+			GC.GetAllocatedBytesForCurrentThread() - allocated,
+			result);
+	}
+
+	private static double MedianValue(double[] values) => values[values.Length / 2];
+	private static long MedianValue(long[] values) => values[values.Length / 2];
+	private static string FormatValue(double value) => value.ToString("0.000000", CultureInfo.InvariantCulture);
+
+	private readonly record struct PackAttributionSample(
+		double ElapsedMilliseconds,
+		long AllocatedBytes,
+		IReadOnlyList<McpStoredJournalPath> Paths);
 }
 
 internal static class LiveRootRetentionBenchmark

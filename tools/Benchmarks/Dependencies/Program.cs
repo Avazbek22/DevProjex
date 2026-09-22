@@ -11,6 +11,11 @@ if (args.FirstOrDefault() == "operations")
 	await OperationRunner.RunAsync(args[1..]);
 	return;
 }
+if (args.FirstOrDefault() == "fact-budget")
+{
+	await FactBudgetScaleRunner.RunAsync(args[1..]);
+	return;
+}
 BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args);
 
 [MemoryDiagnoser]
@@ -265,4 +270,174 @@ internal static class OperationRunner
 	private sealed record OperationSummary(string Operation, double MedianMilliseconds, double MinimumMilliseconds, double MaximumMilliseconds,
 		long MedianAllocatedBytes, long MinimumAllocatedBytes, long MaximumAllocatedBytes);
 	private sealed record OperationReport(string Root, int Files, IReadOnlyList<OperationSample> Samples, IReadOnlyList<OperationSummary> Summaries);
+}
+
+internal static class FactBudgetScaleRunner
+{
+	private const long BoundedBytes = 16L * 1024 * 1024;
+
+	public static async Task RunAsync(string[] arguments)
+	{
+		var repetitions = 3;
+		if (arguments.Length > 0)
+		{
+			if (arguments.Length != 2 || arguments[0] != "--repetitions")
+				throw new ArgumentException("Only --repetitions is supported.");
+			repetitions = int.Parse(arguments[1]);
+		}
+		if (repetitions < 3)
+			throw new ArgumentOutOfRangeException(nameof(repetitions));
+
+		var root = Path.Combine(Path.GetTempPath(), "DevProjex-DependencyFactScale", Guid.NewGuid().ToString("N"));
+		Directory.CreateDirectory(root);
+		try
+		{
+			Console.WriteLine(
+				"files,mode,median_ms,spread_ms,median_alloc_bytes,accumulated_fact_bytes,resolver_context_estimated_bytes,resolved_index_estimated_bytes,limited_files");
+			foreach (var count in new[] { 1_000, 10_000, 100_000 })
+			{
+				foreach (var bounded in new[] { false, true })
+				{
+					var samples = new List<FactBudgetSample>(repetitions);
+					for (var repetition = 0; repetition < repetitions; repetition++)
+						samples.Add(await MeasureAsync(root, count, bounded));
+					var elapsed = samples.Select(static sample => sample.ElapsedMilliseconds).Order().ToArray();
+					var allocations = samples.Select(static sample => sample.AllocatedBytes).Order().ToArray();
+					var middle = samples.OrderBy(static sample => sample.ElapsedMilliseconds).ElementAt(samples.Count / 2);
+					Console.WriteLine(string.Join(',',
+						count,
+						bounded ? "bounded" : "unbounded",
+						elapsed[elapsed.Length / 2].ToString("0.000", System.Globalization.CultureInfo.InvariantCulture),
+						(elapsed[^1] - elapsed[0]).ToString("0.000", System.Globalization.CultureInfo.InvariantCulture),
+						allocations[allocations.Length / 2],
+						middle.Metrics.AccumulatedFactBytes,
+						middle.Metrics.ResolverContextEstimatedBytes,
+						middle.Metrics.ResolvedIndexEstimatedBytes,
+						middle.Metrics.FactBudgetLimitedFiles));
+				}
+			}
+		}
+		finally
+		{
+			Directory.Delete(root, recursive: true);
+		}
+	}
+
+	private static async Task<FactBudgetSample> MeasureAsync(string root, int count, bool bounded)
+	{
+		var files = Enumerable.Range(0, count)
+			.Select(index => Path.Combine(root, $"Type{index:D6}.cs"))
+			.ToArray();
+		using var engine = new DependencyFactsEngine(
+			new DenseSyntheticExtractor(),
+			new DenseSyntheticConfiguration(root),
+			new DependencyFactsLimits(
+				MaximumCachedFiles: 1,
+				MaximumCachedIndexes: 1,
+				MaximumFileCacheBytes: 1,
+				MaximumIndexCacheBytes: 1,
+				MaximumAccumulatedFactBytes: bounded ? BoundedBytes : long.MaxValue));
+		var allocated = GC.GetTotalAllocatedBytes(precise: true);
+		var timer = Stopwatch.StartNew();
+		var result = await engine.IndexAsync(root, files);
+		timer.Stop();
+		return new FactBudgetSample(
+			timer.Elapsed.TotalMilliseconds,
+			GC.GetTotalAllocatedBytes(precise: true) - allocated,
+			result.Metrics);
+	}
+
+	private sealed class DenseSyntheticExtractor : IDependencyFactExtractor
+	{
+		public int ParseCount { get; private set; }
+		public int CompiledQuerySetCount => 0;
+
+		public ValueTask<PreparedDependencySource> PrepareAsync(
+			string sourceRoot,
+			string fullPath,
+			DependencyResolverConfiguration configuration,
+			DependencyFactsLimits limits,
+			CancellationToken cancellationToken,
+			string? contentIdentity = null)
+		{
+			var relative = Path.GetRelativePath(sourceRoot, fullPath).Replace('\\', '/');
+			return ValueTask.FromResult(new PreparedDependencySource(
+				fullPath,
+				relative,
+				"scale",
+				LanguageId.CSharp,
+				relative,
+				"scale:v1",
+				string.Empty));
+		}
+
+		public FileFacts Extract(PreparedDependencySource source, DependencyFactsLimits limits)
+		{
+			ParseCount++;
+			var index = int.Parse(Path.GetFileNameWithoutExtension(source.RelativePath)[4..]);
+			var name = $"Type{index:D6}";
+			var references = index == 0
+				? Array.Empty<ReferenceFact>()
+				: [new ReferenceFact(
+					EvidenceLayer.TypeReference,
+					$"Type{index - 1:D6}",
+					0,
+					"type",
+					new SourceSite(source.RelativePath, 1, $"Type{index - 1:D6}"))];
+			return new FileFacts(
+				source.RelativePath,
+				source.ScopeId,
+				source.LanguageId,
+				source.ContentFingerprint,
+				0,
+				DependencyFileStatus.Supported,
+				null,
+				false,
+				new Dictionary<string, int>(),
+				[new DeclarationFact(
+					new SymbolIdentity(source.ScopeId, source.LanguageId, SymbolKind.Class, name, 0),
+					[new SourceSite(source.RelativePath, 1, name)])],
+				[],
+				references,
+				[],
+				new Dictionary<string, string>(),
+				[],
+				new Dictionary<string, string>(),
+				[]);
+		}
+
+		public void Dispose()
+		{
+		}
+	}
+
+	private sealed class DenseSyntheticConfiguration(string root) : IDependencyConfigurationProvider
+	{
+		public Task<DependencyResolverConfiguration> ReadAsync(
+			string sourceRoot,
+			IReadOnlyList<string> manifestFiles,
+			CancellationToken cancellationToken) => Task.FromResult(new DependencyResolverConfiguration(
+			"scale",
+			[new DependencyScopeDescriptor(
+				"scale",
+				root,
+				LanguageId.CSharp,
+				[],
+				null,
+				false,
+				new Dictionary<string, IReadOnlyList<string>>(),
+				null,
+				new HashSet<string>(),
+				[],
+				true)],
+			new Dictionary<string, PackageMapDescriptor>(),
+			new HashSet<string>(),
+			new Dictionary<string, IReadOnlySet<string>>(),
+			new HashSet<string>()));
+	}
+
+	private readonly record struct FactBudgetSample(
+		double ElapsedMilliseconds,
+		long AllocatedBytes,
+		DependencyIndexMetrics Metrics);
 }
