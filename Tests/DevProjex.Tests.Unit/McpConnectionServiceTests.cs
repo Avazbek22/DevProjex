@@ -1054,7 +1054,7 @@ public sealed class McpConnectionServiceTests
 	[Theory]
 	[InlineData((int)McpConnectionClient.Cursor, ".cursor", "mcpServers")]
 	[InlineData((int)McpConnectionClient.VsCode, ".vscode", "servers")]
-	public async Task Connect_ProjectClient_PreservesFieldsOnTheExistingDevProjexEntry(
+	public async Task Connect_ProjectClient_ReplacesExistingEntryAndKeepsOnlySupportedEditorFields(
 		int clientValue,
 		string directory,
 		string container)
@@ -1092,11 +1092,22 @@ public sealed class McpConnectionServiceTests
 			targetPath,
 			TestContext.Current.CancellationToken));
 		var entry = document.RootElement.GetProperty(container).GetProperty("devprojex");
-		Assert.Equal("${workspaceFolder}/.env", entry.GetProperty("envFile").GetString());
+		Assert.False(entry.TryGetProperty("envFile", out _));
 		Assert.True(entry.GetProperty("sandboxEnabled").GetBoolean());
-		Assert.Equal("yes", entry.GetProperty("env").GetProperty("KEEP").GetString());
+		if (entry.TryGetProperty("env", out var environment))
+			Assert.False(environment.TryGetProperty("KEEP", out _));
 		Assert.True(entry.GetProperty("dev").GetProperty("watch").GetBoolean());
-		Assert.Equal("keep-me", entry.GetProperty("cwd").GetString());
+		Assert.False(entry.TryGetProperty("cwd", out _));
+		Assert.EndsWith(
+			Environment.NewLine +
+			"Existing devprojex fields other than sandboxEnabled and dev were discarded.",
+			result.UserMessage,
+			StringComparison.Ordinal);
+		Assert.Equal(
+			1,
+			result.UserMessage.Split(
+				"Existing devprojex fields other than sandboxEnabled and dev were discarded.",
+				StringSplitOptions.None).Length - 1);
 		AssertConnection(
 			entry,
 			executable,
