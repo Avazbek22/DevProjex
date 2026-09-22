@@ -14,13 +14,23 @@ public sealed class SecretRedactionOutputPreparer
 {
 	private readonly IFileContentAnalyzer contentAnalyzer;
 	private readonly IFileContentAnalyzer preparedContentAnalyzer;
+	private readonly PreparedContentStorageQuota preparedContentQuota;
 
 	public SecretRedactionOutputPreparer(
 		IFileContentAnalyzer contentAnalyzer,
 		IFileContentAnalyzer? preparedContentAnalyzer = null)
+		: this(contentAnalyzer, preparedContentAnalyzer, PreparedContentStorageQuota.Shared)
+	{
+	}
+
+	internal SecretRedactionOutputPreparer(
+		IFileContentAnalyzer contentAnalyzer,
+		IFileContentAnalyzer? preparedContentAnalyzer,
+		PreparedContentStorageQuota preparedContentQuota)
 	{
 		this.contentAnalyzer = contentAnalyzer ?? throw new ArgumentNullException(nameof(contentAnalyzer));
 		this.preparedContentAnalyzer = preparedContentAnalyzer ?? contentAnalyzer;
+		this.preparedContentQuota = preparedContentQuota ?? throw new ArgumentNullException(nameof(preparedContentQuota));
 		SecretRedactionTempDirectoryScavenger.StartOnce();
 	}
 
@@ -215,6 +225,9 @@ public sealed class SecretRedactionOutputPreparer
 
 		SecretRedactionTempDirectory? workingDirectory = null;
 		PreparedContentStore? contentStore = null;
+		var storageLease = materializeTransformedContent
+			? preparedContentQuota.CreateLease()
+			: null;
 		var useConsolidatedSnapshot =
 			allowConsolidatedSnapshot &&
 			materializeTransformedContent &&
@@ -412,7 +425,8 @@ public sealed class SecretRedactionOutputPreparer
 					if (useConsolidatedSnapshot)
 					{
 						contentStore ??= new PreparedContentStore(
-							Path.Combine(workingDirectory.Path, "prepared-content.snapshot"));
+							Path.Combine(workingDirectory.Path, "prepared-content.snapshot"),
+							storageLease);
 						PreparedContentSlice slice;
 						using (ContentPipelineDiagnostics.MeasureStage(ContentPipelineStage.RedactionAndOutput))
 						{
@@ -446,6 +460,7 @@ public sealed class SecretRedactionOutputPreparer
 								plan,
 								ResolveEncoding(encoding),
 								captureTransformedMetrics,
+								storageLease,
 								cancellationToken)
 							.ConfigureAwait(false);
 						if (writtenMetrics is { } metrics)
@@ -491,12 +506,26 @@ public sealed class SecretRedactionOutputPreparer
 				transformedFileMetrics is null
 					? []
 					: transformedFileMetrics.OfType<ContentFileMetrics>().ToArray(),
-				contentStore);
+				contentStore,
+				storageLease);
 		}
 		catch
 		{
-			contentStore?.Dispose();
-			workingDirectory?.Dispose();
+			try
+			{
+				contentStore?.Dispose();
+			}
+			finally
+			{
+				try
+				{
+					workingDirectory?.Dispose();
+				}
+				finally
+				{
+					storageLease?.Dispose();
+				}
+			}
 			throw;
 		}
 	}
@@ -910,6 +939,9 @@ public sealed class SecretRedactionOutputPreparer
 		var workingDirectory = new Lazy<SecretRedactionTempDirectory>(
 			CreateWorkingDirectory,
 			LazyThreadSafetyMode.ExecutionAndPublication);
+		var storageLease = materializeTransformedContent
+			? preparedContentQuota.CreateLease()
+			: null;
 		var prepared = new PreparedSecretFile?[orderedFilePaths.Count];
 		var transformedMetrics = captureTransformedMetrics
 			? new ContentFileMetrics?[orderedFilePaths.Count]
@@ -954,6 +986,7 @@ public sealed class SecretRedactionOutputPreparer
 							context,
 							transformationScope,
 							workingDirectory,
+							storageLease,
 							workItem,
 							materializeTransformedContent,
 							captureTransformedMetrics,
@@ -974,6 +1007,7 @@ public sealed class SecretRedactionOutputPreparer
 					context,
 					transformationScope,
 					workingDirectory,
+					storageLease,
 					workItem,
 					materializeTransformedContent,
 					captureTransformedMetrics,
@@ -1011,12 +1045,20 @@ public sealed class SecretRedactionOutputPreparer
 				unscannableFiles: unscannableFiles,
 				transformedFileMetrics: transformedMetrics is null
 					? []
-					: transformedMetrics.OfType<ContentFileMetrics>().ToArray());
+					: transformedMetrics.OfType<ContentFileMetrics>().ToArray(),
+				storageLease: storageLease);
 		}
 		catch
 		{
-			if (workingDirectory.IsValueCreated)
-				workingDirectory.Value.Dispose();
+			try
+			{
+				if (workingDirectory.IsValueCreated)
+					workingDirectory.Value.Dispose();
+			}
+			finally
+			{
+				storageLease?.Dispose();
+			}
 			throw;
 		}
 	}
@@ -1042,6 +1084,7 @@ public sealed class SecretRedactionOutputPreparer
 		ContentTransformationContext context,
 		ContentTransformationScope transformationScope,
 		Lazy<SecretRedactionTempDirectory> workingDirectory,
+		PreparedContentQuotaLease? storageLease,
 		CompressionWorkItem workItem,
 		bool materializeTransformedContent,
 		bool captureTransformedMetrics,
@@ -1141,6 +1184,7 @@ public sealed class SecretRedactionOutputPreparer
 					plan: null,
 					ResolveEncoding(encoding),
 					captureMetrics: false,
+					storageLease: storageLease,
 					cancellationToken)
 				.ConfigureAwait(false);
 		}
@@ -2229,9 +2273,11 @@ public sealed class SecretRedactionOutputPreparer
 		SecretFileRedactionPlan? plan,
 		Encoding encoding,
 		bool captureMetrics,
+		PreparedContentQuotaLease? storageLease,
 		CancellationToken cancellationToken)
 	{
 		using var stage = ContentPipelineDiagnostics.MeasureStage(ContentPipelineStage.RedactionAndOutput);
+		storageLease?.ReserveForWrite(path, encoding.GetPreamble().Length);
 		var options = new FileStreamOptions
 		{
 			Access = FileAccess.Write,
@@ -2244,15 +2290,49 @@ public sealed class SecretRedactionOutputPreparer
 
 		await using var stream = new FileStream(path, options);
 		await using var writer = new StreamWriter(stream, encoding);
-		var metricsWriter = captureMetrics ? new ContentMetricsTextWriter(encoding, writer) : null;
-		var destination = (TextWriter?)metricsWriter ?? writer;
+		var quotaWriter = storageLease is null
+			? null
+			: new PreparedContentQuotaTextWriter(writer, encoding, path, storageLease);
+		var quotaDestination = (TextWriter?)quotaWriter ?? writer;
+		var metricsWriter = captureMetrics ? new ContentMetricsTextWriter(encoding, quotaDestination) : null;
+		var destination = (TextWriter?)metricsWriter ?? quotaDestination;
 		if (plan is null)
 			await destination.WriteAsync(content.AsMemory(), cancellationToken).ConfigureAwait(false);
 		else
 			await plan.WriteToAsync(destination, content, cancellationToken).ConfigureAwait(false);
+		quotaWriter?.Complete();
 		await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
 		ContentPipelineDiagnostics.RecordPreparedWrite(stream.Position);
 		return metricsWriter?.Build(sourcePath);
+	}
+
+	private sealed class PreparedContentQuotaTextWriter(
+		TextWriter destination,
+		Encoding encoding,
+		string path,
+		PreparedContentQuotaLease storageLease) : TextWriter
+	{
+		private readonly Encoder encoder = encoding.GetEncoder();
+		private bool completed;
+
+		public override Encoding Encoding => encoding;
+
+		public override async Task WriteAsync(
+			ReadOnlyMemory<char> buffer,
+			CancellationToken cancellationToken = default)
+		{
+			ObjectDisposedException.ThrowIf(completed, this);
+			var bytes = encoder.GetByteCount(buffer.Span, flush: false);
+			storageLease.ReserveForWrite(path, bytes);
+			await destination.WriteAsync(buffer, cancellationToken).ConfigureAwait(false);
+		}
+
+		public void Complete()
+		{
+			ObjectDisposedException.ThrowIf(completed, this);
+			completed = true;
+			storageLease.ReserveForWrite(path, encoder.GetByteCount([], flush: true));
+		}
 	}
 
 	private static async Task<ContentFileMetrics> MeasureTransformedContentAsync(
@@ -2367,19 +2447,138 @@ internal interface IUtf8FileContentSnapshot
 		CancellationToken cancellationToken = default);
 }
 
+internal sealed class PreparedContentStorageQuota
+{
+	private const long MiB = 1024L * 1024;
+	private readonly object sync = new();
+	private readonly long maximumPreparedBytes;
+	private readonly long freeSpaceReserveBytes;
+	private readonly Func<string, long> availableFreeSpace;
+	private long reservedBytes;
+
+	public static PreparedContentStorageQuota Shared { get; } = new(
+		maximumPreparedBytes: 512 * MiB,
+		freeSpaceReserveBytes: 256 * MiB,
+		GetAvailableFreeSpace);
+
+	internal PreparedContentStorageQuota(
+		long maximumPreparedBytes,
+		long freeSpaceReserveBytes,
+		Func<string, long> availableFreeSpace)
+	{
+		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumPreparedBytes);
+		ArgumentOutOfRangeException.ThrowIfNegative(freeSpaceReserveBytes);
+		this.maximumPreparedBytes = maximumPreparedBytes;
+		this.freeSpaceReserveBytes = freeSpaceReserveBytes;
+		this.availableFreeSpace = availableFreeSpace ?? throw new ArgumentNullException(nameof(availableFreeSpace));
+	}
+
+	public PreparedContentQuotaLease CreateLease() => new(this);
+
+	internal void Reserve(PreparedContentQuotaLease lease, string path, long bytes)
+	{
+		ArgumentOutOfRangeException.ThrowIfNegative(bytes);
+		lock (sync)
+		{
+			lease.ThrowIfDisposed();
+			if (bytes == 0)
+				return;
+			var nextReserved = checked(reservedBytes + bytes);
+			if (nextReserved > maximumPreparedBytes)
+				throw new SecretDetectionException("Prepared content exceeded the shared storage quota.");
+
+			long freeSpace;
+			try
+			{
+				freeSpace = availableFreeSpace(path);
+			}
+			catch (Exception exception) when (exception is
+				ArgumentException or
+				IOException or
+				UnauthorizedAccessException or
+				System.Security.SecurityException or
+				NotSupportedException)
+			{
+				throw new SecretDetectionException(
+					"Prepared content storage availability could not be verified.",
+					exception);
+			}
+
+			if (freeSpace < checked(freeSpaceReserveBytes + nextReserved))
+				throw new SecretDetectionException("Prepared content storage has insufficient free space.");
+			reservedBytes = nextReserved;
+			lease.AddReserved(bytes);
+		}
+	}
+
+	internal void Release(PreparedContentQuotaLease lease)
+	{
+		lock (sync)
+			reservedBytes = checked(reservedBytes - lease.MarkDisposedAndTakeReservation());
+	}
+
+	internal long ReservedBytes
+	{
+		get
+		{
+			lock (sync)
+				return reservedBytes;
+		}
+	}
+
+	private static long GetAvailableFreeSpace(string path)
+	{
+		var root = Path.GetPathRoot(Path.GetFullPath(path));
+		if (string.IsNullOrEmpty(root))
+			throw new IOException("Prepared content storage has no filesystem root.");
+		return new DriveInfo(root).AvailableFreeSpace;
+	}
+}
+
+internal sealed class PreparedContentQuotaLease(PreparedContentStorageQuota owner) : IDisposable
+{
+	private long reservedBytes;
+	private bool disposed;
+
+	public void ReserveForWrite(string path, long bytes)
+	{
+		owner.Reserve(this, path, bytes);
+	}
+
+	internal void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(disposed, this);
+
+	internal void AddReserved(long bytes) => reservedBytes = checked(reservedBytes + bytes);
+
+	internal long MarkDisposedAndTakeReservation()
+	{
+		if (disposed)
+			return 0;
+		disposed = true;
+		var released = reservedBytes;
+		reservedBytes = 0;
+		return released;
+	}
+
+	public void Dispose() => owner.Release(this);
+}
+
 internal sealed class PreparedContentStore : IDisposable
 {
 	private const int StreamBufferSize = 64 * 1024;
 	private static readonly Encoding StorageEncoding = new UTF8Encoding(false, true);
 	private readonly FileStream stream;
 	private readonly StreamWriter storageWriter;
+	private readonly PreparedContentQuotaLease storageLease;
+	private readonly bool ownsStorageLease;
 	private long nextOffset;
 	private bool completed;
 	private bool disposed;
 
-	public PreparedContentStore(string path)
+	public PreparedContentStore(string path, PreparedContentQuotaLease? storageLease = null)
 	{
 		Path = path;
+		this.storageLease = storageLease ?? PreparedContentStorageQuota.Shared.CreateLease();
+		ownsStorageLease = storageLease is null;
 		var options = new FileStreamOptions
 		{
 			Access = FileAccess.ReadWrite,
@@ -2407,7 +2606,7 @@ internal sealed class PreparedContentStore : IDisposable
 			throw new InvalidOperationException("The prepared content store is already complete.");
 
 		var offset = nextOffset;
-		var writer = new PreparedContentStoreTextWriter(storageWriter, logicalEncoding);
+		var writer = new PreparedContentStoreTextWriter(storageWriter, logicalEncoding, Path, storageLease);
 		if (plan is null)
 			await writer.WriteAsync(content.AsMemory(), cancellationToken).ConfigureAwait(false);
 		else
@@ -2517,13 +2716,23 @@ internal sealed class PreparedContentStore : IDisposable
 		}
 		finally
 		{
-			stream.Dispose();
+			try
+			{
+				stream.Dispose();
+			}
+			finally
+			{
+				if (ownsStorageLease)
+					storageLease.Dispose();
+			}
 		}
 	}
 
 	private sealed class PreparedContentStoreTextWriter(
 		TextWriter storageWriter,
-		Encoding logicalEncoding) : TextWriter
+		Encoding logicalEncoding,
+		string path,
+		PreparedContentQuotaLease storageLease) : TextWriter
 	{
 		private readonly Encoder logicalEncoder = logicalEncoding.GetEncoder();
 		private readonly Encoder storageEncoder = StorageEncoding.GetEncoder();
@@ -2538,18 +2747,21 @@ internal sealed class PreparedContentStore : IDisposable
 			ReadOnlyMemory<char> buffer,
 			CancellationToken cancellationToken = default)
 		{
-			AppendMetrics(buffer.Span);
+			var storedByteCount = AppendMetrics(buffer.Span);
+			storageLease.ReserveForWrite(path, storedByteCount);
 			await storageWriter.WriteAsync(buffer, cancellationToken).ConfigureAwait(false);
 		}
 
-		private void AppendMetrics(ReadOnlySpan<char> buffer)
+		private int AppendMetrics(ReadOnlySpan<char> buffer)
 		{
 			if (built)
 				throw new InvalidOperationException("Prepared content metrics were already completed.");
 			if (!counter.Append(buffer))
 				throw new InvalidOperationException("Prepared transformed text unexpectedly contained a null character.");
 			logicalBytes = checked(logicalBytes + logicalEncoder.GetByteCount(buffer, flush: false));
-			storedBytes = checked(storedBytes + storageEncoder.GetByteCount(buffer, flush: false));
+			var storedByteCount = storageEncoder.GetByteCount(buffer, flush: false);
+			storedBytes = checked(storedBytes + storedByteCount);
+			return storedByteCount;
 		}
 
 		public (TextFileMetrics Metrics, int StoredLength) BuildMetrics()
@@ -2558,7 +2770,9 @@ internal sealed class PreparedContentStore : IDisposable
 				throw new InvalidOperationException("Prepared content metrics were already completed.");
 			built = true;
 			logicalBytes = checked(logicalBytes + logicalEncoder.GetByteCount([], flush: true));
-			storedBytes = checked(storedBytes + storageEncoder.GetByteCount([], flush: true));
+			var finalStoredByteCount = storageEncoder.GetByteCount([], flush: true);
+			storageLease.ReserveForWrite(path, finalStoredByteCount);
+			storedBytes = checked(storedBytes + finalStoredByteCount);
 			return (counter.Build(logicalBytes), checked((int)storedBytes));
 		}
 	}
@@ -2693,6 +2907,7 @@ public sealed class PreparedSecretRedactionOutput : IAsyncDisposable
 {
 	private readonly SecretRedactionTempDirectory? _workingDirectory;
 	private readonly PreparedContentStore? _contentStore;
+	private readonly PreparedContentQuotaLease? _storageLease;
 	private readonly IReadOnlyDictionary<string, PreparedSecretFile> _files;
 	private bool _disposed;
 
@@ -2703,10 +2918,12 @@ public sealed class PreparedSecretRedactionOutput : IAsyncDisposable
 		Compression.CodeCompressionSnapshot? compressionSnapshot = null,
 		IReadOnlyList<UnscannableFile>? unscannableFiles = null,
 		IReadOnlyList<ContentFileMetrics>? transformedFileMetrics = null,
-		PreparedContentStore? contentStore = null)
+		PreparedContentStore? contentStore = null,
+		PreparedContentQuotaLease? storageLease = null)
 	{
 		_workingDirectory = workingDirectory;
 		_contentStore = contentStore;
+		_storageLease = storageLease;
 		_files = files;
 		Snapshot = snapshot;
 		CompressionSnapshot = compressionSnapshot;
@@ -2776,11 +2993,24 @@ public sealed class PreparedSecretRedactionOutput : IAsyncDisposable
 		if (_disposed)
 			return ValueTask.CompletedTask;
 		_disposed = true;
-		_contentStore?.Dispose();
-		if (_workingDirectory is not null)
+		try
 		{
-			using var stage = ContentPipelineDiagnostics.MeasureStage(ContentPipelineStage.Cleanup);
-			_workingDirectory.Dispose();
+			try
+			{
+				_contentStore?.Dispose();
+			}
+			finally
+			{
+				if (_workingDirectory is not null)
+				{
+					using var stage = ContentPipelineDiagnostics.MeasureStage(ContentPipelineStage.Cleanup);
+					_workingDirectory.Dispose();
+				}
+			}
+		}
+		finally
+		{
+			_storageLease?.Dispose();
 		}
 		return ValueTask.CompletedTask;
 	}
