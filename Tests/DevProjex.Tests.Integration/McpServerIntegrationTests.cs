@@ -7515,8 +7515,9 @@ public sealed partial class McpServerIntegrationTests
 		File.WriteAllText(consumerPath, "import target from './Target.js'; export const value = target;\n");
 		using var measurement = McpRelatedEvidenceRetentionDiagnostics.BeginMeasurement(paths =>
 		{
-			Assert.Contains(consumerPath, paths, PathComparer.Default);
-			File.Delete(consumerPath);
+			var protectedSourcePath = Assert.Single(paths);
+			Assert.Equal("Consumer.ts", Path.GetFileName(protectedSourcePath));
+			File.Delete(protectedSourcePath);
 		});
 
 		CallToolResult result;
