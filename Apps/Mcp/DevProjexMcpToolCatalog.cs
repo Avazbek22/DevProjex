@@ -61,6 +61,8 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 		.Replace("created by pack_context, search_project, or related_files", "created by search_project or related_files", StringComparison.Ordinal)
 		.Replace("use pack_context instead, or related_files for dependencies, when none is valid.",
 			"use search_project for evidence or related_files for dependencies when none is valid.", StringComparison.Ordinal)
+		.Replace("use pack_context instead when no valid stored result exists.",
+			"use search_project for evidence or related_files for dependencies when no valid stored result exists.", StringComparison.Ordinal)
 		.Replace("use pack_context for broad multi-file context.", "use batched requests for several known files.", StringComparison.Ordinal);
 
 	public int Count => _tools.Count;

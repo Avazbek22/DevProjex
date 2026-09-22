@@ -1510,35 +1510,36 @@ internal sealed class DevProjexMcpTools(
 		var replacements = new Dictionary<string, string>(StringComparer.Ordinal);
 		var returnedRedactions = new Dictionary<string, int>(PathComparer.Default);
 		var processedSources = new HashSet<string>(PathComparer.Default);
-		SecretRedactionSnapshot? protectionSnapshot;
-		await using (var protectedSources = await Projects.ConsumeSearchTextAsync(
-			plan with { IncludedFiles = sourcePaths },
-			(file, _) =>
-			{
-				using var retention = McpRelatedEvidenceRetentionDiagnostics.Retain(file.Content.Length);
-				processedSources.Add(file.Path);
-				if (!evidenceBySource.TryGetValue(file.Path, out var sourceEvidence))
-					return ValueTask.CompletedTask;
-				var redactedLines = new HashSet<int>();
-				foreach (var item in sourceEvidence)
-				{
-					cancellationToken.ThrowIfCancellationRequested();
-					if (TryReadLine(file.Content, item.Site.Line, out var line, out var start, out var end) &&
-						!file.ReplacementRanges.Any(range => range.Start < end && range.End > start) &&
-						line.Contains(item.Edge.Reference, StringComparison.Ordinal))
-					{
-						continue;
-					}
-					replacements[item.Reason] =
-						$"{RelatedEvidenceLabel(item.Edge.Layer)} at line {item.Site.Line.ToString(CultureInfo.InvariantCulture)}";
-					redactedLines.Add(item.Site.Line);
-				}
-				if (redactedLines.Count > 0)
-					returnedRedactions[file.Path] = CountRedactionsOnLines(file, redactedLines);
-				return ValueTask.CompletedTask;
-			},
-			cancellationToken).ConfigureAwait(false))
+		SecretRedactionSnapshot? protectionSnapshot = null;
+		if (sourcePaths.Count > 0)
 		{
+			await using var protectedSources = await Projects.ConsumeSearchTextAsync(
+				plan with { IncludedFiles = sourcePaths },
+				(file, _) =>
+				{
+					using var retention = McpRelatedEvidenceRetentionDiagnostics.Retain(file.Content.Length);
+					processedSources.Add(file.Path);
+					if (!evidenceBySource.TryGetValue(file.Path, out var sourceEvidence))
+						return ValueTask.CompletedTask;
+					var redactedLines = new HashSet<int>();
+					foreach (var item in sourceEvidence)
+					{
+						cancellationToken.ThrowIfCancellationRequested();
+						if (TryReadLine(file.Content, item.Site.Line, out var line, out var start, out var end) &&
+							!file.ReplacementRanges.Any(range => range.Start < end && range.End > start) &&
+							line.Contains(item.Edge.Reference, StringComparison.Ordinal))
+						{
+							continue;
+						}
+						replacements[item.Reason] =
+							$"{RelatedEvidenceLabel(item.Edge.Layer)} at line {item.Site.Line.ToString(CultureInfo.InvariantCulture)}";
+						redactedLines.Add(item.Site.Line);
+					}
+					if (redactedLines.Count > 0)
+						returnedRedactions[file.Path] = CountRedactionsOnLines(file, redactedLines);
+					return ValueTask.CompletedTask;
+				},
+				cancellationToken).ConfigureAwait(false);
 			protectionSnapshot = protectedSources.Snapshot;
 		}
 		var hasUnavailableSources = false;
