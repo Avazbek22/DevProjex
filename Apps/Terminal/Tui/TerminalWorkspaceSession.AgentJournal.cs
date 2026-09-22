@@ -169,8 +169,11 @@ internal sealed partial class TerminalWorkspaceSession
 		var content = command.Format == ProjectContextDocumentFormat.Json
 			? _agentJournalReceiptFormatter.FormatJson(receipt)
 			: _agentJournalReceiptFormatter.FormatMarkdown(receipt);
+		var requestedDestination = ResolveAgentJournalExportDestination(
+			projectRoot,
+			command.Destination);
 		var destination = await AtomicOutputWriter.WriteTextAsync(
-			command.Destination,
+			requestedDestination,
 			content,
 			overwrite: false,
 			cancellationToken,
@@ -187,6 +190,11 @@ internal sealed partial class TerminalWorkspaceSession
 			return true;
 		}).ConfigureAwait(false);
 	}
+
+	internal static string ResolveAgentJournalExportDestination(
+		string projectRoot,
+		string destination) =>
+		TerminalWorkspacePathResolver.Resolve(destination, projectRoot);
 
 	private async ValueTask<AgentJournalSession?> ResolveAgentJournalSessionAsync(
 		string projectRoot,

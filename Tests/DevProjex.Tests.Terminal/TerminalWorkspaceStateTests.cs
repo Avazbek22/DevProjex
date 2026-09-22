@@ -256,6 +256,32 @@ public sealed class TerminalWorkspaceStateTests
 	}
 
 	[Fact]
+	public void CommandSelectionReportsASelectionIntentTransitionWithoutChangedNodes()
+	{
+		using var state = new TerminalWorkspaceState(CreatePlan());
+		state.RestoreSelectedRelativePaths([]);
+
+		var result = state.SetSelection(["all"], selected: false);
+
+		Assert.Equal(0, result.ChangedNodes);
+		Assert.True(result.SelectionChanged);
+		Assert.Null(state.BuildSelection().SelectedPaths);
+	}
+
+	[Fact]
+	public void SettingsRefreshPublicationRequiresTheCapturedSelectionRevision()
+	{
+		using var state = new TerminalWorkspaceState(CreatePlan());
+		var expectedRevision = state.Revision;
+
+		Assert.True(TerminalWorkspaceSession.CanPublishSettingsRefresh(state, expectedRevision));
+
+		state.RestoreSelectedRelativePaths([]);
+
+		Assert.False(TerminalWorkspaceSession.CanPublishSettingsRefresh(state, expectedRevision));
+	}
+
+	[Fact]
 	public void CommandSelectionRejectsUnsafeGlobWithoutChangingState()
 	{
 		using var state = new TerminalWorkspaceState(CreatePlan());

@@ -14,7 +14,8 @@ public partial class MainWindow
     private async void OnWindowClosing(object? sender, WindowClosingEventArgs e)
     {
         if (!_allowCloseAfterSelectionPersistence &&
-            _treeSelectionProfiles.State.Phase != SelectionPersistencePhase.Idle)
+            (_treeSelectionProfiles.State.Phase != SelectionPersistencePhase.Idle ||
+             _projectProfiles.HasPendingWrites))
         {
             e.Cancel = true;
             if (_selectionPersistenceClosePending)
@@ -122,8 +123,15 @@ public partial class MainWindow
     private async Task<bool> ResolvePendingSelectionBeforeTransitionAsync(bool exiting)
     {
         var cancellationToken = _windowLifetimeCts?.Token ?? CancellationToken.None;
-        while (!await _treeSelectionProfiles.FlushAsync(cancellationToken))
+        while (true)
         {
+            var treeSelectionSaved = await _treeSelectionProfiles.FlushAsync(cancellationToken);
+            var projectProfileFlush = await _projectProfiles.FlushPendingAsync(
+                TimeSpan.FromSeconds(2),
+                cancellationToken);
+            if (treeSelectionSaved && projectProfileFlush.Succeeded)
+                return true;
+
             var decision = await MessageDialog.ShowChoiceAsync(
                 this,
                 _localization["Terminal.Tui.ProfileSaveFailure.Title"],
@@ -138,14 +146,20 @@ public partial class MainWindow
                 case 2:
                     continue;
                 case 1:
+                    if (!await _projectProfiles.DiscardPendingWritesAsync(
+                            TimeSpan.FromSeconds(2),
+                            cancellationToken))
+                    {
+                        Trace.TraceWarning(
+                            "Project profile pending writes could not be discarded before the transition.");
+                        return false;
+                    }
                     _treeSelectionProfiles.CancelPending();
                     return true;
                 default:
                     return false;
             }
         }
-
-        return true;
     }
 
     private void CancelAndDisposeWindowOperations()

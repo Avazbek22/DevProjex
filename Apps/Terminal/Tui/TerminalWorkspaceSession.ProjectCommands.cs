@@ -95,17 +95,104 @@ internal sealed partial class TerminalWorkspaceSession
 			return TerminalWorkspaceCommandExecutionResult.Deferred();
 		}
 
-		FlushLocalProfilePersistence();
-		var status = _services.LocalProfileStore.TryDeleteProfileWithResult(_state.Plan.SourceRoot);
-		if (status != ProjectProfileDeleteStatus.Deleted)
+		if (!FlushLocalProfilePersistence())
 		{
-			return TerminalWorkspaceCommandExecutionResult.Failure(L(status == ProjectProfileDeleteStatus.Partial
-				? "Terminal.Tui.Command.Profile.ResetPartial"
-				: "Terminal.Tui.Command.Profile.ResetFailed"));
+			return TerminalWorkspaceCommandExecutionResult.Failure(
+				L("Terminal.Tui.Error.ProfilePersistence"));
 		}
 
-		BeginApplyProfile(ProjectProfileReference.Standard);
+		BeginResetProfile();
 		return TerminalWorkspaceCommandExecutionResult.Deferred();
+	}
+
+	private void BeginResetProfile()
+	{
+		if (_state is not { } current)
+			return;
+		var projectRoot = current.Plan.SourceRoot;
+		var sourceIdentity = current.Plan.SourceIdentity;
+		var operationCts = ReplaceActiveOperation();
+		TrackActiveOperation(Task.Run(async () =>
+		{
+			TerminalWorkspaceState? replacement = null;
+			try
+			{
+				replacement = await _controller
+					.OpenAsync(
+						projectRoot,
+						ProjectProfileReference.Standard,
+						operationCts.Token,
+						sourceIdentity)
+					.ConfigureAwait(false);
+				var gitCliAvailable = await ResolveGitCliAvailabilityAsync(
+						replacement.Plan,
+						operationCts.Token)
+					.ConfigureAwait(false);
+				var canCommit = await InvokeAsync(() =>
+					_operations.IsCurrent(WorkspaceOperationKind.Active, operationCts) &&
+					_screen == TerminalWorkspaceScreen.Workspace &&
+					_state is { } state &&
+					ProjectTreePathIdentity.CanonicalComparer.Equals(
+						state.Plan.SourceRoot,
+						projectRoot)).ConfigureAwait(false);
+				if (!canCommit)
+					return;
+
+				operationCts.Token.ThrowIfCancellationRequested();
+				var status = _services.LocalProfileStore.TryDeleteProfileWithResult(projectRoot);
+				if (status != ProjectProfileDeleteStatus.Deleted)
+				{
+					await ShowCommandFailureAsync(
+							status == ProjectProfileDeleteStatus.Partial
+								? "DPX-TUI-PROFILE-RESET-PARTIAL"
+								: "DPX-TUI-PROFILE-RESET-FAILED",
+							L(status == ProjectProfileDeleteStatus.Partial
+								? "Terminal.Tui.Command.Profile.ResetPartial"
+								: "Terminal.Tui.Command.Profile.ResetFailed"))
+						.ConfigureAwait(false);
+					return;
+				}
+
+				var applied = await InvokeAsync(() =>
+				{
+					if (_screen != TerminalWorkspaceScreen.Workspace ||
+						_state is not { } state ||
+						!ProjectTreePathIdentity.CanonicalComparer.Equals(
+							state.Plan.SourceRoot,
+							projectRoot))
+					{
+						return false;
+					}
+					_gitCliAvailable = gitCliAvailable;
+					ShowWorkspace(replacement);
+					return true;
+				}).ConfigureAwait(false);
+				if (applied)
+					replacement = null;
+			}
+			catch (OperationCanceledException) when (operationCts.IsCancellationRequested)
+			{
+			}
+			catch (ProjectContextValidationException exception)
+			{
+				await ShowCommandFailureAsync(
+						exception.Code,
+						ResolveValidationErrorMessage(exception.Code))
+					.ConfigureAwait(false);
+			}
+			catch
+			{
+				await ShowCommandFailureAsync(
+						"DPX-TUI-PROFILE-RESET-FAILED",
+						L("Terminal.Tui.Error.OperationFailed"))
+					.ConfigureAwait(false);
+			}
+			finally
+			{
+				replacement?.Dispose();
+				ReleaseActiveOperation(operationCts);
+			}
+		}, CancellationToken.None));
 	}
 
 	private void BeginApplyProfile(ProjectProfileReference profile)
@@ -136,6 +223,7 @@ internal sealed partial class TerminalWorkspaceSession
 					}
 					_gitCliAvailable = gitCliAvailable;
 					ShowWorkspace(replacement);
+					PublishLoadedProfileAsLocal();
 					return true;
 				}).ConfigureAwait(false);
 				if (applied)
@@ -172,33 +260,12 @@ internal sealed partial class TerminalWorkspaceSession
 	}
 
 	private string? ResolvePortableProfilePath(string value)
-	{
-		try
-		{
-			var expanded = TerminalPathPickerModel.ExpandPath(value);
-			var hasPathSyntax = Path.IsPathRooted(expanded) ||
-				expanded.Contains(Path.DirectorySeparatorChar) ||
-				expanded.Contains(Path.AltDirectorySeparatorChar);
-			if (hasPathSyntax)
-			{
-				return Path.GetFullPath(Path.IsPathRooted(expanded)
-					? expanded
-					: Path.Combine(_state!.Plan.SourceRoot, expanded));
-			}
-
-			var directory = ResolvePortableProfileDirectory();
-			if (directory is null)
-				return null;
-			var fileName = expanded.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
-				? expanded
-				: expanded + ".json";
-			return Path.GetFullPath(Path.Combine(directory, fileName));
-		}
-		catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
-		{
-			return null;
-		}
-	}
+		=> _state is { } state
+			? TerminalPortableProfilePathResolver.Resolve(
+				value,
+				state.Plan.SourceRoot,
+				ResolvePortableProfileDirectory())
+			: null;
 
 	private string? ResolvePortableProfileDirectory()
 	{
@@ -209,5 +276,40 @@ internal sealed partial class TerminalWorkspaceSession
 			Directory.GetCurrentDirectory(),
 			"devprojex-profile.json");
 		return string.IsNullOrWhiteSpace(candidate) ? null : Path.GetDirectoryName(candidate);
+	}
+}
+
+internal static class TerminalPortableProfilePathResolver
+{
+	public static bool IsExplicitPath(string value)
+	{
+		var expanded = TerminalPathPickerModel.ExpandPath(value);
+		return Path.IsPathRooted(expanded) ||
+			expanded.Contains(Path.DirectorySeparatorChar) ||
+			expanded.Contains(Path.AltDirectorySeparatorChar);
+	}
+
+	public static string? Resolve(
+		string value,
+		string workingDirectory,
+		string? profileDirectory)
+	{
+		try
+		{
+			var expanded = TerminalPathPickerModel.ExpandPath(value);
+			if (IsExplicitPath(expanded))
+				return TerminalWorkspacePathResolver.Resolve(expanded, workingDirectory);
+			if (string.IsNullOrWhiteSpace(profileDirectory))
+				return null;
+
+			var fileName = expanded.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+				? expanded
+				: expanded + ".json";
+			return TerminalWorkspacePathResolver.Resolve(fileName, profileDirectory);
+		}
+		catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
+		{
+			return null;
+		}
 	}
 }

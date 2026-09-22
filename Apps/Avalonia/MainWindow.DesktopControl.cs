@@ -246,40 +246,35 @@ public partial class MainWindow
                 },
                 ["filter"] = _viewModel.NameFilter,
                 ["search"] = _viewModel.SearchQuery,
-                ["gitMode"] = _selectionCoordinator.AppliedGitReadiness.Mode switch
-                {
-                    GitFilteringMode.RespectGitIgnore => "gitignore",
-                    GitFilteringMode.TrackedFilesOnly => "tracked",
-					GitFilteringMode.Staged => "staged",
-					GitFilteringMode.Changes => "changes",
-                    _ => "none"
-                },
+                ["gitMode"] = GitScopeSelection.ToToken(
+                    _selectionCoordinator.AppliedGitReadiness.Mode,
+                    _selectionCoordinator.AppliedGitDiffRange),
                 ["trackedGitReady"] = _selectionCoordinator.AppliedGitReadiness.IsReady
             });
 
     private ContextDiagnostic? GetDesktopGitReadinessDiagnostic(DesktopOpenRequest request)
     {
-		if (request.Selection?.GitMode is not { } requestedMode ||
-		    requestedMode is not (GitFilteringMode.TrackedFilesOnly or
-			    GitFilteringMode.Staged or GitFilteringMode.Changes))
+        if (request.Selection?.GitMode is not { } requestedMode ||
+            requestedMode is not (GitFilteringMode.TrackedFilesOnly or
+                GitFilteringMode.Staged or GitFilteringMode.Changes))
             return null;
 
         var projectPath = _currentPath ?? request.ProjectPath;
         if (string.IsNullOrWhiteSpace(projectPath))
         {
-			return requestedMode == GitFilteringMode.TrackedFilesOnly
-				? ProjectContextGitReadiness
-					.Evaluate(GitFilteringMode.TrackedFilesOnly, 0, 0)
-					.CreateDiagnostic(string.Empty)
-				: new ContextDiagnostic(
-					GitScopeFilter.UnavailableDiagnosticCode,
-					ContextDiagnosticSeverity.Error,
-					"The requested Git state could not be applied.");
+            return requestedMode == GitFilteringMode.TrackedFilesOnly
+                ? ProjectContextGitReadiness
+                    .Evaluate(GitFilteringMode.TrackedFilesOnly, 0, 0)
+                    .CreateDiagnostic(string.Empty)
+                : new ContextDiagnostic(
+                    GitScopeFilter.UnavailableDiagnosticCode,
+                    ContextDiagnosticSeverity.Error,
+                    "The requested Git state could not be applied.");
         }
 
         return _selectionCoordinator.GetAppliedGitReadinessDiagnostic(
             projectPath,
-			requestedMode);
+            requestedMode);
     }
 
     private static DesktopInteractionResult Failure(string code) =>

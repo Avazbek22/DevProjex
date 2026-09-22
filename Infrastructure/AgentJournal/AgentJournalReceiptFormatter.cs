@@ -123,7 +123,7 @@ public sealed class AgentJournalReceiptFormatter : IAgentJournalReceiptFormatter
 			JsonSerializer.Serialize(
 				writer,
 				document,
-				AgentJournalJsonSerializerContext.Default.AgentJournalReceiptDocument);
+				AgentJournalReceiptJsonSerializerContext.Default.AgentJournalReceiptDocument);
 		}
 		return Encoding.UTF8.GetString(stream.ToArray());
 	}

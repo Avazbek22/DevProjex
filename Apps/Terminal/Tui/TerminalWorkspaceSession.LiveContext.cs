@@ -9,6 +9,8 @@ internal sealed partial class TerminalWorkspaceSession
 	private string? _agentJournalOpeningRoot;
 	private string? _agentJournalOpeningSessionId;
 	private long _agentJournalOpeningSequence;
+	private long _agentJournalReadSequence;
+	private DateTimeOffset _agentJournalWorkspaceOpenedUtc;
 	private bool PollLiveSessions()
 	{
 		if (_stopping || _disposed)
@@ -19,8 +21,17 @@ internal sealed partial class TerminalWorkspaceSession
 		return true;
 	}
 
-	private void RefreshLiveSessions(bool force)
+	private void RefreshLiveSessions(bool force, bool resetOpeningBaseline = false)
 	{
+		if (resetOpeningBaseline && _state is { } state)
+		{
+			_agentJournalWorkspaceOpenedUtc = DateTimeOffset.UtcNow;
+			_agentJournalOpeningRoot = state.Plan.SourceRoot;
+			_agentJournalOpeningSessionId = null;
+			_agentJournalOpeningSequence = 0;
+			_agentJournalReadSequence = 0;
+			_agentJournalSnapshot = null;
+		}
 		var sessions = _state is null
 			? Array.Empty<LiveSessionRecord>()
 			: _liveSessionRegistry.ReadActive(_state.Plan.SourceRoot)
@@ -64,31 +75,49 @@ internal sealed partial class TerminalWorkspaceSession
 			AgentJournalActivitySnapshot? activity = null;
 			if (session is not null)
 			{
-				var afterSequence = _agentJournalSnapshot is { } current &&
+				var sameTrackedSession =
 					ProjectTreePathIdentity.CanonicalComparer.Equals(_agentJournalOpeningRoot, projectRoot) &&
-					string.Equals(current.Session.Id, session.Id, StringComparison.Ordinal)
-					? current.LatestCall?.Sequence ?? 0
-					: 0;
+					string.Equals(_agentJournalOpeningSessionId, session.Id, StringComparison.Ordinal);
+				var afterSequence = sameTrackedSession ? _agentJournalReadSequence : 0;
 				activity = await _agentJournalStore.Value
 					.ReadActivityAsync(session.Id, afterSequence, _sessionCts.Token)
 					.ConfigureAwait(false);
+				if (activity is { RequiresReset: true })
+				{
+					var completeHistory = await _agentJournalStore.Value
+						.ReadCallsAsync(session.Id, _sessionCts.Token)
+						.ConfigureAwait(false);
+					activity = activity with
+					{
+						LatestCall = completeHistory
+							.OrderBy(static call => call.Sequence)
+							.LastOrDefault() ?? activity.LatestCall,
+						AppendedCalls = completeHistory
+					};
+				}
 			}
-			if (activity is not null &&
+			var sessionChanged = activity is not null &&
 				(!ProjectTreePathIdentity.CanonicalComparer.Equals(_agentJournalOpeningRoot, projectRoot) ||
-				 !string.Equals(_agentJournalOpeningSessionId, activity.Session.Id, StringComparison.Ordinal)))
+				 !string.Equals(_agentJournalOpeningSessionId, activity.Session.Id, StringComparison.Ordinal));
+			var openingSequence = _agentJournalOpeningSequence;
+			var previousSnapshot = _agentJournalSnapshot;
+			if (activity is not null && sessionChanged)
 			{
-				_agentJournalOpeningRoot = projectRoot;
-				_agentJournalOpeningSessionId = activity.Session.Id;
-				_agentJournalOpeningSequence = activity.LatestCall?.Sequence ?? 0;
-				_agentJournalSnapshot = null;
+				openingSequence = TerminalAgentJournalSnapshot.ResolveOpeningBaseline(
+					activity.Session.StartedUtc <= _agentJournalWorkspaceOpenedUtc,
+					activity.LatestCall?.Sequence ?? 0);
+				previousSnapshot = null;
 			}
 			var snapshot = activity is null
 				? null
 				: TerminalAgentJournalSnapshot.Create(
 					projectRoot,
 					activity,
-					_agentJournalSnapshot,
-					_agentJournalOpeningSequence);
+					previousSnapshot,
+					openingSequence);
+			var readSequence = activity is null
+				? 0
+				: TerminalAgentJournalSnapshot.ResolveReadCursor(activity);
 			await InvokeAsync(() =>
 			{
 				if (!_agentActivityEnabled || _state is null ||
@@ -97,6 +126,13 @@ internal sealed partial class TerminalWorkspaceSession
 						projectRoot))
 				{
 					return false;
+				}
+				if (activity is not null)
+				{
+					_agentJournalOpeningRoot = projectRoot;
+					_agentJournalOpeningSessionId = activity.Session.Id;
+					_agentJournalOpeningSequence = openingSequence;
+					_agentJournalReadSequence = readSequence;
 				}
 				_agentJournalSnapshot = snapshot;
 				_state.SetAgentActivity(
@@ -157,6 +193,23 @@ internal sealed partial class TerminalWorkspaceSession
 			CaptureLocalProfile(state));
 	}
 
+	internal static bool ShouldResetAgentJournalOpeningBaseline(
+		string? previousProjectRoot,
+		string projectRoot) =>
+		string.IsNullOrWhiteSpace(previousProjectRoot) ||
+		!ProjectTreePathIdentity.CanonicalComparer.Equals(previousProjectRoot, projectRoot);
+
+	private void PublishLoadedProfileAsLocal()
+	{
+		if (_state is not { } state || _stopping)
+			return;
+		lock (_localProfileBaselineSync)
+			_localProfileBaseline = null;
+		_selectionProfilePersistence.Schedule(
+			state.Plan.SourceRoot,
+			CaptureLocalProfile(state));
+	}
+
 	private bool FlushLocalProfilePersistence()
 	{
 		return _selectionProfilePersistence.FlushAsync().GetAwaiter().GetResult();
@@ -210,7 +263,7 @@ internal sealed partial class TerminalWorkspaceSession
 					"The terminal project profile could not be saved.");
 			}
 			lock (_localProfileBaselineSync)
-				_localProfileBaseline = result.PersistedProfile ?? profile;
+				_localProfileBaseline = profile;
 			return ProjectProfilePersistenceResult.Saved();
 		}, cancellationToken).ConfigureAwait(false);
 	}

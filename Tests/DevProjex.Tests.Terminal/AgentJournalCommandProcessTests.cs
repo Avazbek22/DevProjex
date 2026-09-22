@@ -25,6 +25,32 @@ public sealed class AgentJournalCommandProcessTests
 	}
 
 	[Fact]
+	public async Task SessionListAndReceiptUseTheSameEnumSpelling()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var dataRoot = workspace.CreateDirectory("data");
+		await SeedAsync(dataRoot, project);
+
+		var list = Run(dataRoot, "mcp", "log", project, "--format", "json");
+		var receipt = Run(dataRoot, "mcp", "log", project, "--last", "--format", "json");
+
+		Assert.Equal(CommandLineExitCodes.Success, list.ExitCode);
+		Assert.Equal(CommandLineExitCodes.Success, receipt.ExitCode);
+		using var listDocument = JsonDocument.Parse(list.StandardOutput);
+		using var receiptDocument = JsonDocument.Parse(receipt.StandardOutput);
+		var listedSession = listDocument.RootElement.GetProperty("sessions")[0];
+		var receiptSession = receiptDocument.RootElement.GetProperty("receipt").GetProperty("session");
+		Assert.Equal("standard", listedSession.GetProperty("mode").GetString());
+		Assert.Equal(
+			listedSession.GetProperty("mode").GetString(),
+			receiptSession.GetProperty("mode").GetString());
+		Assert.Equal(
+			listedSession.GetProperty("toolSet").GetString(),
+			receiptSession.GetProperty("toolSet").GetString());
+	}
+
+	[Fact]
 	public async Task RealCliRequiresConfirmationBeforeClearingMatchingSessions()
 	{
 		using var workspace = new TemporaryDirectory();

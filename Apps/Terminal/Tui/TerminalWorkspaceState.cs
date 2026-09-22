@@ -61,7 +61,8 @@ public sealed record TerminalTreeRow(
 
 internal readonly record struct TerminalTreeSelectionResult(
 	int ChangedNodes,
-	int MissingSelectors);
+	int MissingSelectors,
+	bool SelectionChanged);
 
 /// <summary>
 /// Keeps terminal tree interaction entirely in memory. Filesystem scans are reserved for
@@ -563,6 +564,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 		bool selected)
 	{
 		ArgumentNullException.ThrowIfNull(selectors);
+		var previousSelectedPaths = BuildSelection().SelectedPaths;
 		var previousFrontier = _selectedPathFrontier;
 		var previousRootState = GetCheckState(Plan.EffectiveTree);
 		var previousStates = new Dictionary<string, TerminalTreeCheckState>(
@@ -583,7 +585,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 		}
 
 		if (targets.Count == 0)
-			return new TerminalTreeSelectionResult(0, missing);
+			return new TerminalTreeSelectionResult(0, missing, SelectionChanged: false);
 
 		Interlocked.Increment(ref _revision);
 		foreach (var target in targets.Order(ProjectTreePathIdentity.CanonicalComparer))
@@ -599,7 +601,20 @@ public sealed class TerminalWorkspaceState : IDisposable
 
 		var changed = _checkStates.Count(pair =>
 			previousStates.GetValueOrDefault(pair.Key) != pair.Value);
-		return new TerminalTreeSelectionResult(changed, missing);
+		var selectionChanged = changed > 0 || !SelectedPathsEqual(
+			previousSelectedPaths,
+			BuildSelection().SelectedPaths);
+		return new TerminalTreeSelectionResult(changed, missing, selectionChanged);
+	}
+
+	private static bool SelectedPathsEqual(
+		IReadOnlyCollection<string>? left,
+		IReadOnlyCollection<string>? right)
+	{
+		if (left is null || right is null)
+			return left is null && right is null;
+		return new HashSet<string>(left, ProjectTreePathIdentity.CanonicalComparer)
+			.SetEquals(right);
 	}
 
 	private IReadOnlyList<TreeNodeDescriptor> ResolveSelectionTargets(string selector)
