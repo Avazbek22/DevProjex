@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Reflection;
 using System.Threading.Channels;
 using Avalonia.Automation;
 using Avalonia.Media;
@@ -343,6 +344,57 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 	}
 
 	[AvaloniaFact]
+	public async Task JournalExportValidatesTheDestinationBeforeReadingTheReceipt()
+	{
+		var fixture = JournalFixture.Create(workspace.Project.RootPath);
+		var reader = new RecordingJournalReader(fixture.Sessions, fixture.Calls);
+		var errors = new List<string>();
+		var journal = new AgentJournalWindow(
+			reader,
+			new RecordingFormatter(),
+			new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En),
+			workspace.Project.RootPath)
+		{
+			OperationErrorPresenter = message =>
+			{
+				errors.Add(message);
+				return Task.CompletedTask;
+			}
+		};
+		var destination = Path.Combine(workspace.Project.RootPath, "journal-receipt.md");
+		var captureEvidence = HasUi5ArtifactDestination();
+		if (captureEvidence)
+		{
+			UiTestDriver.TrackTopLevelWindow(journal);
+			journal.Show();
+		}
+
+		try
+		{
+			await journal.RefreshAsync();
+
+			await journal.ExportSelectedToPathAsync(destination, json: false);
+
+			Assert.Equal(0, reader.ReadReceiptCount);
+			Assert.False(File.Exists(destination));
+			Assert.Single(errors);
+			if (captureEvidence)
+			{
+				await SaveUi5ArtifactAsync(
+					journal,
+					"issue-11-journal-export-validation",
+					$"readReceiptCount={reader.ReadReceiptCount}",
+					$"destinationExists={File.Exists(destination)}",
+					$"errorCount={errors.Count}");
+			}
+		}
+		finally
+		{
+			journal.Close();
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task JournalRefreshDoesNotRestartTheSelectedSessionSubscription()
 	{
 		var fixture = JournalFixture.Create(workspace.Project.RootPath);
@@ -514,6 +566,151 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 	}
 
 	[AvaloniaFact]
+	public async Task JournalClearUsesTheRootAndScopeShownByTheConfirmation()
+	{
+		var fixture = JournalFixture.Create(workspace.Project.RootPath);
+		var reader = new RecordingJournalReader(fixture.Sessions, fixture.Calls);
+		var secondRoot = Path.Combine(workspace.Project.RootPath, "changed-root");
+		Directory.CreateDirectory(secondRoot);
+		var journal = new AgentJournalWindow(
+			reader,
+			new RecordingFormatter(),
+			new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En),
+			workspace.Project.RootPath);
+		UiTestDriver.TrackTopLevelWindow(journal);
+		journal.Show();
+
+		try
+		{
+			await journal.RefreshAsync();
+			var clear = Assert.IsType<Button>(journal.FindControl<Button>("ClearJournalButton"));
+			var clearing = UiTestDriver.RaiseButtonClickAsync(clear);
+			await WaitForJournalConditionAsync(
+				() => journal.OwnedWindows.Count == 1,
+				"journal clear confirmation");
+
+			await journal.UpdateProjectContextAsync(secondRoot);
+			journal.ViewModel.CurrentProjectOnly = false;
+			var confirmation = Assert.Single(journal.OwnedWindows);
+			var confirm = Assert.Single(
+				confirmation.GetVisualDescendants().OfType<Button>(),
+				button => Equals(button.Content, journal.ViewModel.ClearText));
+			await UiTestDriver.RaiseButtonClickAsync(confirm);
+			await WaitForJournalConditionAsync(
+				() => reader.ClearRoots.Count == 1,
+				"confirmed journal scope to be cleared");
+			await clearing;
+
+			Assert.True(PathComparer.Default.Equals(
+				workspace.Project.RootPath,
+				Assert.Single(reader.ClearRoots)));
+		}
+		finally
+		{
+			await UiTestDriver.CloseTopLevelWindowAsync(journal);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task LateCallReadCannotReplaceTheNewlySelectedSession()
+	{
+		var fixture = JournalFixture.Create(workspace.Project.RootPath);
+		var first = fixture.LiveSession with
+		{
+			Id = "first-session",
+			StartedUtc = fixture.LiveSession.StartedUtc.AddMinutes(1)
+		};
+		var second = fixture.LiveSession with { Id = "second-session" };
+		var firstCall = fixture.Calls[fixture.LiveSession.Id][0] with { Tool = "first-tool" };
+		var secondCall = fixture.SecondCall with { Tool = "second-tool" };
+		var reader = new OverlappingCallsJournalReader(first, second, firstCall, secondCall);
+		var journal = new AgentJournalWindow(
+			reader,
+			new RecordingFormatter(),
+			new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En),
+			workspace.Project.RootPath);
+		var captureEvidence = HasUi5ArtifactDestination();
+		if (captureEvidence)
+		{
+			UiTestDriver.TrackTopLevelWindow(journal);
+			journal.Show();
+		}
+
+		try
+		{
+			var firstLoad = journal.RefreshAsync();
+			await reader.FirstReadStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+			journal.ViewModel.SelectedSession = Assert.Single(
+				journal.ViewModel.Sessions,
+				row => string.Equals(row.Session.Id, second.Id, StringComparison.Ordinal));
+			await InvokeLoadSelectedSessionAsync(journal, reloadSelected: true);
+			Assert.Equal("second-tool", Assert.Single(journal.ViewModel.Calls).Tool);
+
+			reader.ReleaseFirstRead.TrySetResult();
+			await firstLoad;
+
+			Assert.Equal(second.Id, journal.ViewModel.SelectedSession!.Session.Id);
+			Assert.Equal("second-tool", Assert.Single(journal.ViewModel.Calls).Tool);
+			if (captureEvidence)
+			{
+				await SaveUi5ArtifactAsync(
+					journal,
+					"issue-12-journal-session-generation",
+					$"selectedSession={journal.ViewModel.SelectedSession.Session.Id}",
+					$"visibleTool={journal.ViewModel.Calls.Single().Tool}");
+			}
+		}
+		finally
+		{
+			reader.ReleaseFirstRead.TrySetResult();
+			journal.Close();
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task PeriodicSessionRefreshDoesNotInvalidateConsumedWatchReload()
+	{
+		var fixture = JournalFixture.Create(workspace.Project.RootPath);
+		var initial = fixture.Calls[fixture.LiveSession.Id][0] with { Tool = "initial-tool" };
+		var appended = fixture.SecondCall with { Tool = "tail-tool" };
+		var reader = new OverlappingTailRefreshJournalReader(
+			fixture.LiveSession,
+			initial,
+			appended);
+		var journal = new AgentJournalWindow(
+			reader,
+			new RecordingFormatter(),
+			new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En),
+			workspace.Project.RootPath);
+
+		try
+		{
+			await journal.RefreshAsync();
+			Assert.Equal("initial-tool", Assert.Single(journal.ViewModel.Calls).Tool);
+			await reader.WatchStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+
+			reader.PublishAppendedCall();
+			await WaitForJournalConditionAsync(
+				() => reader.TailReadStarted.Task.IsCompleted,
+				"watch-triggered tail read to start");
+			await journal.RefreshAsync();
+
+			reader.ReleaseTailRead.TrySetResult();
+			await reader.TailReadReturned.Task.WaitAsync(TestContext.Current.CancellationToken);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+
+			Assert.Equal(
+				["initial-tool", "tail-tool"],
+				journal.ViewModel.Calls.Select(static call => call.Tool));
+		}
+		finally
+		{
+			reader.ReleaseTailRead.TrySetResult();
+			journal.Close();
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task ContextRulesAreExplainedBesideTheMcpMenuTreeAndSecretSetting()
 	{
 		var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
@@ -647,6 +844,11 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 	{
 		var fixture = JournalFixture.Create(workspace.Project.RootPath);
 		var errors = new List<string>();
+		var outputRoot = Path.Combine(
+			Path.GetTempPath(),
+			"devprojex-journal-failure",
+			Guid.NewGuid().ToString("N"));
+		Directory.CreateDirectory(outputRoot);
 		var journal = new AgentJournalWindow(
 			new FailingJournalReader(fixture.Sessions, fixture.Calls, failExport: true),
 			new RecordingFormatter(),
@@ -664,7 +866,7 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 			await journal.RefreshAsync();
 
 			var exception = await Record.ExceptionAsync(() => journal.ExportSelectedToPathAsync(
-				Path.Combine(workspace.Project.RootPath, "journal.md"),
+				Path.Combine(outputRoot, "journal.md"),
 				json: false));
 
 			Assert.Null(exception);
@@ -673,6 +875,7 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 		finally
 		{
 			journal.Close();
+			Directory.Delete(outputRoot, recursive: true);
 		}
 	}
 
@@ -818,6 +1021,131 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 			Assert.False(viewModel.AgentActivityVisible);
 			Assert.Equal(0, deliveredNode.AgentDeliveryCount);
 			Assert.Equal(checkedBefore, deliveredNode.IsChecked);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task AgentActivityFiltersLatestCallByProjectRootWhileAdvancingTheSessionCursor()
+	{
+		var fixture = JournalFixture.Create(workspace.Project.RootPath);
+		var otherRoot = Path.Combine(workspace.Project.RootPath, "other-root");
+		Directory.CreateDirectory(otherRoot);
+		var session = fixture.LiveSession with
+		{
+			Roots =
+			[
+				new AgentJournalRoot(workspace.Project.RootPath, "current"),
+				new AgentJournalRoot(otherRoot, "other")
+			]
+		};
+		var initial = fixture.Calls[fixture.LiveSession.Id][0] with
+		{
+			RootIndex = 0,
+			Tool = "initial-current",
+			DeliveredPaths = ["src/AppHost/Program.cs"]
+		};
+		var reader = new ScriptedActivityJournalReader(session, [initial]);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			workspace.Project,
+			configureServices: services => services with { AgentJournalReader = reader });
+
+		try
+		{
+			var activity = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "AgentActivityMenuItem");
+			await UiTestDriver.RaiseMenuItemClickAsync(activity);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => reader.WatchStarts > 0 && UiTestDriver.GetViewModel(window).AgentActivityVisible,
+				"root-aware activity watch to start");
+			var viewModel = UiTestDriver.GetViewModel(window);
+			var deliveredNode = Assert.Single(
+				viewModel.TreeNodes.SelectMany(static root => root.Flatten()),
+				node => PathComparer.Default.Equals(
+					node.FullPath,
+					Path.Combine(workspace.Project.RootPath, "src", "AppHost", "Program.cs")));
+			var currentCall = fixture.SecondCall with
+			{
+				Sequence = 2,
+				RootIndex = 0,
+				Tool = "current-root-tool",
+				Arguments = new Dictionary<string, string> { ["path"] = "src/AppHost/Program.cs" }
+			};
+			var otherCall = fixture.SecondCall with
+			{
+				Sequence = 3,
+				RootIndex = 1,
+				Tool = "other-root-tool",
+				Arguments = new Dictionary<string, string> { ["path"] = "foreign.cs" },
+				DeliveredPaths = ["foreign.cs"]
+			};
+
+			reader.AppendCalls(currentCall, otherCall);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => deliveredNode.AgentDeliveryCount == 1 &&
+					  viewModel.AgentActivityText.Contains("current-root-tool", StringComparison.Ordinal),
+				"current-root activity to win over the later foreign-root call");
+			reader.NotifyChanged();
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => reader.AfterSequences.Count >= 3,
+				"activity cursor to be observed on the next read");
+
+			Assert.Equal(3, reader.AfterSequences[^1]);
+			Assert.DoesNotContain("other-root-tool", viewModel.AgentActivityText, StringComparison.Ordinal);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task AgentActivityResetRebuildsDeliveryCountsInsteadOfAddingFullHistoryAgain()
+	{
+		var fixture = JournalFixture.Create(workspace.Project.RootPath);
+		var initial = fixture.Calls[fixture.LiveSession.Id][0] with
+		{
+			DeliveredPaths = ["src/AppHost/Program.cs"]
+		};
+		var reader = new ScriptedActivityJournalReader(fixture.LiveSession, [initial]);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			workspace.Project,
+			configureServices: services => services with { AgentJournalReader = reader });
+
+		try
+		{
+			var activity = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "AgentActivityMenuItem");
+			await UiTestDriver.RaiseMenuItemClickAsync(activity);
+			var viewModel = UiTestDriver.GetViewModel(window);
+			var deliveredNode = Assert.Single(
+				viewModel.TreeNodes.SelectMany(static root => root.Flatten()),
+				node => PathComparer.Default.Equals(
+					node.FullPath,
+					Path.Combine(workspace.Project.RootPath, "src", "AppHost", "Program.cs")));
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => reader.WatchStarts > 0 && viewModel.AgentActivityVisible,
+				"activity baseline to be captured");
+
+			reader.AppendCalls(fixture.SecondCall with { Sequence = 2 });
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => deliveredNode.AgentDeliveryCount == 1,
+				"first post-baseline delivery");
+
+			reader.RequireResetOnNextRead();
+			reader.AppendCalls(fixture.SecondCall with { Sequence = 3 });
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => deliveredNode.AgentDeliveryCount >= 2,
+				"reset delivery projection");
+
+			Assert.Equal(2, deliveredNode.AgentDeliveryCount);
 		}
 		finally
 		{
@@ -1349,6 +1677,55 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 		}, DispatcherPriority.Render);
 	}
 
+	private static bool HasUi5ArtifactDestination() =>
+		!string.IsNullOrWhiteSpace(
+			Environment.GetEnvironmentVariable("DEVPROJEX_UI5_ARTIFACT_DIR"));
+
+	private static async Task SaveUi5ArtifactAsync(
+		TopLevel topLevel,
+		string artifactName,
+		params string[] facts)
+	{
+		var configuredRoot = Environment.GetEnvironmentVariable("DEVPROJEX_UI5_ARTIFACT_DIR");
+		if (string.IsNullOrWhiteSpace(configuredRoot))
+			return;
+
+		var outputRoot = Path.GetFullPath(configuredRoot);
+		Directory.CreateDirectory(outputRoot);
+		await File.WriteAllLinesAsync(
+			Path.Combine(outputRoot, $"{artifactName}.txt"),
+			facts,
+			TestContext.Current.CancellationToken);
+	}
+
+	private static async Task InvokeLoadSelectedSessionAsync(
+		AgentJournalWindow journal,
+		bool reloadSelected)
+	{
+		var method = typeof(AgentJournalWindow).GetMethod(
+			"LoadSelectedSessionAsync",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(method);
+		var invocation = method.Invoke(journal, [CancellationToken.None, reloadSelected]);
+		await Assert.IsAssignableFrom<Task>(invocation);
+	}
+
+	private static async Task WaitForJournalConditionAsync(
+		Func<bool> predicate,
+		string description)
+	{
+		var stopwatch = Stopwatch.StartNew();
+		while (stopwatch.Elapsed < TimeSpan.FromSeconds(5))
+		{
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+			if (predicate())
+				return;
+			await Task.Delay(20, TestContext.Current.CancellationToken);
+		}
+
+		throw new XunitException($"Timed out waiting for {description}.");
+	}
+
 	private static void AssertOpaqueJournalSurface(AgentJournalWindow journal)
 	{
 		AssertOpaqueWindow(journal);
@@ -1453,6 +1830,240 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 		{
 			JsonCalls++;
 			return $"json:{receipt.Session.Id}";
+		}
+	}
+
+	private sealed class OverlappingCallsJournalReader(
+		AgentJournalSession firstSession,
+		AgentJournalSession secondSession,
+		AgentJournalCall firstCall,
+		AgentJournalCall secondCall) : IAgentJournalReader
+	{
+		public AgentJournalRetentionPolicy Retention => AgentJournalRetentionPolicy.Default;
+		public TaskCompletionSource FirstReadStarted { get; } =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
+		public TaskCompletionSource ReleaseFirstRead { get; } =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+		public ValueTask<IReadOnlyList<AgentJournalSession>> ListSessionsAsync(
+			string? projectRoot = null,
+			int limit = 200,
+			CancellationToken cancellationToken = default) =>
+			ValueTask.FromResult<IReadOnlyList<AgentJournalSession>>([firstSession, secondSession]);
+
+		public async ValueTask<IReadOnlyList<AgentJournalCall>> ReadCallsAsync(
+			string sessionId,
+			CancellationToken cancellationToken = default)
+		{
+			if (string.Equals(sessionId, firstSession.Id, StringComparison.Ordinal))
+			{
+				FirstReadStarted.TrySetResult();
+				await ReleaseFirstRead.Task;
+				return [firstCall];
+			}
+
+			return [secondCall];
+		}
+
+		public ValueTask<AgentJournalReceipt?> ReadReceiptAsync(
+			string sessionId,
+			CancellationToken cancellationToken = default) =>
+			ValueTask.FromResult<AgentJournalReceipt?>(null);
+
+		public async IAsyncEnumerable<AgentJournalChange> WatchChangesAsync(
+			string sessionId,
+			[EnumeratorCancellation] CancellationToken cancellationToken = default)
+		{
+			await Task.CompletedTask;
+			yield break;
+		}
+
+		public ValueTask<int> ClearAsync(
+			string? projectRoot = null,
+			CancellationToken cancellationToken = default) =>
+			ValueTask.FromResult(0);
+	}
+
+	private sealed class OverlappingTailRefreshJournalReader(
+		AgentJournalSession session,
+		AgentJournalCall initialCall,
+		AgentJournalCall appendedCall) : IAgentJournalReader
+	{
+		private readonly object _sync = new();
+		private readonly List<AgentJournalCall> _calls = [initialCall];
+		private readonly Channel<AgentJournalChange> _changes = Channel.CreateUnbounded<AgentJournalChange>();
+		private int _readCallsCount;
+
+		public AgentJournalRetentionPolicy Retention => AgentJournalRetentionPolicy.Default;
+		public TaskCompletionSource WatchStarted { get; } =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
+		public TaskCompletionSource TailReadStarted { get; } =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
+		public TaskCompletionSource ReleaseTailRead { get; } =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
+		public TaskCompletionSource TailReadReturned { get; } =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+		public ValueTask<IReadOnlyList<AgentJournalSession>> ListSessionsAsync(
+			string? projectRoot = null,
+			int limit = 200,
+			CancellationToken cancellationToken = default) =>
+			ValueTask.FromResult<IReadOnlyList<AgentJournalSession>>([session]);
+
+		public async ValueTask<IReadOnlyList<AgentJournalCall>> ReadCallsAsync(
+			string sessionId,
+			CancellationToken cancellationToken = default)
+		{
+			if (Interlocked.Increment(ref _readCallsCount) == 2)
+			{
+				TailReadStarted.TrySetResult();
+				await ReleaseTailRead.Task.WaitAsync(cancellationToken);
+				TailReadReturned.TrySetResult();
+			}
+
+			lock (_sync)
+				return _calls.ToArray();
+		}
+
+		public ValueTask<AgentJournalReceipt?> ReadReceiptAsync(
+			string sessionId,
+			CancellationToken cancellationToken = default) =>
+			ValueTask.FromResult<AgentJournalReceipt?>(null);
+
+		public async IAsyncEnumerable<AgentJournalChange> WatchChangesAsync(
+			string sessionId,
+			[EnumeratorCancellation] CancellationToken cancellationToken = default)
+		{
+			WatchStarted.TrySetResult();
+			await foreach (var change in _changes.Reader.ReadAllAsync(cancellationToken))
+				yield return change;
+		}
+
+		public ValueTask<int> ClearAsync(
+			string? projectRoot = null,
+			CancellationToken cancellationToken = default) =>
+			ValueTask.FromResult(0);
+
+		public void PublishAppendedCall()
+		{
+			lock (_sync)
+				_calls.Add(appendedCall);
+			_changes.Writer.TryWrite(new AgentJournalChange(
+				session.Id,
+				AgentJournalChangeKind.CallAppended,
+				appendedCall.Sequence));
+		}
+	}
+
+	private sealed class ScriptedActivityJournalReader(
+		AgentJournalSession session,
+		IEnumerable<AgentJournalCall> calls) : IAgentJournalReader, IAgentJournalActivityReader
+	{
+		private readonly object _sync = new();
+		private readonly List<AgentJournalCall> _calls = [.. calls];
+		private readonly List<long> _afterSequences = [];
+		private readonly Channel<AgentJournalChange> _changes = Channel.CreateUnbounded<AgentJournalChange>();
+		private bool _requiresReset;
+		private int _watchStarts;
+
+		public AgentJournalRetentionPolicy Retention => AgentJournalRetentionPolicy.Default;
+		public int WatchStarts => Volatile.Read(ref _watchStarts);
+
+		public IReadOnlyList<long> AfterSequences
+		{
+			get
+			{
+				lock (_sync)
+					return _afterSequences.ToArray();
+			}
+		}
+
+		public ValueTask<IReadOnlyList<AgentJournalSession>> ListSessionsAsync(
+			string? projectRoot = null,
+			int limit = 200,
+			CancellationToken cancellationToken = default)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			return ValueTask.FromResult<IReadOnlyList<AgentJournalSession>>([session]);
+		}
+
+		public ValueTask<AgentJournalActivitySnapshot?> ReadActivityAsync(
+			string sessionId,
+			long afterSequence,
+			CancellationToken cancellationToken = default)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			lock (_sync)
+			{
+				_afterSequences.Add(afterSequence);
+				var reset = _requiresReset;
+				_requiresReset = false;
+				var ordered = _calls.OrderBy(static call => call.Sequence).ToArray();
+				var appended = reset
+					? Array.Empty<AgentJournalCall>()
+					: ordered.Where(call => call.Sequence > afterSequence).ToArray();
+				return ValueTask.FromResult<AgentJournalActivitySnapshot?>(new AgentJournalActivitySnapshot(
+					session,
+					ordered.LastOrDefault(),
+					appended,
+					reset,
+					ordered.LastOrDefault()?.Utc));
+			}
+		}
+
+		public ValueTask<IReadOnlyList<AgentJournalCall>> ReadCallsAsync(
+			string sessionId,
+			CancellationToken cancellationToken = default)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			lock (_sync)
+				return ValueTask.FromResult<IReadOnlyList<AgentJournalCall>>(_calls.ToArray());
+		}
+
+		public ValueTask<AgentJournalReceipt?> ReadReceiptAsync(
+			string sessionId,
+			CancellationToken cancellationToken = default) =>
+			ValueTask.FromResult<AgentJournalReceipt?>(null);
+
+		public async IAsyncEnumerable<AgentJournalChange> WatchChangesAsync(
+			string sessionId,
+			[EnumeratorCancellation] CancellationToken cancellationToken = default)
+		{
+			Interlocked.Increment(ref _watchStarts);
+			await foreach (var change in _changes.Reader.ReadAllAsync(cancellationToken))
+				yield return change;
+		}
+
+		public ValueTask<int> ClearAsync(
+			string? projectRoot = null,
+			CancellationToken cancellationToken = default) =>
+			ValueTask.FromResult(0);
+
+		public void AppendCalls(params AgentJournalCall[] appended)
+		{
+			lock (_sync)
+				_calls.AddRange(appended);
+			_changes.Writer.TryWrite(new AgentJournalChange(
+				session.Id,
+				AgentJournalChangeKind.CallAppended,
+				appended.Max(static call => call.Sequence)));
+		}
+
+		public void RequireResetOnNextRead()
+		{
+			lock (_sync)
+				_requiresReset = true;
+		}
+
+		public void NotifyChanged()
+		{
+			long? sequence;
+			lock (_sync)
+				sequence = _calls.Count == 0 ? null : _calls.Max(static call => call.Sequence);
+			_changes.Writer.TryWrite(new AgentJournalChange(
+				session.Id,
+				AgentJournalChangeKind.CallAppended,
+				sequence));
 		}
 	}
 

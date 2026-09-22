@@ -41,56 +41,121 @@ public sealed class ProjectProfilePersistenceCoordinator(
     private readonly object _loadStateSync = new();
     private readonly Dictionary<string, ProfileLoadState> _loadStates =
         new(PathComparer.Default);
+    private readonly SemaphoreSlim _persistenceGate = new(1, 1);
     private long _nextLoadRevision;
+    private int _persistenceOperationCount;
 
     public bool EnsureStorageExists() => profileStore.EnsureStorageExists();
 
     public ProjectProfileClearStatus ClearAllProfiles()
     {
-        var result = _pendingWrites.ClearAllProfiles();
-        if (result != ProjectProfileClearStatus.Cleared)
-            return result;
+        if (!_persistenceGate.Wait(GuiLookupTimeout))
+            return ProjectProfileClearStatus.Busy;
 
-        lock (_loadStateSync)
-            _loadStates.Clear();
-        return result;
+        try
+        {
+            var result = _pendingWrites.ClearAllProfiles();
+            if (result != ProjectProfileClearStatus.Cleared)
+                return result;
+
+            lock (_loadStateSync)
+                _loadStates.Clear();
+            return result;
+        }
+        finally
+        {
+            _persistenceGate.Release();
+        }
     }
 
-    public async Task PersistIfNeededAsync(
+    public Task PersistIfNeededAsync(
         string? currentPath,
         CancellationToken cancellationToken = default)
     {
-        var readiness = await PreparePersistenceAsync(currentPath, cancellationToken).ConfigureAwait(false);
-        if (!readiness.CanPersist || !selectionCoordinator.IsSelectionStateCompleteForPersistence)
-            return;
+        if (!IsApplicable(currentPath) ||
+            !selectionCoordinator.IsSelectionStateCompleteForPersistence)
+        {
+            return Task.CompletedTask;
+        }
 
-        var profile = CaptureCurrentProfile(currentPath!);
+        return RunSerializedPersistenceAsync(
+            () => PersistIfNeededCoreAsync(currentPath!, cancellationToken),
+            cancellationToken);
+    }
+
+    private async Task PersistIfNeededCoreAsync(
+        string currentPath,
+        CancellationToken cancellationToken)
+    {
+        var normalizedPath = Path.GetFullPath(currentPath);
+        var profile = CaptureCurrentProfile(normalizedPath);
+        var updatedUtc = DateTimeOffset.UtcNow;
+        var readiness = await PreparePersistenceAsync(currentPath, cancellationToken).ConfigureAwait(false);
+        if (!readiness.CanPersist)
+        {
+            await EnqueueFullProfileWriteAsync(
+                    normalizedPath,
+                    profile,
+                    readiness.RecoveredSnapshot?.Profile ?? GetSuccessfulSnapshot(normalizedPath)?.Profile,
+                    updatedUtc,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            return;
+        }
+
         if (profileStore is ProjectProfileStore)
         {
+            var pendingRevision = await _pendingWrites
+                .GetPendingRevisionAsync(normalizedPath, cancellationToken)
+                .ConfigureAwait(false);
             var merged = await PersistMergedAsync(
-                currentPath!,
+                normalizedPath,
                 profile,
                 readiness.RecoveredSnapshot?.Profile,
                 ProjectProfileMergeFields.AllSelections,
                 cancellationToken).ConfigureAwait(false);
             if (!merged)
-                throw new IOException("The project profile could not be saved without overwriting a newer revision.");
+            {
+                await _pendingWrites
+                    .EnqueueMergeAsync(
+                        normalizedPath,
+                        profile,
+                        readiness.RecoveredSnapshot?.Profile,
+                        ProjectProfileMergeFields.AllSelections,
+                        updatedUtc,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            else
+            {
+                await _pendingWrites
+                    .RemovePendingAsync(normalizedPath, pendingRevision, CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
             return;
         }
         await _pendingWrites
             .PersistAsync(
-                currentPath!,
+                normalizedPath,
                 profile,
-                DateTimeOffset.UtcNow,
+                updatedUtc,
                 CanPersistNormalizedPath,
                 cancellationToken)
             .ConfigureAwait(false);
     }
 
-    public async Task<ProjectProfilePersistenceResult> PersistSelectedPathsAsync(
+    public Task<ProjectProfilePersistenceResult> PersistSelectedPathsAsync(
         string? currentPath,
         IReadOnlyCollection<string>? selectedPaths,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        RunSerializedPersistenceAsync(
+            () => PersistSelectedPathsCoreAsync(currentPath, selectedPaths, cancellationToken),
+            cancellationToken);
+
+    private async Task<ProjectProfilePersistenceResult> PersistSelectedPathsCoreAsync(
+        string? currentPath,
+        IReadOnlyCollection<string>? selectedPaths,
+        CancellationToken cancellationToken)
     {
         var readiness = await PreparePersistenceAsync(currentPath, cancellationToken).ConfigureAwait(false);
         if (!readiness.CanPersist)
@@ -112,6 +177,9 @@ public sealed class ProjectProfilePersistenceCoordinator(
         }
         if (profileStore is ProjectProfileStore)
         {
+            var pendingRevision = await _pendingWrites
+                .GetPendingRevisionAsync(currentPath!, cancellationToken)
+                .ConfigureAwait(false);
             var merged = await PersistMergedAsync(
                 currentPath!,
                 profile,
@@ -123,6 +191,13 @@ public sealed class ProjectProfilePersistenceCoordinator(
                 return ProjectProfilePersistenceResult.Failed(
                     "The project selection could not be saved without overwriting a newer revision.");
             }
+            await _pendingWrites
+                .CoalesceSelectedPathsAsync(
+                    currentPath!,
+                    pendingRevision,
+                    selectedPaths,
+                    CancellationToken.None)
+                .ConfigureAwait(false);
             return ProjectProfilePersistenceResult.Saved();
         }
 
@@ -228,7 +303,7 @@ public sealed class ProjectProfilePersistenceCoordinator(
                     attempt.Revision,
                     result.Status,
                     successfulSnapshot: null,
-                    retryPersistenceLoad: result.Status == ProjectProfileLookupStatus.TemporarilyUnavailable);
+                    retryPersistenceLoad: ShouldRetryBlockedPersistence(result.Status));
                 return new ProjectProfileLoadSnapshot(result.Status, null, null);
             }
             if (result.RecoveryStatus is not null && attempt.Previous.SuccessfulSnapshot is { } previousSnapshot)
@@ -249,7 +324,12 @@ public sealed class ProjectProfilePersistenceCoordinator(
             if (!marksResult.Succeeded || marksResult.Snapshot is null)
             {
                 var unavailableStatus = MapMarkStoreStatus(marksResult.Status);
-                CompleteLoad(normalizedPath, attempt.Revision, unavailableStatus, successfulSnapshot: null);
+                CompleteLoad(
+                    normalizedPath,
+                    attempt.Revision,
+                    unavailableStatus,
+                    successfulSnapshot: null,
+                    retryPersistenceLoad: ShouldRetryBlockedPersistence(unavailableStatus));
                 return new ProjectProfileLoadSnapshot(unavailableStatus, null, null);
             }
             var identityAvailability = await secretRedactionSession
@@ -261,7 +341,12 @@ public sealed class ProjectProfilePersistenceCoordinator(
                                         PersistentSecretIdentityAvailability.TemporarilyUnavailable
                     ? ProjectProfileLookupStatus.TemporarilyUnavailable
                     : ProjectProfileLookupStatus.InvalidStorage;
-                CompleteLoad(normalizedPath, attempt.Revision, unavailableStatus, successfulSnapshot: null);
+                CompleteLoad(
+                    normalizedPath,
+                    attempt.Revision,
+                    unavailableStatus,
+                    successfulSnapshot: null,
+                    retryPersistenceLoad: ShouldRetryBlockedPersistence(unavailableStatus));
                 return new ProjectProfileLoadSnapshot(unavailableStatus, null, null);
             }
 
@@ -327,8 +412,182 @@ public sealed class ProjectProfilePersistenceCoordinator(
             _ => ProjectProfileLookupStatus.InvalidStorage
         };
 
-    public ProjectProfileFlushResult FlushPending(TimeSpan timeout) =>
-        _pendingWrites.Flush(timeout, CanPersistNormalizedPath);
+    private static bool ShouldRetryBlockedPersistence(ProjectProfileLookupStatus status) =>
+        status is ProjectProfileLookupStatus.TemporarilyUnavailable or
+            ProjectProfileLookupStatus.InvalidStorage;
+
+    public ProjectProfileFlushResult FlushPending(TimeSpan timeout)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(timeout, TimeSpan.Zero);
+        var startedTimestamp = Stopwatch.GetTimestamp();
+        if (!_persistenceGate.Wait(timeout))
+            return new ProjectProfileFlushResult(false, 0, 0, -1);
+
+        try
+        {
+            var remaining = timeout - Stopwatch.GetElapsedTime(startedTimestamp);
+            if (remaining < TimeSpan.Zero)
+                remaining = TimeSpan.Zero;
+            return _pendingWrites.Flush(remaining, CanPersistNormalizedPath);
+        }
+        finally
+        {
+            _persistenceGate.Release();
+        }
+    }
+
+    public async Task<ProjectProfileFlushResult> FlushPendingAsync(
+        TimeSpan timeout,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(timeout, TimeSpan.Zero);
+        var startedTimestamp = Stopwatch.GetTimestamp();
+        if (!await _persistenceGate.WaitAsync(timeout, cancellationToken).ConfigureAwait(false))
+            return new ProjectProfileFlushResult(false, 0, 0, -1);
+
+        try
+        {
+            var remaining = timeout - Stopwatch.GetElapsedTime(startedTimestamp);
+            if (remaining <= TimeSpan.Zero)
+                return new ProjectProfileFlushResult(true, 0, 0, _pendingWrites.Count);
+
+            using (var refreshTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+            {
+                refreshTimeout.CancelAfter(remaining);
+                try
+                {
+                    await RefreshPendingPersistenceReadinessAsync(refreshTimeout.Token)
+                        .ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (
+                    refreshTimeout.IsCancellationRequested &&
+                    !cancellationToken.IsCancellationRequested)
+                {
+                    return new ProjectProfileFlushResult(true, 0, 0, _pendingWrites.Count);
+                }
+            }
+
+            remaining = timeout - Stopwatch.GetElapsedTime(startedTimestamp);
+            if (remaining < TimeSpan.Zero)
+                remaining = TimeSpan.Zero;
+            return await Task.Run(
+                    () => _pendingWrites.Flush(remaining, CanPersistNormalizedPath),
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            _persistenceGate.Release();
+        }
+    }
+
+    private async Task RefreshPendingPersistenceReadinessAsync(CancellationToken cancellationToken)
+    {
+        var projectPaths = await _pendingWrites
+            .GetPendingProjectPathsAsync(cancellationToken)
+            .ConfigureAwait(false);
+        foreach (var projectPath in projectPaths)
+        {
+            if (!ShouldRetryProfileLoadForPersistence(projectPath))
+                continue;
+
+            _ = await LoadSnapshotWithRetryAsync(projectPath, cancellationToken)
+                .ConfigureAwait(false);
+        }
+    }
+
+    public bool HasPendingWrites =>
+        Volatile.Read(ref _persistenceOperationCount) > 0 || _pendingWrites.HasPending;
+
+    public async Task<bool> DiscardPendingWritesAsync(
+        TimeSpan timeout,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(timeout, TimeSpan.Zero);
+        var startedTimestamp = Stopwatch.GetTimestamp();
+        if (!await _persistenceGate.WaitAsync(timeout, cancellationToken).ConfigureAwait(false))
+            return false;
+
+        try
+        {
+            var remaining = timeout - Stopwatch.GetElapsedTime(startedTimestamp);
+            if (remaining < TimeSpan.Zero)
+                remaining = TimeSpan.Zero;
+            return await _pendingWrites
+                .DiscardPendingAsync(remaining, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            _persistenceGate.Release();
+        }
+    }
+
+    private Task EnqueueFullProfileWriteAsync(
+        string normalizedPath,
+        ProjectSelectionProfile profile,
+        ProjectSelectionProfile? baseline,
+        DateTimeOffset updatedUtc,
+        CancellationToken cancellationToken) =>
+        profileStore is ProjectProfileStore
+            ? _pendingWrites.EnqueueMergeAsync(
+                normalizedPath,
+                profile,
+                baseline,
+                ProjectProfileMergeFields.AllSelections,
+                updatedUtc,
+                cancellationToken)
+            : _pendingWrites.EnqueueAsync(
+                normalizedPath,
+                profile,
+                updatedUtc,
+                cancellationToken);
+
+    private async Task RunSerializedPersistenceAsync(
+        Func<Task> operation,
+        CancellationToken cancellationToken)
+    {
+        Interlocked.Increment(ref _persistenceOperationCount);
+        try
+        {
+            await _persistenceGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await operation().ConfigureAwait(false);
+            }
+            finally
+            {
+                _persistenceGate.Release();
+            }
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _persistenceOperationCount);
+        }
+    }
+
+    private async Task<TResult> RunSerializedPersistenceAsync<TResult>(
+        Func<Task<TResult>> operation,
+        CancellationToken cancellationToken)
+    {
+        Interlocked.Increment(ref _persistenceOperationCount);
+        try
+        {
+            await _persistenceGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                return await operation().ConfigureAwait(false);
+            }
+            finally
+            {
+                _persistenceGate.Release();
+            }
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _persistenceOperationCount);
+        }
+    }
 
     private bool IsApplicable(string? currentPath)
     {
@@ -565,6 +824,24 @@ internal sealed class PendingProjectProfileWriteQueue(IProjectProfileStore profi
         new(PathComparer.Default);
 
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private long _nextRevision;
+
+    internal bool HasPending
+    {
+        get
+        {
+            if (!_gate.Wait(0))
+                return true;
+            try
+            {
+                return _pending.Count > 0;
+            }
+            finally
+            {
+                _gate.Release();
+            }
+        }
+    }
 
     internal int Count
     {
@@ -582,6 +859,20 @@ internal sealed class PendingProjectProfileWriteQueue(IProjectProfileStore profi
         }
     }
 
+    public async Task<IReadOnlyList<string>> GetPendingProjectPathsAsync(
+        CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return _pending.Keys.ToArray();
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
     public async Task PersistAsync(
         string projectPath,
         ProjectSelectionProfile profile,
@@ -595,6 +886,54 @@ internal sealed class PendingProjectProfileWriteQueue(IProjectProfileStore profi
             await Task.Run(
                 () => PersistCore(projectPath, profile, updatedUtc, canPersist),
                 cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task EnqueueAsync(
+        string projectPath,
+        ProjectSelectionProfile profile,
+        DateTimeOffset updatedUtc,
+        CancellationToken cancellationToken)
+    {
+        var normalizedPath = Path.GetFullPath(projectPath);
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            _pending[normalizedPath] = new PendingProfileWrite(
+                ProjectSelectionProfileBuilder.Clone(profile),
+                updatedUtc,
+                Merge: null,
+                checked(++_nextRevision));
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task EnqueueMergeAsync(
+        string projectPath,
+        ProjectSelectionProfile candidate,
+        ProjectSelectionProfile? baseline,
+        ProjectProfileMergeFields fields,
+        DateTimeOffset updatedUtc,
+        CancellationToken cancellationToken)
+    {
+        var normalizedPath = Path.GetFullPath(projectPath);
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            _pending[normalizedPath] = new PendingProfileWrite(
+                ProjectSelectionProfileBuilder.Clone(candidate),
+                updatedUtc,
+                new PendingProfileMerge(
+                    baseline is null ? null : ProjectSelectionProfileBuilder.Clone(baseline),
+                    fields),
+                checked(++_nextRevision));
         }
         finally
         {
@@ -636,7 +975,92 @@ internal sealed class PendingProjectProfileWriteQueue(IProjectProfileStore profi
 
         _pending[normalizedPath] = new PendingProfileWrite(
             ProjectSelectionProfileBuilder.Clone(profile),
-            updatedUtc);
+            updatedUtc,
+            Merge: null,
+            checked(++_nextRevision));
+    }
+
+    public async Task<long?> GetPendingRevisionAsync(
+        string projectPath,
+        CancellationToken cancellationToken)
+    {
+        var normalizedPath = Path.GetFullPath(projectPath);
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return _pending.TryGetValue(normalizedPath, out var pending)
+                ? pending.Revision
+                : null;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task RemovePendingAsync(
+        string projectPath,
+        long? expectedRevision,
+        CancellationToken cancellationToken)
+    {
+        if (expectedRevision is null)
+            return;
+
+        var normalizedPath = Path.GetFullPath(projectPath);
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_pending.TryGetValue(normalizedPath, out var pending) &&
+                pending.Revision == expectedRevision.Value)
+            {
+                _pending.Remove(normalizedPath);
+            }
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task CoalesceSelectedPathsAsync(
+        string projectPath,
+        long? expectedRevision,
+        IReadOnlyCollection<string>? selectedPaths,
+        CancellationToken cancellationToken)
+    {
+        if (expectedRevision is null)
+            return;
+
+        var normalizedPath = Path.GetFullPath(projectPath);
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!_pending.TryGetValue(normalizedPath, out var pending) ||
+                pending.Revision != expectedRevision.Value)
+            {
+                return;
+            }
+
+            var profile = ProjectSelectionProfileBuilder.Clone(pending.Profile) with
+            {
+                SelectedPaths = selectedPaths?.ToArray()
+            };
+            var merge = pending.Merge is null
+                ? null
+                : pending.Merge with
+                {
+                    Fields = pending.Merge.Fields & ~ProjectProfileMergeFields.SelectedPaths
+                };
+            _pending[normalizedPath] = pending with
+            {
+                Profile = profile,
+                Merge = merge
+            };
+        }
+        finally
+        {
+            _gate.Release();
+        }
     }
 
     public void Flush(Func<string, bool>? canPersist = null) =>
@@ -651,6 +1075,25 @@ internal sealed class PendingProjectProfileWriteQueue(IProjectProfileStore profi
             if (result == ProjectProfileClearStatus.Cleared)
                 _pending.Clear();
             return result;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<bool> DiscardPendingAsync(
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(timeout, TimeSpan.Zero);
+        if (!await _gate.WaitAsync(timeout, cancellationToken).ConfigureAwait(false))
+            return false;
+
+        try
+        {
+            _pending.Clear();
+            return true;
         }
         finally
         {
@@ -684,31 +1127,80 @@ internal sealed class PendingProjectProfileWriteQueue(IProjectProfileStore profi
         Func<string, bool>? canPersist,
         TimeSpan lockTimeout)
     {
-        var requests = _pending
+        var pending = _pending
             .Where(entry => canPersist is null || canPersist(entry.Key))
+            .ToArray();
+        if (pending.Length == 0)
+            return new ProjectProfileFlushResult(true, 0, 0, _pending.Count);
+
+        var startedTimestamp = Stopwatch.GetTimestamp();
+        var attempted = 0;
+        var saved = 0;
+        foreach (var entry in pending.Where(static entry => entry.Value.Merge is not null))
+        {
+            var remaining = GetRemainingTimeout(startedTimestamp, lockTimeout);
+            if (remaining == TimeSpan.Zero)
+                break;
+
+            attempted++;
+            var merge = entry.Value.Merge!;
+            var result = ProjectProfileMergeWriter.TryMerge(
+                profileStore,
+                entry.Key,
+                entry.Value.Profile,
+                merge.Baseline,
+                merge.Fields,
+                remaining);
+            if (!result.Succeeded)
+                continue;
+
+            _pending.Remove(entry.Key);
+            saved++;
+        }
+
+        var requests = pending
+            .Where(static entry => entry.Value.Merge is null)
             .Select(static entry => new ProjectProfileSaveRequest(
                 entry.Key,
                 ProjectSelectionProfileBuilder.Clone(entry.Value.Profile),
                 entry.Value.UpdatedUtc))
             .ToArray();
-        if (requests.Length == 0)
-            return new ProjectProfileFlushResult(true, 0, 0, _pending.Count);
-
-        var result = profileStore.TrySaveProfilesWithResult(requests, lockTimeout);
-        var savedPaths = result.SavedProjectPaths.ToHashSet(PathComparer.Default);
-        foreach (var path in savedPaths)
-            _pending.Remove(path);
+        if (requests.Length > 0)
+        {
+            attempted += requests.Length;
+            var remaining = GetRemainingTimeout(startedTimestamp, lockTimeout);
+            if (remaining > TimeSpan.Zero)
+            {
+                var result = profileStore.TrySaveProfilesWithResult(requests, remaining);
+                var savedPaths = result.SavedProjectPaths.ToHashSet(PathComparer.Default);
+                foreach (var path in savedPaths)
+                    _pending.Remove(path);
+                saved += savedPaths.Count;
+            }
+        }
 
         return new ProjectProfileFlushResult(
             true,
-            requests.Length,
-            savedPaths.Count,
+            attempted,
+            saved,
             _pending.Count);
+    }
+
+    private static TimeSpan GetRemainingTimeout(long startedTimestamp, TimeSpan timeout)
+    {
+        var remaining = timeout - Stopwatch.GetElapsedTime(startedTimestamp);
+        return remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero;
     }
 
     private sealed record PendingProfileWrite(
         ProjectSelectionProfile Profile,
-        DateTimeOffset UpdatedUtc);
+        DateTimeOffset UpdatedUtc,
+        PendingProfileMerge? Merge,
+        long Revision);
+
+    private sealed record PendingProfileMerge(
+        ProjectSelectionProfile? Baseline,
+        ProjectProfileMergeFields Fields);
 }
 
 internal sealed class PersistentSecretMarkDeltaWriter(

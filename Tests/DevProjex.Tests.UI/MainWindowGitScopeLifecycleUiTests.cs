@@ -51,7 +51,7 @@ public sealed class MainWindowGitScopeLifecycleUiTests
 				{
 					var current = UiTestDriver.GetViewModel(window);
 					return current.TreeNodes.Count == 1 &&
-					       current.TreeNodes[0].Children.Count == 0;
+						   current.TreeNodes[0].Children.Count == 0;
 				},
 				"the startup staged scope to publish its empty tree");
 
@@ -459,7 +459,7 @@ public sealed class MainWindowGitScopeLifecycleUiTests
 				{
 					var currentModes = UiTestDriver.GetViewModel(window).GitFilteringModes;
 					return currentModes.Any(static option => option.Mode == GitFilteringMode.Staged) &&
-					       currentModes.Any(static option => option.Mode == GitFilteringMode.Changes);
+						   currentModes.Any(static option => option.Mode == GitFilteringMode.Changes);
 				},
 				"the refreshed repository Git modes to become available");
 
@@ -964,7 +964,7 @@ public sealed class MainWindowGitScopeLifecycleUiTests
 		{
 			var changed = method!.Invoke(
 				coordinator,
-				[projectPath, selectedExtensions, null, gitMode, false, false]);
+				[projectPath, selectedExtensions, null, gitMode, null, false, false]);
 			Assert.True(Assert.IsType<bool>(changed));
 		});
 		await UiTestDriver.WaitForSelectionRefreshIdleAsync(window);
