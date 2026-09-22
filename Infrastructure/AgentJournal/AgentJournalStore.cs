@@ -65,6 +65,7 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 		Retention = retention ?? AgentJournalRetentionPolicy.Default;
 		activeSessions = activeSessionProvider ??
 			(() => new LiveSessionRegistry(stateRoot, clock).ReadActive());
+		_ = DirectoryPath;
 		Sweep();
 	}
 
