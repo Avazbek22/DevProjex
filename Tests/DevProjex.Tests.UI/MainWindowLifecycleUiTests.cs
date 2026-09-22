@@ -49,8 +49,9 @@ public sealed class MainWindowLifecycleUiTests
 			window.Show();
 			await UiTestDriver.WaitForConditionAsync(
 				window,
-				() => Directory.Exists(paths.RegistryDirectory) &&
-				      Directory.EnumerateFiles(paths.RegistryDirectory, "*.json").Any(),
+				() => GetPrivateFieldValue(window, new OwnedField(null, "_desktopControlServer")) is not null &&
+					  Directory.Exists(paths.RegistryDirectory) &&
+					  Directory.EnumerateFiles(paths.RegistryDirectory, "*.json").Any(),
 				"desktop control server publication",
 				TimeSpan.FromSeconds(2));
 
@@ -60,7 +61,7 @@ public sealed class MainWindowLifecycleUiTests
 			Assert.True(shutdownCompletedAtClosed);
 			Assert.Null(GetPrivateFieldValue(window, new OwnedField(null, "_desktopControlServer")));
 			Assert.False(Directory.Exists(paths.RegistryDirectory) &&
-			             Directory.EnumerateFiles(paths.RegistryDirectory, "*.json").Any());
+						 Directory.EnumerateFiles(paths.RegistryDirectory, "*.json").Any());
 		}
 		finally
 		{
@@ -122,7 +123,7 @@ public sealed class MainWindowLifecycleUiTests
 			await UiTestDriver.WaitForConditionAsync(
 				window,
 				() => !Directory.Exists(paths.RegistryDirectory) ||
-				      !Directory.EnumerateFiles(paths.RegistryDirectory, "*.json").Any(),
+					  !Directory.EnumerateFiles(paths.RegistryDirectory, "*.json").Any(),
 				"late desktop control server to be disposed",
 				TimeSpan.FromSeconds(2));
 			Assert.Null(GetPrivateFieldValue(window, new OwnedField(null, "_desktopControlServer")));

@@ -30,6 +30,10 @@ FROM mcr.microsoft.com/dotnet/runtime-deps:10.0-noble-chiseled-extra
 WORKDIR /app
 COPY --from=build /out/app/ ./
 COPY --from=build /out/receipt/ /payload-receipt/
-ENV PATH="/app:${PATH}"
+ENV PATH="/app:${PATH}" \
+    XDG_CONFIG_HOME="/tmp/devprojex/config" \
+    XDG_DATA_HOME="/tmp/devprojex/data" \
+    XDG_STATE_HOME="/tmp/devprojex/state" \
+    XDG_CACHE_HOME="/tmp/devprojex/cache"
 USER app
 ENTRYPOINT ["devprojex"]

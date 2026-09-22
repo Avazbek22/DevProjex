@@ -822,6 +822,10 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("-p:DevProjexGrammarDelivery=Content", dockerfile, StringComparison.Ordinal);
 		Assert.Contains("USER app", dockerfile, StringComparison.Ordinal);
 		Assert.Contains("ENTRYPOINT [\"devprojex\"]", dockerfile, StringComparison.Ordinal);
+		Assert.Contains("XDG_CONFIG_HOME=\"/tmp/devprojex/config\"", dockerfile, StringComparison.Ordinal);
+		Assert.Contains("XDG_DATA_HOME=\"/tmp/devprojex/data\"", dockerfile, StringComparison.Ordinal);
+		Assert.Contains("XDG_STATE_HOME=\"/tmp/devprojex/state\"", dockerfile, StringComparison.Ordinal);
+		Assert.Contains("XDG_CACHE_HOME=\"/tmp/devprojex/cache\"", dockerfile, StringComparison.Ordinal);
 		Assert.DoesNotContain("alpine", dockerfile, StringComparison.OrdinalIgnoreCase);
 
 		using var glama = JsonDocument.Parse(File.ReadAllText(Path.Combine(rootPath, "glama.json")));
