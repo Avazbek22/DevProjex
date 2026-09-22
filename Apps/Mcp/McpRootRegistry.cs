@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace DevProjex.Mcp;
 
 public sealed class McpRootRegistry
@@ -72,17 +74,23 @@ public sealed class McpRootRegistry
 			throw new McpToolException(
 				McpErrorCodes.UnknownProject,
 				$"{McpErrorCodes.UnknownProject}: 'project' is required because multiple roots are available. " +
-				$"Call list_projects and use a listed name or path: {FormatRoots()}.");
+				$"Call list_projects and use a listed project index: {FormatRoots()}.");
 		}
 		var requestedProject = project!;
+		if (TryParseProjectIndex(requestedProject, out var projectIndex))
+		{
+			if (projectIndex >= 1 && projectIndex <= _roots.Count)
+				return _roots[projectIndex - 1];
+			throw UnknownProject();
+		}
 		if (_rootsByName.TryGetValue(requestedProject, out var namedRoots))
 		{
 			if (namedRoots.Count == 1)
 				return namedRoots[0];
 			throw new McpToolException(
 				McpErrorCodes.UnknownProject,
-				$"{McpErrorCodes.UnknownProject}: project name '{requestedProject}' is ambiguous. " +
-				$"Call list_projects and use one of these paths: {string.Join(", ", namedRoots.Select(static root => $"'{root}'"))}.");
+				$"{McpErrorCodes.UnknownProject}: the project name is ambiguous. " +
+				$"Call list_projects and use one of these project indexes: {FormatIndexes(namedRoots)}.");
 		}
 
 		// A path that names a host is refused here, ahead of the resolution below rather than
@@ -99,7 +107,7 @@ public sealed class McpRootRegistry
 				$"{McpErrorCodes.InvalidArguments}: 'project' is written as a path that names a host. " +
 				"Such a form is refused before 'project' is resolved against the allowed roots, so that " +
 				"naming one cannot make the server reach it. " +
-				$"Call list_projects and use a listed name or path: {FormatRoots()}.");
+				$"Call list_projects and use a listed project index: {FormatRoots()}.");
 		}
 
 		string physical;
@@ -110,11 +118,21 @@ public sealed class McpRootRegistry
 		}
 		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
 		{
-			throw UnknownProject(requestedProject);
+			throw UnknownProject();
 		}
 
 		var match = _roots.FirstOrDefault(root => StringComparer.Ordinal.Equals(root, physical));
-		return match ?? throw UnknownProject(requestedProject);
+		return match ?? throw UnknownProject();
+	}
+
+	internal int GetProjectIndex(string physicalRoot)
+	{
+		for (var index = 0; index < _roots.Count; index++)
+		{
+			if (StringComparer.Ordinal.Equals(_roots[index], physicalRoot))
+				return index + 1;
+		}
+		throw UnknownProject();
 	}
 
 	/// <summary>
@@ -310,11 +328,11 @@ public sealed class McpRootRegistry
 		return path.StartsWith(prefix, StringComparison.Ordinal);
 	}
 
-	private McpToolException UnknownProject(string project) =>
+	private McpToolException UnknownProject() =>
 		new(
 			McpErrorCodes.UnknownProject,
-			$"{McpErrorCodes.UnknownProject}: project '{project}' is not an allowed root name or path. " +
-			$"Call list_projects and use a listed name or path: {FormatRoots()}.");
+			$"{McpErrorCodes.UnknownProject}: project is not an allowed root name, path, or index. " +
+			$"Call list_projects and use a listed project index: {FormatRoots()}.");
 
 	private McpToolException RootViolation(string path) =>
 		new(
@@ -328,9 +346,19 @@ public sealed class McpRootRegistry
 			$"{McpErrorCodes.InvalidArguments}: 'path' is not a valid filesystem path; " +
 			"provide a valid path inside the project.");
 
-	private string FormatRoots() => string.Join(
+	private string FormatRoots() => string.Join(", ", Enumerable.Range(1, _roots.Count).Select(static index => $"#{index}"));
+
+	private string FormatIndexes(IEnumerable<string> roots) => string.Join(
 		", ",
-		_roots.Select(static root => $"'{GetProjectName(root)}' ('{root}')"));
+		roots.Select(root => $"#{GetProjectIndex(root)}"));
+
+	private static bool TryParseProjectIndex(string project, out int index)
+	{
+		index = 0;
+		return project.Length > 1 &&
+			project[0] == '#' &&
+			int.TryParse(project.AsSpan(1), NumberStyles.None, CultureInfo.InvariantCulture, out index);
+	}
 
 	internal static string GetProjectName(string root)
 	{

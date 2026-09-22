@@ -361,6 +361,9 @@ session metadata, totals, delivered-path counts, and call rows, so a user can re
 evidence of what context was made available without retaining the returned file
 bodies. A delivered path is counted only when its text was actually returned, not
 when a stored result was merely prepared; `read_pack` accounts for the page it returns.
+If a stored source disappears before its protection count is captured, the journal
+records `unavailable` and keeps that count unknown instead of reporting a false zero;
+known counts on the same page are still accumulated.
 For multiple roots, exports retain the root number as part of path identity. GUI,
 Terminal Workspace, and CLI exports use the same receipt formatter. A recreated
 active journal is marked on its next event. If a call remains unwritten after bounded
@@ -434,18 +437,20 @@ with recording. The 0.036 ms difference was below the baseline spread.
   Private Data processing is added when the server starts with
   `--hide-private-data` or the active live profile enables it. Root paths in
   `list_projects` and project-derived details in tool errors remain data inside
-  the untrusted boundary; remote tools use the safe Git URL as the project address.
+  the untrusted boundary and are scanned as string values before JSON serialization;
+  remote tools use the safe Git URL as the project address. If a local name or path
+  is masked, its 1-based `index` remains a safe address such as `project: "#1"`.
   These addresses form the contract for the `project` argument. Without the
   flag, a pack retains real addresses like a default CLI export. With the flag,
   the pack is private-data-redacted in full, including its tree header.
-  File names and paths are address fields and are not masked by secret or
-  private-data protection. Callers need their literal values for `project`,
-  `path`, and `paths`; when response text contains project-controlled addresses,
-  they stay inside the per-response untrusted-data boundary.
+  File names and paths in content responses remain address fields; when response
+  text contains project-controlled addresses, they stay inside the per-response
+  untrusted-data boundary.
 - Searches run against content after mandatory secret redaction and any enabled
   private-data redaction, not the original file text. Static-dependency bodies
   produced by `related_files` first protect evidence at its source file and line,
-  omitting a dynamic evidence fragment when its safe origin cannot be retained,
+  consuming one transformed source at a time without retaining whole transformed
+  files across the scan. They omit a dynamic evidence fragment when its safe origin cannot be retained,
   and then pass through synthetic-document redaction before inline delivery or
   storage. Evidence, specifiers, and candidate paths cannot bypass the content
   policy.
@@ -540,13 +545,13 @@ description has to fit a budget rather than grow one silently.
 
 | Tool | Parameters | Result and limits |
 |---|---|---|
-| `list_projects` | none | Session inventory used for profiles, active policy, or choosing among several projects: allowed local roots with path, name, type, and profiles, plus the server `baseline`. The profile database is read once per call and `profilesStatus` reports an unavailable bounded read. The baseline reports secret/private-data policy and the optional remote-host allowlist. With one local root, project tools accept an omitted `project`; otherwise they accept a unique listed name or its absolute path. Remote projects are addressed by URL and are not added to this list. |
+| `list_projects` | none | Session inventory used for profiles, active policy, or choosing among several projects: allowed local roots with 1-based index, path, name, type, and profiles, plus the server `baseline`. String metadata is protected before JSON serialization. If a name or path is masked, use its stable address for this process, such as `project: "#1"`. The profile database is read once per call and `profilesStatus` reports an unavailable bounded read. The baseline reports secret/private-data policy and the optional remote-host allowlist. With one local root, project tools accept an omitted `project`; otherwise they accept a listed `#index`, a unique listed name, or its absolute path. Remote projects are addressed by URL and are not added to this list. |
 | `get_tree` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `max_depth?`, `format?` | Effective tree in `markdown` (default), `text`, `json`, or `xml`; at most 2,000 lines and 50,000 characters. Select several directories in one call with a brace pattern such as `include_patterns: ["src/middleware/{powered-by,body-limit,bearer-auth}/**"]` instead of walking each directory separately. Without `max_depth`, a large human-readable tree uses the deepest complete depth that fits. |
 | `analyze` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `detail_by_pattern?`, `tracked_only?`, `git_scope?`, `top_files?`, `max_file_bytes?`, `max_tokens?`, `rank?`, `focus?` | File, character, and token metrics plus the requested largest files by tokens. `contentMetrics` separates measured transformed bodies from size-based estimates; `documentMetrics` models `pack_context` with `view=content`, `format=text`, relative file headings, and its Root line. Every ranked file carries `estimated`; an uninspected one also carries `uninspected: true`. The `topFiles` array has a 32,000-character aggregate budget; `topFilesTruncated` and `topFilesRemaining` make any omission explicit. With `max_tokens` the result also carries `admission`: which files that budget would admit, from the same greedy pass `pack_context` uses and without producing content. `rank` and `focus` order that admission and are invalid without `max_tokens`. |
 | `pack_context` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `detail_by_pattern?`, `tracked_only?`, `git_scope?`, `max_tokens?`, `rank?`, `focus?`, `max_file_bytes?`, `view?`, `format?` | Exact DevProjex context pipeline. `max_tokens` measures the safe transformed selection, applies the ordinary token admission order, and materializes only admitted content without changing the budget report. `rank: "importance"` opts into importance-aware admission and document order; `focus` seeds graph-hop order within it. `detail_by_pattern` overrides `detail` per file. `full` adds no transformations; transformations enabled by the active profile still apply. Inline through 50,000 characters; otherwise returns a `pack_id` valid until this server process exits. After restart, call `pack_context` again. |
-| `read_pack` | `pack_id`, `start_line?`, `end_line?`, `start_column?` | Pages a stored result from `pack_context`, `search_project`, or `related_files`. Inclusive, 1-based line range; `start_column` continues within `start_line` using 1-based Unicode characters. At most 1,000 lines or 50,000 characters per call. An `end_line` after EOF is clamped and reported. Call the originating tool again after server restart or quota eviction. |
+| `read_pack` | `pack_id`, `start_line?`, `end_line?`, `start_column?` | Pages a stored result from `pack_context`, `search_project`, or `related_files`. Inclusive, 1-based line range; `start_column` continues within `start_line` using 1-based Unicode characters. At most 1,000 lines or 50,000 characters per call. An `end_line` after EOF is clamped and reported. A manual protection-policy change after storage fails with `DPX-MCP-STORED-PROTECTION-CHANGED` and requires rerunning the producing tool. If the current saved policy cannot be verified, `DPX-MCP-STORED-PROTECTION-UNAVAILABLE` fails closed until the selection becomes readable. A selection-only revision change keeps the stored page readable with its existing revision warning. Call the originating tool again after server restart or quota eviction. |
 | `search_project` | `project?`, `branch?`, `pattern`, `paths?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `max_results?` | Matches over safe transformed text, grouped by file: the relative path stands on its own line, then each line of the group is written as `line:text` for a match and `line-text` for context. Line numbers refer to that returned text after replacements. `search_project` matches file content only and never matches paths; use `get_tree` with `include_patterns` to find files by name. A bounded collector keeps stronger evidence from everything inspected instead of preserving arrival order. The returned match text is capped at 16,000 characters. Overlapping or adjacent context windows are merged and distinct groups use `--`. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200. The trusted `[Search boundary]` line distinguishes a complete result from every partial limit and reports inspected sources, encountered and retained matches, written matches, named declaration files, and continuation guidance. Actual text inserted by redaction never matches. |
-| `related_files` | `project?`, `branch?`, `path`, `direction?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `tracked_only?`, `git_scope?`, `max_file_bytes?` | Statically evidenced dependencies and dependents for one seed or up to 16 seeds. `direction` is `dependencies`, `dependents`, or `both` (default). The trusted `[Resolution]` line counts resolved, ambiguous, unresolved, and external edges for the call. Coverage distinguishes recognized supported languages from unsupported files and reports configuration diagnostics. Results larger than 50,000 characters use `read_pack`. |
+| `related_files` | `project?`, `branch?`, `path`, `direction?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `tracked_only?`, `git_scope?`, `max_file_bytes?` | Statically evidenced dependencies and dependents for one seed or up to 16 seeds. `direction` is `dependencies`, `dependents`, or `both` (default). The trusted `[Resolution]` line counts resolved, ambiguous, unresolved, and external edges for the call. Coverage distinguishes recognized supported languages from unsupported files and reports configuration diagnostics. Evidence protection consumes transformed sources one at a time under a cumulative 64 MiB source budget; sources outside that budget are not opened by this pass and their dynamic fragments become bounded generic reasons. Results larger than 50,000 characters use `read_pack`. |
 | `get_file` | `project?`, `branch?`, `profile?`, either `path` with `start_line?`, `end_line?`, `start_column?`, `symbol?`, or `requests` | Redacted text from one effective file or a batch of up to eight file requests and sixteen file selections. Every returned section starts with its path and returned line interval. A batch item with only `path` reads the whole file; `ranges` or `symbol` narrows it. Ranges are inclusive, each physical file is read and redacted once, overlaps merge, and every original range reports `ok`, `partial`, `not-returned`, or `unavailable` from its own returned coverage. Both forms share the 1,000-line/50,000-character limit. Coordinates refer to returned text after replacements. A non-empty file that cannot pass the 16 MiB mandatory-redaction boundary is withheld; the single form returns `DPX-MCP-PAYLOAD-TRUNCATED` and never returns an empty success, while batch output reports the count-only unavailable status. `profile` applies the same effective selection and transformations as `analyze` and `pack_context`. Markdown-escaped names copied from default `get_tree` are accepted (`\_` and other ASCII punctuation); use `format: "text"` to copy unescaped names. |
 
 On a server started with `--allow-agent-exclusions`, `get_tree`, `analyze`,
@@ -1530,10 +1535,12 @@ does not apply to `get_file`, which addresses one already-effective file. Its
 value is echoed in the effective-filter diagnostics of every tool that accepts
 the parameter.
 
-For the six project tools, `project` accepts a unique `name` from `list_projects`
-or that entry's absolute `path`. An ambiguous name returns
-`DPX-MCP-UNKNOWN-PROJECT` and asks for one of the listed paths; every unknown-project
-error names both accepted local forms. `project` may be a Git URL only when the server was
+For the six project tools, `project` accepts `#` plus the 1-based `index` from
+`list_projects`, a unique listed `name`, or that entry's absolute `path`. Index
+resolution happens before name and path resolution, and remains usable when protected
+metadata masks either string field. An ambiguous or unknown name returns
+`DPX-MCP-UNKNOWN-PROJECT` without echoing the supplied value and asks for a listed
+index. `project` may be a Git URL only when the server was
 started with `--allow-remote`. The optional `branch` is valid only with a URL.
 Remote checkouts are reused from RepoCache and remain pinned for this server
 session. `list_projects` continues to report only configured local roots.
@@ -1578,7 +1585,9 @@ allowlist; those are the hard authorization and protection ceilings.
 After lexical validation, a portable profile is opened through the same guarded
 root-jail handle as project content. Replacing it or one of its parent directories
 with a symbolic link or junction outside the root causes a request error instead
-of reading the external file.
+of reading the external file. The bounded document is staged only in the user's
+application-data root, in a managed directory that rejects symbolic links and
+junctions; Unix directory and file modes are `0700` and `0600` respectively.
 
 ## Detail Levels
 

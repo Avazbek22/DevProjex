@@ -600,6 +600,154 @@ public sealed class McpLiveContextStateTests
 		Assert.Contains("[Live context] revision 1 · 0 files selected in the window", response, StringComparison.Ordinal);
 	}
 
+	[Fact]
+	public void StoredResultAllowsSelectionChangeAndReportsTheOriginalRevision()
+	{
+		using var temporary = new TemporaryDirectory();
+		var store = new SequenceProfileStore(
+			Found(Profile(["src"])),
+			Found(Profile(["tests"])));
+		var state = new McpLiveContextState(
+			new McpRootRegistry([temporary.Path]),
+			() => store,
+			TimeSpan.Zero);
+		McpStoredResultContext stored;
+		using (state.BeginInvocation())
+		{
+			_ = state.ReadProfile(temporary.Path);
+			stored = Assert.IsType<McpStoredResultContext>(
+				state.RecordStoredResult(temporary.Path, McpStoredResultKind.Search));
+		}
+
+		using var invocation = state.BeginInvocation();
+		Assert.True(state.RefreshStoredResult(stored));
+		var response = Text(state.AppendNotices(McpToolResults.TextSuccess("stored")));
+
+		Assert.Contains("search result built at revision 1; window is at revision 2", response, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void StoredResultRejectsAChangedManualProtectionPolicy()
+	{
+		using var temporary = new TemporaryDirectory();
+		var initial = Profile(["src"]);
+		var protectedProfile = initial with
+		{
+			MarkedSecrets = [new MarkedSecretProfileEntry("v2:marked", "secret", 6)]
+		};
+		var store = new SequenceProfileStore(Found(initial), Found(protectedProfile));
+		var state = new McpLiveContextState(
+			new McpRootRegistry([temporary.Path]),
+			() => store,
+			TimeSpan.Zero);
+		McpStoredResultContext stored;
+		using (state.BeginInvocation())
+		{
+			_ = state.ReadProfile(temporary.Path);
+			stored = Assert.IsType<McpStoredResultContext>(
+				state.RecordStoredResult(temporary.Path, McpStoredResultKind.Search));
+		}
+
+		using var invocation = state.BeginInvocation();
+		var error = Assert.Throws<McpToolException>(() => state.RefreshStoredResult(stored));
+
+		Assert.Equal("DPX-MCP-STORED-PROTECTION-CHANGED", error.Code);
+		Assert.Equal(
+			"DPX-MCP-STORED-PROTECTION-CHANGED: the saved protection policy changed after this result was stored. " +
+			"Call search_project again before read_pack.",
+			error.Message);
+	}
+
+	[Fact]
+	public void StoredResultRejectsAChangedPrivateDataPolicy()
+	{
+		using var temporary = new TemporaryDirectory();
+		var initial = Profile(["src"]);
+		var protectedProfile = initial with
+		{
+			SelectedIgnoreOptions = [IgnoreOptionId.HidePrivateData]
+		};
+		var store = new SequenceProfileStore(Found(initial), Found(protectedProfile));
+		var state = new McpLiveContextState(
+			new McpRootRegistry([temporary.Path]),
+			() => store,
+			TimeSpan.Zero);
+		McpStoredResultContext stored;
+		using (state.BeginInvocation())
+		{
+			_ = state.ReadProfile(temporary.Path);
+			stored = Assert.IsType<McpStoredResultContext>(
+				state.RecordStoredResult(temporary.Path, McpStoredResultKind.Pack));
+		}
+
+		using var invocation = state.BeginInvocation();
+		var error = Assert.Throws<McpToolException>(() => state.RefreshStoredResult(stored));
+
+		Assert.Equal("DPX-MCP-STORED-PROTECTION-CHANGED", error.Code);
+		Assert.Contains("Call pack_context again before read_pack.", error.Message, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData(ProjectProfileLookupStatus.TemporarilyUnavailable)]
+	[InlineData(ProjectProfileLookupStatus.InvalidStorage)]
+	[InlineData(ProjectProfileLookupStatus.UnsupportedFutureSchema)]
+	public void StoredResultFailsClosedWhenCurrentProtectionCannotBeVerified(
+		ProjectProfileLookupStatus failureStatus)
+	{
+		using var temporary = new TemporaryDirectory();
+		var store = new SequenceProfileStore(
+			Found(Profile(["src"])),
+			new ProjectProfileLookupResult(failureStatus, null));
+		var state = new McpLiveContextState(
+			new McpRootRegistry([temporary.Path]),
+			() => store,
+			TimeSpan.Zero);
+		McpStoredResultContext stored;
+		using (state.BeginInvocation())
+		{
+			_ = state.ReadProfile(temporary.Path);
+			stored = Assert.IsType<McpStoredResultContext>(
+				state.RecordStoredResult(temporary.Path, McpStoredResultKind.Search));
+		}
+
+		using var invocation = state.BeginInvocation();
+		var error = Assert.Throws<McpToolException>(() => state.RefreshStoredResult(stored));
+
+		Assert.Equal("DPX-MCP-STORED-PROTECTION-UNAVAILABLE", error.Code);
+		Assert.Equal(
+			"DPX-MCP-STORED-PROTECTION-UNAVAILABLE: the current saved protection policy could not be verified. " +
+			"Retry read_pack after the saved selection is readable; do not use this stored result until then.",
+			error.Message);
+	}
+
+	[Fact]
+	public void StoredResultAllowsMissingProfileToBecomeSelectionOnlyProfile()
+	{
+		using var temporary = new TemporaryDirectory();
+		var store = new SequenceProfileStore(
+			new ProjectProfileLookupResult(ProjectProfileLookupStatus.Missing, null),
+			Found(Profile(["src"])));
+		var state = new McpLiveContextState(
+			new McpRootRegistry([temporary.Path]),
+			() => store,
+			TimeSpan.Zero);
+		McpStoredResultContext stored;
+		using (state.BeginInvocation())
+		{
+			_ = state.ReadProfile(temporary.Path);
+			stored = Assert.IsType<McpStoredResultContext>(
+				state.RecordStoredResult(temporary.Path, McpStoredResultKind.Search));
+		}
+
+		using var invocation = state.BeginInvocation();
+
+		Assert.True(state.RefreshStoredResult(stored));
+		Assert.Contains(
+			"search result built at revision 1; window is at revision 2",
+			Text(state.AppendNotices(McpToolResults.TextSuccess("stored"))),
+			StringComparison.Ordinal);
+	}
+
 	private static ProjectSelectionProfile Profile(IReadOnlyCollection<string>? selectedPaths) =>
 		new([], [], [], SelectedPaths: selectedPaths);
 

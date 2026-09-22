@@ -118,7 +118,7 @@ internal sealed class DevProjexMcpTools(
 	private McpProjectService Projects => projectService.Value;
 
 	[Description(
-		"Lists configured local projects, saved profiles, and baseline filters. Use it for profiles, active policy, or choosing among several roots; use get_tree instead for one project's structure. With one root, omit project in local calls rather than using this only for its name. Returns names, absolute paths, root types, profiles, and Git/exclusion policy. project accepts a unique listed name or path. This tool has no parameters; remote URLs belong only to project tools when enabled.")]
+		"Lists configured local projects, saved profiles, and baseline filters. Use it to choose among roots or inspect active policy; use get_tree for structure. Returns indexes, protected names and paths, root types, profiles, and Git/exclusion policy. Local project accepts #index, a unique listed name, or a path; remote URLs require opt-in. This tool has no parameters.")]
 	public Task<CallToolResult> ListProjects(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -150,11 +150,19 @@ internal sealed class DevProjexMcpTools(
 				}
 			}
 			var projectItems = validatedRoots
-				.Select(root => new
+				.Select(root =>
 				{
-					path = root,
-					name = ResolveProjectName(root),
-					type = McpProjectService.IsGitRepository(root) ? "git-repository" : "local-folder"
+					var path = McpToolResults.ProtectMetadataString(root);
+					var name = McpToolResults.ProtectMetadataString(ResolveProjectName(root));
+					return new
+					{
+						index = roots.GetProjectIndex(root),
+						path,
+						name,
+						type = McpProjectService.IsGitRepository(root) ? "git-repository" : "local-folder",
+						masked = !StringComparer.Ordinal.Equals(path, root) ||
+							!StringComparer.Ordinal.Equals(name, ResolveProjectName(root))
+					};
 				})
 				.ToArray();
 			var profileRootIdentities = validatedRoots
@@ -175,7 +183,11 @@ internal sealed class DevProjexMcpTools(
 				.Where(identity =>
 					profileCatalog.ProjectRoots.Contains(identity.Configured) ||
 					profileCatalog.ProjectRoots.Contains(identity.Physical))
-				.Select(identity => new { project = identity.Physical, name = "local" })
+				.Select(identity => new
+				{
+					project = McpToolResults.ProtectMetadataString(identity.Physical),
+					name = "local"
+				})
 				.ToArray();
 			// The baseline is server-wide, so the first call in the recommended sequence is
 			// where an agent learns which filters shape every later answer and whether it
@@ -199,13 +211,26 @@ internal sealed class DevProjexMcpTools(
 					hosts = remoteHosts?.Order(StringComparer.Ordinal).ToArray() ?? []
 				}
 			};
+			var maskedReferences = projectItems
+				.Where(static item => item.masked)
+				.Select(static item => $"project=\"#{item.index.ToString(CultureInfo.InvariantCulture)}\"")
+				.ToArray();
 			return McpToolResults.ProtectedJsonSuccess(new
 			{
-				projects = projectItems,
+				projects = projectItems.Select(static item => new
+				{
+					item.index,
+					item.path,
+					item.name,
+					item.type
+				}),
 				profiles,
 				profilesStatus = profileCatalog.Status,
 				baseline
-			});
+			},
+			maskedReferences.Length == 0
+				? null
+				: $"[Project reference] A project name or path was masked; use {string.Join(" or ", maskedReferences)}.");
 		});
 
 	[Description(
@@ -889,7 +914,7 @@ internal sealed class DevProjexMcpTools(
 		}, cancellationToken);
 
 	[Description(
-		"Reads one page of a stored result created by pack_context, search_project, or related_files in this server process. Use it with a returned pack_id; use pack_context instead, or related_files for dependencies, when none is valid. Returns untrusted data up to 1,000 lines or 50,000 characters with trusted continuation or range notes. pack_id is required; start_line and end_line are inclusive, and start_column continues within a long line, all 1-based.")]
+		"Reads one page of a stored result created by pack_context, search_project, or related_files. Use a returned pack_id; rerun the producing tool when none is valid. Returns untrusted data up to 1,000 lines or 50,000 characters with trusted continuation or range notes. Manual protection changes invalidate stored content; selection-only changes keep it readable with a warning. Ranges and columns are inclusive and 1-based.")]
 	public Task<CallToolResult> ReadPack(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -923,12 +948,14 @@ internal sealed class DevProjexMcpTools(
 			if (journalContext is not null)
 			{
 				var delivered = journalContext.PathsForPage(page.StartLine, page.EndLine);
+				if (delivered.Any(static item => !item.ProtectionKnown))
+					journal?.RecordNotice(AgentJournalNoticeCodes.Unavailable);
 				journal?.RecordDeliveredPaths(
 					journalContext.SourceRoot,
 					delivered.Select(static item => item.RelativePath));
 				journal?.RecordProtection(
-					delivered.Sum(static item => item.SecretsMasked),
-					delivered.Sum(static item => item.PrivateDataMasked));
+					delivered.Where(static item => item.ProtectionKnown).Sum(static item => item.SecretsMasked),
+					delivered.Where(static item => item.ProtectionKnown).Sum(static item => item.PrivateDataMasked));
 			}
 			return McpToolResults.TextSuccess(
 				AppendTrustedNotices(McpSpotlight.Wrap(page.Text), rangeNotice, characterLimitNotice),
@@ -1454,50 +1481,83 @@ internal sealed class DevProjexMcpTools(
 		if (evidence.Length == 0)
 			return related;
 
-		var sourcePaths = evidence
+		var candidateSourcePaths = evidence
 			.Select(item => Path.GetFullPath(item.Site.File, plan.SourceRoot))
-			.Where(File.Exists)
 			.Distinct(PathComparer.Default)
 			.Order(ProjectTreePathIdentity.CanonicalComparer)
 			.ToArray();
-		var transformed = new Dictionary<string, TransformedTextFile>(PathComparer.Default);
+		McpRelatedEvidenceRetentionDiagnostics.BeforeConsume(candidateSourcePaths);
+		var sourcePaths = new List<string>(candidateSourcePaths.Length);
+		long admittedSourceBytes = 0;
+		foreach (var sourcePath in candidateSourcePaths)
+		{
+			long sourceBytes;
+			try
+			{
+				sourceBytes = new FileInfo(sourcePath).Length;
+			}
+			catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+			{
+				continue;
+			}
+			if (!TryAdmitRelatedEvidenceSource(sourceBytes, ref admittedSourceBytes))
+				continue;
+			sourcePaths.Add(sourcePath);
+		}
+		var evidenceBySource = evidence
+			.GroupBy(item => Path.GetFullPath(item.Site.File, plan.SourceRoot), PathComparer.Default)
+			.ToDictionary(static group => group.Key, static group => group.ToArray(), PathComparer.Default);
+		var replacements = new Dictionary<string, string>(StringComparer.Ordinal);
+		var returnedRedactions = new Dictionary<string, int>(PathComparer.Default);
+		var processedSources = new HashSet<string>(PathComparer.Default);
 		SecretRedactionSnapshot? protectionSnapshot;
 		await using (var protectedSources = await Projects.ConsumeSearchTextAsync(
 			plan with { IncludedFiles = sourcePaths },
 			(file, _) =>
 			{
-				transformed[file.Path] = file;
+				using var retention = McpRelatedEvidenceRetentionDiagnostics.Retain(file.Content.Length);
+				processedSources.Add(file.Path);
+				if (!evidenceBySource.TryGetValue(file.Path, out var sourceEvidence))
+					return ValueTask.CompletedTask;
+				var redactedLines = new HashSet<int>();
+				foreach (var item in sourceEvidence)
+				{
+					cancellationToken.ThrowIfCancellationRequested();
+					if (TryReadLine(file.Content, item.Site.Line, out var line, out var start, out var end) &&
+						!file.ReplacementRanges.Any(range => range.Start < end && range.End > start) &&
+						line.Contains(item.Edge.Reference, StringComparison.Ordinal))
+					{
+						continue;
+					}
+					replacements[item.Reason] =
+						$"{RelatedEvidenceLabel(item.Edge.Layer)} at line {item.Site.Line.ToString(CultureInfo.InvariantCulture)}";
+					redactedLines.Add(item.Site.Line);
+				}
+				if (redactedLines.Count > 0)
+					returnedRedactions[file.Path] = CountRedactionsOnLines(file, redactedLines);
 				return ValueTask.CompletedTask;
 			},
 			cancellationToken).ConfigureAwait(false))
 		{
 			protectionSnapshot = protectedSources.Snapshot;
 		}
-
-		var replacements = new Dictionary<string, string>(StringComparer.Ordinal);
-		var returnedRedactions = new Dictionary<string, HashSet<int>>(PathComparer.Default);
-		foreach (var item in evidence)
+		var hasUnavailableSources = false;
+		foreach (var (sourcePath, sourceEvidence) in evidenceBySource)
 		{
-			cancellationToken.ThrowIfCancellationRequested();
-			var sourcePath = Path.GetFullPath(item.Site.File, plan.SourceRoot);
-			if (transformed.TryGetValue(sourcePath, out var source) &&
-				TryReadLine(source.Content, item.Site.Line, out var line, out var start, out var end) &&
-				!source.ReplacementRanges.Any(range => range.Start < end && range.End > start) &&
-				line.Contains(item.Edge.Reference, StringComparison.Ordinal))
-			{
+			if (processedSources.Contains(sourcePath))
 				continue;
-			}
-			replacements[item.Reason] =
-				$"{RelatedEvidenceLabel(item.Edge.Layer)} at line {item.Site.Line.ToString(CultureInfo.InvariantCulture)}";
-			if (!returnedRedactions.TryGetValue(sourcePath, out var lines))
+			hasUnavailableSources = true;
+			foreach (var item in sourceEvidence)
 			{
-				lines = [];
-				returnedRedactions[sourcePath] = lines;
+				replacements[item.Reason] =
+					$"{RelatedEvidenceLabel(item.Edge.Layer)} at line {item.Site.Line.ToString(CultureInfo.InvariantCulture)}";
 			}
-			lines.Add(item.Site.Line);
 		}
-		foreach (var (sourcePath, lines) in returnedRedactions)
-			journal?.RecordProtection(CountRedactionsOnLines(transformed[sourcePath], lines), protectionSnapshot);
+		if (hasUnavailableSources)
+			journal?.RecordNotice(AgentJournalNoticeCodes.Unavailable);
+
+		foreach (var redactionCount in returnedRedactions.Values)
+			journal?.RecordProtection(redactionCount, protectionSnapshot);
 		if (replacements.Count == 0)
 			return related;
 
@@ -1840,6 +1900,7 @@ internal sealed class DevProjexMcpTools(
 					.Select(static range => new McpStoredLineRange(range.StartLine, range.EndLine))
 					.ToArray(),
 				PathComparer.Default);
+		var hasUnknownProtection = false;
 		var storedPaths = paths
 			.Select(path => Path.IsPathFullyQualified(path)
 				? Path.GetFullPath(path)
@@ -1847,19 +1908,50 @@ internal sealed class DevProjexMcpTools(
 			.Distinct(PathComparer.Default)
 			.Select(path =>
 			{
-				var redactions = prepared?.GetFile(path).RedactedCount ?? 0;
-				var counts = ResolveProtectionCounts(redactions, prepared?.Snapshot);
+				var protection = TryGetPreparedRedactionCount(prepared, path);
+				if (!protection.Known)
+					hasUnknownProtection = true;
+				var counts = ResolveProtectionCounts(protection.Count, prepared?.Snapshot);
 				return new McpStoredJournalPath(
 					Path.GetRelativePath(plan.SourceRoot, path).Replace('\\', '/'),
 					counts.Secrets,
 					counts.PrivateData,
-					rangesByPath?.GetValueOrDefault(path) ?? []);
+					rangesByPath?.GetValueOrDefault(path) ?? [],
+					protection.Known);
 			})
 			.ToArray();
+		if (hasUnknownProtection)
+			journal?.RecordNotice(AgentJournalNoticeCodes.Unavailable);
 		return new McpStoredJournalContext(
 			plan.SourceRoot,
 			liveContext?.CurrentInvocationRevision(plan.SourceRoot),
 			storedPaths);
+	}
+
+	internal static bool TryAdmitRelatedEvidenceSource(long sourceBytes, ref long admittedBytes)
+	{
+		if (sourceBytes < 0 || sourceBytes > MaximumSearchInspectedBytes - admittedBytes)
+			return false;
+		admittedBytes += sourceBytes;
+		return true;
+	}
+
+	internal static McpPreparedProtectionCount TryGetPreparedRedactionCount(
+		PreparedSecretRedactionOutput? prepared,
+		string path)
+	{
+		if (prepared is null)
+			return new McpPreparedProtectionCount(0, Known: true);
+		try
+		{
+			return new McpPreparedProtectionCount(prepared.GetFile(path).RedactedCount, Known: true);
+		}
+		catch (KeyNotFoundException)
+		{
+			// A selected source can disappear after preparation. Preserve the stored result while
+			// keeping an unknown protection count distinct from a proven zero.
+			return new McpPreparedProtectionCount(0, Known: false);
+		}
 	}
 
 	private void RecordSearchProtection(
@@ -4903,3 +4995,111 @@ internal sealed class DevProjexMcpTools(
 	}
 
 }
+
+internal static class McpRelatedEvidenceRetentionDiagnostics
+{
+	private static readonly AsyncLocal<MeasurementState?> Current = new();
+	private static int activeMeasurements;
+
+	internal static Measurement BeginMeasurement(Action<IReadOnlyList<string>>? beforeConsume = null)
+	{
+		var state = new MeasurementState(beforeConsume);
+		var previous = Current.Value;
+		Current.Value = state;
+		Interlocked.Increment(ref activeMeasurements);
+		return new Measurement(state, previous);
+	}
+
+	internal static void BeforeConsume(IReadOnlyList<string> paths)
+	{
+		if (Volatile.Read(ref activeMeasurements) == 0 || Current.Value is not { } state)
+			return;
+		state.BeforeConsume?.Invoke(paths);
+	}
+
+	internal static IDisposable Retain(int characters)
+	{
+		if (Volatile.Read(ref activeMeasurements) == 0 || Current.Value is not { } state)
+			return EmptyLease.Instance;
+		Interlocked.Increment(ref state.SourceCount);
+		Interlocked.Add(ref state.LegacyRetainedCharacters, characters);
+		var retained = Interlocked.Add(ref state.StreamingRetainedCharacters, characters);
+		UpdateMaximum(ref state.PeakStreamingRetainedCharacters, retained);
+		return new RetentionLease(state, characters);
+	}
+
+	private static void UpdateMaximum(ref long target, long candidate)
+	{
+		var current = Volatile.Read(ref target);
+		while (candidate > current)
+		{
+			var observed = Interlocked.CompareExchange(ref target, candidate, current);
+			if (observed == current)
+				return;
+			current = observed;
+		}
+	}
+
+	internal sealed class Measurement : IDisposable
+	{
+		private readonly MeasurementState state;
+		private readonly MeasurementState? previous;
+		private bool disposed;
+
+		internal Measurement(MeasurementState state, MeasurementState? previous)
+		{
+			this.state = state;
+			this.previous = previous;
+		}
+
+		internal McpRelatedEvidenceRetentionSnapshot Snapshot => new(
+			Volatile.Read(ref state.SourceCount),
+			Volatile.Read(ref state.LegacyRetainedCharacters),
+			Volatile.Read(ref state.PeakStreamingRetainedCharacters));
+
+		public void Dispose()
+		{
+			if (disposed)
+				return;
+			disposed = true;
+			if (ReferenceEquals(Current.Value, state))
+				Current.Value = previous;
+			Interlocked.Decrement(ref activeMeasurements);
+		}
+	}
+
+	private sealed class RetentionLease(MeasurementState state, int characters) : IDisposable
+	{
+		private int disposed;
+
+		public void Dispose()
+		{
+			if (Interlocked.Exchange(ref disposed, 1) == 0)
+				Interlocked.Add(ref state.StreamingRetainedCharacters, -characters);
+		}
+	}
+
+	private sealed class EmptyLease : IDisposable
+	{
+		internal static readonly EmptyLease Instance = new();
+		public void Dispose()
+		{
+		}
+	}
+
+	internal sealed class MeasurementState(Action<IReadOnlyList<string>>? beforeConsume)
+	{
+		internal Action<IReadOnlyList<string>>? BeforeConsume { get; } = beforeConsume;
+		internal long SourceCount;
+		internal long LegacyRetainedCharacters;
+		internal long StreamingRetainedCharacters;
+		internal long PeakStreamingRetainedCharacters;
+	}
+}
+
+internal sealed record McpRelatedEvidenceRetentionSnapshot(
+	long SourceCount,
+	long LegacyRetainedCharacters,
+	long PeakStreamingRetainedCharacters);
+
+internal readonly record struct McpPreparedProtectionCount(int Count, bool Known);

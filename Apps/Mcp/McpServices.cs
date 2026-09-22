@@ -77,7 +77,7 @@ internal sealed class McpServices : IDisposable
 		var contentAnalyzer = new FileContentAnalyzer(guardedFileOpener.OpenRead);
 		var preparedContentAnalyzer = new FileContentAnalyzer();
 		var resolvedDataPath = appDataPathProvider ??
-		                       DevProjex.Infrastructure.Persistence.UserDataPathResolver.GetConfigurationRoot;
+							   DevProjex.Infrastructure.Persistence.UserDataPathResolver.GetConfigurationRoot;
 		var profileStore = new ProjectProfileStore(resolvedDataPath);
 		var persistentIdentity = new PersistentSecretIdentityProvider(resolvedDataPath);
 		SecretRedactionSession redactionSession;
@@ -146,7 +146,11 @@ internal sealed class McpServices : IDisposable
 				contentAnalyzer,
 				new ProjectSelectionResolver(
 					profileStore,
-					(path, token) => LoadPortableProfileAsync(guardedFileOpener, path, token)),
+					(path, token) => LoadPortableProfileAsync(
+						guardedFileOpener,
+						resolvedDataPath(),
+						path,
+						token)),
 				profileStore,
 				new GitScopePathProvider(gitPathComparisonSemanticsResolver),
 				redactionSession,
@@ -165,11 +169,11 @@ internal sealed class McpServices : IDisposable
 
 	private static async Task<ProjectSelectionSpec> LoadPortableProfileAsync(
 		McpRootJailFileStreamOpener guardedFileOpener,
+		string userDataRoot,
 		string path,
 		CancellationToken cancellationToken)
 	{
-		var stagingDirectory = Path.Combine(Path.GetTempPath(), "DevProjex", "McpProfiles");
-		Directory.CreateDirectory(stagingDirectory);
+		var stagingDirectory = CreatePrivateProfileStagingDirectory(userDataRoot);
 		var stagingPath = Path.Combine(stagingDirectory, $"{Guid.NewGuid():N}.json");
 		try
 		{
@@ -178,35 +182,31 @@ internal sealed class McpServices : IDisposable
 				16 * 1024,
 				FileShare.ReadWrite | FileShare.Delete,
 				asynchronous: true))
-			await using (var destination = new FileStream(
-				stagingPath,
-				FileMode.CreateNew,
-				FileAccess.Write,
-				FileShare.None,
-				16 * 1024,
-				FileOptions.Asynchronous | FileOptions.SequentialScan))
 			{
-				var buffer = new byte[16 * 1024];
-				long copied = 0;
-				try
+				await using (var destination = CreatePrivateProfileStagingFile(stagingPath))
 				{
-					while (true)
+					var buffer = new byte[16 * 1024];
+					long copied = 0;
+					try
 					{
-						var read = await source.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
-						if (read == 0)
-							break;
-						copied += read;
-						if (copied > 4L * 1024 * 1024)
-							throw new PortableProjectProfileException(
-								"DPX-CLI-PROFILE-INVALID",
-								"The portable profile could not be read.");
-						await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken)
-							.ConfigureAwait(false);
+						while (true)
+						{
+							var read = await source.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+							if (read == 0)
+								break;
+							copied += read;
+							if (copied > 4L * 1024 * 1024)
+								throw new PortableProjectProfileException(
+									"DPX-CLI-PROFILE-INVALID",
+									"The portable profile could not be read.");
+							await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken)
+								.ConfigureAwait(false);
+						}
 					}
-				}
-				finally
-				{
-					System.Security.Cryptography.CryptographicOperations.ZeroMemory(buffer);
+					finally
+					{
+						System.Security.Cryptography.CryptographicOperations.ZeroMemory(buffer);
+					}
 				}
 			}
 			return await new PortableProjectProfileService()
@@ -227,6 +227,58 @@ internal sealed class McpServices : IDisposable
 			{
 			}
 		}
+	}
+
+	internal static string CreatePrivateProfileStagingDirectory(string userDataRoot)
+	{
+		var fullDataRoot = Path.GetFullPath(userDataRoot);
+		if (Directory.Exists(fullDataRoot) &&
+			(File.GetAttributes(fullDataRoot) & FileAttributes.ReparsePoint) != 0)
+		{
+			throw UnsafeProfileStagingDirectory();
+		}
+		Directory.CreateDirectory(fullDataRoot);
+		if ((File.GetAttributes(fullDataRoot) & FileAttributes.ReparsePoint) != 0)
+			throw UnsafeProfileStagingDirectory();
+		var stagingRoot = Path.Combine(fullDataRoot, "mcp-profile-staging");
+		if (Directory.Exists(stagingRoot) &&
+			(File.GetAttributes(stagingRoot) & FileAttributes.ReparsePoint) != 0)
+		{
+			throw UnsafeProfileStagingDirectory();
+		}
+		if (OperatingSystem.IsWindows())
+			Directory.CreateDirectory(stagingRoot);
+		else
+			Directory.CreateDirectory(stagingRoot, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+		if ((File.GetAttributes(stagingRoot) & FileAttributes.ReparsePoint) != 0)
+			throw UnsafeProfileStagingDirectory();
+		if (!OperatingSystem.IsWindows())
+		{
+			File.SetUnixFileMode(
+				stagingRoot,
+				UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+		}
+		return stagingRoot;
+	}
+
+	private static PortableProjectProfileException UnsafeProfileStagingDirectory() =>
+		new(
+			"DPX-CLI-PROFILE-INVALID",
+			"The portable profile staging directory is unsafe.");
+
+	internal static FileStream CreatePrivateProfileStagingFile(string stagingPath)
+	{
+		var options = new FileStreamOptions
+		{
+			Mode = FileMode.CreateNew,
+			Access = FileAccess.Write,
+			Share = FileShare.None,
+			BufferSize = 16 * 1024,
+			Options = FileOptions.Asynchronous | FileOptions.SequentialScan
+		};
+		if (!OperatingSystem.IsWindows())
+			options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+		return new FileStream(stagingPath, options);
 	}
 
 	public void Dispose()
