@@ -995,6 +995,157 @@ public sealed class TerminalWorkspaceContractTests
 	}
 
 	[Fact]
+	public async Task DelayedSettingsBarrierBuildsCopyPayloadFromThePublishedRedactedPlan()
+	{
+		const string secret = "ghp_a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL";
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("src/Secrets.cs", secret);
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+		var baseline = state.Plan;
+		var selection = state.BuildSelection() with { HideSecrets = true };
+		var releaseRefresh = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var stateChanged = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var hasDraft = true;
+		var outcome = TerminalWorkspaceSession.SettingsRefreshOutcome.Pending;
+		Task? pendingRefresh = null;
+		var payloadBuilderCalls = 0;
+		string? clipboard = null;
+
+		async Task RefreshAsync()
+		{
+			await releaseRefresh.Task;
+			try
+			{
+				var result = await controller.BuildSettingsPlanAsync(
+					baseline,
+					selection,
+					state.ExtensionOptionStates,
+					state.BuildSelectedItemRelativePaths(),
+					state.PathOptionStates,
+					TestContext.Current.CancellationToken);
+				controller.ApplySettingsPlan(state, result);
+				outcome = TerminalWorkspaceSession.SettingsRefreshOutcome.Applied;
+			}
+			catch
+			{
+				outcome = TerminalWorkspaceSession.SettingsRefreshOutcome.Failed;
+				throw;
+			}
+			finally
+			{
+				hasDraft = false;
+				pendingRefresh = null;
+				stateChanged.SetResult();
+			}
+		}
+
+		async Task CopyAsync()
+		{
+			await TerminalWorkspaceSession.AwaitLatestSettingsRefreshAsync(
+				() => (pendingRefresh, hasDraft, stateChanged.Task, 1, outcome),
+				TestContext.Current.CancellationToken);
+			payloadBuilderCalls++;
+			clipboard = await controller.BuildCopyPayloadAsync(
+				state,
+				ProjectContextView.Content,
+				ProjectContextDocumentFormat.Text,
+				TestContext.Current.CancellationToken);
+		}
+
+		var refresh = RefreshAsync();
+		pendingRefresh = refresh;
+		var copy = CopyAsync();
+		await Task.Yield();
+		Assert.Equal(0, payloadBuilderCalls);
+		Assert.Null(clipboard);
+
+		releaseRefresh.SetResult();
+		await Task.WhenAll(refresh, copy);
+
+		Assert.Equal(1, payloadBuilderCalls);
+		Assert.NotNull(clipboard);
+		Assert.DoesNotContain(secret, clipboard, StringComparison.Ordinal);
+		Assert.Contains("DEVPROJEX_REDACTED[github-pat#1]", clipboard, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task DelayedSettingsBarrierSavesThePublishedSelectionInThePortableProfile()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("src/App.cs", "class App {}");
+		var destination = Path.Combine(workspace.Path, "selection.json");
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+		var baseline = state.Plan;
+		var selection = state.BuildSelection() with { HideSecrets = true };
+		var releaseRefresh = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var stateChanged = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var hasDraft = true;
+		var outcome = TerminalWorkspaceSession.SettingsRefreshOutcome.Pending;
+		Task? pendingRefresh = null;
+
+		async Task RefreshAsync()
+		{
+			await releaseRefresh.Task;
+			try
+			{
+				var result = await controller.BuildSettingsPlanAsync(
+					baseline,
+					selection,
+					state.ExtensionOptionStates,
+					state.BuildSelectedItemRelativePaths(),
+					state.PathOptionStates,
+					TestContext.Current.CancellationToken);
+				controller.ApplySettingsPlan(state, result);
+				outcome = TerminalWorkspaceSession.SettingsRefreshOutcome.Applied;
+			}
+			finally
+			{
+				hasDraft = false;
+				pendingRefresh = null;
+				stateChanged.SetResult();
+			}
+		}
+
+		async Task SaveAsync()
+		{
+			await TerminalWorkspaceSession.AwaitLatestSettingsRefreshAsync(
+				() => (pendingRefresh, hasDraft, stateChanged.Task, 1, outcome),
+				TestContext.Current.CancellationToken);
+			await controller.SavePortableProfileAsync(
+				state,
+				destination,
+				overwrite: false,
+				TestContext.Current.CancellationToken);
+		}
+
+		var refresh = RefreshAsync();
+		pendingRefresh = refresh;
+		var save = SaveAsync();
+		await Task.Yield();
+		Assert.False(File.Exists(destination));
+
+		releaseRefresh.SetResult();
+		await Task.WhenAll(refresh, save);
+
+		var portableProfile = await File.ReadAllTextAsync(
+			destination,
+			TestContext.Current.CancellationToken);
+		Assert.Contains("\"hideSecrets\": true", portableProfile, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void CopyPayloadRejectsAnOversizedDocumentBeforeReadingItsText()
 	{
 		using var document = new NonMaterializablePreviewDocument(
@@ -1006,7 +1157,7 @@ public sealed class TerminalWorkspaceContractTests
 	}
 
 	[Fact]
-	public async Task BuildCurrentPlanPublishesTheReprojectedPlanToWorkspaceState()
+	public async Task BuildCurrentPlanReturnsAReprojectedPlanWithoutPublishingIt()
 	{
 		using var workspace = new TemporaryDirectory();
 		workspace.WriteFile("kept.cs", "class Kept {}");
@@ -1029,8 +1180,11 @@ public sealed class TerminalWorkspaceContractTests
 			state,
 			TestContext.Current.CancellationToken);
 
-		Assert.Same(rebuilt, state.Plan);
+		Assert.NotSame(rebuilt, state.Plan);
 		Assert.DoesNotContain(
+			rebuilt.IncludedFiles,
+			path => Path.GetFileName(path) == "cleared.cs");
+		Assert.Contains(
 			state.Plan.IncludedFiles,
 			path => Path.GetFileName(path) == "cleared.cs");
 	}

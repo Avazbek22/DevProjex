@@ -253,7 +253,7 @@ public sealed class TerminalSelectionEvolutionPtyTests
 	}
 
 	[Fact(Timeout = 60_000)]
-	public async Task ExitCancelsBlockedSettingsRefresh()
+	public async Task ExitWaitsForBlockedSettingsRefresh()
 	{
 		using var project = CreateGitIgnoreProject();
 		string? dataRoot = null;
@@ -277,7 +277,19 @@ public sealed class TerminalSelectionEvolutionPtyTests
 			GetCheckpointRoot(dataRoot),
 			"background-refresh");
 
-		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
+		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"OK",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenWithoutAsync(
+			"OK",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Building tree",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.False(terminal.HasExited);
+		ReleaseCheckpoint(GetCheckpointRoot(dataRoot), "background-refresh");
 
 		Assert.Equal(
 			CommandLineExitCodes.Success,
