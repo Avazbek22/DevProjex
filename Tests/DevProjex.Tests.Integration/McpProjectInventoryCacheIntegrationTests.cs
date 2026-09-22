@@ -80,14 +80,17 @@ public sealed class McpProjectInventoryCacheIntegrationTests
 		var profileStore = new ProjectProfileStore(() => Path.Combine(workspace.Path, "app-data"));
 		profileStore.SaveProfile(project, new ProjectSelectionProfile([], [], [], SelectedPaths: ["src"]));
 		var buildCount = 0;
+		McpProjectService? service = null;
 		await using var harness = CreateHarness(
 			project,
 			(_, _) =>
 			{
 				Interlocked.Increment(ref buildCount);
+				DisableWatcher(service!);
 				return ValueTask.CompletedTask;
 			},
 			live: true);
+		service = harness.Service;
 
 		var initial = await BuildAsync(harness.Service);
 		var buildsAfterInitial = buildCount;
