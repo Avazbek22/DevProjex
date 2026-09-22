@@ -328,7 +328,7 @@ internal sealed class TerminalWorkspaceCommandLineView : View
 		{
 			_applyingCompletion = false;
 		}
-		UpdateGhost();
+		UpdateGhost(prefetchCompletion: false);
 	}
 
 	private void SetInputText(string text)
@@ -347,7 +347,7 @@ internal sealed class TerminalWorkspaceCommandLineView : View
 		UpdateGhost();
 	}
 
-	private void UpdateGhost()
+	private void UpdateGhost(bool prefetchCompletion = true)
 	{
 		var text = InputText;
 		if (!IsEditing || _input.InsertionPoint < text.EnumerateRunes().Count())
@@ -364,7 +364,7 @@ internal sealed class TerminalWorkspaceCommandLineView : View
 			text,
 			cursorPosition);
 		RenderGhost(completion.GhostSuffix, completion.SchemaKey);
-		if (_prefetchCompletion)
+		if (_prefetchCompletion && prefetchCompletion)
 		{
 			ScheduleCompletion(
 				new CompletionRequestKey(text, cursorPosition),

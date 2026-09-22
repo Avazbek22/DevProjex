@@ -1078,8 +1078,9 @@ public sealed class TerminalWorkspaceContractTests
 	public async Task DelayedSettingsBarrierSavesThePublishedSelectionInThePortableProfile()
 	{
 		using var workspace = new TemporaryDirectory();
+		using var output = new TemporaryDirectory();
 		workspace.WriteFile("src/App.cs", "class App {}");
-		var destination = Path.Combine(workspace.Path, "selection.json");
+		var destination = Path.Combine(output.Path, "selection.json");
 		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
 			.Create(AppLanguage.En);
 		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
