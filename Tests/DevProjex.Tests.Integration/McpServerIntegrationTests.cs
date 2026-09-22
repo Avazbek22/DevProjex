@@ -3309,11 +3309,11 @@ public sealed partial class McpServerIntegrationTests
 		Assert.Equal(1, git.CloneCallCount);
 		Assert.True(jail.IsError);
 		Assert.Contains(McpErrorCodes.RootViolation, Text(jail), StringComparison.Ordinal);
-		Assert.Contains(repositoryUrl, Text(jail), StringComparison.Ordinal);
+		Assert.DoesNotContain(repositoryUrl, Text(jail), StringComparison.Ordinal);
 		Assert.DoesNotContain(cachePath, Text(jail), PathComparison);
 		Assert.True(missingBranch.IsError);
 		Assert.Contains(McpErrorCodes.RemoteFailed, Text(missingBranch), StringComparison.Ordinal);
-		Assert.DoesNotContain(repositoryUrl, Text(listed), StringComparison.Ordinal);
+		Assert.DoesNotContain(repositoryUrl, AllText(listed), StringComparison.Ordinal);
 	}
 
 	[Fact]
