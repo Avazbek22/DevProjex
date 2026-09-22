@@ -60,7 +60,7 @@ public static class StoreUserDataMigration
 				ProductFolderName);
 			if (!Directory.Exists(source))
 				return StoreUserDataMigrationStatus.NotApplicable;
-			UserDataPathResolver.EnsurePhysicalDirectory(source, createIfMissing: false);
+			ValidatePhysicalTree(source);
 			if (!HasInitializedData(source))
 				return StoreUserDataMigrationStatus.NotApplicable;
 
@@ -74,7 +74,7 @@ public static class StoreUserDataMigration
 				return StoreUserDataMigrationStatus.AlreadyInitialized;
 			if (Directory.Exists(destination))
 			{
-				UserDataPathResolver.EnsurePhysicalDirectory(destination, createIfMissing: false);
+				ValidatePhysicalTree(destination);
 				if (HasInitializedData(destination))
 				{
 					WriteCompletionMarker(completionMarker);
