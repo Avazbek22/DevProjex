@@ -11,6 +11,128 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 	[Theory]
 	[InlineData(ProjectCopyExportFormat.Folder)]
 	[InlineData(ProjectCopyExportFormat.Zip)]
+	public async Task ProtectedExportRejectsSecretProjectNameBeforeCreatingDestination(
+		ProjectCopyExportFormat format)
+	{
+		const string secret = "SENSITIVE_KEY";
+		using var workspace = new TemporaryDirectory();
+		var sourceRoot = workspace.CreateDirectory("source");
+		var outputRoot = workspace.CreateDirectory("output");
+		var sourceFile = workspace.CreateFile(Path.Combine("source", "readme.txt"), "safe");
+		var tree = new TreeNodeDescriptor(
+			"source",
+			sourceRoot,
+			true,
+			false,
+			"folder",
+			[new TreeNodeDescriptor("readme.txt", sourceFile, false, false, "file", [])]);
+		var destination = Path.Combine(outputRoot, format == ProjectCopyExportFormat.Zip ? "copy.zip" : "copy");
+		using var session = new SecretRedactionSession(new ExactValueDetector(secret));
+		var service = new ProjectCopyExportService(
+			new ProjectCopyExportPlanBuilder(),
+			new FileContentAnalyzer(),
+			session);
+
+		var exception = await Assert.ThrowsAsync<ProjectCopyExportException>(() => service.ExportAsync(
+			new ProjectCopyExportRequest(
+				sourceRoot,
+				"Sample-" + secret,
+				tree,
+				new HashSet<string>(PathComparer.Default),
+				destination,
+				format,
+				ProjectCopyDestinationMode.Exact,
+				RedactSecrets: true),
+			cancellationToken: TestContext.Current.CancellationToken));
+
+		Assert.Equal(ProjectCopyExportError.SecretDetectionFailed, exception.Error);
+		Assert.Equal(
+			"Protected project copy metadata contains sensitive data. No project copy was created.",
+			exception.Message);
+		Assert.DoesNotContain(secret, exception.ToString(), StringComparison.Ordinal);
+		Assert.False(File.Exists(destination));
+		Assert.False(Directory.Exists(destination));
+	}
+
+	[Fact]
+	public async Task ProtectedExportPreflightRejectsSecretRelativePathWithoutDisclosingIt()
+	{
+		const string secret = "SENSITIVE_KEY";
+		using var workspace = new TemporaryDirectory();
+		var sourceRoot = workspace.CreateDirectory("source");
+		var relativePath = Path.Combine("src", secret + ".txt");
+		var sourceFile = workspace.CreateFile(Path.Combine("source", relativePath), "safe");
+		var tree = new TreeNodeDescriptor(
+			"source",
+			sourceRoot,
+			true,
+			false,
+			"folder",
+			[new TreeNodeDescriptor(Path.GetFileName(sourceFile), sourceFile, false, false, "file", [])]);
+		using var session = new SecretRedactionSession(new ExactValueDetector(secret));
+		var service = new ProjectCopyExportService(
+			new ProjectCopyExportPlanBuilder(),
+			new FileContentAnalyzer(),
+			session);
+
+		var exception = await Assert.ThrowsAsync<ProjectCopyExportException>(() => service.PreflightAsync(
+			new ProjectCopyExportRequest(
+				sourceRoot,
+				"Sample",
+				tree,
+				new HashSet<string>(PathComparer.Default),
+				Path.Combine(workspace.Path, "copy.zip"),
+				ProjectCopyExportFormat.Zip,
+				RedactSecrets: true),
+			TestContext.Current.CancellationToken));
+
+		Assert.Equal(ProjectCopyExportError.SecretDetectionFailed, exception.Error);
+		Assert.Equal(
+			"Protected project copy metadata contains sensitive data. No project copy was created.",
+			exception.Message);
+		Assert.DoesNotContain(secret, exception.ToString(), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task ProtectedStreamedZipRejectsSecretMetadataBeforeWritingBytes()
+	{
+		const string secret = "SENSITIVE_KEY";
+		using var workspace = new TemporaryDirectory();
+		var sourceRoot = workspace.CreateDirectory("source");
+		var sourceFile = workspace.CreateFile(Path.Combine("source", "readme.txt"), "safe");
+		var tree = new TreeNodeDescriptor(
+			"source",
+			sourceRoot,
+			true,
+			false,
+			"folder",
+			[new TreeNodeDescriptor("readme.txt", sourceFile, false, false, "file", [])]);
+		using var session = new SecretRedactionSession(new ExactValueDetector(secret));
+		var service = new ProjectCopyExportService(
+			new ProjectCopyExportPlanBuilder(),
+			new FileContentAnalyzer(),
+			session);
+		await using var destination = new MemoryStream();
+
+		var exception = await Assert.ThrowsAsync<ProjectCopyExportException>(() => service.ExportZipToStreamAsync(
+			new ProjectCopyExportRequest(
+				sourceRoot,
+				"Sample-" + secret,
+				tree,
+				new HashSet<string>(PathComparer.Default),
+				"ignored.zip",
+				ProjectCopyExportFormat.Zip,
+				RedactSecrets: true),
+			destination,
+			cancellationToken: TestContext.Current.CancellationToken));
+
+		Assert.Equal(ProjectCopyExportError.SecretDetectionFailed, exception.Error);
+		Assert.Equal(0, destination.Length);
+	}
+
+	[Theory]
+	[InlineData(ProjectCopyExportFormat.Folder)]
+	[InlineData(ProjectCopyExportFormat.Zip)]
 	[UnsupportedOSPlatform("windows")]
 	public async Task ExportPreservesSafeUnixModesAndExecutableBits(ProjectCopyExportFormat format)
 	{
@@ -2064,6 +2186,20 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 			new(
 				new HashSet<string>(folders, StringComparer.OrdinalIgnoreCase),
 				new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+	}
+
+	private sealed class ExactValueDetector(string secret) : ISecretDetector
+	{
+		public IReadOnlyList<DetectedSecret> Detect(
+			string repositoryRelativePath,
+			string content,
+			CancellationToken cancellationToken = default)
+		{
+			var index = content.IndexOf(secret, StringComparison.Ordinal);
+			return index < 0
+				? []
+				: [new DetectedSecret("exact-value", index, secret.Length, secret, RuleOrder: 0)];
+		}
 	}
 
 	private sealed class ProjectCopyWorkspace : IDisposable
