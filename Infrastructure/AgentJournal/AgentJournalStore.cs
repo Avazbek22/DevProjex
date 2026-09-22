@@ -70,7 +70,8 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 
 	public AgentJournalRetentionPolicy Retention { get; }
 
-	public string DirectoryPath => Path.Combine(stateRoot(), "agent-journal");
+	public string DirectoryPath =>
+		UserDataPathResolver.EnsurePhysicalServiceDirectory(stateRoot(), "agent-journal");
 
 	public static string CreateSessionId(DateTimeOffset startedUtc, int pid)
 	{
@@ -842,26 +843,56 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 		var cutoff = clock.GetUtcNow() - Retention.MaximumAge;
 		var live = ActiveSessionKeys();
 		var files = EnumerateSessionFiles()
-			.Select(path => new FileInfo(path))
+			.Select(TryCreateRetentionCandidate)
+			.Where(static candidate => candidate is not null)
+			.Cast<RetentionCandidate>()
 			.OrderByDescending(static file => file.LastWriteTimeUtc)
-			.ThenByDescending(static file => file.Name, StringComparer.Ordinal)
+			.ThenByDescending(static file => file.Path, StringComparer.Ordinal)
 			.ToArray();
 		for (var index = 0; index < files.Length; index++)
 		{
 			if (index < Retention.MaximumSessions && files[index].LastWriteTimeUtc >= cutoff.UtcDateTime)
 				continue;
-			if (!TryReadSessionHeader(files[index].FullName, out var session) ||
-				session is not null && IsActive(session, live))
-			{
+			if (IsActive(files[index].Session, live))
 				continue;
-			}
 			try
 			{
-				files[index].Delete();
+				File.Delete(files[index].Path);
 			}
 			catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
 			{
 			}
+		}
+	}
+
+	private static RetentionCandidate? TryCreateRetentionCandidate(string path)
+	{
+		try
+		{
+			var attributes = File.GetAttributes(path);
+			if ((attributes & (FileAttributes.ReparsePoint | FileAttributes.Directory)) != 0 ||
+				!TryReadSessionHeader(path, out var session) ||
+				session is null ||
+				!SessionIdPattern().IsMatch(session.Id) ||
+				!StringComparer.Ordinal.Equals(session.Id, CreateSessionId(session.StartedUtc, session.Pid)) ||
+				!StringComparer.Ordinal.Equals(Path.GetFileName(path), session.Id + ".jsonl") ||
+				session.Pid <= 0 ||
+				session.Roots is null or { Count: 0 } ||
+				session.Roots.Count > 256 ||
+				session.Roots.Any(static root => !Path.IsPathFullyQualified(root.ConfiguredPath)))
+			{
+				return null;
+			}
+			return new RetentionCandidate(path, File.GetLastWriteTimeUtc(path), session);
+		}
+		catch (Exception exception) when (exception is
+			   IOException or
+			   UnauthorizedAccessException or
+			   System.Security.SecurityException or
+			   ArgumentException or
+			   NotSupportedException)
+		{
+			return null;
 		}
 	}
 
@@ -1166,6 +1197,11 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 			AgentJournalSessionHistory.Attach(Session, AgentJournalSessionHistory.FromCalls(calls));
 		}
 	}
+
+	private sealed record RetentionCandidate(
+		string Path,
+		DateTime LastWriteTimeUtc,
+		AgentJournalSession Session);
 
 	private sealed record TailReadResult(
 		long Offset,

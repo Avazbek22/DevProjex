@@ -22,11 +22,16 @@ public sealed class LiveSessionRegistry(
 	public static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(5);
 	public static readonly TimeSpan StaleHeartbeatAge = TimeSpan.FromSeconds(15);
 	private const int MaximumRecordBytes = 64 * 1024;
+	private const int MaximumRegistryEntries = 1_024;
+	private const int MaximumClientNameCharacters = 256;
+	private const int MaximumClientVersionCharacters = 128;
+	private const int MaximumRootCharacters = 4_096;
 	private readonly Func<string> stateRoot = stateRootProvider ?? UserDataPathResolver.GetStateRoot;
 	private readonly TimeProvider clock = timeProvider ?? TimeProvider.System;
 	private readonly Func<int, DateTimeOffset?> processStart = processStartProvider ?? TryGetProcessStartUtc;
 
-	public string DirectoryPath => Path.Combine(stateRoot(), "live-sessions");
+	public string DirectoryPath =>
+		UserDataPathResolver.EnsurePhysicalServiceDirectory(stateRoot(), "live-sessions");
 
 	public LiveSessionWriter Start(
 		IReadOnlyList<string> roots,
@@ -47,13 +52,15 @@ public sealed class LiveSessionRegistry(
 
 	public IReadOnlyList<LiveSessionRecord> ReadActive(string? projectRoot = null)
 	{
-		var directory = DirectoryPath;
 		string[] paths;
 		try
 		{
+			var directory = DirectoryPath;
 			if (!Directory.Exists(directory))
 				return [];
-			paths = Directory.GetFiles(directory, "*.json", SearchOption.TopDirectoryOnly);
+			paths = Directory.EnumerateFiles(directory, "*.json", SearchOption.TopDirectoryOnly)
+				.Take(MaximumRegistryEntries)
+				.ToArray();
 		}
 		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
 		{
@@ -137,13 +144,29 @@ public sealed class LiveSessionRegistry(
 		}
 	}
 
-	internal void Delete(int pid) => TryDelete(GetPath(pid));
+	internal void Delete(int pid)
+	{
+		try
+		{
+			TryDelete(GetPath(pid));
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+		{
+		}
+	}
 
 	private LiveSessionRecord? TryRead(string path, out bool invalid)
 	{
 		invalid = false;
 		try
 		{
+			var attributes = File.GetAttributes(path);
+			if ((attributes & (FileAttributes.ReparsePoint | FileAttributes.Directory)) != 0 ||
+				!TryParsePidFileName(path, out var filePid))
+			{
+				invalid = true;
+				return null;
+			}
 			using var stream = new FileStream(
 				path,
 				FileMode.Open,
@@ -168,7 +191,12 @@ public sealed class LiveSessionRegistry(
 			var record = JsonSerializer.Deserialize(
 				bytes,
 				InfrastructureJsonSerializerContext.Default.LiveSessionRecord);
-			if (record is { Roots: not null } && record.Roots.Count <= 256)
+			if (record is { Roots: not null } &&
+				record.Pid == filePid &&
+				record.Roots.Count is > 0 and <= 256 &&
+				record.Roots.All(static root => !string.IsNullOrWhiteSpace(root) && root.Length <= MaximumRootCharacters) &&
+				(record.ClientName?.Length ?? 0) <= MaximumClientNameCharacters &&
+				(record.ClientVersion?.Length ?? 0) <= MaximumClientVersionCharacters)
 				return record;
 
 			invalid = true;
@@ -183,6 +211,21 @@ public sealed class LiveSessionRegistry(
 		{
 			return null;
 		}
+	}
+
+	private static bool TryParsePidFileName(string path, out int pid)
+	{
+		var fileName = Path.GetFileName(path);
+		var name = Path.GetFileNameWithoutExtension(fileName);
+		return int.TryParse(
+			name,
+			System.Globalization.NumberStyles.None,
+			System.Globalization.CultureInfo.InvariantCulture,
+			out pid) &&
+			pid > 0 &&
+			StringComparer.Ordinal.Equals(
+				fileName,
+				pid.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".json");
 	}
 
 	private static string? TryNormalize(string? path)
@@ -201,7 +244,10 @@ public sealed class LiveSessionRegistry(
 
 	private bool IsAlive(LiveSessionRecord record, DateTimeOffset now)
 	{
-		if (record.Pid <= 0 || now - record.HeartbeatUtc > StaleHeartbeatAge)
+		if (record.Pid <= 0 ||
+			record.HeartbeatUtc < record.ProcessStartUtc ||
+			record.HeartbeatUtc > now + HeartbeatInterval ||
+			now - record.HeartbeatUtc > StaleHeartbeatAge)
 			return false;
 		DateTimeOffset? observedStart;
 		try

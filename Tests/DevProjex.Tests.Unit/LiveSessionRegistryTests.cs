@@ -134,6 +134,112 @@ public sealed class LiveSessionRegistryTests
 	}
 
 	[Fact]
+	public void ReaderRejectsARecordWhosePidDoesNotMatchItsFileName()
+	{
+		using var temporary = new TemporaryDirectory();
+		var started = new DateTimeOffset(2026, 9, 18, 1, 2, 3, TimeSpan.Zero);
+		var registry = new LiveSessionRegistry(
+			() => temporary.Path,
+			new MutableTimeProvider(started.AddSeconds(1)),
+			pid => pid == 43 ? started : null);
+		registry.Write(new LiveSessionRecord(43, started, "client", "1", [temporary.Path], started));
+		var mismatchedPath = Path.Combine(registry.DirectoryPath, "42.json");
+		File.Move(registry.GetPath(43), mismatchedPath);
+
+		Assert.Empty(registry.ReadActive());
+		Assert.False(File.Exists(mismatchedPath));
+	}
+
+	[Fact]
+	public void ReaderRejectsHeartbeatBeyondTheFutureClockSkew()
+	{
+		using var temporary = new TemporaryDirectory();
+		var started = new DateTimeOffset(2026, 9, 18, 1, 2, 3, TimeSpan.Zero);
+		var now = started.AddMinutes(1);
+		var registry = new LiveSessionRegistry(
+			() => temporary.Path,
+			new MutableTimeProvider(now),
+			_ => started);
+		registry.Write(new LiveSessionRecord(
+			42,
+			started,
+			"client",
+			"1",
+			[temporary.Path],
+			now + LiveSessionRegistry.HeartbeatInterval + TimeSpan.FromTicks(1)));
+
+		Assert.Empty(registry.ReadActive());
+		Assert.False(File.Exists(registry.GetPath(42)));
+	}
+
+	[Fact]
+	public void ReaderRejectsHeartbeatBeforeProcessStart()
+	{
+		using var temporary = new TemporaryDirectory();
+		var started = new DateTimeOffset(2026, 9, 18, 1, 2, 3, TimeSpan.Zero);
+		var registry = new LiveSessionRegistry(
+			() => temporary.Path,
+			new MutableTimeProvider(started.AddSeconds(1)),
+			_ => started);
+		registry.Write(new LiveSessionRecord(
+			42,
+			started,
+			"client",
+			"1",
+			[temporary.Path],
+			started - TimeSpan.FromTicks(1)));
+
+		Assert.Empty(registry.ReadActive());
+		Assert.False(File.Exists(registry.GetPath(42)));
+	}
+
+	[Fact]
+	public void ReaderBoundsTheNumberOfRegistryEntries()
+	{
+		using var temporary = new TemporaryDirectory();
+		var started = new DateTimeOffset(2026, 9, 18, 1, 2, 3, TimeSpan.Zero);
+		var registry = new LiveSessionRegistry(
+			() => temporary.Path,
+			new MutableTimeProvider(started.AddSeconds(1)),
+			_ => started);
+		for (var index = 1; index <= 1_025; index++)
+		{
+			registry.Write(new LiveSessionRecord(
+				index,
+				started,
+				"client",
+				"1",
+				[temporary.Path],
+				started));
+		}
+
+		var records = registry.ReadActive();
+
+		Assert.Equal(1_024, records.Count);
+	}
+
+	[Fact]
+	public void RegistryRejectsASymbolicLinkServiceDirectory()
+	{
+		using var temporary = new TemporaryDirectory();
+		using var outside = new TemporaryDirectory();
+		var link = Path.Combine(temporary.Path, "live-sessions");
+		try
+		{
+			Directory.CreateSymbolicLink(link, outside.Path);
+		}
+		catch (Exception linkException) when (linkException is IOException or UnauthorizedAccessException)
+		{
+			Assert.Skip("Creating directory symbolic links is unavailable in this environment.");
+			return;
+		}
+		var registry = new LiveSessionRegistry(() => temporary.Path);
+
+		Assert.Empty(registry.ReadActive());
+		Assert.Empty(Directory.EnumerateFileSystemEntries(outside.Path));
+	}
+
+	[Fact]
 	public async Task WriterRetriesAfterSessionDirectoryBecomesWritable()
 	{
 		using var temporary = new TemporaryDirectory();

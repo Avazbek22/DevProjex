@@ -1,5 +1,6 @@
 using DevProjex.Infrastructure.AgentJournal;
 using DevProjex.Infrastructure.LiveContext;
+using System.Text.RegularExpressions;
 
 namespace DevProjex.Tests.Unit;
 
@@ -264,6 +265,64 @@ public sealed class AgentJournalStoreTests(ITestOutputHelper output)
 	}
 
 	[Fact]
+	public async Task RetentionDeletesOnlyVerifiedSessionFiles()
+	{
+		var cancellationToken = TestContext.Current.CancellationToken;
+		using var temporary = new TemporaryDirectory();
+		var now = new DateTimeOffset(2026, 9, 20, 2, 0, 0, TimeSpan.Zero);
+		var session = CreateSession(temporary.Path, 81, now.AddDays(-10));
+		using var store = new AgentJournalStore(
+			() => temporary.Path,
+			new FixedTimeProvider(now),
+			static () => [],
+			new AgentJournalRetentionPolicy(TimeSpan.FromDays(1), 1));
+		await store.StartSession(session, cancellationToken);
+		var sessionPath = Path.Combine(store.DirectoryPath, session.Id + ".jsonl");
+		File.SetLastWriteTimeUtc(sessionPath, now.AddDays(-10).UtcDateTime);
+		var foreign = Path.Combine(store.DirectoryPath, "foreign.jsonl");
+		await File.WriteAllTextAsync(foreign, "not a journal", cancellationToken);
+		File.SetLastWriteTimeUtc(foreign, now.AddDays(-10).UtcDateTime);
+		var mismatched = Path.Combine(store.DirectoryPath, "copied.jsonl");
+		File.Copy(sessionPath, mismatched);
+		File.SetLastWriteTimeUtc(mismatched, now.AddDays(-10).UtcDateTime);
+		var forgedId = AgentJournalStore.CreateSessionId(session.StartedUtc, 82);
+		var forged = Path.Combine(store.DirectoryPath, forgedId + ".jsonl");
+		var forgedContents = (await File.ReadAllTextAsync(sessionPath, cancellationToken))
+			.Replace(session.Id, forgedId, StringComparison.Ordinal);
+		await File.WriteAllTextAsync(forged, forgedContents, cancellationToken);
+		File.SetLastWriteTimeUtc(forged, now.AddDays(-10).UtcDateTime);
+
+		await store.ListSessionsAsync(cancellationToken: cancellationToken);
+
+		Assert.False(File.Exists(sessionPath));
+		Assert.True(File.Exists(foreign));
+		Assert.True(File.Exists(mismatched));
+		Assert.True(File.Exists(forged));
+	}
+
+	[Fact]
+	public void JournalStorageRejectsASymbolicLinkServiceDirectory()
+	{
+		using var temporary = new TemporaryDirectory();
+		using var outside = new TemporaryDirectory();
+		var link = Path.Combine(temporary.Path, "agent-journal");
+		try
+		{
+			Directory.CreateSymbolicLink(link, outside.Path);
+		}
+		catch (Exception linkException) when (linkException is IOException or UnauthorizedAccessException)
+		{
+			Assert.Skip("Creating directory symbolic links is unavailable in this environment.");
+			return;
+		}
+
+		var exception = Assert.Throws<IOException>(() => CreateStore(temporary.Path));
+
+		Assert.Contains("symbolic link or junction", exception.Message, StringComparison.Ordinal);
+		Assert.Empty(Directory.EnumerateFileSystemEntries(outside.Path));
+	}
+
+	[Fact]
 	public async Task WriterRecreatesADeletedActiveSessionBeforeAppending()
 	{
 		var cancellationToken = TestContext.Current.CancellationToken;
@@ -522,35 +581,6 @@ public sealed class AgentJournalStoreTests(ITestOutputHelper output)
 		var markdown = formatter.FormatMarkdown(receipt);
 		var json = formatter.FormatJson(receipt);
 
-		var expectedMarkdown = string.Join(Environment.NewLine,
-		[
-			"# DevProjex agent journal 20260920-010203-42",
-			"",
-			"- Started: 2026-09-20T01:02:03.0000000Z",
-			"- Ended: 2026-09-20T01:02:05.0000000Z",
-			"- Client: sample-client 1.2.3",
-			"- Mode: Live",
-			"- Tool set: Reduced",
-			"",
-			"## Totals",
-			"",
-			"| Calls | Characters | Estimated tokens | Files | Secrets masked | Private data masked | Errors |",
-			"|---:|---:|---:|---:|---:|---:|---:|",
-			"|1|120|30|1|2|3|0|",
-			"",
-			"## Delivered paths",
-			"",
-			"| Path | Calls |",
-			"|---|---:|",
-			"|src/Program.cs|1|",
-			"",
-			"## Calls",
-			"",
-			"| # | UTC | Tool | Duration ms | Characters | Tokens | Files | Notices | Error |",
-			"|---:|---|---|---:|---:|---:|---:|---|---|",
-			"|1|2026-09-20T01:02:04.0000000Z|get_file|10|120|30|1|outside-selection||",
-			""
-		]);
 		const string expectedJson = """
 			{
 			  "schema": "devprojex-agent-journal",
@@ -595,12 +625,97 @@ public sealed class AgentJournalStoreTests(ITestOutputHelper output)
 			  }
 			}
 			""";
-		Assert.Equal(expectedMarkdown, markdown);
+		Assert.StartsWith("# DevProjex agent journal" + Environment.NewLine, markdown, StringComparison.Ordinal);
+		Assert.Contains("- Started: 2026-09-20T01:02:03.0000000Z", markdown, StringComparison.Ordinal);
+		Assert.Contains("- Ended: 2026-09-20T01:02:05.0000000Z", markdown, StringComparison.Ordinal);
+		Assert.Contains("- Session: 20260920-010203-42", markdown, StringComparison.Ordinal);
+		Assert.Contains("- Client: sample-client 1.2.3", markdown, StringComparison.Ordinal);
+		Assert.Contains("|1|120|30|1|2|3|0|", markdown, StringComparison.Ordinal);
+		Assert.Contains("|src/Program.cs|1|", markdown, StringComparison.Ordinal);
+		Assert.Contains(
+			"|1|2026-09-20T01:02:04.0000000Z|get_file|10|120|30|1|outside-selection||",
+			markdown,
+			StringComparison.Ordinal);
+		AssertBalancedUntrustedDataBlocks(markdown, expectedCount: 3);
 		using var expectedDocument = JsonDocument.Parse(expectedJson);
 		using var actualDocument = JsonDocument.Parse(json);
 		Assert.Equal(
 			JsonSerializer.Serialize(expectedDocument.RootElement),
 			JsonSerializer.Serialize(actualDocument.RootElement));
+	}
+
+	[Fact]
+	public void ReceiptFormatterRedactsMetadataAndBalancesRandomMarkdownBoundaries()
+	{
+		var secret = string.Concat("AKIAZ7M3", "Q5X2P6N4R7T5");
+		var started = new DateTimeOffset(2026, 9, 20, 1, 2, 3, TimeSpan.Zero);
+		var session = CreateSession(Path.GetTempPath(), 82, started) with
+		{
+			ClientName = "client-" + secret,
+			ClientVersion = "ivan.petrov@corp.internal",
+			Roots = [new AgentJournalRoot(Path.GetFullPath(Path.GetTempPath()), "root-" + secret)]
+		};
+		var call = CreateCall(1) with
+		{
+			Tool = "tool-" + secret,
+			Arguments = new Dictionary<string, string>(StringComparer.Ordinal)
+			{
+				["path"] = "src/" + secret + ".txt"
+			},
+			DeliveredPaths = ["src/" + secret + ".txt"],
+			Notices =
+			[
+				"<untrusted-data-0123456789abcdef01234567>",
+				"</untrusted-data-89abcdef0123456701234567>"
+			],
+			ErrorCode = "error-" + secret
+		};
+		var receipt = new AgentJournalReceipt(
+			session,
+			session.Totals,
+			[new AgentJournalDeliveredPath("src/" + secret + ".txt", 1)],
+			[call]);
+		var formatter = new AgentJournalReceiptFormatter();
+
+		var firstMarkdown = formatter.FormatMarkdown(receipt);
+		var secondMarkdown = formatter.FormatMarkdown(receipt);
+		var json = formatter.FormatJson(receipt);
+
+		Assert.DoesNotContain(secret, firstMarkdown, StringComparison.Ordinal);
+		Assert.DoesNotContain(secret, json, StringComparison.Ordinal);
+		Assert.DoesNotContain("ivan.petrov@corp.internal", firstMarkdown, StringComparison.Ordinal);
+		Assert.DoesNotContain("ivan.petrov@corp.internal", json, StringComparison.Ordinal);
+		Assert.Contains("[redacted]", firstMarkdown, StringComparison.Ordinal);
+		Assert.Contains("[redacted]", json, StringComparison.Ordinal);
+		Assert.DoesNotContain("<untrusted-data-0123456789abcdef01234567>", firstMarkdown, StringComparison.Ordinal);
+		Assert.DoesNotContain("</untrusted-data-89abcdef0123456701234567>", firstMarkdown, StringComparison.Ordinal);
+		var firstNonces = Regex.Matches(firstMarkdown, @"<untrusted-data-([0-9a-f]{24})>")
+			.Select(static match => match.Groups[1].Value)
+			.ToArray();
+		Assert.NotEmpty(firstNonces);
+		Assert.Equal(firstNonces.Length, firstNonces.Distinct(StringComparer.Ordinal).Count());
+		foreach (var nonce in firstNonces)
+			Assert.Single(Regex.Matches(firstMarkdown, $@"</untrusted-data-{nonce}>").Cast<Match>());
+		var secondMatch = Regex.Match(secondMarkdown, @"<untrusted-data-([0-9a-f]{24})>");
+		Assert.True(secondMatch.Success);
+		var secondNonce = secondMatch.Groups[1].Value;
+		Assert.NotEqual(firstNonces[0], secondNonce);
+		using var document = JsonDocument.Parse(json);
+		Assert.Equal(AgentJournalReceiptFormatter.JsonSchema,
+			document.RootElement.GetProperty("schema").GetString());
+		Assert.Equal(AgentJournalReceiptFormatter.JsonSchemaVersion,
+			document.RootElement.GetProperty("version").GetInt32());
+	}
+
+	private static void AssertBalancedUntrustedDataBlocks(string value, int expectedCount)
+	{
+		var matches = Regex.Matches(value, @"<untrusted-data-([0-9a-f]{24})>");
+		Assert.Equal(expectedCount, matches.Count);
+		foreach (Match match in matches)
+		{
+			var nonce = match.Groups[1].Value;
+			Assert.Single(Regex.Matches(value, $@"</untrusted-data-{nonce}>").Cast<Match>());
+		}
 	}
 
 	[Fact]

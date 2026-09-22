@@ -51,6 +51,13 @@ public sealed class AgentJournalDocumentationContractTests
 		Assert.Contains("no project file contents", security, StringComparison.Ordinal);
 		Assert.Contains("search-query text", security, StringComparison.Ordinal);
 		Assert.Contains("does not change the telemetry-free guarantee", security, StringComparison.Ordinal);
+		Assert.Contains("checked again immediately before Markdown or JSON receipt export", security, StringComparison.Ordinal);
+		Assert.Contains("random, balanced untrusted-data boundaries", security, StringComparison.Ordinal);
+		Assert.Contains("not an authentication", security, StringComparison.Ordinal);
+		Assert.Contains("exact `.jsonl` file name agree", security, StringComparison.Ordinal);
+		Assert.Contains("same PID", security, StringComparison.Ordinal);
+		Assert.Contains("Invalid or foreign", security, StringComparison.Ordinal);
+		Assert.Contains("arbitrary `.tmp` or `.lock` file", security, StringComparison.Ordinal);
 	}
 
 	[Fact]

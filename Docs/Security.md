@@ -47,9 +47,30 @@ the user explicitly exports a context receipt. It contains session metadata,
 bounded execution parameters, paths, notices, and counts, but no project file contents,
 tool-result bodies, search-query text, symbol-selector text, detected
 secret values, or masked private-data values. Remaining string values are checked
-by the existing secret and private-data detectors before they are queued. Journal
-recording does not change the telemetry-free guarantee: DevProjex does not transmit
-the journal or collect it as telemetry.
+by the existing secret and private-data detectors before they are queued and are
+checked again immediately before Markdown or JSON receipt export. Detected metadata
+is replaced rather than exported. Markdown places project-controlled receipt metadata
+inside random, balanced untrusted-data boundaries; JSON preserves the documented
+schema with the same redacted values.
+Journal recording does not change the telemetry-free guarantee: DevProjex does not
+transmit the journal or collect it as telemetry.
+
+Application-owned journal and live-session directories must be physical directories;
+DevProjex refuses a symbolic link or junction at those service-directory boundaries.
+Journal retention considers only a validated session header whose session identity,
+process identity, root shape, and exact `.jsonl` file name agree. Invalid or foreign
+files are not classified as expired journal sessions and are not deleted by retention.
+The Store-data migration likewise refuses linked source, destination, backup, or tree
+entries, and it never treats an arbitrary `.tmp` or `.lock` file as one of its own
+migration artifacts.
+
+The live-session registry is bounded local discovery metadata, not an authentication
+or authorization mechanism. A record is considered discoverable only when its exact
+file name names the same PID, the operating system reports the same process start,
+and its heartbeat is within the accepted past and future bounds. Record size, entry
+count, root count, and string lengths are bounded. Root-jail validation, effective
+selection, mandatory content protection, and process ownership remain the enforcing
+boundaries; finding a registry record grants no additional authority.
 
 ## What is not guaranteed
 
