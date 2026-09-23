@@ -113,7 +113,6 @@ public sealed class MainWindowApplySettingsSelectionUiTests
 
 			await UiTestDriver.RaiseButtonClickAsync(
 				UiTestDriver.GetRequiredStatusCancelButton(window));
-			blockingTreeBuilder.Release();
 			Assert.False(await opening.WaitAsync(
 				TimeSpan.FromSeconds(30),
 				TestContext.Current.CancellationToken));
