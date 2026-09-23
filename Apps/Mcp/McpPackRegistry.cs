@@ -304,7 +304,8 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 				FileShare.Read,
 				16 * 1024,
 				FileOptions.Asynchronous | FileOptions.SequentialScan,
-				entry.FileIdentity);
+				entry.FileIdentity,
+				entry.Document.Bytes);
 			return new McpPackReadLease(this, entry, stream);
 		}
 		catch
@@ -570,7 +571,8 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 		FileShare share,
 		int bufferSize,
 		FileOptions options,
-		FileSystemHandleIdentity? expectedIdentity = null)
+		FileSystemHandleIdentity? expectedIdentity = null,
+		long? expectedBytes = null)
 	{
 		if (mode == FileMode.Open)
 		{
@@ -598,6 +600,8 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 				(!FileSystemPathIdentity.TryReadHandle(stream.SafeFileHandle, out var actual) ||
 				 actual != expected))
 				throw new IOException("MCP stored-result file identity changed.");
+			if (expectedBytes is { } length && stream.Length != length)
+				throw new IOException("MCP stored-result file length changed.");
 			if (!OperatingSystem.IsWindows())
 			{
 				var handle = stream.SafeFileHandle;

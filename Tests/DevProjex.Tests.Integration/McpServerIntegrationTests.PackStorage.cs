@@ -1,6 +1,7 @@
 using DevProjex.Mcp;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace DevProjex.Tests.Integration;
 
@@ -39,6 +40,40 @@ public sealed partial class McpServerIntegrationTests
 		Assert.Equal(externalSentinel, File.ReadAllText(externalPath));
 		if (!OperatingSystem.IsWindows())
 			Assert.Equal(externalMode, File.GetUnixFileMode(externalPath));
+	}
+
+	[Fact]
+	public async Task ReadPackRejectsContentTruncatedWithinTheOriginalFile()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Large.txt"), new string('x', 60_000));
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+		var stored = await server.CallAsync("pack_context");
+		Assert.NotEqual(true, stored.IsError);
+		var packId = ExtractPackId(AllText(stored));
+		var productDirectory = McpPackRegistry.ResolveProductDirectory(
+			Path.Combine(workspace.Path, "temp"),
+			xdgRuntimeDirectory: null,
+			Environment.UserName);
+		var packPath = Assert.Single(Directory.EnumerateFiles(
+			Path.Combine(productDirectory, "mcp"),
+			packId + ".pack",
+			SearchOption.AllDirectories));
+		const string alteredContent = "unprotected-content-must-not-be-delivered";
+		using (var stream = new FileStream(packPath, FileMode.Open, FileAccess.Write, FileShare.None))
+		{
+			stream.SetLength(0);
+			stream.Write(Encoding.UTF8.GetBytes(alteredContent));
+		}
+
+		var page = await server.CallAsync(
+			"read_pack",
+			new Dictionary<string, object?> { ["pack_id"] = packId });
+		var response = AllText(page);
+		Assert.Equal(true, page.IsError);
+		Assert.Contains(McpErrorCodes.PackExpired, response, StringComparison.Ordinal);
+		Assert.DoesNotContain(alteredContent, response, StringComparison.Ordinal);
 	}
 
 	[Fact]
