@@ -268,6 +268,18 @@ load took 695.49 ms; subsequent loads took 250.25, 181.48, 113.52, 110.52, and
 paint and the existing visual quiet-period gate; they must not be presented as desktop
 ready times or added to the historical v5.0/v5.1 recollection.
 
+A later current-only headless rerun, compiled from `124b3be5` on .NET 10.0.12, used the
+then-current DevProjex tree (3,028 inventory entries; 2,742 selected files) and six
+backend loads. The first load through metrics publication took 804.92 ms; the five warm
+paired totals were 286.70, 177.89, 172.54, 163.92, and 149.08 ms (median 172.54 ms).
+Each pass made one workspace scan, one dynamic pass, and 2,313 full content reads totaling
+28,920,131 B, with 5,913 file-version opens; metrics publication had a 66.50 ms warm
+median and 3,703,448 B median managed allocation. Composition was measured separately
+at 73.91 ms. A second opt-in selection probe confirmed the same read/version counters
+and a 177.50 ms warm paired-total median. These are different corpus and phase
+samples from the frozen A/B and the earlier 2,723-file calibration, not evidence of a
+further speedup or full desktop readiness. The probes left no persistent fixture folders.
+
 The root `.gitignore` has 435 lines. An isolated cold matcher build took 49–96 ms and
 allocated about 62.7 MB; the matchers were reused during the same scan. A targeted
 `RegexOptions.Compiled` A/B did not establish an end-to-end benefit, so the matcher
@@ -440,6 +452,9 @@ not a unique-test total.
 | Folder export staging links | `a67ccd3f` | A progress-callback junction swap in a staging subdirectory previously caused folder export to write outside staging. A regression failed before per-file ancestor and final-stage validation; the two-case theory passed afterward. The focused Release Integration batch passed 10 checks with two Unix-only skips on Windows. A 2/2 follow-up confirmed that cleanup leaves an external sentinel unchanged. Path-based checks cannot eliminate a hostile same-user swap between validation and OS open. |
 | Managed Git reset cancellation | `25b6e507` | Cancellation remains effective through fetch and immediately before hard reset. Once reset of the managed cache begins, caller cancellation cannot terminate the Git process halfway through materialization; the existing two-minute operation deadline remains. A deterministic regression failed before; 4 focused Unit and 2 local-repository Integration checks passed afterward. A Git process failure or deadline during reset can still leave a partial cached worktree. |
 | Selected content source admission | `286303cf` | GUI clipboard, streamed file output, combined export, and bounded preview now pass the physical project root separately from any display-path alias; transformation contexts also supply their own root when a caller omits it. A stable junction previously let selected content read an external file, including with Hide Secrets. The plain/protected regressions failed before, then 4 focused and 71 related Unit checks passed. Plain output omits unavailable entries; protected output fails closed. An optional no-context/no-root API still accepts caller-supplied arbitrary paths. |
+| Shared dependency resolution cancellation | `fa2db563` | A canceled index producer no longer cancels an independent caller joined to its shared resolution entry. The live caller retries a bounded number of joins, then resolves privately if necessary; failed-entry removal remains instance-conditional. A deterministic regression failed before, then 25 focused Unit checks passed; the new test verifies one weighted successful entry, truthful re-resolution metrics, and a subsequent warm hit. |
+| MCP project-address metadata | `124b3be5` | The published `project` schema and six project-tool descriptions now specify a unique listed name, an absolute path returned by `list_projects`, or a listed `#index`; allowed Git URLs remain conditional on remote opt-in. Protocol behavior is unchanged. A metadata regression failed before; 4 focused Integration checks passed afterward across local and remote-enabled modes. |
+| TUI failed-mutation reconciliation | `850fc5f4` | A failed managed Git update or branch switch may have changed part of the cached worktree. TUI now gates export and performs the existing noncancelable structural refresh even when the mutation reports `false`, then retains the original failure outcome; refresh failure leaves export blocked. Two deterministic regressions failed before, and 13 focused transition/update/branch Terminal checks passed afterward. Network or preflight failures now also incur a refresh on the error path. |
 
 The CLI dense-search dictionary experiment was intentionally discarded: three 5,000-hit
 process samples per variant gave medians of 475 ms for the prior lookup and 480 ms for
@@ -476,7 +491,7 @@ speedup is claimed.
   conclusions about the complete visible project-opening experience.
 - A targeted Avalonia headless UI check verified that every realized project-tree checkbox
   has no tooltip or automation help text while Hide Secrets and MCP menu help remain intact.
-  Its 38,572-byte tree screenshot was captured under the ignored local
+  Its 40,440-byte tree screenshot was captured under the ignored local
   `artifacts/release-stabilization/tree-checkbox-no-tooltip.png` path. It is visual evidence
   from a headless fixture, not a claim about every desktop compositor.
 - MCP discovery dependency-facts warm-up remains a separate release risk. The current
