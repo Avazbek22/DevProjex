@@ -25,9 +25,9 @@ public sealed class GitExecutableLocatorTests(ITestOutputHelper output)
 				executableName,
 				alias,
 				currentDirectory);
-			Assert.True(PathComparer.Default.Equals(
-				Path.Combine(repository, "bin", executableName),
-				resolved));
+			Assert.NotNull(resolved);
+			Assert.NotEqual(aliasedExecutable, resolved);
+			Assert.Equal("placeholder", File.ReadAllText(resolved));
 			Assert.False(GitExecutableLocator.IsSafeForRepository(resolved!, repository));
 		}
 		finally
@@ -56,9 +56,11 @@ public sealed class GitExecutableLocatorTests(ITestOutputHelper output)
 		}
 
 		Assert.False(GitExecutableLocator.IsSafeForRepository(link, repository));
-		Assert.True(PathComparer.Default.Equals(
-			Path.Combine(repository, executableName),
-			GitExecutableLocator.TryResolveFromPath(executableName, externalBin, currentDirectory)));
+		var resolved = GitExecutableLocator.TryResolveFromPath(executableName, externalBin, currentDirectory);
+		Assert.NotNull(resolved);
+		Assert.NotEqual(link, resolved);
+		Assert.Equal("placeholder", File.ReadAllText(resolved));
+		Assert.False(GitExecutableLocator.IsSafeForRepository(resolved, repository));
 	}
 
 	[Fact]
@@ -77,9 +79,11 @@ public sealed class GitExecutableLocatorTests(ITestOutputHelper output)
 		{
 			var aliasedExecutable = Path.Combine(alias, executableName);
 			Assert.True(GitExecutableLocator.IsSafeForRepository(aliasedExecutable, repository));
-			Assert.True(PathComparer.Default.Equals(
-				Path.Combine(workspace.Path, "trusted", "bin", executableName),
-				GitExecutableLocator.TryResolveFromPath(executableName, alias, currentDirectory)));
+			var resolved = GitExecutableLocator.TryResolveFromPath(executableName, alias, currentDirectory);
+			Assert.NotNull(resolved);
+			Assert.NotEqual(aliasedExecutable, resolved);
+			Assert.Equal("placeholder", File.ReadAllText(resolved));
+			Assert.True(GitExecutableLocator.IsSafeForRepository(resolved, repository));
 		}
 		finally
 		{

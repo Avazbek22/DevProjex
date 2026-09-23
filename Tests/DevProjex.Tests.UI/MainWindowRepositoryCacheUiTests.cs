@@ -1291,7 +1291,7 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 
 		try
 		{
-			var loadCompletion = new TaskCompletionSource<RecentProjectsDb>(
+			var loadCompletion = new TaskCompletionSource<RecentProjectsLoadResult>(
 				TaskCreationOptions.RunContinuationsAsynchronously);
 			var loadedField = GetRequiredMainWindowField("_recentProjectsLoaded");
 			var loadTaskField = GetRequiredMainWindowField("_recentProjectsLoadTask");
@@ -1312,7 +1312,9 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
 			Assert.Empty(window.OwnedWindows.OfType<GitCloneWindow>());
 
-			loadCompletion.SetResult(database);
+			loadCompletion.SetResult(new RecentProjectsLoadResult(
+				database,
+				RecentProjectsLoadStatus.Success));
 			await UiTestDriver.WaitForConditionAsync(
 				window,
 				() => window.OwnedWindows.OfType<GitCloneWindow>().Count() == 1,

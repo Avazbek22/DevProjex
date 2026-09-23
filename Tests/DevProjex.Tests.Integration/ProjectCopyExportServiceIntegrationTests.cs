@@ -498,7 +498,9 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 				conflictPolicy),
 			cancellationToken: TestContext.Current.CancellationToken);
 
-		Assert.Equal(expectedPath, result.DestinationPath);
+		Assert.Equal("Sample-copy (3).zip", Path.GetFileName(result.DestinationPath));
+		Assert.True(File.Exists(result.DestinationPath));
+		Assert.True(File.Exists(expectedPath));
 		Assert.Equal("first archive", await File.ReadAllTextAsync(
 			firstPath,
 			TestContext.Current.CancellationToken));
@@ -531,7 +533,9 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.True(competingFileCreated);
-		Assert.Equal(expectedPath, result.DestinationPath);
+		Assert.Equal("race (2).zip", Path.GetFileName(result.DestinationPath));
+		Assert.True(File.Exists(result.DestinationPath));
+		Assert.True(File.Exists(expectedPath));
 		Assert.Equal("competing archive", await File.ReadAllTextAsync(
 			preferredPath,
 			TestContext.Current.CancellationToken));

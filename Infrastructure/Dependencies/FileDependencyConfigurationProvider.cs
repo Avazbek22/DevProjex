@@ -14,6 +14,7 @@ namespace DevProjex.Infrastructure.Dependencies;
 public sealed partial class FileDependencyConfigurationProvider : IDependencyConfigurationProvider
 {
 	internal const int MaximumConfigurationBytes = 4 * 1024 * 1024;
+	private const int MaximumProjectReferencePathCharacters = 32_767;
 	internal const int MaximumTypeScriptExtendsDepth = 8;
 	internal const string TypeScriptExtendsShapeReason = "tsconfig extends must be one relative path string";
 	internal const string TypeScriptExtendsPackageReason = "tsconfig package extends is not supported";
@@ -765,7 +766,7 @@ public sealed partial class FileDependencyConfigurationProvider : IDependencyCon
 				.Where(static element => IsEnabledProjectReference(element))
 				.Select(element => element.Attribute("Include")?.Value)
 				.Where(static value => !string.IsNullOrWhiteSpace(value))
-				.Select(value => Path.GetFullPath(Path.Combine(directory, NormalizeMsBuildInclude(value!))))
+				.Select(value => ResolveProjectReferencePath(directory, value!))
 				.Distinct(PathComparer).Order(StringComparer.Ordinal).ToArray();
 			var projectConfiguration = new CSharpProjectConfiguration(
 				references,
@@ -801,6 +802,14 @@ public sealed partial class FileDependencyConfigurationProvider : IDependencyCon
 
 	private static string NormalizeMsBuildInclude(string value) =>
 		value.Replace('\\', Path.DirectorySeparatorChar).Replace('/', Path.DirectorySeparatorChar);
+
+	private static string ResolveProjectReferencePath(string directory, string include)
+	{
+		var path = Path.GetFullPath(Path.Combine(directory, NormalizeMsBuildInclude(include)));
+		if (path.Length > MaximumProjectReferencePathCharacters)
+			throw new PathTooLongException();
+		return path;
+	}
 
 	private static ConfigurationParseResult<TypeScriptConfigurationLayer> ParseTypeScriptConfigLayer(
 		string configPath,

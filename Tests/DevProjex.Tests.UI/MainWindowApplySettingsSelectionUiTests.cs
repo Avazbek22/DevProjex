@@ -99,6 +99,7 @@ public sealed class MainWindowApplySettingsSelectionUiTests
 			});
 		try
 		{
+			await UiTestDriver.WaitForInitialMetricsBaselineAsync(window);
 			blockingTreeBuilder.Arm();
 			var opening = Assert.IsAssignableFrom<Task<bool>>(
 				await UiTestDriver.BeginOpenFolderAsync(

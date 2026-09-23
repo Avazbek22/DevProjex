@@ -202,7 +202,22 @@ public sealed class ProjectRootFactsProvider
 		if (!FileSystemRootEntryPolicy.IsPhysicalDirectory(rootPath))
 			return ProjectRootFacts.Inaccessible(rootPath);
 
-		return BuildFromEntries(rootPath, EnumerateTopLevelEntries(rootPath), cancellationToken);
+		try
+		{
+			return BuildFromEntries(rootPath, EnumerateTopLevelEntries(rootPath), cancellationToken);
+		}
+		catch (UnauthorizedAccessException)
+		{
+			return ProjectRootFacts.Inaccessible(rootPath);
+		}
+		catch (System.Security.SecurityException)
+		{
+			return ProjectRootFacts.Inaccessible(rootPath);
+		}
+		catch (IOException)
+		{
+			return ProjectRootFacts.Inaccessible(rootPath);
+		}
 	}
 
 	internal static ProjectRootFacts BuildFromEntries(

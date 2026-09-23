@@ -352,14 +352,14 @@ public sealed partial class McpServerProcessTests
 			var descriptionContracts = new Dictionary<string, (string Purpose, string Alternative, string Limit)>(
 				StringComparer.Ordinal)
 			{
-				["list_projects"] = ("Lists configured local projects", "get_tree instead", "unique listed name"),
-				["get_tree"] = ("Returns the filtered project structure", "analyze instead", "format=markdown|text|json|xml"),
+				["list_projects"] = ("Lists local projects", "get_tree for structure", "unique listed name"),
+				["get_tree"] = ("Returns filtered structure", "analyze instead", "format=markdown|text|json|xml"),
 				["analyze"] = ("Measures a selection", "pack_context", "detail=full|compact|signatures"),
-				["pack_context"] = ("Builds multi-file project context", "get_file instead", "view=tree|content|tree-content"),
-				["read_pack"] = ("Reads one page", "pack_context instead", "1,000 lines"),
-				["search_project"] = ("Searches safe transformed project text", "related_files instead", "max_results=1..200"),
-				["related_files"] = ("Finds statically evidenced", "search_project instead", "direction=dependencies|dependents|both"),
-				["get_file"] = ("Reads selected file text", "pack_context for", "sixteen whole-file")
+				["pack_context"] = ("Builds multi-file project context", "use get_file for", "view=tree|content|tree-content"),
+				["read_pack"] = ("Reads a stored result page", "pack_context instead", "1,000 lines"),
+				["search_project"] = ("Searches transformed text", "use related_files for", "max_results=1..200"),
+				["related_files"] = ("Finds evidenced dependencies", "use search_project for", "direction=dependencies|dependents|both"),
+				["get_file"] = ("Reads selected text", "pack_context for", "sixteen file/range/symbol")
 			};
 			foreach (var tool in tools)
 			{

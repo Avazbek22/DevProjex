@@ -601,9 +601,12 @@ public sealed class TerminalWorkspaceContractTests
 			format,
 			TestContext.Current.CancellationToken);
 		await SetPreviewDocumentAsync(state, preview);
+		var exportPlan = format is ProjectContextDocumentFormat.Json or ProjectContextDocumentFormat.Xml
+			? await controller.BuildCurrentPlanAsync(state, TestContext.Current.CancellationToken)
+			: state.Plan;
 		var exported = await CompleteContextDocumentTestHelper.BuildAsync(
 			services.ContextDocumentService,
-			state.Plan,
+			exportPlan,
 			ProjectContextView.TreeContent,
 			format,
 			TestContext.Current.CancellationToken);
@@ -981,9 +984,12 @@ public sealed class TerminalWorkspaceContractTests
 			view,
 			format,
 			TestContext.Current.CancellationToken);
+		var currentPlan = await controller.BuildCurrentPlanAsync(
+			state,
+			TestContext.Current.CancellationToken);
 		var expected = await CompleteContextDocumentTestHelper.BuildAsync(
 			services.ContextDocumentService,
-			state.Plan,
+			currentPlan,
 			view,
 			format,
 			TestContext.Current.CancellationToken);

@@ -118,7 +118,7 @@ internal sealed class DevProjexMcpTools(
 	private McpProjectService Projects => projectService.Value;
 
 	[Description(
-		"Lists configured local projects, saved profiles, and baseline filters. Use it to choose among roots or inspect active policy; use get_tree instead for structure. Returns indexes, protected names and paths, root types, profiles, and Git/exclusion policy. A local project accepts its listed #index, unique name, or absolute path from this result; remote URLs require opt-in. This tool has no parameters.")]
+		"Lists local projects, profiles, and baseline filters. Use it to choose a root or inspect policy; use get_tree for structure. Returns indexes, protected names and paths, root types, profiles, and Git/exclusion policy. A local project accepts a unique listed name, #index, or absolute path returned by list_projects; remote URLs require opt-in. No parameters.")]
 	public Task<CallToolResult> ListProjects(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken)
@@ -242,7 +242,7 @@ internal sealed class DevProjexMcpTools(
 	}
 
 	[Description(
-		"Returns the filtered project structure without file contents. Use it to orient or find files by name; use analyze instead for size and token metrics, or pack_context for multi-file content. Returns Markdown, text, JSON, or XML within 2,000 lines and 50,000 characters. paths selects literal locations; include_patterns selects names or several directories in one call, for example include_patterns=[\"src/middleware/{powered-by,body-limit,bearer-auth}/**/*handler*.ts\"]. format=markdown|text|json|xml; max_depth=0..1000 counts levels below the project root; git_scope and other filters only narrow.")]
+		"Returns filtered structure without contents. Use it to find files by name; use analyze instead for size and token metrics, or pack_context for multi-file content. Returns Markdown/text/JSON/XML within 2,000 lines and 50,000 characters. paths selects literal locations; include_patterns selects names or directories in one call, e.g. include_patterns=[\"src/middleware/{powered-by,body-limit,bearer-auth}/**/*handler*.ts\"]. format=markdown|text|json|xml; max_depth=0..1000 counts levels below the project root; git_scope and filters only narrow.")]
 	public Task<CallToolResult> GetTree(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -339,7 +339,7 @@ internal sealed class DevProjexMcpTools(
 		}, cancellationToken);
 
 	[Description(
-		"Measures a selection before packaging: protected content metrics, estimates, canonical content/text document size, and largest files. Use it to choose pack_context filters or max_tokens; use get_tree for structure and pack_context for actual content. Returns measured-versus-estimated metrics without file bodies. Key parameters: detail=full|compact|signatures, top_files, git_scope, paths, include_patterns, exclude_patterns, profile, and max_file_bytes. detail_by_pattern uses its last match. max_tokens reports the same greedy admission as pack_context; rank and focus require it.")]
+		"Measures a selection before packaging: protected metrics, estimates, document size, and largest files. Use it to choose pack_context filters or max_tokens; use get_tree for structure and pack_context for content. Returns measured and estimated metrics without file bodies. Key parameters: detail=full|compact|signatures, top_files, git_scope, paths, include_patterns, exclude_patterns, profile, and max_file_bytes. Last detail_by_pattern match wins. max_tokens reports pack_context's greedy admission; rank and focus require it.")]
 	public Task<CallToolResult> Analyze(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -587,7 +587,7 @@ internal sealed class DevProjexMcpTools(
 		}, cancellationToken);
 
 	[Description(
-		"Builds multi-file project context. Use it after get_tree, search_project, or analyze; use get_file instead for one file. Returns inline untrusted project data, or pack_id plus a preview above 50,000 characters for read_pack. Key parameters: detail, view=tree|content|tree-content, format, rank, focus, max_tokens, git_scope, and detail_by_pattern. Profile transformations still apply to detail=full. expand_related adds only resolved neighbours within selection. focus requires rank=importance; max_tokens uses greedy admission and heuristic estimates. Pattern overrides use the last match.")]
+		"Builds multi-file project context. Use it after get_tree, search_project, or analyze; use get_file for one file. Returns inline untrusted project data, or pack_id plus a preview above 50,000 characters for read_pack. Key parameters: detail, view=tree|content|tree-content, format, rank, focus, max_tokens, git_scope, and detail_by_pattern. detail=full still transforms content. expand_related adds resolved selected neighbours. focus requires rank=importance; max_tokens admits greedily by estimate. Last pattern override wins.")]
 	public Task<CallToolResult> PackContext(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -932,7 +932,7 @@ internal sealed class DevProjexMcpTools(
 		}, cancellationToken);
 
 	[Description(
-		"Reads one page of a stored result created by pack_context, search_project, or related_files. Use a returned pack_id; use pack_context instead when no valid stored result exists. Returns untrusted data up to 1,000 lines or 50,000 characters with trusted continuation or range notes. Manual protection changes invalidate stored content; selection-only changes keep it readable with a warning. Ranges and columns are inclusive and 1-based.")]
+		"Reads a stored result page created by pack_context, search_project, or related_files. Use its pack_id; use pack_context instead when no valid stored result exists. Returns untrusted data up to 1,000 lines or 50,000 characters with trusted continuation or range notes. Protection changes invalidate stored content; selection-only changes retain it with a warning. Ranges and columns are inclusive and 1-based.")]
 	public Task<CallToolResult> ReadPack(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken)
@@ -989,7 +989,7 @@ internal sealed class DevProjexMcpTools(
 	}
 
 	[Description(
-		"Searches safe transformed project text with a timed .NET regex and bounded evidence. It matches file content, never paths; find names with get_tree include_patterns. Use it for symbols or phrases; use related_files instead for dependency links. Returns path-grouped numbered matches, merged context, and a complete|partial boundary with inspected, retained, and written counts plus continuation. Line numbers address returned text; generated redaction replacements never match. Key parameters: pattern, paths, context_lines, ignore_case, max_results=1..200, git_scope, include_patterns, exclude_patterns, and max_file_bytes. The best unique declaration includes up to 1,800 protected body characters within the same cap.")]
+		"Searches transformed text with a timed .NET regex. It matches file content, never paths; find names with get_tree include_patterns. Use it for symbols or phrases; use related_files for dependency links. Returns grouped numbered matches, merged context, complete|partial status, inspected/retained/written counts, and continuation. Line numbers use returned text; generated redaction replacements never match. Key parameters: pattern, paths, context_lines, ignore_case, max_results=1..200, git_scope, include_patterns, exclude_patterns, and max_file_bytes. The best unique declaration includes up to 1,800 protected body characters within the same cap.")]
 	public Task<CallToolResult> SearchProject(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -1365,7 +1365,7 @@ internal sealed class DevProjexMcpTools(
 		}, cancellationToken);
 
 	[Description(
-		"Finds statically evidenced dependencies and dependents for one to 16 seed files without widening selection. Use it after search_project or get_tree; use search_project instead for text references, or get_file for content. Returns paths, evidence, resolution status, token estimates, language-limited coverage, partial-parse and configuration diagnostics, and scope; results above 50,000 characters use read_pack. Key parameters: path, direction=dependencies|dependents|both, profile, git_scope, include_patterns, exclude_patterns, and max_file_bytes.")]
+		"Finds evidenced dependencies and dependents for one to 16 seed files without widening selection. Use it after search_project or get_tree; use search_project for text references or get_file for content. Returns paths, evidence, resolution status, token estimates, language coverage, partial-parse and configuration diagnostics, and scope; results above 50,000 characters use read_pack. Key parameters: path, direction=dependencies|dependents|both, profile, git_scope, include_patterns, exclude_patterns, and max_file_bytes.")]
 	public Task<CallToolResult> RelatedFiles(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -1641,7 +1641,7 @@ internal sealed class DevProjexMcpTools(
 	};
 
 	[Description(
-		"Reads selected file text after mandatory secret and configured private-data replacement. Use it after get_tree or search_project; use pack_context for broad multi-file context. Pass path for one page or requests for up to eight files and sixteen whole-file, range, or symbol selections; forms are exclusive. Send one batched call whenever you want more than one file, range, or known symbol: requests=[{\"path\":\"src/a.ts\",\"symbol\":\"Router.load\"}]. Every item reports ok, partial, not-returned, or unavailable; overlaps merge under the shared 1,000-line/50,000-character limit. Coordinates address returned text; start_column continues a scalar page.")]
+		"Reads selected text after mandatory secret and configured private-data replacement. Use it after get_tree or search_project; use pack_context for broad multi-file context. Use path for one page or requests for up to eight files and sixteen file/range/symbol selections; forms are exclusive. Send one batched call whenever you want more than one file, range, or known symbol: requests=[{\"path\":\"src/a.ts\",\"symbol\":\"Router.load\"}]. Items report ok, partial, not-returned, or unavailable; overlapping ranges share a 1,000-line/50,000-character cap. Coordinates use returned text; start_column continues a page.")]
 	public Task<CallToolResult> GetFile(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>

@@ -1137,6 +1137,8 @@ public sealed class McpInfrastructureTests
 		var local = workspace.CreateFolder("local");
 		var aliceRoot = workspace.CreateFolder("cache/alice");
 		var bobRoot = workspace.CreateFolder("cache/bob");
+		workspace.CreateFile("cache/alice/account.txt", "alice");
+		workspace.CreateFile("cache/bob/account.txt", "bob");
 		const string aliceSource = "https://alice:alice-secret@example.test/owner/shared.git";
 		const string bobSource = "https://bob:bob-secret@example.test/owner/shared.git";
 		const string aliceIdentity = "https://alice@example.test/owner/shared.git";
@@ -1155,8 +1157,9 @@ public sealed class McpInfrastructureTests
 		var bob = await resolver.ResolveAsync(bobSource, branch: null, TestContext.Current.CancellationToken);
 		var repeatedAlice = await resolver.ResolveAsync(aliceSource, branch: null, TestContext.Current.CancellationToken);
 
-		Assert.Equal(PathUtility.Normalize(aliceRoot), alice.Root);
-		Assert.Equal(PathUtility.Normalize(bobRoot), bob.Root);
+		Assert.Equal("alice", File.ReadAllText(Path.Combine(alice.Root, "account.txt")));
+		Assert.Equal("bob", File.ReadAllText(Path.Combine(bob.Root, "account.txt")));
+		Assert.NotEqual(alice.Root, bob.Root);
 		Assert.NotSame(alice, bob);
 		Assert.Same(alice, repeatedAlice);
 		Assert.Equal(2, cache.AcquireSessionCallCount);

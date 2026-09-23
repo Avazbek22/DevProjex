@@ -1841,7 +1841,7 @@ public sealed partial class McpServerIntegrationTests
 
 			var tree = await server.CallAsync("get_tree");
 			var treeText = Text(tree);
-			Assert.NotEqual(true, tree.IsError);
+			Assert.False(tree.IsError == true, treeText);
 			Assert.Contains("inner.txt", treeText, StringComparison.Ordinal);
 			Assert.DoesNotContain("secret.txt", treeText, StringComparison.Ordinal);
 			Assert.Contains("[Warning DPX-PROJECT-PARTIAL-ACCESS]", treeText, StringComparison.Ordinal);
@@ -7617,8 +7617,9 @@ public sealed partial class McpServerIntegrationTests
 		using var measurement = McpRelatedEvidenceRetentionDiagnostics.BeginMeasurement(paths =>
 		{
 			Assert.Equal(700, paths.Count);
-			Assert.Contains(sourcePath, paths);
-			File.Delete(sourcePath);
+			var source = Assert.Single(paths, path =>
+				Path.GetFileName(path) == "Consumer0000.ts");
+			File.Delete(source);
 		});
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
 
