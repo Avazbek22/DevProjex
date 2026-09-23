@@ -438,13 +438,12 @@ public sealed class ProjectContextDocumentService(
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			var path = orderedPaths[index];
-			metricsByPath.TryGetValue(Path.GetFullPath(path), out var metrics);
+			var normalizedPath = Path.GetFullPath(path);
+			if (unscannableByPath.ContainsKey(normalizedPath))
+				continue;
+			metricsByPath.TryGetValue(normalizedPath, out var metrics);
 			FileContentMetricsResult result;
-			if (unscannableByPath.TryGetValue(Path.GetFullPath(path), out var unscannable))
-			{
-				result = new FileContentMetricsResult(unscannable.Classification);
-			}
-			else if (metrics.Path is not null && !metrics.IsEstimated)
+			if (metrics.Path is not null && !metrics.IsEstimated)
 			{
 				result = new FileContentMetricsResult(
 					measured.GetFile(path).Classification,

@@ -230,7 +230,12 @@ public sealed class ExportContextCommandHandler(
 									preserveContentMetrics: admissionResult is not null)
 								.ConfigureAwait(false);
 						if (admissionResult is not null)
-							writeResult = writeResult with { UnscannableFiles = admissionResult.UnscannableFiles };
+							writeResult = writeResult with
+							{
+								UnscannableFiles = MergeUnscannableFiles(
+									admissionResult.UnscannableFiles,
+									writeResult.UnscannableFiles)
+							};
 						await destination.CompleteAsync(cancellationToken).ConfigureAwait(false);
 						return writeResult;
 					})
@@ -282,7 +287,12 @@ public sealed class ExportContextCommandHandler(
 									preserveContentMetrics: admissionResult is not null)
 								.ConfigureAwait(false);
 						if (admissionResult is not null && writeReport is not null)
-							writeReport = writeReport with { UnscannableFiles = admissionResult.UnscannableFiles };
+							writeReport = writeReport with
+							{
+								UnscannableFiles = MergeUnscannableFiles(
+									admissionResult.UnscannableFiles,
+									writeReport.UnscannableFiles)
+							};
 					},
 					cancellationToken,
 					path => ExactOutputDestinationValidator.ValidateContext(
@@ -310,6 +320,35 @@ public sealed class ExportContextCommandHandler(
 				ranking);
 		}
 		return CommandLineExitCodes.Success;
+	}
+
+	private static IReadOnlyList<UnscannableFile> MergeUnscannableFiles(
+		IReadOnlyList<UnscannableFile> admissionFiles,
+		IReadOnlyList<UnscannableFile> writtenFiles)
+	{
+		if (admissionFiles.Count == 0)
+			return writtenFiles;
+		if (writtenFiles.Count == 0)
+			return admissionFiles;
+
+		var merged = new List<UnscannableFile>(admissionFiles.Count + writtenFiles.Count);
+		var indicesByPath = new Dictionary<string, int>(PathComparer.Default);
+		foreach (var file in admissionFiles)
+		{
+			if (indicesByPath.TryAdd(file.Path, merged.Count))
+				merged.Add(file);
+		}
+		foreach (var file in writtenFiles)
+		{
+			if (indicesByPath.TryGetValue(file.Path, out var index))
+				merged[index] = file;
+			else
+			{
+				indicesByPath.Add(file.Path, merged.Count);
+				merged.Add(file);
+			}
+		}
+		return merged;
 	}
 
 	private static IReadOnlyList<FocusRankingSeedRequest>? ResolveFocusSeeds(

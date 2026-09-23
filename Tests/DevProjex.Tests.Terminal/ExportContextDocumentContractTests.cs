@@ -5,6 +5,7 @@ using System.Xml.Linq;
 using DevProjex.Application.Diagnostics;
 using DevProjex.Application.Secrets;
 using DevProjex.Application.Services;
+using DevProjex.Kernel.Abstractions;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -600,6 +601,58 @@ public sealed class ExportContextDocumentContractTests
 	}
 
 	[Theory]
+	[InlineData(false, 2)]
+	[InlineData(true, 2)]
+	[InlineData(false, 1)]
+	[InlineData(true, 1)]
+	public async Task TokenBudgetedExportReportsEachUnscannableFileAcrossBothPreparationPasses(
+		bool writeToFile,
+		int unreadableRead)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/Content.txt", "visible source content\n");
+		var destination = writeToFile ? Path.Combine(workspace.Path, "context.txt") : "-";
+		var environment = new TestTerminalEnvironment();
+		using var services = new TerminalServiceFactory(
+			() => workspace.CreateDirectory("app-data")).Create(AppLanguage.En);
+		var analyzer = new UnreadableOnSelectedReadAnalyzer(unreadableRead);
+		var controlledServices = services with
+		{
+			SecretRedactionOutputPreparer = new SecretRedactionOutputPreparer(analyzer)
+		};
+		var request = new ExportContextCommandRequest(
+			ProjectPath: project,
+			Selection: new ProjectSelectionSpec(
+				GitMode: GitFilteringMode.None,
+				Exclusions: [],
+				HideSecrets: true),
+			View: ProjectContextView.Content,
+			Format: ProjectContextDocumentFormat.Text,
+			OutputPath: destination,
+			Force: false,
+			DryRun: false,
+			MaximumEstimatedTokens: unreadableRead == 1 ? 1 : 1_000,
+			Output: new TerminalOutputOptions(Progress: TerminalProgressMode.Never));
+
+		var exitCode = await new ExportContextCommandHandler(controlledServices, environment)
+			.ExecuteAsync(request, TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Equal(unreadableRead == 1 ? 1 : 2, analyzer.ReadCount);
+		Assert.Equal(1, CountOccurrences(
+			environment.StandardError,
+			"Files excluded from content output: 1."));
+		Assert.Equal(1, CountOccurrences(environment.StandardError, "Content.txt"));
+		if (writeToFile)
+			Assert.True(File.Exists(destination));
+		var output = writeToFile
+			? await File.ReadAllTextAsync(destination, TestContext.Current.CancellationToken)
+			: environment.StandardOutput;
+		Assert.DoesNotContain("visible source content", output, StringComparison.Ordinal);
+	}
+
+	[Theory]
 	[InlineData("utf8-crlf-below", -1L)]
 	[InlineData("utf8-nonascii-exact", 0L)]
 	[InlineData("utf8-nonascii-above", 2L)]
@@ -1131,5 +1184,42 @@ public sealed class ExportContextDocumentContractTests
 		return long.Parse(
 			XDocument.Parse(output).Root!.Element("metrics")!.Element("estimatedTokens")!.Value,
 			CultureInfo.InvariantCulture);
+	}
+
+	private sealed class UnreadableOnSelectedReadAnalyzer(int unreadableRead) : IFileContentAnalyzer
+	{
+		private readonly FileContentAnalyzer _inner = new();
+		private int _readCount;
+
+		public int ReadCount => Volatile.Read(ref _readCount);
+
+		public ValueTask<FileContentReadResult> ReadClassifiedAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			Interlocked.Increment(ref _readCount) == unreadableRead
+				? ValueTask.FromResult(new FileContentReadResult(FileContentClassification.Unreadable))
+				: _inner.ReadClassifiedAsync(path, maxSizeForFullRead, cancellationToken);
+
+		public ValueTask<bool> IsTextFileAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			_inner.IsTextFileAsync(path, cancellationToken);
+
+		public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			_inner.GetTextFileMetricsAsync(path, cancellationToken);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			_inner.TryReadAsTextAsync(path, cancellationToken);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			_inner.TryReadAsTextAsync(path, maxSizeForFullRead, cancellationToken);
 	}
 }
