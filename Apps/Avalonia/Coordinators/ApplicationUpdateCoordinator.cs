@@ -13,6 +13,7 @@ internal sealed class ApplicationUpdateCoordinator : IDisposable
     private readonly string _currentVersion;
 
     private UserSettingsDb? _settings;
+    private int _manualCheckPending;
     private bool _disposed;
 
     public ApplicationUpdateCoordinator(
@@ -56,24 +57,32 @@ internal sealed class ApplicationUpdateCoordinator : IDisposable
 
     public async Task CheckManuallyAsync(CancellationToken cancellationToken)
     {
-        if (!await _operationGate.WaitAsync(0, cancellationToken))
+        if (Interlocked.CompareExchange(ref _manualCheckPending, 1, 0) != 0)
             return;
 
         try
         {
-            var settings = await EnsureSettingsLoadedAsync(cancellationToken);
-            _viewModel.BeginUpdateCheck();
-            var result = await _updateService.CheckAsync(_currentVersion, cancellationToken);
-            _viewModel.CompleteUpdateCheck(result);
-            await RecordCheckAsync(
-                settings,
-                result,
-                markAvailableVersionAsNotified: true,
-                cancellationToken);
+            await _operationGate.WaitAsync(cancellationToken);
+            try
+            {
+                var settings = await EnsureSettingsLoadedAsync(cancellationToken);
+                _viewModel.BeginUpdateCheck();
+                var result = await _updateService.CheckAsync(_currentVersion, cancellationToken);
+                _viewModel.CompleteUpdateCheck(result);
+                await RecordCheckAsync(
+                    settings,
+                    result,
+                    markAvailableVersionAsNotified: true,
+                    cancellationToken);
+            }
+            finally
+            {
+                _operationGate.Release();
+            }
         }
         finally
         {
-            _operationGate.Release();
+            Volatile.Write(ref _manualCheckPending, 0);
         }
     }
 

@@ -6,6 +6,107 @@ namespace DevProjex.Tests.Unit;
 public sealed class ApplicationUpdateCoordinatorTests
 {
     [Fact]
+    public async Task ManualCheckClickedWhileAutomaticCheckOwnsGate_RunsAfterItCompletes()
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new UserSettingsStore(() => temp.Path);
+        Assert.True(store.TrySave(new UserSettingsDb
+        {
+            UpdateCheckSettings = new UpdateCheckSettings
+            {
+                IsAutomaticCheckEnabled = true
+            }
+        }));
+        var service = new PausedUpdateService(new ApplicationUpdateCheckResult(
+            ApplicationUpdateAvailability.UpToDate,
+            "5.0",
+            "5.0"));
+        using var viewModel = CreateViewModel();
+        using var coordinator = new ApplicationUpdateCoordinator(
+            viewModel, service, store, "5.0");
+        var cancellationToken = TestContext.Current.CancellationToken;
+
+        var automaticCheck = coordinator.RunAutomaticCheckIfDueAsync(cancellationToken);
+        await service.Started.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
+        var openPopover = coordinator.OpenManualCheckAsync(cancellationToken);
+        Assert.True(viewModel.UpdatePopoverOpen);
+        var manualCheck = coordinator.CheckManuallyAsync(cancellationToken);
+        var duplicateClick = coordinator.CheckManuallyAsync(cancellationToken);
+
+        service.Complete();
+        await Task.WhenAll(automaticCheck, openPopover, manualCheck, duplicateClick);
+
+        Assert.Equal(2, service.CallCount);
+        Assert.Equal(UpdateCheckPresentationState.UpToDate, viewModel.UpdateCheckState);
+    }
+
+    [Fact]
+    public async Task CanceledPendingManualCheck_AllowsLaterManualCheck()
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new UserSettingsStore(() => temp.Path);
+        Assert.True(store.TrySave(new UserSettingsDb
+        {
+            UpdateCheckSettings = new UpdateCheckSettings
+            {
+                IsAutomaticCheckEnabled = true
+            }
+        }));
+        var service = new PausedUpdateService(new ApplicationUpdateCheckResult(
+            ApplicationUpdateAvailability.UpToDate,
+            "5.0",
+            "5.0"));
+        using var viewModel = CreateViewModel();
+        using var coordinator = new ApplicationUpdateCoordinator(
+            viewModel, service, store, "5.0");
+        var cancellationToken = TestContext.Current.CancellationToken;
+
+        var automaticCheck = coordinator.RunAutomaticCheckIfDueAsync(cancellationToken);
+        await service.Started.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
+        using var pendingCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var canceledCheck = coordinator.CheckManuallyAsync(pendingCancellation.Token);
+        pendingCancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => canceledCheck);
+
+        service.Complete();
+        await automaticCheck;
+        await coordinator.CheckManuallyAsync(cancellationToken);
+
+        Assert.Equal(2, service.CallCount);
+    }
+
+    [Fact]
+    public async Task FailedManualCheck_AllowsLaterManualCheck()
+    {
+        using var temp = new TemporaryDirectory();
+        var firstAttempt = true;
+        var service = new RecordingUpdateService(
+            UpdateAvailable("5.1"),
+            () =>
+            {
+                if (!firstAttempt)
+                    return;
+
+                firstAttempt = false;
+                throw new IOException("Simulated update service failure.");
+            });
+        using var viewModel = CreateViewModel();
+        using var coordinator = new ApplicationUpdateCoordinator(
+            viewModel,
+            service,
+            new UserSettingsStore(() => temp.Path),
+            "5.0");
+        var cancellationToken = TestContext.Current.CancellationToken;
+
+        await Assert.ThrowsAsync<IOException>(() =>
+            coordinator.CheckManuallyAsync(cancellationToken));
+        await coordinator.CheckManuallyAsync(cancellationToken);
+
+        Assert.Equal(2, service.CallCount);
+        Assert.Equal(UpdateCheckPresentationState.UpdateAvailable, viewModel.UpdateCheckState);
+    }
+
+    [Fact]
     public async Task RecoveredSettingsRead_DoesNotOverwriteCachedUpdateHistory()
     {
         if (!OperatingSystem.IsWindows())
@@ -868,13 +969,16 @@ public sealed class ApplicationUpdateCoordinatorTests
         private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource<ApplicationUpdateCheckResult> _completion =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _callCount;
 
         public Task Started => _started.Task;
+        public int CallCount => Volatile.Read(ref _callCount);
 
         public Task<ApplicationUpdateCheckResult> CheckAsync(
             string currentVersion,
             CancellationToken cancellationToken = default)
         {
+            Interlocked.Increment(ref _callCount);
             _started.TrySetResult();
             return _completion.Task.WaitAsync(cancellationToken);
         }
