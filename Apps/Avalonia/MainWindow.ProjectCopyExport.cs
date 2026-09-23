@@ -1,6 +1,7 @@
 using Avalonia.Platform.Storage;
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Avalonia.Services;
+using DevProjex.Kernel.Contracts;
 
 namespace DevProjex.Avalonia;
 
@@ -17,9 +18,12 @@ public partial class MainWindow
             !StorageProvider.CanPickFolder)
             return;
 
+        var sourcePath = _currentPath;
+        var sourceTree = _currentTree;
         try
         {
-			if (!await ConfirmRedactedProjectCopyAsync())
+			if (!await ConfirmRedactedProjectCopyAsync() ||
+                !IsProjectCopySourceCurrent(sourcePath, sourceTree))
 				return;
 
             var folderName = $"{GetProjectCopyName()}-copy";
@@ -29,6 +33,9 @@ public partial class MainWindow
                 SuggestedFileName = folderName,
                 AllowMultiple = false
             });
+            if (!IsProjectCopySourceCurrent(sourcePath, sourceTree))
+                return;
+
             var destinationParent = folders.FirstOrDefault()?.TryGetLocalPath();
             if (string.IsNullOrWhiteSpace(destinationParent))
             {
@@ -37,11 +44,16 @@ public partial class MainWindow
                 return;
             }
 
-            await ExportProjectCopyAsync(ProjectCopyExportFormat.Folder, destinationParent);
+            await ExportProjectCopyIfSourceCurrentAsync(
+                ProjectCopyExportFormat.Folder,
+                destinationParent,
+                sourcePath,
+                sourceTree);
         }
         catch (Exception exception)
         {
-            ShowProjectCopyExportError(exception);
+            if (IsProjectCopySourceIdentityCurrent(sourcePath, sourceTree))
+                ShowProjectCopyExportError(exception);
         }
     }
 
@@ -54,9 +66,12 @@ public partial class MainWindow
             !StorageProvider.CanSave)
             return;
 
+        var sourcePath = _currentPath;
+        var sourceTree = _currentTree;
         try
         {
-			if (!await ConfirmRedactedProjectCopyAsync())
+			if (!await ConfirmRedactedProjectCopyAsync() ||
+                !IsProjectCopySourceCurrent(sourcePath, sourceTree))
 				return;
 
             var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
@@ -74,6 +89,9 @@ public partial class MainWindow
                     }
                 ]
             });
+            if (!IsProjectCopySourceCurrent(sourcePath, sourceTree))
+                return;
+
             if (file is null)
                 return;
 
@@ -87,11 +105,16 @@ public partial class MainWindow
             if (!destinationPath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
                 destinationPath += ".zip";
 
-            await ExportProjectCopyAsync(ProjectCopyExportFormat.Zip, destinationPath);
+            await ExportProjectCopyIfSourceCurrentAsync(
+                ProjectCopyExportFormat.Zip,
+                destinationPath,
+                sourcePath,
+                sourceTree);
         }
         catch (Exception exception)
         {
-            ShowProjectCopyExportError(exception);
+            if (IsProjectCopySourceIdentityCurrent(sourcePath, sourceTree))
+                ShowProjectCopyExportError(exception);
         }
     }
 
@@ -183,6 +206,25 @@ public partial class MainWindow
             completion.TrySetResult(true);
         }
     }
+
+    private Task ExportProjectCopyIfSourceCurrentAsync(
+        ProjectCopyExportFormat format,
+        string destinationPath,
+        string? expectedPath,
+        BuildTreeResult? expectedTree) =>
+        IsProjectCopySourceCurrent(expectedPath, expectedTree)
+            ? ExportProjectCopyAsync(format, destinationPath)
+            : Task.CompletedTask;
+
+    private bool IsProjectCopySourceCurrent(string? expectedPath, BuildTreeResult? expectedTree) =>
+        _viewModel.CanExportProjectCopy &&
+        IsProjectCopySourceIdentityCurrent(expectedPath, expectedTree);
+
+    private bool IsProjectCopySourceIdentityCurrent(string? expectedPath, BuildTreeResult? expectedTree) =>
+        _windowLifetimeCts is { IsCancellationRequested: false } &&
+        !string.IsNullOrWhiteSpace(expectedPath) &&
+        PathComparer.Default.Equals(expectedPath, _currentPath) &&
+        ReferenceEquals(expectedTree, _currentTree);
 
 	private async Task<bool> ConfirmRedactedProjectCopyAsync()
 	{

@@ -91,6 +91,57 @@ public sealed class MainWindowProjectCopyExportUiTests(UiWorkspaceFixture worksp
 	}
 
 	[AvaloniaFact]
+	public async Task PickerContinuation_AfterProjectSwitch_DoesNotExportAnotherProject()
+	{
+		using var nextProject = UiTestProject.CreateDefault();
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+		var originalTree = UiTestDriver.GetCurrentTreeIdentity(window);
+		var destinationParent = Path.Combine(
+			workspace.Project.AppDataPath,
+			"project-copy-stale-picker",
+			Guid.NewGuid().ToString("N"));
+		Directory.CreateDirectory(destinationParent);
+
+		try
+		{
+			await UiTestDriver.OpenFolderAsync(window, nextProject.RootPath);
+			await InvokePickerContinuationAsync(
+				window,
+				destinationParent,
+				workspace.Project.RootPath,
+				originalTree);
+
+			Assert.Empty(Directory.EnumerateFileSystemEntries(destinationParent));
+			Assert.False(UiTestDriver.GetViewModel(window).IsProjectCopyExportInProgress);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task PickerContinuation_AfterWindowCloses_DoesNotStartExport()
+	{
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+		var originalTree = UiTestDriver.GetCurrentTreeIdentity(window);
+		var destinationParent = Path.Combine(
+			workspace.Project.AppDataPath,
+			"project-copy-closed-picker",
+			Guid.NewGuid().ToString("N"));
+		Directory.CreateDirectory(destinationParent);
+
+		await UiTestDriver.CloseWindowAsync(window);
+		await InvokePickerContinuationAsync(
+			window,
+			destinationParent,
+			workspace.Project.RootPath,
+			originalTree);
+
+		Assert.Empty(Directory.EnumerateFileSystemEntries(destinationParent));
+	}
+
+	[AvaloniaFact]
 	public async Task ActiveProjectExport_AllowsClosingExistingPreviewButBlocksReopening()
 	{
 		var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
@@ -127,15 +178,28 @@ public sealed class MainWindowProjectCopyExportUiTests(UiWorkspaceFixture worksp
 
 	private static async Task InvokeFolderExportAsync(MainWindow window, string destinationParent)
 	{
+		await InvokePickerContinuationAsync(
+			window,
+			destinationParent,
+			Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes).FullPath,
+			UiTestDriver.GetCurrentTreeIdentity(window));
+	}
+
+	private static async Task InvokePickerContinuationAsync(
+		MainWindow window,
+		string destinationParent,
+		string expectedPath,
+		object expectedTree)
+	{
 		var export = typeof(MainWindow).GetMethod(
-			"ExportProjectCopyAsync",
+			"ExportProjectCopyIfSourceCurrentAsync",
 			BindingFlags.Instance | BindingFlags.NonPublic);
 		Assert.NotNull(export);
 
 		var operation = await window.Dispatcher.InvokeAsync<Task>(() =>
 			Assert.IsAssignableFrom<Task>(export.Invoke(
 				window,
-				[ProjectCopyExportFormat.Folder, destinationParent])));
+				[ProjectCopyExportFormat.Folder, destinationParent, expectedPath, expectedTree])));
 		await operation.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
 	}
 
