@@ -1184,6 +1184,25 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 		Assert.False(new AgentActivityPreferenceStore(() => root).Load());
 	}
 
+	[Theory]
+	[InlineData(4 * 1024, true)]
+	[InlineData(4 * 1024 + 1, false)]
+	public void AgentActivityPreferenceLoadRejectsDocumentsBeyondByteLimit(
+		int documentBytes,
+		bool expectedEnabled)
+	{
+		using var project = UiTestProject.CreateDefault();
+		var root = project.AppDataPath;
+		Directory.CreateDirectory(root);
+		const string json = "{\"Enabled\":true}";
+		var path = Path.Combine(root, "agent-activity-view.json");
+		File.WriteAllText(path, json + new string(' ', documentBytes - json.Length));
+
+		var store = new AgentActivityPreferenceStore(() => root);
+		Assert.Equal(expectedEnabled, store.Load());
+		Assert.Equal(documentBytes, new FileInfo(path).Length);
+	}
+
 	[Fact]
 	public void AgentActivityPreferenceUnavailableStateRootKeepsOptionalFeatureDisabled()
 	{

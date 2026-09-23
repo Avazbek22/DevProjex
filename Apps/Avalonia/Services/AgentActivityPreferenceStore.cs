@@ -1,10 +1,12 @@
 using System.Text.Json;
+using DevProjex.Kernel.IO;
 
 namespace DevProjex.Avalonia.Services;
 
 public sealed class AgentActivityPreferenceStore(Func<string> stateRootProvider)
 {
     private const string FileName = "agent-activity-view.json";
+    private const int MaximumDocumentBytes = 4 * 1024;
     private readonly Func<string> _stateRootProvider = stateRootProvider;
 
     public bool Load()
@@ -14,7 +16,18 @@ public sealed class AgentActivityPreferenceStore(Func<string> stateRootProvider)
             var path = GetPath();
             if (!File.Exists(path))
                 return false;
-            var document = JsonSerializer.Deserialize<AgentActivityPreference>(File.ReadAllBytes(path));
+            using var source = new FileStream(
+                path,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete,
+                bufferSize: MaximumDocumentBytes,
+                FileOptions.SequentialScan);
+            using var bounded = new MaximumLengthReadStream(
+                source,
+                MaximumDocumentBytes,
+                static () => new IOException("Agent activity preference exceeds the size limit."));
+            var document = JsonSerializer.Deserialize<AgentActivityPreference>(bounded);
             return document?.Enabled == true;
         }
         catch (Exception exception) when (exception is
