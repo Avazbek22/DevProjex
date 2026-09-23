@@ -15,6 +15,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 	internal const string AccumulatedFactBudgetReason = "index fact memory limit exceeded";
 	private const int MaximumCachedNavigationFiles = 2_048;
 	private const long MaximumNavigationCacheBytes = 8L * 1024 * 1024;
+	private const int MaximumCachedPhysicalFileProbes = 4_096;
 
 	private readonly IDependencyFactExtractor _extractor;
 	private readonly IDependencyConfigurationProvider _configurationProvider;
@@ -191,6 +192,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			cachedSnapshot.ManifestPaths.SequenceEqual(manifestRelativePaths, StringComparer.Ordinal) &&
 			cachedSnapshot.Stamps.SequenceEqual(initialStamps) &&
 			AreControlFilesStillAbsent(cachedSnapshot.AbsentControlFiles, cancellationToken) &&
+			ArePhysicalFileProbesCurrent(cachedSnapshot.PhysicalFileProbes, cancellationToken) &&
 			ContentIdentitiesMatch(cachedSnapshot.ContentIdentities, alignedContentIdentities) &&
 			_indexCache.ContainsKey(cachedSnapshot.IndexCacheKey))
 		{
@@ -348,10 +350,29 @@ public sealed partial class DependencyFactsEngine : IDisposable
 				RemoveIndexCacheEntry(cacheKey, cachedIndex);
 				throw;
 			}
-			resolutionCacheHit = createdIndex is null || !ReferenceEquals(cachedIndex, createdIndex);
+			var sharedIndex = createdIndex is null || !ReferenceEquals(cachedIndex, createdIndex);
+			bool probesCurrent;
+			try
+			{
+				probesCurrent = resolved.CanCachePhysicalFileProbes &&
+				                ArePhysicalFileProbesCurrent(resolved.PhysicalFileProbes, cancellationToken);
+			}
+			catch
+			{
+				RemoveIndexCacheEntry(cacheKey, cachedIndex);
+				throw;
+			}
+			if (!probesCurrent)
+			{
+				RemoveIndexCacheEntry(cacheKey, cachedIndex);
+				resolvedIndexEntry = null;
+				if (sharedIndex || resolved.CanCachePhysicalFileProbes)
+					resolved = await CreateIndex().Value.ConfigureAwait(false);
+			}
+			resolutionCacheHit = resolvedIndexEntry is not null && sharedIndex;
 			if (resolutionCacheHit)
 				DependencyEngineDiagnostics.RecordResolutionCacheHit();
-			if (!resolutionCacheHit)
+			if (resolvedIndexEntry is not null && !resolutionCacheHit)
 				RegisterIndexCacheWeight(cacheKey, cachedIndex, EstimateResolvedIndexBytes(resolved));
 		}
 		var contentObservations = new Dictionary<string, DependencySourceObservation>(
@@ -398,6 +419,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 				initialStamps,
 				alignedContentIdentities,
 				configuration.AbsentControlFiles,
+				resolved.PhysicalFileProbes,
 				cacheKey,
 				resolvedIndexEntry,
 				result);
@@ -849,6 +871,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		IReadOnlyList<FileStamp> stamps,
 		IReadOnlyList<string>? contentIdentities,
 		IReadOnlyList<string> absentControlFiles,
+		IReadOnlyList<PhysicalFileProbe> physicalFileProbes,
 		IndexCacheKey indexCacheKey,
 		IndexCacheEntry expectedIndexEntry,
 		DependencyIndexSnapshot snapshot)
@@ -862,7 +885,8 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			if (_manifestSnapshots.TryGetValue(key, out var previous))
 				RemoveManifestSnapshotUnderLock(key, previous);
 			var entry = new ManifestSnapshotCacheEntry(
-				key, manifestPaths, stamps, contentIdentities, absentControlFiles, indexCacheKey, snapshot);
+				key, manifestPaths, stamps, contentIdentities, absentControlFiles,
+				physicalFileProbes, indexCacheKey, snapshot);
 			_manifestSnapshots[key] = entry;
 			entry.OrderNode = _manifestSnapshotOrder.AddLast(entry);
 			while (_manifestSnapshots.Count > _limits.MaximumCachedIndexes &&
@@ -989,7 +1013,8 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			strings.Add(edge.Reference) + edge.Reasons.Sum(strings.Add) +
 			edge.Evidence.Sum(site => SiteBytes(site, strings)) +
 			edge.Candidates.Sum(strings.Add) + edge.DeclarationFiles.Sum(strings.Add)) +
-			index.Files.Sum(file => EstimateFileFactsBytes(file, strings));
+			index.Files.Sum(file => EstimateFileFactsBytes(file, strings)) +
+			index.PhysicalFileProbes.Sum(probe => 32 + strings.Add(probe.Path));
 	}
 
 	private static bool AreControlFilesStillAbsent(IEnumerable<string> paths, CancellationToken cancellationToken)
@@ -999,6 +1024,20 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			if (File.Exists(path))
+				return false;
+		}
+		return true;
+	}
+
+	private static bool ArePhysicalFileProbesCurrent(
+		IReadOnlyList<PhysicalFileProbe> probes,
+		CancellationToken cancellationToken)
+	{
+		for (var index = 0; index < probes.Count; index++)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var probe = probes[index];
+			if (File.Exists(probe.Path) != probe.Exists)
 				return false;
 		}
 		return true;
@@ -1279,6 +1318,8 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		long LastWriteTimeUtcTicks,
 		long CreationTimeUtcTicks);
 
+	private readonly record struct PhysicalFileProbe(string Path, bool Exists);
+
 	private sealed class FileCacheEntry(FileCacheKey key, Lazy<Task<FileFacts>> value)
 	{
 		public FileCacheKey Key { get; } = key;
@@ -1301,6 +1342,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		IReadOnlyList<FileStamp> Stamps,
 		IReadOnlyList<string>? ContentIdentities,
 		IReadOnlyList<string> AbsentControlFiles,
+		IReadOnlyList<PhysicalFileProbe> PhysicalFileProbes,
 		IndexCacheKey IndexCacheKey,
 		DependencyIndexSnapshot Snapshot)
 	{
@@ -1325,6 +1367,8 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		IReadOnlyDictionary<string, IReadOnlyList<DependencyEdge>> EdgesByTarget)
 	{
 		public long ResolverContextEstimatedBytes { get; init; }
+		public IReadOnlyList<PhysicalFileProbe> PhysicalFileProbes { get; init; } = [];
+		public bool CanCachePhysicalFileProbes { get; init; } = true;
 	}
 
 	private static class DependencyResolver
@@ -1414,7 +1458,9 @@ public sealed partial class DependencyFactsEngine : IDisposable
 				new Dictionary<string, IReadOnlyList<DependencyEdge>>(StringComparer.Ordinal),
 				new Dictionary<string, IReadOnlyList<DependencyEdge>>(StringComparer.Ordinal))
 			{
-				ResolverContextEstimatedBytes = context.EstimatedRetainedBytes
+				ResolverContextEstimatedBytes = context.EstimatedRetainedBytes,
+				PhysicalFileProbes = context.CapturePhysicalFileProbes(),
+				CanCachePhysicalFileProbes = context.CanCachePhysicalFileProbes
 			};
 		}
 
@@ -1592,7 +1638,22 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		private readonly IReadOnlySet<string> _manifestDirectoryPrefixes;
 		private readonly IReadOnlyDictionary<string, TypeScriptPathMapping[]> _typeScriptMappingsByScope;
 		private readonly bool _diagnosticsEnabled;
+		private readonly ConcurrentDictionary<string, int> _physicalFileProbes = new(PathComparer);
+		private int _physicalFileProbeCount;
+		private int _physicalFileProbeOverflow;
+		private int _physicalFileProbeConflict;
 		public long EstimatedRetainedBytes { get; }
+		public bool CanCachePhysicalFileProbes =>
+			Volatile.Read(ref _physicalFileProbeOverflow) == 0 &&
+			Volatile.Read(ref _physicalFileProbeConflict) == 0;
+
+		public IReadOnlyList<PhysicalFileProbe> CapturePhysicalFileProbes() =>
+			CanCachePhysicalFileProbes
+				? _physicalFileProbes
+					.OrderBy(static pair => pair.Key, PathComparer)
+					.Select(static pair => new PhysicalFileProbe(pair.Key, pair.Value == 2))
+					.ToArray()
+				: [];
 
 		public ResolverContext(
 			string root,
@@ -2164,11 +2225,29 @@ public sealed partial class DependencyFactsEngine : IDisposable
 					var relative = PortableRelative(_root, probe);
 					if (TryGetManifestPath(relative, out var manifestPath))
 						return [manifestPath];
-					if (File.Exists(probe))
+					if (ProbeUnselectedFile(probe))
 						return [];
 				}
 			}
 			return [];
+		}
+
+		private bool ProbeUnselectedFile(string path)
+		{
+			var exists = File.Exists(path);
+			if (Volatile.Read(ref _physicalFileProbeOverflow) != 0)
+				return exists;
+			var state = exists ? 2 : 1;
+			if (_physicalFileProbes.TryAdd(path, state))
+			{
+				if (Interlocked.Increment(ref _physicalFileProbeCount) > MaximumCachedPhysicalFileProbes)
+					Volatile.Write(ref _physicalFileProbeOverflow, 1);
+			}
+			else if (_physicalFileProbes.TryGetValue(path, out var previous) && previous != state)
+			{
+				Volatile.Write(ref _physicalFileProbeConflict, 1);
+			}
+			return exists;
 		}
 
 		private static bool Matches(string pattern, int star, string value) => star < 0
