@@ -107,16 +107,23 @@ public static class AtomicFileOutput
 			cancellationToken.ThrowIfCancellationRequested();
 			RevalidateResolvedPath(fullPath, validateDestination);
 			cancellationToken.ThrowIfCancellationRequested();
-			AtomicFileCommit.Commit(tempPath, fullPath, overwrite);
+			try
+			{
+				AtomicFileCommit.Commit(tempPath, fullPath, overwrite);
+			}
+			catch (Exception exception) when (
+				(exception is IOException or UnauthorizedAccessException) &&
+				CommitFailureIsDestinationConflict(fullPath, overwrite))
+			{
+				throw new AtomicFileOutputConflictException(fullPath);
+			}
 		}
-		catch (Exception exception) when (
-			(exception is IOException or UnauthorizedAccessException) &&
-			CommitFailureIsDestinationConflict(fullPath, overwrite))
+		catch (AtomicFileOutputConflictException exception)
 		{
 			operationException = new AtomicFileOutputConflictException(
 				ProjectCopyExportService.ResolveReportedDestinationPath(
 					requestedPath,
-					fullPath));
+					exception.Path));
 		}
 		catch (Exception exception)
 		{

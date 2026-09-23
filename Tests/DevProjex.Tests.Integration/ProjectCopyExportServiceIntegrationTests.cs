@@ -1197,6 +1197,29 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 	}
 
 	[Fact]
+	public async Task AtomicFileWriterFailurePreservesItsCauseWhenDestinationAppears()
+	{
+		using var workspace = new TemporaryDirectory();
+		var outputDirectory = workspace.CreateDirectory("output");
+		var destination = Path.Combine(outputDirectory, "report.txt");
+		var writeFailure = new IOException("Source read failed during export.");
+
+		var exception = await Assert.ThrowsAsync<IOException>(() => AtomicFileOutput.WriteAsync(
+			destination,
+			overwrite: false,
+			(_, _) =>
+			{
+				File.WriteAllText(destination, "competing output");
+				return Task.FromException(writeFailure);
+			},
+			TestContext.Current.CancellationToken));
+
+		Assert.Same(writeFailure, exception);
+		Assert.Equal("competing output", File.ReadAllText(destination));
+		Assert.Empty(Directory.EnumerateFiles(outputDirectory, ".*.tmp"));
+	}
+
+	[Fact]
 	public async Task AtomicFileForceRaceWithDirectoryReturnsConflictAndCleansStaging()
 	{
 		using var workspace = new TemporaryDirectory();
