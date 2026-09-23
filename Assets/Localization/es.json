@@ -124,7 +124,6 @@
     "Menu.Mcp.OpenProject.Standard.Help": "Registra el servidor para este proyecto y abre el proyecto en {0}. El agente no depende de la selección de la ventana.",
     "Menu.Mcp.OtherClients.Help": "Muestra una configuración lista para Claude Desktop y otros clientes.",
     "Menu.Mcp.Journal.Help": "Lo que el agente solicitó y recibió mediante DevProjex; solo se guarda en este equipo.",
-    "Tree.Selection.Focus.Help": "Las casillas definen el foco del agente, no una prohibición: se puede pedir por nombre un archivo fuera del foco si los filtros lo permiten. Sin casillas, el agente ve todo el proyecto disponible.",
     "Settings.HideSecrets.Help": "En MCP, los secretos siempre se ocultan; este ajuste controla la vista previa, la copia y la exportación.",
     "AgentJournal.ExportFailed": "No se pudo exportar el registro: {0}",
     "AgentJournal.ClearFailed": "No se pudo borrar el registro: {0}",

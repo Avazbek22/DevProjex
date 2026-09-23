@@ -620,8 +620,6 @@
                                       Spacing="{DynamicResource TreeItemSpacingResource}">
                             <CheckBox IsThreeState="True"
                                       IsChecked="{CompiledBinding IsChecked, Mode=TwoWay}"
-                                      ToolTip.Tip="{Binding $parent[Window].DataContext.TreeSelectionFocusHelp}"
-                                      AutomationProperties.HelpText="{Binding $parent[Window].DataContext.TreeSelectionFocusHelp}"
                                       VerticalAlignment="Center" />
                             <Image Source="{CompiledBinding Icon}"
                                    Width="{DynamicResource TreeIconSizeResource}"

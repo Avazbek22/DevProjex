@@ -124,7 +124,6 @@
   "Menu.Mcp.OpenProject.Standard.Help": "为此项目注册服务器，并在 {0} 中打开项目。代理不依赖窗口中的选择。",
   "Menu.Mcp.OtherClients.Help": "显示适用于 Claude Desktop 和其他客户端的现成配置。",
   "Menu.Mcp.Journal.Help": "代理通过 DevProjex 请求和收到的内容；仅存储在此计算机上。",
-  "Tree.Selection.Focus.Help": "勾选项设置代理的关注范围，而不是禁止访问：如果筛选器允许，可按名称请求范围之外的文件。没有勾选项时，代理可看到整个可用项目。",
   "Settings.HideSecrets.Help": "在 MCP 中，机密信息始终会被遮盖；此设置控制预览、复制和导出。",
   "AgentJournal.ExportFailed": "无法导出日志：{0}",
   "AgentJournal.ClearFailed": "无法清除日志：{0}",

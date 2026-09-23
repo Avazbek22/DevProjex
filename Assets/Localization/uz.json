@@ -124,7 +124,6 @@
   "Menu.Mcp.OpenProject.Standard.Help": "Serverni ushbu loyiha uchun ro‘yxatdan o‘tkazadi va loyihani {0}da ochadi. Agent oynadagi tanlovga bog‘liq emas.",
   "Menu.Mcp.OtherClients.Help": "Claude Desktop va boshqa mijozlar uchun tayyor konfiguratsiyani ko‘rsatadi.",
   "Menu.Mcp.Journal.Help": "Agent DevProjex orqali so‘ragan va olgan ma’lumotlar; faqat shu kompyuterda saqlanadi.",
-  "Tree.Selection.Focus.Help": "Belgilar agent diqqatini belgilaydi, taqiq qo‘ymaydi: filtrlar ruxsat bersa, diqqatdan tashqaridagi faylni nomi bilan so‘rash mumkin. Belgilar bo‘lmasa, agent mavjud loyihaning barchasini ko‘radi.",
   "Settings.HideSecrets.Help": "MCPda sirlar har doim niqoblanadi; bu sozlama ko‘rib chiqish, nusxalash va eksportni boshqaradi.",
   "AgentJournal.ExportFailed": "Jurnalni eksport qilib bo‘lmadi: {0}",
   "AgentJournal.ClearFailed": "Jurnalni tozalab bo‘lmadi: {0}",

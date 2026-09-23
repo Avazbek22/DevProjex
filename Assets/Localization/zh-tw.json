@@ -124,7 +124,6 @@
   "Menu.Mcp.OpenProject.Standard.Help": "為此專案註冊伺服器，並在 {0} 中開啟專案。代理程式不依賴視窗中的選取項目。",
   "Menu.Mcp.OtherClients.Help": "顯示適用於 Claude Desktop 和其他用戶端的現成設定。",
   "Menu.Mcp.Journal.Help": "代理程式透過 DevProjex 要求和收到的內容；只儲存在此電腦上。",
-  "Tree.Selection.Focus.Help": "勾選項目設定代理程式的關注範圍，而非禁止存取：若篩選器允許，可依名稱要求範圍外的檔案。沒有勾選項目時，代理程式可看到整個可用專案。",
   "Settings.HideSecrets.Help": "在 MCP 中，機密資訊一律會被遮蔽；此設定控制預覽、複製和匯出。",
   "AgentJournal.ExportFailed": "無法匯出日誌：{0}",
   "AgentJournal.ClearFailed": "無法清除日誌：{0}",

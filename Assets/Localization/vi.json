@@ -124,7 +124,6 @@
   "Menu.Mcp.OpenProject.Standard.Help": "Đăng ký máy chủ cho dự án này và mở dự án trong {0}. Tác nhân không phụ thuộc vào lựa chọn trong cửa sổ.",
   "Menu.Mcp.OtherClients.Help": "Hiển thị cấu hình dùng ngay cho Claude Desktop và các ứng dụng khác.",
   "Menu.Mcp.Journal.Help": "Những gì tác nhân đã yêu cầu và nhận qua DevProjex; chỉ được lưu trên máy tính này.",
-  "Tree.Selection.Focus.Help": "Các dấu chọn đặt trọng tâm cho tác nhân, không phải lệnh cấm: có thể yêu cầu tệp ngoài trọng tâm theo tên nếu bộ lọc cho phép. Khi không có dấu chọn, tác nhân thấy toàn bộ dự án khả dụng.",
   "Settings.HideSecrets.Help": "Trong MCP, dữ liệu bí mật luôn được che; cài đặt này điều khiển xem trước, sao chép và xuất.",
   "AgentJournal.ExportFailed": "Không thể xuất nhật ký: {0}",
   "AgentJournal.ClearFailed": "Không thể xóa nhật ký: {0}",

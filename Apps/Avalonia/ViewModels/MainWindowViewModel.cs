@@ -1785,7 +1785,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public string MenuMcpOpenVsCodeStandardHelp { get; private set; } = string.Empty;
     public string MenuMcpOtherClientsHelp { get; private set; } = string.Empty;
     public string MenuMcpJournalHelp { get; private set; } = string.Empty;
-    public string TreeSelectionFocusHelp { get; private set; } = string.Empty;
     public ObservableCollection<ToastMessageViewModel> ToastItems { get; private set; } = [];
     public bool HasToastItems => ToastItems.Count > 0;
     public string MenuView { get; private set; } = string.Empty;
@@ -2003,7 +2002,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         MenuMcpOpenVsCodeStandardHelp = _localization.Format("Menu.Mcp.OpenProject.Standard.Help", "VS Code");
         MenuMcpOtherClientsHelp = _localization["Menu.Mcp.OtherClients.Help"];
         MenuMcpJournalHelp = _localization["Menu.Mcp.Journal.Help"];
-        TreeSelectionFocusHelp = _localization["Tree.Selection.Focus.Help"];
         if (HideSecretsOption is not null)
             HideSecretsOption.HelpText = _localization["Settings.HideSecrets.Help"];
         MenuView = _localization["Menu.View"];
@@ -2211,7 +2209,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(MenuMcpOpenVsCodeStandardHelp));
         RaisePropertyChanged(nameof(MenuMcpOtherClientsHelp));
         RaisePropertyChanged(nameof(MenuMcpJournalHelp));
-        RaisePropertyChanged(nameof(TreeSelectionFocusHelp));
         RaisePropertyChanged(nameof(MenuView));
         RaisePropertyChanged(nameof(MenuViewExpandAll));
         RaisePropertyChanged(nameof(MenuViewCollapseAll));

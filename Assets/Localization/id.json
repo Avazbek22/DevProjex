@@ -124,7 +124,6 @@
   "Menu.Mcp.OpenProject.Standard.Help": "Mendaftarkan server untuk proyek ini dan membuka proyek di {0}. Agen tidak bergantung pada pilihan di jendela.",
   "Menu.Mcp.OtherClients.Help": "Menampilkan konfigurasi siap pakai untuk Claude Desktop dan klien lain.",
   "Menu.Mcp.Journal.Help": "Apa yang diminta dan diterima agen melalui DevProjex; hanya disimpan di komputer ini.",
-  "Tree.Selection.Focus.Help": "Kotak centang menentukan fokus agen, bukan larangan: file di luar fokus dapat diminta berdasarkan nama jika diizinkan filter. Tanpa kotak yang dicentang, agen melihat seluruh proyek yang tersedia.",
   "Settings.HideSecrets.Help": "Di MCP, rahasia selalu disamarkan; pengaturan ini mengatur pratinjau, penyalinan, dan ekspor.",
   "AgentJournal.ExportFailed": "Jurnal tidak dapat diekspor: {0}",
   "AgentJournal.ClearFailed": "Jurnal tidak dapat dihapus: {0}",

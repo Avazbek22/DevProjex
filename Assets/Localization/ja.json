@@ -124,7 +124,6 @@
   "Menu.Mcp.OpenProject.Standard.Help": "このプロジェクトにサーバーを登録し、{0} でプロジェクトを開きます。エージェントはウィンドウの選択に依存しません。",
   "Menu.Mcp.OtherClients.Help": "Claude Desktop などのクライアントですぐ使える設定を表示します。",
   "Menu.Mcp.Journal.Help": "エージェントが DevProjex 経由で要求して受け取った内容です。このコンピューターにのみ保存されます。",
-  "Tree.Selection.Focus.Help": "チェックはエージェントの注目範囲を示すもので、アクセス禁止ではありません。フィルターで許可されていれば、範囲外のファイルも名前で要求できます。チェックがなければ、利用可能なプロジェクト全体が見えます。",
   "Settings.HideSecrets.Help": "MCP ではシークレットは常にマスクされます。この設定はプレビュー、コピー、エクスポートを制御します。",
   "AgentJournal.ExportFailed": "ジャーナルをエクスポートできませんでした: {0}",
   "AgentJournal.ClearFailed": "ジャーナルを消去できませんでした: {0}",

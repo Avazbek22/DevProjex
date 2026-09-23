@@ -126,7 +126,6 @@
   "Menu.Mcp.OpenProject.Standard.Help": "Registers the server for this project and opens the project in {0}. The agent does not depend on the window selection.",
   "Menu.Mcp.OtherClients.Help": "Shows ready-to-use configuration for Claude Desktop and other clients.",
   "Menu.Mcp.Journal.Help": "What the agent requested and received through DevProjex; stored only on this computer.",
-  "Tree.Selection.Focus.Help": "Checked items set the agent's focus, not an access ban: a file outside the focus can be requested by name when filters allow it. With no checked items, the agent sees the entire available project.",
   "Settings.HideSecrets.Help": "In MCP, secrets are always redacted; this setting controls preview, copy, and export.",
   "Menu.Mcp.Documentation": "Documentation",
   "AgentJournal.Title": "Agent journal",

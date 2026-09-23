@@ -124,7 +124,6 @@
   "Menu.Mcp.OpenProject.Standard.Help": "Sunucuyu bu proje için kaydeder ve projeyi {0} içinde açar. Aracı penceredeki seçime bağlı değildir.",
   "Menu.Mcp.OtherClients.Help": "Claude Desktop ve diğer istemciler için hazır yapılandırmayı gösterir.",
   "Menu.Mcp.Journal.Help": "Aracının DevProjex üzerinden istediği ve aldığı bilgiler; yalnızca bu bilgisayarda saklanır.",
-  "Tree.Selection.Focus.Help": "İşaretler aracının odağını belirler, erişimi yasaklamaz: filtreler izin veriyorsa odak dışındaki bir dosya adıyla istenebilir. Hiçbir öğe işaretli değilse aracı kullanılabilir projenin tamamını görür.",
   "Settings.HideSecrets.Help": "MCP'de gizli bilgiler her zaman maskelenir; bu ayar önizleme, kopyalama ve dışa aktarmayı yönetir.",
   "AgentJournal.ExportFailed": "Günlük dışa aktarılamadı: {0}",
   "AgentJournal.ClearFailed": "Günlük temizlenemedi: {0}",
