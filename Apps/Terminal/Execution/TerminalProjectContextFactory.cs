@@ -93,7 +93,7 @@ public sealed class TerminalProjectContextFactory(
 		else if (!includeContentOutputMetrics)
 		{
 			plan = await planner
-				.BuildWithTreeMetricsAsync(request, cancellationToken)
+				.BuildWithTreeMetricsAsync(request, captureIgnoreImpactCounts, cancellationToken)
 				.ConfigureAwait(false);
 		}
 		else if (captureIgnoreImpactCounts)

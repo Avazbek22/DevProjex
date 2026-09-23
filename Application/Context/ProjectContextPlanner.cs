@@ -43,6 +43,14 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			includeContentOutputMetrics: false,
 			cancellationToken);
 
+	public Task<ProjectContextPlan> BuildWithTreeMetricsAsync(
+		ProjectContextRequest request,
+		bool captureIgnoreImpactCounts,
+		CancellationToken cancellationToken = default)
+		=> BuildWithTreeMetricsAsync(
+			captureIgnoreImpactCounts ? request with { CaptureIgnoreImpactCounts = true } : request,
+			cancellationToken);
+
 	public Task<ProjectContextPlan> BuildStructureAsync(
 		ProjectContextRequest request,
 		CancellationToken cancellationToken = default)
@@ -383,6 +391,18 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			pathComparer: null,
 			cancellationToken);
 
+	public Task<ProjectContextPlan> ReprojectSelectionWithOutputMetricsAsync(
+		ProjectContextPlan baseline,
+		IReadOnlyCollection<string>? selectedPaths,
+		CancellationToken cancellationToken = default) =>
+		ReprojectSelectionCoreAsync(
+			baseline,
+			selectedPaths,
+			forceEmptySelection: false,
+			pathComparer: null,
+			cancellationToken,
+			includeOutputMetrics: true);
+
 	public Task<ProjectContextPlan> ReprojectSelectionAsync(
 		ProjectContextPlan baseline,
 		IReadOnlyCollection<string>? selectedPaths,
@@ -408,14 +428,27 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			pathComparer: null,
 			cancellationToken);
 
+	public Task<ProjectContextPlan> ReprojectEmptySelectionWithOutputMetricsAsync(
+		ProjectContextPlan baseline,
+		CancellationToken cancellationToken = default) =>
+		ReprojectSelectionCoreAsync(
+			baseline,
+			selectedPaths: [],
+			forceEmptySelection: true,
+			pathComparer: null,
+			cancellationToken,
+			includeOutputMetrics: true);
+
 	private async Task<ProjectContextPlan> ReprojectSelectionCoreAsync(
 		ProjectContextPlan baseline,
 		IReadOnlyCollection<string>? selectedPaths,
 		bool forceEmptySelection,
 		StringComparer? pathComparer,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		bool? includeOutputMetrics = null)
 	{
 		ArgumentNullException.ThrowIfNull(baseline);
+		var captureOutputMetrics = includeOutputMetrics ?? baseline.IncludesOutputMetrics;
 		var diagnostics = baseline.Diagnostics
 			.Where(static diagnostic =>
 				diagnostic.Code is not MissingSelectedPathCode and not InvalidSelectedPathCode)
@@ -487,7 +520,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		var analysis = await analysisService
 			.BuildReportFromTreeAsync(
 				reportInput,
-				baseline.IncludesOutputMetrics,
+				captureOutputMetrics,
 				cancellationToken)
 			.ConfigureAwait(false);
 
@@ -499,6 +532,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			IncludedFiles = includedFiles,
 			IncludedFolders = includedFolders,
 			Analysis = analysis,
+			IncludesOutputMetrics = captureOutputMetrics,
 			Diagnostics = diagnostics,
 			Fingerprint = BuildFingerprint(
 				baseline.SourceRoot,
@@ -865,7 +899,8 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 				rootStates,
 				extensionStates,
 				ignoreStates,
-				profile.SelectedPaths?.ToArray())
+				profile.SelectedPaths?.ToArray(),
+				profile.MarkedSecrets?.ToArray())
 		};
 	}
 

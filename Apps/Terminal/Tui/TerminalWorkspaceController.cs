@@ -139,7 +139,7 @@ public sealed class TerminalWorkspaceController(
 	{
 		var normalizedFrontier = selectedPathFrontier?
 			.Select(ProjectSelectionPath.NormalizeRelative)
-			.ToArray();
+			.ToHashSet(StringComparer.Ordinal);
 		return SelectionEvolutionPolicy.Reconcile(
 			availablePaths,
 			previousPaths,
@@ -150,23 +150,23 @@ public sealed class TerminalWorkspaceController(
 
 	private static bool IsInsideSelectedPathFrontier(
 		string path,
-		IReadOnlyCollection<string>? selectedPathFrontier)
+		IReadOnlySet<string>? selectedPathFrontier)
 	{
 		if (selectedPathFrontier is null)
 			return true;
 
 		var normalizedPath = ProjectSelectionPath.NormalizeRelative(path);
-		foreach (var selectedPath in selectedPathFrontier)
+		if (selectedPathFrontier.Contains(string.Empty))
+			return true;
+		while (true)
 		{
-			if (selectedPath.Length == 0 ||
-				string.Equals(normalizedPath, selectedPath, StringComparison.Ordinal) ||
-				normalizedPath.StartsWith(selectedPath + '/', StringComparison.Ordinal))
-			{
+			if (selectedPathFrontier.Contains(normalizedPath))
 				return true;
-			}
+			var separatorIndex = normalizedPath.LastIndexOf('/');
+			if (separatorIndex < 0)
+				return false;
+			normalizedPath = normalizedPath[..separatorIndex];
 		}
-
-		return false;
 	}
 
 	internal async Task<TerminalStructuralRefreshResult> BuildStructuralRefreshAsync(
@@ -642,11 +642,14 @@ public sealed class TerminalWorkspaceController(
 	public Task<ProjectContextPlan> BuildCurrentPlanAsync(
 		TerminalWorkspaceState state,
 		CancellationToken cancellationToken) =>
-		BuildReprojectedPlanAsync(
-			state.Plan,
-			state.BuildSelectedRelativePaths(),
-			state.IsEffectiveRootUnchecked,
-			cancellationToken);
+		state.IsEffectiveRootUnchecked
+			? services.ContextPlanner.ReprojectEmptySelectionWithOutputMetricsAsync(
+				state.Plan,
+				cancellationToken)
+			: services.ContextPlanner.ReprojectSelectionWithOutputMetricsAsync(
+				state.Plan,
+				state.BuildSelectedRelativePaths(),
+				cancellationToken);
 
 	public async Task RefreshPreviewAsync(
 		TerminalWorkspaceState state,
@@ -654,9 +657,12 @@ public sealed class TerminalWorkspaceController(
 		ProjectContextDocumentFormat format,
 		CancellationToken cancellationToken)
 	{
+		var plan = format is ProjectContextDocumentFormat.Json or ProjectContextDocumentFormat.Xml
+			? await BuildCurrentPlanAsync(state, cancellationToken).ConfigureAwait(false)
+			: state.Plan;
 		var preview = await services.ContextDocumentService
 			.BuildAsync(
-				state.Plan,
+				plan,
 				view,
 				format,
 				PreviewLimits,
@@ -717,13 +723,19 @@ public sealed class TerminalWorkspaceController(
 			.ConfigureAwait(false);
 	}
 
-	public Task<IPreviewTextDocument> BuildExactExportDocumentAsync(
+	public async Task<IPreviewTextDocument> BuildExactExportDocumentAsync(
 		TerminalWorkspaceState state,
 		ProjectContextView view,
 		ProjectContextDocumentFormat format,
 		CancellationToken cancellationToken,
 		bool plain = false)
-		=> BuildExactExportDocumentAsync(state.Plan, view, format, cancellationToken, plain);
+	{
+		var plan = format is ProjectContextDocumentFormat.Json or ProjectContextDocumentFormat.Xml
+			? await BuildCurrentPlanAsync(state, cancellationToken).ConfigureAwait(false)
+			: state.Plan;
+		return await BuildExactExportDocumentAsync(plan, view, format, cancellationToken, plain)
+			.ConfigureAwait(false);
+	}
 
 	private Task<IPreviewTextDocument> BuildExactExportDocumentAsync(
 		ProjectContextPlan plan,
@@ -1071,11 +1083,13 @@ public sealed class TerminalWorkspaceController(
 		services.ContextFactory.BuildAsync(
 			projectPath,
 			selection,
-			sourceIdentity,
-			cancellationToken,
+			includeOutputMetrics: true,
+			knownIdentity: sourceIdentity,
+			cancellationToken: cancellationToken,
 			captureIgnoreImpactCounts: true,
-			knownExtensionStates,
-			repositoryScopeFullPaths);
+			includeContentOutputMetrics: false,
+			knownExtensionStates: knownExtensionStates,
+			repositoryScopeFullPaths: repositoryScopeFullPaths);
 
 	private static IReadOnlyList<string>? ResolveRepositoryScopeFullPaths(
 		string sourceRoot,
