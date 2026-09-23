@@ -16,6 +16,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 	private const int MaximumCachedNavigationFiles = 2_048;
 	private const long MaximumNavigationCacheBytes = 8L * 1024 * 1024;
 	private const int MaximumCachedPhysicalFileProbes = 4_096;
+	private const int MaximumSharedIndexCancellationRetries = 1;
 
 	private readonly IDependencyFactExtractor _extractor;
 	private readonly IDependencyConfigurationProvider _configurationProvider;
@@ -344,23 +345,42 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		}
 		else
 		{
-			IndexCacheEntry? createdIndex = null;
-			if (!_indexCache.TryGetValue(cacheKey, out var cachedIndex))
+			var sharedIndex = false;
+			var canceledSharedAttempts = 0;
+			while (true)
 			{
-				createdIndex = new IndexCacheEntry(cacheKey, CreateIndex());
-				cachedIndex = GetOrAddIndexCacheEntry(createdIndex);
+				IndexCacheEntry? createdIndex = null;
+				if (!_indexCache.TryGetValue(cacheKey, out var cachedIndex))
+				{
+					createdIndex = new IndexCacheEntry(cacheKey, CreateIndex());
+					cachedIndex = GetOrAddIndexCacheEntry(createdIndex);
+				}
+				sharedIndex = createdIndex is null || !ReferenceEquals(cachedIndex, createdIndex);
+				if (sharedIndex)
+					DependencyEngineDiagnostics.RecordIndexCacheJoin();
+				try
+				{
+					resolved = await cachedIndex.Value.Value.ConfigureAwait(false);
+					resolvedIndexEntry = cachedIndex;
+					break;
+				}
+				catch (OperationCanceledException) when (sharedIndex && !cancellationToken.IsCancellationRequested)
+				{
+					RemoveIndexCacheEntry(cacheKey, cachedIndex);
+					if (++canceledSharedAttempts <= MaximumSharedIndexCancellationRetries)
+						continue;
+
+					// A live caller must not inherit repeated producer cancellations.
+					resolved = await CreateIndex().Value.ConfigureAwait(false);
+					sharedIndex = false;
+					break;
+				}
+				catch
+				{
+					RemoveIndexCacheEntry(cacheKey, cachedIndex);
+					throw;
+				}
 			}
-			resolvedIndexEntry = cachedIndex;
-			try
-			{
-				resolved = await cachedIndex.Value.Value.ConfigureAwait(false);
-			}
-			catch
-			{
-				RemoveIndexCacheEntry(cacheKey, cachedIndex);
-				throw;
-			}
-			var sharedIndex = createdIndex is null || !ReferenceEquals(cachedIndex, createdIndex);
 			bool probesCurrent;
 			try
 			{
@@ -369,12 +389,14 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			}
 			catch
 			{
-				RemoveIndexCacheEntry(cacheKey, cachedIndex);
+				if (resolvedIndexEntry is not null)
+					RemoveIndexCacheEntry(cacheKey, resolvedIndexEntry);
 				throw;
 			}
 			if (!probesCurrent)
 			{
-				RemoveIndexCacheEntry(cacheKey, cachedIndex);
+				if (resolvedIndexEntry is not null)
+					RemoveIndexCacheEntry(cacheKey, resolvedIndexEntry);
 				resolvedIndexEntry = null;
 				if (sharedIndex || resolved.CanCachePhysicalFileProbes)
 					resolved = await CreateIndex().Value.ConfigureAwait(false);
@@ -383,7 +405,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			if (resolutionCacheHit)
 				DependencyEngineDiagnostics.RecordResolutionCacheHit();
 			if (resolvedIndexEntry is not null && !resolutionCacheHit)
-				RegisterIndexCacheWeight(cacheKey, cachedIndex, EstimateResolvedIndexBytes(resolved));
+				RegisterIndexCacheWeight(cacheKey, resolvedIndexEntry, EstimateResolvedIndexBytes(resolved));
 		}
 		var contentObservations = new Dictionary<string, DependencySourceObservation>(
 			manifest.Length,

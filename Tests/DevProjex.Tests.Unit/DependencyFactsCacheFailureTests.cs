@@ -186,6 +186,61 @@ public sealed class DependencyFactsCacheFailureTests(ITestOutputHelper output)
 	}
 
 	[Fact]
+	public async Task CancelledSharedResolution_DoesNotCancelAnotherIndexRequest()
+	{
+		using var fixture = new TemporaryDirectory();
+		var file = fixture.CreateFile("Source.cs", string.Empty);
+		using var ownerCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+			TestContext.Current.CancellationToken);
+		var resolutionStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		using var releaseResolution = new ManualResetEventSlim();
+		var resolutionInvocation = 0;
+		var configuration = new ConfigurationProvider
+		{
+			BeforeResolve = () =>
+			{
+				if (Interlocked.Increment(ref resolutionInvocation) != 1)
+					return;
+				resolutionStarted.SetResult();
+				if (!releaseResolution.Wait(TimeSpan.FromSeconds(5)))
+					throw new TimeoutException("The shared resolution was not released.");
+				ownerCancellation.Cancel();
+			}
+		};
+		using var engine = new DependencyFactsEngine(new ControlledExtractor(), configuration);
+		using var diagnostics = DependencyEngineDiagnostics.BeginMeasurement();
+		var cancelled = Task.Run(() => engine.IndexAsync(fixture.Path, [file],
+			cancellationToken: ownerCancellation.Token));
+
+		try
+		{
+			await resolutionStarted.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+			var surviving = Task.Run(() => engine.IndexAsync(fixture.Path, [file],
+				cancellationToken: TestContext.Current.CancellationToken));
+			Assert.True(SpinWait.SpinUntil(
+				() => diagnostics.Capture().IndexCacheJoins > 0,
+				TimeSpan.FromSeconds(5)));
+			releaseResolution.Set();
+
+			await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancelled);
+			var snapshot = await surviving;
+			Assert.Equal(DependencyFileStatus.Supported, Assert.Single(snapshot.Files).Status);
+			Assert.False(snapshot.Metrics.ResolutionCacheHit);
+			Assert.Equal(1, snapshot.Metrics.ReresolvedFiles);
+			Assert.Equal(1, engine.CacheState.ResolvedIndexes);
+			Assert.Equal(1, engine.CacheState.IndexEvictionEntries);
+			Assert.True(engine.CacheState.ResolvedIndexBytes > 0);
+			Assert.True((await engine.IndexAsync(fixture.Path, [file],
+				cancellationToken: TestContext.Current.CancellationToken)).Metrics.ResolutionCacheHit);
+		}
+		finally
+		{
+			releaseResolution.Set();
+			await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancelled);
+		}
+	}
+
+	[Fact]
 	public async Task EvictedCompletion_CannotReleaseReplacementEntryOrItsWeight()
 	{
 		using var fixture = new TemporaryDirectory();

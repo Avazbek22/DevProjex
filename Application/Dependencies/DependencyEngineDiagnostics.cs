@@ -23,6 +23,7 @@ internal static class DependencyEngineDiagnostics
 	public static void RecordGraphBuild() => Increment(static state => ref state.GraphBuilds);
 	public static void RecordResolverCandidateProbes(int count) => Add(static state => ref state.ResolverCandidateProbes, count);
 	public static void RecordFileCacheHit() => Increment(static state => ref state.FileCacheHits);
+	public static void RecordIndexCacheJoin() => Increment(static state => ref state.IndexCacheJoins);
 	public static void RecordResolutionCacheHit() => Increment(static state => ref state.ResolutionCacheHits);
 
 	private delegate ref long Counter(State state);
@@ -45,6 +46,7 @@ internal static class DependencyEngineDiagnostics
 		public long GraphBuilds;
 		public long ResolverCandidateProbes;
 		public long FileCacheHits;
+		public long IndexCacheJoins;
 		public long ResolutionCacheHits;
 
 		public DependencyEngineDiagnosticSnapshot Capture() => new(
@@ -55,6 +57,7 @@ internal static class DependencyEngineDiagnostics
 			Volatile.Read(ref GraphBuilds),
 			Volatile.Read(ref ResolverCandidateProbes),
 			Volatile.Read(ref FileCacheHits),
+			Volatile.Read(ref IndexCacheJoins),
 			Volatile.Read(ref ResolutionCacheHits));
 	}
 
@@ -83,4 +86,5 @@ internal readonly record struct DependencyEngineDiagnosticSnapshot(
 	long GraphBuilds,
 	long ResolverCandidateProbes,
 	long FileCacheHits,
+	long IndexCacheJoins,
 	long ResolutionCacheHits);
