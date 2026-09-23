@@ -632,6 +632,39 @@ public sealed class InfrastructureJsonPersistenceTests
 	}
 
 	[Fact]
+	public void JsonStorePersistence_PartialBackupCopyFailurePreservesLastValidSnapshot()
+	{
+		using var temp = new TemporaryDirectory();
+		var fileSet = CreateFileSet(temp, "secret-marks.json");
+		Assert.True(JsonStorePersistence.TryWriteAtomic(
+			fileSet,
+			new TestDocument("previous", 1),
+			JsonOptions));
+		var previousBackup = File.ReadAllBytes(fileSet.BackupPath);
+		var operations = new JsonStoreWriteOperations(
+			static (source, destination, backup) => File.Replace(source, destination, backup),
+			static (_, destination, _) =>
+			{
+				File.WriteAllText(destination, "{");
+				throw new IOException("backup copy interrupted");
+			});
+
+		var result = JsonStorePersistence.WriteAtomicDurableWithResult(
+			fileSet,
+			new TestDocument("current", 2),
+			JsonOptions,
+			maximumPayloadBytes: 1024,
+			operations);
+
+		Assert.Equal(JsonStoreWriteResult.CommittedBackupFailed, result);
+		Assert.Contains("\"name\":\"current\"", File.ReadAllText(fileSet.PrimaryPath));
+		Assert.Equal(previousBackup, File.ReadAllBytes(fileSet.BackupPath));
+		using var backup = JsonDocument.Parse(File.ReadAllText(fileSet.BackupPath));
+		Assert.Equal("previous", backup.RootElement.GetProperty("name").GetString());
+		Assert.Empty(Directory.EnumerateFiles(fileSet.DirectoryPath, "*.tmp"));
+	}
+
+	[Fact]
 	public void JsonStorePersistence_OversizedStreamingWriteRejectsBeforePayloadSizedAllocation()
 	{
 		using var temp = new TemporaryDirectory();

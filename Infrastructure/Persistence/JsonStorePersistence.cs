@@ -383,21 +383,55 @@ internal static class JsonStorePersistence
 		JsonStoreFileSet fileSet,
 		JsonStoreWriteOperations writeOperations)
     {
+		string? temporaryBackupPath = null;
         try
         {
             // The backup must mirror the final committed primary snapshot.
             // This keeps recovery deterministic across multiple processes.
             if (File.Exists(fileSet.PrimaryPath))
 			{
-				writeOperations.Copy(fileSet.PrimaryPath, fileSet.BackupPath, overwrite: true);
+				temporaryBackupPath = Path.Combine(
+					fileSet.DirectoryPath,
+					$"{fileSet.FileName}.{Guid.NewGuid():N}.bak.tmp");
+				writeOperations.Copy(fileSet.PrimaryPath, temporaryBackupPath, overwrite: false);
+				EnsurePrivateUnixFileMode(temporaryBackupPath);
+				if (File.Exists(fileSet.BackupPath))
+				{
+					try
+					{
+						File.Replace(temporaryBackupPath, fileSet.BackupPath, null);
+					}
+					catch (NotSupportedException)
+					{
+						File.Move(temporaryBackupPath, fileSet.BackupPath, overwrite: true);
+					}
+				}
+				else
+				{
+					File.Move(temporaryBackupPath, fileSet.BackupPath);
+				}
 				EnsurePrivateUnixFileMode(fileSet.BackupPath);
 			}
 			return true;
         }
         catch
-        {
+		{
 			return false;
         }
+		finally
+		{
+			if (temporaryBackupPath is not null)
+			{
+				try
+				{
+					File.Delete(temporaryBackupPath);
+				}
+				catch
+				{
+					// Best-effort cleanup must not change the committed write result.
+				}
+			}
+		}
     }
 
     internal static bool IsDocumentWithinSizeLimit(string path, long maximumDocumentBytes)
