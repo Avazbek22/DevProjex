@@ -2040,7 +2040,7 @@ internal sealed class MetricsPipeline(
     public IReadOnlyList<string> GetOrBuildAllOrderedFilePaths(TreeNodeDescriptor treeRoot)
 		=> GetOrBuildAllOrderedFilePathsWithCancellation(treeRoot, CancellationToken.None);
 
-	private IReadOnlyList<string> GetOrBuildAllOrderedFilePathsWithCancellation(
+	internal IReadOnlyList<string> GetOrBuildAllOrderedFilePathsWithCancellation(
 		TreeNodeDescriptor treeRoot,
 		CancellationToken cancellationToken)
     {

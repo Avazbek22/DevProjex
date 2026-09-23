@@ -389,6 +389,77 @@ public sealed class ProjectTextOutputPipelineTests
             () => pipeline.BuildAsync(mode, snapshot, cancellation.Token));
     }
 
+	[Theory]
+	[InlineData(false, false, (int)ProjectTextOutputMode.Content)]
+	[InlineData(false, true, (int)ProjectTextOutputMode.Content)]
+	[InlineData(true, false, (int)ProjectTextOutputMode.Content)]
+	[InlineData(true, true, (int)ProjectTextOutputMode.Content)]
+	[InlineData(true, false, (int)ProjectTextOutputMode.TreeAndContent)]
+	[InlineData(true, true, (int)ProjectTextOutputMode.TreeAndContent)]
+	public async Task ContentProjectionStopsTraversingWhenTheRequestIsCanceled(
+		bool buildDocument,
+		bool hasSelection,
+		int modeValue)
+	{
+		using var project = new TemporaryDirectory();
+		using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(
+			TestContext.Current.CancellationToken);
+		var filePath = Path.Combine(project.Path, "selected.txt");
+		var children = new CancelOnFirstReadList(FileNode(filePath), cancellation);
+		var root = DirectoryNode(project.Path) with { Children = children };
+		var selectedPaths = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
+		if (hasSelection)
+			selectedPaths.Add(filePath);
+		var snapshot = CreateSnapshot(project.Path, root, selectedPaths);
+		var pipeline = CreatePipeline();
+
+		await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+		{
+			if (buildDocument)
+			{
+				using var result = await pipeline.BuildDocumentAsync(
+					(ProjectTextOutputMode)modeValue,
+					snapshot,
+					cancellation.Token);
+			}
+			else
+			{
+				await pipeline.BuildAsync(
+					(ProjectTextOutputMode)modeValue,
+					snapshot,
+					cancellation.Token);
+			}
+		});
+
+		Assert.Equal(1, children.ReadCount);
+	}
+
+	private sealed class CancelOnFirstReadList(
+		TreeNodeDescriptor child,
+		CancellationTokenSource cancellation) : IReadOnlyList<TreeNodeDescriptor>
+	{
+		public int Count => 10_000;
+		public int ReadCount { get; private set; }
+
+		public TreeNodeDescriptor this[int index]
+		{
+			get
+			{
+				if (++ReadCount == 1)
+					cancellation.Cancel();
+				return child;
+			}
+		}
+
+		public IEnumerator<TreeNodeDescriptor> GetEnumerator()
+		{
+			for (var index = 0; index < Count; index++)
+				yield return this[index];
+		}
+
+		System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+	}
+
     private static ProjectTextOutputPipeline CreatePipeline()
     {
         var treeExport = new TreeExportService();

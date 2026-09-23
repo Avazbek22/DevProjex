@@ -1299,7 +1299,8 @@ internal sealed class PreviewSurfaceController : IDisposable
 					selectedPaths,
 					hasSelection,
 					currentTreeRoot,
-					currentTreeOrderedFilePaths);
+					currentTreeOrderedFilePaths,
+					cancellationToken);
 				_secretRedactionPreparer
 					.AnalyzeAsync(transformationContext, selectedFiles, cancellationToken)
 					.GetAwaiter()
@@ -1339,7 +1340,8 @@ internal sealed class PreviewSurfaceController : IDisposable
             selectedPaths,
             hasSelection,
             currentTreeRoot,
-            currentTreeOrderedFilePaths);
+            currentTreeOrderedFilePaths,
+            cancellationToken);
 
         if (selectedMode == PreviewContentMode.Content)
         {
@@ -1686,7 +1688,8 @@ internal sealed class PreviewSurfaceController : IDisposable
         IReadOnlySet<string> selectedPaths,
         bool hasSelection,
         TreeNodeDescriptor? currentTreeRoot,
-        IReadOnlyList<string>? currentTreeOrderedFilePaths)
+        IReadOnlyList<string>? currentTreeOrderedFilePaths,
+        CancellationToken cancellationToken)
     {
         if (currentTreeRoot is null)
             return [];
@@ -1698,14 +1701,17 @@ internal sealed class PreviewSurfaceController : IDisposable
         if (hasSelection && effectiveSelectedPaths.Count > 0)
         {
             return PreviewFileCollectionPolicy
-                .BuildOrderedSelectedFilePaths(
+                .BuildOrderedSelectedFilePathsWithCancellation(
                     effectiveSelectedPaths,
-                    currentTreeRoot);
+                    currentTreeRoot,
+                    ensureExists: true,
+                    cancellationToken);
         }
 
         return currentTreeOrderedFilePaths ??
-               _metrics.GetOrBuildAllOrderedFilePaths(
-                   currentTreeRoot);
+               _metrics.GetOrBuildAllOrderedFilePathsWithCancellation(
+                   currentTreeRoot,
+                   cancellationToken);
     }
 
     private static PreviewWarmupSnapshot CreateWarmupSnapshot(
