@@ -201,7 +201,20 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 		await terminal.WaitForScreenAsync(
 			"PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"readme.md",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Files 3",
+			cancellationToken: TestContext.Current.CancellationToken);
 		await ExecuteAsync(terminal, "type .md off", ".md: disabled");
+		await terminal.WaitForScreenWithoutAsync(
+			"readme.md",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Files 2",
+			cancellationToken: TestContext.Current.CancellationToken);
 		project.WriteFile("notes.md", "# Added while the workspace is open");
 		project.WriteFile("config.toml", "enabled = true");
 
