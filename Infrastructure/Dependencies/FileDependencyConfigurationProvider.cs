@@ -233,6 +233,12 @@ public sealed partial class FileDependencyConfigurationProvider : IDependencyCon
 				// that never included the base file.
 				if (!manifest.Contains(extendedPath.Value))
 					Interlocked.Exchange(ref transientReadFailure, 1);
+				if (!_pathMetadata.TryResolveContainedPath(root, extendedPath.Value, out _))
+				{
+					Interlocked.Exchange(ref transientReadFailure, 1);
+					return TypeScriptLayerFailure(DependencyConfigurationState.UnsupportedSemantics,
+						TypeScriptExtendsOutsideRootReason);
+				}
 
 				var inherited = await ReadTypeScriptLayerAsync(extendedPath.Value, depth + 1, chain)
 					.ConfigureAwait(false);
@@ -1847,6 +1853,18 @@ internal interface IDependencyPathMetadata
 
 internal sealed class DependencyPathMetadata : IDependencyPathMetadata
 {
+	private const int MaximumLinkTransitions = 40;
+	private readonly Func<string, (FileAttributes Attributes, string? LinkTarget)> _readMetadata;
+
+	public DependencyPathMetadata() : this(ReadMetadata)
+	{
+	}
+
+	internal DependencyPathMetadata(Func<string, (FileAttributes Attributes, string? LinkTarget)> readMetadata)
+	{
+		_readMetadata = readMetadata ?? throw new ArgumentNullException(nameof(readMetadata));
+	}
+
 	public bool FileExists(string path) => File.Exists(path);
 
 	public bool TryResolveContainedPath(string root, string path, out string resolvedPath)
@@ -1859,16 +1877,16 @@ internal sealed class DependencyPathMetadata : IDependencyPathMetadata
 			return false;
 
 		var current = root;
-		var segments = relative.Split(
-			[Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
-			StringSplitOptions.RemoveEmptyEntries);
-		for (var index = 0; index < segments.Length; index++)
+		var segments = SplitRelative(relative);
+		HashSet<string>? visitedLinks = null;
+		var linkTransitions = 0;
+		for (var index = 0; index < segments.Length;)
 		{
 			var candidate = Path.Combine(current, segments[index]);
-			FileAttributes attributes;
+			(FileAttributes Attributes, string? LinkTarget) metadata;
 			try
 			{
-				attributes = File.GetAttributes(candidate);
+				metadata = _readMetadata(candidate);
 			}
 			catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
 			{
@@ -1876,35 +1894,75 @@ internal sealed class DependencyPathMetadata : IDependencyPathMetadata
 				return true;
 			}
 			catch (Exception exception) when (
-				exception is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+				exception is IOException or UnauthorizedAccessException or System.Security.SecurityException or
+					ArgumentException or NotSupportedException)
 			{
 				return false;
 			}
 
-			if (!attributes.HasFlag(FileAttributes.ReparsePoint))
+			if (!metadata.Attributes.HasFlag(FileAttributes.ReparsePoint))
 			{
 				current = candidate;
+				index++;
 				continue;
 			}
 
-			FileSystemInfo info = attributes.HasFlag(FileAttributes.Directory)
-				? new DirectoryInfo(candidate)
-				: new FileInfo(candidate);
-			var linkTarget = info.LinkTarget;
+			if (++linkTransitions > MaximumLinkTransitions)
+				return false;
+			visitedLinks ??= new HashSet<string>(OperatingSystem.IsWindows()
+				? StringComparer.OrdinalIgnoreCase
+				: StringComparer.Ordinal);
+			if (!visitedLinks.Add(candidate))
+				return false;
+			var linkTarget = metadata.LinkTarget;
 			if (string.IsNullOrWhiteSpace(linkTarget))
 				return false;
-			var target = Path.GetFullPath(
-				Path.IsPathFullyQualified(linkTarget)
-					? linkTarget
-					: Path.Combine(Path.GetDirectoryName(candidate)!, linkTarget));
-			if (IsNetworkPath(target) || !IsContainedRelative(Path.GetRelativePath(root, target)))
+			string[] targetSegments;
+			try
+			{
+				var target = Path.GetFullPath(
+					Path.IsPathFullyQualified(linkTarget)
+						? linkTarget
+						: Path.Combine(Path.GetDirectoryName(candidate)!, linkTarget));
+				if (IsNetworkPath(target))
+					return false;
+				var targetRelative = Path.GetRelativePath(root, target);
+				if (!IsContainedRelative(targetRelative))
+					return false;
+				targetSegments = SplitRelative(targetRelative);
+			}
+			catch (Exception exception) when (
+				exception is IOException or UnauthorizedAccessException or System.Security.SecurityException or
+					ArgumentException or NotSupportedException)
+			{
 				return false;
-			current = target;
+			}
+			// Revisit the target from the root so links inside another link's target are checked.
+			segments = [.. targetSegments, .. segments[(index + 1)..]];
+			current = root;
+			index = 0;
 		}
 
 		resolvedPath = current;
 		return true;
 	}
+
+	private static (FileAttributes Attributes, string? LinkTarget) ReadMetadata(string path)
+	{
+		var attributes = File.GetAttributes(path);
+		if (!attributes.HasFlag(FileAttributes.ReparsePoint))
+			return (attributes, null);
+		FileSystemInfo info = attributes.HasFlag(FileAttributes.Directory)
+			? new DirectoryInfo(path)
+			: new FileInfo(path);
+		return (attributes, info.LinkTarget);
+	}
+
+	private static string[] SplitRelative(string relative) => relative == "."
+		? []
+		: relative.Split(
+			[Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+			StringSplitOptions.RemoveEmptyEntries);
 
 	private static bool IsContainedRelative(string relative) =>
 		relative != ".." &&
