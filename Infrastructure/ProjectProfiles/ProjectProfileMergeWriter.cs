@@ -187,9 +187,13 @@ public static class ProjectProfileMergeWriter
 			return [];
 		}
 
+		var baselineStates = states(baseline);
+		var candidateStates = states(candidate);
 		return EnumerateSelectionKeys(baseline, candidate, selected, states, comparer)
 			.Where(key => GetSelectionState(baseline, key, selected, states, comparer) !=
-						  GetSelectionState(candidate, key, selected, states, comparer))
+						  GetSelectionState(candidate, key, selected, states, comparer) ||
+						  allowedFields.HasFlag(stateField) &&
+						  HasNewExplicitUncheckedState(baselineStates, candidateStates, key))
 			.ToArray();
 	}
 
@@ -255,6 +259,16 @@ public static class ProjectProfileMergeWriter
 			? value
 			: selected(profile).Contains(key, comparer);
 
+	private static bool HasNewExplicitUncheckedState<T>(
+		IReadOnlyDictionary<T, bool>? baselineStates,
+		IReadOnlyDictionary<T, bool>? candidateStates,
+		T key)
+		where T : notnull =>
+		candidateStates is not null &&
+		candidateStates.TryGetValue(key, out var selected) &&
+		!selected &&
+		baselineStates?.ContainsKey(key) != true;
+
 	private readonly record struct SelectionMerge<T>(
 		IReadOnlyCollection<T> Selected,
 		IReadOnlyDictionary<T, bool> States)
@@ -273,7 +287,12 @@ public static class ProjectProfileMergeWriter
 		}
 
 		return EnumerateIgnoreOptionIds(baseline, candidate)
-			.Where(id => GetIgnoreOptionState(baseline, id) != GetIgnoreOptionState(candidate, id))
+			.Where(id => GetIgnoreOptionState(baseline, id) != GetIgnoreOptionState(candidate, id) ||
+						 allowedFields.HasFlag(ProjectProfileMergeFields.IgnoreOptionStates) &&
+						 HasNewExplicitUncheckedState(
+							 baseline.IgnoreOptionStates,
+							 candidate.IgnoreOptionStates,
+							 id))
 			.ToArray();
 	}
 

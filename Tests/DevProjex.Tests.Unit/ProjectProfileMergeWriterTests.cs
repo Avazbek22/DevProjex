@@ -241,6 +241,128 @@ public sealed class ProjectProfileMergeWriterTests
 		Assert.True(loaded.RootFolderStates["docs"]);
 	}
 
+	[Fact]
+	public void NewlyExplicitlyUncheckedExtensionSurvivesMergeAndPreservesConcurrentPaths()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var appData = workspace.CreateFolder("data");
+		var firstStore = new ProjectProfileStore(() => appData);
+		var secondStore = new ProjectProfileStore(() => appData);
+		var baseline = CreateProfileWithExtensions((".cs", true));
+		var candidate = CreateProfileWithExtensions((".cs", true), (".md", false));
+		Assert.True(firstStore.TrySaveProfile(project, baseline));
+		Assert.True(secondStore.TrySaveProfile(project, baseline with { SelectedPaths = ["newer.cs"] }));
+
+		var merge = ProjectProfileMergeWriter.TryMerge(
+			firstStore,
+			project,
+			candidate,
+			baseline,
+			ProjectProfileMergeFields.Extensions | ProjectProfileMergeFields.ExtensionStates,
+			TimeSpan.FromSeconds(1),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.True(merge.Succeeded);
+		Assert.True(firstStore.TryLoadProfile(project, out var loaded));
+		Assert.False(loaded.ExtensionStates![".md"]);
+		Assert.Equal(["newer.cs"], loaded.SelectedPaths);
+	}
+
+	[Fact]
+	public void NewlyExplicitlyUncheckedRootSurvivesMerge()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var store = new ProjectProfileStore(() => workspace.CreateFolder("data"));
+		var baseline = CreateProfileWithRoots(("src", true));
+		var candidate = CreateProfileWithRoots(("src", true), ("docs", false));
+		Assert.True(store.TrySaveProfile(project, baseline));
+
+		var merge = ProjectProfileMergeWriter.TryMerge(
+			store,
+			project,
+			candidate,
+			baseline,
+			ProjectProfileMergeFields.RootFolders | ProjectProfileMergeFields.RootFolderStates,
+			TimeSpan.FromSeconds(1),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.True(merge.Succeeded);
+		Assert.True(store.TryLoadProfile(project, out var loaded));
+		Assert.False(loaded.RootFolderStates!["docs"]);
+	}
+
+	[Fact]
+	public void NewlyExplicitlyUncheckedIgnoreOptionSurvivesMerge()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var store = new ProjectProfileStore(() => workspace.CreateFolder("data"));
+		var baseline = CreateProfileWithIgnoreStates();
+		var candidate = CreateProfileWithIgnoreStates((IgnoreOptionId.HidePrivateData, false));
+		Assert.True(store.TrySaveProfile(project, baseline));
+
+		var merge = ProjectProfileMergeWriter.TryMerge(
+			store,
+			project,
+			candidate,
+			baseline,
+			ProjectProfileMergeFields.IgnoreOptions | ProjectProfileMergeFields.IgnoreOptionStates,
+			TimeSpan.FromSeconds(1),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.True(merge.Succeeded);
+		Assert.True(store.TryLoadProfile(project, out var loaded));
+		Assert.False(loaded.IgnoreOptionStates![IgnoreOptionId.HidePrivateData]);
+	}
+
+	[Fact]
+	public void StateOnlyAdditionsDoNotExpandSelectedOnlyMergeMask()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var store = new ProjectProfileStore(() => workspace.CreateFolder("data"));
+		var baseline = CreateProfileWithExtensions((".cs", true)) with
+		{
+			IgnoreOptionStates = new Dictionary<IgnoreOptionId, bool>()
+		};
+		var candidate = baseline with
+		{
+			RootFolderStates = new Dictionary<string, bool>(ProjectTreePathIdentity.CanonicalComparer)
+			{
+				["docs"] = false
+			},
+			ExtensionStates = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+			{
+				[".cs"] = true,
+				[".md"] = false
+			},
+			IgnoreOptionStates = new Dictionary<IgnoreOptionId, bool>
+			{
+				[IgnoreOptionId.HidePrivateData] = false
+			}
+		};
+		Assert.True(store.TrySaveProfile(project, baseline));
+
+		var merge = ProjectProfileMergeWriter.TryMerge(
+			store,
+			project,
+			candidate,
+			baseline,
+			ProjectProfileMergeFields.RootFolders |
+			ProjectProfileMergeFields.Extensions |
+			ProjectProfileMergeFields.IgnoreOptions,
+			TimeSpan.FromSeconds(1),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.True(merge.Succeeded);
+		Assert.True(store.TryLoadProfile(project, out var loaded));
+		Assert.False(loaded.RootFolderStates!.ContainsKey("docs"));
+		Assert.False(loaded.ExtensionStates!.ContainsKey(".md"));
+		Assert.False(loaded.IgnoreOptionStates!.ContainsKey(IgnoreOptionId.HidePrivateData));
+	}
+
 	private static ProjectSelectionProfile CreateProfile(
 		IReadOnlyCollection<string> selectedPaths,
 		bool hidePrivateData)
