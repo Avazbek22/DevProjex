@@ -295,7 +295,10 @@ public sealed class SecretRedactionOutputPreparer
 					{
 						case FileContentClassification.Binary:
 							scope?.AnalyzeBinary(sourcePath, metadataAfterRead);
-							preparedFiles[sourcePath] = PreparedSecretFile.Binary(sourcePath);
+							preparedFiles[sourcePath] = PreparedSecretFile.Binary(sourcePath) with
+							{
+								SourceMetadata = metadataAfterRead
+							};
 							completed = true;
 							continue;
 						case FileContentClassification.TooLarge:

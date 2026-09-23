@@ -133,6 +133,63 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 	[Theory]
 	[InlineData(ProjectCopyExportFormat.Folder)]
 	[InlineData(ProjectCopyExportFormat.Zip)]
+	public async Task ProtectedExportRejectsBinarySourceReplacedWithTextAfterInspection(
+		ProjectCopyExportFormat format)
+	{
+		const string secret = "replacement-secret-value-42";
+		using var workspace = new TemporaryDirectory();
+		var sourceRoot = workspace.CreateDirectory("source");
+		var outputRoot = workspace.CreateDirectory("output");
+		var precedingFiles = Enumerable.Range(0, 8)
+			.Select(index => workspace.CreateFile($"source/{index:D2}.txt", "safe\n"))
+			.ToArray();
+		var binaryPath = Path.Combine(sourceRoot, "99.txt");
+		File.WriteAllBytes(binaryPath, [0x61, 0x00, 0x62]);
+		var replacementPath = workspace.CreateFile("output/replacement.txt", secret);
+		var tree = new TreeNodeDescriptor(
+			"source",
+			sourceRoot,
+			true,
+			false,
+			"folder",
+			precedingFiles.Append(binaryPath)
+				.Select(path => new TreeNodeDescriptor(Path.GetFileName(path), path, false, false, "file", []))
+				.ToArray());
+		var destination = Path.Combine(outputRoot, format == ProjectCopyExportFormat.Zip ? "copy.zip" : "copy");
+		using var session = new SecretRedactionSession(new ExactValueDetector(secret));
+		var service = new ProjectCopyExportService(
+			new ProjectCopyExportPlanBuilder(),
+			new FileContentAnalyzer(),
+			session);
+		var replacementTriggered = 0;
+		var progress = new CallbackProgress<ProjectCopyExportProgress>(update =>
+		{
+			if (update.BytesWritten > 0 && Interlocked.Exchange(ref replacementTriggered, 1) == 0)
+				File.Move(replacementPath, binaryPath, overwrite: true);
+		});
+
+		var exception = await Assert.ThrowsAsync<ProjectCopyExportException>(() => service.ExportAsync(
+			new ProjectCopyExportRequest(
+				sourceRoot,
+				"Sample",
+				tree,
+				new HashSet<string>(PathComparer.Default),
+				destination,
+				format,
+				ProjectCopyDestinationMode.Exact,
+				RedactSecrets: true),
+			progress,
+			TestContext.Current.CancellationToken));
+
+		Assert.Equal(1, replacementTriggered);
+		Assert.Equal(ProjectCopyExportError.SourceUnavailable, exception.Error);
+		Assert.False(File.Exists(destination));
+		Assert.False(Directory.Exists(destination));
+	}
+
+	[Theory]
+	[InlineData(ProjectCopyExportFormat.Folder)]
+	[InlineData(ProjectCopyExportFormat.Zip)]
 	[UnsupportedOSPlatform("windows")]
 	public async Task ExportPreservesSafeUnixModesAndExecutableBits(ProjectCopyExportFormat format)
 	{
