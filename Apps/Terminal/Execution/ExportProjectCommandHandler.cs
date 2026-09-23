@@ -122,14 +122,25 @@ public sealed class ExportProjectCommandHandler(
 				"DPX-CLI-BINARY-STDOUT-UNAVAILABLE",
 				"Binary stdout is unavailable in this host.");
 			await environment.Output.FlushAsync(cancellationToken).ConfigureAwait(false);
-			var streamedResult = await new ProgressRenderer(environment, request.Output, services.Localization)
-				.RunProjectExportAsync(progress =>
-					services.ProjectCopyExportService.ExportZipToStreamAsync(
-						exportRequest,
-						rawOutput,
-						progress,
-						cancellationToken))
-				.ConfigureAwait(false);
+			ProjectCopyExportResult streamedResult;
+			try
+			{
+				streamedResult = await new ProgressRenderer(environment, request.Output, services.Localization)
+					.RunProjectExportAsync(progress =>
+						services.ProjectCopyExportService.ExportZipToStreamAsync(
+							exportRequest,
+							rawOutput,
+							progress,
+							cancellationToken))
+					.ConfigureAwait(false);
+			}
+			catch (ProjectCopyExportException exception) when (
+				exception.Error == ProjectCopyExportError.IoFailure &&
+				exception.InnerException is IOException ioException &&
+				TerminalBrokenPipeDetector.IsBrokenPipe(ioException))
+			{
+				return CommandLineExitCodes.Success;
+			}
 			UnscannableFileOutput.Write(
 				environment.Error,
 				plan.SourceRoot,

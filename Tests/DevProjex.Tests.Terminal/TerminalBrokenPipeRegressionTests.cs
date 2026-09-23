@@ -114,6 +114,44 @@ public sealed class TerminalBrokenPipeRegressionTests
 		Assert.Empty(environment.StandardError);
 	}
 
+	[Theory]
+	[InlineData(true)]
+	[InlineData(false)]
+	public async Task ZipStdoutDistinguishesClosedPipeFromOtherIoFailure(bool brokenPipe)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/source.txt", "content\n");
+		var nativeCode = brokenPipe
+			? OperatingSystem.IsWindows() ? 109 : 32
+			: 5;
+		var environment = new TestTerminalEnvironment
+		{
+			RawOutputOverride = new FailingRawOutputStream(new NativeCodeIOException(nativeCode))
+		};
+		var application = new TerminalApplication(
+			environment,
+			new TerminalServiceFactory(() => workspace.CreateDirectory("app-data")));
+
+		var exitCode = await application.RunAsync(
+			[
+				"export", "project", project,
+				"--as", "zip", "-o", "-",
+				"--git-mode", "none", "--exclude", "none",
+				"--progress", "never", "--language", "en"
+			],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(
+			brokenPipe ? CommandLineExitCodes.Success : CommandLineExitCodes.RuntimeError,
+			exitCode);
+		Assert.Empty(environment.StandardOutput);
+		if (brokenPipe)
+			Assert.Empty(environment.StandardError);
+		else
+			Assert.Contains("DPX-IO-FAILURE", environment.StandardError, StringComparison.Ordinal);
+	}
+
 	[Fact]
 	public async Task HelpExitsCleanlyWhenStdoutConsumerClosesEarly()
 	{
@@ -350,6 +388,31 @@ public sealed class TerminalBrokenPipeRegressionTests
 		{
 			HResult = unchecked((int)(0x80070000u | (uint)nativeCode));
 		}
+	}
+
+	private sealed class FailingRawOutputStream(IOException failure) : Stream
+	{
+		public override bool CanRead => false;
+		public override bool CanSeek => false;
+		public override bool CanWrite => true;
+		public override long Length => throw new NotSupportedException();
+		public override long Position
+		{
+			get => throw new NotSupportedException();
+			set => throw new NotSupportedException();
+		}
+
+		public override void Flush() { }
+		public override Task FlushAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+		public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+		public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+		public override void SetLength(long value) => throw new NotSupportedException();
+		public override void Write(byte[] buffer, int offset, int count) => throw failure;
+		public override void Write(ReadOnlySpan<byte> buffer) => throw failure;
+		public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+			Task.FromException(failure);
+		public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) =>
+			ValueTask.FromException(failure);
 	}
 
 	private sealed class NativeCodeException : Exception
