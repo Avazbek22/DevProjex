@@ -25,6 +25,8 @@ public sealed class ExportContextCommandHandler(
 					() => services.ContextFactory.BuildAsync(
 						request.ProjectPath,
 						request.Selection,
+						includeOutputMetrics: request.DryRun || request.Format is not
+							(ProjectContextDocumentFormat.Text or ProjectContextDocumentFormat.Markdown),
 						cancellationToken: cancellationToken,
 						repositorySourceUrl: request.RepositorySourceUrl))
 				.ConfigureAwait(false);
