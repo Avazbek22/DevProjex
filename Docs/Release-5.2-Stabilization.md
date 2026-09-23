@@ -3,7 +3,8 @@
 Status: draft, 2026-09-23. This report records local evidence, not release approval.
 
 The stabilization baseline is `dfcaff70e7407457378aee07a29f158aad0306c5`. The
-verified change inventory and combined backend comparison extend through `0ec72b78`.
+combined backend comparison extends through `0ec72b78`; later isolated profile-load
+verification (`4b5b3520`) and root-facts profiling (`6d79b72f`) are recorded separately.
 The backend task does not include a real desktop run; desktop readiness remains a
 separate release check.
 
@@ -107,11 +108,53 @@ These measurements identify particular hot paths. They are not desktop load-time
 | Search context merging, 5k candidates / 20 context lines | 91.193 → 7.941 ms | 2,674,392 → 1,282,416 B | Paths, match counts, line markers, and Unicode text verified |
 | Search context merging, 5k candidates / zero context lines | 76.542 → 0.664 ms | 2,327,472 → 938,408 B | Removes repeated boundary enumeration; no provenance/ranking changes |
 | Ignore matcher construction, actual 435-line root `.gitignore` | 106.8596 → 54.7221 ms | 112,743,112 → 62,657,280 B | `3d504635`; 97 eligible simple ASCII suffix rules avoid regex construction |
+| GUI profile snapshot load, 1,000 active marks across 20 projects | 39.8786 → 18.7672 ms | 8,257,256 → 4,127,920 B | `4b5b3520`; isolated profile phase, not whole-project loading |
+| GUI profile snapshot load, 10,000 active marks across 20 projects | 119.3714 → 59.6512 ms | 99,823,672 → 49,919,912 B | Same operation-local marks snapshot reused; no persistent cache |
 
 The suffix benchmark measures `GitIgnoreMatcher.Build` only: ignore-file reading is outside
 the timed region, followed by one warm-up and seven samples. It does not time per-file
 matching or project loading. A same-run forced-regex control measured 117.8306 ms /
 112,753,224 B versus 54.7221 ms / 62,657,280 B for the optimized implementation.
+
+### Profile marks: remove a duplicate state-document load
+
+The profile fixture measures `ProjectProfilePersistenceCoordinator.LoadSnapshotAsync`
+with 20 projects, 1,000 or 10,000 active marks in total, and one tombstone per project.
+Primary and backup JSON documents are each 219,602 B or 2,160,722 B respectively, below
+the existing 8 MiB bound. Each case runs six loads; the table uses the median of the five
+warm observations.
+This measures profile loading only, which the combined backend A/B explicitly excludes.
+
+State-document parses drop from two to one and explicit `LoadMarksAsync` calls from one
+to zero. The parse counter observes the state-document loader; it excludes separate
+primary/backup schema probes and is not a count of all physical reads. Loaded revisions
+remain 51 and 501, with active marks and tombstone revision metadata preserved.
+
+The successful profile lookup carries the already detached marks snapshot returned by
+legacy migration. GUI consumption follows the existing status, recovery, cancellation,
+and identity-readiness gates. Missing/custom lookup results retain the independent marks
+fallback; subsequent lookups remain fresh. The operation-local payload is excluded from
+JSON serialization. No persistent cache, storage format, or new store interface is added.
+
+### Deferred: broader root-facts reuse
+
+The read-only `6d79b72f` probe used the actual repository at 3,001 inventory entries,
+with one initial run and seven warm samples. It observed 412 root-facts builds over
+231 unique paths: 194 during initial availability, 181 repeated during selected-root
+discovery, and 37 new builds during scanning. There were no cache evictions.
+
+Repeated builds account for a median 20.8598 ms of summed elapsed work, 6.9793 ms of
+union wall-clock coverage, and 1,369,744 B allocated inside the facts builder. Parallel
+elapsed durations overlap: neither duration is a measured or guaranteed saving from
+an unimplemented optimization. Broader operation-scoped reuse was deferred before
+release because it requires additional lifetime/invalidation design for this measured cost.
+
+Scanner hooks reported 547 events over 273 unique paths, including 182 paths shared
+with facts discovery (363 facts builds). These hooks are not physical syscalls and can
+observe retained batches. Existing scan diagnostics instead recorded 344 combined,
+two directory, and one file enumeration. These counters must not be added together or
+presented as complete duplicated workspace IO. This investigation changed only the probe,
+not the production discovery/cache architecture.
 
 ## MCP process A/B: no broad speedup established
 
@@ -159,6 +202,8 @@ Counts below overlap across runs and must not be summed into a unique-test total
 | `e068c986` | Normal reload refreshes discovery but reuses only content-validated compiled ignore matchers | One baseline reuse failure + seven controls; 41/41 after passes; same-metadata rewrites, nested additions/removals, Smart Ignore, semantic changes/unavailability, and cancellation covered |
 | `3d504635` | Simple ASCII ignore-suffix fast path preserves matching semantics | 255 Unit passes / three skips, including 33 new cases; six native-Git parity passes |
 | `0ec72b78` | Raw GUI metrics reuse stable same-handle identity while retaining final path/publication checks and conservative fallbacks | 55/55 targeted passes, including 16 new cases: seven initial IO-counter failures, seven controls, and two cancellation checks |
+| `4b5b3520` | GUI profile load reuses its successful lookup's marks snapshot without losing revision, recovery, cancellation, or fallback semantics | One initial duplicate-load failure + four controls; final 102 targeted passes / two opt-in skips, including eight new correctness cases; separate enabled benchmark run: two passes |
+| `6d79b72f` | Measure repeated root-facts work before considering broader session reuse | One enabled read-only probe passed; production optimization deferred, not claimed as a speedup |
 
 An additional cross-surface run covering selection contracts, MCP inventory caching, and
 inventory projection passed 31/31 tests.
@@ -228,3 +273,8 @@ The opt-in `GuiSelectionLoadMeasurementTests` and `GuiBackendLoadMeasurementTest
 `DEVPROJEX_GUI_BENCHMARK_ROOT` to select a read-only target. Record the exact revision,
 effective file count, phase boundaries, warm-up policy, counters, and distribution when
 repeating measurements. Keep backend probes distinct from a real desktop run.
+
+`ProjectProfileMarksReuseTests` enables its two isolated profile-load benchmarks with
+`DEVPROJEX_PROFILE_MARKS_BENCHMARK=1`. `ProjectScopeDiscoveryRootFactsMeasurementTests`
+uses `DEVPROJEX_GUI_BENCHMARK_ROOT` for read-only profiling; its diagnostics distinguish
+summed work, overlapping wall-clock coverage, and scanner hook events.
