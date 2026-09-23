@@ -25,6 +25,28 @@ public sealed class DependencyConfigurationInheritanceIntegrationTests
 	}
 
 	[Fact]
+	public async Task InvalidTypeScriptPathMappingReportsUnsupportedConfiguration()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile(
+			"tsconfig.json",
+			"{\"compilerOptions\":{\"paths\":{\"alias\":[\"\\u0000\"]}}}");
+		var provider = new FileDependencyConfigurationProvider();
+
+		var result = await provider.ReadAsync(
+			fixture.Path,
+			[config],
+			TestContext.Current.CancellationToken);
+
+		var diagnostic = Assert.Single(result.ConfigurationDiagnostics);
+		Assert.Equal(DependencyConfigurationState.UnsupportedSemantics, diagnostic.State);
+		Assert.Equal(FileDependencyConfigurationProvider.TypeScriptInvalidOptionPathReason, diagnostic.Reason);
+		Assert.Equal(
+			DependencyConfigurationState.UnsupportedSemantics,
+			Assert.Single(result.Scopes, scope => scope.HasConfiguration).ConfigurationState);
+	}
+
+	[Fact]
 	public async Task InheritedBaseUrlAndPathsRetainTheirDeclaringConfigOrigin()
 	{
 		using var fixture = new TemporaryDirectory();
@@ -320,6 +342,36 @@ public sealed class DependencyConfigurationInheritanceIntegrationTests
 		Assert.Equal(
 			FileDependencyConfigurationProvider.ProjectReferenceConditionReason,
 			rootScope.ConfigurationDiagnostic);
+	}
+
+	[Fact]
+	public async Task InvalidProjectReferencePathReportsUnsupportedConfigurationWithoutAffectingOtherProjects()
+	{
+		using var fixture = new TemporaryDirectory();
+		var invalid = fixture.CreateFile(
+			"Invalid.csproj",
+			"<Project><ItemGroup><ProjectReference Include=\"" +
+			new string('x', 40_000) +
+			".csproj\" /></ItemGroup></Project>");
+		var valid = fixture.CreateFile(
+			"Valid.csproj",
+			"<Project><ItemGroup><ProjectReference Include=\"Leaf.csproj\" /></ItemGroup></Project>");
+		var leaf = fixture.CreateFile("Leaf.csproj", "<Project />");
+
+		var result = await new FileDependencyConfigurationProvider().ReadAsync(
+			fixture.Path,
+			[invalid, valid, leaf],
+			TestContext.Current.CancellationToken);
+
+		var diagnostic = Assert.Single(result.ConfigurationDiagnostics);
+		Assert.Equal(DependencyConfigurationState.UnsupportedSemantics, diagnostic.State);
+		Assert.Equal("C# ProjectReference path is invalid", diagnostic.Reason);
+		Assert.Equal(
+			DependencyConfigurationState.UnsupportedSemantics,
+			Assert.Single(result.Scopes, scope => scope.ScopeId == "csharp:Invalid.csproj").ConfigurationState);
+		Assert.Equal(
+			["csharp:Leaf.csproj"],
+			Assert.Single(result.Scopes, scope => scope.ScopeId == "csharp:Valid.csproj").ProjectReferences);
 	}
 
 	[Fact]

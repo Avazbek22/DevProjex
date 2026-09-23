@@ -24,7 +24,10 @@ public sealed partial class FileDependencyConfigurationProvider : IDependencyCon
 	internal const string TypeScriptModuleResolutionReason = "tsconfig moduleResolution is not supported";
 	internal const string TypeScriptCustomConditionsReason = "tsconfig customConditions are not supported";
 	internal const string TypeScriptRootDirectoriesOutsideRootReason = "tsconfig rootDirs must stay inside the project root";
+	internal const string TypeScriptInvalidOptionPathReason = "tsconfig compilerOptions contains an invalid path";
 	internal const string ProjectReferenceConditionReason = "project reference condition could not be evaluated safely";
+	internal const string ProjectReferenceInvalidPathReason = "C# ProjectReference path is invalid";
+	internal const string CMakeInvalidIncludePathReason = "CMake include directory path is invalid";
 	internal const string CompileItemMembershipReason = "C# Compile item membership is not supported";
 	internal const string DisableTransitiveProjectReferencesReason = "DisableTransitiveProjectReferences could not be evaluated safely";
 	internal const string InvalidPyProjectReason = "invalid pyproject TOML";
@@ -156,13 +159,23 @@ public sealed partial class FileDependencyConfigurationProvider : IDependencyCon
 		{
 			var chain = new HashSet<string>(PathComparer);
 			var parsed = await ReadTypeScriptLayerAsync(Path.GetFullPath(configPath), 0, chain).ConfigureAwait(false);
-			return parsed.State == DependencyConfigurationState.Valid
-				? ConfigurationParseResult<TypeScriptConfiguration>.Valid(
-					MaterializeTypeScriptConfiguration(parsed.Value, scopeDirectory, root))
-				: ConfigurationParseResult<TypeScriptConfiguration>.Failure(
+			if (parsed.State != DependencyConfigurationState.Valid)
+				return ConfigurationParseResult<TypeScriptConfiguration>.Failure(
 					TypeScriptConfiguration.Default,
 					parsed.State,
 					parsed.Reason);
+			try
+			{
+				return ConfigurationParseResult<TypeScriptConfiguration>.Valid(
+					MaterializeTypeScriptConfiguration(parsed.Value, scopeDirectory, root));
+			}
+			catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+			{
+				return ConfigurationParseResult<TypeScriptConfiguration>.Failure(
+					TypeScriptConfiguration.Default,
+					DependencyConfigurationState.UnsupportedSemantics,
+					TypeScriptInvalidOptionPathReason);
+			}
 		}
 
 		Task<ConfigurationParseResult<TypeScriptConfigurationLayer>> ReadTypeScriptLayerProjectionAsync(string path)
@@ -594,17 +607,29 @@ public sealed partial class FileDependencyConfigurationProvider : IDependencyCon
 			AddFingerprint(configPath, snapshot);
 			var directory = Path.GetDirectoryName(configPath)!;
 			var scopeId = "c:" + PortableRelative(root, configPath);
-			var includeDirectories = snapshot.State == DependencyConfigurationState.Valid
-				? ParseCIncludeDirectories(root, directory, snapshot.Content)
-				: [];
-			AddDiagnostic(configPath, snapshot.State, snapshot.Reason, scopeId);
+			var configurationState = snapshot.State;
+			var configurationReason = snapshot.Reason;
+			IReadOnlyList<string> includeDirectories = [];
+			if (configurationState == DependencyConfigurationState.Valid)
+			{
+				try
+				{
+					includeDirectories = ParseCIncludeDirectories(root, directory, snapshot.Content);
+				}
+				catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+				{
+					configurationState = DependencyConfigurationState.UnsupportedSemantics;
+					configurationReason = CMakeInvalidIncludePathReason;
+				}
+			}
+			AddDiagnostic(configPath, configurationState, configurationReason, scopeId);
 			scopes.Add(new DependencyScopeDescriptor(
 				scopeId, directory, LanguageId.C, [], null, false,
 				new Dictionary<string, IReadOnlyList<string>>(), null,
 				new HashSet<string>(), [], true)
 			{
-				ConfigurationState = snapshot.State,
-				ConfigurationDiagnostic = snapshot.Reason,
+				ConfigurationState = configurationState,
+				ConfigurationDiagnostic = configurationReason,
 				CIncludeDirectories = includeDirectories
 			});
 			scopes.Add(new DependencyScopeDescriptor(
@@ -612,8 +637,8 @@ public sealed partial class FileDependencyConfigurationProvider : IDependencyCon
 				new Dictionary<string, IReadOnlyList<string>>(), null,
 				new HashSet<string>(), [], true)
 			{
-				ConfigurationState = snapshot.State,
-				ConfigurationDiagnostic = snapshot.Reason,
+				ConfigurationState = configurationState,
+				ConfigurationDiagnostic = configurationReason,
 				CIncludeDirectories = includeDirectories
 			});
 		}
@@ -744,6 +769,13 @@ public sealed partial class FileDependencyConfigurationProvider : IDependencyCon
 				CSharpProjectConfiguration.Default,
 				DependencyConfigurationState.Corrupt,
 				"invalid project XML");
+		}
+		catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+		{
+			return ConfigurationParseResult<CSharpProjectConfiguration>.Failure(
+				CSharpProjectConfiguration.Default,
+				DependencyConfigurationState.UnsupportedSemantics,
+				ProjectReferenceInvalidPathReason);
 		}
 	}
 

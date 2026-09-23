@@ -60,6 +60,27 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task InvalidCMakeIncludeDirectoryReportsUnsupportedConfiguration()
+	{
+		using var fixture = new TemporaryDirectory();
+		var configuration = fixture.CreateFile(
+			"CMakeLists.txt",
+			"target_include_directories(app PRIVATE \"bad\0path\")\n");
+
+		var result = await new FileDependencyConfigurationProvider().ReadAsync(
+			fixture.Path,
+			[configuration],
+			TestContext.Current.CancellationToken);
+
+		var diagnostic = Assert.Single(result.ConfigurationDiagnostics);
+		Assert.Equal(DependencyConfigurationState.UnsupportedSemantics, diagnostic.State);
+		Assert.Equal("CMake include directory path is invalid", diagnostic.Reason);
+		Assert.Equal(
+			DependencyConfigurationState.UnsupportedSemantics,
+			Assert.Single(result.Scopes, scope => scope.ScopeId == "c:CMakeLists.txt").ConfigurationState);
+	}
+
+	[Fact]
 	public async Task CDamagedDeclarationDoesNotHideIndependentFacts()
 	{
 		using var fixture = new TemporaryDirectory();
