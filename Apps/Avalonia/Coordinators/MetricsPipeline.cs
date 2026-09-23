@@ -341,7 +341,7 @@ internal sealed class MetricsPipeline(
         }
 
         var selectedPaths = selectedPathsProvider();
-        var filePaths = selectedPaths.Count > 0
+		var filePaths = !ProjectTreeSelectionProjection.CoversWholeTree(currentTree.Root, selectedPaths)
 			? PreviewFileCollectionPolicy.BuildOrderedSelectedFilePathsWithCancellation(
 				selectedPaths,
 				currentTree.Root,
