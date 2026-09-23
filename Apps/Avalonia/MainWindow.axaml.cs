@@ -362,6 +362,12 @@ public partial class MainWindow : Window
     {
         CancelBackgroundMemoryCleanup();
         CancelPreviewRefresh();
+        var projectPath = _currentPath;
+        var folderOpenRequestId = Volatile.Read(ref _latestEligibleFolderOpenRequestId);
+        bool IsCurrentRefresh() =>
+            _windowLifetimeCts is { IsCancellationRequested: false } &&
+            folderOpenRequestId == Volatile.Read(ref _latestEligibleFolderOpenRequestId) &&
+            PathComparer.Default.Equals(projectPath, _currentPath);
         var refreshCts = ReplaceCancellationSource(ref _projectOperationCts);
         var cancellationToken = refreshCts.Token;
         var statusOperationId = _statusOperations.Begin(
@@ -371,23 +377,27 @@ public partial class MainWindow : Window
             cancelAction: () => refreshCts.Cancel());
         try
         {
-            await ReloadProjectAsync(
+            var refreshed = await ReloadProjectAsync(
                 cancellationToken,
                 applyStoredProfile: true,
                 reuseUnchangedDiscoveryCaches: true);
             _statusOperations.Complete(statusOperationId);
+            if (!refreshed || !IsCurrentRefresh())
+                return;
             ScheduleBackgroundMemoryCleanup(MemoryCleanupReason.RefreshProject);
             _toastService.Show(_localization["Toast.Refresh.Success"]);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             _statusOperations.Complete(statusOperationId);
-            _toastService.Show(_localization["Toast.Operation.RefreshCanceled"]);
+            if (IsCurrentRefresh())
+                _toastService.Show(_localization["Toast.Operation.RefreshCanceled"]);
         }
         catch (Exception ex)
         {
             _statusOperations.Complete(statusOperationId);
-            await ShowErrorAsync(ResolveDesktopExceptionMessage(ex));
+            if (IsCurrentRefresh())
+                await ShowErrorAsync(ResolveDesktopExceptionMessage(ex));
         }
         finally
         {
@@ -1304,7 +1314,10 @@ public partial class MainWindow : Window
                     ref _latestEligibleFolderOpenRequestId,
                     requestId,
                     latestEligibleRequestId) == latestEligibleRequestId)
+            {
+                _projectOperationCts?.Cancel();
                 return true;
+            }
         }
     }
 
@@ -1465,7 +1478,8 @@ public partial class MainWindow : Window
         bool reuseUnchangedDiscoveryCaches = false,
         bool preserveTreeState = true)
     {
-        if (string.IsNullOrEmpty(_currentPath)) return false;
+        var projectPath = _currentPath;
+        if (string.IsNullOrEmpty(projectPath)) return false;
         cancellationToken.ThrowIfCancellationRequested();
 
         // A no-change F5 validates only directories previously inspected by scope discovery.
@@ -1474,13 +1488,16 @@ public partial class MainWindow : Window
         if (reuseUnchangedDiscoveryCaches)
         {
             canReuseIgnoreRuleCaches = await Task.Run(
-                () => _ignoreRulesService.RevalidateCaches(_currentPath, cancellationToken),
+                () => _ignoreRulesService.RevalidateCaches(projectPath, cancellationToken),
                 cancellationToken);
         }
         else
         {
-            _ignoreRulesService.RefreshDiscoveryCaches(_currentPath);
+            _ignoreRulesService.RefreshDiscoveryCaches(projectPath);
         }
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!PathComparer.Default.Equals(_currentPath, projectPath))
+            return false;
 
         if (!canReuseIgnoreRuleCaches)
             _selectionCoordinator.InvalidateFileSystemCaches();
@@ -1496,13 +1513,15 @@ public partial class MainWindow : Window
         {
             var runtimeGitMode = _selectionCoordinator.ActiveGitFilteringMode;
             var profileSnapshot = await LoadProjectProfileWithRetryAsync(
-                _currentPath,
+                projectPath,
                 cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
+            if (!PathComparer.Default.Equals(_currentPath, projectPath))
+                return false;
 
             if (profileSnapshot is { HasProfile: true, Profile: not null })
             {
-                _selectionCoordinator.ApplyProjectProfileSelections(_currentPath, profileSnapshot.Profile);
+                _selectionCoordinator.ApplyProjectProfileSelections(projectPath, profileSnapshot.Profile);
                 if (!preserveTreeState)
                 {
                     profileTreeSelection = new ProjectProfileTreeSelection(
@@ -1511,7 +1530,7 @@ public partial class MainWindow : Window
             }
             else if (profileSnapshot.Status == ProjectProfileLookupStatus.Missing)
             {
-                _selectionCoordinator.ResetProjectProfileSelections(_currentPath);
+                _selectionCoordinator.ResetProjectProfileSelections(projectPath);
                 if (!preserveTreeState)
                     profileTreeSelection = new ProjectProfileTreeSelection(SelectedPaths: null);
             }
@@ -1532,8 +1551,11 @@ public partial class MainWindow : Window
             }
         }
 
+        if (!PathComparer.Default.Equals(_currentPath, projectPath))
+            return false;
+
         return await _projectLoadSnapshotPipeline.ReloadAsync(
-            _currentPath,
+            projectPath,
             preserveTreeState,
             persistentMarks,
             profileTreeSelection,

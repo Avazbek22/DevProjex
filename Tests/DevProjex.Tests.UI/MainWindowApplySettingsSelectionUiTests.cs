@@ -5,6 +5,7 @@ using DevProjex.Application.Services;
 using DevProjex.Application.UseCases;
 using DevProjex.Infrastructure.FileSystem;
 using DevProjex.Infrastructure.LiveContext;
+using DevProjex.Infrastructure.ProjectProfiles;
 using DevProjex.Infrastructure.ResourceStore;
 using DevProjex.Kernel.Abstractions;
 using DevProjex.Terminal.DesktopControl;
@@ -593,6 +594,130 @@ public sealed class MainWindowApplySettingsSelectionUiTests
             await UiTestDriver.CloseWindowAsync(window);
         }
     }
+
+	[AvaloniaFact]
+	public async Task RefreshProject_ProfileLookupFinishingAfterProjectSwitchCannotApplyOldProfile()
+	{
+		using var firstProject = UiTestProject.CreateDefault();
+		using var secondProject = UiTestProject.CreateDefault();
+		var appDataPath = Path.Combine(firstProject.AppDataPath, Guid.NewGuid().ToString("N"));
+		var durableStore = new ProjectProfileStore(() => appDataPath);
+		var firstProfile = new ProjectSelectionProfile(
+			SelectedRootFolders: [],
+			SelectedExtensions: [],
+			SelectedIgnoreOptions: [IgnoreOptionId.StripBlankLines],
+			IgnoreOptionStates: new Dictionary<IgnoreOptionId, bool>
+			{
+				[IgnoreOptionId.StripBlankLines] = true
+			});
+		var secondProfile = firstProfile with
+		{
+			SelectedIgnoreOptions = [],
+			IgnoreOptionStates = new Dictionary<IgnoreOptionId, bool>
+			{
+				[IgnoreOptionId.StripBlankLines] = false
+			}
+		};
+		Assert.True(durableStore.TrySaveProfile(firstProject.RootPath, firstProfile));
+		Assert.True(durableStore.TrySaveProfile(secondProject.RootPath, secondProfile));
+		var blockingStore = new BlockingProfileLookupStore(durableStore);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			firstProject,
+			appDataPathOverride: appDataPath,
+			configureServices: services => services with { ProjectProfileStore = blockingStore });
+
+		try
+		{
+			await UiTestDriver.WaitForIgnoreOptionStateAsync(
+				window,
+				IgnoreOptionId.StripBlankLines,
+				visible: true,
+				isChecked: true);
+			blockingStore.BlockNextLookup(firstProject.RootPath);
+			var refreshMethod = typeof(MainWindow).GetMethod(
+				"ReloadCurrentProjectAsync",
+				System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+			Assert.NotNull(refreshMethod);
+			var refreshTask = await window.Dispatcher.InvokeAsync<Task>(() =>
+				Assert.IsAssignableFrom<Task>(refreshMethod!.Invoke(window, [])));
+			await blockingStore.LookupStarted.Task.WaitAsync(
+				TimeSpan.FromSeconds(10),
+				TestContext.Current.CancellationToken);
+
+			await UiTestDriver.OpenFolderAsync(
+				window,
+				secondProject.RootPath,
+				recordRecentFolder: false);
+			await UiTestDriver.WaitForIgnoreOptionStateAsync(
+				window,
+				IgnoreOptionId.StripBlankLines,
+				visible: true,
+				isChecked: false);
+
+			blockingStore.ReleaseLookup();
+			await refreshTask.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+			await UiTestDriver.WaitForSelectionRefreshIdleAsync(window);
+			Assert.True(PathComparer.Default.Equals(
+				secondProject.RootPath,
+				Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes).FullPath));
+			await UiTestDriver.WaitForIgnoreOptionStateAsync(
+				window,
+				IgnoreOptionId.StripBlankLines,
+				visible: true,
+				isChecked: false);
+		}
+		finally
+		{
+			blockingStore.ReleaseLookup();
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task RefreshProject_ProfileLookupFinishingAfterSameProjectReopenCannotReplaceLatestTree()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var blockingStore = new BlockingProfileLookupStore(new ProjectProfileStore(() => appDataPath));
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			appDataPathOverride: appDataPath,
+			configureServices: services => services with { ProjectProfileStore = blockingStore });
+
+		try
+		{
+			blockingStore.BlockNextLookup(project.RootPath);
+			var refreshMethod = typeof(MainWindow).GetMethod(
+				"ReloadCurrentProjectAsync",
+				System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+			Assert.NotNull(refreshMethod);
+			var refreshTask = await window.Dispatcher.InvokeAsync<Task>(() =>
+				Assert.IsAssignableFrom<Task>(refreshMethod!.Invoke(window, [])));
+			await blockingStore.LookupStarted.Task.WaitAsync(
+				TimeSpan.FromSeconds(10),
+				TestContext.Current.CancellationToken);
+
+			var reopening = Assert.IsAssignableFrom<Task<bool>>(
+				await UiTestDriver.BeginOpenFolderAsync(
+					window,
+					project.RootPath,
+					fromDialog: false,
+					recordRecentFolder: false));
+			Assert.True(await reopening.WaitAsync(
+				TimeSpan.FromSeconds(30),
+				TestContext.Current.CancellationToken));
+			var latestRoot = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
+
+			blockingStore.ReleaseLookup();
+			await refreshTask.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+			Assert.Same(latestRoot, Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes));
+		}
+		finally
+		{
+			blockingStore.ReleaseLookup();
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
 
     [AvaloniaFact]
     public async Task GitPull_PreservesCheckedFolderExpansionAndSelectsNewFiles()
@@ -1368,6 +1493,56 @@ public sealed class MainWindowApplySettingsSelectionUiTests
                 projectionRules,
                 cancellationToken);
     }
+
+	private sealed class BlockingProfileLookupStore(ProjectProfileStore inner) : IProjectProfileStore
+	{
+		private readonly ManualResetEventSlim _release = new(initialState: true);
+		private string? _blockedProjectPath;
+		private int _armed;
+
+		public TaskCompletionSource LookupStarted { get; } =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+		public void BlockNextLookup(string projectPath)
+		{
+			_blockedProjectPath = projectPath;
+			_release.Reset();
+			Volatile.Write(ref _armed, 1);
+		}
+
+		public void ReleaseLookup() => _release.Set();
+
+		public bool EnsureStorageExists() => inner.EnsureStorageExists();
+
+		public bool TryLoadProfile(string localProjectPath, out ProjectSelectionProfile profile) =>
+			inner.TryLoadProfile(localProjectPath, out profile);
+
+		public ProjectProfileLookupResult LookupProfile(string localProjectPath, TimeSpan lockTimeout)
+		{
+			if (PathComparer.Default.Equals(localProjectPath, _blockedProjectPath) &&
+				Interlocked.CompareExchange(ref _armed, 0, 1) == 1)
+			{
+				LookupStarted.TrySetResult();
+				_release.Wait(TestContext.Current.CancellationToken);
+			}
+
+			return inner.LookupProfile(localProjectPath, lockTimeout);
+		}
+
+		public bool TrySaveProfile(string localProjectPath, ProjectSelectionProfile profile) =>
+			inner.TrySaveProfile(localProjectPath, profile);
+
+		public bool TrySaveProfile(
+			string localProjectPath,
+			ProjectSelectionProfile profile,
+			DateTimeOffset updatedUtc) =>
+			inner.TrySaveProfile(localProjectPath, profile, updatedUtc);
+
+		public void SaveProfile(string localProjectPath, ProjectSelectionProfile profile) =>
+			inner.SaveProfile(localProjectPath, profile);
+
+		public ProjectProfileClearStatus ClearAllProfiles() => inner.ClearAllProfiles();
+	}
 
     private static TimeSpan PublicationSafetyTimeout =>
         string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase)
