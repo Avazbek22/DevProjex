@@ -241,15 +241,45 @@ public sealed class DependencyFactsCacheFailureTests(ITestOutputHelper output)
 			return;
 		}
 		using var source = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
-		await Assert.ThrowsAnyAsync<OperationCanceledException>(() => engine.IndexAsync(
-			root, [file], new InlineProgress(source.Cancel), source.Token));
+		var resolutionReached = false;
+		configuration.BeforeResolve = () =>
+		{
+			var state = engine.CacheState;
+			Assert.Equal(1, state.ResolvedIndexes);
+			Assert.Equal(1, state.IndexEvictionEntries);
+			Assert.Equal(0, state.ResolvedIndexBytes);
+			resolutionReached = true;
+			source.Cancel();
+		};
+		try
+		{
+			var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => engine.IndexAsync(
+				root, [file], cancellationToken: source.Token));
+			Assert.True(resolutionReached);
+			Assert.Equal(source.Token, exception.CancellationToken);
+		}
+		finally
+		{
+			configuration.BeforeResolve = null;
+		}
 	}
 
 	public enum ExtractionFailure { None, NonCacheable, Fault, Cancellation }
 
-	private sealed class InlineProgress(Action report) : IProgress<DependencyIndexProgress>
+	private sealed class ObservedScopes(IReadOnlyList<DependencyScopeDescriptor> scopes, Action beforeResolve)
+		: IReadOnlyList<DependencyScopeDescriptor>
 	{
-		public void Report(DependencyIndexProgress value) => report();
+		private Action? _beforeResolve = beforeResolve;
+		public int Count => scopes.Count;
+		public DependencyScopeDescriptor this[int index] => scopes[index];
+
+		public IEnumerator<DependencyScopeDescriptor> GetEnumerator()
+		{
+			Interlocked.Exchange(ref _beforeResolve, null)?.Invoke();
+			return scopes.GetEnumerator();
+		}
+
+		System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
 	}
 
 	private sealed class ControlledExtractor : IDependencyFactExtractor
@@ -301,14 +331,18 @@ public sealed class DependencyFactsCacheFailureTests(ITestOutputHelper output)
 	{
 		public bool CanCache { get; init; } = true;
 		public bool FailResolution { get; set; }
+		public Action? BeforeResolve { get; set; }
 
 		public Task<DependencyResolverConfiguration> ReadAsync(
 			string sourceRoot, IReadOnlyList<string> manifestFiles, CancellationToken cancellationToken)
 		{
 			var scope = new DependencyScopeDescriptor("fixture", sourceRoot, LanguageId.CSharp,
 				[], null, false, new Dictionary<string, IReadOnlyList<string>>(), null, new HashSet<string>(), [], true);
+			IReadOnlyList<DependencyScopeDescriptor> scopes = FailResolution ? [scope, scope] : [scope];
+			if (BeforeResolve is { } beforeResolve)
+				scopes = new ObservedScopes(scopes, beforeResolve);
 			return Task.FromResult(new DependencyResolverConfiguration("fixture",
-				FailResolution ? [scope, scope] : [scope], new Dictionary<string, PackageMapDescriptor>(),
+				scopes, new Dictionary<string, PackageMapDescriptor>(),
 				new HashSet<string>(), new Dictionary<string, IReadOnlySet<string>>(), new HashSet<string>())
 			{ CanCache = CanCache });
 		}
