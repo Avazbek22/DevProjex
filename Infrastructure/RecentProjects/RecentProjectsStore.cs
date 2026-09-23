@@ -772,7 +772,29 @@ public sealed class RecentProjectsStore
 			out db,
 			out requiresRewrite,
 			out temporarilyUnavailable,
-			JsonStorePersistence.SmallDocumentMaximumBytes);
+			JsonStorePersistence.SmallDocumentMaximumBytes,
+			IsValidCurrentSchemaDocument);
+
+	private static bool IsValidCurrentSchemaDocument(string json)
+	{
+		using var document = JsonDocument.Parse(json);
+		var root = document.RootElement;
+		if (root.ValueKind != JsonValueKind.Object ||
+		    !root.TryGetProperty("schemaVersion", out var schemaVersion) ||
+		    !schemaVersion.TryGetInt32(out var version) ||
+		    version != CurrentSchemaVersion)
+		{
+			return true;
+		}
+
+		return HasArrayProperty(root, "recentFolders") &&
+		       HasArrayProperty(root, "recentFolderRemovals") &&
+		       HasArrayProperty(root, "recentRepositories") &&
+		       HasArrayProperty(root, "recentRepositoryRemovals");
+	}
+
+	private static bool HasArrayProperty(JsonElement root, string name) =>
+		root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Array;
 
 	private bool TryLoadLegacy(
 		JsonStoreFileSet currentFileSet,

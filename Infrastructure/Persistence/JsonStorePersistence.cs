@@ -75,7 +75,8 @@ internal static class JsonStorePersistence
         out TDocument document,
         out bool requiresRewrite,
         out bool temporarilyUnavailable,
-        long maximumDocumentBytes = long.MaxValue)
+        long maximumDocumentBytes = long.MaxValue,
+        Func<string, bool>? validateJson = null)
     {
         document = createDefault();
         requiresRewrite = false;
@@ -101,6 +102,9 @@ internal static class JsonStorePersistence
             {
                 return false;
             }
+            if (validateJson is not null && !validateJson(json))
+                return false;
+
             var deserialized = JsonSerializer.Deserialize<TDocument>(json, serializerOptions);
             if (deserialized is null)
                 return false;

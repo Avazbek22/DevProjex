@@ -1,5 +1,6 @@
 using DevProjex.Infrastructure.RecentProjects;
 using DevProjex.Infrastructure.Persistence;
+using System.Text.Json.Nodes;
 
 namespace DevProjex.Tests.Unit;
 
@@ -813,6 +814,53 @@ public sealed class RecentProjectsStoreTests
 
 		Assert.Equal(RecentProjectsLoadStatus.Success, result.Status);
 		Assert.Equal(PathUtility.Normalize(folder), Assert.Single(result.Database.RecentFolders).Path);
+	}
+
+	[Fact]
+	public void CurrentSchemaWithoutRecentCollections_RecoversBackupBeforeNextWrite()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+		var existingFolder = temp.CreateFolder("Existing");
+		var newFolder = temp.CreateFolder("New");
+		store.AddFolder(null, existingFolder);
+		var primaryPath = store.GetPath();
+		using var savedBackup = JsonDocument.Parse(File.ReadAllText(primaryPath + ".bak"));
+		var schemaVersion = savedBackup.RootElement.GetProperty("schemaVersion").GetInt32();
+		File.WriteAllText(primaryPath, JsonSerializer.Serialize(new { schemaVersion }));
+
+		var startup = store.LoadForStartupWithStatus(TimeSpan.Zero);
+		Assert.Equal(RecentProjectsLoadStatus.Success, startup.Status);
+		var updated = store.AddFolder(startup.Database, newFolder);
+
+		Assert.Contains(updated.RecentFolders, entry => PathComparer.Default.Equals(entry.Path, existingFolder));
+		Assert.Contains(updated.RecentFolders, entry => PathComparer.Default.Equals(entry.Path, newFolder));
+		using var backup = JsonDocument.Parse(File.ReadAllText(primaryPath + ".bak"));
+		var recentFolders = backup.RootElement.GetProperty("recentFolders")
+			.EnumerateArray()
+			.Select(static entry => entry.GetProperty("path").GetString())
+			.ToArray();
+		Assert.Contains(PathUtility.Normalize(existingFolder), recentFolders);
+		Assert.Contains(PathUtility.Normalize(newFolder), recentFolders);
+	}
+
+	[Fact]
+	public void CurrentSchemaMissingRecentFolders_RecoversValidBackup()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+		var folder = temp.CreateFolder("Existing");
+		store.AddFolder(null, folder);
+		var primaryPath = store.GetPath();
+		var incomplete = JsonNode.Parse(File.ReadAllText(primaryPath))!.AsObject();
+		Assert.True(incomplete.Remove("recentFolders"));
+		File.WriteAllText(primaryPath, incomplete.ToJsonString());
+
+		var startup = store.LoadForStartupWithStatus(TimeSpan.Zero);
+
+		Assert.Equal(RecentProjectsLoadStatus.Success, startup.Status);
+		Assert.Equal(PathUtility.Normalize(folder), Assert.Single(startup.Database.RecentFolders).Path);
+		Assert.Contains("recentFolders", File.ReadAllText(primaryPath));
 	}
 
 	[Fact]
