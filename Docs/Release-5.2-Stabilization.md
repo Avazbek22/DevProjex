@@ -208,6 +208,16 @@ two directory, and one file enumeration. These counters must not be added togeth
 presented as complete duplicated workspace IO. This investigation changed only the probe,
 not the production discovery/cache architecture.
 
+A later current-branch-only normal-folder probe used the changed 2,755-file DevProjex
+tree. Across five warm `--no-build` samples, selection took 68.8–74.0 ms, projection
+24.5–29.3 ms, metrics scanning 29.2–35.9 ms, and publication 58.8–67.4 ms. Root facts
+were built 417 times for 235 unique paths, with 182 selected-root repeats and generally
+15.4–20.0 ms of summed warm builder time. These stage times overlap and cannot be added
+as an end-to-end load time. A separate early TreeBuilder name/extension-filter trial on
+the same growing repository improved one timing slice but regressed another; its source
+and test changes were discarded after 29 focused checks passed. Neither probe justifies
+a new speedup claim or a late cache redesign.
+
 ### Journal retention fast path at GUI startup
 
 GUI composition constructs `AgentJournalStore` unconditionally, before creating the window.
@@ -518,6 +528,8 @@ not a unique-test total.
 | Stale GUI root-access failure | `b1518b44` | An older blocked root-access probe could fail after a newer project opened, then show an obsolete modal error or attempt elevation over the new project. A post-probe eligibility guard now cancels that stale path before not-found/access-denied handling. The deterministic headless regression observed an elevation request before the fix; afterward three focused and four adjacent UI checks passed, retaining the newer project and normal behavior when a newer preflight fails. |
 | Root probe completing after window shutdown | `7b95db7c` | A blocked folder-access probe could fail after the window had closed and still attempt elevation or show a dialog owned by the closed window. The same post-probe guard now checks the window lifetime before handling an error or entering the load pipeline. A deterministic headless regression observed a late relaunch before the fix; four focused and two adjacent shutdown/close-decision checks passed afterward. A canceled Closing attempt retains its active lifetime and existing behavior. |
 | Shared dependency-index wait cancellation | `18364e0a` | An index-cache joiner previously blocked inside synchronous `Lazy.Value` while the owner resolved dependencies; cancellation could not complete until the owner released. Only the cache-owned resolution is now scheduled off-thread, and joined callers await it with their own token without evicting the owner's entry. The blocked-owner regression failed before the fix; 17 focused Release Unit and one concurrent cold-index Integration check passed afterward, including owner-cancel retry and retained warm reuse. Noncache/private resolution remains synchronous. |
+| Stale GUI repository-acquisition failure | `6ab6228e` | A cached-repository acquisition for older folder A could fail after newer B opened, or after final window close, and show an obsolete modal error (or use an already closed window as its owner). Both branch-unavailable and generic acquisition catches now discard only superseded or closed-window requests; current-request errors remain visible. Deterministic headless regressions failed before the fix; six focused and five adjacent Release UI checks passed afterward. |
+| Tree-only MCP pack journal accuracy | `01bff6dd` | `pack_context` with `view=tree` used to journal every selected file as delivered even though no file body was returned. The delivered-file set is now empty for tree-only packs, including stored packs via the same journal context, without changing response content. A regression failed before the fix (`DeliveredPaths=[Source.txt]`); four focused Release Integration checks passed afterward, including a content-view control. |
 
 The CLI dense-search dictionary experiment was intentionally discarded: three 5,000-hit
 process samples per variant gave medians of 475 ms for the prior lookup and 480 ms for
@@ -609,6 +621,13 @@ speedup is claimed.
   immediately, but the TUI success view has no structured warning channel. Adding an
   immediate TUI warning is a UX/result-contract choice recorded in PR #451; no export
   contents or status text were changed in this branch.
+- On non-root Unix, applying a source directory's non-writable mode (for example 0555)
+  to a staged folder before its final move may prevent recursive staging cleanup when
+  a destination conflict or cancellation follows. The original failure can be obscured
+  and a `.devprojex-*.tmp` directory may remain. This needs a deterministic Unix
+  integration regression and mode-aware cleanup; the available WSL installation has no
+  Linux .NET SDK, so no unverified late cross-platform change was made. PR #451 records
+  the risk.
 - Two GUI windows that both loaded a missing local project profile can lose independent
   first edits: the second save has no baseline, treats every selection field as changed,
   and can overwrite the first window's setting. Normal TUI editing keeps a pre-edit
@@ -617,6 +636,15 @@ speedup is claimed.
   editable during asynchronous initial load; disabling them briefly or tracking edit
   intent changes the loading UX. This release branch leaves the behavior unchanged
   pending the product decision recorded in PR #451.
+- Desktop settings toggles and language changes synchronously enter the user-settings
+  store's cross-process lock, whose contention budget is five seconds. Closing the
+  theme popover likewise enters the theme store's five-second lock, and window closing
+  persists pending changes synchronously. Startup uses a shorter 100 ms lock budget,
+  so this is an interaction/shutdown responsiveness risk rather than the measured load
+  regression. A safe nonblocking path needs ordered/coalesced writes, field-mask merge
+  preservation, UI reconciliation, and bounded shutdown drain; a one-off background
+  write can lose or reorder edits. PR #451 records the release risk; this branch keeps
+  the established persistence behavior.
 
 ## Cleanup status
 
