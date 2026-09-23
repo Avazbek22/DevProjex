@@ -23,7 +23,8 @@ public sealed class GuiBackendLoadMeasurementTests(ITestOutputHelper output)
 		{
 			for (var iteration = 0; iteration < 6; iteration++)
 			{
-				services.IgnoreRulesService.InvalidateCaches(projectRoot);
+				// Normal folder loads refresh discovery while retaining validated compiled ignore matchers.
+				services.IgnoreRulesService.RefreshDiscoveryCaches(projectRoot);
 				using var ignoreMeasurement = IgnorePipelineDiagnostics.BeginMeasurement();
 				using var contentMeasurement = ContentPipelineDiagnostics.BeginMeasurement();
 				var loadStarted = Stopwatch.GetTimestamp();

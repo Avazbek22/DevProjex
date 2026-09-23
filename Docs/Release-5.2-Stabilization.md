@@ -208,12 +208,13 @@ two directory, and one file enumeration. These counters must not be added togeth
 presented as complete duplicated workspace IO. This investigation changed only the probe,
 not the production discovery/cache architecture.
 
-### Deferred: synchronous journal housekeeping at GUI startup
+### Journal retention fast path at GUI startup
 
 GUI composition constructs `AgentJournalStore` unconditionally, before creating the window.
-Its constructor synchronously performs the existing retention sweep, even when the activity
-panel is disabled. This reads the live-session registry and validates journal headers;
-it is startup work, not part of ordinary project reload or the main backend A/B above.
+Its constructor synchronously performs the retention sweep, even when the activity
+panel is disabled. It reads the live-session registry and, when cleanup may be needed,
+validates journal headers. This is startup work, not part of ordinary project reload
+or the main backend A/B above.
 No accidental startup of the MCP server, TUI, or dependency-facts engine was found on
 the normal GUI route. Desktop IPC and live-session monitoring serve existing contracts.
 
@@ -235,11 +236,63 @@ setup. The 512-file case includes 312 normal retention removals per observation;
 not a pure header-read comparison. Presented-file counts are not measured syscall/read
 counters. First observations were 5.4377 / 30.6462 / 74.5276 ms respectively.
 
-This quantifies a startup follow-up, not a GUI improvement or the cause of the reported
-whole-second regression. Deferring or rescheduling cleanup was deliberately not implemented:
-retention ordering, concurrent readers/writers, and the packaged desktop startup path need
-separate validation. No retention behavior or UI timings changed. The enabled probe passed;
-its default-disabled execution was verified to skip.
+The retention sweep now skips journal-header reads only when the physical `.jsonl` file
+count is at or below the configured maximum and every file has a recent write time.
+No verified subset can be eligible for deletion in that case. A reparse point, unreadable
+metadata, an expired file, or an excess count takes the existing validation/deletion path.
+The live-session registry is still read; cleanup is neither deferred nor rescheduled.
+The [follow-up samples](Benchmarks/v5.2-journal-startup-fastpath.json) used the same
+isolated fixture and Release test harness, but are not an interleaved A/B run:
+
+| Valid journal headers presented | Previous warm median | Fast-path warm median | Previous / new current-thread allocation |
+| --- | ---: | ---: | ---: |
+| 0 | 0.4119 ms | 0.4205 ms | 11,840 / 11,760 B |
+| 200 | 19.2530 ms | 5.9497 ms | 2,334,096 / 75,216 B |
+| 512 | 66.4650 ms | 67.9844 ms | 5,953,672 / 5,953,704 B |
+
+The 200-file case is about 3.2x faster and allocates about 31x less in this synthetic
+constructor workload. The 512-file control retains the full cleanup behavior. These
+numbers do not establish a whole-GUI startup improvement or explain the reported
+whole-second project-load delay. Targeted journal retention tests and the opt-in probe pass.
+
+### Current normal-folder load calibration
+
+The opt-in `GuiBackendLoadMeasurementTests` now uses the production folder-refresh path,
+`RefreshDiscoveryCaches`, instead of fully invalidating compiled ignore matchers on
+every iteration. The earlier form of this local probe overstated normal warm reload cost;
+it did not indicate a regression in the production load path. The [six recorded samples](Benchmarks/v5.2-gui-backend-normal-folder-load.json)
+on the current DevProjex tree contain 2,723 selected files. The first headless backend
+load took 695.49 ms; subsequent loads took 250.25, 181.48, 113.52, 110.52, and
+102.29 ms as the process and filesystem warmed. Background metrics publication took
+99.89 ms on the first pass and 60.95–84.34 ms thereafter. These phases exclude first
+paint and the existing visual quiet-period gate; they must not be presented as desktop
+ready times or added to the historical v5.0/v5.1 recollection.
+
+The root `.gitignore` has 435 lines. An isolated cold matcher build took 49–96 ms and
+allocated about 62.7 MB; the matchers were reused during the same scan. A targeted
+`RegexOptions.Compiled` A/B did not establish an end-to-end benefit, so the matcher
+implementation and fixed UI timings remain unchanged.
+
+### TUI backend content metrics on demand
+
+The terminal workspace now opens without computing full content-output metrics that are
+not displayed by the initial TUI tree. An explicit request for the full plan still
+computes those metrics. [Two recorded real-root runs](Benchmarks/v5.2-tui-deferred-content-metrics.json)
+used alternating full and deferred backend paths, each with one warm-up pair and five
+measured pairs. The included corpus grew by one file between runs, so their timing
+distributions are reported separately rather than pooled.
+
+| Run | Included files | Full-path warm median | Deferred-open warm median | Full reads during deferred open |
+| --- | ---: | ---: | ---: | ---: |
+| Initial | 2,728 | 135.13 ms | 114.56 ms | 0 instead of 2,299 |
+| Verification | 2,729 | 134.58 ms | 128.84 ms | 0 instead of 2,300 |
+
+In both runs, deferred open also avoided one content-metrics call per included file.
+An on-demand follow-up made the expected reads, reproduced all output metrics, and
+produced byte-identical structured Tree JSON in the checked sample. Median process-wide
+managed allocations were essentially unchanged. The medians differ by 4–15% across
+the two runs and do not establish a stable whole-TUI speedup. The timings exclude
+terminal rendering and application readiness.
 
 ## MCP process A/B: no broad speedup established
 

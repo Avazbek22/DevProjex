@@ -144,6 +144,40 @@ public sealed class GitIgnoreMatcherSuffixTests(ITestOutputHelper output)
 		}
 	}
 
+	[Fact]
+	[Trait("Category", "LocalPerformance")]
+	public void MeasureCurrentRootGitIgnoreRuleConstruction()
+	{
+		var requestedRoot = Environment.GetEnvironmentVariable("DEVPROJEX_GUI_BENCHMARK_ROOT");
+		Assert.SkipWhen(string.IsNullOrWhiteSpace(requestedRoot), "Set DEVPROJEX_GUI_BENCHMARK_ROOT for read-only profiling.");
+		var projectRoot = Path.GetFullPath(requestedRoot!);
+		var lines = File.ReadAllLines(Path.Combine(projectRoot, ".gitignore"));
+		var semantics = GitConfigPathComparisonSemanticsResolver.Instance.Resolve(projectRoot);
+		Assert.True(semantics.IsAuthoritative);
+		var measurements = new List<(int Line, string Pattern, double Milliseconds, long AllocatedBytes)>();
+		for (var index = 0; index < lines.Length; index++)
+		{
+			var sample = Measure(projectRoot, [lines[index]], semantics);
+			measurements.Add((index + 1, lines[index], sample.Milliseconds, sample.AllocatedBytes));
+		}
+		output.WriteLine(JsonSerializer.Serialize(new
+		{
+			SourceLines = lines.Length,
+			TotalPerRuleAllocatedBytes = measurements.Sum(static sample => sample.AllocatedBytes),
+			TopRules = measurements
+				.OrderByDescending(static sample => sample.AllocatedBytes)
+				.Take(16)
+				.Select(static sample => new
+				{
+					sample.Line,
+					sample.Pattern,
+					sample.Milliseconds,
+					sample.AllocatedBytes
+				})
+				.ToArray()
+		}));
+	}
+
 	private static BuildSample Measure(string root, string[] patterns, GitPathComparisonSemantics semantics)
 	{
 		var before = GC.GetAllocatedBytesForCurrentThread();
