@@ -382,8 +382,8 @@ inventoried at 1,283,874,520 B; reported reclaimed space is **0 B**. Baseline so
 benchmark outputs, and other generated build artifacts also remain to be addressed under
 the applicable cleanup policy. The rejection must not be bypassed through another shell.
 
-A final read-only inventory at 09:12 UTC found 56 project-derived `bin`/`obj` directories totaling
-14,461,441,581 B of logical file sizes. Resolved paths were restricted to the workspace
+A final read-only inventory at 09:36 UTC found 56 project-derived `bin`/`obj` directories totaling
+14,461,519,165 B of logical file sizes. Resolved paths were restricted to the workspace
 and reparse points were rejected. This is a pending-artifact inventory, not space reclaimed
 or a claim that all these bytes were created by this task; no initial inventory exists.
 Source archives and other non-`bin`/`obj` temporary outputs are additional pending items.
