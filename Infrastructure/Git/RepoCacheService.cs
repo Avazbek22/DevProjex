@@ -834,7 +834,10 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 
 		try
 		{
-			var trashRoot = RepositoryCacheLayout.GetTrashRoot(GetOwningCacheRoot(path));
+			var cacheRoot = GetOwningCacheRoot(path);
+			if (HasLinkedTrashPathComponent(cacheRoot))
+				return false;
+			var trashRoot = RepositoryCacheLayout.GetTrashRoot(cacheRoot);
 			Directory.CreateDirectory(trashRoot);
 			var destination = Path.Combine(trashRoot, $"trash-{Guid.NewGuid():N}");
 			Directory.Move(path, destination);
@@ -2201,9 +2204,12 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 		if (!Directory.Exists(path) || !IsInCache(path))
 			return;
 
-		var trashRoot = RepositoryCacheLayout.GetTrashRoot(GetOwningCacheRoot(path));
+		var cacheRoot = GetOwningCacheRoot(path);
 		try
 		{
+			if (HasLinkedTrashPathComponent(cacheRoot))
+				throw new IOException("Repository cache trash path must not be a symbolic link or junction.");
+			var trashRoot = RepositoryCacheLayout.GetTrashRoot(cacheRoot);
 			Directory.CreateDirectory(trashRoot);
 			string destination;
 			for (var index = 1; ; index++)
@@ -2248,7 +2254,7 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 		CancellationToken cancellationToken = default)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
-		if (IsLinkedCacheRoot(cacheRoot))
+		if (HasLinkedTrashPathComponent(cacheRoot))
 			return;
 		var trashRoot = RepositoryCacheLayout.GetTrashRoot(cacheRoot);
 		if (!Directory.Exists(trashRoot))
@@ -2719,6 +2725,11 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 			return true;
 		}
 	}
+
+	private static bool HasLinkedTrashPathComponent(string cacheRoot) =>
+		IsLinkedCacheRoot(cacheRoot) ||
+		IsLinkedCacheRoot(Path.Combine(cacheRoot, RepositoryCacheLayout.StagingDirectoryName)) ||
+		IsLinkedCacheRoot(RepositoryCacheLayout.GetTrashRoot(cacheRoot));
 
 	private static IReadOnlyList<string> BuildCacheSearchRoots(
 		string currentCacheRoot,

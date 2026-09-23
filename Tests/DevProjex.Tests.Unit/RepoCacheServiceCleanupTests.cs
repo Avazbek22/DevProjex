@@ -317,6 +317,103 @@ public sealed class RepoCacheServiceCleanupTests : IDisposable
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void LinkedTrashPathCannotDeleteExternalDirectoriesOnStartup(bool linkStagingRoot)
+    {
+        var outsidePath = _testCacheRoot + "-trash-cleanup-outside";
+        var stagingRoot = Path.Combine(_testCacheRoot, ".staging");
+        var trashRoot = Path.Combine(stagingRoot, ".trash");
+        var linkedPath = linkStagingRoot ? stagingRoot : trashRoot;
+        var externalTrashRoot = linkStagingRoot ? Path.Combine(outsidePath, ".trash") : outsidePath;
+        var sentinelPath = Path.Combine(externalTrashRoot, "foreign", "sentinel.txt");
+        Directory.CreateDirectory(Path.GetDirectoryName(linkedPath)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(sentinelPath)!);
+        File.WriteAllText(sentinelPath, "keep");
+
+        try
+        {
+            if (!TryCreateDirectoryLink(linkedPath, outsidePath))
+                Assert.Skip("The platform does not permit creating a directory link for this safety test.");
+
+            _service.CleanupStaleCacheOnStartup();
+
+            Assert.Equal("keep", File.ReadAllText(sentinelPath));
+        }
+        finally
+        {
+            if (Directory.Exists(linkedPath))
+                Directory.Delete(linkedPath);
+            if (Directory.Exists(outsidePath))
+                Directory.Delete(outsidePath, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void LinkedTrashPathCannotMoveUnindexedCacheContainer()
+    {
+        var outsidePath = _testCacheRoot + "-trash-removal-outside";
+        var trashRoot = Path.Combine(_testCacheRoot, ".staging", ".trash");
+        var unindexedPath = Path.Combine(_testCacheRoot, "unindexed-repository");
+        var sentinelPath = Path.Combine(outsidePath, "sentinel.txt");
+        Directory.CreateDirectory(Path.GetDirectoryName(trashRoot)!);
+        Directory.CreateDirectory(unindexedPath);
+        Directory.CreateDirectory(outsidePath);
+        File.WriteAllText(sentinelPath, "keep");
+
+        try
+        {
+            if (!TryCreateDirectoryLink(trashRoot, outsidePath))
+                Assert.Skip("The platform does not permit creating a directory link for this safety test.");
+
+            var result = _service.ClearAllCacheWithResult();
+
+            Assert.Equal(new CacheClearResult(0, 0, 1), result);
+            Assert.True(Directory.Exists(unindexedPath));
+            Assert.Equal("keep", File.ReadAllText(sentinelPath));
+        }
+        finally
+        {
+            if (Directory.Exists(trashRoot))
+                Directory.Delete(trashRoot);
+            if (Directory.Exists(outsidePath))
+                Directory.Delete(outsidePath, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void LinkedTrashPathCannotMoveStagingDirectory()
+    {
+        var outsidePath = _testCacheRoot + "-trash-staging-outside";
+        var stagingPath = _service.CreateRepositoryStagingDirectory("https://example.com/owner/repo.git");
+        var trashRoot = Path.Combine(_testCacheRoot, ".staging", ".trash");
+        var sentinelPath = Path.Combine(outsidePath, "sentinel.txt");
+        Directory.CreateDirectory(outsidePath);
+        File.WriteAllText(sentinelPath, "keep");
+
+        try
+        {
+            if (!TryCreateDirectoryLink(trashRoot, outsidePath))
+                Assert.Skip("The platform does not permit creating a directory link for this safety test.");
+
+            _service.DeleteRepositoryDirectory(stagingPath);
+
+            Assert.True(Directory.Exists(stagingPath));
+            Assert.Equal(new[] { "sentinel.txt" }, Directory.GetFileSystemEntries(outsidePath)
+                .Select(Path.GetFileName)
+                .ToArray());
+            Assert.Equal("keep", File.ReadAllText(sentinelPath));
+        }
+        finally
+        {
+            if (Directory.Exists(trashRoot))
+                Directory.Delete(trashRoot);
+            if (Directory.Exists(outsidePath))
+                Directory.Delete(outsidePath, recursive: true);
+        }
+    }
+
     [Fact]
     public void ClearAllCache_RemovesAllCachedRepositories()
     {
