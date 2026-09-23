@@ -33,6 +33,130 @@ public sealed class AgentJournalStoreTests(ITestOutputHelper output)
 	}
 
 	[Fact]
+	public async Task UnixJournalDirectoryAndNewSessionFileArePrivate()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Unix file modes do not apply on Windows.");
+			return;
+		}
+
+		using var temporary = new TemporaryDirectory();
+		using var store = CreateStore(temporary.Path);
+		var session = CreateSession(temporary.Path, 81, new DateTimeOffset(2026, 9, 20, 1, 2, 3, TimeSpan.Zero));
+		await store.StartSession(session, TestContext.Current.CancellationToken);
+		var path = Path.Combine(store.DirectoryPath, session.Id + ".jsonl");
+		Assert.Equal(
+			UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
+			File.GetUnixFileMode(store.DirectoryPath));
+		Assert.Equal(
+			UnixFileMode.UserRead | UnixFileMode.UserWrite,
+			File.GetUnixFileMode(path));
+
+		await store.RecordCall(session.Id, CreateCall(1), TestContext.Current.CancellationToken);
+
+		Assert.Equal(
+			UnixFileMode.UserRead | UnixFileMode.UserWrite,
+			File.GetUnixFileMode(path));
+		Assert.Single(await store.ReadCallsAsync(session.Id, TestContext.Current.CancellationToken));
+	}
+
+	[Fact]
+	public async Task UnixJournalRepairsAnExistingDirectoryAndSessionFile()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Unix file modes do not apply on Windows.");
+			return;
+		}
+
+		using var temporary = new TemporaryDirectory();
+		var directory = Directory.CreateDirectory(Path.Combine(temporary.Path, "agent-journal")).FullName;
+		File.SetUnixFileMode(
+			directory,
+			UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+			UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
+			UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+		using var store = CreateStore(temporary.Path);
+		Assert.Equal(
+			UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
+			File.GetUnixFileMode(directory));
+		var session = CreateSession(temporary.Path, 82, new DateTimeOffset(2026, 9, 20, 1, 2, 3, TimeSpan.Zero));
+		await store.StartSession(session, TestContext.Current.CancellationToken);
+		var path = Path.Combine(directory, session.Id + ".jsonl");
+		File.SetUnixFileMode(
+			path,
+			UnixFileMode.UserRead | UnixFileMode.UserWrite |
+			UnixFileMode.GroupRead | UnixFileMode.OtherRead);
+
+		Assert.Empty(await store.ReadCallsAsync(session.Id, TestContext.Current.CancellationToken));
+		Assert.Equal(
+			UnixFileMode.UserRead | UnixFileMode.UserWrite,
+			File.GetUnixFileMode(path));
+	}
+
+	[Fact]
+	public async Task JournalDoesNotFollowASymbolicLinkSessionFile()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Symbolic-link creation may require elevated Windows privileges.");
+			return;
+		}
+
+		using var temporary = new TemporaryDirectory();
+		using var outside = new TemporaryDirectory();
+		using var store = CreateStore(temporary.Path);
+		var session = CreateSession(temporary.Path, 83, new DateTimeOffset(2026, 9, 20, 1, 2, 3, TimeSpan.Zero));
+		await store.StartSession(session, TestContext.Current.CancellationToken);
+		var path = Path.Combine(store.DirectoryPath, session.Id + ".jsonl");
+		File.Delete(path);
+		var protectedPath = Path.Combine(outside.Path, "protected.txt");
+		File.WriteAllText(protectedPath, "keep");
+		File.CreateSymbolicLink(path, protectedPath);
+
+		await Assert.ThrowsAsync<IOException>(async () =>
+			await store.RecordCall(session.Id, CreateCall(1), TestContext.Current.CancellationToken));
+		Assert.Equal("keep", File.ReadAllText(protectedPath));
+		Assert.True(File.Exists(path));
+	}
+
+	[Fact]
+	public async Task ListingSkipsALinkedSessionWithoutLosingOtherSessions()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Symbolic-link creation may require elevated Windows privileges.");
+			return;
+		}
+
+		using var temporary = new TemporaryDirectory();
+		using var outside = new TemporaryDirectory();
+		using var store = CreateStore(temporary.Path);
+		var started = new DateTimeOffset(2026, 9, 20, 1, 2, 3, TimeSpan.Zero);
+		var linked = CreateSession(temporary.Path, 84, started);
+		var physical = CreateSession(temporary.Path, 85, started.AddSeconds(1));
+		await store.StartSession(linked, TestContext.Current.CancellationToken);
+		await store.StartSession(physical, TestContext.Current.CancellationToken);
+		Assert.Equal(2, (await store.ListSessionsAsync(cancellationToken: TestContext.Current.CancellationToken)).Count);
+
+		var path = Path.Combine(store.DirectoryPath, linked.Id + ".jsonl");
+		File.Delete(path);
+		var protectedPath = Path.Combine(outside.Path, "protected.txt");
+		File.WriteAllText(protectedPath, new string('x', 4096));
+		File.CreateSymbolicLink(path, protectedPath);
+
+		var remaining = Assert.Single(await store.ListSessionsAsync(cancellationToken: TestContext.Current.CancellationToken));
+		Assert.Equal(physical.Id, remaining.Id);
+		var observedBytes = 0L;
+		store.BytesReadObserver = bytes => observedBytes += bytes;
+		await Assert.ThrowsAsync<IOException>(async () =>
+			await store.ReadCallsAsync(linked.Id, TestContext.Current.CancellationToken));
+		Assert.Equal(0, observedBytes);
+		Assert.Equal(new string('x', 4096), File.ReadAllText(protectedPath));
+	}
+
+	[Fact]
 	public async Task ReaderIgnoresAnIncompleteLastLine()
 	{
 		var cancellationToken = TestContext.Current.CancellationToken;

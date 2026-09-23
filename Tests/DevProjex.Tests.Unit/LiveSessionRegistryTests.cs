@@ -16,6 +16,108 @@ public sealed class LiveSessionRegistryTests
 	}
 
 	[Fact]
+	public void DirectoryPath_RestrictsAnExistingUnixSessionDirectory()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Unix file modes do not apply on Windows.");
+			return;
+		}
+
+		using var workspace = new TemporaryDirectory();
+		var directory = Directory.CreateDirectory(Path.Combine(workspace.Path, "live-sessions")).FullName;
+		File.SetUnixFileMode(
+			directory,
+			UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+			UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
+			UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+		var registry = new LiveSessionRegistry(() => workspace.Path);
+
+		Assert.Equal(directory, registry.DirectoryPath);
+		Assert.Equal(
+			UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
+			File.GetUnixFileMode(directory));
+	}
+
+	[Fact]
+	public async Task WriterKeepsUnixSessionRecordsPrivateAcrossAtomicHeartbeats()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Unix file modes do not apply on Windows.");
+			return;
+		}
+
+		using var workspace = new TemporaryDirectory();
+		var started = new DateTimeOffset(2026, 9, 18, 1, 2, 3, TimeSpan.Zero);
+		var registry = new LiveSessionRegistry(
+			() => workspace.Path,
+			new MutableTimeProvider(started),
+			_ => started);
+		await using var writer = registry.Start(42, started, [workspace.Path]);
+		const UnixFileMode privateFileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+		Assert.Equal(
+			UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
+			File.GetUnixFileMode(registry.DirectoryPath));
+		Assert.Equal(privateFileMode, File.GetUnixFileMode(writer.Path));
+
+		writer.UpdateClient("sample-client", "2.4.1");
+
+		Assert.Equal(privateFileMode, File.GetUnixFileMode(writer.Path));
+		Assert.Empty(Directory.EnumerateFiles(registry.DirectoryPath, "*.tmp"));
+	}
+
+	[Fact]
+	public void ReaderRepairsAnExistingUnixSessionRecordBeforeReturningIt()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Unix file modes do not apply on Windows.");
+			return;
+		}
+
+		using var workspace = new TemporaryDirectory();
+		var started = new DateTimeOffset(2026, 9, 18, 1, 2, 3, TimeSpan.Zero);
+		var registry = new LiveSessionRegistry(
+			() => workspace.Path,
+			new MutableTimeProvider(started),
+			_ => started);
+		var path = registry.GetPath(42);
+		registry.Write(new LiveSessionRecord(42, started, "client", "1", [workspace.Path], started));
+		File.SetUnixFileMode(
+			path,
+			UnixFileMode.UserRead | UnixFileMode.UserWrite |
+			UnixFileMode.GroupRead | UnixFileMode.OtherRead);
+
+		Assert.Single(registry.ReadActive(workspace.Path));
+		Assert.Equal(
+			UnixFileMode.UserRead | UnixFileMode.UserWrite,
+			File.GetUnixFileMode(path));
+	}
+
+	[Fact]
+	public void ReaderDoesNotFollowASymbolicLinkSessionRecord()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Symbolic-link creation may require elevated Windows privileges.");
+			return;
+		}
+
+		using var workspace = new TemporaryDirectory();
+		using var outside = new TemporaryDirectory();
+		var registry = new LiveSessionRegistry(() => workspace.Path);
+		var protectedPath = Path.Combine(outside.Path, "record.json");
+		File.WriteAllText(protectedPath, "keep");
+		var link = registry.GetPath(42);
+		File.CreateSymbolicLink(link, protectedPath);
+
+		Assert.Empty(registry.ReadActive());
+		Assert.Equal("keep", File.ReadAllText(protectedPath));
+		Assert.False(File.Exists(link));
+	}
+
+	[Fact]
 	public async Task WriterPublishesClientAndRemovesRecordOnDispose()
 	{
 		using var temporary = new TemporaryDirectory();
