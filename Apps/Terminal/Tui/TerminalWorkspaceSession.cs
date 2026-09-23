@@ -1285,6 +1285,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				_selectedTreePath = focusedPath;
 			}
 		}
+		_services.ContextFactory.ApplyMarkedSecrets(state.Plan.SourceRoot, state.Plan.Selection);
 		_state = state;
 		SetRepositoryStateInconsistent(false);
 		lock (_localProfileBaselineSync)

@@ -46,7 +46,8 @@ public sealed class TerminalWorkspaceController(
 				projectPath,
 				selection,
 				sourceIdentity,
-				cancellationToken)
+				cancellationToken,
+				applyMarkedSecrets: false)
 			.ConfigureAwait(false);
 		ThrowIfTrackedModeIsUnavailable(plan);
 		return new TerminalWorkspaceState(
@@ -1096,7 +1097,8 @@ public sealed class TerminalWorkspaceController(
 		ProjectSourceIdentity? sourceIdentity,
 		CancellationToken cancellationToken,
 		IReadOnlyDictionary<string, bool>? knownExtensionStates = null,
-		IReadOnlyCollection<string>? repositoryScopeFullPaths = null) =>
+		IReadOnlyCollection<string>? repositoryScopeFullPaths = null,
+		bool applyMarkedSecrets = true) =>
 		services.ContextFactory.BuildAsync(
 			projectPath,
 			selection,
@@ -1106,7 +1108,8 @@ public sealed class TerminalWorkspaceController(
 			captureIgnoreImpactCounts: true,
 			includeContentOutputMetrics: false,
 			knownExtensionStates: knownExtensionStates,
-			repositoryScopeFullPaths: repositoryScopeFullPaths);
+			repositoryScopeFullPaths: repositoryScopeFullPaths,
+			applyMarkedSecrets: applyMarkedSecrets);
 
 	private static IReadOnlyList<string>? ResolveRepositoryScopeFullPaths(
 		string sourceRoot,
