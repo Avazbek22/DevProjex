@@ -1420,7 +1420,7 @@ public partial class MainWindow : Window
         cancellationToken.ThrowIfCancellationRequested();
 
         // A no-change F5 validates only directories previously inspected by scope discovery.
-        // Structural changes, project switches and git operations still force a complete rebuild.
+        // Other reloads refresh discovery; matcher reuse still validates content and Git semantics.
         var canReuseIgnoreRuleCaches = false;
         if (reuseUnchangedDiscoveryCaches)
         {
@@ -1430,7 +1430,7 @@ public partial class MainWindow : Window
         }
         else
         {
-            _ignoreRulesService.InvalidateCaches(_currentPath);
+            _ignoreRulesService.RefreshDiscoveryCaches(_currentPath);
         }
 
         if (!canReuseIgnoreRuleCaches)
