@@ -409,6 +409,36 @@ public sealed class ThemeSettingsStoreTests
         Assert.Equal(edited, recovered.Presets["Light.Mica"]);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CurrentSchemaWithoutPresetsObject_RecoversBackupBeforeRewriting(bool includeNullPresets)
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new ThemeSettingsStore(() => temp.Path);
+        var customized = store.Load();
+        var edited = CreatePreset(37);
+        store.SetPreset(customized, ThemeVariant.Light, ThemeEffectMode.Mica, edited);
+        customized.SelectedPreset = "Light.Mica";
+        Assert.True(store.TrySave(customized));
+        var primaryPath = store.GetPath();
+        using var savedBackup = JsonDocument.Parse(File.ReadAllText(primaryPath + ".bak"));
+        var schemaVersion = savedBackup.RootElement.GetProperty("schemaVersion").GetInt32();
+        var defaultsRevision = savedBackup.RootElement.GetProperty("defaultsRevision").GetInt32();
+        var incomplete = includeNullPresets
+            ? JsonSerializer.Serialize(new { schemaVersion, defaultsRevision, presets = (object?)null })
+            : JsonSerializer.Serialize(new { schemaVersion, defaultsRevision });
+        File.WriteAllText(primaryPath, incomplete);
+
+        var recovered = store.LoadForStartup(TimeSpan.Zero);
+
+        Assert.Equal("Light.Mica", recovered.SelectedPreset);
+        Assert.Equal(edited, recovered.Presets["Light.Mica"]);
+        using var backup = JsonDocument.Parse(File.ReadAllText(primaryPath + ".bak"));
+        Assert.Equal(edited.BackgroundTransparency, backup.RootElement.GetProperty("presets")
+            .GetProperty("Light.Mica").GetProperty("backgroundTransparency").GetDouble());
+    }
+
     [Fact]
     public void EnsureStorageExists_CorruptPrimaryRestoresCurrentBackupBeforeCreatingDefaults()
     {

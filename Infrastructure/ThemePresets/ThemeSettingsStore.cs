@@ -299,6 +299,13 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
                 return ThemeDocumentReadStatus.Obsolete;
             }
 
+            using var sourceDocument = JsonDocument.Parse(json);
+            if (!sourceDocument.RootElement.TryGetProperty("presets", out var presets) ||
+                presets.ValueKind != JsonValueKind.Object)
+            {
+                return ThemeDocumentReadStatus.MissingOrInvalid;
+            }
+
             var original = JsonSerializer.Serialize(deserialized, SerializerOptions);
             document = NormalizeCurrent(deserialized);
             requiresRewrite = !string.Equals(
