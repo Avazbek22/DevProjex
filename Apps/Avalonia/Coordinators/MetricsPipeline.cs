@@ -26,6 +26,7 @@ internal sealed class MetricsPipelineIoTestPoint
 	private long _metricsLockAttemptCount;
 	private long _metricsLockAcquisitionCount;
 	private long _metricsLockWaitTicks;
+	internal Action? AfterContentMetricsSnapshot { get; set; }
 
 	public MetricsPipelineIoSnapshot Snapshot => new(
 		Volatile.Read(ref _fileVersionOpenCount),
@@ -261,6 +262,7 @@ internal sealed class MetricsPipeline(
 	private TaskCompletionSource _backgroundMetricsIdle = CompletedSignal();
     private int _metricsRecalcVersion;
     private int _metricsCacheGeneration;
+	private long _fileMetricsRevision;
     private long _lastStatusTreeLines;
     private long _lastStatusTreeChars;
     private long _lastStatusTreeTokens;
@@ -278,6 +280,7 @@ internal sealed class MetricsPipeline(
     private ExportOutputMetrics _treeMetricsCacheValue = ExportOutputMetrics.Empty;
     private bool _hasContentMetricsCache;
     private ContentMetricsCacheKey _contentMetricsCacheKey;
+	private long _contentMetricsCacheRevision;
     private ContentMetricsPair _contentMetricsCacheValue = new(ExportOutputMetrics.Empty, ExportOutputMetrics.Empty);
     private int _allOrderedFilePathsTreeIdentity;
     private IReadOnlyList<string>? _allOrderedFilePathsCache;
@@ -696,6 +699,7 @@ internal sealed class MetricsPipeline(
         lock (_metricsLock)
         {
             _fileMetricsCache.Clear();
+			_fileMetricsRevision++;
             if (trimCapacity)
                 _fileMetricsCache.TrimExcess();
         }
@@ -1141,6 +1145,8 @@ internal sealed class MetricsPipeline(
 					entry.SetTransformed(result.TransformIdentity, result.Effective);
 				mergedAny = true;
 			}
+			if (mergedAny)
+				_fileMetricsRevision++;
 		}
 
 		if (mergedAny)
@@ -1753,6 +1759,8 @@ internal sealed class MetricsPipeline(
 					missingPaths.Add(path);
 				}
 			}
+			if (removedStaleEntry)
+				_fileMetricsRevision++;
 		}
 		finally
 		{
@@ -1995,11 +2003,18 @@ internal sealed class MetricsPipeline(
 			TreeAndContentRootPathIdentity: BuildRootPathIdentity(selection.RootPath),
             TransformIdentity: ResolveTransformIdentity());
 
-        lock (_computationCacheLock)
-        {
-            if (_hasContentMetricsCache && _contentMetricsCacheKey == cacheKey)
-                return _contentMetricsCacheValue;
-        }
+		lock (_metricsLock)
+		{
+			lock (_computationCacheLock)
+			{
+				if (_hasContentMetricsCache &&
+				    _contentMetricsCacheKey == cacheKey &&
+				    _contentMetricsCacheRevision == _fileMetricsRevision)
+				{
+					return _contentMetricsCacheValue;
+				}
+			}
+		}
 
 		var orderedPaths = selection.OrderedFilePaths ??
 			BuildOrderedMetricsFilePaths(selection, cancellationToken);
@@ -2007,10 +2022,12 @@ internal sealed class MetricsPipeline(
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			var cacheGeneration = Volatile.Read(ref _metricsCacheGeneration);
+			long fileMetricsRevision;
 			var selected = new List<(string Path, FileMetricsData Metrics)>(orderedPaths.Count);
 			EnterMetricsLock();
 			try
 			{
+				fileMetricsRevision = _fileMetricsRevision;
 				for (var index = 0; index < orderedPaths.Count; index++)
 				{
 					var path = orderedPaths[index];
@@ -2026,6 +2043,7 @@ internal sealed class MetricsPipeline(
 			{
 				Monitor.Exit(_metricsLock);
 			}
+			ioTestPoint?.AfterContentMetricsSnapshot?.Invoke();
 
 			var contentAccumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
 			foreach (var selectedFile in selected)
@@ -2055,15 +2073,27 @@ internal sealed class MetricsPipeline(
 			var computed = new ContentMetricsPair(
 				AddContentRootMetrics(treeAndContentMetrics, contentOnlyRootPath, selected.Count > 0),
 				treeAndContentMetrics);
-			lock (_computationCacheLock)
+			EnterMetricsLock();
+			try
 			{
-				if (cacheGeneration != Volatile.Read(ref _metricsCacheGeneration))
-					continue;
-				_hasContentMetricsCache = true;
-				_contentMetricsCacheKey = cacheKey;
-				_contentMetricsCacheValue = computed;
+				lock (_computationCacheLock)
+				{
+					if (cacheGeneration != Volatile.Read(ref _metricsCacheGeneration) ||
+					    fileMetricsRevision != _fileMetricsRevision)
+					{
+						continue;
+					}
+					_hasContentMetricsCache = true;
+					_contentMetricsCacheKey = cacheKey;
+					_contentMetricsCacheRevision = fileMetricsRevision;
+					_contentMetricsCacheValue = computed;
+				}
+				return computed;
 			}
-			return computed;
+			finally
+			{
+				Monitor.Exit(_metricsLock);
+			}
 		}
 	}
 
