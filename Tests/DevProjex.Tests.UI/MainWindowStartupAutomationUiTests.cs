@@ -2,8 +2,11 @@ using System.Reflection;
 using System.Security;
 using System.Text.Json;
 using DevProjex.Application.Context;
+using DevProjex.Application.UseCases;
+using DevProjex.Infrastructure.FileSystem;
 using DevProjex.Infrastructure.RecentProjects;
 using DevProjex.Infrastructure.ThemePresets;
+using DevProjex.Kernel.Abstractions;
 using DevProjex.Terminal.DesktopControl;
 
 namespace DevProjex.Tests.UI;
@@ -11,6 +14,89 @@ namespace DevProjex.Tests.UI;
 [Collection(UiWorkspaceCollection.Name)]
 public sealed class MainWindowStartupAutomationUiTests
 {
+	[AvaloniaFact]
+	public async Task OpenFolder_OlderBlockedRootProbeCannotReplaceNewerOpenedProject()
+	{
+		using var olderProject = UiTestProject.CreateDefault();
+		using var newerProject = UiTestProject.CreateDefault();
+		using var scanner = new BlockingRootProbeScanner(olderProject.RootPath);
+		var appDataPath = Path.Combine(olderProject.AppDataPath, Guid.NewGuid().ToString("N"));
+		var options = DesktopStartupOptions.Default;
+		var services = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath) with
+		{
+			ScanOptionsUseCase = new ScanOptionsUseCase(scanner)
+		};
+		var window = new MainWindow(options, services);
+		UiTestDriver.TrackTopLevelWindow(window);
+
+		try
+		{
+			window.Show();
+			var olderOpen = Assert.IsAssignableFrom<Task<bool>>(
+				await UiTestDriver.BeginOpenFolderAsync(window, olderProject.RootPath));
+			await scanner.Started.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+			await UiTestDriver.OpenFolderAsync(window, newerProject.RootPath);
+			Assert.Equal(GetComparablePath(newerProject.RootPath), GetComparablePath(GetCurrentPath(window)));
+
+			scanner.Release();
+			Assert.False(await olderOpen.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
+			Assert.Equal(GetComparablePath(newerProject.RootPath), GetComparablePath(GetCurrentPath(window)));
+		}
+		finally
+		{
+			scanner.Release();
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task OpenFolder_NewerFailedPreflightDoesNotSupersedeOlderEligibleProject()
+	{
+		using var olderProject = UiTestProject.CreateDefault();
+		using var scanner = new BlockingRootProbeScanner(olderProject.RootPath);
+		var appDataPath = Path.Combine(olderProject.AppDataPath, Guid.NewGuid().ToString("N"));
+		var options = DesktopStartupOptions.Default;
+		var services = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath) with
+		{
+			ScanOptionsUseCase = new ScanOptionsUseCase(scanner)
+		};
+		var window = new MainWindow(options, services);
+		UiTestDriver.TrackTopLevelWindow(window);
+		Window? dialog = null;
+
+		try
+		{
+			window.Show();
+			var olderOpen = Assert.IsAssignableFrom<Task<bool>>(
+				await UiTestDriver.BeginOpenFolderAsync(window, olderProject.RootPath));
+			await scanner.Started.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+			var missingPath = Path.Combine(olderProject.RootPath, "missing-project");
+			var newerOpen = Assert.IsAssignableFrom<Task<bool>>(
+				await UiTestDriver.BeginOpenFolderAsync(window, missingPath));
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => window.OwnedWindows.Count == 1,
+				"missing-project error dialog to open");
+			dialog = Assert.Single(window.OwnedWindows);
+			await UiTestDriver.CloseTopLevelWindowAsync(dialog);
+			dialog = null;
+			Assert.False(await newerOpen.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+
+			scanner.Release();
+			Assert.True(await olderOpen.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
+			Assert.Equal(GetComparablePath(olderProject.RootPath), GetComparablePath(GetCurrentPath(window)));
+		}
+		finally
+		{
+			scanner.Release();
+			if (dialog is not null)
+				await UiTestDriver.CloseTopLevelWindowAsync(dialog);
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+	}
+
 	[AvaloniaFact]
 	public async Task StartupUi_AgentActivityPreferenceStorageFailureDoesNotBlockRequestedProject()
 	{
@@ -909,5 +995,55 @@ public sealed class MainWindowStartupAutomationUiTests
 		public static TemporaryEnvironmentVariable Set(string name, string value) => new(name, value);
 
 		public void Dispose() => Environment.SetEnvironmentVariable(_name, _previousValue);
+	}
+
+	private sealed class BlockingRootProbeScanner(string blockedPath)
+		: IFileSystemScannerProjectWorkspaceScanner, IDisposable
+	{
+		private readonly FileSystemScanner _inner = new();
+		private readonly ManualResetEventSlim _release = new(initialState: false);
+		private readonly TaskCompletionSource _started =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+		public Task Started => _started.Task;
+
+		public void Release() => _release.Set();
+
+		public bool CanReadRoot(string rootPath)
+		{
+			if (PathComparer.Default.Equals(rootPath, blockedPath))
+			{
+				_started.TrySetResult();
+				if (!_release.Wait(TimeSpan.FromSeconds(15)))
+					throw new TimeoutException("The controlled root probe was not released.");
+			}
+
+			return _inner.CanReadRoot(rootPath);
+		}
+
+		public ScanResult<HashSet<string>> GetExtensions(
+			string rootPath,
+			IgnoreRules rules,
+			CancellationToken cancellationToken = default) =>
+			_inner.GetExtensions(rootPath, rules, cancellationToken);
+
+		public ScanResult<HashSet<string>> GetRootFileExtensions(
+			string rootPath,
+			IgnoreRules rules,
+			CancellationToken cancellationToken = default) =>
+			_inner.GetRootFileExtensions(rootPath, rules, cancellationToken);
+
+		public ScanResult<List<string>> GetRootFolderNames(
+			string rootPath,
+			IgnoreRules rules,
+			CancellationToken cancellationToken = default) =>
+			_inner.GetRootFolderNames(rootPath, rules, cancellationToken);
+
+		public ScanResult<ProjectWorkspaceScanSnapshot> ScanProjectWorkspace(
+			ProjectWorkspaceScanRequest request,
+			CancellationToken cancellationToken = default) =>
+			_inner.ScanProjectWorkspace(request, cancellationToken);
+
+		public void Dispose() => _release.Dispose();
 	}
 }

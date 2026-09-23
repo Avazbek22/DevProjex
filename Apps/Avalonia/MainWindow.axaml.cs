@@ -13,6 +13,8 @@ public partial class MainWindow : Window
     private const double BranchMenuItemHeight = 32;
     private const double TreeFontMenuItemHeight = 32;
     private static readonly TimeSpan ShutdownPersistenceBudget = TimeSpan.FromSeconds(10);
+    private long _nextFolderOpenRequestId;
+    private long _latestEligibleFolderOpenRequestId;
 
     internal enum TerminalCommandPostInstallUiAction
     {
@@ -1047,6 +1049,7 @@ public partial class MainWindow : Window
             return false;
         }
 
+        var requestId = Interlocked.Increment(ref _nextFolderOpenRequestId);
         var stopwatch = Stopwatch.StartNew();
         var candidateSession = preparedSession;
         var ownsCandidateSession = candidateSession is not null;
@@ -1154,6 +1157,14 @@ public partial class MainWindow : Window
             return false;
         }
 
+        if (!TryClaimEligibleFolderOpen(requestId))
+        {
+            if (ownsCandidateSession)
+                candidateSession?.Dispose();
+            _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "load-canceled");
+            return false;
+        }
+
         var projectLoadFinalization = BeginProjectLoadFinalization();
         var previousSourceType = _viewModel.ProjectSourceType;
         var previousBranch = _viewModel.CurrentBranch;
@@ -1256,6 +1267,22 @@ public partial class MainWindow : Window
         finally
         {
             projectLoadFinalization.TrySetResult();
+        }
+    }
+
+    private bool TryClaimEligibleFolderOpen(long requestId)
+    {
+        while (true)
+        {
+            var latestEligibleRequestId = Volatile.Read(ref _latestEligibleFolderOpenRequestId);
+            if (requestId < latestEligibleRequestId)
+                return false;
+
+            if (Interlocked.CompareExchange(
+                    ref _latestEligibleFolderOpenRequestId,
+                    requestId,
+                    latestEligibleRequestId) == latestEligibleRequestId)
+                return true;
         }
     }
 
