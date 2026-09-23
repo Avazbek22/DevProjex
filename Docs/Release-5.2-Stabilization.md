@@ -60,7 +60,7 @@ Metrics-publication elapsed time already includes the metrics scan. Total backen
 also includes selection publication. Individual phase medians must not be added together
 to reconstruct the median of the per-run total.
 
-The recorded invariant audit confirms identical counts and published values across all
+The recorded invariant check confirms identical counts and published values across all
 124 observations: 2,712 files, 2,997 inventory entries, 2,283 full content reads, and
 28,407,252 content bytes. Git mode remained `RespectGitIgnore`, with the same ignore-option
 selection. Fewer metadata opens did not reduce the required content reads.
@@ -689,7 +689,7 @@ Source archives and other non-`bin`/`obj` temporary outputs are additional pendi
 
 The working verification ledger is `artifacts/release-stabilization/verification-log.md`.
 The durable combined A/B evidence is [v5.2-gui-backend.json](Benchmarks/v5.2-gui-backend.json),
-containing 124 timing/allocation samples, measurement boundaries, and the invariant audit.
+containing 124 timing/allocation samples, measurement boundaries, and the invariant check.
 Committed regression tests and benchmark harnesses are the reproducible evidence; this
 document excludes personal environment paths and operational account information.
 
