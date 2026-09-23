@@ -109,11 +109,12 @@ public sealed class SearchCommandHandler(
 		CancellationToken cancellationToken)
 	{
 		var regex = new McpSearchRegex(ToRegexPattern(request.Pattern, request.Mode), ignoreCase: true);
+		var context = CreateTransformationContext(plan);
 		var inspectedFiles = new List<string>(plan.IncludedFiles.Count);
 		long inspectedBytes = 0;
 		foreach (var path in plan.IncludedFiles)
 		{
-			var fileBytes = ResolveFileSize(plan, path);
+			var fileBytes = ResolveFileSize(plan, path, recheckPlannedSize: context is not null);
 			if (fileBytes > maximumInspectedBytes - inspectedBytes)
 				break;
 			inspectedFiles.Add(path);
@@ -212,7 +213,6 @@ public sealed class SearchCommandHandler(
 			return ValueTask.CompletedTask;
 		}
 
-		var context = CreateTransformationContext(plan);
 		if (context is null)
 		{
 			var analyzer = new FileContentAnalyzer();
@@ -242,7 +242,7 @@ public sealed class SearchCommandHandler(
 					cancellationToken).ConfigureAwait(false);
 			}
 		}
-		else
+		else if (inspectedFiles.Count > 0)
 		{
 			await using var searched = await services.SecretRedactionOutputPreparer
 				.ConsumeTransformedTextAsync(context, inspectedFiles, Consume, cancellationToken)
@@ -394,10 +394,23 @@ public sealed class SearchCommandHandler(
 		return separator >= 0 ? name[(separator + 1)..] : name;
 	}
 
-	private static long ResolveFileSize(ProjectContextPlan plan, string path)
+	private static long ResolveFileSize(
+		ProjectContextPlan plan,
+		string path,
+		bool recheckPlannedSize)
 	{
 		if (plan.EffectiveFileSizes?.TryGetValue(path, out var size) == true)
-			return Math.Max(0, size);
+		{
+			var plannedSize = Math.Max(0, size);
+			return recheckPlannedSize
+				? Math.Max(plannedSize, ReadCurrentFileSize(path))
+				: plannedSize;
+		}
+		return ReadCurrentFileSize(path);
+	}
+
+	private static long ReadCurrentFileSize(string path)
+	{
 		try
 		{
 			return Math.Max(0, new FileInfo(path).Length);
