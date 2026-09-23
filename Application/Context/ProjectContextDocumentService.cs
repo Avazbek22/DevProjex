@@ -1254,7 +1254,7 @@ public sealed class ProjectContextDocumentService(
 			writer,
 			plan.Diagnostics,
 			mapDiagnosticPaths ? contentPathMapper : null,
-			mapDiagnosticPaths ? pathRedaction : null);
+			pathRedaction);
 		writer.WriteString("fingerprint", plan.Fingerprint);
 		writer.WriteEndObject();
 		await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
@@ -1410,7 +1410,7 @@ public sealed class ProjectContextDocumentService(
 					ResolveDiagnosticPath(
 						diagnostic.Path,
 						mapDiagnosticPaths ? contentPathMapper : null,
-						mapDiagnosticPaths ? pathRedaction : null));
+						pathRedaction));
 			}
 			WriteSanitizedXmlString(writer, diagnostic.Message);
 			writer.WriteEndElement();
