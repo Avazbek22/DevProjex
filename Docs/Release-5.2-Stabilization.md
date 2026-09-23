@@ -455,6 +455,8 @@ not a unique-test total.
 | Shared dependency resolution cancellation | `fa2db563` | A canceled index producer no longer cancels an independent caller joined to its shared resolution entry. The live caller retries a bounded number of joins, then resolves privately if necessary; failed-entry removal remains instance-conditional. A deterministic regression failed before, then 25 focused Unit checks passed; the new test verifies one weighted successful entry, truthful re-resolution metrics, and a subsequent warm hit. |
 | MCP project-address metadata | `124b3be5` | The published `project` schema and six project-tool descriptions now specify a unique listed name, an absolute path returned by `list_projects`, or a listed `#index`; allowed Git URLs remain conditional on remote opt-in. Protocol behavior is unchanged. A metadata regression failed before; 4 focused Integration checks passed afterward across local and remote-enabled modes. |
 | TUI failed-mutation reconciliation | `850fc5f4` | A failed managed Git update or branch switch may have changed part of the cached worktree. TUI now gates export and performs the existing noncancelable structural refresh even when the mutation reports `false`, then retains the original failure outcome; refresh failure leaves export blocked. Two deterministic regressions failed before, and 13 focused transition/update/branch Terminal checks passed afterward. Network or preflight failures now also incur a refresh on the error path. |
+| Profile snapshot atomic replacement | `651d110b` | The profile read-cache identity now includes creation time already available from the same `FileInfo.Refresh`, alongside length, last-write time, and the 4 KiB prefix; no extra content read was added. A same-length/restored-mtime atomic replacement changing a later profile returned stale selection before the fix. The regression failed before and 240 focused Unit checks passed afterward. Filesystems that do not distinguish replacement creation times skip the new test; a replacement restoring every identity field still needs a full hash to detect. |
+| Managed branch-switch cancellation | `27334642` | Cancellation remains effective through branch verification/fetch and immediately before detach. Once managed checkout starts, detach and worktree-branch recording use caller-independent tokens under their existing per-command two-minute deadlines, allowing TUI to reconcile true or false outcomes. Two regressions failed before; 6 focused Unit, 3 local-repository Integration, and 1 branch PTY check passed afterward. The earlier tracked-branch config write does not materialize the worktree; interruption there remains a Git-config error-path risk, not a demonstrated partial-tree defect. |
 
 The CLI dense-search dictionary experiment was intentionally discarded: three 5,000-hit
 process samples per variant gave medians of 475 ms for the prior lookup and 480 ms for
@@ -499,6 +501,13 @@ speedup is claimed.
   state, while holding its operation gate through a 4.7-second cold index could delay
   the next tool. A cancellable, foreground-priority scheduler and disposal drain need
   independent design and verification; no speculative warm-up was added here.
+- MCP search's 64 MiB aggregate inspection admission uses planned file sizes, while the
+  ordered transform workers enforce a separate 16 MiB per-file scan limit and 96 MiB
+  in-flight budget. Files that grow after planning can therefore cause more than 64 MiB
+  of total source reads in one request without marking the result partial. A strict
+  aggregate limit needs ordered producer-side live admission and skipped-tail accounting;
+  a one-time size recheck cannot close the same-request race. No unverified shared-pipeline
+  change was added before release.
 
 ## Cleanup status
 
