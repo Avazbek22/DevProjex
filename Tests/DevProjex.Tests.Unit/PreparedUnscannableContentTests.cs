@@ -106,6 +106,53 @@ public sealed class PreparedUnscannableContentTests
 		Assert.Empty(read.Content.Content);
 	}
 
+	[Theory]
+	[InlineData(ProjectContextDocumentFormat.Json)]
+	[InlineData(ProjectContextDocumentFormat.Xml)]
+	public async Task PreparedStructuredExportDoesNotReadOutsideRootMetrics(
+		ProjectContextDocumentFormat format)
+	{
+		using var workspace = new TemporaryDirectory();
+		var projectRoot = workspace.CreateFolder("project");
+		var outside = workspace.CreateFile("outside.txt", "outside content");
+		await using var prepared = CreateUnscannableOutput(outside, FileContentClassification.Unreadable);
+		var analyzer = new CountingSourceAnalyzer(new FileContentAnalyzer());
+		var service = new ProjectContextDocumentService(new TreeExportService(), analyzer);
+		using var destination = new MemoryStream();
+
+		await service.WritePreparedCompleteAsync(
+			CreatePlan(projectRoot, outside),
+			ProjectContextView.Content,
+			format,
+			destination,
+			prepared,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(0, analyzer.SourceReads);
+		Assert.DoesNotContain("outside content", Encoding.UTF8.GetString(destination.ToArray()), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task MeasuredTokenBudgetDoesNotReadOutsideRootMetrics()
+	{
+		using var workspace = new TemporaryDirectory();
+		var projectRoot = workspace.CreateFolder("project");
+		var outside = workspace.CreateFile("outside.txt", "outside content");
+		await using var prepared = CreateUnscannableOutput(outside, FileContentClassification.Unreadable);
+		var analyzer = new CountingSourceAnalyzer(new FileContentAnalyzer());
+		var service = new ProjectContextDocumentService(new TreeExportService(), analyzer);
+
+		_ = await service.EvaluateMeasuredTokenBudgetAsync(
+			CreatePlan(projectRoot, outside),
+			ProjectContextView.Content,
+			ProjectContextDocumentFormat.Json,
+			maximumEstimatedTokens: 1_000,
+			measured: prepared,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Equal(0, analyzer.SourceReads);
+	}
+
 	private static PreparedSecretRedactionOutput CreateUnscannableOutput(
 		string sourcePath,
 		FileContentClassification classification) =>
@@ -159,5 +206,51 @@ public sealed class PreparedUnscannableContentTests
 			string repositoryRelativePath,
 			string content,
 			CancellationToken cancellationToken = default) => [];
+	}
+
+	private sealed class CountingSourceAnalyzer(IFileContentAnalyzer inner) : IFileContentAnalyzer
+	{
+		private int sourceReads;
+
+		public int SourceReads => Volatile.Read(ref sourceReads);
+
+		public ValueTask<bool> IsTextFileAsync(string path, CancellationToken cancellationToken = default)
+		{
+			Interlocked.Increment(ref sourceReads);
+			return inner.IsTextFileAsync(path, cancellationToken);
+		}
+
+		public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default)
+		{
+			Interlocked.Increment(ref sourceReads);
+			return inner.GetTextFileMetricsAsync(path, cancellationToken);
+		}
+
+		public ValueTask<FileContentMetricsResult> GetClassifiedMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default)
+		{
+			Interlocked.Increment(ref sourceReads);
+			return inner.GetClassifiedMetricsAsync(path, cancellationToken);
+		}
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			CancellationToken cancellationToken = default)
+		{
+			Interlocked.Increment(ref sourceReads);
+			return inner.TryReadAsTextAsync(path, cancellationToken);
+		}
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default)
+		{
+			Interlocked.Increment(ref sourceReads);
+			return inner.TryReadAsTextAsync(path, maxSizeForFullRead, cancellationToken);
+		}
 	}
 }

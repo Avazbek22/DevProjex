@@ -440,7 +440,7 @@ public sealed class ProjectContextDocumentService(
 				? new FileContentMetricsResult(
 					preparedFile.Classification,
 					ToTextFileMetrics(metrics))
-				: await ReadExactMetricsAsync(path, measuredAnalyzer, cancellationToken)
+				: await ReadExactMetricsAsync(plan.SourceRoot, path, measuredAnalyzer, cancellationToken)
 					.ConfigureAwait(false);
 			var file = CreateCompleteFileDocument(
 				path,
@@ -651,7 +651,7 @@ public sealed class ProjectContextDocumentService(
 				continue;
 			}
 
-			var result = await ReadExactMetricsAsync(path, analyzer, cancellationToken)
+			var result = await ReadExactMetricsAsync(plan.SourceRoot, path, analyzer, cancellationToken)
 				.ConfigureAwait(false);
 			if (result.IsText && result.Metrics is { } textMetrics)
 				orderedMetrics.Add(ToContentFileMetrics(path, textMetrics));
@@ -662,13 +662,20 @@ public sealed class ProjectContextDocumentService(
 	}
 
 	private static async ValueTask<FileContentMetricsResult> ReadExactMetricsAsync(
+		string projectRoot,
 		string path,
 		IFileContentAnalyzer analyzer,
 		CancellationToken cancellationToken)
 	{
+		var sourceBacked = analyzer is not PreparedSecretFileContentAnalyzer prepared ||
+		                   !prepared.IsApplicationOwnedImmutableContent(path);
+		if (sourceBacked && ProjectSourcePathPolicy.ClassifyUnavailable(projectRoot, path) is { } unavailable)
+			return new FileContentMetricsResult(unavailable);
 		await using var snapshot = await analyzer
 			.OpenCompleteSnapshotAsync(path, cancellationToken)
 			.ConfigureAwait(false);
+		if (sourceBacked && ProjectSourcePathPolicy.ClassifyUnavailable(projectRoot, path) is { } unavailableAfterRead)
+			return new FileContentMetricsResult(unavailableAfterRead);
 		if (snapshot.Result.Metrics is { IsEstimated: true })
 			throw new IOException($"Exact document metrics are unavailable for '{path}'.");
 		return snapshot.Result;
