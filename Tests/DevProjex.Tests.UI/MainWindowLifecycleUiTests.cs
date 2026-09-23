@@ -77,6 +77,142 @@ public sealed class MainWindowLifecycleUiTests
 		}
 	}
 
+	[AvaloniaTheory]
+	[InlineData(true)]
+	[InlineData(false)]
+	public async Task OpenFolder_LateCachedSessionFailureDoesNotPromptAfterNewerProjectOpens(bool branchUnavailable)
+	{
+		using var olderProject = UiTestProject.CreateDefault();
+		using var newerProject = UiTestProject.CreateDefault();
+		var appDataPath = Path.Combine(olderProject.AppDataPath, Guid.NewGuid().ToString("N"));
+		var options = DesktopStartupOptions.Default;
+		var defaultServices = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath);
+		using var cache = new BlockingRepoCacheService(defaultServices.RepoCacheService, olderProject.RootPath);
+		var window = new MainWindow(options, defaultServices with { RepoCacheService = cache });
+		UiTestDriver.TrackTopLevelWindow(window);
+		Task<bool>? olderOpen = null;
+
+		try
+		{
+			window.Show();
+			olderOpen = Assert.IsAssignableFrom<Task<bool>>(
+				await UiTestDriver.BeginOpenFolderAsync(window, olderProject.RootPath));
+			await cache.SessionAcquisitionStarted.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+			await UiTestDriver.OpenFolderAsync(window, newerProject.RootPath);
+			cache.ReleaseSessionWithError(CreateSessionAcquisitionFailure(branchUnavailable));
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => olderOpen.IsCompleted || window.OwnedWindows.Count > 0,
+				"older cached-session open to finish or show an error",
+				TimeSpan.FromSeconds(5));
+			Assert.Empty(window.OwnedWindows);
+			Assert.False(await olderOpen.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+			Assert.Equal(
+				Path.GetFullPath(newerProject.RootPath),
+				Assert.IsType<string>(GetPrivateFieldValue(window, new OwnedField(null, "_currentPath"))));
+		}
+		finally
+		{
+			cache.ReleaseSessionWithError(new OperationCanceledException());
+			foreach (var dialog in window.OwnedWindows.ToArray())
+				await UiTestDriver.CloseTopLevelWindowAsync(dialog);
+			if (olderOpen is not null)
+				_ = await Record.ExceptionAsync(() => olderOpen.WaitAsync(TimeSpan.FromSeconds(5)));
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+	}
+
+	[AvaloniaTheory]
+	[InlineData(true)]
+	[InlineData(false)]
+	public async Task OpenFolder_LateCachedSessionFailureAfterShutdownDoesNotPrompt(bool branchUnavailable)
+	{
+		using var project = UiTestProject.CreateDefault();
+		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var options = DesktopStartupOptions.Default;
+		var defaultServices = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath);
+		using var cache = new BlockingRepoCacheService(defaultServices.RepoCacheService, project.RootPath);
+		var window = new MainWindow(options, defaultServices with { RepoCacheService = cache });
+		UiTestDriver.TrackTopLevelWindow(window);
+		Task<bool>? openTask = null;
+
+		try
+		{
+			window.Show();
+			openTask = Assert.IsAssignableFrom<Task<bool>>(
+				await UiTestDriver.BeginOpenFolderAsync(window, project.RootPath));
+			await cache.SessionAcquisitionStarted.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+			window.Close();
+			await window.ShutdownCompletion.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+			cache.ReleaseSessionWithError(CreateSessionAcquisitionFailure(branchUnavailable));
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => openTask.IsCompleted || window.OwnedWindows.Count > 0,
+				"closed-window cached-session open to finish or show an error",
+				TimeSpan.FromSeconds(5));
+			Assert.Empty(window.OwnedWindows);
+			Assert.False(await openTask.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+		}
+		finally
+		{
+			cache.ReleaseSessionWithError(new OperationCanceledException());
+			foreach (var dialog in window.OwnedWindows.ToArray())
+				await UiTestDriver.CloseTopLevelWindowAsync(dialog);
+			if (openTask is not null)
+				_ = await Record.ExceptionAsync(() => openTask.WaitAsync(TimeSpan.FromSeconds(5)));
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+	}
+
+	[AvaloniaTheory]
+	[InlineData(true)]
+	[InlineData(false)]
+	public async Task OpenFolder_CurrentCachedSessionFailureStillShowsError(bool branchUnavailable)
+	{
+		using var project = UiTestProject.CreateDefault();
+		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var options = DesktopStartupOptions.Default;
+		var defaultServices = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath);
+		using var cache = new BlockingRepoCacheService(defaultServices.RepoCacheService, project.RootPath);
+		var window = new MainWindow(options, defaultServices with { RepoCacheService = cache });
+		UiTestDriver.TrackTopLevelWindow(window);
+		Task<bool>? openTask = null;
+
+		try
+		{
+			window.Show();
+			openTask = Assert.IsAssignableFrom<Task<bool>>(
+				await UiTestDriver.BeginOpenFolderAsync(window, project.RootPath));
+			await cache.SessionAcquisitionStarted.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+			cache.ReleaseSessionWithError(CreateSessionAcquisitionFailure(branchUnavailable));
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => window.OwnedWindows.Count == 1,
+				"current cached-session failure dialog",
+				TimeSpan.FromSeconds(5));
+			await UiTestDriver.CloseTopLevelWindowAsync(Assert.Single(window.OwnedWindows));
+			Assert.False(await openTask.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+			Assert.False(UiTestDriver.GetViewModel(window).IsProjectLoaded);
+		}
+		finally
+		{
+			cache.ReleaseSessionWithError(new OperationCanceledException());
+			foreach (var dialog in window.OwnedWindows.ToArray())
+				await UiTestDriver.CloseTopLevelWindowAsync(dialog);
+			if (openTask is not null)
+				_ = await Record.ExceptionAsync(() => openTask.WaitAsync(TimeSpan.FromSeconds(5)));
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+	}
+
+	private static Exception CreateSessionAcquisitionFailure(bool branchUnavailable) =>
+		branchUnavailable
+			? new RepositoryBranchUnavailableException("main", RepositoryBranchUnavailableReason.NotFound)
+			: new IOException("Simulated repository session failure.");
+
 	[AvaloniaFact]
 	public async Task ClosingWindow_WithPublishedDesktopServer_CompletesTeardownBeforeClosedReturns()
 	{
@@ -742,14 +878,20 @@ public sealed class MainWindowLifecycleUiTests
 			OwnerFieldName is null ? FieldName : $"{OwnerFieldName}.{FieldName}";
 	}
 
-	private sealed class BlockingRepoCacheService(IRepoCacheService inner) : IRepoCacheService, IDisposable
+	private sealed class BlockingRepoCacheService(
+		IRepoCacheService inner,
+		string? blockedSessionPath = null) : IRepoCacheService, IDisposable
 	{
 		private readonly ManualResetEventSlim _release = new(initialState: false);
+		private readonly TaskCompletionSource<IRepositoryCacheSession?> _sessionAcquisition =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
 		private int _armed;
 		private int _disposed;
 
 		public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 		public TaskCompletionSource Exited { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+		public TaskCompletionSource SessionAcquisitionStarted { get; } =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
 		public bool IsDisposed => Volatile.Read(ref _disposed) != 0;
 		public string CacheRootPath => inner.CacheRootPath;
 		public IReadOnlyList<string> CacheSearchRootPaths => inner.CacheSearchRootPaths;
@@ -757,6 +899,7 @@ public sealed class MainWindowLifecycleUiTests
 		public void Arm() => Volatile.Write(ref _armed, 1);
 
 		public void Release() => _release.Set();
+		public void ReleaseSessionWithError(Exception exception) => _sessionAcquisition.TrySetException(exception);
 
 		public string CreateRepositoryDirectory(string repositoryUrl) =>
 			inner.CreateRepositoryDirectory(repositoryUrl);
@@ -798,8 +941,14 @@ public sealed class MainWindowLifecycleUiTests
 
 		public Task<IRepositoryCacheSession?> TryAcquireRepositorySessionByPathAsync(
 			string repositoryPath,
-			CancellationToken cancellationToken = default) =>
-			inner.TryAcquireRepositorySessionByPathAsync(repositoryPath, cancellationToken);
+			CancellationToken cancellationToken = default)
+		{
+			if (blockedSessionPath is null || !PathComparer.Default.Equals(repositoryPath, blockedSessionPath))
+				return inner.TryAcquireRepositorySessionByPathAsync(repositoryPath, cancellationToken);
+
+			SessionAcquisitionStarted.TrySetResult();
+			return _sessionAcquisition.Task;
+		}
 
 		public Task<IAsyncDisposable> AcquireRepositoryOperationAsync(
 			string repositoryUrl,
@@ -838,7 +987,9 @@ public sealed class MainWindowLifecycleUiTests
 		public void RefreshIndexedRepositorySize(string localPath) =>
 			inner.RefreshIndexedRepositorySize(localPath);
 
-		public bool IsInCache(string path) => inner.IsInCache(path);
+		public bool IsInCache(string path) =>
+			blockedSessionPath is not null && PathComparer.Default.Equals(path, blockedSessionPath) ||
+			inner.IsInCache(path);
 
 		public bool PathsBelongToSameRepository(string left, string right) =>
 			inner.PathsBelongToSameRepository(left, right);

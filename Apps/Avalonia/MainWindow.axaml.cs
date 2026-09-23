@@ -1090,6 +1090,11 @@ public partial class MainWindow : Window
         {
             if (ownsCandidateSession)
                 candidateSession?.Dispose();
+            if (IsFolderOpenRequestStale(requestId))
+            {
+                _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "load-canceled");
+                return false;
+            }
             _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "branch-unavailable");
             await ShowErrorAsync(FormatRepositoryBranchUnavailableMessage(exception));
             return false;
@@ -1098,6 +1103,11 @@ public partial class MainWindow : Window
         {
             if (ownsCandidateSession)
                 candidateSession?.Dispose();
+            if (IsFolderOpenRequestStale(requestId))
+            {
+                _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "load-canceled");
+                return false;
+            }
             _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "invalid-path");
             await ShowErrorAsync(_localization.Format("Msg.PathNotFound", path));
             return false;
@@ -1114,8 +1124,7 @@ public partial class MainWindow : Window
                 CanRead: exists && _scanOptions.CanReadRoot(normalizedPath));
         });
 
-        if (_windowLifetimeCts is not { IsCancellationRequested: false } ||
-            requestId < Volatile.Read(ref _latestEligibleFolderOpenRequestId))
+        if (IsFolderOpenRequestStale(requestId))
         {
             if (ownsCandidateSession)
                 candidateSession?.Dispose();
@@ -1278,6 +1287,10 @@ public partial class MainWindow : Window
             projectLoadFinalization.TrySetResult();
         }
     }
+
+    private bool IsFolderOpenRequestStale(long requestId) =>
+        _windowLifetimeCts is not { IsCancellationRequested: false } ||
+        requestId < Volatile.Read(ref _latestEligibleFolderOpenRequestId);
 
     private bool TryClaimEligibleFolderOpen(long requestId)
     {
