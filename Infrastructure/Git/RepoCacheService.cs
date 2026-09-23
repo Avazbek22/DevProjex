@@ -1284,6 +1284,10 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 				return null;
 
 			kind = ResolveContentKind(entry);
+			var validatedRequestedBranch = kind == RepositoryCacheContentKind.Git &&
+			                               !string.IsNullOrWhiteSpace(requestedBranch)
+				? GitBranchNameValidator.ValidateAndNormalize(requestedBranch.Trim())
+				: null;
 			if (kind == RepositoryCacheContentKind.Zip)
 			{
 				selectedPath = entry.LocalPath;
@@ -1339,10 +1343,7 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 			}
 
 			entry = verified;
-			effectiveBranch = kind == RepositoryCacheContentKind.Git &&
-			                  !string.IsNullOrWhiteSpace(requestedBranch)
-				? GitBranchNameValidator.ValidateAndNormalize(requestedBranch.Trim())
-				: verified.Branch;
+			effectiveBranch = validatedRequestedBranch ?? verified.Branch;
 		}
 
 		try

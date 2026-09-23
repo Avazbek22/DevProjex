@@ -110,6 +110,54 @@ public sealed class RepositoryCacheIsolationTests : IDisposable
 	}
 
 	[Fact]
+	public async Task InvalidBranchDoesNotAcquireRepositoryLease()
+	{
+		var worktrees = new FakeWorktreeManager(supported: true);
+		var leaseAcquisitions = 0;
+		var hooks = new RepoCacheTestHooks
+		{
+			AfterSessionLeaseAcquired = _ => leaseAcquisitions++
+		};
+		using var service = CreateService(worktrees, hooks: hooks);
+		var basePath = Publish(service, RepositoryUrl, RepositoryCacheContentKind.Git, "main");
+		var leasePath = RepositoryCacheLayout.GetLeasePath(service.CacheRootPath, basePath);
+
+		await Assert.ThrowsAsync<ArgumentException>(() => service.TryAcquireRepositorySessionAsync(
+			RepositoryUrl,
+			"invalid..branch",
+			TestContext.Current.CancellationToken));
+
+		Assert.Equal(0, leaseAcquisitions);
+		Assert.True(RepositoryFileLease.TryAcquireExclusive(leasePath, out var lease));
+		lease!.Dispose();
+		Assert.Equal(0, worktrees.CreatedCount);
+
+		using var validSession = await service.TryAcquireRepositorySessionAsync(
+			RepositoryUrl,
+			"main",
+			TestContext.Current.CancellationToken);
+		Assert.NotNull(validSession);
+		Assert.Equal(basePath, validSession.RepositoryPath, PathComparer.Default);
+		Assert.Equal(1, leaseAcquisitions);
+	}
+
+	[Fact]
+	public async Task CanceledGitSession_ReleasesRepositoryLease()
+	{
+		using var service = CreateService(new FakeWorktreeManager(supported: true));
+		var basePath = Publish(service, RepositoryUrl, RepositoryCacheContentKind.Git, "main");
+		var leasePath = RepositoryCacheLayout.GetLeasePath(service.CacheRootPath, basePath);
+		using var canceled = new CancellationTokenSource();
+		canceled.Cancel();
+
+		await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+			service.TryAcquireRepositorySessionAsync(RepositoryUrl, "main", canceled.Token));
+
+		Assert.True(RepositoryFileLease.TryAcquireExclusive(leasePath, out var lease));
+		lease!.Dispose();
+	}
+
+	[Fact]
 	public async Task GitSessionReturnsBeforeUnusedWorktreeCleanupCompletes()
 	{
 		var worktrees = new FakeWorktreeManager(supported: true, blockRemoval: true);
