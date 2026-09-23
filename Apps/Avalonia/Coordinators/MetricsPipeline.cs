@@ -1645,14 +1645,16 @@ internal sealed class MetricsPipeline(
 			Monitor.Exit(_metricsLock);
 		}
 
-		var staleCandidates = new List<FileMetricsVersionCandidate>();
-		for (var index = 0; index < candidates.Count; index++)
+		var staleCandidates = new bool[candidates.Count];
+		Parallel.For(0, candidates.Count, new ParallelOptions
 		{
-			cancellationToken.ThrowIfCancellationRequested();
+			CancellationToken = cancellationToken,
+			MaxDegreeOfParallelism = MetricsCalculationPolicy.GetSelectionRecoveryParallelism(Environment.ProcessorCount)
+		}, index =>
+		{
 			var candidate = candidates[index];
-			if (TryCaptureCurrentSourceVersion(candidate.Path) != candidate.SourceVersion)
-				staleCandidates.Add(candidate);
-		}
+			staleCandidates[index] = TryCaptureCurrentSourceVersion(candidate.Path) != candidate.SourceVersion;
+		});
 
 		cancellationToken.ThrowIfCancellationRequested();
 		var missingPaths = new List<string>();
@@ -1666,9 +1668,11 @@ internal sealed class MetricsPipeline(
 				throw new OperationCanceledException(cancellationToken);
 			}
 
-			for (var index = 0; index < staleCandidates.Count; index++)
+			for (var index = 0; index < staleCandidates.Length; index++)
 			{
-				var candidate = staleCandidates[index];
+				if (!staleCandidates[index])
+					continue;
+				var candidate = candidates[index];
 				if (_fileMetricsCache.TryGetValue(candidate.Path, out var current) &&
 				    ReferenceEquals(current, candidate.Entry) &&
 				    current.SourceVersion == candidate.SourceVersion)
