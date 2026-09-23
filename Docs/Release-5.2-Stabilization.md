@@ -494,6 +494,9 @@ not a unique-test total.
 | Multi-file preview metadata denial | `55b291ef` | A `SecurityException` from the small-file metadata probe no longer aborts the entire multi-file preview; the normal per-file preparation path continues and preserves other entries. The new SecurityException scenario failed before the fix while its IOException control passed. Both passed afterward, plus 68 adjacent Release Unit checks with 2 host-symlink skips. |
 | Bounded GUI preference read | `3e36ecf8` | Startup reading of the optional agent-activity preference is capped at 4 KiB, including growth after opening the file; an oversized or unreadable preference keeps the feature disabled. A 4,097-byte regression failed before the fix, while 4,096 bytes remained valid; four focused UI tests and a warning-free Release UI build passed afterward. |
 | Shared dependency preparation cancellation | `f104d5b9` | A canceled owner of the prepared-source cache no longer cancels an independent caller joined to the same read. The live caller retries once, then reads privately on another canceled shared generation. The deterministic regression failed before the fix; it and three adjacent prepared-source cache controls passed in Release. |
+| Prompt prepared-source waiter cancellation | `98008aa8` | A caller waiting on another request's prepared-source read now observes its own cancellation promptly without evicting the owner's cache entry. The deterministic regression timed out before the fix; it and four adjacent prepared-source cache controls passed in Release afterward. |
+| CLI measured-admission freshness | `4dde399a` | A content export with `--max-tokens` now verifies that the measured source versions still match after transformation and before publishing output. A deterministic source change between measurement and materialization previously produced a file despite the stale budget; the new regression failed before the guard, and 7 targeted Release checks passed afterward. A write after the version check remains a filesystem race. |
+| Theme startup-lock persistence | `2a38b325` | When the theme store is temporarily unavailable during startup, subsequent edits merge only explicitly changed sliders, mode, and effect into the latest saved document rather than replacing a preset from factory fallback values. The data-loss regression failed before the fix; 17 session, 41 store, and 3 headless startup UI checks passed afterward. Normal loaded sessions retain full-preset persistence. During startup contention, the visible theme may remain at fallback values until the next launch. |
 
 The CLI dense-search dictionary experiment was intentionally discarded: three 5,000-hit
 process samples per variant gave medians of 475 ms for the prior lookup and 480 ms for
@@ -569,6 +572,11 @@ speedup is claimed.
   A very large or slow cache tree can therefore delay completion of a canceled operation
   beyond the process-reap deadline. No deterministic timing reproduction or safe bounded
   scanner change was established for this release patch.
+- ZIP export currently treats an automatically named destination as replaceable, even
+  when its conflict policy is `Fail`; a second export to the same name can replace the
+  first archive. Folder export chooses a free suffix, while the GUI file picker has an
+  overwrite prompt. Changing the service default without an explicit GUI-confirmed
+  overwrite signal could break that flow, so this behavior needs a product decision.
 
 ## Cleanup status
 
