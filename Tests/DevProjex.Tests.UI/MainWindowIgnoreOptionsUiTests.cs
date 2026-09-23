@@ -2939,6 +2939,38 @@ public sealed class MainWindowIgnoreOptionsUiTests
         }
     }
 
+	[AvaloniaFact]
+	public async Task RefreshProject_ChangedGitCaseSemantics_RebuildsSelectionRules()
+	{
+		EnsureGitAvailable();
+		using var project = UiTestProject.CreateDefault();
+		WriteTextFile(project.RootPath, ".gitignore", "CASEFILE.cs\n");
+		WriteTextFile(project.RootPath, Path.Combine("src", "casefile.cs"), "class CaseFile {}\n");
+		RunGit(project.RootPath, "init", "--quiet");
+		RunGit(project.RootPath, "config", "core.ignoreCase", "false");
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+		try
+		{
+			await UiTestDriver.WaitForIgnoreOptionStateAsync(
+				window,
+				IgnoreOptionId.UseGitIgnore,
+				visible: true,
+				isChecked: true);
+			await WaitForProjectTreePathStateAsync(window, exists: true, "src", "casefile.cs");
+
+			RunGit(project.RootPath, "config", "core.ignoreCase", "true");
+			await UiTestDriver.RefreshProjectAsync(window);
+
+			await WaitForProjectTreePathStateAsync(window, exists: false, "src", "casefile.cs");
+			await WaitForProjectTreePathStateAsync(window, exists: true, "src", "AppHost", "Program.cs");
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
     [AvaloniaFact]
     public async Task SuccessfulCloneCommit_LoadsManagedIgnoreBoundaryThroughProductionPath()
     {
