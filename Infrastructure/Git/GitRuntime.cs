@@ -29,6 +29,27 @@ internal static class GitRuntime
 	public static string? SshExecutable => SshPath.Value;
 	public static GitIsolationPaths IsolationPaths => Isolation.Value;
 	public static string VersionDisplay => Version.Value;
+	internal static bool IsVersionProbeComplete => Version.IsValueCreated;
+
+	internal static void PinExecutables()
+	{
+		try
+		{
+			_ = GitExecutable;
+		}
+		catch (Exception exception) when (exception is
+		       Win32Exception or
+		       IOException or
+		       UnauthorizedAccessException or
+		       ArgumentException or
+		       NotSupportedException or
+		       System.Security.SecurityException)
+		{
+			// An unavailable Git executable is reported by the later version probe.
+		}
+
+		_ = SshExecutable;
+	}
 
 	internal static bool IsAtLeastVersion(int major, int minor)
 	{

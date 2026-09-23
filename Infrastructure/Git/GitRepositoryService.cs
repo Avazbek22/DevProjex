@@ -23,7 +23,7 @@ namespace DevProjex.Infrastructure.Git;
 /// - Optimistic path: Try cheap operations first (local checkout ~50ms)
 /// - Reliable path: Fetch with --depth 1 for minimal traffic (~70% reduction)
 /// - Force operations (-B checkout, --hard reset) are safe for cached copies
-/// - AI assistants: Do NOT change these optimizations without understanding the read-only cache context
+/// - Keep these optimizations aligned with the read-only cache contract.
 /// </summary>
 public sealed class GitRepositoryService : IGitRepositoryService, IDisposable
 {
@@ -54,8 +54,7 @@ public sealed class GitRepositoryService : IGitRepositoryService, IDisposable
 		_allowFileTransport = RepositoryTransportPolicy.AllowsLocalFileTransport;
 		_materializeTestClone = _allowFileTransport;
 		_resourceLimits = GitRepositoryResourceLimits.Default;
-        _ = GitRuntime.VersionDisplay;
-        _ = GitRuntime.SshExecutable;
+        GitRuntime.PinExecutables();
     }
 
     internal GitRepositoryService(string gitExecutable)
@@ -89,18 +88,22 @@ public sealed class GitRepositoryService : IGitRepositoryService, IDisposable
 		_materializeTestClone = allowFileTransportForTests;
 		_retainTestManagedMarker = allowFileTransportForTests && retainTestManagedMarker;
 		_resourceLimits = (resourceLimits ?? throw new ArgumentNullException(nameof(resourceLimits))).Validate();
-        _ = GitRuntime.VersionDisplay;
-        _ = GitRuntime.SshExecutable;
+        GitRuntime.PinExecutables();
     }
 
     /// <summary>
     /// Checks if Git CLI is available on the system by running "git --version".
     /// This is used to determine if we can use git clone or need to fall back to ZIP download.
     /// </summary>
-    public Task<bool> IsGitAvailableAsync(CancellationToken cancellationToken = default)
+    public async Task<bool> IsGitAvailableAsync(CancellationToken cancellationToken = default)
     {
 		cancellationToken.ThrowIfCancellationRequested();
-		return Task.FromResult(GitRuntime.VersionDisplay.StartsWith("git version ", StringComparison.OrdinalIgnoreCase));
+		if (GitRuntime.IsVersionProbeComplete)
+			return GitRuntime.VersionDisplay.StartsWith("git version ", StringComparison.OrdinalIgnoreCase);
+		var version = await Task.Run(
+			static () => GitRuntime.VersionDisplay,
+			cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
+		return version.StartsWith("git version ", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
