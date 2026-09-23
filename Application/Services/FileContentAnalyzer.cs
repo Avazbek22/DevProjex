@@ -892,7 +892,16 @@ public sealed class FileContentAnalyzer :
 		stream.Position = 0;
 		int toRead = (int)Math.Min(BinaryCheckBufferSize, stream.Length);
 		Span<byte> buffer = stackalloc byte[toRead];
-		int bytesRead = stream.Read(buffer);
+		var bytesRead = 0;
+		while (bytesRead < toRead)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var read = stream.Read(buffer[bytesRead..]);
+			if (read == 0)
+				break;
+			bytesRead += read;
+		}
+		cancellationToken.ThrowIfCancellationRequested();
 
 		stream.Position = 0;
 		if (TryResolveBomEncoding(buffer[..bytesRead], out var encoding))
