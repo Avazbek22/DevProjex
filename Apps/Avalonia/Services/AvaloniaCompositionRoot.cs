@@ -123,9 +123,20 @@ public static class AvaloniaCompositionRoot
         var terminalCommandSetupService = new TerminalCommandSetupService();
         var localAppDataProvider = appDataPathProvider ?? UserDataPathResolver.GetStateRoot;
         var liveSessionRegistry = new LiveSessionRegistry(localAppDataProvider);
-        var agentJournalStore = new AgentJournalStore(
-            localAppDataProvider,
-            activeSessionProvider: () => liveSessionRegistry.ReadActive());
+        IAgentJournalReader agentJournalReader;
+        try
+        {
+            agentJournalReader = new AgentJournalStore(
+                localAppDataProvider,
+                activeSessionProvider: () => liveSessionRegistry.ReadActive());
+        }
+        catch (Exception exception) when (exception is
+                   IOException or UnauthorizedAccessException or System.Security.SecurityException or
+                   ArgumentException or NotSupportedException)
+        {
+            Trace.TraceWarning("Agent journal storage is unavailable: {0}", exception.GetType().Name);
+            agentJournalReader = new UnavailableAgentJournalReader();
+        }
         var sessionMetricsRecorder = sessionMetrics.Enabled
             ? new SessionMetricsRecorder(sessionMetrics, localAppDataProvider)
             : SessionMetricsRecorder.Disabled;
@@ -198,7 +209,7 @@ public static class AvaloniaCompositionRoot
             CodeCompressionSession: codeCompressionSession,
             ProjectPathLauncher: projectPathLauncher,
             LiveSessionRegistry: liveSessionRegistry,
-            AgentJournalReader: agentJournalStore,
+            AgentJournalReader: agentJournalReader,
             AgentJournalReceiptFormatter: new AgentJournalReceiptFormatter(),
             AgentActivityPreferenceStore: new AgentActivityPreferenceStore(localAppDataProvider));
     }
