@@ -3585,10 +3585,11 @@ internal sealed class DevProjexMcpTools(
 			var ordered = byFile[path].OrderBy(static item => item.MatchLine).ToArray();
 			var currentMatches = new List<int>();
 			var currentLines = new SortedDictionary<int, McpSearchGroupLine>();
+			var currentLastLine = 0;
 			foreach (var candidate in ordered)
 			{
 				var firstLine = candidate.Group.Lines[0].LineNumber;
-				var adjacent = currentLines.Count == 0 || firstLine <= currentLines.Keys.Last() + 1;
+				var adjacent = currentLines.Count == 0 || firstLine <= currentLastLine + 1;
 				if (!adjacent)
 				{
 					result.Add(new McpSearchRenderedGroup(
@@ -3598,11 +3599,13 @@ internal sealed class DevProjexMcpTools(
 						currentLines.Values.ToArray()));
 					currentMatches.Clear();
 					currentLines.Clear();
+					currentLastLine = 0;
 				}
 
 				currentMatches.Add(candidate.MatchLine);
 				foreach (var line in candidate.Group.Lines)
 				{
+					currentLastLine = Math.Max(currentLastLine, line.LineNumber);
 					if (currentLines.TryGetValue(line.LineNumber, out var existing))
 					{
 						var isMatch = existing.IsMatch || line.IsMatch;

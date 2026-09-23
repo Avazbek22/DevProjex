@@ -48,3 +48,13 @@ one current 32 KiB UTF-16 source to the retained metadata:
 ```powershell
 dotnet run -c Release --project tools/Benchmarks/Mcp/DevProjex.Benchmarks.Mcp.csproj -- search-retention --repetitions 5
 ```
+
+The search-context merge measurement compares the original repeated boundary enumeration with the
+current implementation for 1,000, 3,000, and 5,000 candidates with 0, 2, and 20 context lines. It
+performs no server or network calls and verifies every merged path, match number, line marker, and
+Unicode text before reporting elapsed time and allocations. Fixture creation and equality checks
+are outside the measured interval:
+
+```powershell
+dotnet run -c Release --project tools/Benchmarks/Mcp/DevProjex.Benchmarks.Mcp.csproj -- search-merge --repetitions 7
+```

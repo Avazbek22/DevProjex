@@ -38,6 +38,12 @@ if (args.FirstOrDefault() == "search-retention")
 	return;
 }
 
+if (args.FirstOrDefault() == "search-merge")
+{
+	SearchMergeBenchmark.Run(args[1..]);
+	return;
+}
+
 var options = BenchmarkOptions.Parse(args);
 var temporaryCorpus = options.SyntheticFileCount is null ? null : SyntheticCorpus.Create(options.SyntheticFileCount.Value);
 var root = temporaryCorpus?.Path ?? options.Root ?? throw new ArgumentException("Specify --root or --synthetic-files.");
