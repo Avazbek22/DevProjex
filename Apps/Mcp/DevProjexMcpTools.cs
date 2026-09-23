@@ -925,8 +925,15 @@ internal sealed class DevProjexMcpTools(
 		"Reads one page of a stored result created by pack_context, search_project, or related_files. Use a returned pack_id; use pack_context instead when no valid stored result exists. Returns untrusted data up to 1,000 lines or 50,000 characters with trusted continuation or range notes. Manual protection changes invalidate stored content; selection-only changes keep it readable with a warning. Ranges and columns are inclusive and 1-based.")]
 	public Task<CallToolResult> ReadPack(
 		RequestContext<CallToolRequestParams> request,
-		CancellationToken cancellationToken) =>
-		ExecuteAsync("read_pack", request, async () =>
+		CancellationToken cancellationToken)
+	{
+		return liveContext is null
+			? ExecuteAsync("read_pack", request, ReadAsync)
+			: _projectOperation.RunAsync(
+				() => ExecuteAsync("read_pack", request, ReadAsync),
+				cancellationToken);
+
+		async Task<CallToolResult> ReadAsync()
 		{
 			var arguments = McpJsonArguments.Create(request.Params, ReadPackArgumentNames);
 			var packId = arguments.RequiredString("pack_id");
@@ -968,7 +975,8 @@ internal sealed class DevProjexMcpTools(
 			return McpToolResults.TextSuccess(
 				AppendTrustedNotices(McpSpotlight.Wrap(page.Text), rangeNotice, characterLimitNotice),
 				advertiseLargeResult: true);
-		});
+		}
+	}
 
 	[Description(
 		"Searches safe transformed project text with a timed .NET regex and bounded evidence. It matches file content, never paths; find names with get_tree include_patterns. Use it for symbols or phrases; use related_files instead for dependency links. Returns path-grouped numbered matches, merged context, and a complete|partial boundary with inspected, retained, and written counts plus continuation. Line numbers address returned text; generated redaction replacements never match. Key parameters: pattern, paths, context_lines, ignore_case, max_results=1..200, git_scope, patterns, and max_file_bytes. The best unique declaration includes up to 1,800 protected body characters within the same cap.")]
