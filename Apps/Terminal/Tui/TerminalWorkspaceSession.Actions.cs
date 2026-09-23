@@ -1911,24 +1911,47 @@ internal sealed partial class TerminalWorkspaceSession
 		TerminalStructuralRefreshRequest request,
 		CancellationToken cancellationToken)
 	{
-		var result = await _controller
-			.BuildStructuralRefreshAsync(request, cancellationToken)
-			.ConfigureAwait(false);
-		var gitCliAvailable = await ResolveGitCliAvailabilityAsync(result.Plan, cancellationToken)
-			.ConfigureAwait(false);
-		cancellationToken.ThrowIfCancellationRequested();
-		var applied = await InvokeAsync(() =>
+		while (true)
 		{
-			if (_stopping || !ReferenceEquals(_state, state))
-				return false;
+			cancellationToken.ThrowIfCancellationRequested();
+			var result = await _controller
+				.BuildStructuralRefreshAsync(request, cancellationToken)
+				.ConfigureAwait(false);
+			var gitCliAvailable = await ResolveGitCliAvailabilityAsync(result.Plan, cancellationToken)
+				.ConfigureAwait(false);
+			cancellationToken.ThrowIfCancellationRequested();
+			TerminalStructuralRefreshRequest? retryRequest = null;
+			var applied = await InvokeAsync(() =>
+			{
+				if (_stopping ||
+					cancellationToken.IsCancellationRequested ||
+					!ReferenceEquals(_state, state))
+				{
+					return false;
+				}
 
-			_gitCliAvailable = gitCliAvailable;
-			TerminalWorkspaceController.ApplyStructuralRefresh(state, result);
-			return true;
-		}).ConfigureAwait(false);
-		if (!applied)
-			throw new OperationCanceledException();
-		SetRepositoryStateInconsistent(false);
+				if (!TerminalWorkspaceController.ApplyStructuralRefresh(state, result))
+				{
+					retryRequest = _controller.CaptureStructuralRefresh(
+						state,
+						state.BuildSelection(),
+						_preferredGitMode);
+					return false;
+				}
+
+				_gitCliAvailable = gitCliAvailable;
+				return true;
+			}).ConfigureAwait(false);
+			if (retryRequest is not null)
+			{
+				request = retryRequest;
+				continue;
+			}
+			if (!applied)
+				throw new OperationCanceledException();
+			SetRepositoryStateInconsistent(false);
+			return;
+		}
 	}
 
 	private async Task<bool> ResolveGitCliAvailabilityAsync(

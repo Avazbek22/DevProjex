@@ -15,13 +15,15 @@ internal sealed record TerminalStructuralRefreshRequest(
 	IReadOnlyCollection<string>? SelectedPathFrontier,
 	IReadOnlyDictionary<string, bool> ExtensionOptionStates,
 	IReadOnlyDictionary<string, bool> PathOptionStates,
-	GitFilteringMode? FallbackGitMode);
+	GitFilteringMode? FallbackGitMode,
+	long? ExpectedRevision);
 
 internal sealed record TerminalStructuralRefreshResult(
 	ProjectContextPlan Plan,
 	IReadOnlyDictionary<string, bool> ExtensionOptionStates,
 	IReadOnlyDictionary<string, bool> PathOptionStates,
-	int PlanBuildCount);
+	int PlanBuildCount,
+	long? ExpectedRevision);
 
 public sealed class TerminalWorkspaceController(
 	TerminalServices services,
@@ -88,13 +90,19 @@ public sealed class TerminalWorkspaceController(
 		ProjectSelectionSpec selection,
 		CancellationToken cancellationToken)
 	{
-		var request = CaptureStructuralRefresh(
-			state,
-			selection,
-			ResolveDefaultFallbackGitMode(selection));
-		var result = await BuildStructuralRefreshAsync(request, cancellationToken)
-			.ConfigureAwait(false);
-		ApplyStructuralRefresh(state, result);
+		while (true)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var request = CaptureStructuralRefresh(
+				state,
+				selection,
+				ResolveDefaultFallbackGitMode(selection));
+			var result = await BuildStructuralRefreshAsync(request, cancellationToken)
+				.ConfigureAwait(false);
+			if (ApplyStructuralRefresh(state, result))
+				return;
+			selection = state.BuildSelection();
+		}
 	}
 
 	internal TerminalStructuralRefreshRequest CaptureStructuralRefresh(
@@ -119,7 +127,8 @@ public sealed class TerminalWorkspaceController(
 				state.ExtensionOptionStates,
 				StringComparer.OrdinalIgnoreCase),
 			ClonePathOptionStates(state.PathOptionStates),
-			fallbackGitMode);
+			fallbackGitMode,
+			state.Revision);
 	}
 
 	internal static Dictionary<string, bool> ClonePathOptionStates(
@@ -300,7 +309,8 @@ public sealed class TerminalWorkspaceController(
 			plan,
 			extensionEvolution.KnownStates,
 			pathEvolution.KnownStates,
-			buildCount);
+			buildCount,
+			request.ExpectedRevision);
 	}
 
 	private static bool ShouldPreserveRootsDuringDiscovery(ProjectSelectionSpec selection) =>
@@ -317,13 +327,19 @@ public sealed class TerminalWorkspaceController(
 			: GitFilteringMode.None;
 	}
 
-	internal static void ApplyStructuralRefresh(
+	internal static bool ApplyStructuralRefresh(
 		TerminalWorkspaceState state,
 		TerminalStructuralRefreshResult result)
 	{
 		ArgumentNullException.ThrowIfNull(state);
 		ArgumentNullException.ThrowIfNull(result);
+		if (result.ExpectedRevision is not { } expectedRevision ||
+			state.Revision != expectedRevision)
+		{
+			return false;
+		}
 		state.ReplacePlan(result.Plan, result.ExtensionOptionStates, result.PathOptionStates);
+		return true;
 	}
 
 	public async Task ReprojectSelectionAsync(
@@ -575,7 +591,8 @@ public sealed class TerminalWorkspaceController(
 			baseline.Selection.GitMode == selection.GitMode &&
 			GitScopeSelection.IsMomentary(selection.GitMode ?? GitFilteringMode.None)
 				? fallbackGitMode
-				: null);
+				: null,
+			null);
 		var result = await BuildReconciledStructuralPlanAsync(
 				request,
 				baseline.SourceIdentity,

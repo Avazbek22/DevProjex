@@ -1487,6 +1487,55 @@ public sealed class TerminalWorkspaceContractTests
 	}
 
 	[Fact]
+	public async Task StructuralRefreshDoesNotOverwriteSelectionChangedAfterCapture()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		workspace.WriteFile("src/First.cs", "class First {}\n");
+		workspace.WriteFile("src/Second.cs", "class Second {}\n");
+		using var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+		state.SelectAll();
+		var request = controller.CaptureStructuralRefresh(state, state.BuildSelection());
+		var result = await controller.BuildStructuralRefreshAsync(
+			request,
+			TestContext.Current.CancellationToken);
+
+		var sourceRow = state.VisibleRows
+			.Select((row, index) => (row, index))
+			.Single(item => item.row.Node.DisplayName == "src")
+			.index;
+		state.Expand(sourceRow);
+		var secondRow = state.VisibleRows
+			.Select((row, index) => (row, index))
+			.Single(item => item.row.Node.DisplayName == "Second.cs")
+			.index;
+		state.ToggleSelection(secondRow);
+		var revision = state.Revision;
+		var plan = state.Plan;
+
+		Assert.False(TerminalWorkspaceController.ApplyStructuralRefresh(state, result));
+
+		Assert.Equal(revision, state.Revision);
+		Assert.Same(plan, state.Plan);
+		Assert.DoesNotContain(
+			state.BuildSelectedRelativePaths(),
+			path => path.EndsWith("Second.cs", StringComparison.Ordinal));
+
+		var currentResult = await controller.BuildStructuralRefreshAsync(
+			controller.CaptureStructuralRefresh(state, state.BuildSelection()),
+			TestContext.Current.CancellationToken);
+		Assert.True(TerminalWorkspaceController.ApplyStructuralRefresh(state, currentResult));
+		Assert.Equal(revision + 1, state.Revision);
+		Assert.Single(state.Plan.IncludedFiles);
+		Assert.EndsWith("First.cs", state.Plan.IncludedFiles[0], StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task StructuralRefreshFallsBackWhenTheActiveRepositoryBoundaryDisappears()
 	{
 		if (!TryRunGit(Directory.GetCurrentDirectory(), "--version"))
