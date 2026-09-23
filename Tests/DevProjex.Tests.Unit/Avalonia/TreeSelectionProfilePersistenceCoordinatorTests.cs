@@ -349,6 +349,45 @@ public sealed class TreeSelectionProfilePersistenceCoordinatorTests
 	}
 
 	[Fact]
+	public async Task FlushIncludesSelectionScheduledWhileItsFirstWriteIsInProgress()
+	{
+		var firstWriteStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var releaseFirstWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var writes = new List<IReadOnlyCollection<string>?>();
+		using var coordinator = new TreeSelectionProfilePersistenceCoordinator(
+			async (_, selectedPaths, cancellationToken) =>
+			{
+				writes.Add(selectedPaths);
+				if (writes.Count == 1)
+				{
+					firstWriteStarted.TrySetResult();
+					await releaseFirstWrite.Task.WaitAsync(cancellationToken);
+				}
+			},
+			static cancellationToken => Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken));
+
+		try
+		{
+			coordinator.Schedule("project", ["src"]);
+			var flush = coordinator.FlushAsync(TestContext.Current.CancellationToken);
+			await firstWriteStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+
+			coordinator.Schedule("project", ["tests"]);
+			releaseFirstWrite.TrySetResult();
+
+			Assert.True(await flush.WaitAsync(TestContext.Current.CancellationToken));
+			Assert.Collection(writes,
+				selection => Assert.Equal(["src"], selection),
+				selection => Assert.Equal(["tests"], selection));
+			Assert.Equal(SelectionPersistencePhase.Idle, coordinator.State.Phase);
+		}
+		finally
+		{
+			releaseFirstWrite.TrySetResult();
+		}
+	}
+
+	[Fact]
 	public async Task QueuedFlushPreservesANewerSelectionScheduledDuringTheActiveWrite()
 	{
 		var delay = new ControlledDelay();

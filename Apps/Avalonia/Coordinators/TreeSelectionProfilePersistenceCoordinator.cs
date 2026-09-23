@@ -129,24 +129,34 @@ internal sealed class TreeSelectionProfilePersistenceCoordinator : IDisposable
 
     public async Task<bool> FlushAsync(CancellationToken cancellationToken = default)
     {
-        CancellationTokenSource? delayCancellation;
-        lock (_sync)
+        while (true)
         {
-            delayCancellation = _delayCts;
-            _delayCts = null;
-            _version = checked(_version + 1);
-        }
+            CancellationTokenSource? delayCancellation;
+            lock (_sync)
+            {
+                delayCancellation = _delayCts;
+                _delayCts = null;
+                _version = checked(_version + 1);
+            }
 
-        try
-        {
-            delayCancellation?.Cancel();
-        }
-        finally
-        {
-            delayCancellation?.Dispose();
-        }
+            try
+            {
+                delayCancellation?.Cancel();
+            }
+            finally
+            {
+                delayCancellation?.Dispose();
+            }
 
-        return await PersistPendingAsync(expectedVersion: null, cancellationToken).ConfigureAwait(false);
+            if (!await PersistPendingAsync(expectedVersion: null, cancellationToken).ConfigureAwait(false))
+                return false;
+
+            lock (_sync)
+            {
+                if (_disposed != 0 || _pending is null)
+                    return true;
+            }
+        }
     }
 
     public bool Flush(TimeSpan timeout)
