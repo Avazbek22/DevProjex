@@ -346,6 +346,45 @@ public sealed class UserSettingsStoreTests
     }
 
     [Fact]
+    public void CurrentSchemaWithoutViewSettings_RecoversBackupBeforeNextChange()
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new UserSettingsStore(() => temp.Path);
+        Assert.True(store.TrySave(new UserSettingsDb
+        {
+            ViewSettings = new AppViewSettings
+            {
+                IsCompactMode = true,
+                PreferredLanguage = AppLanguage.It
+            },
+            UpdateCheckSettings = new UpdateCheckSettings
+            {
+                IsAutomaticCheckEnabled = true,
+                LatestKnownVersion = "5.2"
+            }
+        }));
+        var primaryPath = store.GetPath();
+        using var savedBackup = JsonDocument.Parse(File.ReadAllText(primaryPath + ".bak"));
+        var schemaVersion = savedBackup.RootElement.GetProperty("schemaVersion").GetInt32();
+        File.WriteAllText(primaryPath, JsonSerializer.Serialize(new { schemaVersion }));
+
+        var loaded = store.LoadForStartup(TimeSpan.Zero);
+        Assert.True(store.TryPersistViewSettings(
+            loaded,
+            latest => latest with { IsTreeExpansionAnimationEnabled = false }));
+
+        var reloaded = store.Load();
+        Assert.True(reloaded.ViewSettings.IsCompactMode);
+        Assert.False(reloaded.ViewSettings.IsTreeExpansionAnimationEnabled);
+        Assert.Equal(AppLanguage.It, reloaded.ViewSettings.PreferredLanguage);
+        Assert.True(reloaded.UpdateCheckSettings.IsAutomaticCheckEnabled);
+        Assert.Equal("5.2", reloaded.UpdateCheckSettings.LatestKnownVersion);
+        using var backup = JsonDocument.Parse(File.ReadAllText(primaryPath + ".bak"));
+        Assert.True(backup.RootElement.GetProperty("viewSettings")
+            .GetProperty("isCompactMode").GetBoolean());
+    }
+
+    [Fact]
     public void LoadForStartup_UnreadablePrimaryAndCorruptBackupRemainUnchanged()
     {
         if (!OperatingSystem.IsWindows())

@@ -308,12 +308,29 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
             out database,
             out requiresRewrite,
             out var temporarilyUnavailable,
-            JsonStorePersistence.SmallDocumentMaximumBytes);
+            JsonStorePersistence.SmallDocumentMaximumBytes,
+            IsValidCurrentSchemaDocument);
         if (preferencesUnavailable || temporarilyUnavailable)
             return SettingsReadStatus.TemporarilyUnavailable;
         return loaded
             ? SettingsReadStatus.Loaded
             : SettingsReadStatus.MissingOrInvalid;
+    }
+
+    private static bool IsValidCurrentSchemaDocument(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        if (root.ValueKind != JsonValueKind.Object ||
+            !root.TryGetProperty("schemaVersion", out var schemaVersion) ||
+            !schemaVersion.TryGetInt32(out var version) ||
+            version != CurrentSchemaVersion)
+        {
+            return true;
+        }
+
+        return root.TryGetProperty("viewSettings", out var viewSettings) &&
+               viewSettings.ValueKind == JsonValueKind.Object;
     }
 
     private static StoredViewPreferences ReadStoredViewPreferences(string path, out bool temporarilyUnavailable)
