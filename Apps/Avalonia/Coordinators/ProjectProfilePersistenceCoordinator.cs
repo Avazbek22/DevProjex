@@ -316,10 +316,12 @@ public sealed class ProjectProfilePersistenceCoordinator(
                 return previousSnapshot;
             }
 
-            var marksResult = await LoadPersistentMarksAsync(
-                normalizedPath,
-                result.Profile,
-                cancellationToken).ConfigureAwait(false);
+            var marksResult = result.PersistentMarks is { } lookupMarks
+                ? new PersistentSecretMarksLoadResult(PersistentSecretMarkStoreStatus.Success, lookupMarks)
+                : await LoadPersistentMarksAsync(
+                    normalizedPath,
+                    result.Profile,
+                    cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
             if (!marksResult.Succeeded || marksResult.Snapshot is null)
             {

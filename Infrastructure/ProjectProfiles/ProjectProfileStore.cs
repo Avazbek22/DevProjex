@@ -490,7 +490,10 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		return new ProjectProfileLookupResult(
 			ProjectProfileLookupStatus.Found,
 			ToProfile(entry, marks.Snapshot.Marks),
-			NormalizeProfileTimestamp(entry.UpdatedUtc));
+			NormalizeProfileTimestamp(entry.UpdatedUtc))
+		{
+			PersistentMarks = marks.Snapshot
+		};
 	}
 
 	private static ProjectProfileLookupStatus MapMarkStoreStatus(PersistentSecretMarkStoreStatus status) =>

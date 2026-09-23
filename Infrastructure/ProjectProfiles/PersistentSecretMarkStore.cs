@@ -26,6 +26,9 @@ internal sealed class PersistentSecretMarkStore(
 
 	private readonly object _sync = new();
 	private readonly TimeSpan _lockTimeout = lockTimeout ?? DefaultLockTimeout;
+	private long _markDocumentParseCount;
+
+	internal long MarkDocumentParseCount => Interlocked.Read(ref _markDocumentParseCount);
 
 	public ValueTask<PersistentSecretMarksLoadResult> LoadAsync(
 		string localProjectPath,
@@ -425,7 +428,7 @@ internal sealed class PersistentSecretMarkStore(
 		return StoreLoadResult.Success(CreateDefaultDatabase());
 	}
 
-	private static bool TryLoadFromPath(
+	private bool TryLoadFromPath(
 		string path,
 		out PersistentSecretMarkDb database,
 		out bool requiresRewrite)
@@ -441,6 +444,7 @@ internal sealed class PersistentSecretMarkStore(
 				FileMode.Open,
 				FileAccess.Read,
 				FileShare.ReadWrite | FileShare.Delete);
+			Interlocked.Increment(ref _markDocumentParseCount);
 			if (!JsonStorePersistence.TryParseDocumentWithinSizeLimit(
 				stream,
 				(int)ProjectProfileStorageLimits.MaximumJsonBytes,
