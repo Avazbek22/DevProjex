@@ -263,31 +263,41 @@ public sealed partial class DependencyFactsEngine : IDisposable
 					else
 					{
 						var key = CreateFileCacheKey(source);
-						FileCacheEntry? created = null;
-						if (!_fileCache.TryGetValue(key, out var lazy))
+						while (true)
 						{
-							created = new FileCacheEntry(key, new Lazy<Task<FileFacts>>(
-								() => Task.Run(() => _extractor.Extract(source, _limits, token), token),
-								LazyThreadSafetyMode.ExecutionAndPublication));
-							lazy = GetOrAddFileCacheEntry(created);
-						}
-						if (!ReferenceEquals(lazy, created))
-						{
-							Interlocked.Increment(ref reusedFiles);
-							DependencyEngineDiagnostics.RecordFileCacheHit();
-						}
-						try
-						{
-							extracted = await lazy.Value.Value.ConfigureAwait(false);
-							if (!extracted.CanCache)
+							token.ThrowIfCancellationRequested();
+							FileCacheEntry? created = null;
+							if (!_fileCache.TryGetValue(key, out var lazy))
+							{
+								created = new FileCacheEntry(key, new Lazy<Task<FileFacts>>(
+									() => Task.Run(() => _extractor.Extract(source, _limits, token), token),
+									LazyThreadSafetyMode.ExecutionAndPublication));
+								lazy = GetOrAddFileCacheEntry(created);
+							}
+							var shared = !ReferenceEquals(lazy, created);
+							if (shared)
+								DependencyEngineDiagnostics.RecordFileCacheHit();
+							try
+							{
+								extracted = await lazy.Value.Value.ConfigureAwait(false);
+								if (shared)
+									Interlocked.Increment(ref reusedFiles);
+								if (!extracted.CanCache)
+									RemoveFileCacheEntry(key, lazy);
+								else if (!shared)
+									RegisterFileCacheWeight(key, lazy, EstimateFileFactsBytes(extracted));
+								break;
+							}
+							catch (OperationCanceledException) when (shared && !token.IsCancellationRequested)
+							{
+								// Retry with this caller's token if the shared producer was canceled.
 								RemoveFileCacheEntry(key, lazy);
-							else if (created is not null && ReferenceEquals(lazy, created))
-								RegisterFileCacheWeight(key, lazy, EstimateFileFactsBytes(extracted));
-						}
-						catch
-						{
-							RemoveFileCacheEntry(key, lazy);
-							throw;
+							}
+							catch
+							{
+								RemoveFileCacheEntry(key, lazy);
+								throw;
+							}
 						}
 					}
 

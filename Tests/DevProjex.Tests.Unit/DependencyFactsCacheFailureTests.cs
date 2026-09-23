@@ -140,6 +140,52 @@ public sealed class DependencyFactsCacheFailureTests(ITestOutputHelper output)
 	}
 
 	[Fact]
+	public async Task CancelledSharedExtraction_DoesNotCancelAnotherIndexRequest()
+	{
+		using var fixture = new TemporaryDirectory();
+		var file = fixture.CreateFile("Source.cs", string.Empty);
+		using var ownerCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+			TestContext.Current.CancellationToken);
+		var extractionStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		using var releaseExtraction = new ManualResetEventSlim();
+		var extractor = new ControlledExtractor
+		{
+			Failure = ExtractionFailure.Cancellation,
+			CancelExtraction = ownerCancellation.Cancel,
+			BeforeExtract = invocation =>
+			{
+				if (invocation != 1) return;
+				extractionStarted.SetResult();
+				if (!releaseExtraction.Wait(TimeSpan.FromSeconds(5)))
+					throw new TimeoutException("The shared extraction was not released.");
+			}
+		};
+		using var engine = new DependencyFactsEngine(extractor, new ConfigurationProvider());
+		using var diagnostics = DependencyEngineDiagnostics.BeginMeasurement();
+		var cancelled = engine.IndexAsync(fixture.Path, [file], cancellationToken: ownerCancellation.Token);
+
+		try
+		{
+			await extractionStarted.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+			var surviving = engine.IndexAsync(fixture.Path, [file],
+				cancellationToken: TestContext.Current.CancellationToken);
+			Assert.True(SpinWait.SpinUntil(
+				() => diagnostics.Capture().FileCacheHits > 0,
+				TimeSpan.FromSeconds(5)));
+			releaseExtraction.Set();
+
+			await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancelled);
+			var snapshot = await surviving;
+			Assert.Equal(DependencyFileStatus.Supported, Assert.Single(snapshot.Files).Status);
+			Assert.Equal(2, extractor.ParseCount);
+		}
+		finally
+		{
+			releaseExtraction.Set();
+		}
+	}
+
+	[Fact]
 	public async Task EvictedCompletion_CannotReleaseReplacementEntryOrItsWeight()
 	{
 		using var fixture = new TemporaryDirectory();
