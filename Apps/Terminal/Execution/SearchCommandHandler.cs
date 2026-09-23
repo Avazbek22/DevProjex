@@ -43,10 +43,14 @@ public sealed class SearchCommandHandler(
 		if (plan.HasErrors)
 			return CommandLineExitCodes.PolicyFailure;
 
-		SearchResult result;
+		string payload;
 		try
 		{
-			result = await SearchAsync(plan, request, cancellationToken).ConfigureAwait(false);
+			payload = await RenderSearchForPlanAsync(
+				plan,
+				request,
+				MaximumInspectedBytes,
+				cancellationToken).ConfigureAwait(false);
 		}
 		catch (McpToolException exception) when (exception.Code == McpErrorCodes.InvalidPattern)
 		{
@@ -56,7 +60,6 @@ public sealed class SearchCommandHandler(
 				exception);
 		}
 
-		var payload = Render(result, request.Format);
 		if (request.OutputPath is null or "-")
 		{
 			await environment.Output.WriteAsync(payload.AsMemory(), cancellationToken).ConfigureAwait(false);
@@ -85,9 +88,24 @@ public sealed class SearchCommandHandler(
 		return CommandLineExitCodes.Success;
 	}
 
+	internal async Task<string> RenderSearchForPlanAsync(
+		ProjectContextPlan plan,
+		SearchCommandRequest request,
+		long maximumInspectedBytes,
+		CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(plan);
+		ArgumentNullException.ThrowIfNull(request);
+		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumInspectedBytes);
+		var result = await SearchAsync(plan, request, maximumInspectedBytes, cancellationToken)
+			.ConfigureAwait(false);
+		return Render(result, request.Format);
+	}
+
 	private async Task<SearchResult> SearchAsync(
 		ProjectContextPlan plan,
 		SearchCommandRequest request,
+		long maximumInspectedBytes,
 		CancellationToken cancellationToken)
 	{
 		var regex = new McpSearchRegex(ToRegexPattern(request.Pattern, request.Mode), ignoreCase: true);
@@ -96,11 +114,12 @@ public sealed class SearchCommandHandler(
 		foreach (var path in plan.IncludedFiles)
 		{
 			var fileBytes = ResolveFileSize(plan, path);
-			if (fileBytes > MaximumInspectedBytes - inspectedBytes)
+			if (fileBytes > maximumInspectedBytes - inspectedBytes)
 				break;
 			inspectedFiles.Add(path);
 			inspectedBytes += fileBytes;
 		}
+		var inspectionByteLimitReached = inspectedFiles.Count < plan.IncludedFiles.Count;
 
 		var candidates = new McpSearchCandidateCollector(MaximumStoredMatches, MaximumStoredCharacters);
 		var navigationByFile = new Dictionary<string, IReadOnlyList<NavigationDeclaration>>(StringComparer.Ordinal);
@@ -197,16 +216,27 @@ public sealed class SearchCommandHandler(
 		if (context is null)
 		{
 			var analyzer = new FileContentAnalyzer();
+			long inspectedActualBytes = 0;
 			foreach (var path in inspectedFiles)
 			{
 				cancellationToken.ThrowIfCancellationRequested();
-				var read = await analyzer.ReadClassifiedAsync(path, long.MaxValue, cancellationToken)
+				var read = await analyzer.ReadClassifiedAsync(
+						path,
+						maximumInspectedBytes - inspectedActualBytes,
+						cancellationToken)
 					.ConfigureAwait(false);
+				if (read.Classification == FileContentClassification.TooLarge)
+				{
+					unscannableSources++;
+					inspectionByteLimitReached = true;
+					break;
+				}
 				if (read.Classification != FileContentClassification.Text || read.Content is null)
 				{
 					unscannableSources++;
 					continue;
 				}
+				inspectedActualBytes += read.Content.SizeBytes;
 				await Consume(
 					new TransformedTextFile(path, read.Content.Content, []),
 					cancellationToken).ConfigureAwait(false);
@@ -284,7 +314,7 @@ public sealed class SearchCommandHandler(
 				namesWritten
 					? symbols.Names.Keys.Select(key => key.RelativePath).Distinct(StringComparer.Ordinal).Count()
 					: 0,
-				inspectedFiles.Count < plan.IncludedFiles.Count,
+				inspectionByteLimitReached,
 				candidates.MatchCapacityReached,
 				retainedMatchingFiles > McpSearchSymbols.MaximumAnnotatedFiles,
 				rendered.Truncated || !namesWritten,
