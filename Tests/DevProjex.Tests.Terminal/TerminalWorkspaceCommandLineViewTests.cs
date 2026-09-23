@@ -90,15 +90,17 @@ public sealed class TerminalWorkspaceCommandLineViewTests
 			Frame = new Rectangle(0, 0, 40, 1)
 		};
 		view.Open("value-0");
-		await Assert.IsAssignableFrom<Task>(view.ActiveCompletionTask)
-			.WaitAsync(TestContext.Current.CancellationToken);
+		if (view.ActiveCompletionTask is { } initialTask)
+			await initialTask.WaitAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(1, view.CompletionCacheCount);
 		var input = GetField<TerminalTransparentTextEditor>(view, "_input");
 		for (var index = 1; index < 40; index++)
 		{
 			input.Value = $"value-{index}";
 			input.MoveEnd();
-			await Assert.IsAssignableFrom<Task>(view.ActiveCompletionTask)
-				.WaitAsync(TestContext.Current.CancellationToken);
+			if (view.ActiveCompletionTask is { } activeTask)
+				await activeTask.WaitAsync(TestContext.Current.CancellationToken);
+			Assert.Equal(Math.Min(index + 1, 32), view.CompletionCacheCount);
 		}
 
 		Assert.Equal(32, view.CompletionCacheCount);
