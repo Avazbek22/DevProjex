@@ -588,7 +588,6 @@ public sealed class TerminalWorkspaceState : IDisposable
 		if (targets.Count == 0)
 			return new TerminalTreeSelectionResult(0, missing, SelectionChanged: false);
 
-		Interlocked.Increment(ref _revision);
 		foreach (var target in targets.Order(ProjectTreePathIdentity.CanonicalComparer))
 			SetSubtreeSelection(_nodesByPath[target], selected);
 		RecomputeCheckStates();
@@ -605,6 +604,8 @@ public sealed class TerminalWorkspaceState : IDisposable
 		var selectionChanged = changed > 0 || !SelectedPathsEqual(
 			previousSelectedPaths,
 			BuildSelection().SelectedPaths);
+		if (selectionChanged)
+			Interlocked.Increment(ref _revision);
 		return new TerminalTreeSelectionResult(changed, missing, selectionChanged);
 	}
 
