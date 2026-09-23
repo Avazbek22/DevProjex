@@ -434,6 +434,7 @@ not a unique-test total.
 | MCP search oversized context | `391f48d2` | An oversized adjacent context line no longer hides a short match in an otherwise complete search result. The regression failed before; four focused Integration checks passed afterward, including the separate oversized-matching-line partial-result boundary. |
 | Shared dependency extraction cancellation | `ced2bf4f` | A canceled producer no longer cancels an independent caller that joined its file-facts cache entry; the live caller retries with its own token. The deterministic regression failed before and passed after; 20 focused failure/cancellation Unit checks passed. Successful-reuse metrics exclude the canceled shared attempt. |
 | Desktop instance list timeout | `cd17284b` | `ui list --timeout` now returns `DPX-DESKTOP-TIMEOUT` with exit code 5 and cancels the registry scan token; caller cancellation still returns code 130. One regression failed before; four focused Terminal checks passed afterward. |
+| Content preparation source admission | `04d47418` | Shared redaction/compression preparation rejects out-of-root selected paths before opening source content and retains its post-read policy check. Two mode regressions failed before with one source-analyzer call each, then two focused Unit and 12 adjacent Integration checks passed. Two optional file-symlink cases skipped because this Windows host cannot create them; pre/post path checks cannot eliminate a replacement race between validation and open. |
 
 The CLI dense-search dictionary experiment was intentionally discarded: three 5,000-hit
 process samples per variant gave medians of 475 ms for the prior lookup and 480 ms for
@@ -452,8 +453,11 @@ speedup is claimed.
   line feeds and symlinks. Native-Git parity on this host does not replace Linux/macOS CI.
   Coherence tests model writable-during-read behavior with controlled test streams; they
   do not claim that the Linux desktop was executed locally.
-- Only targeted local suites were run. CI was not awaited for this report; no CI success,
+- Only targeted local suites were completed. CI was not awaited for this report; no CI success,
   full-suite success, merge, publication, or release approval is implied.
+- The UI project uses a Microsoft.Testing.Platform runner that ignored one attempted
+  VSTest-style `dotnet test --filter`; that run was interrupted without a suite result.
+  Its exact tree-checkbox check then passed 1/1 through the runner's `--filter-method`.
 - Warm filesystem-cache timings are not cold-storage throughput. Earlier exploratory
   probes used a slightly changing development corpus; the primary 124-observation A/B
   uses one frozen workload. No hardware-normalized cross-machine comparison is available.
@@ -465,6 +469,11 @@ speedup is claimed.
 - The combined backend measurements are complete for the recorded workload. A real
   desktop run remains a separate release check, outside this backend task, before drawing
   conclusions about the complete visible project-opening experience.
+- A targeted Avalonia headless UI check verified that every realized project-tree checkbox
+  has no tooltip or automation help text while Hide Secrets and MCP menu help remain intact.
+  Its 38,572-byte tree screenshot was captured under the ignored local
+  `artifacts/release-stabilization/tree-checkbox-no-tooltip.png` path. It is visual evidence
+  from a headless fixture, not a claim about every desktop compositor.
 - MCP discovery dependency-facts warm-up remains a separate release risk. The current
   `list_projects` path has no selection plan; a background build would mutate shared
   state, while holding its operation gate through a 4.7-second cold index could delay
