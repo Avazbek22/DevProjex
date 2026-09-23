@@ -6,6 +6,7 @@ The stabilization baseline is `dfcaff70e7407457378aee07a29f158aad0306c5`. The
 combined backend comparison extends through `0ec72b78`; later profile-load verification
 (`4b5b3520`), root-facts profiling (`6d79b72f`), and partial-selection compression-fact
 reuse (`01b3fac1`) are recorded separately.
+Final cache-publication safeguards (`b9fc735a`) do not change those timing comparisons.
 The backend task does not include a real desktop run; desktop readiness remains a
 separate release check.
 
@@ -256,6 +257,9 @@ Counts below overlap across runs and must not be summed into a unique-test total
 | `4b5b3520` | GUI profile load reuses its successful lookup's marks snapshot without losing revision, recovery, cancellation, or fallback semantics | One initial duplicate-load failure + four controls; final 102 targeted passes / two opt-in skips, including eight new correctness cases; separate enabled benchmark run: two passes |
 | `6d79b72f` | Measure repeated root-facts work before considering broader session reuse | One enabled read-only probe passed; production optimization deferred, not claimed as a speedup |
 | `01b3fac1` | Reuse selected compression facts while populating metrics for the full tree | Two baseline read-count failures + five passing controls; 37/37 after passes, including seven new cases and existing freshness, coherent-read, visual-gate, and cancellation checks; two separately enabled transformed-load probes passed |
+| `63b8fd0b` | An active v1 write and queued v1 flush must not discard a newly scheduled v2 selection | Two new deterministic races; GUI persistence class 15/15 and Terminal persistence class 17/17 passed; exact v1/v2 writes and final idle state checked |
+| `3449e03d` | Resolution-cancellation tests must reach an admitted cache entry, not cancel during earlier preflight | Test-only correction; 13/13 passes, with entry/node existence, unregistered weight, cancellation stage, and token asserted |
+| `b9fc735a` | A retired successful resolution must not replace the manifest snapshot of a newer same-key cache entry | One deterministic baseline failure; 23 Unit + 10 Integration passes after, including public facts/edges/coverage equivalence, hot reuse, budgets, configuration invalidation, and manifest gates |
 
 An additional cross-surface run covering selection contracts, MCP inventory caching, and
 inventory projection passed 31/31 tests.
@@ -289,6 +293,27 @@ paths. A changed handle identity is rejected. A rare unidentified result falls t
 a fresh legacy public read between before/after version checks; its old bytes are never
 assigned a newly observed path stamp. This fallback can require two content reads and is
 intentionally conservative.
+
+### Dependency manifest snapshots: preserve generation ownership
+
+A deterministic interleaving reproduced an existing retention defect: resolver A was
+evicted while in flight, resolver C completed under the same key, then A finished and
+replaced C's manifest snapshot with its own graph. The index cache still held C, so both
+graphs remained reachable through cache-owned structures while the index budget accounted
+for only C. Snapshot count was already bounded: this is not an unbounded leak or a proven
+stale-output defect, and some underlying file facts can be shared.
+
+`b9fc735a` carries the actually used index entry to manifest publication. Under the existing
+cache lock, publication must still belong to that exact entry before replacing a snapshot.
+The retired request returns its own result normally; it cannot replace the newer cache's
+snapshot. Root, manifest, file-stamp, content-identity, absent-control-file checks, and
+cache-hit reporting remain intact. No extra cache or production test hook was added.
+
+The original baseline fixture showed distinct retired/current graph identities with one
+accounted index. The final regression adds a nonempty dependency edge and verifies public
+facts, edges/maps, coverage, root, manifest/declaration identities, cache weights, and hot
+reuse. Fixture sizes therefore are not a before/after memory benchmark. The demonstrated
+improvement is correct cache ownership, not a quantified reduction in working set.
 
 ## Limitations and pending release checks
 
