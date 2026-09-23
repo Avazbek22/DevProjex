@@ -280,6 +280,13 @@ and a 177.50 ms warm paired-total median. These are different corpus and phase
 samples from the frozen A/B and the earlier 2,723-file calibration, not evidence of a
 further speedup or full desktop readiness. The probes left no persistent fixture folders.
 
+One further current-only `--no-build` headless pass on the 2,745-file DevProjex tree
+reported a 699.8 ms first backend load plus 90.7 ms metrics publication. Its last three
+warm loads were 99.1, 114.5, and 106.9 ms; their separate metrics publications were
+63.3, 77.8, and 57.8 ms. Each pass made 2,316 full text reads (about 29.0 MB) and
+5,919 version-handle opens. The corpus and environment changed again, so this is a
+current calibration, not a new A/B improvement or desktop-ready time.
+
 The root `.gitignore` has 435 lines. An isolated cold matcher build took 49–96 ms and
 allocated about 62.7 MB; the matchers were reused during the same scan. A targeted
 `RegexOptions.Compiled` A/B did not establish an end-to-end benefit, so the matcher
@@ -479,6 +486,12 @@ not a unique-test total.
 | Atomic JSON backup mirroring | `c41f508b` | After primary commit, interrupted backup copying previously could truncate the last valid `.bak`. A deterministic partial-copy regression failed before the fix. The primary is now copied to a same-directory temporary backup and published only after success; the old backup and write-result semantics remain intact on failure. Focused Release runs across JSON persistence and dependent stores passed 257 tests, with 3 Unix-only skips on Windows. |
 | MCP included-byte refresh | `df513c9d` | When a cached file grew but remained under `max_file_bytes`, the effective size was refreshed while `IncludedBytes` still reported the old total. An under-cap growth regression failed at 6 versus 32 bytes before the fix; the existing no-exclusion path now recomputes the selected sum with saturating arithmetic. Three focused Integration checks passed afterward, including over-cap filtering and pack token-budget ordering. |
 | Project-scope access revocation | `d7a053c6` | A `SecurityException` raised while enumerating root entries after an initial access check no longer aborts the project load or exposes partially collected root facts; the root is treated as inaccessible, matching neighboring scanner behavior. A deterministic partial-enumeration regression failed before the fix; 58 focused Unit checks passed afterward, with 3 platform skips. |
+| Valid backup through recovery commit | `98939534` | When recovering a corrupt primary from a valid backup, the primary replacement previously wrote the corrupt old primary over `.bak` before the staged mirror. If that mirror then failed, no valid backup remained. A deterministic recovery regression failed before the fix; existing `.bak` is now retained until mirror publication. Normal recovery checks passed 8/8; dependent-store Release checks passed 286 tests with 3 Unix-only skips on Windows. |
+| MCP size-refresh cancellation | `98179bfd` | A canceled `max_file_bytes` request previously kept reading file sizes for all 100 fixture files before reporting cancellation. The refresh now checks the token before each stat; the red regression observed 100 reads, and the green run observed one. Four focused Integration checks passed afterward, including the cached-growth byte count. |
+| GUI content-total cache race | `7b911ee9` | A file-fact eviction or replacement during aggregate calculation could publish and cache a stale content total. A deterministic interleaving failed before the fix (94 versus 74 characters). File-fact revisions now guard cache hits and publication under a consistent lock order without changing scan generation semantics. Two new race scenarios and 67 adjacent Release Unit checks passed. A current-only headless DevProjex run retained 5,919 version probes and showed no obvious hot-path regression; noisy timings do not establish a precise A/B improvement. |
+| Recent-history startup lock retry | `84e7d52d` | A temporarily locked recent-project store during synchronous `--last` construction was previously memoized as an empty, loaded history, causing a false no-recent-project result. The deferred shared load now retries off the UI thread with a bounded lock wait, and another temporary failure remains retryable on a later IPC request. The constructor contention regression failed before the fix; 4 focused headless UI cases and a warning-free Release UI build passed afterward. |
+| TUI project-export planning | `7c7afb62` | Actual folder/ZIP export and portable-profile save now use the existing structural selection reprojection instead of eagerly computing unused content metrics. The export summary and structured context paths still compute their required metrics. Two regressions failed before the fix; 7 focused Terminal checks passed afterward, including ZIP content and saved selection. On the real 2,745-file DevProjex tree, five same-binary paired planning samples had medians of 47.58 → 8.67 ms (−81.8%) and 2,129,600 → 1,359,976 B allocated (−36.1%). The planning pass made 2,745 → 0 metrics calls and 2,316 → 0 full-file reads (29,014,832 → 0 B); files, included bytes, fingerprint, diagnostics, and source stamps matched. This does not measure the copy/ZIP phase or whole-export speedup. |
+| Multi-file preview metadata denial | `55b291ef` | A `SecurityException` from the small-file metadata probe no longer aborts the entire multi-file preview; the normal per-file preparation path continues and preserves other entries. The new SecurityException scenario failed before the fix while its IOException control passed. Both passed afterward, plus 68 adjacent Release Unit checks with 2 host-symlink skips. |
 
 The CLI dense-search dictionary experiment was intentionally discarded: three 5,000-hit
 process samples per variant gave medians of 475 ms for the prior lookup and 480 ms for
@@ -543,6 +556,13 @@ speedup is claimed.
   lock for up to five seconds when another process holds it. Moving persistence off the
   UI path requires a lifetime/ordering design and an end-to-end contention regression;
   no lock timeout or saved-setting semantics were changed late in this branch.
+- Packaged v5.1-to-shared user-data migration currently allows startup to continue after
+  a busy migration lock or transient migration failure. Startup can then write factory
+  defaults into the destination; a later migration attempt treats that destination as
+  initialized and can leave legacy settings and profiles unmigrated. The safe narrow
+  policy is a bounded retry followed by a visible fail-closed startup error before any
+  stores are created, but this changes launch behavior during contention. The product
+  decision is requested in PR #451; migration code has not been changed in this branch.
 - Managed Git quota checks do not test cancellation inside their filesystem enumeration.
   A very large or slow cache tree can therefore delay completion of a canceled operation
   beyond the process-reap deadline. No deterministic timing reproduction or safe bounded
