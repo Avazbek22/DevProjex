@@ -440,9 +440,15 @@ with recording. The 0.036 ms difference was below the baseline spread.
   the untrusted boundary and are scanned as string values before JSON serialization;
   remote tools use the safe Git URL as the project address. If a local name or path
   is masked, its 1-based `index` remains a safe address such as `project: "#1"`.
-  These addresses form the contract for the `project` argument. Without the
-  flag, a pack retains real addresses like a default CLI export. With the flag,
-  the pack is private-data-redacted in full, including its tree header.
+  Generated read and search continuation hints use that index instead of the
+  masked local path. Trusted warning trailers report fixed codes and counts,
+  not diagnostic paths. These addresses form the contract for the `project`
+  argument. Without an effective private-data policy, a pack retains real
+  addresses like a default CLI export. With the policy, the pack is
+  private-data-redacted in full, including its tree header.
+  The `get_tree` root label follows the effective startup-or-live-profile policy
+  in every format: only a supported local-user segment is replaced with
+  `[local-user-1]`; project-relative file paths remain unchanged.
   File names and paths are address fields in content responses; when response
   text contains project-controlled addresses, they stay inside the per-response
   untrusted-data boundary.
@@ -478,6 +484,11 @@ with recording. The 0.036 ms difference was below the baseline spread.
   Reading an evicted id returns `DPX-MCP-PACK-EXPIRED` with a quota notice. A request
   that exceeds the per-pack limit, or cannot fit while every candidate is active,
   returns `DPX-MCP-PACK-TOO-LARGE` with narrowing guidance.
+
+On Linux, stored results require `statx` to verify the opened file handle's identity.
+If it is unavailable, creation fails closed and removes the unregistered file;
+`read_pack` returns `DPX-MCP-PACK-EXPIRED` rather than serving unverified bytes.
+macOS requires `fgetattrlist` for the same check, with no weaker fallback.
 
 Errors returned by tools have `isError: true` and stable `DPX-MCP-*` codes. Only
 the code and `request failed` status are trusted; the detailed message, including
@@ -546,7 +557,7 @@ description has to fit a budget rather than grow one silently.
 | Tool | Parameters | Result and limits |
 |---|---|---|
 | `list_projects` | none | Session inventory used for profiles, active policy, or choosing among several projects: allowed local roots with 1-based index, path, name, type, and profiles, plus the server `baseline`. String metadata is protected before JSON serialization. If a name or path is masked, use its stable address for this process, such as `project: "#1"`. The profile database is read once per call and `profilesStatus` reports an unavailable bounded read. The baseline reports secret/private-data policy and the optional remote-host allowlist. With one local root, project tools accept an omitted `project`; otherwise they accept a listed `#index`, a unique listed name, or its absolute path. Remote projects are addressed by URL and are not added to this list. |
-| `get_tree` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `max_depth?`, `format?` | Effective tree in `markdown` (default), `text`, `json`, or `xml`; at most 2,000 lines and 50,000 characters. Select several directories in one call with a brace pattern such as `include_patterns: ["src/middleware/{powered-by,body-limit,bearer-auth}/**"]` instead of walking each directory separately. Without `max_depth`, a large human-readable tree uses the deepest complete depth that fits. |
+| `get_tree` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `max_depth?`, `format?` | Effective tree in `markdown` (default), `text`, `json`, or `xml`; at most 2,000 lines and 50,000 characters. Its root label masks a supported local-user segment when Hide Private Data is effective. Select several directories in one call with a brace pattern such as `include_patterns: ["src/middleware/{powered-by,body-limit,bearer-auth}/**"]` instead of walking each directory separately. Without `max_depth`, a large human-readable tree uses the deepest complete depth that fits. |
 | `analyze` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `detail_by_pattern?`, `tracked_only?`, `git_scope?`, `top_files?`, `max_file_bytes?`, `max_tokens?`, `rank?`, `focus?` | File, character, and token metrics plus the requested largest files by tokens. `contentMetrics` separates measured transformed bodies from size-based estimates; `documentMetrics` models `pack_context` with `view=content`, `format=text`, relative file headings, and its Root line. Every ranked file carries `estimated`; an uninspected one also carries `uninspected: true`. The `topFiles` array has a 32,000-character aggregate budget; `topFilesTruncated` and `topFilesRemaining` make any omission explicit. With `max_tokens` the result also carries `admission`: which files that budget would admit, from the same greedy pass `pack_context` uses and without producing content. `rank` and `focus` order that admission and are invalid without `max_tokens`. |
 | `pack_context` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `detail_by_pattern?`, `tracked_only?`, `git_scope?`, `max_tokens?`, `rank?`, `focus?`, `max_file_bytes?`, `view?`, `format?` | Exact DevProjex context pipeline. `max_tokens` measures the safe transformed selection, applies the ordinary token admission order, and materializes only admitted content without changing the budget report. `rank: "importance"` opts into importance-aware admission and document order; `focus` seeds graph-hop order within it. `detail_by_pattern` overrides `detail` per file. `full` adds no transformations; transformations enabled by the active profile still apply. Inline through 50,000 characters; otherwise returns a `pack_id` valid until this server process exits. After restart, call `pack_context` again. |
 | `read_pack` | `pack_id`, `start_line?`, `end_line?`, `start_column?` | Pages a stored result from `pack_context`, `search_project`, or `related_files`. Inclusive, 1-based line range; `start_column` continues within `start_line` using 1-based Unicode characters. At most 1,000 lines or 50,000 characters per call. An `end_line` after EOF is clamped and reported. A manual protection-policy change after storage fails with `DPX-MCP-STORED-PROTECTION-CHANGED` and requires rerunning the producing tool. If the current saved policy cannot be verified, `DPX-MCP-STORED-PROTECTION-UNAVAILABLE` fails closed until the selection becomes readable. A selection-only revision change keeps the stored page readable with its existing revision warning. Call the originating tool again after server restart or quota eviction. |
