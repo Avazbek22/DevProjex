@@ -3352,6 +3352,35 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task PreparedSourceCache_CancelledOwnerDoesNotCancelSharedCaller()
+	{
+		using var fixture = new TemporaryDirectory();
+		var source = fixture.CreateFile("Source.cs", "public sealed class Source { }\n");
+		var analyzer = new CoordinatedPreparedSourceAnalyzer();
+		using var extractor = new TreeSitterDependencyFactExtractor(new MissingGrammarLocator(), analyzer);
+		using var ownerCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+			TestContext.Current.CancellationToken);
+		var configuration = EmptyConfiguration();
+		var limits = new DependencyFactsLimits();
+
+		var cancelled = extractor.PrepareAsync(
+			fixture.Path, source, configuration, limits, ownerCancellation.Token).AsTask();
+		await analyzer.FirstReadStarted.Task.WaitAsync(
+			TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+		var surviving = extractor.PrepareAsync(
+			fixture.Path, source, configuration, limits, TestContext.Current.CancellationToken).AsTask();
+		Assert.False(surviving.IsCompleted);
+		Assert.Equal(1, analyzer.OpenCount);
+
+		ownerCancellation.Cancel();
+		await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancelled);
+		var prepared = await surviving.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+		Assert.Equal("new source", prepared.Source);
+		Assert.Equal(2, analyzer.OpenCount);
+		Assert.Equal(1, extractor.CacheState.Entries);
+	}
+
+	[Fact]
 	public async Task Cache_RebindsFactsWhenConfigurationChangesFileOwnershipWithoutParsingSource()
 	{
 		using var fixture = new TemporaryDirectory();

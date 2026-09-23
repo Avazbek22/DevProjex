@@ -130,26 +130,45 @@ public sealed partial class TreeSitterDependencyFactExtractor : IDependencyFactE
 				info.CreationTimeUtc.Ticks,
 				language,
 				limits.MaximumCharactersPerFile);
-			var (entry, ownsEntry) = GetOrCreatePreparedSource(
-				key,
-				contentIdentity,
-				fullPath,
-				language,
-				limits.MaximumCharactersPerFile,
-				cancellationToken);
 			PreparedSourceContent content;
-			try
+			var ownsEntry = false;
+			var canceledSharedAttempts = 0;
+			while (true)
 			{
-				content = await entry.Value.Value.ConfigureAwait(false);
-				if (!content.CanCache)
+				var (entry, createdEntry) = GetOrCreatePreparedSource(
+					key,
+					contentIdentity,
+					fullPath,
+					language,
+					limits.MaximumCharactersPerFile,
+					cancellationToken);
+				ownsEntry = createdEntry;
+				try
+				{
+					content = await entry.Value.Value.ConfigureAwait(false);
+					if (!content.CanCache)
+						RemovePreparedSource(key, entry);
+					else if (ownsEntry)
+						RegisterPreparedSourceWeight(key, entry, EstimatePreparedSourceBytes(content));
+					break;
+				}
+				catch (OperationCanceledException) when (!ownsEntry && !cancellationToken.IsCancellationRequested)
+				{
 					RemovePreparedSource(key, entry);
-				else if (ownsEntry)
-					RegisterPreparedSourceWeight(key, entry, EstimatePreparedSourceBytes(content));
-			}
-			catch
-			{
-				RemovePreparedSource(key, entry);
-				throw;
+					if (++canceledSharedAttempts > 1)
+					{
+						content = await ReadPreparedSourceAsync(
+							fullPath, language, limits.MaximumCharactersPerFile, cancellationToken)
+							.ConfigureAwait(false);
+						ownsEntry = true;
+						break;
+					}
+				}
+				catch
+				{
+					RemovePreparedSource(key, entry);
+					throw;
+				}
 			}
 			// Only a call that performed the read may claim to have observed the file. A reused
 			// preparation is reported as reuse, so a caller can tell an observation apart from an
