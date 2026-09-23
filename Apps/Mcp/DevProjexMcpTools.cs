@@ -829,9 +829,11 @@ internal sealed class DevProjexMcpTools(
 				var admittedPackFiles = writeResult?.TokenBudget is { } tokenBudget
 					? tokenBudget.AdmittedSourceFiles.ToArray()
 					: plan.IncludedFiles;
-				var deliveredPackFiles = McpPackDelivery.DeliveredPaths(
-					admittedPackFiles,
-					writeResult?.UnscannableFiles ?? []);
+				IReadOnlyList<string> deliveredPackFiles = view == ProjectContextView.Tree
+					? []
+					: McpPackDelivery.DeliveredPaths(
+						admittedPackFiles,
+						writeResult?.UnscannableFiles ?? []);
 				packs.RecordJournalContext(
 					pack.Id,
 					CreateStoredJournalContext(

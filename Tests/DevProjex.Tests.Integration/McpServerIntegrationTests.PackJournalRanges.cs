@@ -5,6 +5,50 @@ namespace DevProjex.Tests.Integration;
 public sealed partial class McpServerIntegrationTests
 {
 	[Fact]
+	public async Task TreeOnlyPackJournalDoesNotMarkFileContentDelivered()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Source.txt"), "source-content-sentinel");
+		var appData = workspace.CreateDirectory("app-data");
+
+		await using (var server = await McpTestServer.StartAsync(project, workspace.Path))
+		{
+			var tree = await server.CallAsync("pack_context", new Dictionary<string, object?>
+			{
+				["view"] = "tree",
+				["format"] = "text"
+			});
+			Assert.NotEqual(true, tree.IsError);
+			Assert.Contains("Source.txt", AllText(tree), StringComparison.Ordinal);
+			Assert.DoesNotContain("source-content-sentinel", AllText(tree), StringComparison.Ordinal);
+
+			var content = await server.CallAsync("pack_context", new Dictionary<string, object?>
+			{
+				["view"] = "content",
+				["format"] = "text"
+			});
+			Assert.NotEqual(true, content.IsError);
+			Assert.Contains("source-content-sentinel", AllText(content), StringComparison.Ordinal);
+		}
+
+		using var journal = new AgentJournalStore(
+			() => appData,
+			activeSessionProvider: static () => []);
+		var session = Assert.Single(await journal.ListSessionsAsync(
+			project,
+			cancellationToken: TestContext.Current.CancellationToken));
+		var calls = (await journal.ReadCallsAsync(session.Id, TestContext.Current.CancellationToken))
+			.Where(static call => call.Tool == "pack_context")
+			.ToArray();
+		Assert.Equal(2, calls.Length);
+		Assert.Empty(calls[0].DeliveredPaths);
+		Assert.Equal(0, calls[0].FilesDelivered);
+		Assert.Equal(["Source.txt"], calls[1].DeliveredPaths);
+		Assert.Equal(1, calls[1].FilesDelivered);
+	}
+
+	[Fact]
 	public async Task ReadPackJournalAttributesACharacterLimitedSingleLinePage()
 	{
 		using var workspace = new TemporaryDirectory();
