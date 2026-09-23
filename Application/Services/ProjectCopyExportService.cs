@@ -469,12 +469,20 @@ public sealed class ProjectCopyExportService(
 		try
 		{
 			CreatePrivateDirectory(stagingPath);
+			ValidateStagingDirectory(stagingPath, stagingPath);
 			ValidateDestinationOutsideSource(plan.ProjectRootPath, stagingPath);
 			foreach (var directory in plan.Entries.Where(static entry => entry.IsDirectory))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
 				var destination = ResolveDestinationPath(stagingPath, directory.RelativePath);
-				CreatePrivateDirectory(destination);
+				if (!PathComparer.Default.Equals(destination, stagingPath))
+				{
+					ValidateStagingDirectory(stagingPath, Path.GetDirectoryName(destination)!);
+					if (AtomicFileCommit.DestinationEntryExists(destination))
+						throw UnsafeDestination($"A staging directory entry already exists: {destination}");
+					CreatePrivateDirectory(destination);
+					ValidateStagingDirectory(stagingPath, destination);
+				}
 				processedEntries++;
 				ReportProgress(progress, processedEntries, totalEntries, bytesWritten);
 			}
@@ -501,11 +509,14 @@ public sealed class ProjectCopyExportService(
 			if (transformationNotice is { } notice)
 			{
 				var noticePath = Path.Combine(stagingPath, TransformationNoticeFileName);
+				ValidateStagingDirectory(stagingPath, stagingPath);
 				await using (var noticeStream = OpenDestinationFile(noticePath))
 				await using (var noticeWriter = new StreamWriter(noticeStream, new UTF8Encoding(false)))
 					await noticeWriter.WriteAsync(notice.AsMemory(), cancellationToken).ConfigureAwait(false);
+				ValidateStagingDirectory(stagingPath, stagingPath);
 				SetFinalUnixMode(noticePath, PortableFileMode);
 			}
+			ValidateStagedDirectories(plan, stagingPath);
 			ApplyFinalFolderModes(plan, stagingPath);
 
 			var finalPath = destinationMode == ProjectCopyDestinationMode.Exact
@@ -1522,7 +1533,8 @@ public sealed class ProjectCopyExportService(
 			return default;
 
 		var destination = ResolveDestinationPath(stagingPath, file.RelativePath);
-		Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+		var destinationDirectory = Path.GetDirectoryName(destination)!;
+		ValidateStagingDirectory(stagingPath, destinationDirectory);
 		var preparedFile = prepared?.GetFile(file.SourcePath);
 		var contentPath = preparedFile?.ContentPath ?? file.SourcePath;
 		var copiedBytes = await CopyFileAsync(
@@ -1533,6 +1545,7 @@ public sealed class ProjectCopyExportService(
 			destination,
 			buffer,
 			cancellationToken).ConfigureAwait(false);
+		ValidateStagingDirectory(stagingPath, destinationDirectory);
 		TryCopyLastWriteTime(file.SourcePath, destination);
 		SetFinalUnixMode(destination, GetSafeUnixMode(file.SourcePath, isDirectory: false));
 		return new FolderCopyEntryResult(true, copiedBytes);
@@ -1793,6 +1806,53 @@ public sealed class ProjectCopyExportService(
 		Directory.CreateDirectory(path);
 		if (!OperatingSystem.IsWindows())
 			File.SetUnixFileMode(path, PrivateDirectoryMode);
+	}
+
+	private static void ValidateStagedDirectories(ProjectCopyExportPlan plan, string stagingPath)
+	{
+		ValidateStagingDirectory(stagingPath, stagingPath);
+		foreach (var directory in plan.Entries.Where(static entry => entry.IsDirectory))
+		{
+			var destination = ResolveDestinationPath(stagingPath, directory.RelativePath);
+			ValidateStagingDirectory(stagingPath, destination);
+		}
+	}
+
+	private static void ValidateStagingDirectory(string stagingPath, string directoryPath)
+	{
+		if (!PathUtility.IsPathInside(directoryPath, stagingPath))
+			throw UnsafeDestination($"A staging directory escapes the export directory: {directoryPath}");
+
+		var currentPath = stagingPath;
+		ValidateStagingDirectorySegment(currentPath);
+		var relativePath = Path.GetRelativePath(stagingPath, directoryPath);
+		if (relativePath == ".")
+			return;
+
+		foreach (var segment in relativePath.Split(
+			         [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+			         StringSplitOptions.RemoveEmptyEntries))
+		{
+			currentPath = Path.Combine(currentPath, segment);
+			ValidateStagingDirectorySegment(currentPath);
+		}
+	}
+
+	private static void ValidateStagingDirectorySegment(string path)
+	{
+		FileAttributes attributes;
+		try
+		{
+			attributes = File.GetAttributes(path);
+		}
+		catch (Exception exception) when (exception is
+			       IOException or UnauthorizedAccessException or NotSupportedException)
+		{
+			throw UnsafeDestination($"A staging directory cannot be inspected safely: {path}", exception);
+		}
+
+		if ((attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != FileAttributes.Directory)
+			throw UnsafeDestination($"A staging directory is not an ordinary directory: {path}");
 	}
 
 	private static void ApplyFinalFolderModes(ProjectCopyExportPlan plan, string stagingPath)

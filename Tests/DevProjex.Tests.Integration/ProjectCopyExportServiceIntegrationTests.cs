@@ -1421,6 +1421,62 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 		}
 	}
 
+	[Theory]
+	[InlineData(2)]
+	[InlineData(3)]
+	public async Task FolderExportRejectsStagingDirectoryLinkIntroducedDuringCopy(int processedEntriesAtReplacement)
+	{
+		using var workspace = ProjectCopyWorkspace.Create();
+		var escapeDirectory = Directory.CreateDirectory(
+			Path.Combine(workspace.DestinationParent, "escape")).FullName;
+		var sentinelPath = Path.Combine(escapeDirectory, "sentinel.txt");
+		await File.WriteAllTextAsync(sentinelPath, "unchanged", TestContext.Current.CancellationToken);
+		var probe = Path.Combine(workspace.DestinationParent, "link-probe");
+		if (OperatingSystem.IsWindows())
+			CreateWindowsJunctionOrSkip(probe, escapeDirectory);
+		else
+			CreateDirectoryLinkOrSkip(probe, escapeDirectory);
+		DeleteDirectoryLink(probe);
+		var destination = Path.Combine(workspace.DestinationParent, "Sample-copy");
+		var replacedDirectory = false;
+		var progress = new CallbackProgress<ProjectCopyExportProgress>(value =>
+		{
+			if (replacedDirectory || value.ProcessedEntryCount != processedEntriesAtReplacement)
+				return;
+
+			var stagingPath = Assert.Single(FindStagingArtifacts(workspace.DestinationParent));
+			var stagingSubdirectory = Path.Combine(stagingPath, "src");
+			Directory.Delete(stagingSubdirectory, recursive: true);
+			if (OperatingSystem.IsWindows())
+				CreateWindowsJunctionOrSkip(stagingSubdirectory, escapeDirectory);
+			else
+				CreateDirectoryLinkOrSkip(stagingSubdirectory, escapeDirectory);
+			replacedDirectory = true;
+		});
+
+		try
+		{
+			var exception = await Assert.ThrowsAsync<ProjectCopyExportException>(() =>
+				workspace.ExportAsync(
+					ProjectCopyExportFormat.Folder,
+					workspace.DestinationParent,
+					[workspace.Paths["unicode"]],
+					progress: progress,
+					cancellationToken: TestContext.Current.CancellationToken));
+
+			Assert.True(replacedDirectory, exception.ToString());
+			Assert.Equal(ProjectCopyExportError.UnsafeDestinationPath, exception.Error);
+			Assert.False(File.Exists(Path.Combine(escapeDirectory, "Пример.cs")));
+			Assert.Equal("unchanged", await File.ReadAllTextAsync(sentinelPath, TestContext.Current.CancellationToken));
+			Assert.False(Directory.Exists(destination));
+			Assert.Empty(FindStagingArtifacts(workspace.DestinationParent));
+		}
+		finally
+		{
+			DeleteDirectoryLink(Path.Combine(destination, "src"));
+		}
+	}
+
 	[Fact]
 	public async Task ZipDestinationDirectorySymlinkIntoSourceIsRejectedBeforeStaging()
 	{
