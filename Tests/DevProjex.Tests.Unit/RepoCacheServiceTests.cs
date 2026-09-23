@@ -361,6 +361,45 @@ public class RepoCacheServiceTests : IDisposable
 	}
 
 	[Fact]
+	public void ClearAllCacheWithResult_TemporarilyUnreadableIndexFailsClosed()
+	{
+		if (!OperatingSystem.IsWindows())
+			Assert.Skip("This test relies on Windows file-sharing behavior.");
+
+		const string repositoryUrl = "https://github.com/example/locked-document.git";
+		var published = PublishZip(_service, repositoryUrl);
+		var indexPath = Path.Combine(_testCacheRoot, "cache-index.json");
+		var originalIndex = File.ReadAllBytes(indexPath);
+		CacheClearResult result;
+		using (new FileStream(indexPath, FileMode.Open, FileAccess.Write, FileShare.Delete))
+			result = _service.ClearAllCacheWithResult();
+
+		Assert.Equal(0, result.Removed);
+		Assert.True(result.Failed > 0);
+		Assert.True(Directory.Exists(published));
+		Assert.Equal(originalIndex, File.ReadAllBytes(indexPath));
+	}
+
+	[Fact]
+	public void ClearAllCacheWithResult_RepairsCorruptIndexAfterExplicitRemoval()
+	{
+		const string repositoryUrl = "https://github.com/example/clear-corrupt-index.git";
+		var published = PublishZip(_service, repositoryUrl);
+		var indexPath = Path.Combine(_testCacheRoot, "cache-index.json");
+		File.WriteAllText(indexPath, "{ invalid json");
+		File.WriteAllText(indexPath + ".bak", "{ invalid json");
+
+		var result = _service.ClearAllCacheWithResult();
+
+		Assert.Equal(new CacheClearResult(1, 0, 0), result);
+		Assert.False(Directory.Exists(published));
+		using var primary = JsonDocument.Parse(File.ReadAllText(indexPath));
+		using var backup = JsonDocument.Parse(File.ReadAllText(indexPath + ".bak"));
+		Assert.Empty(primary.RootElement.GetProperty("entries").EnumerateArray());
+		Assert.Empty(backup.RootElement.GetProperty("entries").EnumerateArray());
+	}
+
+	[Fact]
 	public void ClearAllCacheWithResult_FutureSchemaFailsClosedWithoutRewritingIndex()
 	{
 		const string repositoryUrl = "https://github.com/example/future-index.git";
@@ -693,6 +732,28 @@ public class RepoCacheServiceTests : IDisposable
     }
 
     [Fact]
+    public void RemoteIdentityWrite_DoesNotOverwriteHardLinkedExternalFile()
+    {
+        if (!OperatingSystem.IsWindows())
+            Assert.Skip("This test requires Windows hard-link creation.");
+
+        const string repositoryUrl = "https://example.com/owner/hardlink.git";
+        var repositoryPath = _service.CreateRepositoryDirectory(repositoryUrl);
+        var gitDirectory = Path.Combine(repositoryPath, ".git");
+        Directory.CreateDirectory(gitDirectory);
+        var externalPath = Path.Combine(_testCacheRoot, "external-content.txt");
+        File.WriteAllText(externalPath, "external content");
+        var identityPath = Path.Combine(gitDirectory, "devprojex.remote-identity");
+        if (!CreateHardLinkWindows(identityPath, externalPath, IntPtr.Zero))
+            Assert.Skip($"Hard-link creation is unavailable (Win32 error {System.Runtime.InteropServices.Marshal.GetLastWin32Error()}).");
+
+        GitRemoteIdentityStore.Write(repositoryPath, repositoryUrl);
+
+        Assert.Equal("external content", File.ReadAllText(externalPath));
+        Assert.True(GitRemoteIdentityStore.Matches(repositoryPath, repositoryUrl));
+    }
+
+    [Fact]
     public void CollectGarbage_OverlongFileUrlEntryDoesNotDiscardValidIndexEntries()
     {
         const string validUrl = "https://github.com/example/valid.git";
@@ -924,6 +985,96 @@ public class RepoCacheServiceTests : IDisposable
         Assert.NotNull(indexed);
         Assert.Equal(cachePath, indexed.LocalPath, PathComparer.Default);
         Assert.Equal("main", indexed.Branch);
+    }
+
+    [Fact]
+    public void RecordIndexedRepository_DoesNotReplaceTemporarilyUnreadableIndex()
+    {
+        if (!OperatingSystem.IsWindows())
+            Assert.Skip("This test relies on Windows file-sharing behavior.");
+
+        const string retainedUrl = "https://github.com/example/retained.git";
+        const string newUrl = "https://github.com/example/new.git";
+        var retainedPath = _service.CreateRepositoryDirectory(retainedUrl);
+        var newPath = _service.CreateRepositoryDirectory(newUrl);
+        _service.RecordIndexedRepository(retainedUrl, retainedPath);
+        var indexPath = Path.Combine(_testCacheRoot, "cache-index.json");
+        var originalIndex = File.ReadAllBytes(indexPath);
+
+        using (new FileStream(indexPath, FileMode.Open, FileAccess.Write, FileShare.Delete))
+            _service.RecordIndexedRepository(newUrl, newPath);
+
+        Assert.Equal(originalIndex, File.ReadAllBytes(indexPath));
+        Assert.NotNull(_service.FindIndexedRepository(retainedUrl));
+        Assert.Null(_service.FindIndexedRepository(newUrl));
+    }
+
+    [Fact]
+    public void RecordIndexedRepository_DoesNotReplaceIndexWhenRecoveryBackupIsTemporarilyUnreadable()
+    {
+        if (!OperatingSystem.IsWindows())
+            Assert.Skip("This test relies on Windows file-sharing behavior.");
+
+        const string retainedUrl = "https://github.com/example/retained-backup.git";
+        const string newUrl = "https://github.com/example/new-backup.git";
+        var retainedPath = _service.CreateRepositoryDirectory(retainedUrl);
+        var newPath = _service.CreateRepositoryDirectory(newUrl);
+        _service.RecordIndexedRepository(retainedUrl, retainedPath);
+        var indexPath = Path.Combine(_testCacheRoot, "cache-index.json");
+        var backupPath = indexPath + ".bak";
+        File.WriteAllText(indexPath, "{ invalid json");
+        var originalIndex = File.ReadAllBytes(indexPath);
+        var originalBackup = File.ReadAllBytes(backupPath);
+
+        using (new FileStream(backupPath, FileMode.Open, FileAccess.Write, FileShare.Delete))
+            _service.RecordIndexedRepository(newUrl, newPath);
+
+        Assert.Equal(originalIndex, File.ReadAllBytes(indexPath));
+        Assert.Equal(originalBackup, File.ReadAllBytes(backupPath));
+        Assert.NotNull(_service.FindIndexedRepository(retainedUrl));
+        Assert.Null(_service.FindIndexedRepository(newUrl));
+    }
+
+    [Fact]
+    public void StartupCleanup_DoesNotRemoveIndexedRepositoryWhenIndexIsTemporarilyUnreadable()
+    {
+        if (!OperatingSystem.IsWindows())
+            Assert.Skip("This test relies on Windows file-sharing behavior.");
+
+        const string repositoryUrl = "https://github.com/example/startup-retained.git";
+        var stagingPath = _service.CreateRepositoryStagingDirectory(repositoryUrl);
+        File.WriteAllText(Path.Combine(stagingPath, "README.md"), "retained content");
+        var repositoryPath = _service.PublishRepositoryDirectory(stagingPath, repositoryUrl);
+        var indexPath = Path.Combine(_testCacheRoot, "cache-index.json");
+        File.WriteAllText(indexPath + ".bak", "{ invalid json");
+        var originalIndex = File.ReadAllBytes(indexPath);
+
+        using (new FileStream(indexPath, FileMode.Open, FileAccess.Write, FileShare.Delete))
+            _service.CleanupStaleCacheOnStartup();
+
+        Assert.Equal(originalIndex, File.ReadAllBytes(indexPath));
+        Assert.Equal("retained content", File.ReadAllText(Path.Combine(repositoryPath, "README.md")));
+        Assert.NotNull(_service.FindIndexedRepository(repositoryUrl));
+    }
+
+    [Fact]
+    public void StartupCleanup_DoesNotRemoveRepositoryWhenBothIndexesAreCorrupt()
+    {
+        const string repositoryUrl = "https://github.com/example/corrupt-index-retained.git";
+        const string newUrl = "https://github.com/example/corrupt-index-new.git";
+        var stagingPath = _service.CreateRepositoryStagingDirectory(repositoryUrl);
+        File.WriteAllText(Path.Combine(stagingPath, "README.md"), "retained content");
+        var repositoryPath = _service.PublishRepositoryDirectory(stagingPath, repositoryUrl);
+        var indexPath = Path.Combine(_testCacheRoot, "cache-index.json");
+        File.WriteAllText(indexPath, "{ invalid json");
+        File.WriteAllText(indexPath + ".bak", "{ invalid json");
+        var newPath = _service.CreateRepositoryDirectory(newUrl);
+
+        _service.RecordIndexedRepository(newUrl, newPath);
+        _service.CleanupStaleCacheOnStartup();
+
+        Assert.Equal("{ invalid json", File.ReadAllText(indexPath));
+        Assert.Equal("retained content", File.ReadAllText(Path.Combine(repositoryPath, "README.md")));
     }
 
 	[Fact]
@@ -1312,4 +1463,12 @@ public class RepoCacheServiceTests : IDisposable
 
         _service.DeleteRepositoryDirectory(cacheDir);
     }
+
+    [System.Runtime.InteropServices.DllImport(
+        "kernel32.dll", EntryPoint = "CreateHardLinkW", CharSet = System.Runtime.InteropServices.CharSet.Unicode,
+        SetLastError = true)]
+    private static extern bool CreateHardLinkWindows(
+        string linkPath,
+        string targetPath,
+        IntPtr securityAttributes);
 }

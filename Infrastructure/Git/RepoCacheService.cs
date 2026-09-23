@@ -323,7 +323,8 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 				if (HasUnsupportedIndexDocument(fileSet))
 					continue;
 
-				var document = LoadIndex(fileSet);
+				if (!TryLoadIndex(fileSet, out var document))
+					continue;
 				List<RepositoryCacheIndexEntry>? retained = null;
 				for (var index = 0; index < document.Entries.Count; index++)
 				{
@@ -408,7 +409,11 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 					continue;
 				}
 
-				var document = LoadIndex(fileSet);
+				if (!TryLoadIndex(fileSet, out var document))
+				{
+					unavailableRootCount++;
+					continue;
+				}
 				List<RepositoryCacheIndexEntry>? retained = null;
 				for (var index = 0; index < document.Entries.Count; index++)
 				{
@@ -586,7 +591,8 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 			if (HasUnsupportedIndexDocument(fileSet))
 				return;
 
-			var document = LoadIndex(fileSet);
+			if (!TryLoadIndex(fileSet, out var document))
+				return;
 			var entry = FindByPath(document, normalizedPath);
 			if (entry is null)
 			{
@@ -679,7 +685,8 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 			if (HasUnsupportedIndexDocument(fileSet))
 				return CacheRootFailure(cacheRoot);
 
-			var document = LoadIndex(fileSet);
+			if (!TryLoadIndex(fileSet, out var document, allowCorruptExisting: identity is null))
+				return CacheRootFailure(cacheRoot);
 			var indexedEntries = new List<CacheRemovalEntry>(document.Entries.Count);
 			var indexedContainers = new HashSet<string>(PathComparer.Default);
 			var containersWithNonTargets = new HashSet<string>(PathComparer.Default);
@@ -759,9 +766,11 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 				}
 			}
 
-			if (indexedRemoved > 0 && !WriteIndex(fileSet, retainedEntries))
+			var resetExistingIndex = identity is null &&
+			                         (File.Exists(fileSet.PrimaryPath) || File.Exists(fileSet.BackupPath));
+			if ((indexedRemoved > 0 || resetExistingIndex) && !WriteIndex(fileSet, retainedEntries))
 			{
-				failed = checked(failed + indexedRemoved);
+				failed = checked(failed + Math.Max(indexedRemoved, 1));
 				indexedRemoved = 0;
 			}
 			result = new CacheClearResult(
@@ -902,7 +911,8 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 			if (HasUnsupportedIndexDocument(fileSet))
 				return;
 
-			var document = LoadIndex(fileSet);
+			if (!TryLoadIndex(fileSet, out var document, allowCorruptExisting: true))
+				return;
 			var retained = new List<RepositoryCacheIndexEntry>();
 			foreach (var entry in document.Entries)
 			{
@@ -1086,7 +1096,8 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 			if (HasUnsupportedIndexDocument(fileSet))
 				return;
 
-			var document = LoadIndex(fileSet);
+			if (!TryLoadIndex(fileSet, out var document))
+				return;
 			var entries = document.Entries.ToList();
 			var totalSize = CalculateIndexedSize(entries);
 			var expiration = _timeProvider.GetUtcNow() - _policy.MaximumUnusedAge;
@@ -1152,7 +1163,8 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 			if (HasUnsupportedIndexDocument(fileSet))
 				return;
 
-			var document = LoadIndex(fileSet);
+			if (!TryLoadIndex(fileSet, out var document))
+				return;
 			var entry = FindByPath(document, localPath);
 			if (entry is null)
 				return;
@@ -1207,7 +1219,8 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 			if (HasUnsupportedIndexDocument(fileSet))
 				return;
 
-			var document = LoadIndex(fileSet);
+			if (!TryLoadIndex(fileSet, out var document))
+				return;
 			var entries = document.Entries
 				.Where(entry => !ArePathsInSameRepository(entry.LocalPath, normalizedPath))
 				.ToList();
@@ -1432,7 +1445,8 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 			if (HasUnsupportedIndexDocument(fileSet))
 				return null;
 
-			var document = LoadIndex(fileSet);
+			if (!TryLoadIndex(fileSet, out var document))
+				return null;
 			var current = FindByIdentity(document, identity);
 			if (current is null ||
 			    !PathComparer.Default.Equals(current.LocalPath, expectedLocalPath) ||
@@ -1911,7 +1925,8 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 			if (HasUnsupportedIndexDocument(fileSet))
 				return;
 
-			var document = LoadIndex(fileSet);
+			if (!TryLoadIndex(fileSet, out var document))
+				return;
 			var previous = FindByIdentity(document, identity) ?? FindByPath(document, normalizedPath);
 			var resolvedKind = contentKind != RepositoryCacheContentKind.Unknown
 				? contentKind
@@ -1975,7 +1990,8 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 			if (HasUnsupportedIndexDocument(fileSet))
 				return null;
 
-			var document = LoadIndex(fileSet);
+			if (!TryLoadIndex(fileSet, out var document))
+				return null;
 			var entry = FindByIdentity(document, identity);
 			if (entry is null ||
 			    ResolveContentKind(entry) != RepositoryCacheContentKind.Git ||
@@ -2267,7 +2283,9 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 		var trashPaths = new List<string>();
 		using (heldLock)
 		{
-			var indexedContainers = LoadIndex(fileSet).Entries
+			if (HasUnsupportedIndexDocument(fileSet) || !TryLoadIndex(fileSet, out var document))
+				return;
+			var indexedContainers = document.Entries
 				.Select(entry => RepositoryCacheLayout.GetContainer(entry.LocalPath))
 				.ToHashSet(PathComparer.Default);
 			foreach (var directory in EnumerateRepositoryRootDirectories(cacheRoot))
@@ -2719,16 +2737,30 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 		return roots.AsReadOnly();
 	}
 
-	private RepositoryCacheIndexDocument LoadIndex(JsonStoreFileSet fileSet)
+	private RepositoryCacheIndexDocument LoadIndex(JsonStoreFileSet fileSet) =>
+		TryLoadIndex(fileSet, out var document) ? document : RepositoryCacheIndexDocument.Empty;
+
+	private bool TryLoadIndex(
+		JsonStoreFileSet fileSet,
+		out RepositoryCacheIndexDocument document,
+		bool allowCorruptExisting = false)
 	{
-		if (TryLoadIndex(fileSet.PrimaryPath, out var primary))
-			return primary;
-		if (TryLoadIndex(fileSet.BackupPath, out var backup))
-			return backup;
-		return RepositoryCacheIndexDocument.Empty;
+		if (TryLoadIndex(fileSet.PrimaryPath, out document, out var primaryUnavailable))
+			return true;
+		if (primaryUnavailable)
+			return false;
+		if (TryLoadIndex(fileSet.BackupPath, out document, out var backupUnavailable))
+			return true;
+		document = RepositoryCacheIndexDocument.Empty;
+		return !backupUnavailable &&
+		       (allowCorruptExisting ||
+		        (!File.Exists(fileSet.PrimaryPath) && !File.Exists(fileSet.BackupPath)));
 	}
 
-	private bool TryLoadIndex(string path, out RepositoryCacheIndexDocument document)
+	private bool TryLoadIndex(
+		string path,
+		out RepositoryCacheIndexDocument document,
+		out bool temporarilyUnavailable)
 	{
 		if (!JsonStorePersistence.TryReadNormalized(
 			    path,
@@ -2737,6 +2769,7 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 			    NormalizeIndex,
 			    out document,
 			    out _,
+			    out temporarilyUnavailable,
 			    MaximumCacheIndexBytes))
 		{
 			document = RepositoryCacheIndexDocument.Empty;
