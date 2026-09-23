@@ -166,14 +166,24 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 		GitRepositorySafetyInspector.TraceDisabledMaterializationFilters(safety);
 		var revision = await ResolveRevisionAsync(basePath, branch, cancellationToken)
 			.ConfigureAwait(false);
-		if (!await RunSuccessfulAsync(
+		bool added;
+		try
+		{
+			added = await RunSuccessfulAsync(
 				basePath,
 				GitProcessOperation.ManagedWorktreeAdd(
 					worktreePath,
 					revision,
 					safety.CheckoutFilterDrivers),
 				cancellationToken)
-			.ConfigureAwait(false))
+				.ConfigureAwait(false);
+		}
+		catch
+		{
+			await TryCleanupDetachedAsync(basePath, worktreePath).ConfigureAwait(false);
+			throw;
+		}
+		if (!added)
 		{
 			TryDeletePartialWorktree(worktreePath);
 			return false;

@@ -275,6 +275,47 @@ public class GitRepositoryServiceUnitTests
 	}
 
 	[Fact]
+	public async Task DetachedWorktree_CancellationDuringAddCleansPartialDirectory()
+	{
+		using var temporary = new TemporaryDirectory();
+		using var cancellation = new CancellationTokenSource();
+		var repositoryPath = Path.Combine(temporary.Path, "repository");
+		var worktreePath = Path.Combine(temporary.Path, "worktree");
+		var removeCount = 0;
+		var manager = new GitWorktreeManager(
+			(_, arguments, cleanupToken) =>
+			{
+				if (arguments is ["rev-parse", "--verify", "--quiet", "--end-of-options", _])
+					return Task.FromResult(new GitWorktreeManager.GitProcessResult(
+						0, "0123456789abcdef\n", string.Empty));
+				if (arguments is ["worktree", "add", ..])
+				{
+					Directory.CreateDirectory(worktreePath);
+					cancellation.Cancel();
+					return Task.FromException<GitWorktreeManager.GitProcessResult>(
+						new OperationCanceledException(cancellation.Token));
+				}
+				if (arguments is ["worktree", "remove", ..])
+				{
+					Assert.False(cleanupToken.IsCancellationRequested);
+					removeCount++;
+					return Task.FromResult(new GitWorktreeManager.GitProcessResult(0, string.Empty, string.Empty));
+				}
+				throw new InvalidOperationException("Unexpected git command.");
+			},
+			TimeSpan.FromSeconds(1));
+
+		await Assert.ThrowsAnyAsync<OperationCanceledException>(() => manager.CreateDetachedAsync(
+			repositoryPath,
+			worktreePath,
+			branch: null,
+			cancellation.Token));
+
+		Assert.Equal(1, removeCount);
+		Assert.False(Directory.Exists(worktreePath));
+	}
+
+	[Fact]
 	public async Task DetachedWorktree_VerificationFailureIsNotMaskedByStalledCleanup()
 	{
 		var cleanupStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
