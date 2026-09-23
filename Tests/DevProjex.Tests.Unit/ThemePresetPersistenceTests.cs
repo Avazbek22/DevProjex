@@ -205,6 +205,191 @@ public sealed class ThemePresetPersistenceTests
     }
 
     [Fact]
+    public void Session_StartupLockFallbackChangingOneSliderPreservesOtherSavedPresetValues()
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new ThemeSettingsStore(() => temp.Path);
+        var saved = store.Load();
+        var original = CreatePreset(30);
+        saved.Presets["Dark.Acrylic"] = original;
+        saved.SelectedThemeMode = ThemeSelectionMode.Light;
+        saved.LightThemeEffect = ThemeEffectMode.Mica;
+        saved.DarkThemeEffect = ThemeEffectMode.Transparent;
+        saved.SelectedPreset = "Light.Mica";
+        Assert.True(store.TrySave(saved));
+
+        var lockPath = store.GetPath() + ".lock";
+        ThemeSettingsStartupLoadResult startup;
+        using (var heldLock = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+        {
+            startup = store.LoadForStartupWithStatus(TimeSpan.FromMilliseconds(25));
+        }
+
+        Assert.True(startup.TemporarilyUnavailable);
+        var session = new ThemePresetSession(
+            store,
+            startup.Document,
+            ThemeVariant.Dark,
+            startupStoreTemporarilyUnavailable: true);
+        var edited = session.CurrentPreset with { PanelContrast = 78 };
+        session.MarkDirty(ThemePresetFields.PanelContrast);
+        Assert.True(session.Persist(edited));
+        var secondEdit = session.CurrentPreset with { MenuTransparency = 66 };
+        session.MarkDirty(ThemePresetFields.MenuTransparency);
+        Assert.True(session.Persist(secondEdit));
+
+        var reloaded = store.Load();
+        Assert.Equal(original with { PanelContrast = 78, MenuTransparency = 66 }, reloaded.Presets["Dark.Acrylic"]);
+        Assert.Equal(ThemeSelectionMode.Light, reloaded.SelectedThemeMode);
+        Assert.Equal(ThemeEffectMode.Mica, reloaded.LightThemeEffect);
+        Assert.Equal(ThemeEffectMode.Transparent, reloaded.DarkThemeEffect);
+        Assert.Equal("Light.Mica", reloaded.SelectedPreset);
+    }
+
+    [Fact]
+    public void Session_StartupLockFallbackExplicitFactoryValuePersistsOnlyTouchedSlider()
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new ThemeSettingsStore(() => temp.Path);
+        var saved = store.Load();
+        var original = CreatePreset(30);
+        saved.Presets["Dark.Acrylic"] = original;
+        Assert.True(store.TrySave(saved));
+
+        var lockPath = store.GetPath() + ".lock";
+        ThemeSettingsStartupLoadResult startup;
+        using (var heldLock = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+        {
+            startup = store.LoadForStartupWithStatus(TimeSpan.FromMilliseconds(25));
+        }
+
+        Assert.True(startup.TemporarilyUnavailable);
+        var session = new ThemePresetSession(
+            store,
+            startup.Document,
+            ThemeVariant.Dark,
+            startupStoreTemporarilyUnavailable: true);
+        var factoryValue = session.CurrentPreset.PanelContrast;
+        session.MarkDirty(ThemePresetFields.PanelContrast);
+        Assert.True(session.Persist(session.CurrentPreset));
+
+        var reloaded = store.Load();
+        Assert.Equal(original with { PanelContrast = factoryValue }, reloaded.Presets["Dark.Acrylic"]);
+    }
+
+    [Fact]
+    public void Session_StartupLockFallbackPlatformEffectNormalizationPreservesSavedSelection()
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new ThemeSettingsStore(() => temp.Path);
+        var saved = store.Load();
+        saved.SelectedThemeMode = ThemeSelectionMode.Light;
+        saved.LightThemeEffect = ThemeEffectMode.Mica;
+        saved.DarkThemeEffect = ThemeEffectMode.Mica;
+        saved.SelectedPreset = "Light.Mica";
+        Assert.True(store.TrySave(saved));
+
+        var lockPath = store.GetPath() + ".lock";
+        ThemeSettingsStartupLoadResult startup;
+        using (var heldLock = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+        {
+            startup = store.LoadForStartupWithStatus(TimeSpan.FromMilliseconds(25));
+        }
+
+        Assert.True(startup.TemporarilyUnavailable);
+        var session = new ThemePresetSession(
+            store,
+            startup.Document,
+            ThemeVariant.Dark,
+            startupStoreTemporarilyUnavailable: true);
+        var originalPrimary = File.ReadAllBytes(store.GetPath());
+        session.SelectEffect(ThemeEffectMode.Transparent, session.CurrentPreset, explicitSelection: false);
+        Assert.False(session.IsDirty);
+        Assert.True(session.Persist(session.CurrentPreset));
+        Assert.Equal(originalPrimary, File.ReadAllBytes(store.GetPath()));
+
+        var reloaded = store.Load();
+        Assert.Equal(ThemeSelectionMode.Light, reloaded.SelectedThemeMode);
+        Assert.Equal(ThemeEffectMode.Mica, reloaded.LightThemeEffect);
+        Assert.Equal(ThemeEffectMode.Mica, reloaded.DarkThemeEffect);
+        Assert.Equal("Light.Mica", reloaded.SelectedPreset);
+    }
+
+    [Fact]
+    public void Session_StartupLockFallbackExplicitFactoryModeChangesOnlyMode()
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new ThemeSettingsStore(() => temp.Path);
+        var saved = store.Load();
+        var original = CreatePreset(30);
+        saved.Presets["Dark.Acrylic"] = original;
+        saved.SelectedThemeMode = ThemeSelectionMode.Light;
+        saved.LightThemeEffect = ThemeEffectMode.Mica;
+        saved.DarkThemeEffect = ThemeEffectMode.Transparent;
+        saved.SelectedPreset = "Light.Mica";
+        Assert.True(store.TrySave(saved));
+
+        var lockPath = store.GetPath() + ".lock";
+        ThemeSettingsStartupLoadResult startup;
+        using (var heldLock = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+        {
+            startup = store.LoadForStartupWithStatus(TimeSpan.FromMilliseconds(25));
+        }
+
+        Assert.True(startup.TemporarilyUnavailable);
+        var session = new ThemePresetSession(
+            store,
+            startup.Document,
+            ThemeVariant.Dark,
+            startupStoreTemporarilyUnavailable: true);
+        var selected = session.SelectMode(ThemeSelectionMode.System, ThemeVariant.Dark, session.CurrentPreset);
+        Assert.True(session.Persist(selected));
+
+        var reloaded = store.Load();
+        Assert.Equal(ThemeSelectionMode.System, reloaded.SelectedThemeMode);
+        Assert.Equal(ThemeEffectMode.Mica, reloaded.LightThemeEffect);
+        Assert.Equal(ThemeEffectMode.Transparent, reloaded.DarkThemeEffect);
+        Assert.Equal(original, reloaded.Presets["Dark.Acrylic"]);
+    }
+
+    [Fact]
+    public void Session_StartupLockFallbackExplicitFactoryEffectChangesOnlyEffect()
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new ThemeSettingsStore(() => temp.Path);
+        var saved = store.Load();
+        var original = CreatePreset(30);
+        saved.Presets["Dark.Acrylic"] = original;
+        saved.SelectedThemeMode = ThemeSelectionMode.Light;
+        saved.LightThemeEffect = ThemeEffectMode.Mica;
+        saved.DarkThemeEffect = ThemeEffectMode.Mica;
+        saved.SelectedPreset = "Light.Mica";
+        Assert.True(store.TrySave(saved));
+
+        var lockPath = store.GetPath() + ".lock";
+        ThemeSettingsStartupLoadResult startup;
+        using (var heldLock = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+        {
+            startup = store.LoadForStartupWithStatus(TimeSpan.FromMilliseconds(25));
+        }
+
+        Assert.True(startup.TemporarilyUnavailable);
+        var session = new ThemePresetSession(
+            store,
+            startup.Document,
+            ThemeVariant.Dark,
+            startupStoreTemporarilyUnavailable: true);
+        var selected = session.SelectEffect(ThemeEffectMode.Acrylic, session.CurrentPreset);
+        Assert.True(session.Persist(selected));
+
+        var reloaded = store.Load();
+        Assert.Equal(ThemeSelectionMode.Light, reloaded.SelectedThemeMode);
+        Assert.Equal(ThemeEffectMode.Mica, reloaded.LightThemeEffect);
+        Assert.Equal(ThemeEffectMode.Acrylic, reloaded.DarkThemeEffect);
+        Assert.Equal(original, reloaded.Presets["Dark.Acrylic"]);
+    }
+
+    [Fact]
     public void Session_StaleInstancesChangingDifferentThemeEffects_MergeBothPreferences()
     {
         using var temp = new TemporaryDirectory();

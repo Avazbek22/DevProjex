@@ -46,6 +46,50 @@ public sealed class MainWindowSettingsStartupUiTests
 	}
 
 	[AvaloniaFact]
+	public async Task SliderAfterTransientThemeLock_PreservesOtherSavedPresetValues()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var store = new ThemeSettingsStore(() => appDataPath);
+		var saved = store.Load();
+		var original = new ThemePreset
+		{
+			BackgroundTransparency = 30,
+			PanelContrast = 31,
+			MenuTransparency = 32,
+			BorderVisibility = 33
+		};
+		foreach (var key in saved.Presets.Keys.ToArray())
+			saved.Presets[key] = original;
+		Assert.True(store.TrySave(saved));
+
+		MainWindow window;
+		using (var heldLock = new FileStream(store.GetPath() + ".lock", FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+		{
+			window = await UiTestDriver.CreateLoadedMainWindowAsync(
+				project,
+				appDataPathOverride: appDataPath);
+		}
+
+		string activeKey;
+		try
+		{
+			var viewModel = UiTestDriver.GetViewModel(window);
+			activeKey = $"{(viewModel.IsDarkTheme ? "Dark" : "Light")}.{viewModel.ActiveThemeEffect}";
+			viewModel.PanelContrast = 78;
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+
+		var reloaded = store.Load();
+		Assert.Equal(original with { PanelContrast = 78 }, reloaded.Presets[activeKey]);
+		foreach (var key in reloaded.Presets.Keys.Where(key => key != activeKey))
+			Assert.Equal(original, reloaded.Presets[key]);
+	}
+
+	[AvaloniaFact]
 	public async Task ViewToggleAfterTransientSettingsRead_PreservesOtherPersistedPreferences()
 	{
 		if (!OperatingSystem.IsWindows())

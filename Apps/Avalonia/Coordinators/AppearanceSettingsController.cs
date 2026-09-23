@@ -45,13 +45,14 @@ internal sealed class AppearanceSettingsController(
             userSettingsStore.LoadForStartup(StartupStoreLockTimeout);
         ApplySavedLanguagePreference(ViewSettings);
 
-        _themeSettings =
-            themeSettingsStore.LoadForStartup(StartupStoreLockTimeout);
+        var themeLoad = themeSettingsStore.LoadForStartupWithStatus(StartupStoreLockTimeout);
+        _themeSettings = themeLoad.Document;
         _themeSession =
             new ThemePresetSession(
                 themeSettingsStore,
                 _themeSettings,
-                ResolveSystemTheme());
+                ResolveSystemTheme(),
+                startupStoreTemporarilyUnavailable: themeLoad.TemporarilyUnavailable);
         NormalizeSessionEffectForPlatform(_themeSession.CurrentPreset);
 
         _currentThemeMode = _themeSession.CurrentMode;
@@ -87,10 +88,20 @@ internal sealed class AppearanceSettingsController(
         themeBrushes.UpdateTransparencyEffect();
     }
 
-    public void MarkPresetDirty()
+    public void MarkPresetDirty(string? propertyName)
     {
-        if (!IsApplyingPreset)
-            _themeSession?.MarkDirty();
+        if (IsApplyingPreset)
+            return;
+
+        var field = propertyName switch
+        {
+            nameof(MainWindowViewModel.BackgroundTransparency) => ThemePresetFields.BackgroundTransparency,
+            nameof(MainWindowViewModel.PanelContrast) => ThemePresetFields.PanelContrast,
+            nameof(MainWindowViewModel.MenuTransparency) => ThemePresetFields.MenuTransparency,
+            nameof(MainWindowViewModel.BorderVisibility) => ThemePresetFields.BorderVisibility,
+            _ => ThemePresetFields.None
+        };
+        _themeSession?.MarkDirty(field);
     }
 
     public void HandleThemePopoverStateChange()
@@ -542,6 +553,6 @@ internal sealed class AppearanceSettingsController(
             isMicaSupported);
         return normalizedEffect == session.CurrentEffect
             ? currentPreset
-            : session.SelectEffect(normalizedEffect, currentPreset);
+            : session.SelectEffect(normalizedEffect, currentPreset, explicitSelection: false);
     }
 }

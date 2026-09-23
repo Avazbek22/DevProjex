@@ -1489,7 +1489,7 @@ public partial class MainWindow
                      or nameof(MainWindowViewModel.BorderVisibility)
                      or nameof(MainWindowViewModel.MenuTransparency))
             {
-                _appearanceSettings.MarkPresetDirty();
+                _appearanceSettings.MarkPresetDirty(args.PropertyName);
                 _themeBrushCoordinator.ScheduleDynamicThemeBrushUpdate();
             }
             else if (args.PropertyName == nameof(MainWindowViewModel.ActiveThemeEffect))
