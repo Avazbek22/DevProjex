@@ -91,7 +91,10 @@ internal sealed class ApplicationUpdateCoordinator : IDisposable
                 IsAutomaticCheckEnabled = enabled
             };
             _viewModel.AutomaticUpdateChecksEnabled = enabled;
-            if (!await PersistSettingsAsync(settings, cancellationToken))
+            if (!await PersistSettingsAsync(
+                    settings,
+                    current => current with { IsAutomaticCheckEnabled = enabled },
+                    cancellationToken))
             {
                 settings.UpdateCheckSettings = settings.UpdateCheckSettings with
                 {
@@ -111,7 +114,13 @@ internal sealed class ApplicationUpdateCoordinator : IDisposable
         await _operationGate.WaitAsync(cancellationToken);
         try
         {
-            var settings = await EnsureSettingsLoadedAsync(cancellationToken);
+            var settings = await RefreshSettingsForAutomaticCheckAsync(cancellationToken);
+            if (settings is null)
+            {
+                if (_settings is { } cached)
+                    RestoreLastSuccessfulResult(cached.UpdateCheckSettings);
+                return;
+            }
             var preferences = settings.UpdateCheckSettings;
             _viewModel.AutomaticUpdateChecksEnabled = preferences.IsAutomaticCheckEnabled;
             // Hydrate the passive update indicator from the last successful result even
@@ -127,29 +136,32 @@ internal sealed class ApplicationUpdateCoordinator : IDisposable
             }
 
             var result = await _updateService.CheckAsync(_currentVersion, cancellationToken);
-            var wasAlreadyNotified = WasVersionAlreadyNotified(
-                settings.UpdateCheckSettings.LastNotifiedVersion,
-                result.LatestVersion);
             await RecordCheckAsync(
                 settings,
                 result,
                 markAvailableVersionAsNotified: false,
                 cancellationToken);
-            if (result.Availability != ApplicationUpdateAvailability.CheckFailed)
-                _viewModel.CompleteUpdateCheck(result);
+            PresentAutomaticCheckResult(settings.UpdateCheckSettings, result);
 
-            if (result.Availability != ApplicationUpdateAvailability.UpdateAvailable ||
-                wasAlreadyNotified)
-            {
+            if (result.Availability != ApplicationUpdateAvailability.UpdateAvailable)
                 return;
-            }
 
-            settings.UpdateCheckSettings = settings.UpdateCheckSettings with
-            {
-                LastNotifiedVersion = result.LatestVersion ?? string.Empty
-            };
-            await PersistSettingsAsync(settings, cancellationToken);
-            _viewModel.UpdatePopoverOpen = true;
+            var newlyNotified = false;
+            var persisted = await PersistSettingsAsync(
+                settings,
+                current =>
+                {
+                    if (WasVersionAlreadyNotified(current.LastNotifiedVersion, result.LatestVersion))
+                        return current;
+                    newlyNotified = true;
+                    return current with
+                    {
+                        LastNotifiedVersion = result.LatestVersion ?? string.Empty
+                    };
+                },
+                cancellationToken);
+            if (!persisted || newlyNotified)
+                _viewModel.UpdatePopoverOpen = true;
         }
         finally
         {
@@ -176,8 +188,29 @@ internal sealed class ApplicationUpdateCoordinator : IDisposable
         if (_settings is not null)
             return _settings;
 
-        _settings = await Task.Run(_settingsStore.Load, cancellationToken);
-        return _settings;
+        var (loaded, settings) = await Task.Run(() =>
+        {
+            var loaded = _settingsStore.TryLoad(out var settings);
+            return (loaded, settings);
+        }, cancellationToken);
+        if (loaded)
+            _settings = settings;
+        return settings;
+    }
+
+    private async Task<UserSettingsDb?> RefreshSettingsForAutomaticCheckAsync(
+        CancellationToken cancellationToken)
+    {
+        var (loaded, settings) = await Task.Run(() =>
+        {
+            var loaded = _settingsStore.TryLoad(out var settings);
+            return (loaded, settings);
+        }, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!loaded)
+            return null;
+        _settings = settings;
+        return settings;
     }
 
     private async Task RecordCheckAsync(
@@ -195,25 +228,44 @@ internal sealed class ApplicationUpdateCoordinator : IDisposable
             return;
         }
 
-        var lastNotifiedVersion = markAvailableVersionAsNotified &&
-                                  result.Availability == ApplicationUpdateAvailability.UpdateAvailable
+        var shouldMarkNotified = markAvailableVersionAsNotified &&
+                                 result.Availability == ApplicationUpdateAvailability.UpdateAvailable;
+        var lastNotifiedVersion = shouldMarkNotified
             ? result.LatestVersion ?? string.Empty
             : settings.UpdateCheckSettings.LastNotifiedVersion;
+        var checkTime = _utcNow();
+        var latestKnownVersion = latestVersion.ToString();
         settings.UpdateCheckSettings = settings.UpdateCheckSettings with
         {
-            LastCheckUtc = _utcNow(),
-            LatestKnownVersion = latestVersion.ToString(),
+            LastCheckUtc = checkTime,
+            LatestKnownVersion = latestKnownVersion,
             LastNotifiedVersion = lastNotifiedVersion
         };
-        await PersistSettingsAsync(settings, cancellationToken);
+        await PersistSettingsAsync(
+            settings,
+            current => current with
+            {
+                LastCheckUtc = checkTime,
+                LatestKnownVersion = ApplicationReleaseVersion.TryParse(
+                        current.LatestKnownVersion,
+                        out var storedVersion) &&
+                    storedVersion.CompareTo(latestVersion) > 0
+                        ? storedVersion.ToString()
+                        : latestKnownVersion,
+                LastNotifiedVersion = shouldMarkNotified
+                    ? lastNotifiedVersion
+                    : current.LastNotifiedVersion
+            },
+            cancellationToken);
     }
 
     private async Task<bool> PersistSettingsAsync(
         UserSettingsDb settings,
+        Func<UpdateCheckSettings, UpdateCheckSettings> applyChanges,
         CancellationToken cancellationToken)
     {
         return await Task.Run(
-            () => _settingsStore.TryPersistUpdateCheckSettings(settings),
+            () => _settingsStore.TryPersistUpdateCheckSettings(settings, applyChanges),
             cancellationToken);
     }
 
@@ -222,7 +274,25 @@ internal sealed class ApplicationUpdateCoordinator : IDisposable
         string? latestVersion)
         => ApplicationReleaseVersion.TryParse(lastNotifiedVersion, out var notified) &&
            ApplicationReleaseVersion.TryParse(latestVersion, out var latest) &&
-           notified.Equals(latest);
+           notified.CompareTo(latest) >= 0;
+
+    private void PresentAutomaticCheckResult(
+        UpdateCheckSettings settings,
+        ApplicationUpdateCheckResult result)
+    {
+        if (result.Availability == ApplicationUpdateAvailability.CheckFailed)
+            return;
+
+        if (ApplicationReleaseVersion.TryParse(result.LatestVersion, out var reported) &&
+            ApplicationReleaseVersion.TryParse(settings.LatestKnownVersion, out var stored) &&
+            stored.CompareTo(reported) > 0 &&
+            RestoreLastSuccessfulResult(settings))
+        {
+            return;
+        }
+
+        _viewModel.CompleteUpdateCheck(result);
+    }
 
     private bool RestoreLastSuccessfulResult(UpdateCheckSettings settings)
     {

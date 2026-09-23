@@ -6,6 +6,184 @@ namespace DevProjex.Tests.Unit;
 public sealed class ApplicationUpdateCoordinatorTests
 {
     [Fact]
+    public async Task RecoveredSettingsRead_DoesNotOverwriteCachedUpdateHistory()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("This test relies on Windows file-sharing behavior.");
+            return;
+        }
+
+        using var temp = new TemporaryDirectory();
+        var store = new UserSettingsStore(() => temp.Path);
+        var previousCheck = new DateTimeOffset(2026, 8, 1, 12, 0, 0, TimeSpan.Zero);
+        Assert.True(store.TrySave(new UserSettingsDb
+        {
+            UpdateCheckSettings = new UpdateCheckSettings
+            {
+                IsAutomaticCheckEnabled = true,
+                LastCheckUtc = previousCheck,
+                LatestKnownVersion = "5.1",
+                LastNotifiedVersion = "5.1"
+            }
+        }));
+        var primaryPath = store.GetPath();
+        File.WriteAllText(primaryPath + ".bak", "{ invalid-backup");
+        using var viewModel = CreateViewModel();
+        var service = new RecordingUpdateService(UpdateAvailable("5.2"));
+        using var coordinator = new ApplicationUpdateCoordinator(
+            viewModel, service, store, "5.0");
+
+        using (var primaryReadBlock = new FileStream(
+                   primaryPath, FileMode.Open, FileAccess.Write, FileShare.Delete))
+        {
+            await coordinator.OpenManualCheckAsync(TestContext.Current.CancellationToken);
+        }
+
+        await coordinator.SetAutomaticCheckEnabledAsync(
+            false,
+            TestContext.Current.CancellationToken);
+
+        var persisted = store.Load().UpdateCheckSettings;
+        Assert.False(persisted.IsAutomaticCheckEnabled);
+        Assert.Equal(previousCheck, persisted.LastCheckUtc);
+        Assert.Equal("5.1", persisted.LatestKnownVersion);
+        Assert.Equal("5.1", persisted.LastNotifiedVersion);
+        Assert.Equal(0, service.CallCount);
+    }
+
+    [Fact]
+    public async Task ManualCheckAfterTransientSettingsRead_PreservesUnchangedUpdatePreferences()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("This test relies on Windows file-sharing behavior.");
+            return;
+        }
+
+        using var temp = new TemporaryDirectory();
+        var store = new UserSettingsStore(() => temp.Path);
+        var previousCheck = new DateTimeOffset(2026, 8, 1, 12, 0, 0, TimeSpan.Zero);
+        var now = previousCheck.AddDays(8);
+        Assert.True(store.TrySave(new UserSettingsDb
+        {
+            UpdateCheckSettings = new UpdateCheckSettings
+            {
+                IsAutomaticCheckEnabled = true,
+                LastCheckUtc = previousCheck,
+                LatestKnownVersion = "5.1",
+                LastNotifiedVersion = "5.1"
+            }
+        }));
+        var primaryPath = store.GetPath();
+        File.WriteAllText(primaryPath + ".bak", "{ invalid-backup");
+        var service = new PausedUpdateService(new ApplicationUpdateCheckResult(
+            ApplicationUpdateAvailability.UpToDate,
+            "5.0",
+            "5.0"));
+        using var viewModel = CreateViewModel();
+        using var coordinator = new ApplicationUpdateCoordinator(
+            viewModel, service, store, "5.0", () => now);
+
+        Task check;
+        using (var primaryReadBlock = new FileStream(
+                   primaryPath, FileMode.Open, FileAccess.Write, FileShare.Delete))
+        {
+            check = coordinator.CheckManuallyAsync(TestContext.Current.CancellationToken);
+            await service.Started.WaitAsync(TestContext.Current.CancellationToken);
+        }
+
+        service.Complete();
+        await check;
+
+        var persisted = store.Load().UpdateCheckSettings;
+        Assert.True(persisted.IsAutomaticCheckEnabled);
+        Assert.Equal(now, persisted.LastCheckUtc);
+        Assert.Equal("5.1", persisted.LatestKnownVersion);
+        Assert.Equal("5.1", persisted.LastNotifiedVersion);
+    }
+
+    [Fact]
+    public async Task CachedSettings_DoNotOverwriteAnotherWindowUpdateHistoryWhenOptingOut()
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new UserSettingsStore(() => temp.Path);
+        Assert.True(store.TrySave(new UserSettingsDb
+        {
+            UpdateCheckSettings = new UpdateCheckSettings
+            {
+                IsAutomaticCheckEnabled = true,
+                LatestKnownVersion = "5.1",
+                LastNotifiedVersion = "5.1"
+            }
+        }));
+        using var viewModel = CreateViewModel();
+        using var coordinator = new ApplicationUpdateCoordinator(
+            viewModel,
+            new RecordingUpdateService(UpdateAvailable("5.2")),
+            store,
+            "5.0");
+        await coordinator.OpenManualCheckAsync(TestContext.Current.CancellationToken);
+
+        var anotherWindow = new UserSettingsStore(() => temp.Path);
+        var changed = anotherWindow.Load();
+        changed.UpdateCheckSettings = changed.UpdateCheckSettings with
+        {
+            LatestKnownVersion = "5.2",
+            LastNotifiedVersion = "5.2"
+        };
+        Assert.True(anotherWindow.TryPersistUpdateCheckSettings(changed));
+
+        await coordinator.SetAutomaticCheckEnabledAsync(
+            false,
+            TestContext.Current.CancellationToken);
+
+        var persisted = store.Load().UpdateCheckSettings;
+        Assert.False(persisted.IsAutomaticCheckEnabled);
+        Assert.Equal("5.2", persisted.LatestKnownVersion);
+        Assert.Equal("5.2", persisted.LastNotifiedVersion);
+    }
+
+    [Fact]
+    public async Task AutomaticCheck_PreservesConcurrentOptOutWhileRecordingAndNotifying()
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new UserSettingsStore(() => temp.Path);
+        var now = new DateTimeOffset(2026, 8, 9, 12, 0, 0, TimeSpan.Zero);
+        Assert.True(store.TrySave(new UserSettingsDb
+        {
+            UpdateCheckSettings = new UpdateCheckSettings
+            {
+                IsAutomaticCheckEnabled = true,
+                LastCheckUtc = now.AddDays(-8),
+                LatestKnownVersion = "5.1",
+                LastNotifiedVersion = "5.1"
+            }
+        }));
+        var anotherWindow = new UserSettingsStore(() => temp.Path);
+        var service = new RecordingUpdateService(UpdateAvailable("5.2"), () =>
+        {
+            var changed = anotherWindow.Load();
+            changed.UpdateCheckSettings = changed.UpdateCheckSettings with
+            {
+                IsAutomaticCheckEnabled = false
+            };
+            Assert.True(anotherWindow.TryPersistUpdateCheckSettings(changed));
+        });
+        using var viewModel = CreateViewModel();
+        using var coordinator = new ApplicationUpdateCoordinator(
+            viewModel, service, store, "5.0", () => now);
+
+        await coordinator.RunAutomaticCheckIfDueAsync(TestContext.Current.CancellationToken);
+
+        var persisted = store.Load().UpdateCheckSettings;
+        Assert.False(persisted.IsAutomaticCheckEnabled);
+        Assert.Equal(now, persisted.LastCheckUtc);
+        Assert.Equal("5.2", persisted.LatestKnownVersion);
+        Assert.Equal("5.2", persisted.LastNotifiedVersion);
+    }
+
+    [Fact]
     public async Task AutomaticCheck_OptOut_PerformsNoNetworkRequest()
     {
         using var temp = new TemporaryDirectory();
@@ -84,6 +262,151 @@ public sealed class ApplicationUpdateCoordinatorTests
         Assert.False(viewModel.AutomaticUpdateChecksEnabled);
         Assert.False(settingsStore.Load().UpdateCheckSettings.IsAutomaticCheckEnabled);
         Assert.Equal(0, service.CallCount);
+    }
+
+    [Fact]
+    public async Task AutomaticCheck_HonorsOptOutSavedByAnotherWindowAfterSettingsWereCached()
+    {
+        using var temp = new TemporaryDirectory();
+        var settingsStore = new UserSettingsStore(() => temp.Path);
+        var now = new DateTimeOffset(2026, 8, 10, 12, 0, 0, TimeSpan.Zero);
+        Assert.True(settingsStore.TrySave(new UserSettingsDb
+        {
+            UpdateCheckSettings = new UpdateCheckSettings
+            {
+                IsAutomaticCheckEnabled = true,
+                LastCheckUtc = now.AddDays(-8)
+            }
+        }));
+        var service = new RecordingUpdateService(UpdateAvailable("5.1"));
+        using var viewModel = CreateViewModel();
+        using var coordinator = new ApplicationUpdateCoordinator(
+            viewModel,
+            service,
+            settingsStore,
+            "5.0",
+            () => now);
+
+        await coordinator.OpenManualCheckAsync(TestContext.Current.CancellationToken);
+        var anotherWindow = new UserSettingsStore(() => temp.Path);
+        var changed = anotherWindow.Load();
+        changed.UpdateCheckSettings = changed.UpdateCheckSettings with
+        {
+            IsAutomaticCheckEnabled = false
+        };
+        Assert.True(anotherWindow.TryPersistUpdateCheckSettings(changed));
+
+        await coordinator.RunAutomaticCheckIfDueAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, service.CallCount);
+        Assert.False(viewModel.AutomaticUpdateChecksEnabled);
+        Assert.False(settingsStore.Load().UpdateCheckSettings.IsAutomaticCheckEnabled);
+    }
+
+    [Theory]
+    [InlineData("5.1", "5.1", "5.1")]
+    [InlineData("5.2", "5.2", "5.2")]
+    [InlineData("invalid", "5.1", "5.1")]
+    public async Task AutomaticCheck_DoesNotNotifyVersionAlreadyMarkedByAnotherWindowDuringRequest(
+        string storedLatestVersion,
+        string previouslyNotifiedVersion,
+        string expectedLatestVersion)
+    {
+        using var temp = new TemporaryDirectory();
+        var settingsStore = new UserSettingsStore(() => temp.Path);
+        var now = new DateTimeOffset(2026, 8, 10, 12, 0, 0, TimeSpan.Zero);
+        Assert.True(settingsStore.TrySave(new UserSettingsDb
+        {
+            UpdateCheckSettings = new UpdateCheckSettings
+            {
+                IsAutomaticCheckEnabled = true,
+                LastCheckUtc = now.AddDays(-8)
+            }
+        }));
+        var service = new PausedUpdateService(UpdateAvailable("5.1"));
+        using var viewModel = CreateViewModel();
+        using var coordinator = new ApplicationUpdateCoordinator(
+            viewModel,
+            service,
+            settingsStore,
+            "5.0",
+            () => now);
+
+        var check = coordinator.RunAutomaticCheckIfDueAsync(TestContext.Current.CancellationToken);
+        await service.Started.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        try
+        {
+            var anotherWindow = new UserSettingsStore(() => temp.Path);
+            var changed = anotherWindow.Load();
+            changed.UpdateCheckSettings = changed.UpdateCheckSettings with
+            {
+                LatestKnownVersion = storedLatestVersion,
+                LastNotifiedVersion = previouslyNotifiedVersion
+            };
+            Assert.True(anotherWindow.TryPersistUpdateCheckSettings(changed));
+        }
+        finally
+        {
+            service.Complete();
+        }
+        await check;
+
+        Assert.False(viewModel.UpdatePopoverOpen);
+        var persisted = settingsStore.Load().UpdateCheckSettings;
+        Assert.Equal(now, persisted.LastCheckUtc);
+        Assert.Equal(expectedLatestVersion, persisted.LatestKnownVersion);
+        Assert.Equal(previouslyNotifiedVersion, persisted.LastNotifiedVersion);
+    }
+
+    [Fact]
+    public async Task AutomaticCheck_OlderInFlightResponseDoesNotHideNewerPersistedUpdate()
+    {
+        using var temp = new TemporaryDirectory();
+        var settingsStore = new UserSettingsStore(() => temp.Path);
+        var now = new DateTimeOffset(2026, 8, 10, 12, 0, 0, TimeSpan.Zero);
+        Assert.True(settingsStore.TrySave(new UserSettingsDb
+        {
+            UpdateCheckSettings = new UpdateCheckSettings
+            {
+                IsAutomaticCheckEnabled = true,
+                LastCheckUtc = now.AddDays(-8)
+            }
+        }));
+        var service = new PausedUpdateService(new ApplicationUpdateCheckResult(
+            ApplicationUpdateAvailability.UpToDate,
+            "5.0",
+            "5.0"));
+        using var viewModel = CreateViewModel();
+        using var coordinator = new ApplicationUpdateCoordinator(
+            viewModel,
+            service,
+            settingsStore,
+            "5.0",
+            () => now);
+
+        var check = coordinator.RunAutomaticCheckIfDueAsync(TestContext.Current.CancellationToken);
+        await service.Started.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        try
+        {
+            var anotherWindow = new UserSettingsStore(() => temp.Path);
+            var changed = anotherWindow.Load();
+            changed.UpdateCheckSettings = changed.UpdateCheckSettings with
+            {
+                LatestKnownVersion = "5.2"
+            };
+            Assert.True(anotherWindow.TryPersistUpdateCheckSettings(changed));
+        }
+        finally
+        {
+            service.Complete();
+        }
+        await check;
+
+        Assert.Equal("5.2", settingsStore.Load().UpdateCheckSettings.LatestKnownVersion);
+        Assert.Equal(UpdateCheckPresentationState.UpdateAvailable, viewModel.UpdateCheckState);
+        Assert.Equal("Latest version: v5.2", viewModel.LatestApplicationVersionText);
+        Assert.True(viewModel.IsKnownUpdateAvailable);
+        Assert.False(viewModel.UpdatePopoverOpen);
     }
 
     [Fact]
@@ -521,7 +844,9 @@ public sealed class ApplicationUpdateCoordinatorTests
             new HelpContentProvider());
     }
 
-    private sealed class RecordingUpdateService(ApplicationUpdateCheckResult result)
+    private sealed class RecordingUpdateService(
+        ApplicationUpdateCheckResult result,
+        Action? beforeReturn = null)
         : IApplicationUpdateService
     {
         public int CallCount { get; private set; }
@@ -532,7 +857,28 @@ public sealed class ApplicationUpdateCoordinatorTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             CallCount++;
+            beforeReturn?.Invoke();
             return Task.FromResult(result with { CurrentVersion = currentVersion });
         }
+    }
+
+    private sealed class PausedUpdateService(ApplicationUpdateCheckResult result)
+        : IApplicationUpdateService
+    {
+        private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<ApplicationUpdateCheckResult> _completion =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task Started => _started.Task;
+
+        public Task<ApplicationUpdateCheckResult> CheckAsync(
+            string currentVersion,
+            CancellationToken cancellationToken = default)
+        {
+            _started.TrySetResult();
+            return _completion.Task.WaitAsync(cancellationToken);
+        }
+
+        public void Complete() => _completion.TrySetResult(result);
     }
 }
