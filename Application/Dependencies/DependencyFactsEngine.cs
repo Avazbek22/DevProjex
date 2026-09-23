@@ -311,6 +311,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		var declarations = MergeDeclarations(orderedFacts);
 		var declarationRevision = HashWithCancellation(declarations.Select(DeclarationKey), cancellationToken);
 		var cacheKey = new IndexCacheKey(
+			root,
 			manifestGeneration,
 			declarationRevision,
 			configuration.Fingerprint);
@@ -1258,6 +1259,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 	private readonly record struct CanonicalManifestFile(string FullPath, string RelativePath);
 
 	private readonly record struct IndexCacheKey(
+		string SourceRoot,
 		string ManifestGeneration,
 		string DeclarationRevision,
 		string ConfigurationFingerprint);
