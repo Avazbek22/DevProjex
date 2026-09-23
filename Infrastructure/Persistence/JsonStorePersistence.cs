@@ -229,7 +229,10 @@ internal static class JsonStorePersistence
             {
 				try
 				{
-					writeOperations.Replace(tempPath, fileSet.PrimaryPath, fileSet.BackupPath);
+					writeOperations.Replace(
+						tempPath,
+						fileSet.PrimaryPath,
+						File.Exists(fileSet.BackupPath) ? null : fileSet.BackupPath);
 				}
 				catch (NotSupportedException)
 				{
@@ -663,14 +666,14 @@ internal enum JsonStoreWriteResult
 }
 
 internal sealed class JsonStoreWriteOperations(
-	Action<string, string, string> replace,
+	Action<string, string, string?> replace,
 	Action<string, string, bool> copy)
 {
 	internal static JsonStoreWriteOperations Default { get; } = new(
 		static (source, destination, backup) => File.Replace(source, destination, backup),
 		static (source, destination, overwrite) => File.Copy(source, destination, overwrite));
 
-	internal void Replace(string source, string destination, string backup) =>
+	internal void Replace(string source, string destination, string? backup) =>
 		replace(source, destination, backup);
 
 	internal void Copy(string source, string destination, bool overwrite) =>
