@@ -514,6 +514,32 @@ public sealed class McpProjectInventoryCacheIntegrationTests
 		Assert.Equal(buildsAfterInitial + 1, buildCount);
 	}
 
+	[Fact]
+	public async Task RemovingAnArtifactSignatureInvalidatesThePreviouslyIgnoredInventory()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.CreateFile("project/Anchor.cs", "anchor\n");
+		var signature = workspace.CreateFile("project/node_modules/.package-lock.json", "{}\n");
+		workspace.CreateFile("project/node_modules/package/index.js", "module.exports = 1;\n");
+		await using var harness = CreateHarness(project);
+
+		var initial = await BuildAsync(harness.Service);
+		Assert.False(HasFile(initial, "node_modules/package/index.js"));
+		Assert.True(IsIgnoredMonitorChange(harness.Service, "node_modules/package/index.js"));
+
+		File.Delete(signature);
+		var removedSignature = new FileSystemEventArgs(
+			WatcherChangeTypes.Deleted,
+			project,
+			"node_modules/.package-lock.json");
+		RaiseWatcherEvent(harness.Service, removedSignature);
+		var updated = await BuildAsync(harness.Service);
+
+		Assert.True(HasFile(updated, "node_modules/package/index.js"));
+		Assert.NotSame(initial, updated);
+	}
+
 	[Theory]
 	[InlineData(WatcherChangeTypes.Changed)]
 	[InlineData(WatcherChangeTypes.Created)]
@@ -708,12 +734,15 @@ public sealed class McpProjectInventoryCacheIntegrationTests
 		watcher.EnableRaisingEvents = false;
 	}
 
-	private static void RaiseWatcherChange(McpProjectService service, string name = "Anchor.cs")
+	private static void RaiseWatcherChange(McpProjectService service, string name = "Anchor.cs") =>
+		RaiseWatcherEvent(service, new FileSystemEventArgs(WatcherChangeTypes.Changed, ".", name));
+
+	private static void RaiseWatcherEvent(McpProjectService service, FileSystemEventArgs eventArgs)
 	{
 		var monitor = GetMonitor(service);
 		monitor.GetType()
 			.GetMethod("OnChanged", BindingFlags.Instance | BindingFlags.NonPublic)!
-			.Invoke(monitor, [monitor, new FileSystemEventArgs(WatcherChangeTypes.Changed, ".", name)]);
+			.Invoke(monitor, [monitor, eventArgs]);
 	}
 
 	private static bool IsIgnoredMonitorChange(McpProjectService service, string name)

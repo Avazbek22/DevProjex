@@ -619,7 +619,22 @@ internal sealed class McpProjectService(
 					 directory = Path.GetDirectoryName(directory))
 				{
 					if (provenIgnoredMonitorSubtrees.ContainsKey(directory))
-						return true;
+					{
+						if (eventArgs.ChangeType == WatcherChangeTypes.Changed &&
+							!PathComparer.Default.Equals(changedPath, directory) &&
+							!PathComparer.Default.Equals(Path.GetDirectoryName(changedPath), directory))
+						{
+							return true;
+						}
+						if (SmartArtifactIgnoreMatcher.Default.IsIgnoredDirectory(
+								directory,
+								Path.GetFileName(directory)))
+						{
+							return true;
+						}
+						provenIgnoredMonitorSubtrees.TryRemove(directory, out _);
+						return false;
+					}
 					var directoryName = Path.GetFileName(directory);
 					if (SmartArtifactIgnoreMatcher.Default.IsCandidateName(directoryName) &&
 						SmartArtifactIgnoreMatcher.Default.IsIgnoredDirectory(directory, directoryName))
