@@ -498,7 +498,7 @@ internal sealed class PersistentSecretMarkStore(
 			return false;
 		requiresRewrite = schemaVersion < CurrentSchemaVersion;
 		if (!root.TryGetProperty("projects", out var projectsElement))
-			return true;
+			return schemaVersion < CurrentSchemaVersion;
 		if (projectsElement.ValueKind != JsonValueKind.Object)
 			return false;
 
@@ -508,6 +508,10 @@ internal sealed class PersistentSecretMarkStore(
 		{
 			if (!TryNormalizePath(property.Name, out var normalizedPath))
 				continue;
+			if (schemaVersion == CurrentSchemaVersion &&
+			    property.Value.ValueKind == JsonValueKind.Object &&
+			    !property.Value.TryGetProperty("states", out _))
+				return false;
 			if (++projectCount > ProjectProfileStorageLimits.MaximumPersistentMarkProjects)
 			{
 				parsed.InvalidProjects.Add(normalizedPath);

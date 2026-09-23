@@ -1,4 +1,5 @@
 using DevProjex.Infrastructure.Persistence;
+using System.Text.Json.Nodes;
 
 namespace DevProjex.Tests.Unit;
 
@@ -30,6 +31,70 @@ public sealed class PersistentSecretMarkStoreTests
 	private const string FirstHash = "001122334455";
 	private const string SecondHash = "aabbccddeeff";
 	private const string V2Hash = "v2:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+	[Fact]
+	public async Task CurrentSchemaWithoutProjects_RecoversBackupBeforeNextMark()
+	{
+		using var temporary = new TemporaryDirectory();
+		var project = temporary.CreateFolder("project");
+		var store = new ProjectProfileStore(() => temporary.Path);
+		var cancellationToken = TestContext.Current.CancellationToken;
+		Assert.True((await store.AddMarkAsync(project, Mark(FirstHash, 12), cancellationToken)).Succeeded);
+		var primaryPath = Path.Combine(temporary.Path, "DevProjex", "project-secret-marks.json");
+		using var savedBackup = JsonDocument.Parse(File.ReadAllText(primaryPath + ".bak"));
+		var schemaVersion = savedBackup.RootElement.GetProperty("schemaVersion").GetInt32();
+		File.WriteAllText(primaryPath, JsonSerializer.Serialize(new { schemaVersion }));
+
+		var loaded = await store.LoadMarksAsync(project, cancellationToken);
+		var added = await store.AddMarkAsync(project, Mark(SecondHash, 16), cancellationToken);
+
+		Assert.True(loaded.Succeeded);
+		Assert.Contains(loaded.Snapshot!.Marks, mark => mark.H == FirstHash);
+		Assert.True(added.Succeeded);
+		Assert.Contains(added.Snapshot!.Marks, mark => mark.H == FirstHash);
+		Assert.Contains(added.Snapshot.Marks, mark => mark.H == SecondHash);
+		using var backup = JsonDocument.Parse(File.ReadAllText(primaryPath + ".bak"));
+		var states = backup.RootElement.GetProperty("projects")
+			.GetProperty(PathUtility.Normalize(project))
+			.GetProperty("states")
+			.EnumerateArray()
+			.Select(static state => state.GetProperty("hash").GetString())
+			.ToArray();
+		Assert.Contains(FirstHash, states);
+		Assert.Contains(SecondHash, states);
+	}
+
+	[Fact]
+	public async Task CurrentSchemaProjectWithoutStates_RecoversBackupBeforeNextMark()
+	{
+		using var temporary = new TemporaryDirectory();
+		var project = temporary.CreateFolder("project");
+		var store = new ProjectProfileStore(() => temporary.Path);
+		var cancellationToken = TestContext.Current.CancellationToken;
+		Assert.True((await store.AddMarkAsync(project, Mark(FirstHash, 12), cancellationToken)).Succeeded);
+		var primaryPath = Path.Combine(temporary.Path, "DevProjex", "project-secret-marks.json");
+		var incomplete = JsonNode.Parse(File.ReadAllText(primaryPath))!.AsObject();
+		Assert.True(incomplete["projects"]![PathUtility.Normalize(project)]!.AsObject().Remove("states"));
+		File.WriteAllText(primaryPath, incomplete.ToJsonString());
+
+		var loaded = await store.LoadMarksAsync(project, cancellationToken);
+		var added = await store.AddMarkAsync(project, Mark(SecondHash, 16), cancellationToken);
+
+		Assert.True(loaded.Succeeded);
+		Assert.Contains(loaded.Snapshot!.Marks, mark => mark.H == FirstHash);
+		Assert.True(added.Succeeded);
+		Assert.Contains(added.Snapshot!.Marks, mark => mark.H == FirstHash);
+		Assert.Contains(added.Snapshot.Marks, mark => mark.H == SecondHash);
+		using var backup = JsonDocument.Parse(File.ReadAllText(primaryPath + ".bak"));
+		var states = backup.RootElement.GetProperty("projects")
+			.GetProperty(PathUtility.Normalize(project))
+			.GetProperty("states")
+			.EnumerateArray()
+			.Select(static state => state.GetProperty("hash").GetString())
+			.ToArray();
+		Assert.Contains(FirstHash, states);
+		Assert.Contains(SecondHash, states);
+	}
 
 	[Fact]
 	public async Task FutureSchema_IsReadOnlyAcrossLoadMutationsMigrationAndClear()
