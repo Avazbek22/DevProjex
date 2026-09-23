@@ -550,7 +550,7 @@ public sealed class SearchCommandHandler(
 		ArgumentNullException.ThrowIfNull(request);
 		ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
 		var useLocalProfile = request.Selection.ProfileSource?.Kind == ProjectProfileSourceKind.Local &&
-		                      ProjectSelectionMarkedSecretsResolver.Resolve(request.Selection).Count > 0;
+							  ProjectSelectionMarkedSecretsResolver.Resolve(request.Selection).Count > 0;
 		if (useLocalProfile && !string.IsNullOrWhiteSpace(request.RepositorySourceUrl))
 			return null;
 		var arguments = new List<string>
