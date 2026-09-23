@@ -336,18 +336,18 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			configuration.Fingerprint);
 		var allowed = orderedFacts.Select(static fact => fact.Path).ToHashSet(StringComparer.Ordinal);
 		var canCacheIndex = configuration.CanCache && cacheable.All(static value => value);
-		Lazy<Task<ResolvedIndex>> CreateIndex() => new(
-			() => Task.FromResult(GateResolvedIndex(
-				DependencyResolver.Resolve(root, orderedFacts, declarations, configuration, _limits, cancellationToken),
-				allowed)),
+		ResolvedIndex ResolveIndex() => GateResolvedIndex(
+			DependencyResolver.Resolve(root, orderedFacts, declarations, configuration, _limits, cancellationToken),
+			allowed);
+		Lazy<Task<ResolvedIndex>> CreateCachedIndex() => new(
+			() => Task.Run(ResolveIndex, cancellationToken),
 			LazyThreadSafetyMode.ExecutionAndPublication);
 		ResolvedIndex resolved;
 		IndexCacheEntry? resolvedIndexEntry = null;
 		var resolutionCacheHit = false;
 		if (!canCacheIndex)
 		{
-			var createdIndex = CreateIndex();
-			resolved = await createdIndex.Value.ConfigureAwait(false);
+			resolved = ResolveIndex();
 		}
 		else
 		{
@@ -358,7 +358,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 				IndexCacheEntry? createdIndex = null;
 				if (!_indexCache.TryGetValue(cacheKey, out var cachedIndex))
 				{
-					createdIndex = new IndexCacheEntry(cacheKey, CreateIndex());
+					createdIndex = new IndexCacheEntry(cacheKey, CreateCachedIndex());
 					cachedIndex = GetOrAddIndexCacheEntry(createdIndex);
 				}
 				sharedIndex = createdIndex is null || !ReferenceEquals(cachedIndex, createdIndex);
@@ -366,9 +366,15 @@ public sealed partial class DependencyFactsEngine : IDisposable
 					DependencyEngineDiagnostics.RecordIndexCacheJoin();
 				try
 				{
-					resolved = await cachedIndex.Value.Value.ConfigureAwait(false);
+					var indexTask = cachedIndex.Value.Value;
+					resolved = await (sharedIndex ? indexTask.WaitAsync(cancellationToken) : indexTask)
+						.ConfigureAwait(false);
 					resolvedIndexEntry = cachedIndex;
 					break;
+				}
+				catch (OperationCanceledException) when (sharedIndex && cancellationToken.IsCancellationRequested)
+				{
+					throw;
 				}
 				catch (OperationCanceledException) when (sharedIndex && !cancellationToken.IsCancellationRequested)
 				{
@@ -377,7 +383,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 						continue;
 
 					// A live caller must not inherit repeated producer cancellations.
-					resolved = await CreateIndex().Value.ConfigureAwait(false);
+					resolved = ResolveIndex();
 					sharedIndex = false;
 					break;
 				}
@@ -405,7 +411,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 					RemoveIndexCacheEntry(cacheKey, resolvedIndexEntry);
 				resolvedIndexEntry = null;
 				if (sharedIndex || resolved.CanCachePhysicalFileProbes)
-					resolved = await CreateIndex().Value.ConfigureAwait(false);
+					resolved = ResolveIndex();
 			}
 			resolutionCacheHit = resolvedIndexEntry is not null && sharedIndex;
 			if (resolutionCacheHit)
