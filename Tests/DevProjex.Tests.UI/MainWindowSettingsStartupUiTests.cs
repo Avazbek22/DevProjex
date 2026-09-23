@@ -133,7 +133,7 @@ public sealed class MainWindowSettingsStartupUiTests
 
 		try
 		{
-			GetAppearanceController(window).ResetThemeSettings();
+			Assert.True(GetAppearanceController(window).ResetThemeSettings());
 		}
 		finally
 		{
@@ -144,6 +144,105 @@ public sealed class MainWindowSettingsStartupUiTests
 		Assert.False(persisted.IsCompactMode);
 		Assert.True(persisted.IsTerminalCommandPromptDismissed);
 		Assert.Null(persisted.PreferredLanguage);
+	}
+
+	[AvaloniaFact]
+	public async Task ResetThemeSettings_WhenThemeWriteFails_LeavesGuiAndStoresUnchanged()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var themeStore = new ThemeSettingsStore(() => appDataPath);
+		var theme = themeStore.Load();
+		theme.SelectedThemeMode = ThemeSelectionMode.Light;
+		theme.LightThemeEffect = ThemeEffectMode.Solid;
+		theme.SelectedPreset = "Light.Solid";
+		Assert.True(themeStore.TrySave(theme));
+		var userStore = new UserSettingsStore(() => appDataPath);
+		Assert.True(userStore.TrySave(new UserSettingsDb
+		{
+			ViewSettings = new AppViewSettings { IsCompactMode = true }
+		}));
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			appDataPathOverride: appDataPath);
+
+		try
+		{
+			var viewModel = UiTestDriver.GetViewModel(window);
+			Assert.Equal(ThemeSelectionMode.Light, viewModel.SelectedThemeMode);
+			Assert.True(viewModel.IsCompactMode);
+			var originalTheme = File.ReadAllBytes(themeStore.GetPath());
+			var originalUser = File.ReadAllBytes(userStore.GetPath());
+
+			using (var heldLock = new FileStream(
+			           themeStore.GetPath() + ".lock",
+			           FileMode.OpenOrCreate,
+			           FileAccess.ReadWrite,
+			           FileShare.None))
+			{
+				Assert.False(GetAppearanceController(window).ResetThemeSettings());
+				Assert.Equal(ThemeSelectionMode.Light, viewModel.SelectedThemeMode);
+				Assert.True(viewModel.IsCompactMode);
+				Assert.Equal(originalTheme, File.ReadAllBytes(themeStore.GetPath()));
+				Assert.Equal(originalUser, File.ReadAllBytes(userStore.GetPath()));
+			}
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+
+		Assert.Equal(ThemeSelectionMode.Light, themeStore.Load().SelectedThemeMode);
+		Assert.True(userStore.Load().ViewSettings.IsCompactMode);
+	}
+
+	[AvaloniaFact]
+	public async Task ResetThemeSettings_WhenViewSettingsWriteFails_ReportsPartialResetAndRetriesOnClose()
+	{
+		if (!OperatingSystem.IsWindows())
+		{
+			Assert.Skip("This test relies on Windows file-sharing behavior.");
+			return;
+		}
+
+		using var project = UiTestProject.CreateDefault();
+		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var themeStore = new ThemeSettingsStore(() => appDataPath);
+		var theme = themeStore.Load();
+		theme.SelectedThemeMode = ThemeSelectionMode.Light;
+		theme.SelectedPreset = "Light.Solid";
+		Assert.True(themeStore.TrySave(theme));
+		var userStore = new UserSettingsStore(() => appDataPath);
+		Assert.True(userStore.TrySave(new UserSettingsDb
+		{
+			ViewSettings = new AppViewSettings { IsCompactMode = true }
+		}));
+		var primaryPath = userStore.GetPath();
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			appDataPathOverride: appDataPath);
+
+		try
+		{
+			var originalUser = File.ReadAllBytes(primaryPath);
+			File.WriteAllText(primaryPath + ".bak", "{ invalid-backup");
+			using (var primaryReadBlock = new FileStream(
+			           primaryPath, FileMode.Open, FileAccess.Write, FileShare.Delete))
+			{
+				Assert.False(GetAppearanceController(window).ResetThemeSettings());
+				var viewModel = UiTestDriver.GetViewModel(window);
+				Assert.Equal(ThemeSelectionMode.System, viewModel.SelectedThemeMode);
+				Assert.False(viewModel.IsCompactMode);
+			}
+			Assert.Equal(originalUser, File.ReadAllBytes(primaryPath));
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+
+		Assert.Equal(ThemeSelectionMode.System, themeStore.Load().SelectedThemeMode);
+		Assert.False(userStore.Load().ViewSettings.IsCompactMode);
 	}
 
 	[AvaloniaFact]

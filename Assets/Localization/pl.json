@@ -46,6 +46,7 @@
   "Toast.Refresh.Success": "Odświeżony",
   "Scan.Error.Incomplete": "Projektu nie udało się odczytać w całości. Nadal wyświetlane są ostatnie ważne dane. Odśwież ponownie.",
   "Toast.Settings.Reset": "Ustawienia zresetowane",
+  "Toast.Settings.Reset.Failed": "Nie udało się całkowicie zresetować ustawień. Sprawdź dostęp do pamięci i spróbuj ponownie.",
   "Toast.Data.Reset": "Reset danych projektu",
   "Toast.Data.Reset.Busy": "Dane projektu są używane przez inny proces DevProjex. Zamknij go i spróbuj ponownie.",
   "Toast.Data.Reset.FutureSchema": "Dane projektu utworzono w nowszej wersji DevProjex, dlatego nie zostały usunięte.",

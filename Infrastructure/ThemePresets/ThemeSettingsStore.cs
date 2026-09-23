@@ -158,9 +158,14 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
 
     public ThemeSettingsDocument ResetToDefaults()
     {
-        var defaults = CreateFactoryDefaults();
-        TrySave(defaults);
+        _ = TryResetToDefaults(out var defaults);
         return defaults;
+    }
+
+    public bool TryResetToDefaults(out ThemeSettingsDocument defaults)
+    {
+        defaults = CreateFactoryDefaults();
+        return TrySave(defaults);
     }
 
     public bool TrySave(ThemeSettingsDocument document)

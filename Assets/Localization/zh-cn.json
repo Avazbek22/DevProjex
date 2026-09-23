@@ -46,6 +46,7 @@
   "Toast.Refresh.Success": "已刷新",
   "Scan.Error.Incomplete": "该项目无法完整阅读。仍显示最后的有效数据。再次刷新。",
   "Toast.Settings.Reset": "设置重置",
+  "Toast.Settings.Reset.Failed": "无法完全重置设置。请检查存储访问权限后重试。",
   "Toast.Data.Reset": "项目数据重置",
   "Toast.Data.Reset.Busy": "项目数据正被另一个 DevProjex 进程使用。请将其关闭后重试。",
   "Toast.Data.Reset.FutureSchema": "项目数据由较新版本的 DevProjex 创建，因此未被删除。",

@@ -46,6 +46,7 @@
   "Toast.Refresh.Success": "煥然一新",
   "Scan.Error.Incomplete": "該項目無法完整閱讀。仍顯示最後的有效數據。再次刷新。",
   "Toast.Settings.Reset": "設定重置",
+  "Toast.Settings.Reset.Failed": "無法完全重設設定。請檢查儲存空間的存取權限後再試一次。",
   "Toast.Data.Reset": "項目數據重置",
   "Toast.Data.Reset.Busy": "專案資料正由另一個 DevProjex 處理程序使用。請將其關閉後再試一次。",
   "Toast.Data.Reset.FutureSchema": "專案資料由較新版本的 DevProjex 建立，因此未被刪除。",

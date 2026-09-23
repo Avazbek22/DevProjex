@@ -204,15 +204,18 @@ internal sealed class AppearanceSettingsController(
         PersistViewSettingsChanges(ViewSettingsChanges.TerminalPromptDismissed);
     }
 
-    public void ResetThemeSettings()
+    public bool ResetThemeSettings()
     {
+        if (!themeSettingsStore.TryResetToDefaults(out var resetDocument))
+            return false;
+
         var resetViewSettings = new AppViewSettings
         {
             IsTerminalCommandPromptDismissed =
                 ViewSettings.IsTerminalCommandPromptDismissed
         };
         _userSettings.ViewSettings = resetViewSettings;
-        PersistViewSettingsChanges(ViewSettingsChanges.Resettable);
+        var viewSettingsPersisted = PersistViewSettingsChanges(ViewSettingsChanges.Resettable);
         ApplyViewSettings(resetViewSettings);
 
         var resetLanguage =
@@ -223,7 +226,6 @@ internal sealed class AppearanceSettingsController(
             viewModel.UpdateLocalization();
         }
 
-        var resetDocument = themeSettingsStore.ResetToDefaults();
         var resetSession =
             new ThemePresetSession(
                 themeSettingsStore,
@@ -248,6 +250,7 @@ internal sealed class AppearanceSettingsController(
         ApplyPresetValues(preset);
         themeBrushes.UpdateTransparencyEffect();
         themeBrushes.UpdateDynamicThemeBrushes();
+        return viewSettingsPersisted;
     }
 
     public void PersistPendingChanges()
@@ -414,7 +417,7 @@ internal sealed class AppearanceSettingsController(
         PersistViewSettingsChanges(changes);
     }
 
-    private void PersistViewSettingsChanges(ViewSettingsChanges changes)
+    private bool PersistViewSettingsChanges(ViewSettingsChanges changes)
     {
         _pendingViewSettingsChanges |= changes;
         var pendingChanges = _pendingViewSettingsChanges;
@@ -423,7 +426,7 @@ internal sealed class AppearanceSettingsController(
                 _userSettings,
                 latest => MergeViewSettings(latest, requested, pendingChanges)))
         {
-            return;
+            return false;
         }
 
         _pendingViewSettingsChanges = ViewSettingsChanges.None;
@@ -441,6 +444,7 @@ internal sealed class AppearanceSettingsController(
         {
             ApplySavedLanguagePreference(persisted);
         }
+        return true;
     }
 
     private static AppViewSettings MergeViewSettings(

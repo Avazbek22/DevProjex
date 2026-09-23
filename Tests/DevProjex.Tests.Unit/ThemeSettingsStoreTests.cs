@@ -484,6 +484,51 @@ public sealed class ThemeSettingsStoreTests
     }
 
     [Fact]
+    public void TryResetToDefaults_WhenStoreLockIsHeld_LeavesPersistedThemeUnchanged()
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new ThemeSettingsStore(() => temp.Path);
+        var customized = store.Load();
+        customized.SelectedThemeMode = ThemeSelectionMode.Light;
+        customized.SelectedPreset = "Light.Solid";
+        Assert.True(store.TrySave(customized));
+        var originalPrimary = File.ReadAllBytes(store.GetPath());
+        var lockPath = store.GetPath() + ".lock";
+
+        using (var heldLock = new FileStream(
+                   lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+        {
+            Assert.False(store.TryResetToDefaults(out var defaults));
+            Assert.Equal(ThemeSelectionMode.System, defaults.SelectedThemeMode);
+            Assert.Equal(originalPrimary, File.ReadAllBytes(store.GetPath()));
+        }
+
+        var reloaded = store.Load();
+        Assert.Equal(ThemeSelectionMode.Light, reloaded.SelectedThemeMode);
+        Assert.Equal("Light.Solid", reloaded.SelectedPreset);
+    }
+
+    [Fact]
+    public void TryResetToDefaults_WhenStorageIsAvailable_PersistsFactoryDefaults()
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new ThemeSettingsStore(() => temp.Path);
+        var customized = store.Load();
+        customized.SelectedThemeMode = ThemeSelectionMode.Light;
+        customized.SelectedPreset = "Light.Solid";
+        Assert.True(store.TrySave(customized));
+
+        Assert.True(store.TryResetToDefaults(out var defaults));
+
+        var reloaded = store.Load();
+        Assert.Equal(ThemeSelectionMode.System, defaults.SelectedThemeMode);
+        Assert.Equal("Dark.Acrylic", defaults.SelectedPreset);
+        Assert.Equal(defaults.SelectedThemeMode, reloaded.SelectedThemeMode);
+        Assert.Equal(defaults.SelectedPreset, reloaded.SelectedPreset);
+        Assert.Equal(defaults.Presets, reloaded.Presets);
+    }
+
+    [Fact]
     public void StaleInstances_EditingDifferentPresets_MergeWithoutLostUpdates()
     {
         using var temp = new TemporaryDirectory();

@@ -325,10 +325,13 @@ public partial class MainWindow
             return;
         }
 
-        ResetThemeSettings();
-        _toastService.Show(_localization["Toast.Settings.Reset"]);
+        var resetSucceeded = ResetThemeSettings();
+        _toastService.Show(_localization[ResolveResetSettingsResultLocalizationKey(resetSucceeded)]);
         e.Handled = true;
     }
+
+    internal static string ResolveResetSettingsResultLocalizationKey(bool succeeded) =>
+        succeeded ? "Toast.Settings.Reset" : "Toast.Settings.Reset.Failed";
 
     private async void OnResetData(object? sender, RoutedEventArgs e)
     {
@@ -393,7 +396,7 @@ public partial class MainWindow
     internal static bool ShouldClearAgentJournalAfterProfileReset(ProjectProfileClearStatus status) =>
         status is ProjectProfileClearStatus.Cleared or ProjectProfileClearStatus.Partial;
 
-    private void ResetThemeSettings()
+    private bool ResetThemeSettings()
         => _appearanceSettings.ResetThemeSettings();
 
 

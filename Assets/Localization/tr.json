@@ -46,6 +46,7 @@
   "Toast.Refresh.Success": "Yenilendi",
   "Scan.Error.Incomplete": "Proje tam olarak okunamadı. Son geçerli veriler hâlâ gösterilmektedir. Tekrar yenileyin.",
   "Toast.Settings.Reset": "Ayarlar sıfırlandı",
+  "Toast.Settings.Reset.Failed": "Ayarlar tamamen sıfırlanamadı. Depolama erişimini denetleyip yeniden deneyin.",
   "Toast.Data.Reset": "Proje verilerini sıfırlama",
   "Toast.Data.Reset.Busy": "Proje verileri başka bir DevProjex işlemi tarafından kullanılıyor. İşlemi kapatıp yeniden deneyin.",
   "Toast.Data.Reset.FutureSchema": "Proje verileri DevProjex'in daha yeni bir sürümüyle oluşturulduğu için silinmedi.",
