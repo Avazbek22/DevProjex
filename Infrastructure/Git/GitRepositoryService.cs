@@ -771,23 +771,43 @@ public sealed class GitRepositoryService : IGitRepositoryService, IDisposable
                 return false;
         }
 
-        var checkout = await RunGitCommandAsync(
-            repositoryPath,
-			GitProcessOperation.ManagedCheckout(
-				GitManagedCheckoutKind.Detach,
-				revision,
-				filterDrivers: safety.CheckoutFilterDrivers),
-            cancellationToken);
-        if (checkout.ExitCode != 0)
-            return false;
+        return await FinishManagedBranchSwitchAsync(
+            async checkoutToken =>
+            {
+                var checkout = await RunGitCommandAsync(
+                    repositoryPath,
+					GitProcessOperation.ManagedCheckout(
+						GitManagedCheckoutKind.Detach,
+						revision,
+						filterDrivers: safety.CheckoutFilterDrivers),
+                    checkoutToken).ConfigureAwait(false);
+                return checkout.ExitCode == 0;
+            },
+            async configToken =>
+            {
+                var config = await RunGitCommandAsync(
+                    repositoryPath,
+					GitProcessOperation.ManagedConfigWrite(
+						GitManagedConfigWriteKind.SetWorktreeBranch,
+						branchName),
+                    configToken).ConfigureAwait(false);
+                return config.ExitCode == 0;
+            },
+            cancellationToken).ConfigureAwait(false);
+    }
 
-        var config = await RunGitCommandAsync(
-            repositoryPath,
-			GitProcessOperation.ManagedConfigWrite(
-				GitManagedConfigWriteKind.SetWorktreeBranch,
-				branchName),
-            cancellationToken);
-        return config.ExitCode == 0;
+    internal static async Task<bool> FinishManagedBranchSwitchAsync(
+        Func<CancellationToken, Task<bool>> checkout,
+        Func<CancellationToken, Task<bool>> updateBranch,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(checkout);
+        ArgumentNullException.ThrowIfNull(updateBranch);
+        cancellationToken.ThrowIfCancellationRequested();
+        // Detaching the worktree and recording its branch must complete as one managed transition.
+        if (!await checkout(CancellationToken.None).ConfigureAwait(false))
+            return false;
+        return await updateBranch(CancellationToken.None).ConfigureAwait(false);
     }
 
     /// <summary>
