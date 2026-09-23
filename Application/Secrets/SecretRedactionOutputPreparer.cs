@@ -248,6 +248,7 @@ public sealed class SecretRedactionOutputPreparer
 				if (requiredInspectionScope.GetContentInspectionMode(sourcePath) ==
 					SecretContentInspectionMode.None)
 				{
+					EnsureSourcePathAvailable(context, sourcePath);
 					preparedFiles[sourcePath] = PreparedSecretFile.Unchanged(sourcePath);
 					if (captureTransformedMetrics)
 					{
@@ -661,6 +662,7 @@ public sealed class SecretRedactionOutputPreparer
 					{
 						if (!IsUnsupportedNonRegularSource(context, template.SourcePath))
 						{
+							EnsureSourcePathAvailable(context, template.SourcePath);
 							var size = SecretFileMetadata.Capture(template.SourcePath).Length;
 							byteLease = await retainedBytes.AcquireAsync(
 								EstimateRetainedTransformationBytes(size),
@@ -857,6 +859,9 @@ public sealed class SecretRedactionOutputPreparer
 		IDisposable? contentLease = null;
 		try
 		{
+			if (IsUnsupportedNonRegularSource(context, item.SourcePath))
+				return CreateUnreadableTransformationEntry(item);
+			EnsureSourcePathAvailable(context, item.SourcePath);
 			CoherentSecretContentRead coherentRead;
 			using (ContentPipelineDiagnostics.MeasureStage(ContentPipelineStage.SourceRead))
 			{
@@ -966,6 +971,7 @@ public sealed class SecretRedactionOutputPreparer
 				ReportProgress(progress, ++processedFiles, orderedFilePaths.Count);
 				continue;
 			}
+			EnsureSourcePathAvailable(context, workItem.SourcePath);
 			if (SecretFileMetadata.Capture(workItem.SourcePath).Length <= MaximumParallelScanFileBytes)
 				parallelWork.Add(workItem);
 			else
@@ -1097,6 +1103,11 @@ public sealed class SecretRedactionOutputPreparer
 		CancellationToken cancellationToken)
 	{
 		var sourcePath = workItem.SourcePath;
+		if (IsUnsupportedNonRegularSource(context, sourcePath))
+			return new PreparedCompressionResult(
+				PreparedSecretFile.Unscannable(sourcePath, FileContentClassification.Unreadable),
+				null);
+		EnsureSourcePathAvailable(context, sourcePath);
 		CoherentSecretContentRead coherentRead;
 		using (ContentPipelineDiagnostics.MeasureStage(ContentPipelineStage.SourceRead))
 		{
