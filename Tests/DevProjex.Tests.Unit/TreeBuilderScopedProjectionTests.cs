@@ -130,8 +130,8 @@ public sealed class TreeBuilderScopedProjectionTests(ITestOutputHelper output)
 		Array.Sort(elapsed);
 		Array.Sort(allocations);
 		output.WriteLine($"Scoped inventory projection: {fileCount:N0} files / {scopeCount:N0} scopes; " +
-		                 $"median {elapsed[1]:F3} ms, range {elapsed[0]:F3}–{elapsed[2]:F3} ms; " +
-		                 $"median {allocations[1]:N0} B.");
+						 $"median {elapsed[1]:F3} ms, range {elapsed[0]:F3}–{elapsed[2]:F3} ms; " +
+						 $"median {allocations[1]:N0} B.");
 	}
 
 	[Theory]
@@ -263,7 +263,7 @@ public sealed class TreeBuilderScopedProjectionTests(ITestOutputHelper output)
 			if (entry.IsDirectory)
 			{
 				if (index != 0 && (entry.ParentIndex == 0 && !options.AllowedRootFolders.Contains(entry.Name) ||
-				    IgnoreDecisionEngine.EvaluateDirectory(entry.FullPath, entry.Name, entry.IsHidden, rules, evaluation).IsIgnored))
+					IgnoreDecisionEngine.EvaluateDirectory(entry.FullPath, entry.Name, entry.IsHidden, rules, evaluation).IsIgnored))
 					return null;
 				var children = new List<FileSystemNode>();
 				if (!entry.IsAccessDenied)
@@ -273,17 +273,17 @@ public sealed class TreeBuilderScopedProjectionTests(ITestOutputHelper output)
 							children.Add(child);
 				}
 				if (index != 0 && children.Count == 0 && !entry.IsAccessDenied &&
-				    (rules.IgnoreEmptyFolders || evaluation.IsIgnored && evaluation.ShouldTraverseIgnoredDirectory))
+					(rules.IgnoreEmptyFolders || evaluation.IsIgnored && evaluation.ShouldTraverseIgnoredDirectory))
 					return null;
 				if (index != 0 && !string.IsNullOrWhiteSpace(options.NameFilter) && children.Count == 0 &&
-				    !entry.Name.Contains(options.NameFilter, StringComparison.OrdinalIgnoreCase))
+					!entry.Name.Contains(options.NameFilter, StringComparison.OrdinalIgnoreCase))
 					return null;
 				return new FileSystemNode(entry.Name, entry.FullPath, true, entry.IsAccessDenied, children);
 			}
 			if (IgnoreDecisionEngine.EvaluateFile(entry.FullPath, entry.Name, entry.IsHidden, entry.Length,
-				    rules, rules.ShouldApplySmartIgnore(inventory.GetEntry(entry.ParentIndex).FullPath, true), evaluation).IsIgnored ||
-			    !IgnoreRuleSemantics.IsExtensionlessFileName(entry.Name) && !options.AllowedExtensions.Contains(Path.GetExtension(entry.Name)) ||
-			    !string.IsNullOrWhiteSpace(options.NameFilter) && !entry.Name.Contains(options.NameFilter, StringComparison.OrdinalIgnoreCase))
+					rules, rules.ShouldApplySmartIgnore(inventory.GetEntry(entry.ParentIndex).FullPath, true), evaluation).IsIgnored ||
+				!IgnoreRuleSemantics.IsExtensionlessFileName(entry.Name) && !options.AllowedExtensions.Contains(Path.GetExtension(entry.Name)) ||
+				!string.IsNullOrWhiteSpace(options.NameFilter) && !entry.Name.Contains(options.NameFilter, StringComparison.OrdinalIgnoreCase))
 				return null;
 			return new FileSystemNode(entry.Name, entry.FullPath, false, false, FileSystemNode.EmptyChildren);
 		}

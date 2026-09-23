@@ -77,13 +77,13 @@ public sealed class FileContentAnalyzerCoherenceTests
 		var analyzer = new FileContentAnalyzer();
 
 		foreach (var (path, expectedClassification) in new[]
-		         {
-			         (empty, FileContentClassification.Text),
-			         (utf8, FileContentClassification.Text),
-			         (utf16, FileContentClassification.Text),
-			         (binary, FileContentClassification.Binary),
-			         (large, FileContentClassification.TooLarge)
-		         })
+				 {
+					 (empty, FileContentClassification.Text),
+					 (utf8, FileContentClassification.Text),
+					 (utf16, FileContentClassification.Text),
+					 (binary, FileContentClassification.Binary),
+					 (large, FileContentClassification.TooLarge)
+				 })
 		{
 			var result = await ReadAsync(analyzer, path, operation, TestContext.Current.CancellationToken);
 			Assert.Equal(expectedClassification, result.Classification);

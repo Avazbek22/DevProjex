@@ -108,19 +108,26 @@ public sealed class ProjectScopeDiscoveryRootFactsMeasurementTests(ITestOutputHe
 				FactsBuildsOnScannerPaths = overlap.Sum(static group => group.Count()),
 				ScannerHookKinds = enumerations.GroupBy(static read => read.Point).Select(group => new
 				{
-					Point = group.Key.ToString(), Count = group.Count(), UniquePaths = group.Select(static read => read.Path).Distinct(PathComparer.Default).Count()
+					Point = group.Key.ToString(),
+					Count = group.Count(),
+					UniquePaths = group.Select(static read => read.Path).Distinct(PathComparer.Default).Count()
 				}).ToArray(),
 				Callbacks = probe.Callbacks.ToArray(),
 				FactsByPhase = facts.GroupBy(static read => read.Phase).Select(group => new
 				{
-					Phase = group.Key, Builds = group.Count(), UniquePaths = group.Select(static read => read.Path).Distinct(PathComparer.Default).Count(),
-					WorkMilliseconds = WorkMilliseconds(group), WallCoveredMilliseconds = WallCoveredMilliseconds(group),
+					Phase = group.Key,
+					Builds = group.Count(),
+					UniquePaths = group.Select(static read => read.Path).Distinct(PathComparer.Default).Count(),
+					WorkMilliseconds = WorkMilliseconds(group),
+					WallCoveredMilliseconds = WallCoveredMilliseconds(group),
 					AllocatedBytes = group.Sum(static read => read.AllocatedBytes)
 				}).ToArray(),
 				RepeatedPaths = factsByPath.Where(static group => group.Count() > 1).Select(group => new
 				{
-					Path = Path.GetRelativePath(projectRoot, group.Key), Builds = group.Count(),
-					Phases = group.Select(static read => read.Phase).ToArray(), WorkMilliseconds = WorkMilliseconds(group)
+					Path = Path.GetRelativePath(projectRoot, group.Key),
+					Builds = group.Count(),
+					Phases = group.Select(static read => read.Phase).ToArray(),
+					WorkMilliseconds = WorkMilliseconds(group)
 				}).OrderByDescending(static group => group.WorkMilliseconds).Take(16).ToArray(),
 				Diagnostics = counters
 			}));

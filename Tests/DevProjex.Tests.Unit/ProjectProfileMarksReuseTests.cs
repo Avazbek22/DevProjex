@@ -145,7 +145,7 @@ public sealed class ProjectProfileMarksReuseTests(ITestOutputHelper output)
 			TestContext.Current.CancellationToken);
 		Assert.True(write.Succeeded);
 		fixture.Store.LookupTransform = result => result with
-			{ RecoveryStatus = ProjectProfileLookupStatus.InvalidStorage };
+		{ RecoveryStatus = ProjectProfileLookupStatus.InvalidStorage };
 
 		var recovered = await fixture.LoadAsync();
 
@@ -347,7 +347,7 @@ public sealed class ProjectProfileMarksReuseTests(ITestOutputHelper output)
 			AfterLookup?.Invoke();
 			return omitLookupSnapshot
 				? new ProjectProfileLookupResult(result.Status, result.Profile, result.UpdatedUtc)
-					{ RecoveryStatus = result.RecoveryStatus }
+				{ RecoveryStatus = result.RecoveryStatus }
 				: result;
 		}
 
