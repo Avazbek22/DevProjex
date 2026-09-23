@@ -145,12 +145,18 @@ public sealed partial class TreeSitterDependencyFactExtractor : IDependencyFactE
 				ownsEntry = createdEntry;
 				try
 				{
-					content = await entry.Value.Value.ConfigureAwait(false);
+					var preparation = entry.Value.Value;
+					content = await (ownsEntry ? preparation : preparation.WaitAsync(cancellationToken))
+						.ConfigureAwait(false);
 					if (!content.CanCache)
 						RemovePreparedSource(key, entry);
 					else if (ownsEntry)
 						RegisterPreparedSourceWeight(key, entry, EstimatePreparedSourceBytes(content));
 					break;
+				}
+				catch (OperationCanceledException) when (!ownsEntry && cancellationToken.IsCancellationRequested)
+				{
+					throw;
 				}
 				catch (OperationCanceledException) when (!ownsEntry && !cancellationToken.IsCancellationRequested)
 				{

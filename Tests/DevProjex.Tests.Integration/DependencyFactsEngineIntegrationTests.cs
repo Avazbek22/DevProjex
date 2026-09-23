@@ -3381,6 +3381,48 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task PreparedSourceCache_CancelledSharedCallerDoesNotEvictOwner()
+	{
+		using var fixture = new TemporaryDirectory();
+		var source = fixture.CreateFile("Source.cs", "public sealed class Source { }\n");
+		var analyzer = new CoordinatedPreparedSourceAnalyzer();
+		using var extractor = new TreeSitterDependencyFactExtractor(new MissingGrammarLocator(), analyzer);
+		using var waiterCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+			TestContext.Current.CancellationToken);
+		var configuration = EmptyConfiguration();
+		var limits = new DependencyFactsLimits();
+
+		var owner = extractor.PrepareAsync(
+			fixture.Path, source, configuration, limits, TestContext.Current.CancellationToken).AsTask();
+		await analyzer.FirstReadStarted.Task.WaitAsync(
+			TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+		var waiter = extractor.PrepareAsync(
+			fixture.Path, source, configuration, limits, waiterCancellation.Token).AsTask();
+		Assert.False(waiter.IsCompleted);
+		Assert.Equal(1, analyzer.OpenCount);
+
+		try
+		{
+			waiterCancellation.Cancel();
+			await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+				waiter.WaitAsync(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken));
+			Assert.False(owner.IsCompleted);
+			Assert.Equal(1, extractor.CacheState.Entries);
+		}
+		finally
+		{
+			analyzer.ReleaseFirstRead();
+			await owner.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+		}
+
+		var prepared = await owner.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+		var warm = await extractor.PrepareAsync(
+			fixture.Path, source, configuration, limits, TestContext.Current.CancellationToken);
+		Assert.Same(prepared.Source, warm.Source);
+		Assert.Equal(1, analyzer.OpenCount);
+	}
+
+	[Fact]
 	public async Task Cache_RebindsFactsWhenConfigurationChangesFileOwnershipWithoutParsingSource()
 	{
 		using var fixture = new TemporaryDirectory();
