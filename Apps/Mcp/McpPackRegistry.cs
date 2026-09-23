@@ -34,7 +34,9 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 	private readonly Task _scavengeTask;
 	private long _allocatedBytes;
 	private int _activeCreates;
+	private int _activeReaders;
 	private bool _disposed;
+	private bool _cleanupStarted;
 	private Task? _disposeTask;
 
 	public McpPackRegistry(
@@ -290,6 +292,7 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 			if (entry is null)
 				throw Expired(StoredKindLocked(packId), _quotaEvictedPackIds.ContainsKey(packId));
 			entry.ActiveReaders++;
+			_activeReaders++;
 			entry.LastReadUtc = TimeProvider.GetUtcNow();
 		}
 		try
@@ -321,7 +324,8 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 			if (_disposeTask is null)
 			{
 				_disposed = true;
-				_disposeTask = DisposeCoreAsync(_activeCreates == 0);
+				var cleanupSession = TryBeginCleanupLocked();
+				_disposeTask = Task.Run(() => DisposeCoreAsync(cleanupSession));
 			}
 			disposal = _disposeTask;
 		}
@@ -397,10 +401,18 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 		lock (_sync)
 		{
 			_activeCreates--;
-			cleanupNow = _disposed && _activeCreates == 0;
+			cleanupNow = TryBeginCleanupLocked();
 		}
 		if (cleanupNow)
 			CleanupSessionDirectory();
+	}
+
+	private bool TryBeginCleanupLocked()
+	{
+		if (!_disposed || _cleanupStarted || _activeCreates != 0 || _activeReaders != 0)
+			return false;
+		_cleanupStarted = true;
+		return true;
 	}
 
 	private void CleanupSessionDirectory()
@@ -738,8 +750,15 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 
 	private void ReleaseReader(PackEntry entry)
 	{
+		bool cleanupNow;
 		lock (_sync)
+		{
 			entry.ActiveReaders--;
+			_activeReaders--;
+			cleanupNow = TryBeginCleanupLocked();
+		}
+		if (cleanupNow)
+			CleanupSessionDirectory();
 	}
 
 	private void Release(long bytes)

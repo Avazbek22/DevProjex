@@ -1680,6 +1680,33 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
+	public async Task PackRegistryDisposeDuringReadRemovesSessionAfterLastReaderCloses()
+	{
+		if (!OperatingSystem.IsWindows())
+			Assert.Skip("Open pack handles block session deletion on Windows.");
+		using var workspace = new TemporaryDirectory();
+		var registry = new McpPackRegistry(workspace.Path);
+		var sessionDirectory = registry.SessionDirectory;
+		var packId = await registry.StoreAsync("protected content", TestContext.Current.CancellationToken);
+		var first = registry.OpenReadDocument(packId);
+		var second = registry.OpenReadDocument(packId);
+		try
+		{
+			await registry.DisposeAsync().AsTask().WaitAsync(
+				TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+			Assert.True(Directory.Exists(sessionDirectory));
+			await first.DisposeAsync();
+			Assert.True(Directory.Exists(sessionDirectory));
+		}
+		finally
+		{
+			await first.DisposeAsync();
+			await second.DisposeAsync();
+		}
+		Assert.False(Directory.Exists(sessionDirectory));
+	}
+
+	[Fact]
 	public async Task PackRemovalIgnoresCleanupAccessFailures()
 	{
 		using var workspace = new TemporaryDirectory();
