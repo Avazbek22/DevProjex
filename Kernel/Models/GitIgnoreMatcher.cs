@@ -636,6 +636,13 @@ public sealed class GitIgnoreMatcher
         bool matchByNameOnly,
         bool hasEscapes)
     {
+        if (matchByNameOnly && !hasEscapes && pattern.Length > 2 &&
+            pattern.StartsWith("*.", StringComparison.Ordinal) && IsAscii(pattern) &&
+            pattern.AsSpan(1).IndexOfAny(GlobSpecialChars) < 0)
+        {
+            return RuleMatchKind.NameSuffix;
+        }
+
         // Literal rules dominate real .gitignore files. Keeping them out of Regex
         // reduces allocations at build time and avoids a Regex call for every path.
         if (hasEscapes || pattern.AsSpan().IndexOfAny(GlobSpecialChars) >= 0)
@@ -1152,6 +1159,7 @@ public sealed class GitIgnoreMatcher
     {
         Regex,
         NameLiteral,
+        NameSuffix,
         AnchoredPathLiteral,
         UnanchoredPathLiteral,
         AnchoredDirectoryLiteral,
@@ -1178,6 +1186,7 @@ public sealed class GitIgnoreMatcher
             MatchKind switch
             {
                 RuleMatchKind.NameLiteral => string.Equals(normalizedName, LiteralPattern, comparison),
+                RuleMatchKind.NameSuffix => MatchesNameSuffix(normalizedName, LiteralPattern, comparison),
                 RuleMatchKind.AnchoredPathLiteral => relativePath.Equals(LiteralPattern.AsSpan(), comparison),
                 RuleMatchKind.UnanchoredPathLiteral => MatchesUnanchoredPathLiteral(relativePath, LiteralPattern, comparison),
                 RuleMatchKind.AnchoredDirectoryLiteral => MatchesAnchoredDirectoryLiteral(relativePath, LiteralPattern, isDirectory, comparison),
@@ -1189,6 +1198,18 @@ public sealed class GitIgnoreMatcher
                     projectedRelativePath,
                     projectedName)
             };
+
+        private static bool MatchesNameSuffix(
+            ReadOnlySpan<char> name,
+            string literalPattern,
+            StringComparison comparison)
+        {
+            var suffix = literalPattern.AsSpan(1);
+            // Preserve the regex end anchor's acceptance of one trailing line feed.
+            var matchesSuffix = name.EndsWith(suffix, comparison) ||
+                                !name.IsEmpty && name[^1] == '\n' && name[..^1].EndsWith(suffix, comparison);
+            return matchesSuffix && !name.Contains('/');
+        }
 
         private bool MatchesRegex(
             ReadOnlySpan<char> relativePath,
