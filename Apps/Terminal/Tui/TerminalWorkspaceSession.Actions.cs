@@ -1903,13 +1903,11 @@ internal sealed partial class TerminalWorkspaceSession
 		ArgumentNullException.ThrowIfNull(setRepositoryStateInconsistent);
 
 		var switched = await checkout(cancellationToken).ConfigureAwait(false);
-		if (!switched)
-			return false;
-
+		// A failed reset or checkout may have already changed part of the cached worktree.
 		setRepositoryStateInconsistent(true);
 		await refresh(CancellationToken.None).ConfigureAwait(false);
 		setRepositoryStateInconsistent(false);
-		return true;
+		return switched;
 	}
 
 	private async Task BuildAndApplyStructuralRefreshAsync(

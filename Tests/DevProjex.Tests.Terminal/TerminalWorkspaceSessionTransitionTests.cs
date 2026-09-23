@@ -215,6 +215,50 @@ public sealed class TerminalWorkspaceSessionTransitionTests
 	}
 
 	[Fact]
+	public async Task FailedRepositoryMutationStillReconcilesTheWorkingTree()
+	{
+		using var cancellation = new CancellationTokenSource();
+		var inconsistent = false;
+		var refreshed = false;
+
+		var succeeded = await TerminalWorkspaceSession.RunPostRepositoryMutationRefreshAsync(
+			_ =>
+			{
+				cancellation.Cancel();
+				return Task.FromResult(false);
+			},
+			token =>
+			{
+				Assert.False(token.CanBeCanceled);
+				Assert.True(inconsistent);
+				refreshed = true;
+				return Task.CompletedTask;
+			},
+			value => inconsistent = value,
+			cancellation.Token);
+
+		Assert.False(succeeded);
+		Assert.True(refreshed);
+		Assert.False(inconsistent);
+	}
+
+	[Fact]
+	public async Task FailedRepositoryMutationKeepsExportsBlockedIfReconciliationFails()
+	{
+		var inconsistent = false;
+
+		await Assert.ThrowsAsync<InvalidOperationException>(() =>
+			TerminalWorkspaceSession.RunPostRepositoryMutationRefreshAsync(
+				_ => Task.FromResult(false),
+				_ => Task.FromException(new InvalidOperationException("refresh failed")),
+				value => inconsistent = value,
+				TestContext.Current.CancellationToken));
+
+		Assert.True(inconsistent);
+		Assert.False(TerminalWorkspaceSession.IsRepositoryExportAllowed(inconsistent));
+	}
+
+	[Fact]
 	public void RepositoryUpdateUsesTheMutationConsistencyRefresh()
 	{
 		var source = File.ReadAllText(Path.Combine(
