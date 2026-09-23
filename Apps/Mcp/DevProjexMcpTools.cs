@@ -121,8 +121,15 @@ internal sealed class DevProjexMcpTools(
 		"Lists configured local projects, saved profiles, and baseline filters. Use it to choose among roots or inspect active policy; use get_tree instead for structure. Returns indexes, protected names and paths, root types, profiles, and Git/exclusion policy. Local project accepts #index, a unique listed name, or a path; remote URLs require opt-in. This tool has no parameters.")]
 	public Task<CallToolResult> ListProjects(
 		RequestContext<CallToolRequestParams> request,
-		CancellationToken cancellationToken) =>
-		ExecuteAsync("list_projects", request, async () =>
+		CancellationToken cancellationToken)
+	{
+		return liveContext is null
+			? ExecuteAsync("list_projects", request, ListAsync)
+			: _projectOperation.RunAsync(
+				() => ExecuteAsync("list_projects", request, ListAsync),
+				cancellationToken);
+
+		async Task<CallToolResult> ListAsync()
 		{
 			_ = McpJsonArguments.Create(request.Params, EmptyArgumentNames);
 			var validatedRoots = roots.Roots
@@ -231,7 +238,8 @@ internal sealed class DevProjexMcpTools(
 			maskedReferences.Length == 0
 				? null
 				: $"[Project reference] A project name or path was masked; use {string.Join(" or ", maskedReferences)}.");
-		});
+		}
+	}
 
 	[Description(
 		"Returns the filtered project structure without file contents. Use it to orient or find files by name; use analyze instead for size and token metrics, or pack_context for multi-file content. Returns Markdown, text, JSON, or XML within 2,000 lines and 50,000 characters. paths selects literal locations; include_patterns selects names or several directories in one call, for example include_patterns=[\"src/middleware/{powered-by,body-limit,bearer-auth}/**/*handler*.ts\"]. format=markdown|text|json|xml; max_depth=0..1000 counts levels below the project root; git_scope and other filters only narrow.")]
