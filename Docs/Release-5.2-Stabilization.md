@@ -457,6 +457,8 @@ not a unique-test total.
 | TUI failed-mutation reconciliation | `850fc5f4` | A failed managed Git update or branch switch may have changed part of the cached worktree. TUI now gates export and performs the existing noncancelable structural refresh even when the mutation reports `false`, then retains the original failure outcome; refresh failure leaves export blocked. Two deterministic regressions failed before, and 13 focused transition/update/branch Terminal checks passed afterward. Network or preflight failures now also incur a refresh on the error path. |
 | Profile snapshot atomic replacement | `651d110b` | The profile read-cache identity now includes creation time already available from the same `FileInfo.Refresh`, alongside length, last-write time, and the 4 KiB prefix; no extra content read was added. A same-length/restored-mtime atomic replacement changing a later profile returned stale selection before the fix. The regression failed before and 240 focused Unit checks passed afterward. Filesystems that do not distinguish replacement creation times skip the new test; a replacement restoring every identity field still needs a full hash to detect. |
 | Managed branch-switch cancellation | `27334642` | Cancellation remains effective through branch verification/fetch and immediately before detach. Once managed checkout starts, detach and worktree-branch recording use caller-independent tokens under their existing per-command two-minute deadlines, allowing TUI to reconcile true or false outcomes. Two regressions failed before; 6 focused Unit, 3 local-repository Integration, and 1 branch PTY check passed afterward. The earlier tracked-branch config write does not materialize the worktree; interruption there remains a Git-config error-path risk, not a demonstrated partial-tree defect. |
+| Managed cache staging links | `48c7d70a` | Clone staging creation rejects a linked staging root, while publication requires an immediate child of that root and rejects linked entries before and after the move. Three deterministic local-link regressions failed before the safeguards; 6 focused Unit checks and a local clone-to-session Integration control passed afterward. A hostile concurrent filesystem replacement remains outside this path-based API's guarantee. |
+| MCP batch file continuation options | `6cc00d09` | Generated `get_file` continuation arguments now retain the request's explicit profile and exclusions, including an explicitly empty exclusion list. Without these, a later page could resolve a different selection and fail to read the same file. Two regressions failed before the fix; 5 focused Integration checks passed afterward. |
 
 The CLI dense-search dictionary experiment was intentionally discarded: three 5,000-hit
 process samples per variant gave medians of 475 ms for the prior lookup and 480 ms for
@@ -508,6 +510,10 @@ speedup is claimed.
   aggregate limit needs ordered producer-side live admission and skipped-tail accounting;
   a one-time size recheck cannot close the same-request race. No unverified shared-pipeline
   change was added before release.
+- Selected-content source admission still checks filesystem paths around the read.
+  Concurrent changes to ancestor directories on Unix are not covered by the final-file
+  no-follow open; a strict physical-root guarantee requires descriptor-relative traversal.
+  This was not broadened into a late cross-platform I/O rewrite without comparable tests.
 
 ## Cleanup status
 
