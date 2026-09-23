@@ -349,6 +349,75 @@ public sealed class MainWindowStartupAutomationUiTests
 	}
 
 	[AvaloniaFact]
+	public async Task StartupUi_LastRetriesRecentHistoryAfterConstructorLockContention()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var recentFolder = Path.Combine(project.RootPath, "history", "recent");
+		Directory.CreateDirectory(recentFolder);
+		var recentStore = new RecentProjectsStore(() => appDataPath);
+		var db = recentStore.Load();
+		Assert.Single(recentStore.AddFolder(db, recentFolder).RecentFolders);
+
+		var options = new DesktopStartupOptions(
+			new DesktopOpenRequest(UseLastProject: true, Language: AppLanguage.En));
+		var lockPath = recentStore.GetPath() + ".lock";
+		MainWindow window;
+		using (var heldLock = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+		{
+			window = CreateStartupWindow(options, appDataPath);
+		}
+
+		try
+		{
+			window.Show();
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => UiTestDriver.GetViewModel(window).IsProjectLoaded,
+				"saved recent project to load after the constructor lock is released");
+			Assert.Equal(GetComparablePath(recentFolder), GetComparablePath(GetCurrentPath(window)));
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task DesktopOpen_LastRetriesRecentHistoryAfterDeferredLockContention()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var recentFolder = Path.Combine(project.RootPath, "history", "recent");
+		Directory.CreateDirectory(recentFolder);
+		var recentStore = new RecentProjectsStore(() => appDataPath);
+		var db = recentStore.Load();
+		Assert.Single(recentStore.AddFolder(db, recentFolder).RecentFolders);
+
+		var window = CreateStartupWindow(DesktopStartupOptions.Default, appDataPath);
+		try
+		{
+			var request = new DesktopOpenProjectRequest(new DesktopOpenRequest(UseLastProject: true));
+			var lockPath = recentStore.GetPath() + ".lock";
+			using (var heldLock = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+			{
+				window.Show();
+				var unavailable = await InvokeDesktopInteractionAsync(window, request);
+				Assert.False(unavailable.Success);
+				Assert.Equal("DPX-DESKTOP-NO-RECENT-PROJECT", unavailable.ErrorCode);
+			}
+
+			var retried = await InvokeDesktopInteractionAsync(window, request);
+			Assert.True(retried.Success, retried.ErrorCode ?? "Recent project did not open after lock release.");
+			Assert.Equal(GetComparablePath(recentFolder), GetComparablePath(GetCurrentPath(window)));
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task StartupUi_LastSkipsMissingRecentFolderAndOpensFirstExistingFolder()
 	{
 		using var project = UiTestProject.CreateDefault();

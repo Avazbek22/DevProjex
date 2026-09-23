@@ -911,7 +911,7 @@ public partial class MainWindow
     private string? _currentCachedRepoPath;
     private IRepositoryCacheSession? _currentRepositorySession;
     private RecentProjectsDb _recentProjectsDb = new();
-    private Task<RecentProjectsDb>? _recentProjectsLoadTask;
+    private Task<RecentProjectsLoadResult>? _recentProjectsLoadTask;
     private bool _recentProjectsLoaded;
     private bool _recentMenuMaterialized;
     private Task? _recentFolderAvailabilityRefreshTask;

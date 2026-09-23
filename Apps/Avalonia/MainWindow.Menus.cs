@@ -1,5 +1,6 @@
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Avalonia.Services;
+using DevProjex.Infrastructure.RecentProjects;
 
 namespace DevProjex.Avalonia;
 
@@ -7,15 +8,19 @@ public partial class MainWindow
 {
     private static readonly TimeSpan RecentProjectsStartupStoreLockTimeout =
         TimeSpan.FromMilliseconds(100);
+    private static readonly TimeSpan RecentProjectsDeferredStoreLockTimeout =
+        TimeSpan.FromSeconds(5);
 
     #region Recent Projects
 
     private void LoadRecentProjectsSynchronously()
     {
-        _recentProjectsDb = _recentProjectsStore.LoadForStartup(
+        var result = _recentProjectsStore.LoadForStartupWithStatus(
             RecentProjectsStartupStoreLockTimeout);
-        _recentProjectsLoadTask = Task.FromResult(_recentProjectsDb);
-        _recentProjectsLoaded = true;
+        _recentProjectsDb = result.Database;
+        _recentProjectsLoaded = result.Status != RecentProjectsLoadStatus.TemporarilyUnavailable;
+        if (_recentProjectsLoaded)
+            _recentProjectsLoadTask = Task.FromResult(result);
         SyncRecentProjectsToViewModel();
     }
 
@@ -31,16 +36,30 @@ public partial class MainWindow
 
         // Keep persistence IO off the dispatcher, but share one load between startup,
         // the Recent menu, Desktop IPC, and the Git clone dialog.
-        _recentProjectsLoadTask ??= Task.Run(
-            () => _recentProjectsStore.LoadForStartup(RecentProjectsStartupStoreLockTimeout),
+        if (_recentProjectsLoadTask is { IsCompletedSuccessfully: true } completed &&
+            completed.Result.Status == RecentProjectsLoadStatus.TemporarilyUnavailable)
+        {
+            _recentProjectsLoadTask = null;
+        }
+
+        var loadTask = _recentProjectsLoadTask ??= Task.Run(
+            () => _recentProjectsStore.LoadForStartupWithStatus(
+                RecentProjectsDeferredStoreLockTimeout),
             CancellationToken.None);
 
-        var loaded = await _recentProjectsLoadTask.WaitAsync(cancellationToken);
+        var result = await loadTask.WaitAsync(cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         if (_recentProjectsLoaded)
             return;
 
-        _recentProjectsDb = loaded;
+        if (result.Status == RecentProjectsLoadStatus.TemporarilyUnavailable)
+        {
+            if (ReferenceEquals(_recentProjectsLoadTask, loadTask))
+                _recentProjectsLoadTask = null;
+            return;
+        }
+
+        _recentProjectsDb = result.Database;
         _recentProjectsLoaded = true;
         SyncRecentProjectsToViewModel();
     }
