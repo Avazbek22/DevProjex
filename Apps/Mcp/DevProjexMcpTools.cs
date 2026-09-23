@@ -1788,6 +1788,8 @@ internal sealed class DevProjexMcpTools(
 		McpGetFileRequestSet requestSet,
 		CancellationToken cancellationToken)
 	{
+		var profile = arguments.OptionalString("profile");
+		var exclusions = ParseExclusionsArgument(arguments);
 		var plan = await Projects.BuildPlanAsync(
 			arguments.OptionalString("project"),
 			arguments.OptionalString("branch"),
@@ -1796,13 +1798,13 @@ internal sealed class DevProjexMcpTools(
 				: requestSet.Requests.Select(static item => item.Path).ToArray(),
 			includePatterns: null,
 			excludePatterns: null,
-			profile: arguments.OptionalString("profile"),
+			profile: profile,
 			trackedOnly: false,
 			gitScope: null,
 			maximumFileBytes: null,
 			cancellationToken,
 			includeOutputMetrics: false,
-			exclusions: ParseExclusionsArgument(arguments),
+			exclusions: exclusions,
 			tolerateMissingPaths: liveContext is not null,
 			allowNamedPathsOutsideSelection: liveContext is not null).ConfigureAwait(false);
 		RecordPlan(plan);
@@ -1882,6 +1884,8 @@ internal sealed class DevProjexMcpTools(
 				plan.SourceIdentity is { SourceType: ProjectSourceType.GitClone } remote
 					? remote.Branch
 					: null),
+			profile,
+			exclusions,
 			cancellationToken);
 		journal?.RecordDeliveredPaths(plan.SourceRoot, rendered.DeliveredPaths);
 		foreach (var returned in rendered.DeliveredRanges)
@@ -2122,6 +2126,8 @@ internal sealed class DevProjexMcpTools(
 		IReadOnlyList<McpResolvedFileReadRequest> requests,
 		IReadOnlyDictionary<string, TransformedTextFile> transformed,
 		McpDeclarationReadContext continuationContext,
+		string? profile,
+		IReadOnlyList<ProjectExclusion>? exclusions,
 		CancellationToken cancellationToken)
 	{
 		var status = requests
@@ -2242,7 +2248,9 @@ internal sealed class DevProjexMcpTools(
 					requests,
 					group,
 					page,
-					continuationContext));
+					continuationContext,
+					profile,
+					exclusions));
 			}
 			else if (page.TotalLines > 0 && group.EndLine > page.TotalLines)
 			{
@@ -2290,7 +2298,9 @@ internal sealed class DevProjexMcpTools(
 		IReadOnlyList<McpResolvedFileReadRequest> requests,
 		McpMergedFileReadGroup group,
 		McpTextPage page,
-		McpDeclarationReadContext context)
+		McpDeclarationReadContext context,
+		string? profile,
+		IReadOnlyList<ProjectExclusion>? exclusions)
 	{
 		var nextLine = page.NextLine ?? page.EndLine + 1;
 		var arguments = new Dictionary<string, object?>(StringComparer.Ordinal)
@@ -2299,6 +2309,10 @@ internal sealed class DevProjexMcpTools(
 		};
 		if (context.Branch is { Length: > 0 } branch)
 			arguments["branch"] = branch;
+		if (profile is not null)
+			arguments["profile"] = profile;
+		if (exclusions is not null)
+			arguments["exclusions"] = exclusions.Select(ProjectSelectionTokens.ToToken).ToArray();
 
 		string heading;
 		if (page.NextColumn is { } nextColumn && nextColumn > 1)

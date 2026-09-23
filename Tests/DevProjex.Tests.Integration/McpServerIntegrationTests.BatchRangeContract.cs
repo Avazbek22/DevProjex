@@ -1,3 +1,4 @@
+using DevProjex.Application.Context;
 using DevProjex.Mcp;
 
 namespace DevProjex.Tests.Integration;
@@ -111,6 +112,76 @@ public sealed partial class McpServerIntegrationTests
 		var range = Assert.Single(request.GetProperty("ranges").EnumerateArray().ToArray());
 		Assert.True(range.GetProperty("start_line").GetInt32() > 1);
 		Assert.Equal(1_600, range.GetProperty("end_line").GetInt32());
+	}
+
+	[Fact]
+	public async Task BatchReadScalarContinuationRetainsExplicitProfile()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, ".gitignore"), "Ignored.txt\n");
+		File.WriteAllText(Path.Combine(project, "Ignored.txt"), new string('x', 60_000) + "tail-marker\n");
+		var profile = WriteUnfilteredPortableProfile(project);
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync("get_file", new Dictionary<string, object?>
+		{
+			["profile"] = profile,
+			["requests"] = new object[]
+			{
+				new
+				{
+					path = "Ignored.txt",
+					ranges = new[] { new { start_line = 1, end_line = 1 } }
+				}
+			}
+		});
+		Assert.NotEqual(true, result.IsError);
+
+		var arguments = ReadContinuationArguments(Text(result), "Ignored.txt");
+		Assert.Equal(profile, arguments.GetProperty("profile").GetString());
+		Assert.True(arguments.GetProperty("start_column").GetInt32() > 1);
+		var continued = await server.CallAsync("get_file",
+			JsonSerializer.Deserialize<Dictionary<string, object?>>(arguments.GetRawText()));
+		Assert.NotEqual(true, continued.IsError);
+		Assert.Contains("tail-marker", Text(continued), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task BatchReadLineContinuationRetainsDelegatedExclusions()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(
+			Path.Combine(project, ".Hidden.txt"),
+			string.Concat(Enumerable.Range(1, 1_600).Select(static line => $"line-{line:D4}\n")));
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			exclusions: [ProjectExclusion.DotFiles],
+			agentExclusions: true);
+
+		var result = await server.CallAsync("get_file", new Dictionary<string, object?>
+		{
+			["exclusions"] = Array.Empty<string>(),
+			["requests"] = new object[]
+			{
+				new
+				{
+					path = ".Hidden.txt",
+					ranges = new[] { new { start_line = 1, end_line = 1_600 } }
+				}
+			}
+		});
+		Assert.NotEqual(true, result.IsError);
+
+		var arguments = ReadContinuationArguments(Text(result), ".Hidden.txt");
+		Assert.Empty(arguments.GetProperty("exclusions").EnumerateArray());
+		Assert.True(arguments.TryGetProperty("requests", out _));
+		var continued = await server.CallAsync("get_file",
+			JsonSerializer.Deserialize<Dictionary<string, object?>>(arguments.GetRawText()));
+		Assert.NotEqual(true, continued.IsError);
+		Assert.Contains("line-1600", Text(continued), StringComparison.Ordinal);
 	}
 
 	private static JsonElement ReadContinuationArguments(string text, string expectedPath)
