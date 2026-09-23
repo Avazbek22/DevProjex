@@ -280,7 +280,9 @@ public sealed partial class DependencyFactsEngine : IDisposable
 								DependencyEngineDiagnostics.RecordFileCacheHit();
 							try
 							{
-								extracted = await lazy.Value.Value.ConfigureAwait(false);
+								var extraction = lazy.Value.Value;
+								extracted = await (shared ? extraction.WaitAsync(token) : extraction)
+									.ConfigureAwait(false);
 								if (shared)
 									Interlocked.Increment(ref reusedFiles);
 								if (!extracted.CanCache)
@@ -288,6 +290,10 @@ public sealed partial class DependencyFactsEngine : IDisposable
 								else if (!shared)
 									RegisterFileCacheWeight(key, lazy, EstimateFileFactsBytes(extracted));
 								break;
+							}
+							catch (OperationCanceledException) when (shared && token.IsCancellationRequested)
+							{
+								throw;
 							}
 							catch (OperationCanceledException) when (shared && !token.IsCancellationRequested)
 							{

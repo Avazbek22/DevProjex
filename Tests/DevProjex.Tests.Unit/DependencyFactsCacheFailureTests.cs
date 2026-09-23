@@ -140,6 +140,58 @@ public sealed class DependencyFactsCacheFailureTests(ITestOutputHelper output)
 	}
 
 	[Fact]
+	public async Task CancelledSharedExtractionWaiter_ReturnsBeforeOwnerCompletesWithoutEvictingItsFile()
+	{
+		using var fixture = new TemporaryDirectory();
+		var file = fixture.CreateFile("Source.cs", string.Empty);
+		using var waiterCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+			TestContext.Current.CancellationToken);
+		var extractionStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		using var releaseExtraction = new ManualResetEventSlim();
+		var extractor = new ControlledExtractor
+		{
+			BeforeExtract = invocation =>
+			{
+				if (invocation != 1) return;
+				extractionStarted.SetResult();
+				if (!releaseExtraction.Wait(TimeSpan.FromSeconds(10)))
+					throw new TimeoutException("The owner extraction was not released.");
+			}
+		};
+		using var engine = new DependencyFactsEngine(extractor, new ConfigurationProvider());
+		using var diagnostics = DependencyEngineDiagnostics.BeginMeasurement();
+		var owner = engine.IndexAsync(fixture.Path, [file],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		try
+		{
+			await extractionStarted.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+			var waiter = engine.IndexAsync(fixture.Path, [file], cancellationToken: waiterCancellation.Token);
+			Assert.True(SpinWait.SpinUntil(
+				() => diagnostics.Capture().FileCacheHits > 0,
+				TimeSpan.FromSeconds(5)));
+
+			waiterCancellation.Cancel();
+			await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+				waiter.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken));
+			Assert.False(owner.IsCompleted);
+		}
+		finally
+		{
+			releaseExtraction.Set();
+		}
+
+		var snapshot = await owner;
+		Assert.Equal(DependencyFileStatus.Supported, Assert.Single(snapshot.Files).Status);
+		Assert.Equal(1, extractor.ParseCount);
+		Assert.Equal(1, engine.CacheState.Files);
+		var warm = await engine.IndexAsync(fixture.Path, [file],
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Equal(0, warm.Metrics.ParsedFiles);
+		Assert.Equal(1, extractor.ParseCount);
+	}
+
+	[Fact]
 	public async Task CancelledSharedExtraction_DoesNotCancelAnotherIndexRequest()
 	{
 		using var fixture = new TemporaryDirectory();
