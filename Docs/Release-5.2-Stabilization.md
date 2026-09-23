@@ -597,6 +597,12 @@ speedup is claimed.
   The button always fails for folder conflicts. Hiding the unsupported action versus
   enabling destructive folder replacement is a product choice recorded in PR #451;
   folder-export behavior was not changed in this branch.
+- TUI project export shows an ordinary completion status when Hide Secrets or Hide
+  Private Data excludes files that could not be inspected. The generated folder or ZIP
+  includes a localized `DEVPROJEX-NOTICE.txt` naming the omitted files, and CLI warns
+  immediately, but the TUI success view has no structured warning channel. Adding an
+  immediate TUI warning is a UX/result-contract choice recorded in PR #451; no export
+  contents or status text were changed in this branch.
 - Two GUI windows that both loaded a missing local project profile can lose independent
   first edits: the second save has no baseline, treats every selection field as changed,
   and can overwrite the first window's setting. Normal TUI editing keeps a pre-edit
