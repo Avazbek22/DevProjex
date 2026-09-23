@@ -499,6 +499,8 @@ not a unique-test total.
 | Theme startup-lock persistence | `2a38b325` | When the theme store is temporarily unavailable during startup, subsequent edits merge only explicitly changed sliders, mode, and effect into the latest saved document rather than replacing a preset from factory fallback values. The data-loss regression failed before the fix; 17 session, 41 store, and 3 headless startup UI checks passed afterward. Normal loaded sessions retain full-preset persistence. During startup contention, the visible theme may remain at fallback values until the next launch. |
 | TUI human-readable context planning | `0dcadc81` | TUI Text/Markdown context preparation and actual export now use structural selection reprojection instead of computing content metrics unused by these formats; JSON/XML retain their full-metrics plan. Two regressions failed before the fix with an unwanted metric call; 11 targeted/adjacent Release checks passed afterward, including exact output-byte parity and summary characters/tokens. The earlier same-binary DevProjex planning proxy measured 47.58 → 8.67 ms for these two plan paths, but no end-to-end context-export speedup is claimed. |
 | MCP pack reader-aware cleanup | `22cb6784` | Disposing the pack registry with open read leases no longer leaves its temporary session directory behind on Windows. Cleanup waits for both active creates and readers, then runs once after the final handle closes without blocking registry disposal on the reader. The Windows regression failed before the fix; 5 focused Unit and 2 Integration controls passed afterward. |
+| CLI profile planning | `68a87049` | `profile save` and `profile import --apply` now build the same selection/diagnostics without unused content metrics. Both new regressions failed before the fix; 43 focused and adjacent Release Terminal checks passed afterward. A representative same-binary DevProjex planning probe at 2,746 files eliminated 2,746 metrics calls and 2,317 full reads (29,050,444 bytes); paired medians were 156.29 → 130.41 ms for its broader full-versus-deferred TUI-open paths. That probe is not a direct CLI command speedup measurement. |
+| Search read-hint manual marks | `c3675602` | A local-profile symbol-search hint now retains `--profile local` when effective manual secret marks exist, so its suggested follow-up does not silently drop that protection. For a remote source whose public URL cannot reproduce the protected checkout/profile, no runnable read command is emitted. Both regressions failed before the fix; 26 focused Search/redaction controls passed, followed by four final wording and standard-path controls. |
 
 The CLI dense-search dictionary experiment was intentionally discarded: three 5,000-hit
 process samples per variant gave medians of 475 ms for the prior lookup and 480 ms for
@@ -579,6 +581,14 @@ speedup is claimed.
   first archive. Folder export chooses a free suffix, while the GUI file picker has an
   overwrite prompt. Changing the service default without an explicit GUI-confirmed
   overwrite signal could break that flow, so this behavior needs a product decision.
+- Two GUI windows that both loaded a missing local project profile can lose independent
+  first edits: the second save has no baseline, treats every selection field as changed,
+  and can overwrite the first window's setting. Normal TUI editing keeps a pre-edit
+  baseline, while explicit imported-profile publication intentionally does not. A safe
+  GUI baseline must be captured before user edits, but filter controls are currently
+  editable during asynchronous initial load; disabling them briefly or tracking edit
+  intent changes the loading UX. This release branch leaves the behavior unchanged
+  pending the product decision recorded in PR #451.
 
 ## Cleanup status
 
