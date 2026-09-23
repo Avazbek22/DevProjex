@@ -7,6 +7,8 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 {
 	private const string MaximumResultSizeKey = "anthropic/maxResultSizeChars";
 	private const string SearchHintKey = "anthropic/searchHint";
+	private const string ProjectAddressDescription =
+		" A local project accepts a unique listed name, an absolute path returned by list_projects, or a listed #index.";
 	private readonly IReadOnlyList<McpServerTool> _tools;
 
 	public DevProjexMcpToolCatalog(DevProjexMcpTools target, bool allowRemote, bool agentExclusions = false,
@@ -96,6 +98,8 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 			BindingFlags.Instance | BindingFlags.Public) ??
 					 throw new MissingMethodException(typeof(DevProjexMcpTools).FullName, methodName);
 		var description = method.GetCustomAttribute<System.ComponentModel.DescriptionAttribute>()?.Description;
+		if (name is "get_tree" or "analyze" or "pack_context" or "search_project" or "related_files" or "get_file")
+			description += ProjectAddressDescription;
 		var options = new McpServerToolCreateOptions
 		{
 			Name = name,
@@ -187,7 +191,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	private const string CompactProjectProperty = """
 	"project": {
 	  "type": "string",
-	  "description": "Listed #index, unique name, path, or allowed Git URL; omit with one local root."
+	  "description": "Listed #index, unique listed name, absolute path returned by list_projects, or allowed Git URL; omit with one local root."
 	}
 	""";
 

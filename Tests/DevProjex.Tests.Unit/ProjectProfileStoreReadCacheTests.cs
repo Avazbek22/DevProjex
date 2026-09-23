@@ -67,6 +67,50 @@ public sealed class ProjectProfileStoreReadCacheTests
 	}
 
 	[Fact]
+	public void AtomicReplacementBeyondHeaderWithRestoredTimestampInvalidatesSnapshot()
+	{
+		using var temporary = new TemporaryDirectory();
+		var appData = temporary.CreateFolder("data");
+		var projects = Enumerable.Range(0, 100)
+			.Select(index => temporary.CreateFolder($"project-{index:D3}"))
+			.ToArray();
+		var writer = new ProjectProfileStore(() => appData);
+		var requests = projects
+			.Select((project, index) => new ProjectProfileSaveRequest(
+				project,
+				Profile([index == projects.Length - 1 ? "alpha" : $"src/{index:D3}"]),
+				DateTimeOffset.UnixEpoch.AddSeconds(index + 1)))
+			.ToArray();
+		Assert.Equal(
+			projects.Length,
+			writer.TrySaveProfilesWithResult(requests, TimeSpan.FromSeconds(5)).SavedProjectPaths.Count);
+
+		var reader = new ProjectProfileStore(() => appData);
+		var targetProject = projects[^1];
+		Assert.Equal(["alpha"], reader.LookupProfile(targetProject, TimeSpan.FromSeconds(1)).Profile!.SelectedPaths);
+		var initialParses = reader.DocumentParseCount;
+		var primary = writer.GetPath();
+		var original = File.ReadAllText(primary);
+		Assert.True(original.IndexOf("alpha", StringComparison.Ordinal) > 4 * 1024);
+		var modified = original.Replace("alpha", "bravo", StringComparison.Ordinal);
+		Assert.Equal(original.Length, modified.Length);
+		Assert.Equal(original[..(4 * 1024)], modified[..(4 * 1024)]);
+		var creationTime = File.GetCreationTimeUtc(primary);
+		var timestamp = File.GetLastWriteTimeUtc(primary);
+		var replacement = Path.Combine(Path.GetDirectoryName(primary)!, "replacement.json");
+		File.WriteAllText(replacement, modified);
+		File.SetLastWriteTimeUtc(replacement, timestamp);
+		File.Move(replacement, primary, overwrite: true);
+		Assert.Equal(timestamp, File.GetLastWriteTimeUtc(primary));
+		if (creationTime == File.GetCreationTimeUtc(primary))
+			Assert.Skip("This filesystem does not distinguish replacement-file creation times.");
+
+		var changed = reader.LookupProfile(targetProject, TimeSpan.FromSeconds(1));
+		Assert.Equal(["bravo"], changed.Profile!.SelectedPaths);
+		Assert.Equal(initialParses + 2, reader.DocumentParseCount);
+	}
+
+	[Fact]
 	public void DifferentProjectLookupsShareTheValidatedDatabaseSnapshot()
 	{
 		using var temporary = new TemporaryDirectory();

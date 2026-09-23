@@ -2646,6 +2646,153 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		Assert.DoesNotContain("must-not-enter", document, StringComparison.Ordinal);
 	}
 
+	[Theory]
+	[InlineData(ProjectContextDocumentFormat.Text, false)]
+	[InlineData(ProjectContextDocumentFormat.Markdown, false)]
+	[InlineData(ProjectContextDocumentFormat.Json, false)]
+	[InlineData(ProjectContextDocumentFormat.Xml, false)]
+	[InlineData(ProjectContextDocumentFormat.Text, true)]
+	[InlineData(ProjectContextDocumentFormat.Markdown, true)]
+	[InlineData(ProjectContextDocumentFormat.Json, true)]
+	[InlineData(ProjectContextDocumentFormat.Xml, true)]
+	public async Task BoundedContext_LocalUserPathFollowsHidePrivateDataSetting(
+		ProjectContextDocumentFormat format,
+		bool hidePrivateData)
+	{
+		using var temporary = new TemporaryDirectory();
+		var projectRoot = temporary.CreateDirectory("private-path-project");
+		temporary.CreateFile("private-path-project/source.txt", "content");
+		var plan = await BuildPlanAsync(projectRoot, hideSecrets: false, hidePrivateData);
+		var privateRoot = OperatingSystem.IsWindows()
+			? @"C:\Users\private-path-owner\project"
+			: "/home/private-path-owner/project";
+		var tree = new TreeNodeDescriptor("project", privateRoot, true, false, "folder", []);
+		plan = plan with
+		{
+			SourceRoot = privateRoot,
+			EffectiveTree = tree,
+			ProjectedTree = tree,
+			IncludedFiles = [],
+			Diagnostics =
+			[
+				new ContextDiagnostic(
+					"DPX-TEST-DIAGNOSTIC",
+					ContextDiagnosticSeverity.Warning,
+					"Diagnostic path is present.",
+					privateRoot)
+			]
+		};
+		var document = await new ProjectContextDocumentService(
+			new TreeExportService(),
+			new FileContentAnalyzer()).BuildAsync(
+			plan,
+			ProjectContextView.TreeContent,
+			format,
+			new ProjectContextDocumentLimits(),
+			TestContext.Current.CancellationToken);
+
+		if (hidePrivateData)
+		{
+			Assert.Contains(OutputRootPathPresentation.LocalUserPlaceholder, document, StringComparison.Ordinal);
+			Assert.DoesNotContain("private-path-owner", document, StringComparison.Ordinal);
+		}
+		else
+		{
+			Assert.Contains("private-path-owner", document, StringComparison.Ordinal);
+			Assert.DoesNotContain(OutputRootPathPresentation.LocalUserPlaceholder, document, StringComparison.Ordinal);
+		}
+	}
+
+	[Theory]
+	[InlineData(ProjectContextDocumentFormat.Text, false)]
+	[InlineData(ProjectContextDocumentFormat.Markdown, false)]
+	[InlineData(ProjectContextDocumentFormat.Json, false)]
+	[InlineData(ProjectContextDocumentFormat.Xml, false)]
+	[InlineData(ProjectContextDocumentFormat.Text, true)]
+	[InlineData(ProjectContextDocumentFormat.Markdown, true)]
+	[InlineData(ProjectContextDocumentFormat.Json, true)]
+	[InlineData(ProjectContextDocumentFormat.Xml, true)]
+	public async Task CompleteContext_LocalUserPathFollowsHidePrivateDataSetting(
+		ProjectContextDocumentFormat format,
+		bool hidePrivateData)
+	{
+		using var temporary = new TemporaryDirectory();
+		var projectRoot = temporary.CreateDirectory("complete-private-path-project");
+		var plan = await BuildPlanAsync(projectRoot, hideSecrets: false, hidePrivateData);
+		var privateRoot = OperatingSystem.IsWindows()
+			? @"C:\Users\private-path-owner\project"
+			: "/home/private-path-owner/project";
+		var tree = new TreeNodeDescriptor("project", privateRoot, true, false, "folder", []);
+		plan = plan with
+		{
+			SourceRoot = privateRoot,
+			EffectiveTree = tree,
+			ProjectedTree = tree,
+			IncludedFiles = [],
+			Diagnostics =
+			[
+				new ContextDiagnostic(
+					ProjectContextGitReadiness.PartialDiagnosticCode,
+					ContextDiagnosticSeverity.Warning,
+					"Some nested Git indexes could not be read; those repository scopes were excluded.",
+					privateRoot)
+			]
+		};
+		using var session = SecretRedactionSession.CreateWithPrivateData(
+			new NoFindingsDetector(),
+			new PrivateDataDetector());
+		var service = new ProjectContextDocumentService(
+			new TreeExportService(),
+			new FileContentAnalyzer(),
+			secretRedactionSession: session);
+		await using var destination = new MemoryStream();
+		await service.WriteCompleteWithReportAsync(
+			plan,
+			ProjectContextView.TreeContent,
+			format,
+			destination,
+			TestContext.Current.CancellationToken,
+			useSourceMappedStructuredPaths: true);
+		var document = Encoding.UTF8.GetString(destination.ToArray());
+
+		if (hidePrivateData)
+		{
+			Assert.Contains(OutputRootPathPresentation.LocalUserPlaceholder, document, StringComparison.Ordinal);
+			Assert.DoesNotContain("private-path-owner", document, StringComparison.Ordinal);
+		}
+		else
+		{
+			Assert.Contains("private-path-owner", document, StringComparison.Ordinal);
+			Assert.DoesNotContain(OutputRootPathPresentation.LocalUserPlaceholder, document, StringComparison.Ordinal);
+		}
+
+		if (!hidePrivateData)
+			return;
+
+		await using var prepared = await new SecretRedactionOutputPreparer(new FileContentAnalyzer())
+			.PrepareAsync(
+				new ContentTransformationContext(
+					Compression: null,
+					Redaction: new SecretRedactionContext(
+						privateRoot,
+						session,
+						SecretRedactionFeatures.PrivateData)),
+				[],
+				TestContext.Current.CancellationToken);
+		await using var preparedDestination = new MemoryStream();
+		await service.WritePreparedCompleteAsync(
+			plan,
+			ProjectContextView.TreeContent,
+			format,
+			preparedDestination,
+			prepared,
+			TestContext.Current.CancellationToken,
+			useSourceMappedStructuredPaths: true);
+		var preparedDocument = Encoding.UTF8.GetString(preparedDestination.ToArray());
+		Assert.Contains(OutputRootPathPresentation.LocalUserPlaceholder, preparedDocument, StringComparison.Ordinal);
+		Assert.DoesNotContain("private-path-owner", preparedDocument, StringComparison.Ordinal);
+	}
+
 	private static async Task<ProjectContextPlan> BuildPlanAsync(
 		string projectRoot,
 		bool hideSecrets,

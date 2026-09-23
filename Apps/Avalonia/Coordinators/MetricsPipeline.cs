@@ -26,6 +26,7 @@ internal sealed class MetricsPipelineIoTestPoint
 	private long _metricsLockAttemptCount;
 	private long _metricsLockAcquisitionCount;
 	private long _metricsLockWaitTicks;
+	internal Action? AfterContentMetricsSnapshot { get; set; }
 
 	public MetricsPipelineIoSnapshot Snapshot => new(
 		Volatile.Read(ref _fileVersionOpenCount),
@@ -261,6 +262,7 @@ internal sealed class MetricsPipeline(
 	private TaskCompletionSource _backgroundMetricsIdle = CompletedSignal();
     private int _metricsRecalcVersion;
     private int _metricsCacheGeneration;
+	private long _fileMetricsRevision;
     private long _lastStatusTreeLines;
     private long _lastStatusTreeChars;
     private long _lastStatusTreeTokens;
@@ -271,12 +273,14 @@ internal sealed class MetricsPipeline(
     private long _lastStatusTreeAndContentContentChars;
     private long _lastStatusTreeAndContentContentTokens;
     private bool _hasStatusMetricsSnapshot;
+	private bool _canReuseStatusMetricsForPreviewSelection;
 	private string? _statusMetricsProjectPath;
     private bool _hasTreeMetricsCache;
     private TreeMetricsCacheKey _treeMetricsCacheKey;
     private ExportOutputMetrics _treeMetricsCacheValue = ExportOutputMetrics.Empty;
     private bool _hasContentMetricsCache;
     private ContentMetricsCacheKey _contentMetricsCacheKey;
+	private long _contentMetricsCacheRevision;
     private ContentMetricsPair _contentMetricsCacheValue = new(ExportOutputMetrics.Empty, ExportOutputMetrics.Empty);
     private int _allOrderedFilePathsTreeIdentity;
     private IReadOnlyList<string>? _allOrderedFilePathsCache;
@@ -341,7 +345,7 @@ internal sealed class MetricsPipeline(
         }
 
         var selectedPaths = selectedPathsProvider();
-        var filePaths = selectedPaths.Count > 0
+		var filePaths = !ProjectTreeSelectionProjection.CoversWholeTree(currentTree.Root, selectedPaths)
 			? PreviewFileCollectionPolicy.BuildOrderedSelectedFilePathsWithCancellation(
 				selectedPaths,
 				currentTree.Root,
@@ -397,6 +401,8 @@ internal sealed class MetricsPipeline(
         if (Volatile.Read(ref _disposed) != 0)
             return;
 
+		InvalidatePreviewSelectionMetricsCache();
+
         // A parent checkbox can fire hundreds of child change notifications. Keep the
         // debounce timer inside the metrics pipeline so UI code does not own recalc state.
         if (_metricsDebounceTimer is null)
@@ -417,6 +423,8 @@ internal sealed class MetricsPipeline(
     {
         if (Volatile.Read(ref _disposed) != 0)
             return;
+
+		InvalidatePreviewSelectionMetricsCache();
 
         if (!viewModel.IsProjectLoaded || viewModel.TreeNodes.Count == 0)
         {
@@ -547,6 +555,7 @@ internal sealed class MetricsPipeline(
     {
         Interlocked.Increment(ref _metricsCacheGeneration);
         _hasCompleteMetricsBaseline = false;
+		InvalidatePreviewSelectionMetricsCache();
         CancelBackgroundCalculation();
         ClearFileMetricsCache(trimCapacity: true);
     }
@@ -559,8 +568,12 @@ internal sealed class MetricsPipeline(
 	{
 		_recalculateMetricsCts?.Cancel();
 		Interlocked.Increment(ref _metricsRecalcVersion);
+		InvalidatePreviewSelectionMetricsCache();
 		InvalidateComputedCaches();
 	}
+
+	private void InvalidatePreviewSelectionMetricsCache()
+		=> _canReuseStatusMetricsForPreviewSelection = false;
 
     public void CancelByUser()
     {
@@ -686,6 +699,7 @@ internal sealed class MetricsPipeline(
         lock (_metricsLock)
         {
             _fileMetricsCache.Clear();
+			_fileMetricsRevision++;
             if (trimCapacity)
                 _fileMetricsCache.TrimExcess();
         }
@@ -709,7 +723,8 @@ internal sealed class MetricsPipeline(
     public void UpdateStatusBarMetrics(
         long treeLines, long treeChars, long treeTokens,
         long contentLines, long contentChars, long contentTokens,
-        ExportOutputMetrics? treeAndContentContentMetrics = null)
+        ExportOutputMetrics? treeAndContentContentMetrics = null,
+		bool canReuseForPreviewSelection = true)
     {
         _lastStatusTreeLines = treeLines;
         _lastStatusTreeChars = treeChars;
@@ -721,8 +736,9 @@ internal sealed class MetricsPipeline(
         _lastStatusTreeAndContentContentLines = combinedContentMetrics.Lines;
         _lastStatusTreeAndContentContentChars = combinedContentMetrics.Chars;
         _lastStatusTreeAndContentContentTokens = combinedContentMetrics.Tokens;
-		_statusMetricsProjectPath = currentPathProvider();
+        _statusMetricsProjectPath = currentPathProvider();
         _hasStatusMetricsSnapshot = true;
+		_canReuseStatusMetricsForPreviewSelection = canReuseForPreviewSelection;
         RenderStatusBarMetrics();
     }
 
@@ -754,6 +770,7 @@ internal sealed class MetricsPipeline(
 			  PathComparer.Default.Equals(_statusMetricsProjectPath, currentProjectPath);
 		var currentDocument = viewModel.PreviewDocument;
 		if (!_hasStatusMetricsSnapshot ||
+		    !_canReuseStatusMetricsForPreviewSelection ||
 		    !projectMatches ||
 		    currentDocument is not null && currentDocument.CharacterCount != document.CharacterCount)
 		{
@@ -915,6 +932,7 @@ internal sealed class MetricsPipeline(
 
         _metricsCancellationRequestedByUser = false;
         _hasCompleteMetricsBaseline = false;
+		_canReuseStatusMetricsForPreviewSelection = false;
 		SetBackgroundMetricsActive(true);
         var statusOperationId = statusOperations.Begin(
             viewModel.StatusOperationCalculatingData,
@@ -949,9 +967,11 @@ internal sealed class MetricsPipeline(
 			var projectRoot = ResolveTransformationProjectRoot();
 			if (candidateReadFacts is not null && projectRoot.Length > 0)
 			{
+				// File-local facts may come from a partial selection. Keep the root check;
+				// the scan below validates each current tree file's transform and source version.
 				var selection = ContentSelectionSnapshot.CreateWithCancellation(
 					projectRoot,
-					filePaths,
+					candidateReadFacts.Selection.OrderedPaths,
 					linkedCts.Token);
 				if (string.Equals(
 						candidateReadFacts.Selection.SelectionFingerprint,
@@ -1125,6 +1145,8 @@ internal sealed class MetricsPipeline(
 					entry.SetTransformed(result.TransformIdentity, result.Effective);
 				mergedAny = true;
 			}
+			if (mergedAny)
+				_fileMetricsRevision++;
 		}
 
 		if (mergedAny)
@@ -1186,12 +1208,21 @@ internal sealed class MetricsPipeline(
 						retainedIdentity.SourceLastWriteTimeUtcTicks,
 						IsMissing: false)
 					: null;
-				var sourceVersionBeforeRead = TryCaptureCurrentSourceVersion(filePath);
+				var coherentAnalyzer = retainedMetrics is null && transformationScope is null &&
+					fileContentAnalyzer is FileContentAnalyzer &&
+					ReferenceEquals(_fileSourceVersionProvider, PhysicalMetricsFileSourceVersionProvider.Instance)
+						? fileContentAnalyzer as IPrewarmFileContentAnalyzer
+						: null;
+				var sourceVersionBeforeRead = coherentAnalyzer is null
+					? TryCaptureCurrentSourceVersion(filePath)
+					: null;
 				if (retainedSourceVersion != sourceVersionBeforeRead)
 					retainedMetrics = null;
                 if (fileContentAnalyzer.ClassifyWithoutReading(filePath) ==
                     FileContentClassification.Binary)
                 {
+					if (coherentAnalyzer is not null)
+						sourceVersionBeforeRead = TryCaptureCurrentSourceVersion(filePath);
 					var binarySourceVersion = TryCaptureStableSourceVersion(
 						filePath,
 						sourceVersionBeforeRead);
@@ -1238,9 +1269,42 @@ internal sealed class MetricsPipeline(
                 }
                 else
                 {
-					var result = await fileContentAnalyzer
-						.GetClassifiedMetricsAsync(filePath, ct)
-						.ConfigureAwait(false);
+					FileContentMetricsResult result;
+					if (coherentAnalyzer is not null)
+					{
+						var identified = await coherentAnalyzer
+							.GetClassifiedMetricsWithIdentityAsync(filePath, ct)
+							.ConfigureAwait(false);
+						if (identified.StableIdentity is { } stableIdentity)
+						{
+							result = identified.Result;
+							sourceVersion = new MetricsFileSourceVersion(
+								stableIdentity.Length,
+								stableIdentity.LastWriteTimeUtcTicks,
+								IsMissing: false);
+						}
+						else if (identified.Identity is not null)
+						{
+							Interlocked.Exchange(ref hadReadFailures, 1);
+							return;
+						}
+						else
+						{
+							// An unidentified result cannot borrow metadata from a later path observation.
+							// Retry inside the legacy before/after checks to preserve failure classification.
+							ct.ThrowIfCancellationRequested();
+							sourceVersionBeforeRead = TryCaptureCurrentSourceVersion(filePath);
+							result = await fileContentAnalyzer
+								.GetClassifiedMetricsAsync(filePath, ct)
+								.ConfigureAwait(false);
+						}
+					}
+					else
+					{
+						result = await fileContentAnalyzer
+							.GetClassifiedMetricsAsync(filePath, ct)
+							.ConfigureAwait(false);
+					}
 					rawMetrics = result.IsText ? result.Metrics : null;
                     effectiveMetrics = rawMetrics;
                 }
@@ -1350,6 +1414,7 @@ internal sealed class MetricsPipeline(
 		_lastStatusTreeAndContentContentChars = 0;
 		_lastStatusTreeAndContentContentTokens = 0;
 		_statusMetricsProjectPath = null;
+		_canReuseStatusMetricsForPreviewSelection = false;
 	}
 
     private static Task WaitForInitialVisualReadyAsync(
@@ -1536,7 +1601,10 @@ internal sealed class MetricsPipeline(
                 return;
             }
 
-            UpdateStatusBarMetrics(treeMetrics.Lines, treeMetrics.Chars, treeMetrics.Tokens, 0, 0, 0);
+            UpdateStatusBarMetrics(
+				treeMetrics.Lines, treeMetrics.Chars, treeMetrics.Tokens,
+				0, 0, 0,
+				canReuseForPreviewSelection: false);
             viewModel.StatusMetricsVisible = true;
         });
     }
@@ -1645,14 +1713,16 @@ internal sealed class MetricsPipeline(
 			Monitor.Exit(_metricsLock);
 		}
 
-		var staleCandidates = new List<FileMetricsVersionCandidate>();
-		for (var index = 0; index < candidates.Count; index++)
+		var staleCandidates = new bool[candidates.Count];
+		Parallel.For(0, candidates.Count, new ParallelOptions
 		{
-			cancellationToken.ThrowIfCancellationRequested();
+			CancellationToken = cancellationToken,
+			MaxDegreeOfParallelism = MetricsCalculationPolicy.GetSelectionRecoveryParallelism(Environment.ProcessorCount)
+		}, index =>
+		{
 			var candidate = candidates[index];
-			if (TryCaptureCurrentSourceVersion(candidate.Path) != candidate.SourceVersion)
-				staleCandidates.Add(candidate);
-		}
+			staleCandidates[index] = TryCaptureCurrentSourceVersion(candidate.Path) != candidate.SourceVersion;
+		});
 
 		cancellationToken.ThrowIfCancellationRequested();
 		var missingPaths = new List<string>();
@@ -1666,9 +1736,11 @@ internal sealed class MetricsPipeline(
 				throw new OperationCanceledException(cancellationToken);
 			}
 
-			for (var index = 0; index < staleCandidates.Count; index++)
+			for (var index = 0; index < staleCandidates.Length; index++)
 			{
-				var candidate = staleCandidates[index];
+				if (!staleCandidates[index])
+					continue;
+				var candidate = candidates[index];
 				if (_fileMetricsCache.TryGetValue(candidate.Path, out var current) &&
 				    ReferenceEquals(current, candidate.Entry) &&
 				    current.SourceVersion == candidate.SourceVersion)
@@ -1687,6 +1759,8 @@ internal sealed class MetricsPipeline(
 					missingPaths.Add(path);
 				}
 			}
+			if (removedStaleEntry)
+				_fileMetricsRevision++;
 		}
 		finally
 		{
@@ -1929,11 +2003,18 @@ internal sealed class MetricsPipeline(
 			TreeAndContentRootPathIdentity: BuildRootPathIdentity(selection.RootPath),
             TransformIdentity: ResolveTransformIdentity());
 
-        lock (_computationCacheLock)
-        {
-            if (_hasContentMetricsCache && _contentMetricsCacheKey == cacheKey)
-                return _contentMetricsCacheValue;
-        }
+		lock (_metricsLock)
+		{
+			lock (_computationCacheLock)
+			{
+				if (_hasContentMetricsCache &&
+				    _contentMetricsCacheKey == cacheKey &&
+				    _contentMetricsCacheRevision == _fileMetricsRevision)
+				{
+					return _contentMetricsCacheValue;
+				}
+			}
+		}
 
 		var orderedPaths = selection.OrderedFilePaths ??
 			BuildOrderedMetricsFilePaths(selection, cancellationToken);
@@ -1941,10 +2022,12 @@ internal sealed class MetricsPipeline(
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			var cacheGeneration = Volatile.Read(ref _metricsCacheGeneration);
+			long fileMetricsRevision;
 			var selected = new List<(string Path, FileMetricsData Metrics)>(orderedPaths.Count);
 			EnterMetricsLock();
 			try
 			{
+				fileMetricsRevision = _fileMetricsRevision;
 				for (var index = 0; index < orderedPaths.Count; index++)
 				{
 					var path = orderedPaths[index];
@@ -1960,6 +2043,7 @@ internal sealed class MetricsPipeline(
 			{
 				Monitor.Exit(_metricsLock);
 			}
+			ioTestPoint?.AfterContentMetricsSnapshot?.Invoke();
 
 			var contentAccumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
 			foreach (var selectedFile in selected)
@@ -1989,15 +2073,27 @@ internal sealed class MetricsPipeline(
 			var computed = new ContentMetricsPair(
 				AddContentRootMetrics(treeAndContentMetrics, contentOnlyRootPath, selected.Count > 0),
 				treeAndContentMetrics);
-			lock (_computationCacheLock)
+			EnterMetricsLock();
+			try
 			{
-				if (cacheGeneration != Volatile.Read(ref _metricsCacheGeneration))
-					continue;
-				_hasContentMetricsCache = true;
-				_contentMetricsCacheKey = cacheKey;
-				_contentMetricsCacheValue = computed;
+				lock (_computationCacheLock)
+				{
+					if (cacheGeneration != Volatile.Read(ref _metricsCacheGeneration) ||
+					    fileMetricsRevision != _fileMetricsRevision)
+					{
+						continue;
+					}
+					_hasContentMetricsCache = true;
+					_contentMetricsCacheKey = cacheKey;
+					_contentMetricsCacheRevision = fileMetricsRevision;
+					_contentMetricsCacheValue = computed;
+				}
+				return computed;
 			}
-			return computed;
+			finally
+			{
+				Monitor.Exit(_metricsLock);
+			}
 		}
 	}
 
@@ -2040,7 +2136,7 @@ internal sealed class MetricsPipeline(
     public IReadOnlyList<string> GetOrBuildAllOrderedFilePaths(TreeNodeDescriptor treeRoot)
 		=> GetOrBuildAllOrderedFilePathsWithCancellation(treeRoot, CancellationToken.None);
 
-	private IReadOnlyList<string> GetOrBuildAllOrderedFilePathsWithCancellation(
+	internal IReadOnlyList<string> GetOrBuildAllOrderedFilePathsWithCancellation(
 		TreeNodeDescriptor treeRoot,
 		CancellationToken cancellationToken)
     {

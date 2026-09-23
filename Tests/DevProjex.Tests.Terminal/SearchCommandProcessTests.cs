@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.RegularExpressions;
+using DevProjex.Infrastructure.ProjectProfiles;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -128,6 +129,7 @@ public sealed class SearchCommandProcessTests
 		var source = SearchCommandHandler.ResolveDeclarationReadSource(request);
 		var arguments = SearchCommandHandler.BuildDeclarationReadArguments(request, "src/App.cs");
 
+		Assert.NotNull(arguments);
 		Assert.Equal("https://example.com/owner/repository.git", source);
 		Assert.DoesNotContain("secret", source, StringComparison.Ordinal);
 		Assert.DoesNotContain("token", source, StringComparison.Ordinal);
@@ -135,6 +137,75 @@ public sealed class SearchCommandProcessTests
 		var branchIndex = Array.IndexOf(arguments.ToArray(), "--branch");
 		Assert.InRange(branchIndex, 0, arguments.Count - 2);
 		Assert.Equal("feature/symbol-search", arguments[branchIndex + 1]);
+	}
+
+	[Theory]
+	[InlineData(null)]
+	[InlineData("https://user:secret@example.com/owner/repository.git?token=private")]
+	public async Task DeclarationReadCommandDoesNotDropLocalManualSecretMarks(string? repositorySourceUrl)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = CreateProject(workspace);
+		var dataRoot = workspace.CreateDirectory("data");
+		var markedSecret = new MarkedSecretProfileEntry("001122334455", "token", 12);
+		var localProfile = new ProjectSelectionProfile(
+			SelectedRootFolders: [],
+			SelectedExtensions: [],
+			SelectedIgnoreOptions: []);
+		var store = new ProjectProfileStore(() => dataRoot);
+		store.SaveProfile(project, localProfile);
+		var markWrite = await store.AddMarkAsync(
+			project,
+			markedSecret,
+			TestContext.Current.CancellationToken);
+		Assert.True(markWrite.Succeeded);
+		using var services = new TerminalServiceFactory(() => dataRoot).Create(AppLanguage.En);
+		var selection = await services.SelectionResolver.ResolveAsync(
+			project,
+			ProjectProfileReference.Local,
+			new ProjectSelectionSpec(HideSecrets: true),
+			TestContext.Current.CancellationToken);
+		var request = new SearchCommandRequest(
+			ProjectPath: project,
+			Pattern: "Run",
+			Selection: selection,
+			Mode: SearchMode.Symbols,
+			MaximumResults: 20,
+			SearchBodyCharacters: 1_800,
+			Format: SearchOutputFormat.Text,
+			OutputPath: null,
+			Output: new TerminalOutputOptions(),
+			RepositorySourceUrl: repositorySourceUrl);
+
+		var arguments = SearchCommandHandler.BuildDeclarationReadArguments(request, "src/App.cs");
+		if (repositorySourceUrl is not null)
+		{
+			Assert.Null(arguments);
+			var plan = await services.ContextFactory.BuildAsync(
+				project,
+				ProjectSelectionSpec.Standard,
+				includeOutputMetrics: false,
+				cancellationToken: TestContext.Current.CancellationToken);
+			var output = await new SearchCommandHandler(services, new TestTerminalEnvironment())
+				.RenderSearchForPlanAsync(
+					plan,
+					request,
+					maximumInspectedBytes: 128 * 1024,
+					cancellationToken: TestContext.Current.CancellationToken);
+			Assert.Contains("Read declaration file: no standalone read command can preserve this remote profile's manual secret marks", output,
+				StringComparison.Ordinal);
+			Assert.DoesNotContain("devprojex export context", output, StringComparison.Ordinal);
+			Assert.DoesNotContain("user:secret", output, StringComparison.Ordinal);
+			return;
+		}
+
+		Assert.NotNull(arguments);
+		var profileIndex = Array.IndexOf(arguments.ToArray(), "--profile");
+		Assert.InRange(profileIndex, 0, arguments.Count - 2);
+		Assert.Equal("local", arguments[profileIndex + 1]);
+		Assert.Contains("--hide-secrets", arguments);
+		Assert.DoesNotContain("001122334455", string.Join(' ', arguments), StringComparison.Ordinal);
+		Assert.DoesNotContain("user:secret", string.Join(' ', arguments), StringComparison.Ordinal);
 	}
 
 	[Fact]

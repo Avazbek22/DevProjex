@@ -60,6 +60,27 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task InvalidCMakeIncludeDirectoryReportsUnsupportedConfiguration()
+	{
+		using var fixture = new TemporaryDirectory();
+		var configuration = fixture.CreateFile(
+			"CMakeLists.txt",
+			"target_include_directories(app PRIVATE \"bad\0path\")\n");
+
+		var result = await new FileDependencyConfigurationProvider().ReadAsync(
+			fixture.Path,
+			[configuration],
+			TestContext.Current.CancellationToken);
+
+		var diagnostic = Assert.Single(result.ConfigurationDiagnostics);
+		Assert.Equal(DependencyConfigurationState.UnsupportedSemantics, diagnostic.State);
+		Assert.Equal("CMake include directory path is invalid", diagnostic.Reason);
+		Assert.Equal(
+			DependencyConfigurationState.UnsupportedSemantics,
+			Assert.Single(result.Scopes, scope => scope.ScopeId == "c:CMakeLists.txt").ConfigurationState);
+	}
+
+	[Fact]
 	public async Task CDamagedDeclarationDoesNotHideIndependentFacts()
 	{
 		using var fixture = new TemporaryDirectory();
@@ -3328,6 +3349,77 @@ public sealed class DependencyFactsEngineIntegrationTests
 		Assert.True(replacementState.RetainedBytes > 0);
 		Assert.Equal(replacementState, afterStaleCompletion);
 		Assert.Equal(replacementState, extractor.CacheState);
+	}
+
+	[Fact]
+	public async Task PreparedSourceCache_CancelledOwnerDoesNotCancelSharedCaller()
+	{
+		using var fixture = new TemporaryDirectory();
+		var source = fixture.CreateFile("Source.cs", "public sealed class Source { }\n");
+		var analyzer = new CoordinatedPreparedSourceAnalyzer();
+		using var extractor = new TreeSitterDependencyFactExtractor(new MissingGrammarLocator(), analyzer);
+		using var ownerCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+			TestContext.Current.CancellationToken);
+		var configuration = EmptyConfiguration();
+		var limits = new DependencyFactsLimits();
+
+		var cancelled = extractor.PrepareAsync(
+			fixture.Path, source, configuration, limits, ownerCancellation.Token).AsTask();
+		await analyzer.FirstReadStarted.Task.WaitAsync(
+			TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+		var surviving = extractor.PrepareAsync(
+			fixture.Path, source, configuration, limits, TestContext.Current.CancellationToken).AsTask();
+		Assert.False(surviving.IsCompleted);
+		Assert.Equal(1, analyzer.OpenCount);
+
+		ownerCancellation.Cancel();
+		await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancelled);
+		var prepared = await surviving.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+		Assert.Equal("new source", prepared.Source);
+		Assert.Equal(2, analyzer.OpenCount);
+		Assert.Equal(1, extractor.CacheState.Entries);
+	}
+
+	[Fact]
+	public async Task PreparedSourceCache_CancelledSharedCallerDoesNotEvictOwner()
+	{
+		using var fixture = new TemporaryDirectory();
+		var source = fixture.CreateFile("Source.cs", "public sealed class Source { }\n");
+		var analyzer = new CoordinatedPreparedSourceAnalyzer();
+		using var extractor = new TreeSitterDependencyFactExtractor(new MissingGrammarLocator(), analyzer);
+		using var waiterCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+			TestContext.Current.CancellationToken);
+		var configuration = EmptyConfiguration();
+		var limits = new DependencyFactsLimits();
+
+		var owner = extractor.PrepareAsync(
+			fixture.Path, source, configuration, limits, TestContext.Current.CancellationToken).AsTask();
+		await analyzer.FirstReadStarted.Task.WaitAsync(
+			TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+		var waiter = extractor.PrepareAsync(
+			fixture.Path, source, configuration, limits, waiterCancellation.Token).AsTask();
+		Assert.False(waiter.IsCompleted);
+		Assert.Equal(1, analyzer.OpenCount);
+
+		try
+		{
+			waiterCancellation.Cancel();
+			await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+				waiter.WaitAsync(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken));
+			Assert.False(owner.IsCompleted);
+			Assert.Equal(1, extractor.CacheState.Entries);
+		}
+		finally
+		{
+			analyzer.ReleaseFirstRead();
+			await owner.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+		}
+
+		var prepared = await owner.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+		var warm = await extractor.PrepareAsync(
+			fixture.Path, source, configuration, limits, TestContext.Current.CancellationToken);
+		Assert.Same(prepared.Source, warm.Source);
+		Assert.Equal(1, analyzer.OpenCount);
 	}
 
 	[Fact]

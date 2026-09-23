@@ -16,6 +16,21 @@ dotnet run -c Release --project tools/Benchmarks/Mcp/DevProjex.Benchmarks.Mcp.cs
 
 Use `--only related_files` (or a comma-separated operation list) for a focused rerun.
 
+Use `--cold-first-search` to measure a fresh MCP process from initialization through
+`list_projects`, `get_tree`, the first `search_project`, and an identical repeat search.
+It starts a new server with a fresh application data root for each repetition and
+prints individual wall time, server CPU time, client allocation, response size,
+search inspection counts, and process peak working set. The normal benchmark's
+warm-up and output are unchanged. This is process-cold, not OS-page-cache-cold.
+Use `--cold-search-pattern PATTERN` with this mode to compare a controlled
+matching or nonmatching search; it does not affect the normal benchmark.
+
+```powershell
+dotnet run -c Release --project tools/Benchmarks/Mcp/DevProjex.Benchmarks.Mcp.csproj -- `
+  --host Apps/TerminalHost/bin/Release/net10.0/devprojex.dll `
+  --root . --cold-first-search --repetitions 5
+```
+
 Client allocation is measured in the benchmark process. Server-side content-pipeline
 counters are asserted by targeted integration tests so the measurement protocol does
 not add a diagnostic field to MCP responses.
@@ -47,4 +62,14 @@ one current 32 KiB UTF-16 source to the retained metadata:
 
 ```powershell
 dotnet run -c Release --project tools/Benchmarks/Mcp/DevProjex.Benchmarks.Mcp.csproj -- search-retention --repetitions 5
+```
+
+The search-context merge measurement compares the original repeated boundary enumeration with the
+current implementation for 1,000, 3,000, and 5,000 candidates with 0, 2, and 20 context lines. It
+performs no server or network calls and verifies every merged path, match number, line marker, and
+Unicode text before reporting elapsed time and allocations. Fixture creation and equality checks
+are outside the measured interval:
+
+```powershell
+dotnet run -c Release --project tools/Benchmarks/Mcp/DevProjex.Benchmarks.Mcp.csproj -- search-merge --repetitions 7
 ```

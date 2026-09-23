@@ -169,7 +169,7 @@ public sealed class TerminalWorkspaceSessionTransitionTests
 		var inconsistent = false;
 		var refreshed = false;
 
-		var switched = await TerminalWorkspaceSession.RunPostCheckoutRefreshAsync(
+		var switched = await TerminalWorkspaceSession.RunPostRepositoryMutationRefreshAsync(
 			_ =>
 			{
 				cancellation.Cancel();
@@ -196,7 +196,7 @@ public sealed class TerminalWorkspaceSessionTransitionTests
 		var inconsistent = false;
 
 		await Assert.ThrowsAsync<InvalidOperationException>(() =>
-			TerminalWorkspaceSession.RunPostCheckoutRefreshAsync(
+			TerminalWorkspaceSession.RunPostRepositoryMutationRefreshAsync(
 				_ =>
 				{
 					cancellation.Cancel();
@@ -212,5 +212,67 @@ public sealed class TerminalWorkspaceSessionTransitionTests
 
 		Assert.True(inconsistent);
 		Assert.False(TerminalWorkspaceSession.IsRepositoryExportAllowed(inconsistent));
+	}
+
+	[Fact]
+	public async Task FailedRepositoryMutationStillReconcilesTheWorkingTree()
+	{
+		using var cancellation = new CancellationTokenSource();
+		var inconsistent = false;
+		var refreshed = false;
+
+		var succeeded = await TerminalWorkspaceSession.RunPostRepositoryMutationRefreshAsync(
+			_ =>
+			{
+				cancellation.Cancel();
+				return Task.FromResult(false);
+			},
+			token =>
+			{
+				Assert.False(token.CanBeCanceled);
+				Assert.True(inconsistent);
+				refreshed = true;
+				return Task.CompletedTask;
+			},
+			value => inconsistent = value,
+			cancellation.Token);
+
+		Assert.False(succeeded);
+		Assert.True(refreshed);
+		Assert.False(inconsistent);
+	}
+
+	[Fact]
+	public async Task FailedRepositoryMutationKeepsExportsBlockedIfReconciliationFails()
+	{
+		var inconsistent = false;
+
+		await Assert.ThrowsAsync<InvalidOperationException>(() =>
+			TerminalWorkspaceSession.RunPostRepositoryMutationRefreshAsync(
+				_ => Task.FromResult(false),
+				_ => Task.FromException(new InvalidOperationException("refresh failed")),
+				value => inconsistent = value,
+				TestContext.Current.CancellationToken));
+
+		Assert.True(inconsistent);
+		Assert.False(TerminalWorkspaceSession.IsRepositoryExportAllowed(inconsistent));
+	}
+
+	[Fact]
+	public void RepositoryUpdateUsesTheMutationConsistencyRefresh()
+	{
+		var source = File.ReadAllText(Path.Combine(
+			PublishedApplicationLocator.FindRepositoryRoot(),
+			"Apps",
+			"Terminal",
+			"Tui",
+			"TerminalWorkspaceSession.Actions.cs"));
+		var updateStart = source.IndexOf("private void GetRepositoryUpdates(", StringComparison.Ordinal);
+		Assert.InRange(updateStart, 0, source.Length - 1);
+		var branchStart = source.IndexOf("private void SwitchRepositoryBranch(", updateStart, StringComparison.Ordinal);
+		Assert.InRange(branchStart, updateStart + 1, source.Length);
+
+		var updateAction = source[updateStart..branchStart];
+		Assert.Contains("RunPostRepositoryMutationRefreshAsync(", updateAction, StringComparison.Ordinal);
 	}
 }

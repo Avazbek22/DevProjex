@@ -33,6 +33,52 @@ public sealed class TerminalSettingsStateContractTests
 	}
 
 	[Fact]
+	public void NewPathsInheritSelectionOnlyFromExactFrontierAncestors()
+	{
+		var availablePaths = new[]
+		{
+			"src/new.cs",
+			"src/nested/new.cs",
+			"srcx/new.cs",
+			"Src/new.cs",
+			"other/new.cs"
+		};
+
+		var evolution = TerminalWorkspaceController.ReconcilePathSelection(
+			availablePaths,
+			new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer),
+			new Dictionary<string, bool>(ProjectTreePathIdentity.CanonicalComparer),
+			["src/./"]);
+
+		Assert.Equal(
+			["src/nested/new.cs", "src/new.cs"],
+			evolution.SelectedItems.Order(StringComparer.Ordinal));
+	}
+
+	[Fact]
+	public void RootFrontierSelectsNewPathsAndEmptyFrontierDoesNot()
+	{
+		var availablePaths = new[] { "src/new.cs", "other/new.cs" };
+		var previous = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
+		var knownStates = new Dictionary<string, bool>(ProjectTreePathIdentity.CanonicalComparer);
+
+		var wholeTree = TerminalWorkspaceController.ReconcilePathSelection(
+			availablePaths,
+			previous,
+			knownStates,
+			["."]);
+		var empty = TerminalWorkspaceController.ReconcilePathSelection(
+			availablePaths,
+			previous,
+			knownStates,
+			[]);
+
+		Assert.Equal(availablePaths.Order(StringComparer.Ordinal),
+			wholeTree.SelectedItems.Order(StringComparer.Ordinal));
+		Assert.Empty(empty.SelectedItems);
+	}
+
+	[Fact]
 	public void ChangingOnlyTheDiffRangeRequiresAFullStructuralRefresh()
 	{
 		var baseline = ProjectSelectionSpec.Standard with

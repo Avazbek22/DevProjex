@@ -34,7 +34,9 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 	private readonly Task _scavengeTask;
 	private long _allocatedBytes;
 	private int _activeCreates;
+	private int _activeReaders;
 	private bool _disposed;
+	private bool _cleanupStarted;
 	private Task? _disposeTask;
 
 	public McpPackRegistry(
@@ -163,6 +165,7 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 			try
 			{
 				PackTextMetrics metrics;
+				FileSystemHandleIdentity fileIdentity;
 				await using (var stream = OpenPrivateFile(
 								 path,
 								 FileMode.CreateNew,
@@ -174,6 +177,8 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 					await using var bounded = new QuotaWriteStream(stream, reservation);
 					await writer(bounded, cancellationToken).ConfigureAwait(false);
 					metrics = bounded.CompleteMetrics();
+					if (!FileSystemPathIdentity.TryReadHandle(stream.SafeFileHandle, out fileIdentity))
+						throw new IOException("MCP stored-result file identity is unavailable.");
 				}
 
 				var document = new McpPackDocument(
@@ -190,7 +195,7 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 				{
 					ObjectDisposedException.ThrowIf(_disposed, this);
 					cancellationToken.ThrowIfCancellationRequested();
-					_packs.Add(id, new PackEntry(document, TimeProvider.GetUtcNow(), kind));
+					_packs.Add(id, new PackEntry(document, TimeProvider.GetUtcNow(), kind, fileIdentity));
 					RememberIssuedKind(id, kind);
 				}
 				reservation.Commit();
@@ -270,7 +275,7 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 			else
 				quotaEvicted = _quotaEvictedPackIds.ContainsKey(packId);
 		}
-		if (entry is null || !File.Exists(entry.Document.Path))
+		if (entry is null || !IsPhysicalPackFile(entry.Document.Path))
 			throw Expired(StoredKind(packId), quotaEvicted || IsQuotaEvicted(packId));
 		return entry.Document;
 	}
@@ -287,6 +292,7 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 			if (entry is null)
 				throw Expired(StoredKindLocked(packId), _quotaEvictedPackIds.ContainsKey(packId));
 			entry.ActiveReaders++;
+			_activeReaders++;
 			entry.LastReadUtc = TimeProvider.GetUtcNow();
 		}
 		try
@@ -297,7 +303,9 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 				FileAccess.Read,
 				FileShare.Read,
 				16 * 1024,
-				FileOptions.Asynchronous | FileOptions.SequentialScan);
+				FileOptions.Asynchronous | FileOptions.SequentialScan,
+				entry.FileIdentity,
+				entry.Document.Bytes);
 			return new McpPackReadLease(this, entry, stream);
 		}
 		catch
@@ -317,7 +325,8 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 			if (_disposeTask is null)
 			{
 				_disposed = true;
-				_disposeTask = DisposeCoreAsync(_activeCreates == 0);
+				var cleanupSession = TryBeginCleanupLocked();
+				_disposeTask = Task.Run(() => DisposeCoreAsync(cleanupSession));
 			}
 			disposal = _disposeTask;
 		}
@@ -393,10 +402,18 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 		lock (_sync)
 		{
 			_activeCreates--;
-			cleanupNow = _disposed && _activeCreates == 0;
+			cleanupNow = TryBeginCleanupLocked();
 		}
 		if (cleanupNow)
 			CleanupSessionDirectory();
+	}
+
+	private bool TryBeginCleanupLocked()
+	{
+		if (!_disposed || _cleanupStarted || _activeCreates != 0 || _activeReaders != 0)
+			return false;
+		_cleanupStarted = true;
+		return true;
 	}
 
 	private void CleanupSessionDirectory()
@@ -553,8 +570,16 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 		FileAccess access,
 		FileShare share,
 		int bufferSize,
-		FileOptions options)
+		FileOptions options,
+		FileSystemHandleIdentity? expectedIdentity = null,
+		long? expectedBytes = null)
 	{
+		if (mode == FileMode.Open)
+		{
+			if (expectedIdentity is null)
+				throw new ArgumentException("An expected file identity is required for stored-result reads.", nameof(expectedIdentity));
+			RejectLinkedPackFile(path);
+		}
 		var streamOptions = new FileStreamOptions
 		{
 			Mode = mode,
@@ -569,8 +594,20 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 		var stream = new FileStream(path, streamOptions);
 		try
 		{
+			if (mode == FileMode.Open)
+				RejectLinkedPackFile(path);
+			if (expectedIdentity is { } expected &&
+				(!FileSystemPathIdentity.TryReadHandle(stream.SafeFileHandle, out var actual) ||
+				 actual != expected))
+				throw new IOException("MCP stored-result file identity changed.");
+			if (expectedBytes is { } length && stream.Length != length)
+				throw new IOException("MCP stored-result file length changed.");
 			if (!OperatingSystem.IsWindows())
-				File.SetUnixFileMode(path, PrivateFileMode);
+			{
+				var handle = stream.SafeFileHandle;
+				if (File.GetUnixFileMode(handle) != PrivateFileMode)
+					File.SetUnixFileMode(handle, PrivateFileMode);
+			}
 			return stream;
 		}
 		catch
@@ -578,6 +615,28 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 			stream.Dispose();
 			throw;
 		}
+	}
+
+	private static bool IsPhysicalPackFile(string path)
+	{
+		try
+		{
+			RejectLinkedPackFile(path);
+			return true;
+		}
+		catch (Exception exception) when (exception is
+				   IOException or UnauthorizedAccessException or System.Security.SecurityException or
+				   ArgumentException or NotSupportedException)
+		{
+			return false;
+		}
+	}
+
+	private static void RejectLinkedPackFile(string path)
+	{
+		var attributes = File.GetAttributes(path);
+		if ((attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0)
+			throw new IOException("MCP stored result must be a physical file.");
 	}
 
 	private McpToolException Expired(bool quotaEvicted = false) =>
@@ -695,8 +754,15 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 
 	private void ReleaseReader(PackEntry entry)
 	{
+		bool cleanupNow;
 		lock (_sync)
+		{
 			entry.ActiveReaders--;
+			_activeReaders--;
+			cleanupNow = TryBeginCleanupLocked();
+		}
+		if (cleanupNow)
+			CleanupSessionDirectory();
 	}
 
 	private void Release(long bytes)
@@ -708,13 +774,15 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 	internal sealed class PackEntry(
 		McpPackDocument document,
 		DateTimeOffset createdUtc,
-		McpStoredResultKind kind)
+		McpStoredResultKind kind,
+		FileSystemHandleIdentity fileIdentity)
 	{
 		public McpPackDocument Document { get; } = document;
 		public DateTimeOffset CreatedUtc { get; } = createdUtc;
 		public DateTimeOffset LastReadUtc { get; set; } = createdUtc;
 		public int ActiveReaders { get; set; }
 		public McpStoredResultKind Kind { get; } = kind;
+		public FileSystemHandleIdentity FileIdentity { get; } = fileIdentity;
 		public McpStoredResultContext? LiveContext { get; set; }
 		public McpStoredJournalContext? JournalContext { get; set; }
 	}

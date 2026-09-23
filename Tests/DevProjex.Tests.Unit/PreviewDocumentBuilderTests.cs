@@ -8,6 +8,37 @@ public sealed class PreviewDocumentBuilderTests
 {
     private const string BlankLine = "\u00A0";
 
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task BuildContentDocumentAsync_MetadataProbeFailureContinuesWithEveryFile(
+		bool securityFailure)
+	{
+		using var project = new TemporaryDirectory();
+		var firstPath = project.CreateFile("first.txt", "first content");
+		var secondPath = project.CreateFile("second.txt", "second content");
+		var builder = new PreviewDocumentBuilder(new FileContentAnalyzer())
+		{
+			FileLengthProbe = path => PathComparer.Default.Equals(path, firstPath)
+				? throw (securityFailure
+					? (Exception)new System.Security.SecurityException("Metadata became inaccessible.")
+					: new IOException("Metadata became inaccessible."))
+				: new FileInfo(path).Length
+		};
+
+		using var document = await builder.BuildContentDocumentAsync(
+			[firstPath, secondPath],
+			TestContext.Current.CancellationToken,
+			Path.GetFileName,
+			projectRoot: project.Path);
+
+		Assert.NotNull(document);
+		Assert.Equal(["first.txt", "second.txt"],
+			document.Sections.Select(static section => section.DisplayPath));
+		Assert.Contains("first content", document.GetFullText(), StringComparison.Ordinal);
+		Assert.Contains("second content", document.GetFullText(), StringComparison.Ordinal);
+	}
+
 	[Fact]
 	public async Task BuildContentDocumentAsync_WithRootHeader_UsesRelativeSectionsAndKeepsCoordinatesAligned()
 	{

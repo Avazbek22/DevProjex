@@ -118,6 +118,104 @@ public sealed class FileBackedPreviewTextDocumentTests
 		Assert.Equal(0, visits);
 	}
 
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task CanceledTraversal_DoesNotWaitForConcurrentExportToFinish(bool searchDocument)
+	{
+		using var directory = new TemporaryDirectory();
+		using var document = CreateDocument(directory, ("alpha", "alpha"), ("beta", "beta"));
+		await using var destination = new GatedWriteStream();
+		using var cancellation = new CancellationTokenSource();
+		var export = document.WriteToAsync(destination, TestContext.Current.CancellationToken).AsTask();
+		var completion = new TaskCompletionSource<Exception?>(TaskCreationOptions.RunContinuationsAsynchronously);
+		var visits = 0;
+		var reader = new Thread(() =>
+		{
+			try
+			{
+				if (searchDocument)
+				{
+					_ = PreviewTextDocumentSearch.Find(document, "alpha", cancellation.Token);
+				}
+				else
+				{
+					document.VisitLines(1, document.LineCount, (_, _) =>
+					{
+						visits++;
+						return true;
+					}, cancellation.Token);
+				}
+				completion.TrySetResult(null);
+			}
+			catch (Exception exception)
+			{
+				completion.TrySetResult(exception);
+			}
+		}) { IsBackground = true };
+		var readerStarted = false;
+
+		try
+		{
+			await destination.WriteStarted.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+			reader.Start();
+			readerStarted = true;
+			Assert.True(SpinWait.SpinUntil(
+				() => completion.Task.IsCompleted || (reader.ThreadState & ThreadState.WaitSleepJoin) != 0,
+				TimeSpan.FromSeconds(5)));
+			Assert.False(completion.Task.IsCompleted);
+
+			cancellation.Cancel();
+			var failure = await completion.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+			var canceled = Assert.IsAssignableFrom<OperationCanceledException>(failure);
+			Assert.Equal(cancellation.Token, canceled.CancellationToken);
+			Assert.Equal(0, visits);
+			Assert.False(export.IsCompleted);
+		}
+		finally
+		{
+			destination.ReleaseWrite.TrySetResult();
+			await export.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+			if (readerStarted)
+				Assert.True(reader.Join(TimeSpan.FromSeconds(5)));
+		}
+
+		Assert.Equal("alpha\nbeta\n", destination.GetWrittenText());
+		Assert.True(destination.CanWrite);
+		Assert.Equal("alpha", document.GetLineText(1));
+		Assert.Equal("beta", document.GetLineText(2));
+	}
+
+	private sealed class GatedWriteStream : Stream
+	{
+		private readonly MemoryStream _written = new();
+		public TaskCompletionSource WriteStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+		public TaskCompletionSource ReleaseWrite { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+		public override bool CanRead => false;
+		public override bool CanSeek => false;
+		public override bool CanWrite => _written.CanWrite;
+		public override long Length => _written.Length;
+		public override long Position { get => _written.Position; set => throw new NotSupportedException(); }
+		public override void Flush() => _written.Flush();
+		public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+		public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+		public override void SetLength(long value) => throw new NotSupportedException();
+		public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+		public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+		{
+			WriteStarted.TrySetResult();
+			await ReleaseWrite.Task.WaitAsync(cancellationToken);
+			await _written.WriteAsync(buffer, cancellationToken);
+		}
+		public string GetWrittenText() => Encoding.UTF8.GetString(_written.ToArray());
+		protected override void Dispose(bool disposing)
+		{
+			if (disposing)
+				_written.Dispose();
+			base.Dispose(disposing);
+		}
+	}
+
     private static FileBackedPreviewTextDocument CreateDocument(
         TemporaryDirectory temp,
         params (string RawLine, string VisibleLine)[] lines)

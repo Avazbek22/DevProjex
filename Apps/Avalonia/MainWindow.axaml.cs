@@ -13,6 +13,8 @@ public partial class MainWindow : Window
     private const double BranchMenuItemHeight = 32;
     private const double TreeFontMenuItemHeight = 32;
     private static readonly TimeSpan ShutdownPersistenceBudget = TimeSpan.FromSeconds(10);
+    private long _nextFolderOpenRequestId;
+    private long _latestEligibleFolderOpenRequestId;
 
     internal enum TerminalCommandPostInstallUiAction
     {
@@ -360,6 +362,12 @@ public partial class MainWindow : Window
     {
         CancelBackgroundMemoryCleanup();
         CancelPreviewRefresh();
+        var projectPath = _currentPath;
+        var folderOpenRequestId = Volatile.Read(ref _latestEligibleFolderOpenRequestId);
+        bool IsCurrentRefresh() =>
+            _windowLifetimeCts is { IsCancellationRequested: false } &&
+            folderOpenRequestId == Volatile.Read(ref _latestEligibleFolderOpenRequestId) &&
+            PathComparer.Default.Equals(projectPath, _currentPath);
         var refreshCts = ReplaceCancellationSource(ref _projectOperationCts);
         var cancellationToken = refreshCts.Token;
         var statusOperationId = _statusOperations.Begin(
@@ -369,23 +377,27 @@ public partial class MainWindow : Window
             cancelAction: () => refreshCts.Cancel());
         try
         {
-            await ReloadProjectAsync(
+            var refreshed = await ReloadProjectAsync(
                 cancellationToken,
                 applyStoredProfile: true,
                 reuseUnchangedDiscoveryCaches: true);
             _statusOperations.Complete(statusOperationId);
+            if (!refreshed || !IsCurrentRefresh())
+                return;
             ScheduleBackgroundMemoryCleanup(MemoryCleanupReason.RefreshProject);
             _toastService.Show(_localization["Toast.Refresh.Success"]);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             _statusOperations.Complete(statusOperationId);
-            _toastService.Show(_localization["Toast.Operation.RefreshCanceled"]);
+            if (IsCurrentRefresh())
+                _toastService.Show(_localization["Toast.Operation.RefreshCanceled"]);
         }
         catch (Exception ex)
         {
             _statusOperations.Complete(statusOperationId);
-            await ShowErrorAsync(ResolveDesktopExceptionMessage(ex));
+            if (IsCurrentRefresh())
+                await ShowErrorAsync(ResolveDesktopExceptionMessage(ex));
         }
         finally
         {
@@ -1047,6 +1059,7 @@ public partial class MainWindow : Window
             return false;
         }
 
+        var requestId = Interlocked.Increment(ref _nextFolderOpenRequestId);
         var stopwatch = Stopwatch.StartNew();
         var candidateSession = preparedSession;
         var ownsCandidateSession = candidateSession is not null;
@@ -1087,6 +1100,11 @@ public partial class MainWindow : Window
         {
             if (ownsCandidateSession)
                 candidateSession?.Dispose();
+            if (IsFolderOpenRequestStale(requestId))
+            {
+                _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "load-canceled");
+                return false;
+            }
             _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "branch-unavailable");
             await ShowErrorAsync(FormatRepositoryBranchUnavailableMessage(exception));
             return false;
@@ -1095,6 +1113,11 @@ public partial class MainWindow : Window
         {
             if (ownsCandidateSession)
                 candidateSession?.Dispose();
+            if (IsFolderOpenRequestStale(requestId))
+            {
+                _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "load-canceled");
+                return false;
+            }
             _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "invalid-path");
             await ShowErrorAsync(_localization.Format("Msg.PathNotFound", path));
             return false;
@@ -1110,6 +1133,14 @@ public partial class MainWindow : Window
                 IsReparsePoint: exists && FileSystemRootEntryPolicy.IsReparsePoint(normalizedPath),
                 CanRead: exists && _scanOptions.CanReadRoot(normalizedPath));
         });
+
+        if (IsFolderOpenRequestStale(requestId))
+        {
+            if (ownsCandidateSession)
+                candidateSession?.Dispose();
+            _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "load-canceled");
+            return false;
+        }
 
         if (!rootAccess.Exists)
         {
@@ -1154,6 +1185,14 @@ public partial class MainWindow : Window
             return false;
         }
 
+        if (!TryClaimEligibleFolderOpen(requestId))
+        {
+            if (ownsCandidateSession)
+                candidateSession?.Dispose();
+            _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "load-canceled");
+            return false;
+        }
+
         var projectLoadFinalization = BeginProjectLoadFinalization();
         var previousSourceType = _viewModel.ProjectSourceType;
         var previousBranch = _viewModel.CurrentBranch;
@@ -1175,11 +1214,12 @@ public partial class MainWindow : Window
         }
         try
         {
-            await _projectLoadPipeline.OpenFolderAsync(
+            var published = await _projectLoadPipeline.OpenFolderAsync(
                 normalizedPath,
                 candidateSession is null && (fromDialog || _currentRepositorySession is not null),
                 recordRecentFolder);
-            if (!PathComparer.Default.Equals(_currentPath, normalizedPath) ||
+            if (!published ||
+                !PathComparer.Default.Equals(_currentPath, normalizedPath) ||
                 !_viewModel.IsProjectLoaded)
             {
                 if (ownsCandidateSession)
@@ -1233,8 +1273,7 @@ public partial class MainWindow : Window
                 _currentCachedRepoPath = null;
             }
 
-            if (_desktopControlServer is not null)
-                await _desktopControlServer.UpdateProjectAsync(normalizedPath);
+            await UpdateDesktopControlProjectBestEffortAsync(normalizedPath);
             _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: true);
             return true;
         }
@@ -1256,6 +1295,29 @@ public partial class MainWindow : Window
         finally
         {
             projectLoadFinalization.TrySetResult();
+        }
+    }
+
+    private bool IsFolderOpenRequestStale(long requestId) =>
+        _windowLifetimeCts is not { IsCancellationRequested: false } ||
+        requestId < Volatile.Read(ref _latestEligibleFolderOpenRequestId);
+
+    private bool TryClaimEligibleFolderOpen(long requestId)
+    {
+        while (true)
+        {
+            var latestEligibleRequestId = Volatile.Read(ref _latestEligibleFolderOpenRequestId);
+            if (requestId < latestEligibleRequestId)
+                return false;
+
+            if (Interlocked.CompareExchange(
+                    ref _latestEligibleFolderOpenRequestId,
+                    requestId,
+                    latestEligibleRequestId) == latestEligibleRequestId)
+            {
+                _projectOperationCts?.Cancel();
+                return true;
+            }
         }
     }
 
@@ -1416,22 +1478,26 @@ public partial class MainWindow : Window
         bool reuseUnchangedDiscoveryCaches = false,
         bool preserveTreeState = true)
     {
-        if (string.IsNullOrEmpty(_currentPath)) return false;
+        var projectPath = _currentPath;
+        if (string.IsNullOrEmpty(projectPath)) return false;
         cancellationToken.ThrowIfCancellationRequested();
 
         // A no-change F5 validates only directories previously inspected by scope discovery.
-        // Structural changes, project switches and git operations still force a complete rebuild.
+        // Other reloads refresh discovery; matcher reuse still validates content and Git semantics.
         var canReuseIgnoreRuleCaches = false;
         if (reuseUnchangedDiscoveryCaches)
         {
             canReuseIgnoreRuleCaches = await Task.Run(
-                () => _ignoreRulesService.RevalidateCaches(_currentPath, cancellationToken),
+                () => _ignoreRulesService.RevalidateCaches(projectPath, cancellationToken),
                 cancellationToken);
         }
         else
         {
-            _ignoreRulesService.InvalidateCaches(_currentPath);
+            _ignoreRulesService.RefreshDiscoveryCaches(projectPath);
         }
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!PathComparer.Default.Equals(_currentPath, projectPath))
+            return false;
 
         if (!canReuseIgnoreRuleCaches)
             _selectionCoordinator.InvalidateFileSystemCaches();
@@ -1447,13 +1513,15 @@ public partial class MainWindow : Window
         {
             var runtimeGitMode = _selectionCoordinator.ActiveGitFilteringMode;
             var profileSnapshot = await LoadProjectProfileWithRetryAsync(
-                _currentPath,
+                projectPath,
                 cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
+            if (!PathComparer.Default.Equals(_currentPath, projectPath))
+                return false;
 
             if (profileSnapshot is { HasProfile: true, Profile: not null })
             {
-                _selectionCoordinator.ApplyProjectProfileSelections(_currentPath, profileSnapshot.Profile);
+                _selectionCoordinator.ApplyProjectProfileSelections(projectPath, profileSnapshot.Profile);
                 if (!preserveTreeState)
                 {
                     profileTreeSelection = new ProjectProfileTreeSelection(
@@ -1462,7 +1530,7 @@ public partial class MainWindow : Window
             }
             else if (profileSnapshot.Status == ProjectProfileLookupStatus.Missing)
             {
-                _selectionCoordinator.ResetProjectProfileSelections(_currentPath);
+                _selectionCoordinator.ResetProjectProfileSelections(projectPath);
                 if (!preserveTreeState)
                     profileTreeSelection = new ProjectProfileTreeSelection(SelectedPaths: null);
             }
@@ -1483,8 +1551,11 @@ public partial class MainWindow : Window
             }
         }
 
+        if (!PathComparer.Default.Equals(_currentPath, projectPath))
+            return false;
+
         return await _projectLoadSnapshotPipeline.ReloadAsync(
-            _currentPath,
+            projectPath,
             preserveTreeState,
             persistentMarks,
             profileTreeSelection,

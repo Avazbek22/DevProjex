@@ -260,12 +260,39 @@ public sealed class TerminalWorkspaceStateTests
 	{
 		using var state = new TerminalWorkspaceState(CreatePlan());
 		state.RestoreSelectedRelativePaths([]);
+		var revision = state.Revision;
 
 		var result = state.SetSelection(["all"], selected: false);
 
 		Assert.Equal(0, result.ChangedNodes);
 		Assert.True(result.SelectionChanged);
+		Assert.Equal(revision + 1, state.Revision);
 		Assert.Null(state.BuildSelection().SelectedPaths);
+	}
+
+	[Fact]
+	public void RedundantCommandSelectionDoesNotRejectPendingReprojection()
+	{
+		var sourcePlan = CreatePlan();
+		using var state = new TerminalWorkspaceState(sourcePlan);
+		state.SetSelection(["all"], selected: true);
+		var changed = state.SetSelection(["src/a.cs"], selected: false);
+		Assert.True(changed.SelectionChanged);
+		var expectedRevision = state.Revision;
+		var projectedPlan = CreatePlan(
+			sourcePlan.EffectiveTree,
+			[Path.Combine(sourcePlan.SourceRoot, "src", "b.cs")],
+			[sourcePlan.SourceRoot, Path.Combine(sourcePlan.SourceRoot, "src"),
+				Path.Combine(sourcePlan.SourceRoot, "empty")]);
+
+		var repeated = state.SetSelection(["src/a.cs"], selected: false);
+
+		Assert.False(repeated.SelectionChanged);
+		Assert.Equal(expectedRevision, state.Revision);
+		Assert.True(state.TryReplacePlan(projectedPlan, expectedRevision));
+		Assert.Same(projectedPlan, state.Plan);
+		Assert.DoesNotContain(state.Plan.IncludedFiles,
+			path => Path.GetFileName(path) == "a.cs");
 	}
 
 	[Fact]

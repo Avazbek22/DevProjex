@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Reflection;
+using System.Security;
 using System.Threading.Channels;
 using Avalonia.Automation;
 using Avalonia.Media;
@@ -739,12 +740,16 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 			}
 
 			var projectTree = Assert.IsAssignableFrom<TreeView>(window.FindControl<Control>("ProjectTree"));
-			var rootCheckBox = Assert.Single(
-				projectTree.GetVisualDescendants().OfType<CheckBox>(),
-				static checkBox => checkBox.DataContext is TreeNodeViewModel { Parent: null });
-			var rootTip = Assert.IsType<string>(ToolTip.GetTip(rootCheckBox));
-			Assert.Contains("focus", rootTip, StringComparison.OrdinalIgnoreCase);
-			Assert.Equal(rootTip, AutomationProperties.GetHelpText(rootCheckBox));
+			var treeCheckBoxes = projectTree.GetVisualDescendants()
+				.OfType<CheckBox>()
+				.Where(static checkBox => checkBox.DataContext is TreeNodeViewModel)
+				.ToArray();
+			Assert.NotEmpty(treeCheckBoxes);
+			Assert.All(treeCheckBoxes, static checkBox =>
+			{
+				Assert.Null(ToolTip.GetTip(checkBox));
+				Assert.True(string.IsNullOrEmpty(AutomationProperties.GetHelpText(checkBox)));
+			});
 
 			var secretCheckBox = UiTestDriver.GetRequiredIgnoreOptionCheckBox(
 				window,
@@ -752,6 +757,20 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 			var secretTip = Assert.IsType<string>(ToolTip.GetTip(secretCheckBox));
 			Assert.Contains("MCP", secretTip, StringComparison.Ordinal);
 			Assert.Equal(secretTip, AutomationProperties.GetHelpText(secretCheckBox));
+
+			var outputDirectory = Environment.GetEnvironmentVariable("DEVPROJEX_UI_CAPTURE_DIRECTORY");
+			if (!string.IsNullOrWhiteSpace(outputDirectory))
+			{
+				Directory.CreateDirectory(outputDirectory);
+				var rootCheckBox = Assert.Single(treeCheckBoxes,
+					static checkBox => checkBox.DataContext is TreeNodeViewModel { Parent: null });
+				window.MouseMove(UiTestDriver.GetControlCenter(rootCheckBox, window), RawInputModifiers.None);
+				await Task.Delay(TimeSpan.FromSeconds(1), TestContext.Current.CancellationToken);
+				await UiTestDriver.WaitForSettledFramesAsync(frameCount: 8);
+				var snapshotPath = Path.Combine(outputDirectory, "tree-checkbox-no-tooltip.png");
+				await SaveSnapshotAsync(window, snapshotPath);
+				Assert.True(new FileInfo(snapshotPath).Length > 1_000);
+			}
 		}
 		finally
 		{
@@ -1165,6 +1184,38 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 		Assert.False(new AgentActivityPreferenceStore(() => root).Load());
 	}
 
+	[Theory]
+	[InlineData(4 * 1024, true)]
+	[InlineData(4 * 1024 + 1, false)]
+	public void AgentActivityPreferenceLoadRejectsDocumentsBeyondByteLimit(
+		int documentBytes,
+		bool expectedEnabled)
+	{
+		using var project = UiTestProject.CreateDefault();
+		var root = project.AppDataPath;
+		Directory.CreateDirectory(root);
+		const string json = "{\"Enabled\":true}";
+		var path = Path.Combine(root, "agent-activity-view.json");
+		File.WriteAllText(path, json + new string(' ', documentBytes - json.Length));
+
+		var store = new AgentActivityPreferenceStore(() => root);
+		Assert.Equal(expectedEnabled, store.Load());
+		Assert.Equal(documentBytes, new FileInfo(path).Length);
+	}
+
+	[Fact]
+	public void AgentActivityPreferenceUnavailableStateRootKeepsOptionalFeatureDisabled()
+	{
+		var denied = new AgentActivityPreferenceStore(
+			() => throw new SecurityException("State root access is denied."));
+		Assert.False(denied.Load());
+		Assert.False(denied.TrySave(enabled: true));
+
+		var malformed = new AgentActivityPreferenceStore(() => "\0");
+		Assert.False(malformed.Load());
+		Assert.False(malformed.TrySave(enabled: true));
+	}
+
 	[Fact]
 	public void AgentJournalStringsExistInEveryInterfaceLanguage()
 	{
@@ -1177,7 +1228,6 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 			"Menu.Mcp.OpenProject.Standard.Help",
 			"Menu.Mcp.OtherClients.Help",
 			"Menu.Mcp.Journal.Help",
-			"Tree.Selection.Focus.Help",
 			"Settings.HideSecrets.Help",
 			"Menu.View.AgentActivity",
 			"AgentJournal.Title",
@@ -1664,8 +1714,11 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 			{
 				using var output = new MemoryStream();
 				captured.Save(output, PngBitmapEncoderOptions.Default);
-				File.WriteAllBytes(path, output.ToArray());
-				return;
+				if (output.Length > 1_000)
+				{
+					File.WriteAllBytes(path, output.ToArray());
+					return;
+				}
 			}
 			var width = Math.Max(1, (int)Math.Ceiling(topLevel.Bounds.Width));
 			var height = Math.Max(1, (int)Math.Ceiling(topLevel.Bounds.Height));

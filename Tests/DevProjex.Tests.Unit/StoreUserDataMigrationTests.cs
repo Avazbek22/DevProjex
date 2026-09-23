@@ -1,4 +1,5 @@
 using DevProjex.Infrastructure.Persistence;
+using DevProjex.Mcp;
 
 namespace DevProjex.Tests.Unit;
 
@@ -194,6 +195,100 @@ public sealed class StoreUserDataMigrationTests
 		Assert.Equal(StoreUserDataMigrationStatus.TemporarilyUnavailable, status);
 		Assert.Equal("legacy", File.ReadAllText(Path.Combine(source, "settings.json")));
 		Assert.False(Directory.Exists(Path.Combine(configuration, "DevProjex")));
+	}
+
+	[Fact]
+	public void AdmissionRetriesLockedMigrationThreeTimesWithoutCreatingDefaultState()
+	{
+		using var workspace = new TemporaryDirectory();
+		var configuration = workspace.CreateFolder("roaming");
+		var local = workspace.CreateFolder("local");
+		var source = CreateSource(local);
+		File.WriteAllText(Path.Combine(source, "settings.json"), "legacy");
+		using var heldLock = new FileStream(
+			Path.Combine(configuration, ".devprojex-store-migration.lock"),
+			FileMode.OpenOrCreate,
+			FileAccess.ReadWrite,
+			FileShare.None);
+		var probes = 0;
+		var waits = new List<TimeSpan>();
+
+		var status = StoreUserDataMigrationAdmission.Run(
+			() =>
+			{
+				probes++;
+				return StoreUserDataMigration.TryMigrate(configuration, local, PackageFamily);
+			},
+			waits.Add);
+
+		Assert.Equal(StoreUserDataMigrationStatus.TemporarilyUnavailable, status);
+		Assert.Equal(3, probes);
+		Assert.Equal([TimeSpan.FromMilliseconds(75), TimeSpan.FromMilliseconds(150)], waits);
+		Assert.Equal("legacy", File.ReadAllText(Path.Combine(source, "settings.json")));
+		Assert.False(Directory.Exists(Path.Combine(configuration, "DevProjex")));
+	}
+
+	[Theory]
+	[InlineData(StoreUserDataMigrationStatus.NotApplicable)]
+	[InlineData(StoreUserDataMigrationStatus.AlreadyInitialized)]
+	[InlineData(StoreUserDataMigrationStatus.Migrated)]
+	public void AdmissionAcceptsReadyStatusWithoutRetry(StoreUserDataMigrationStatus readyStatus)
+	{
+		var probes = 0;
+		var status = StoreUserDataMigrationAdmission.Run(
+			() =>
+			{
+				probes++;
+				return readyStatus;
+			},
+			_ => Assert.Fail("Ready migration must not wait."));
+
+		Assert.Equal(readyStatus, status);
+		Assert.Equal(1, probes);
+	}
+
+	[Fact]
+	public void AdmissionTreatsRecoverableProbeErrorsAsFailedAndAllowsRetry()
+	{
+		var probes = 0;
+		var status = StoreUserDataMigrationAdmission.Run(
+			() =>
+			{
+				probes++;
+				if (probes < 3)
+					throw new IOException("Migration probe is unavailable.");
+				return StoreUserDataMigrationStatus.NotApplicable;
+			},
+			_ => { });
+
+		Assert.Equal(StoreUserDataMigrationStatus.NotApplicable, status);
+		Assert.Equal(3, probes);
+	}
+
+	[Fact]
+	public async Task McpHostRejectsUnavailableMigrationBeforeOpeningProtocolStreams()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var input = new MemoryStream();
+		using var output = new MemoryStream();
+		var probes = 0;
+
+		var error = await Assert.ThrowsAsync<StoreUserDataMigrationUnavailableException>(() =>
+			McpServerHost.RunWithStreamsAsync(
+				[workspace.Path],
+				input,
+				output,
+				cancellationToken: TestContext.Current.CancellationToken,
+				migrationProbe: () =>
+				{
+					probes++;
+					return StoreUserDataMigrationStatus.TemporarilyUnavailable;
+				},
+				migrationWait: _ => { }));
+
+		Assert.Equal(StoreUserDataMigrationStatus.TemporarilyUnavailable, error.Status);
+		Assert.Equal(3, probes);
+		Assert.Equal(0, output.Length);
 	}
 
 	[Fact]

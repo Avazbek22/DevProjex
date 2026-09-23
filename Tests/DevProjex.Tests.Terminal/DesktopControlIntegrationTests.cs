@@ -59,6 +59,42 @@ public sealed class DesktopControlIntegrationTests
 	}
 
 	[Fact]
+	public async Task AppliedActionRemainsSuccessfulWhenRegistrationRefreshFails()
+	{
+		using var workspace = new TemporaryDirectory();
+		var availableRoot = workspace.CreateDirectory("available-root");
+		var unavailableRoot = workspace.WriteFile("unavailable-root", string.Empty);
+		var currentRoot = availableRoot;
+		var paths = new DesktopControlPaths(() => currentRoot);
+		var handler = new RecordingDesktopHandler();
+		await using var server = await DesktopControlServer.StartAsync(
+			handler,
+			paths: paths,
+			cancellationToken: TestContext.Current.CancellationToken);
+		var registration = Assert.Single(
+			await new DesktopInstanceRegistry(paths).ListAsync(TestContext.Current.CancellationToken));
+
+		try
+		{
+			currentRoot = unavailableRoot;
+			var response = await new DesktopControlClient().SendAsync(
+				registration,
+				"activate",
+				new { },
+				TimeSpan.FromSeconds(5),
+				TestContext.Current.CancellationToken);
+
+			Assert.True(response.Ok);
+			Assert.Null(response.Error);
+			Assert.IsType<DesktopActivateRequest>(Assert.Single(handler.Requests));
+		}
+		finally
+		{
+			currentRoot = availableRoot;
+		}
+	}
+
+	[Fact]
 	public async Task ConcurrentProjectUpdatesLeaveOneValidRegistration()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -276,6 +312,44 @@ public sealed class DesktopControlIntegrationTests
 
 		Assert.False(response.Ok);
 		Assert.Equal(expectedCode, response.Error?.Code);
+		Assert.Empty(handler.Requests);
+	}
+
+	[Theory]
+	[InlineData("123")]
+	[InlineData("true")]
+	[InlineData("{}")]
+	public async Task PreviewOpenRejectsNonStringViewWithoutInvokingDesktop(string view)
+	{
+		using var workspace = new TemporaryDirectory();
+		var paths = new DesktopControlPaths(() => workspace.Path);
+		var handler = new RecordingDesktopHandler();
+		await using var server = await DesktopControlServer.StartAsync(
+			handler,
+			paths: paths,
+			cancellationToken: TestContext.Current.CancellationToken);
+		var registry = new DesktopInstanceRegistry(paths);
+		var registration = Assert.Single(
+			await registry.ListAsync(TestContext.Current.CancellationToken));
+		using var payloadDocument = JsonDocument.Parse($"{{\"view\":{view}}}");
+		var request = JsonSerializer.Serialize(new
+		{
+			protocolVersion = DesktopProtocol.CurrentVersion,
+			requestId = "invalid-preview-view",
+			instanceId = registration.InstanceId,
+			action = "preview.open",
+			payload = payloadDocument.RootElement
+		});
+
+		var responseJson = await SendRawAsync(
+			registration,
+			request,
+			TestContext.Current.CancellationToken);
+		using var response = JsonDocument.Parse(responseJson);
+		Assert.False(response.RootElement.GetProperty("ok").GetBoolean());
+		Assert.Equal(
+			"DPX-DESKTOP-INVALID-PAYLOAD",
+			response.RootElement.GetProperty("error").GetProperty("code").GetString());
 		Assert.Empty(handler.Requests);
 	}
 

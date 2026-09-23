@@ -268,7 +268,7 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 							continue;
 						}
 
-						if (retainedPaths.Contains(path) && identifiedMetrics.Identity is { } metricsIdentity)
+						if (retainedPaths.Contains(path) && identifiedMetrics.StableIdentity is { } metricsIdentity)
 						{
 							TryRetainFact(path, new ContentReadFactSnapshot.RetainedContentReadFact(
 								new ContentReadFact(
@@ -301,7 +301,7 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 							decodeScratchGate,
 							pipelineToken).ConfigureAwait(false);
 						fact = read.Fact;
-						identity = read.Identity;
+						identity = read.StableIdentity;
 						lease = read.Lease;
 					}
 					else

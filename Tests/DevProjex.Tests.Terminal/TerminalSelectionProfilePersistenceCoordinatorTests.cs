@@ -273,6 +273,180 @@ public sealed class TerminalSelectionProfilePersistenceCoordinatorTests
 		Assert.Equal(TerminalSelectionPersistencePhase.Idle, coordinator.State.Phase);
 	}
 
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task DisposeAllowsAnActiveSelectionWriteToFinish(bool backgroundWrite)
+	{
+		var delay = new ControlledDelay();
+		var writeStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		using var coordinator = new TerminalSelectionProfilePersistenceCoordinator(
+			async (_, _, _) =>
+			{
+				writeStarted.TrySetResult();
+				await releaseWrite.Task;
+			},
+			delay.WaitAsync);
+
+		try
+		{
+			coordinator.Schedule("project", CreateProfile(["src"]));
+			if (backgroundWrite)
+			{
+				delay.Release();
+				await writeStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+			}
+			var flush = coordinator.FlushAsync(TestContext.Current.CancellationToken);
+			await writeStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+
+			coordinator.Dispose();
+			Assert.False(flush.IsCompleted);
+			releaseWrite.TrySetResult();
+			Assert.True(await flush.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+		}
+		finally
+		{
+			releaseWrite.TrySetResult();
+		}
+	}
+
+	[Theory]
+	[InlineData(false, false)]
+	[InlineData(true, false)]
+	[InlineData(false, true)]
+	public async Task QueuedFlushDoesNotRewriteCompletedOrDiscardedSelection(bool discardPending, bool dispose)
+	{
+		var delay = new ControlledDelay();
+		var writeStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var writeCount = 0;
+		using var queuedCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+			TestContext.Current.CancellationToken);
+		using var coordinator = new TerminalSelectionProfilePersistenceCoordinator(
+			async (_, _, _) =>
+			{
+				writeCount++;
+				writeStarted.TrySetResult();
+				await releaseWrite.Task;
+			},
+			delay.WaitAsync);
+
+		try
+		{
+			coordinator.Schedule("project", CreateProfile(["src"]));
+			var activeFlush = coordinator.FlushAsync(TestContext.Current.CancellationToken);
+			await writeStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+			var queuedFlush = coordinator.FlushAsync(queuedCancellation.Token);
+			Assert.False(queuedFlush.IsCompleted);
+
+			if (dispose)
+				coordinator.Dispose();
+			else if (discardPending)
+				coordinator.DiscardPending();
+
+			releaseWrite.TrySetResult();
+			Assert.True(await activeFlush.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+			Assert.True(await queuedFlush.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+			Assert.Equal(1, writeCount);
+		}
+		finally
+		{
+			releaseWrite.TrySetResult();
+			await queuedCancellation.CancelAsync();
+		}
+	}
+
+	[Fact]
+	public async Task CanceledQueuedFlushDoesNotPreventAnotherFlushFromDrainingDuringDispose()
+	{
+		var delay = new ControlledDelay();
+		var writeStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var writeCount = 0;
+		using var queuedCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+			TestContext.Current.CancellationToken);
+		using var drainingCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+			TestContext.Current.CancellationToken);
+		using var coordinator = new TerminalSelectionProfilePersistenceCoordinator(
+			async (_, _, _) =>
+			{
+				writeCount++;
+				writeStarted.TrySetResult();
+				await releaseWrite.Task;
+			},
+			delay.WaitAsync);
+
+		try
+		{
+			coordinator.Schedule("project", CreateProfile(["src"]));
+			var activeFlush = coordinator.FlushAsync(TestContext.Current.CancellationToken);
+			await writeStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+			var canceledFlush = coordinator.FlushAsync(queuedCancellation.Token);
+			await queuedCancellation.CancelAsync();
+			await Assert.ThrowsAnyAsync<OperationCanceledException>(() => canceledFlush);
+			var queuedFlush = coordinator.FlushAsync(drainingCancellation.Token);
+
+			coordinator.Dispose();
+			releaseWrite.TrySetResult();
+			Assert.True(await activeFlush.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+			Assert.True(await queuedFlush.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+			Assert.Equal(1, writeCount);
+		}
+		finally
+		{
+			releaseWrite.TrySetResult();
+			await drainingCancellation.CancelAsync();
+		}
+	}
+
+	[Fact]
+	public async Task QueuedFlushPreservesANewerSelectionScheduledDuringTheActiveWrite()
+	{
+		var delay = new ControlledDelay();
+		var firstWriteStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var releaseFirstWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var writes = new List<IReadOnlyCollection<string>?>();
+		using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+		cancellation.CancelAfter(TimeSpan.FromSeconds(10));
+		using var coordinator = new TerminalSelectionProfilePersistenceCoordinator(
+			async (_, profile, cancellationToken) =>
+			{
+				writes.Add(profile.SelectedPaths);
+				if (writes.Count == 1)
+				{
+					firstWriteStarted.TrySetResult();
+					await releaseFirstWrite.Task.WaitAsync(cancellationToken);
+				}
+			},
+			delay.WaitAsync);
+
+		try
+		{
+			coordinator.Schedule("project", CreateProfile(["src"]));
+			var activeFlush = coordinator.FlushAsync(cancellation.Token);
+			await firstWriteStarted.Task.WaitAsync(cancellation.Token);
+			var queuedFlush = coordinator.FlushAsync(cancellation.Token);
+			Assert.False(queuedFlush.IsCompleted);
+
+			coordinator.Schedule("project", CreateProfile(["tests"]));
+			Assert.Equal(TerminalSelectionPersistencePhase.Pending, coordinator.State.Phase);
+			releaseFirstWrite.TrySetResult();
+
+			Assert.All(await Task.WhenAll(activeFlush, queuedFlush).WaitAsync(cancellation.Token), saved => Assert.True(saved));
+			Assert.True(await coordinator.FlushAsync(cancellation.Token));
+			Assert.Collection(writes,
+				selection => Assert.Equal(["src"], selection),
+				selection => Assert.Equal(["tests"], selection));
+			Assert.Equal(TerminalSelectionPersistencePhase.Idle, coordinator.State.Phase);
+		}
+		finally
+		{
+			releaseFirstWrite.TrySetResult();
+			await cancellation.CancelAsync();
+		}
+	}
+
 	private static ProjectSelectionProfile CreateProfile(IReadOnlyCollection<string>? selectedPaths) =>
 		new([], [".cs"], [], SelectedPaths: selectedPaths);
 

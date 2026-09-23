@@ -28,6 +28,7 @@ internal sealed class McpProjectService(
 	private readonly ConcurrentDictionary<string, byte> provenIgnoredMonitorSubtrees = new(PathComparer.Default);
 	private readonly object rootMonitorSync = new();
 	private readonly ConditionalWeakTable<ProjectContextPlan, PlanMembership> planMembership = new();
+	private readonly CancellationTokenSource disposalCancellation = new();
 	private long cacheGeneration;
 	private long planMembershipBuildCount;
 	private long profileCatalogReadCount;
@@ -339,7 +340,7 @@ internal sealed class McpProjectService(
 		}
 
 		if (maximumFileBytes is not null)
-			narrowed = RefreshEffectiveFileSizes(narrowed);
+			narrowed = RefreshEffectiveFileSizes(narrowed, cancellationToken);
 		var final = await ProjectFileSizeFilter
 			.ApplyAsync(services.Planner, narrowed, maximumFileBytes, cancellationToken)
 			.ConfigureAwait(false);
@@ -399,11 +400,17 @@ internal sealed class McpProjectService(
 	{
 		ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this);
 		if (!allowInventoryReuse || !CanMonitorRepositoryState(request.ProjectPath))
-			return await BuildUncachedAsync().ConfigureAwait(false);
+		{
+			ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this);
+			return await BuildUncachedAsync(cancellationToken).ConfigureAwait(false);
+		}
 
 		var monitor = GetOrCreateRootMonitor(request.ProjectPath);
 		if (monitor is null || !monitor.IsReliable)
-			return await BuildUncachedAsync().ConfigureAwait(false);
+		{
+			ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this);
+			return await BuildUncachedAsync(cancellationToken).ConfigureAwait(false);
+		}
 
 		for (var attempt = 0; attempt < 2; attempt++)
 		{
@@ -413,42 +420,66 @@ internal sealed class McpProjectService(
 				BuildSelectionIdentity(request),
 				includeOutputMetrics,
 				liveProfileRevision);
-			var created = new CachedInventoryEntry(
-				Interlocked.Increment(ref cacheGeneration),
-				new Lazy<Task<CachedInventoryPlan>>(
-				async () =>
-				{
-					var revisionBeforeBuild = monitor.Revision;
-					var controlStampsBeforeBuild = CaptureBuildControlStamps(request.ProjectPath);
-					var built = await BuildUncachedAsync().ConfigureAwait(false);
-					if (inventoryBuilt is not null)
-						await inventoryBuilt(request.ProjectPath, cancellationToken).ConfigureAwait(false);
-					var builtCoherently = controlStampsBeforeBuild is not null &&
-										  controlStampsBeforeBuild.All(static stamp => stamp.IsCurrent()) &&
-										  ObservedControlFilesAreCurrent(built.ObservedControlFiles) &&
-										  monitor.Revision == revisionBeforeBuild &&
-										  monitor.IsReliable;
-					var stamps = CapturePlanStamps(built);
-					return new CachedInventoryPlan(
-						built,
-						revisionBeforeBuild,
-						stamps,
-						builtCoherently);
-				},
-				LazyThreadSafetyMode.ExecutionAndPublication));
-			var entry = inventoryCache.GetOrAdd(key, created);
+			CachedInventoryEntry? created = null;
+			if (!inventoryCache.TryGetValue(key, out var entry))
+			{
+				created = new CachedInventoryEntry(
+					Interlocked.Increment(ref cacheGeneration),
+					disposalCancellation.Token,
+					async buildCancellationToken =>
+					{
+						var revisionBeforeBuild = monitor.Revision;
+						var controlStampsBeforeBuild = CaptureBuildControlStamps(request.ProjectPath);
+						var built = await BuildUncachedAsync(buildCancellationToken).ConfigureAwait(false);
+						if (inventoryBuilt is not null)
+							await inventoryBuilt(request.ProjectPath, buildCancellationToken).ConfigureAwait(false);
+						var builtCoherently = controlStampsBeforeBuild is not null &&
+							controlStampsBeforeBuild.All(static stamp => stamp.IsCurrent()) &&
+							ObservedControlFilesAreCurrent(built.ObservedControlFiles) &&
+							monitor.Revision == revisionBeforeBuild &&
+							monitor.IsReliable;
+						var stamps = CapturePlanStamps(built);
+						return new CachedInventoryPlan(
+							built,
+							revisionBeforeBuild,
+							stamps,
+							builtCoherently);
+					});
+				entry = inventoryCache.GetOrAdd(key, created);
+				if (!ReferenceEquals(entry, created))
+					created.Retire();
+			}
+			if (Volatile.Read(ref disposed) != 0)
+			{
+				RemoveInventoryEntry(key, entry);
+				throw new ObjectDisposedException(nameof(McpProjectService));
+			}
+			if (!entry.TryJoin())
+			{
+				RemoveInventoryEntry(key, entry);
+				continue;
+			}
 			if (ReferenceEquals(entry, created))
 				TrimInventoryCache();
 
 			CachedInventoryPlan cached;
 			try
 			{
-				cached = await entry.Value.Value.ConfigureAwait(false);
+				cached = await entry.Value.Value.WaitAsync(cancellationToken).ConfigureAwait(false);
+			}
+			catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+			{
+				throw;
 			}
 			catch
 			{
 				RemoveInventoryEntry(key, entry);
 				throw;
+			}
+			finally
+			{
+				if (entry.Leave())
+					RemoveInventoryEntry(key, entry);
 			}
 			var beforeValidation = monitor.Revision;
 			var isCurrent = cached.BuiltCoherently &&
@@ -465,18 +496,22 @@ internal sealed class McpProjectService(
 			RemoveInventoryEntry(key, entry);
 		}
 
-		return await BuildUncachedAsync().ConfigureAwait(false);
+		ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this);
+		return await BuildUncachedAsync(cancellationToken).ConfigureAwait(false);
 
-		Task<ProjectContextPlan> BuildUncachedAsync() => includeOutputMetrics
-			? services.Planner.BuildAsync(request, cancellationToken)
-			: services.Planner.BuildStructureAsync(request, cancellationToken);
+		Task<ProjectContextPlan> BuildUncachedAsync(CancellationToken buildCancellationToken) => includeOutputMetrics
+			? services.Planner.BuildAsync(request, buildCancellationToken)
+			: services.Planner.BuildStructureAsync(request, buildCancellationToken);
 	}
 
-	private ProjectContextPlan RefreshEffectiveFileSizes(ProjectContextPlan plan)
+	private ProjectContextPlan RefreshEffectiveFileSizes(
+		ProjectContextPlan plan,
+		CancellationToken cancellationToken)
 	{
 		var sizes = new Dictionary<string, long>(plan.IncludedFiles.Count, ProjectTreePathIdentity.CanonicalComparer);
 		foreach (var path in plan.IncludedFiles)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			effectiveFileSizeRead?.Invoke(path);
 			try
 			{
@@ -507,6 +542,7 @@ internal sealed class McpProjectService(
 		var normalizedRoot = PathUtility.Normalize(projectRoot);
 		lock (rootMonitorSync)
 		{
+			ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this);
 			if (rootMonitors.TryGetValue(normalizedRoot, out var existing))
 			{
 				if (existing.IsReliable)
@@ -586,7 +622,22 @@ internal sealed class McpProjectService(
 					 directory = Path.GetDirectoryName(directory))
 				{
 					if (provenIgnoredMonitorSubtrees.ContainsKey(directory))
-						return true;
+					{
+						if (eventArgs.ChangeType == WatcherChangeTypes.Changed &&
+							!PathComparer.Default.Equals(changedPath, directory) &&
+							!PathComparer.Default.Equals(Path.GetDirectoryName(changedPath), directory))
+						{
+							return true;
+						}
+						if (SmartArtifactIgnoreMatcher.Default.IsIgnoredDirectory(
+								directory,
+								Path.GetFileName(directory)))
+						{
+							return true;
+						}
+						provenIgnoredMonitorSubtrees.TryRemove(directory, out _);
+						return false;
+					}
 					var directoryName = Path.GetFileName(directory);
 					if (SmartArtifactIgnoreMatcher.Default.IsCandidateName(directoryName) &&
 						SmartArtifactIgnoreMatcher.Default.IsIgnoredDirectory(directory, directoryName))
@@ -778,6 +829,7 @@ internal sealed class McpProjectService(
 			return false;
 		if (entry.Value.IsValueCreated && entry.Value.Value.IsCompletedSuccessfully)
 			RemoveProjectionsForBasePlan(entry.Value.Value.Result.Plan);
+		entry.Retire();
 		return true;
 	}
 
@@ -1103,7 +1155,7 @@ internal sealed class McpProjectService(
 				cancellationToken)
 			.ConfigureAwait(false);
 
-	public string RedactSyntheticText(
+	public (string Text, SecretRedactionSnapshot Snapshot) RedactSyntheticText(
 		ProjectContextPlan plan,
 		string identityPath,
 		string content,
@@ -1115,9 +1167,8 @@ internal sealed class McpProjectService(
 		var redaction = CreateTransformationContext(plan).Redaction ??
 						throw new InvalidOperationException("MCP text redaction is unavailable.");
 		var scope = redaction.BeginOutput([identityPath], cancellationToken);
-		var result = scope.Redact(identityPath, content, cancellationToken).Text;
-		_ = scope.Complete();
-		return result;
+		var result = scope.Redact(identityPath, content, cancellationToken);
+		return (result.Text, scope.Complete());
 	}
 
 	public static async Task EnsureRankingSourcesCurrentAsync(
@@ -1693,9 +1744,99 @@ internal sealed class McpProjectService(
 		ProjectContextPlan Plan,
 		long Generation);
 
-	private sealed record CachedInventoryEntry(
-		long Generation,
-		Lazy<Task<CachedInventoryPlan>> Value);
+	private sealed class CachedInventoryEntry
+	{
+		private readonly object sync = new();
+		private readonly CancellationTokenSource buildCancellation;
+		private int waiters;
+		private bool retired;
+		private bool cleanupScheduled;
+
+		public CachedInventoryEntry(
+			long generation,
+			CancellationToken disposalToken,
+			Func<CancellationToken, Task<CachedInventoryPlan>> build)
+		{
+			Generation = generation;
+			buildCancellation = CancellationTokenSource.CreateLinkedTokenSource(disposalToken);
+			Value = new Lazy<Task<CachedInventoryPlan>>(
+				() => build(buildCancellation.Token),
+				LazyThreadSafetyMode.ExecutionAndPublication);
+		}
+
+		public long Generation { get; }
+		public Lazy<Task<CachedInventoryPlan>> Value { get; }
+
+		public bool TryJoin()
+		{
+			lock (sync)
+			{
+				if (retired)
+					return false;
+				waiters++;
+				return true;
+			}
+		}
+
+		public bool Leave()
+		{
+			CleanupWork cleanup;
+			bool isRetired;
+			lock (sync)
+			{
+				waiters--;
+				if (waiters == 0 && Value.IsValueCreated && !Value.Value.IsCompletedSuccessfully)
+					retired = true;
+				isRetired = retired;
+				cleanup = retired && waiters == 0 ? BeginCleanup() : default;
+			}
+			CompleteCleanup(cleanup);
+			return isRetired;
+		}
+
+		public void Retire()
+		{
+			CleanupWork cleanup;
+			lock (sync)
+			{
+				retired = true;
+				cleanup = waiters == 0 ? BeginCleanup() : default;
+			}
+			CompleteCleanup(cleanup);
+		}
+
+		private CleanupWork BeginCleanup()
+		{
+			if (cleanupScheduled)
+				return default;
+			cleanupScheduled = true;
+			return new CleanupWork(buildCancellation, Value.IsValueCreated ? Value.Value : null);
+		}
+
+		private static void CompleteCleanup(CleanupWork cleanup)
+		{
+			if (cleanup.Cancellation is null)
+				return;
+			if (cleanup.Task is null)
+			{
+				cleanup.Cancellation.Dispose();
+				return;
+			}
+
+			if (!cleanup.Task.IsCompleted)
+				cleanup.Cancellation.Cancel();
+			_ = cleanup.Task.ContinueWith(
+				static (_, state) => ((CancellationTokenSource)state!).Dispose(),
+				cleanup.Cancellation,
+				CancellationToken.None,
+				TaskContinuationOptions.ExecuteSynchronously,
+				TaskScheduler.Default);
+		}
+
+		private readonly record struct CleanupWork(
+			CancellationTokenSource? Cancellation,
+			Task<CachedInventoryPlan>? Task);
+	}
 
 	private sealed record CachedInventoryPlan(
 		ProjectContextPlan Plan,
@@ -1845,7 +1986,9 @@ internal sealed class McpProjectService(
 	{
 		if (Interlocked.Exchange(ref disposed, 1) != 0)
 			return;
-		inventoryCache.Clear();
+		disposalCancellation.Cancel();
+		foreach (var pair in inventoryCache)
+			RemoveInventoryEntry(pair.Key, pair.Value);
 		projectionCache.Clear();
 		lock (rootMonitorSync)
 		{
@@ -1853,6 +1996,7 @@ internal sealed class McpProjectService(
 				monitor.Dispose();
 			rootMonitors.Clear();
 		}
+		disposalCancellation.Dispose();
 	}
 
 	internal static string ToRelative(string root, string path) =>

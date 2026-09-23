@@ -45,6 +45,33 @@ public sealed class ProfileCommandContractTests
 	}
 
 	[Fact]
+	public async Task ProfileSaveDoesNotReportSuccessWhenClockMovesBehindStoredRevision()
+	{
+		using var workspace = CreateWorkspace();
+		var project = workspace.Path;
+		var dataRoot = workspace.CreateDirectory("clock-skew-data");
+		var store = new ProjectProfileStore(() => dataRoot);
+		Assert.True(store.TrySaveProfile(
+			project,
+			new ProjectSelectionProfile([], [".cs"], []),
+			DateTimeOffset.UtcNow.AddMinutes(1)));
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(
+				environment,
+				new TerminalServiceFactory(() => dataRoot))
+			.RunAsync(
+				["profile", "save", project, "--extension", ".md", "--language", "en"],
+				TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.PolicyFailure, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("DPX-CLI-PROFILE-CONFLICT", environment.StandardError, StringComparison.Ordinal);
+		Assert.True(store.TryLoadProfile(project, out var current));
+		Assert.Equal([".cs"], current.SelectedExtensions);
+	}
+
+	[Fact]
 	public void TextProfileEscapesControlCharactersInSelectionValues()
 	{
 		using var workspace = new TemporaryDirectory();

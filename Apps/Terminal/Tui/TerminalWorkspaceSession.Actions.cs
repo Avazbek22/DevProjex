@@ -1818,13 +1818,19 @@ internal sealed partial class TerminalWorkspaceSession
 			L("Terminal.Tui.Action.GetUpdates"),
 			async token =>
 			{
-				var updated = await _services.GitRepositoryService
-					.PullUpdatesAsync(state.Plan.SourceRoot, cancellationToken: token)
+				var updated = await RunPostRepositoryMutationRefreshAsync(
+					cancellationToken => _services.GitRepositoryService.PullUpdatesAsync(
+						state.Plan.SourceRoot,
+						cancellationToken: cancellationToken),
+					cancellationToken => BuildAndApplyStructuralRefreshAsync(
+						state,
+						refreshRequest,
+						cancellationToken),
+					SetRepositoryStateInconsistent,
+					token)
 					.ConfigureAwait(false);
 				if (!updated)
 					throw new TerminalWorkspaceOperationException("DPX-TUI-GIT-UPDATE-FAILED");
-				await BuildAndApplyStructuralRefreshAsync(state, refreshRequest, token)
-					.ConfigureAwait(false);
 				return L("Terminal.Tui.RepositoryUpdated");
 			},
 			modalProgress: true,
@@ -1866,7 +1872,7 @@ internal sealed partial class TerminalWorkspaceSession
 						throw new TerminalWorkspaceOperationException("DPX-TUI-GIT-BRANCH-NOT-FOUND");
 					return null;
 				}
-				var switched = await RunPostCheckoutRefreshAsync(
+				var switched = await RunPostRepositoryMutationRefreshAsync(
 						cancellationToken => _services.GitRepositoryService.SwitchBranchAsync(
 							state.Plan.SourceRoot,
 							selected,
@@ -1886,7 +1892,7 @@ internal sealed partial class TerminalWorkspaceSession
 			originatedFromCommandLine: originatedFromCommandLine));
 	}
 
-	internal static async Task<bool> RunPostCheckoutRefreshAsync(
+	internal static async Task<bool> RunPostRepositoryMutationRefreshAsync(
 		Func<CancellationToken, Task<bool>> checkout,
 		Func<CancellationToken, Task> refresh,
 		Action<bool> setRepositoryStateInconsistent,
@@ -1897,13 +1903,11 @@ internal sealed partial class TerminalWorkspaceSession
 		ArgumentNullException.ThrowIfNull(setRepositoryStateInconsistent);
 
 		var switched = await checkout(cancellationToken).ConfigureAwait(false);
-		if (!switched)
-			return false;
-
+		// A failed reset or checkout may have already changed part of the cached worktree.
 		setRepositoryStateInconsistent(true);
 		await refresh(CancellationToken.None).ConfigureAwait(false);
 		setRepositoryStateInconsistent(false);
-		return true;
+		return switched;
 	}
 
 	private async Task BuildAndApplyStructuralRefreshAsync(
@@ -1911,24 +1915,47 @@ internal sealed partial class TerminalWorkspaceSession
 		TerminalStructuralRefreshRequest request,
 		CancellationToken cancellationToken)
 	{
-		var result = await _controller
-			.BuildStructuralRefreshAsync(request, cancellationToken)
-			.ConfigureAwait(false);
-		var gitCliAvailable = await ResolveGitCliAvailabilityAsync(result.Plan, cancellationToken)
-			.ConfigureAwait(false);
-		cancellationToken.ThrowIfCancellationRequested();
-		var applied = await InvokeAsync(() =>
+		while (true)
 		{
-			if (_stopping || !ReferenceEquals(_state, state))
-				return false;
+			cancellationToken.ThrowIfCancellationRequested();
+			var result = await _controller
+				.BuildStructuralRefreshAsync(request, cancellationToken)
+				.ConfigureAwait(false);
+			var gitCliAvailable = await ResolveGitCliAvailabilityAsync(result.Plan, cancellationToken)
+				.ConfigureAwait(false);
+			cancellationToken.ThrowIfCancellationRequested();
+			TerminalStructuralRefreshRequest? retryRequest = null;
+			var applied = await InvokeAsync(() =>
+			{
+				if (_stopping ||
+					cancellationToken.IsCancellationRequested ||
+					!ReferenceEquals(_state, state))
+				{
+					return false;
+				}
 
-			_gitCliAvailable = gitCliAvailable;
-			TerminalWorkspaceController.ApplyStructuralRefresh(state, result);
-			return true;
-		}).ConfigureAwait(false);
-		if (!applied)
-			throw new OperationCanceledException();
-		SetRepositoryStateInconsistent(false);
+				if (!TerminalWorkspaceController.ApplyStructuralRefresh(state, result))
+				{
+					retryRequest = _controller.CaptureStructuralRefresh(
+						state,
+						state.BuildSelection(),
+						_preferredGitMode);
+					return false;
+				}
+
+				_gitCliAvailable = gitCliAvailable;
+				return true;
+			}).ConfigureAwait(false);
+			if (retryRequest is not null)
+			{
+				request = retryRequest;
+				continue;
+			}
+			if (!applied)
+				throw new OperationCanceledException();
+			SetRepositoryStateInconsistent(false);
+			return;
+		}
 	}
 
 	private async Task<bool> ResolveGitCliAvailabilityAsync(

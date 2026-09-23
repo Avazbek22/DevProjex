@@ -99,6 +99,35 @@ public sealed class MainWindowAvalonia12CleanupUiTests(UiWorkspaceFixture worksp
     }
 
     [AvaloniaFact]
+    public async Task ThemePopup_OpenStateFollowsViewModelInHeadlessHost()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            var popup = UiTestDriver.GetRequiredTopMenuControl<Popup>(window, "ThemePopup");
+            var content = UiTestDriver.GetRequiredTopMenuControl<ThemePopoverView>(window, "ThemePopover");
+            var viewModel = UiTestDriver.GetViewModel(window);
+
+            viewModel.ThemePopoverOpen = true;
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => popup.IsOpen && content.IsVisible,
+                "theme popup to open with visible content");
+
+            viewModel.ThemePopoverOpen = false;
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => !popup.IsOpen,
+                "theme popup to close");
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task TopMenuPopoverCards_ClipRoundedSurfaceWithoutExternalShadow()
     {
         var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);

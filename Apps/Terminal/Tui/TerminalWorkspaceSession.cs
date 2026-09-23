@@ -1279,14 +1279,13 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			_format = Enum.IsDefined(persisted.Format)
 				? persisted.Format
 				: ProjectContextDocumentFormat.Text;
-			if (!string.IsNullOrWhiteSpace(persisted.FocusedPath))
+			if (state.TryResolvePersistedPath(persisted.FocusedPath, out var focusedPath) &&
+				state.Reveal(focusedPath) >= 0)
 			{
-				_selectedTreePath = Path.GetFullPath(Path.Combine(
-					state.Plan.SourceRoot,
-					persisted.FocusedPath.Replace('/', Path.DirectorySeparatorChar)));
-				state.Reveal(_selectedTreePath);
+				_selectedTreePath = focusedPath;
 			}
 		}
+		_services.ContextFactory.ApplyMarkedSecrets(state.Plan.SourceRoot, state.Plan.Selection);
 		_state = state;
 		SetRepositoryStateInconsistent(false);
 		lock (_localProfileBaselineSync)
@@ -3139,14 +3138,15 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					token,
 					plain: _options.Plain).ConfigureAwait(false);
 			},
-			async (_, overwrite, token) => await _controller.ExportContextAsync(
-				_state,
-				_previewView,
-				selectedFormat,
-				destination,
-				overwrite,
-				token,
-				plain: _options.Plain).ConfigureAwait(false),
+			async (_, overwrite, token) => new TerminalExportCompletion(
+				await _controller.ExportContextAsync(
+					_state,
+					_previewView,
+					selectedFormat,
+					destination,
+					overwrite,
+					token,
+					plain: _options.Plain).ConfigureAwait(false)),
 			(exactDestination, dryRun) =>
 				TerminalWorkspaceController.BuildEquivalentContextCommand(
 					_state,
@@ -3197,13 +3197,19 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					destination,
 					token).ConfigureAwait(false);
 			},
-			async (progress, overwrite, token) => await _controller.ExportProjectAsync(
-				_state,
-				selectedKind,
-				destination,
-				overwrite,
-				token,
-				progress).ConfigureAwait(false),
+			async (progress, overwrite, token) =>
+			{
+				var result = await _controller.ExportProjectResultAsync(
+					_state,
+					selectedKind,
+					destination,
+					overwrite,
+					token,
+					progress).ConfigureAwait(false);
+				return new TerminalExportCompletion(
+					result.DestinationPath,
+					result.UnscannableFiles?.Count ?? 0);
+			},
 			(exactDestination, dryRun) => TerminalWorkspaceController.BuildEquivalentProjectCommand(
 				_state,
 				selectedKind,
@@ -3597,7 +3603,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private async Task RunExportWorkflowAsync(
 		string operationName,
 		Func<CancellationToken, Task<TerminalExportSummary>> prepare,
-		Func<IProgress<ProjectCopyExportProgress>, bool, CancellationToken, Task<string>> export,
+		Func<IProgress<ProjectCopyExportProgress>, bool, CancellationToken, Task<TerminalExportCompletion>> export,
 		Func<string, bool, string> equivalentCommand,
 		bool originatedFromCommandLine = false)
 	{
@@ -3703,7 +3709,14 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				var completed = string.Format(
 					CultureInfo.CurrentCulture,
 					L("Terminal.Tui.ExportCompletedStatus"),
-					result);
+					result.DestinationPath);
+				if (result.SkippedUnscannableCount > 0)
+				{
+					completed = string.Format(
+						CultureInfo.CurrentCulture,
+						L("Content.Redaction.UnscannableFiles"),
+						result.SkippedUnscannableCount) + " " + completed;
+				}
 				if (originatedFromCommandLine)
 					ShowCommandResult(completed, success: true);
 				else
@@ -5023,18 +5036,27 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			SchemeName = TerminalWorkspaceTheme.Base
 		};
 		dialog.Add(body);
-		dialog.AddButton(CreateDialogButton(L("Terminal.Tui.Cancel")));
-		dialog.AddButton(CreateDialogButton(L("Terminal.Tui.DryRun")));
-		var export = CreateDialogButton(summary.DestinationState == TerminalExportDestinationState.Conflict
-			? L("Terminal.Tui.Overwrite")
-			: L("Terminal.Tui.Export"));
-		export.IsDefault = true;
-		dialog.AddButton(export);
-		RunOverlay(dialog, export);
+		var cancel = CreateDialogButton(L("Terminal.Tui.Cancel"));
+		dialog.AddButton(cancel);
+		var dryRun = CreateDialogButton(L("Terminal.Tui.DryRun"));
+		dialog.AddButton(dryRun);
+		var canExport = summary.Kind != TerminalExportKind.Folder ||
+						summary.DestinationState != TerminalExportDestinationState.Conflict;
+		var focusedButton = cancel;
+		if (canExport)
+		{
+			var export = CreateDialogButton(summary.DestinationState == TerminalExportDestinationState.Conflict
+				? L("Terminal.Tui.Overwrite")
+				: L("Terminal.Tui.Export"));
+			export.IsDefault = true;
+			dialog.AddButton(export);
+			focusedButton = export;
+		}
+		RunOverlay(dialog, focusedButton);
 		return dialog.Result switch
 		{
 			1 => TerminalExportDecision.DryRun,
-			2 => summary.DestinationState == TerminalExportDestinationState.Conflict
+			2 when canExport => summary.DestinationState == TerminalExportDestinationState.Conflict
 				? TerminalExportDecision.Overwrite
 				: TerminalExportDecision.Export,
 			_ => TerminalExportDecision.Cancel

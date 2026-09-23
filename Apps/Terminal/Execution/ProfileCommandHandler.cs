@@ -97,7 +97,11 @@ public sealed class ProfileCommandHandler(
 		{
 			var expectedUpdatedUtc = ObserveExpectedProfileVersion(projectPath);
 			var plan = await services.ContextFactory
-				.BuildAsync(projectPath, selection, cancellationToken: cancellationToken)
+				.BuildAsync(
+					projectPath,
+					selection,
+					includeOutputMetrics: false,
+					cancellationToken: cancellationToken)
 				.ConfigureAwait(false);
 			if (plan.HasErrors)
 			{
@@ -191,7 +195,11 @@ public sealed class ProfileCommandHandler(
 
 		var expectedUpdatedUtc = ObserveExpectedProfileVersion(projectPath);
 		var plan = await services.ContextFactory
-			.BuildAsync(projectPath, selection, cancellationToken: cancellationToken)
+			.BuildAsync(
+				projectPath,
+				selection,
+				includeOutputMetrics: false,
+				cancellationToken: cancellationToken)
 			.ConfigureAwait(false);
 		if (plan.HasErrors)
 		{

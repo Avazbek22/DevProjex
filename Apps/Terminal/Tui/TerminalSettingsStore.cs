@@ -139,14 +139,12 @@ public sealed class TerminalSettingsStore
 	private TerminalSettingsDocument? LoadDocument()
 		=> LoadDocument(out _);
 
-	private TerminalSettingsDocument? LoadDocument(out bool hasFutureSchema)
+	private TerminalSettingsDocument? LoadDocument(out bool preserveExistingDocument)
 	{
-		hasFutureSchema = false;
+		preserveExistingDocument = false;
 		try
 		{
 			var path = GetPath();
-			if (!File.Exists(path))
-				return null;
 			TryEnsurePrivateUnixFileMode(path);
 
 			using var source = new FileStream(
@@ -162,8 +160,8 @@ public sealed class TerminalSettingsStore
 				MaximumDocumentBytes,
 				static () => new TerminalSettingsLimitException());
 			using var json = JsonDocument.Parse(stream);
-			hasFutureSchema = IsFutureSchema(json.RootElement);
-			if (hasFutureSchema)
+			preserveExistingDocument = IsFutureSchema(json.RootElement);
+			if (preserveExistingDocument)
 				return null;
 
 			var settings = json.RootElement.Deserialize<TerminalSettingsDocument>();
@@ -175,15 +173,26 @@ public sealed class TerminalSettingsStore
 		{
 			// The schema cannot be classified within this version's resource limit. Preserve the
 			// document exactly as a potentially valid settings file written by a newer version.
-			hasFutureSchema = true;
+			preserveExistingDocument = true;
 			_diagnosticSink("Terminal settings exceed the size limit; the document was preserved and ignored.");
+			return null;
+		}
+		catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+		{
+			return null;
+		}
+		catch (JsonException)
+		{
 			return null;
 		}
 		catch (Exception exception) when (exception is
 			       IOException or
 			       UnauthorizedAccessException or
-			       JsonException)
+			       System.Security.SecurityException or
+			       ArgumentException or
+			       NotSupportedException)
 		{
+			preserveExistingDocument = true;
 			return null;
 		}
 	}
@@ -237,10 +246,10 @@ public sealed class TerminalSettingsStore
 			using var persistenceLock = await PersistenceFileLock
 				.AcquireAsync(path, cancellationToken)
 				.ConfigureAwait(false);
-			var current = LoadDocument(out var hasFutureSchema);
-			if (hasFutureSchema)
+			var current = LoadDocument(out var preserveExistingDocument);
+			if (preserveExistingDocument)
 			{
-				_diagnosticSink("Terminal settings update was skipped because the existing document could not be safely classified.");
+				_diagnosticSink("Terminal settings update was skipped because the existing document could not be safely read or classified.");
 				return;
 			}
 			current ??= new TerminalSettingsDocument(

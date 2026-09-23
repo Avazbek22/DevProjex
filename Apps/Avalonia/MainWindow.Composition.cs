@@ -911,7 +911,7 @@ public partial class MainWindow
     private string? _currentCachedRepoPath;
     private IRepositoryCacheSession? _currentRepositorySession;
     private RecentProjectsDb _recentProjectsDb = new();
-    private Task<RecentProjectsDb>? _recentProjectsLoadTask;
+    private Task<RecentProjectsLoadResult>? _recentProjectsLoadTask;
     private bool _recentProjectsLoaded;
     private bool _recentMenuMaterialized;
     private Task? _recentFolderAvailabilityRefreshTask;
@@ -1489,7 +1489,7 @@ public partial class MainWindow
                      or nameof(MainWindowViewModel.BorderVisibility)
                      or nameof(MainWindowViewModel.MenuTransparency))
             {
-                _appearanceSettings.MarkPresetDirty();
+                _appearanceSettings.MarkPresetDirty(args.PropertyName);
                 _themeBrushCoordinator.ScheduleDynamicThemeBrushUpdate();
             }
             else if (args.PropertyName == nameof(MainWindowViewModel.ActiveThemeEffect))

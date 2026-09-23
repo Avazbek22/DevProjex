@@ -23,7 +23,7 @@ namespace DevProjex.Infrastructure.Git;
 /// - Optimistic path: Try cheap operations first (local checkout ~50ms)
 /// - Reliable path: Fetch with --depth 1 for minimal traffic (~70% reduction)
 /// - Force operations (-B checkout, --hard reset) are safe for cached copies
-/// - AI assistants: Do NOT change these optimizations without understanding the read-only cache context
+/// - Keep these optimizations aligned with the read-only cache contract.
 /// </summary>
 public sealed class GitRepositoryService : IGitRepositoryService, IDisposable
 {
@@ -54,8 +54,7 @@ public sealed class GitRepositoryService : IGitRepositoryService, IDisposable
 		_allowFileTransport = RepositoryTransportPolicy.AllowsLocalFileTransport;
 		_materializeTestClone = _allowFileTransport;
 		_resourceLimits = GitRepositoryResourceLimits.Default;
-        _ = GitRuntime.VersionDisplay;
-        _ = GitRuntime.SshExecutable;
+        GitRuntime.PinExecutables();
     }
 
     internal GitRepositoryService(string gitExecutable)
@@ -89,18 +88,22 @@ public sealed class GitRepositoryService : IGitRepositoryService, IDisposable
 		_materializeTestClone = allowFileTransportForTests;
 		_retainTestManagedMarker = allowFileTransportForTests && retainTestManagedMarker;
 		_resourceLimits = (resourceLimits ?? throw new ArgumentNullException(nameof(resourceLimits))).Validate();
-        _ = GitRuntime.VersionDisplay;
-        _ = GitRuntime.SshExecutable;
+        GitRuntime.PinExecutables();
     }
 
     /// <summary>
     /// Checks if Git CLI is available on the system by running "git --version".
     /// This is used to determine if we can use git clone or need to fall back to ZIP download.
     /// </summary>
-    public Task<bool> IsGitAvailableAsync(CancellationToken cancellationToken = default)
+    public async Task<bool> IsGitAvailableAsync(CancellationToken cancellationToken = default)
     {
 		cancellationToken.ThrowIfCancellationRequested();
-		return Task.FromResult(GitRuntime.VersionDisplay.StartsWith("git version ", StringComparison.OrdinalIgnoreCase));
+		if (GitRuntime.IsVersionProbeComplete)
+			return GitRuntime.VersionDisplay.StartsWith("git version ", StringComparison.OrdinalIgnoreCase);
+		var version = await Task.Run(
+			static () => GitRuntime.VersionDisplay,
+			cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
+		return version.StartsWith("git version ", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -600,20 +603,22 @@ public sealed class GitRepositoryService : IGitRepositoryService, IDisposable
             if (fetchResult.ExitCode != 0)
                 return false;  // Network error or branch doesn't exist
 
-            cancellationToken.ThrowIfCancellationRequested();
-
             // Reset local branch to match remote exactly
             // Using --hard is the reliable way to ensure clean state
             // This discards any local changes (which should never exist in a cached copy)
-            var resetResult = await RunGitCommandAsync(
-                repositoryPath,
-				GitProcessOperation.ManagedCheckout(
-					GitManagedCheckoutKind.HardReset,
-					$"refs/remotes/origin/{currentBranch}",
-					filterDrivers: safety.CheckoutFilterDrivers),
-                cancellationToken);
-
-            return resetResult.ExitCode == 0;
+            return await ApplyFetchedResetAsync(
+                async resetToken =>
+                {
+                    var resetResult = await RunGitCommandAsync(
+                        repositoryPath,
+						GitProcessOperation.ManagedCheckout(
+							GitManagedCheckoutKind.HardReset,
+							$"refs/remotes/origin/{currentBranch}",
+							filterDrivers: safety.CheckoutFilterDrivers),
+                        resetToken).ConfigureAwait(false);
+                    return resetResult.ExitCode == 0;
+                },
+                cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -623,6 +628,17 @@ public sealed class GitRepositoryService : IGitRepositoryService, IDisposable
         {
             return false;
         }
+    }
+
+    internal static Task<bool> ApplyFetchedResetAsync(
+        Func<CancellationToken, Task<bool>> reset,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(reset);
+        cancellationToken.ThrowIfCancellationRequested();
+        // Once reset starts, caller cancellation must not terminate it halfway through
+        // materializing the cached worktree.
+        return reset(CancellationToken.None);
     }
 
     public async Task<string?> GetHeadCommitAsync(
@@ -755,23 +771,43 @@ public sealed class GitRepositoryService : IGitRepositoryService, IDisposable
                 return false;
         }
 
-        var checkout = await RunGitCommandAsync(
-            repositoryPath,
-			GitProcessOperation.ManagedCheckout(
-				GitManagedCheckoutKind.Detach,
-				revision,
-				filterDrivers: safety.CheckoutFilterDrivers),
-            cancellationToken);
-        if (checkout.ExitCode != 0)
-            return false;
+        return await FinishManagedBranchSwitchAsync(
+            async checkoutToken =>
+            {
+                var checkout = await RunGitCommandAsync(
+                    repositoryPath,
+					GitProcessOperation.ManagedCheckout(
+						GitManagedCheckoutKind.Detach,
+						revision,
+						filterDrivers: safety.CheckoutFilterDrivers),
+                    checkoutToken).ConfigureAwait(false);
+                return checkout.ExitCode == 0;
+            },
+            async configToken =>
+            {
+                var config = await RunGitCommandAsync(
+                    repositoryPath,
+					GitProcessOperation.ManagedConfigWrite(
+						GitManagedConfigWriteKind.SetWorktreeBranch,
+						branchName),
+                    configToken).ConfigureAwait(false);
+                return config.ExitCode == 0;
+            },
+            cancellationToken).ConfigureAwait(false);
+    }
 
-        var config = await RunGitCommandAsync(
-            repositoryPath,
-			GitProcessOperation.ManagedConfigWrite(
-				GitManagedConfigWriteKind.SetWorktreeBranch,
-				branchName),
-            cancellationToken);
-        return config.ExitCode == 0;
+    internal static async Task<bool> FinishManagedBranchSwitchAsync(
+        Func<CancellationToken, Task<bool>> checkout,
+        Func<CancellationToken, Task<bool>> updateBranch,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(checkout);
+        ArgumentNullException.ThrowIfNull(updateBranch);
+        cancellationToken.ThrowIfCancellationRequested();
+        // Detaching the worktree and recording its branch must complete as one managed transition.
+        if (!await checkout(CancellationToken.None).ConfigureAwait(false))
+            return false;
+        return await updateBranch(CancellationToken.None).ConfigureAwait(false);
     }
 
     /// <summary>

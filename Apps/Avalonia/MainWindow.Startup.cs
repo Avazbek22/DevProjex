@@ -493,7 +493,7 @@ public partial class MainWindow
             // The IPC registration and compositor warmup are independent. Running them
             // together removes registry/socket IO from the first-visible-frame critical path.
             await Task.WhenAll(
-                EnsureDesktopControlServerAsync(cancellationToken),
+                TryStartDesktopControlServerAsync(cancellationToken),
                 RevealStartupWindowAfterCompositionWarmupAsync(cancellationToken));
             await gitAvailabilityTask;
             cancellationToken.ThrowIfCancellationRequested();
@@ -573,6 +573,26 @@ public partial class MainWindow
         {
             if (!cancellationToken.IsCancellationRequested)
                 _desktopStartupReady = true;
+        }
+    }
+
+    private async Task TryStartDesktopControlServerAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await EnsureDesktopControlServerAsync(cancellationToken);
+        }
+        catch (Exception exception) when (exception is
+                   IOException or
+                   UnauthorizedAccessException or
+                   System.Security.SecurityException or
+                   System.Net.Sockets.SocketException or
+                   System.ComponentModel.Win32Exception or
+                   NotSupportedException)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_desktopStartupRequest is not null)
+                _desktopStartupErrorCode = "DPX-DESKTOP-STARTUP-FAILED";
         }
     }
 

@@ -133,6 +133,63 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 	[Theory]
 	[InlineData(ProjectCopyExportFormat.Folder)]
 	[InlineData(ProjectCopyExportFormat.Zip)]
+	public async Task ProtectedExportRejectsBinarySourceReplacedWithTextAfterInspection(
+		ProjectCopyExportFormat format)
+	{
+		const string secret = "replacement-secret-value-42";
+		using var workspace = new TemporaryDirectory();
+		var sourceRoot = workspace.CreateDirectory("source");
+		var outputRoot = workspace.CreateDirectory("output");
+		var precedingFiles = Enumerable.Range(0, 8)
+			.Select(index => workspace.CreateFile($"source/{index:D2}.txt", "safe\n"))
+			.ToArray();
+		var binaryPath = Path.Combine(sourceRoot, "99.txt");
+		File.WriteAllBytes(binaryPath, [0x61, 0x00, 0x62]);
+		var replacementPath = workspace.CreateFile("output/replacement.txt", secret);
+		var tree = new TreeNodeDescriptor(
+			"source",
+			sourceRoot,
+			true,
+			false,
+			"folder",
+			precedingFiles.Append(binaryPath)
+				.Select(path => new TreeNodeDescriptor(Path.GetFileName(path), path, false, false, "file", []))
+				.ToArray());
+		var destination = Path.Combine(outputRoot, format == ProjectCopyExportFormat.Zip ? "copy.zip" : "copy");
+		using var session = new SecretRedactionSession(new ExactValueDetector(secret));
+		var service = new ProjectCopyExportService(
+			new ProjectCopyExportPlanBuilder(),
+			new FileContentAnalyzer(),
+			session);
+		var replacementTriggered = 0;
+		var progress = new CallbackProgress<ProjectCopyExportProgress>(update =>
+		{
+			if (update.BytesWritten > 0 && Interlocked.Exchange(ref replacementTriggered, 1) == 0)
+				File.Move(replacementPath, binaryPath, overwrite: true);
+		});
+
+		var exception = await Assert.ThrowsAsync<ProjectCopyExportException>(() => service.ExportAsync(
+			new ProjectCopyExportRequest(
+				sourceRoot,
+				"Sample",
+				tree,
+				new HashSet<string>(PathComparer.Default),
+				destination,
+				format,
+				ProjectCopyDestinationMode.Exact,
+				RedactSecrets: true),
+			progress,
+			TestContext.Current.CancellationToken));
+
+		Assert.Equal(1, replacementTriggered);
+		Assert.Equal(ProjectCopyExportError.SourceUnavailable, exception.Error);
+		Assert.False(File.Exists(destination));
+		Assert.False(Directory.Exists(destination));
+	}
+
+	[Theory]
+	[InlineData(ProjectCopyExportFormat.Folder)]
+	[InlineData(ProjectCopyExportFormat.Zip)]
 	[UnsupportedOSPlatform("windows")]
 	public async Task ExportPreservesSafeUnixModesAndExecutableBits(ProjectCopyExportFormat format)
 	{
@@ -414,6 +471,73 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 		Assert.Equal(destination, result.DestinationPath);
 		using var replacement = ZipFile.OpenRead(destination);
 		Assert.Contains(replacement.Entries, static entry => entry.FullName == "Sample/README.md");
+	}
+
+	[Theory]
+	[InlineData(ProjectCopyConflictPolicy.Fail)]
+	[InlineData(ProjectCopyConflictPolicy.ReplaceAtomically)]
+	public async Task AutomaticZipExportUsesNextAvailableNameWithoutReplacingExistingEntries(
+		ProjectCopyConflictPolicy conflictPolicy)
+	{
+		using var workspace = ProjectCopyWorkspace.Create();
+		var firstPath = Path.Combine(workspace.DestinationParent, "Sample-copy.zip");
+		var secondPath = Path.Combine(workspace.DestinationParent, "Sample-copy (2).zip");
+		var expectedPath = Path.Combine(workspace.DestinationParent, "Sample-copy (3).zip");
+		await File.WriteAllTextAsync(firstPath, "first archive", TestContext.Current.CancellationToken);
+		Directory.CreateDirectory(secondPath);
+
+		var result = await new ProjectCopyExportService(new ProjectCopyExportPlanBuilder()).ExportAsync(
+			new ProjectCopyExportRequest(
+				workspace.SourceRoot,
+				"Sample",
+				workspace.Root,
+				new HashSet<string>(PathComparer.Default),
+				Path.Combine(workspace.DestinationParent, "Sample-copy"),
+				ProjectCopyExportFormat.Zip,
+				ProjectCopyDestinationMode.AutomaticName,
+				conflictPolicy),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Equal(expectedPath, result.DestinationPath);
+		Assert.Equal("first archive", await File.ReadAllTextAsync(
+			firstPath,
+			TestContext.Current.CancellationToken));
+		Assert.True(Directory.Exists(secondPath));
+		using var archive = ZipFile.OpenRead(expectedPath);
+		Assert.Contains(archive.Entries, static entry => entry.FullName == "Sample/README.md");
+		Assert.Empty(FindStagingArtifacts(workspace.DestinationParent));
+	}
+
+	[Fact]
+	public async Task AutomaticZipExportRetriesWhenPreferredNameAppearsDuringCopy()
+	{
+		using var workspace = ProjectCopyWorkspace.Create();
+		var preferredPath = Path.Combine(workspace.DestinationParent, "race.zip");
+		var expectedPath = Path.Combine(workspace.DestinationParent, "race (2).zip");
+		var competingFileCreated = false;
+		var progress = new CallbackProgress<ProjectCopyExportProgress>(_ =>
+		{
+			if (competingFileCreated)
+				return;
+			competingFileCreated = true;
+			File.WriteAllText(preferredPath, "competing archive");
+		});
+
+		var result = await workspace.ExportAsync(
+			ProjectCopyExportFormat.Zip,
+			preferredPath,
+			[],
+			progress: progress,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.True(competingFileCreated);
+		Assert.Equal(expectedPath, result.DestinationPath);
+		Assert.Equal("competing archive", await File.ReadAllTextAsync(
+			preferredPath,
+			TestContext.Current.CancellationToken));
+		using var archive = ZipFile.OpenRead(expectedPath);
+		Assert.Contains(archive.Entries, static entry => entry.FullName == "Sample/README.md");
+		Assert.Empty(FindStagingArtifacts(workspace.DestinationParent));
 	}
 
 	[Theory]
@@ -1140,6 +1264,29 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 	}
 
 	[Fact]
+	public async Task AtomicFileWriterFailurePreservesItsCauseWhenDestinationAppears()
+	{
+		using var workspace = new TemporaryDirectory();
+		var outputDirectory = workspace.CreateDirectory("output");
+		var destination = Path.Combine(outputDirectory, "report.txt");
+		var writeFailure = new IOException("Source read failed during export.");
+
+		var exception = await Assert.ThrowsAsync<IOException>(() => AtomicFileOutput.WriteAsync(
+			destination,
+			overwrite: false,
+			(_, _) =>
+			{
+				File.WriteAllText(destination, "competing output");
+				return Task.FromException(writeFailure);
+			},
+			TestContext.Current.CancellationToken));
+
+		Assert.Same(writeFailure, exception);
+		Assert.Equal("competing output", File.ReadAllText(destination));
+		Assert.Empty(Directory.EnumerateFiles(outputDirectory, ".*.tmp"));
+	}
+
+	[Fact]
 	public async Task AtomicFileForceRaceWithDirectoryReturnsConflictAndCleansStaging()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -1418,6 +1565,62 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 		finally
 		{
 			DeleteDirectoryLink(linkPath);
+		}
+	}
+
+	[Theory]
+	[InlineData(2)]
+	[InlineData(3)]
+	public async Task FolderExportRejectsStagingDirectoryLinkIntroducedDuringCopy(int processedEntriesAtReplacement)
+	{
+		using var workspace = ProjectCopyWorkspace.Create();
+		var escapeDirectory = Directory.CreateDirectory(
+			Path.Combine(workspace.DestinationParent, "escape")).FullName;
+		var sentinelPath = Path.Combine(escapeDirectory, "sentinel.txt");
+		await File.WriteAllTextAsync(sentinelPath, "unchanged", TestContext.Current.CancellationToken);
+		var probe = Path.Combine(workspace.DestinationParent, "link-probe");
+		if (OperatingSystem.IsWindows())
+			CreateWindowsJunctionOrSkip(probe, escapeDirectory);
+		else
+			CreateDirectoryLinkOrSkip(probe, escapeDirectory);
+		DeleteDirectoryLink(probe);
+		var destination = Path.Combine(workspace.DestinationParent, "Sample-copy");
+		var replacedDirectory = false;
+		var progress = new CallbackProgress<ProjectCopyExportProgress>(value =>
+		{
+			if (replacedDirectory || value.ProcessedEntryCount != processedEntriesAtReplacement)
+				return;
+
+			var stagingPath = Assert.Single(FindStagingArtifacts(workspace.DestinationParent));
+			var stagingSubdirectory = Path.Combine(stagingPath, "src");
+			Directory.Delete(stagingSubdirectory, recursive: true);
+			if (OperatingSystem.IsWindows())
+				CreateWindowsJunctionOrSkip(stagingSubdirectory, escapeDirectory);
+			else
+				CreateDirectoryLinkOrSkip(stagingSubdirectory, escapeDirectory);
+			replacedDirectory = true;
+		});
+
+		try
+		{
+			var exception = await Assert.ThrowsAsync<ProjectCopyExportException>(() =>
+				workspace.ExportAsync(
+					ProjectCopyExportFormat.Folder,
+					workspace.DestinationParent,
+					[workspace.Paths["unicode"]],
+					progress: progress,
+					cancellationToken: TestContext.Current.CancellationToken));
+
+			Assert.True(replacedDirectory, exception.ToString());
+			Assert.Equal(ProjectCopyExportError.UnsafeDestinationPath, exception.Error);
+			Assert.False(File.Exists(Path.Combine(escapeDirectory, "Пример.cs")));
+			Assert.Equal("unchanged", await File.ReadAllTextAsync(sentinelPath, TestContext.Current.CancellationToken));
+			Assert.False(Directory.Exists(destination));
+			Assert.Empty(FindStagingArtifacts(workspace.DestinationParent));
+		}
+		finally
+		{
+			DeleteDirectoryLink(Path.Combine(destination, "src"));
 		}
 	}
 

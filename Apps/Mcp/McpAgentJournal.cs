@@ -115,6 +115,7 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 		}
 		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
 		{
+			startAttempts--;
 			Volatile.Write(ref startState, 0);
 			throw;
 		}

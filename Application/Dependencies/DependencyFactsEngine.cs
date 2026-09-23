@@ -13,21 +13,27 @@ public sealed partial class DependencyFactsEngine : IDisposable
 {
 	public const int MaximumRelatedTraversalSeeds = 256;
 	internal const string AccumulatedFactBudgetReason = "index fact memory limit exceeded";
+	private const int MaximumCachedNavigationFiles = 2_048;
+	private const long MaximumNavigationCacheBytes = 8L * 1024 * 1024;
+	private const int MaximumCachedPhysicalFileProbes = 4_096;
+	private const int MaximumSharedIndexCancellationRetries = 1;
 
 	private readonly IDependencyFactExtractor _extractor;
 	private readonly IDependencyConfigurationProvider _configurationProvider;
 	private readonly DependencyFactsLimits _limits;
-	private readonly ConcurrentDictionary<FileCacheKey, Lazy<Task<FileFacts>>> _fileCache = [];
-	private readonly ConcurrentQueue<FileCacheKey> _fileCacheOrder = [];
-	private readonly ConcurrentDictionary<FileCacheKey, long> _fileCacheWeights = [];
-	private readonly ConcurrentDictionary<IndexCacheKey, Lazy<Task<ResolvedIndex>>> _indexCache = [];
-	private readonly ConcurrentQueue<IndexCacheKey> _indexCacheOrder = [];
-	private readonly ConcurrentDictionary<IndexCacheKey, long> _indexCacheWeights = [];
+	private readonly ConcurrentDictionary<FileCacheKey, FileCacheEntry> _fileCache = [];
+	private readonly LinkedList<FileCacheEntry> _fileCacheOrder = [];
+	private readonly ConcurrentDictionary<IndexCacheKey, IndexCacheEntry> _indexCache = [];
+	private readonly LinkedList<IndexCacheEntry> _indexCacheOrder = [];
 	private readonly ConcurrentDictionary<ManifestRequestKey, ManifestSnapshotCacheEntry> _manifestSnapshots = [];
 	private readonly LinkedList<ManifestSnapshotCacheEntry> _manifestSnapshotOrder = [];
+	private readonly Dictionary<NavigationCacheKey, LinkedListNode<NavigationCacheEntry>> _navigationCache = [];
+	private readonly LinkedList<NavigationCacheEntry> _navigationCacheOrder = [];
+	private readonly object _navigationCacheSync = new();
 	private readonly object _cacheTrimSync = new();
 	private long _fileCacheBytes;
 	private long _indexCacheBytes;
+	private long _navigationCacheBytes;
 	private int _disposed;
 
 	public DependencyFactsEngine(
@@ -65,6 +71,79 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			contentFingerprint,
 			cancellationToken);
 	}
+
+	/// <summary>Caches navigation extracted from a caller-provided immutable text snapshot.</summary>
+	internal IReadOnlyList<NavigationDeclaration> ExtractNavigationFromProtectedText(
+		string relativePath,
+		string source,
+		string contentFingerprint,
+		CancellationToken cancellationToken)
+	{
+		ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+		ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
+		ArgumentNullException.ThrowIfNull(source);
+		ArgumentException.ThrowIfNullOrWhiteSpace(contentFingerprint);
+		cancellationToken.ThrowIfCancellationRequested();
+		if (source.Length > _limits.MaximumCharactersPerFile ||
+			_extractor is not IDependencyNavigationExtractor)
+			return [];
+		var key = new NavigationCacheKey(relativePath, contentFingerprint);
+		lock (_navigationCacheSync)
+		{
+			if (_navigationCache.TryGetValue(key, out var cached))
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				_navigationCacheOrder.Remove(cached);
+				_navigationCacheOrder.AddLast(cached);
+				return cached.Value.Declarations;
+			}
+		}
+		var declarations = ExtractNavigation(
+			relativePath,
+			source,
+			contentFingerprint,
+			cancellationToken);
+		cancellationToken.ThrowIfCancellationRequested();
+		var retained = Array.AsReadOnly(declarations.ToArray());
+		var weight = EstimateNavigationCacheBytes(key, retained);
+		if (weight > MaximumNavigationCacheBytes)
+			return retained;
+		lock (_navigationCacheSync)
+		{
+			if (_navigationCache.TryGetValue(key, out var cached))
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				_navigationCacheOrder.Remove(cached);
+				_navigationCacheOrder.AddLast(cached);
+				return cached.Value.Declarations;
+			}
+			if (Volatile.Read(ref _disposed) != 0)
+				return retained;
+			var entry = new NavigationCacheEntry(key, retained, weight);
+			_navigationCache[key] = _navigationCacheOrder.AddLast(entry);
+			_navigationCacheBytes += weight;
+			while ((_navigationCache.Count > MaximumCachedNavigationFiles ||
+					_navigationCacheBytes > MaximumNavigationCacheBytes) &&
+				   _navigationCacheOrder.First is { Value: var oldest })
+			{
+				_navigationCache.Remove(oldest.Key);
+				_navigationCacheOrder.RemoveFirst();
+				_navigationCacheBytes -= oldest.Weight;
+			}
+		}
+		return retained;
+	}
+
+	private static long EstimateNavigationCacheBytes(
+		NavigationCacheKey key,
+		IReadOnlyList<NavigationDeclaration> declarations)
+	{
+		var strings = new RetainedStringEstimator();
+		return 160 + strings.Add(key.RelativePath) + strings.Add(key.ContentFingerprint) +
+			   declarations.Count * 8L + declarations.Sum(declaration =>
+				   96 + strings.Add(declaration.Name) + strings.Add(declaration.Owner) +
+				   strings.Add(declaration.ContentFingerprint));
+	}
 	internal DependencyFactsCacheState CacheState
 	{
 		get
@@ -74,7 +153,11 @@ public sealed partial class DependencyFactsEngine : IDisposable
 					_manifestSnapshots.Count,
 					_manifestSnapshotOrder.Count,
 					_indexCache.Count,
-					_indexCacheBytes);
+					_indexCacheBytes,
+					_indexCacheOrder.Count,
+					_fileCache.Count,
+					_fileCacheOrder.Count,
+					_fileCacheBytes);
 		}
 	}
 
@@ -88,27 +171,36 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
 		ArgumentException.ThrowIfNullOrWhiteSpace(sourceRoot);
 		ArgumentNullException.ThrowIfNull(manifestFiles);
+		cancellationToken.ThrowIfCancellationRequested();
 		var started = Stopwatch.StartNew();
 		var root = Path.GetFullPath(sourceRoot);
-		var canonicalManifest = CreateCanonicalManifest(root, manifestFiles);
-		var manifest = canonicalManifest.Select(static file => file.FullPath).ToArray();
-		var manifestRelativePaths = canonicalManifest.Select(static file => file.RelativePath).ToArray();
+		var canonicalManifest = CreateCanonicalManifest(root, manifestFiles, cancellationToken);
+		var manifest = new string[canonicalManifest.Length];
+		var manifestRelativePaths = new string[canonicalManifest.Length];
+		for (var index = 0; index < canonicalManifest.Length; index++)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			manifest[index] = canonicalManifest[index].FullPath;
+			manifestRelativePaths[index] = canonicalManifest[index].RelativePath;
+		}
 		var manifestRequestKey = new ManifestRequestKey(
 			root,
-			Hash(manifestRelativePaths));
-		var initialStamps = TryCaptureFileStamps(manifest);
-		var alignedContentIdentities = AlignContentIdentities(manifest, contentIdentities);
+			HashWithCancellation(manifestRelativePaths, cancellationToken));
+		var initialStamps = TryCaptureFileStamps(manifest, cancellationToken);
+		var alignedContentIdentities = AlignContentIdentities(manifest, contentIdentities, cancellationToken);
 		if (initialStamps is not null &&
 			_manifestSnapshots.TryGetValue(manifestRequestKey, out var cachedSnapshot) &&
 			cachedSnapshot.ManifestPaths.SequenceEqual(manifestRelativePaths, StringComparer.Ordinal) &&
 			cachedSnapshot.Stamps.SequenceEqual(initialStamps) &&
-			AreControlFilesStillAbsent(cachedSnapshot.AbsentControlFiles) &&
+			AreControlFilesStillAbsent(cachedSnapshot.AbsentControlFiles, cancellationToken) &&
+			ArePhysicalFileProbesCurrent(cachedSnapshot.PhysicalFileProbes, cancellationToken) &&
 			ContentIdentitiesMatch(cachedSnapshot.ContentIdentities, alignedContentIdentities) &&
 			_indexCache.ContainsKey(cachedSnapshot.IndexCacheKey))
 		{
 			DependencyEngineDiagnostics.RecordResolutionCacheHit();
 			var snapshot = cachedSnapshot.Snapshot;
 			progress?.Report(new DependencyIndexProgress(manifest.Length, manifest.Length));
+			cancellationToken.ThrowIfCancellationRequested();
 			return snapshot with
 			{
 				Metrics = new DependencyIndexMetrics(
@@ -172,33 +264,47 @@ public sealed partial class DependencyFactsEngine : IDisposable
 					else
 					{
 						var key = CreateFileCacheKey(source);
-						Lazy<Task<FileFacts>>? created = null;
-						if (!_fileCache.TryGetValue(key, out var lazy))
+						while (true)
 						{
-							created = new Lazy<Task<FileFacts>>(
-								() => Task.Run(() => _extractor.Extract(source, _limits, token), token),
-								LazyThreadSafetyMode.ExecutionAndPublication);
-							lazy = _fileCache.GetOrAdd(key, created);
-							if (ReferenceEquals(lazy, created))
-								_fileCacheOrder.Enqueue(key);
-						}
-						if (!ReferenceEquals(lazy, created))
-						{
-							Interlocked.Increment(ref reusedFiles);
-							DependencyEngineDiagnostics.RecordFileCacheHit();
-						}
-						try
-						{
-							extracted = await lazy.Value.ConfigureAwait(false);
-							if (!extracted.CanCache)
-								_fileCache.TryRemove(new KeyValuePair<FileCacheKey, Lazy<Task<FileFacts>>>(key, lazy));
-							else if (created is not null && ReferenceEquals(lazy, created))
-								RegisterFileCacheWeight(key, lazy, EstimateFileFactsBytes(extracted));
-						}
-						catch
-						{
-							_fileCache.TryRemove(new KeyValuePair<FileCacheKey, Lazy<Task<FileFacts>>>(key, lazy));
-							throw;
+							token.ThrowIfCancellationRequested();
+							FileCacheEntry? created = null;
+							if (!_fileCache.TryGetValue(key, out var lazy))
+							{
+								created = new FileCacheEntry(key, new Lazy<Task<FileFacts>>(
+									() => Task.Run(() => _extractor.Extract(source, _limits, token), token),
+									LazyThreadSafetyMode.ExecutionAndPublication));
+								lazy = GetOrAddFileCacheEntry(created);
+							}
+							var shared = !ReferenceEquals(lazy, created);
+							if (shared)
+								DependencyEngineDiagnostics.RecordFileCacheHit();
+							try
+							{
+								var extraction = lazy.Value.Value;
+								extracted = await (shared ? extraction.WaitAsync(token) : extraction)
+									.ConfigureAwait(false);
+								if (shared)
+									Interlocked.Increment(ref reusedFiles);
+								if (!extracted.CanCache)
+									RemoveFileCacheEntry(key, lazy);
+								else if (!shared)
+									RegisterFileCacheWeight(key, lazy, EstimateFileFactsBytes(extracted));
+								break;
+							}
+							catch (OperationCanceledException) when (shared && token.IsCancellationRequested)
+							{
+								throw;
+							}
+							catch (OperationCanceledException) when (shared && !token.IsCancellationRequested)
+							{
+								// Retry with this caller's token if the shared producer was canceled.
+								RemoveFileCacheEntry(key, lazy);
+							}
+							catch
+							{
+								RemoveFileCacheEntry(key, lazy);
+								throw;
+							}
 						}
 					}
 
@@ -216,55 +322,102 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			}
 		}
 
-		var manifestGeneration = Hash(prepared.Select(source =>
-			$"{source.RelativePath}\0{source.ContentFingerprint}\0{source.LanguageId}"));
+		var manifestGeneration = HashWithCancellation(prepared.Select(source =>
+			$"{source.RelativePath}\0{source.ContentFingerprint}\0{source.LanguageId}"), cancellationToken);
 		var parsedFiles = _extractor.ParseCount - parsedBefore;
 		// Parallel extraction writes by canonical manifest index, so this array is already ordered.
 		var orderedFacts = facts;
 		var declarations = MergeDeclarations(orderedFacts);
-		var declarationRevision = Hash(declarations.Select(DeclarationKey));
+		var declarationRevision = HashWithCancellation(declarations.Select(DeclarationKey), cancellationToken);
 		var cacheKey = new IndexCacheKey(
+			root,
 			manifestGeneration,
 			declarationRevision,
 			configuration.Fingerprint);
 		var allowed = orderedFacts.Select(static fact => fact.Path).ToHashSet(StringComparer.Ordinal);
 		var canCacheIndex = configuration.CanCache && cacheable.All(static value => value);
-		Lazy<Task<ResolvedIndex>> CreateIndex() => new(
-			() => Task.FromResult(GateResolvedIndex(
-				DependencyResolver.Resolve(root, orderedFacts, declarations, configuration, _limits, cancellationToken),
-				allowed)),
+		ResolvedIndex ResolveIndex() => GateResolvedIndex(
+			DependencyResolver.Resolve(root, orderedFacts, declarations, configuration, _limits, cancellationToken),
+			allowed);
+		Lazy<Task<ResolvedIndex>> CreateCachedIndex() => new(
+			() => Task.Run(ResolveIndex, cancellationToken),
 			LazyThreadSafetyMode.ExecutionAndPublication);
 		ResolvedIndex resolved;
+		IndexCacheEntry? resolvedIndexEntry = null;
 		var resolutionCacheHit = false;
 		if (!canCacheIndex)
 		{
-			var createdIndex = CreateIndex();
-			resolved = await createdIndex.Value.ConfigureAwait(false);
+			resolved = ResolveIndex();
 		}
 		else
 		{
-			Lazy<Task<ResolvedIndex>>? createdIndex = null;
-			if (!_indexCache.TryGetValue(cacheKey, out var cachedIndex))
+			var sharedIndex = false;
+			var canceledSharedAttempts = 0;
+			while (true)
 			{
-				createdIndex = CreateIndex();
-				cachedIndex = _indexCache.GetOrAdd(cacheKey, createdIndex);
-				if (ReferenceEquals(cachedIndex, createdIndex))
-					_indexCacheOrder.Enqueue(cacheKey);
+				IndexCacheEntry? createdIndex = null;
+				if (!_indexCache.TryGetValue(cacheKey, out var cachedIndex))
+				{
+					createdIndex = new IndexCacheEntry(cacheKey, CreateCachedIndex());
+					cachedIndex = GetOrAddIndexCacheEntry(createdIndex);
+				}
+				sharedIndex = createdIndex is null || !ReferenceEquals(cachedIndex, createdIndex);
+				if (sharedIndex)
+					DependencyEngineDiagnostics.RecordIndexCacheJoin();
+				try
+				{
+					var indexTask = cachedIndex.Value.Value;
+					resolved = await (sharedIndex ? indexTask.WaitAsync(cancellationToken) : indexTask)
+						.ConfigureAwait(false);
+					resolvedIndexEntry = cachedIndex;
+					break;
+				}
+				catch (OperationCanceledException) when (sharedIndex && cancellationToken.IsCancellationRequested)
+				{
+					throw;
+				}
+				catch (OperationCanceledException) when (sharedIndex && !cancellationToken.IsCancellationRequested)
+				{
+					RemoveIndexCacheEntry(cacheKey, cachedIndex);
+					if (++canceledSharedAttempts <= MaximumSharedIndexCancellationRetries)
+						continue;
+
+					// A live caller must not inherit repeated producer cancellations.
+					resolved = ResolveIndex();
+					sharedIndex = false;
+					break;
+				}
+				catch
+				{
+					RemoveIndexCacheEntry(cacheKey, cachedIndex);
+					throw;
+				}
 			}
+			bool probesCurrent;
 			try
 			{
-				resolved = await cachedIndex.Value.ConfigureAwait(false);
+				probesCurrent = resolved.CanCachePhysicalFileProbes &&
+								ArePhysicalFileProbesCurrent(resolved.PhysicalFileProbes, cancellationToken);
 			}
 			catch
 			{
-				_indexCache.TryRemove(new KeyValuePair<IndexCacheKey, Lazy<Task<ResolvedIndex>>>(cacheKey, cachedIndex));
+				if (resolvedIndexEntry is not null)
+					RemoveIndexCacheEntry(cacheKey, resolvedIndexEntry);
 				throw;
 			}
-			resolutionCacheHit = createdIndex is null || !ReferenceEquals(cachedIndex, createdIndex);
+			if (!probesCurrent)
+			{
+				if (resolvedIndexEntry is not null)
+					RemoveIndexCacheEntry(cacheKey, resolvedIndexEntry);
+				resolvedIndexEntry = null;
+				if (sharedIndex || resolved.CanCachePhysicalFileProbes)
+					resolved = ResolveIndex();
+			}
+			resolutionCacheHit = resolvedIndexEntry is not null && sharedIndex;
 			if (resolutionCacheHit)
 				DependencyEngineDiagnostics.RecordResolutionCacheHit();
-			if (!resolutionCacheHit)
-				RegisterIndexCacheWeight(cacheKey, cachedIndex, EstimateResolvedIndexBytes(resolved));
+			if (resolvedIndexEntry is not null && !resolutionCacheHit)
+				RegisterIndexCacheWeight(cacheKey, resolvedIndexEntry, EstimateResolvedIndexBytes(resolved));
 		}
 		var contentObservations = new Dictionary<string, DependencySourceObservation>(
 			manifest.Length,
@@ -299,20 +452,23 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			FileByPath = resolved.FileByPath,
 			ContentObservations = contentObservations
 		};
-		var finalStamps = TryCaptureFileStamps(manifest);
-		if (canCacheIndex && initialStamps is not null && finalStamps is not null && initialStamps.SequenceEqual(finalStamps) &&
-			AreControlFilesStillAbsent(configuration.AbsentControlFiles))
+		var finalStamps = TryCaptureFileStamps(manifest, cancellationToken);
+		if (canCacheIndex && resolvedIndexEntry is not null &&
+			initialStamps is not null && finalStamps is not null && initialStamps.SequenceEqual(finalStamps) &&
+			AreControlFilesStillAbsent(configuration.AbsentControlFiles, cancellationToken))
 		{
-			if (_indexCache.ContainsKey(cacheKey))
-				StoreManifestSnapshot(
-					manifestRequestKey,
-					manifestRelativePaths,
-					initialStamps,
-					alignedContentIdentities,
-					configuration.AbsentControlFiles,
-					cacheKey,
-					result);
+			StoreManifestSnapshot(
+				manifestRequestKey,
+				manifestRelativePaths,
+				initialStamps,
+				alignedContentIdentities,
+				configuration.AbsentControlFiles,
+				resolved.PhysicalFileProbes,
+				cacheKey,
+				resolvedIndexEntry,
+				result);
 		}
+		cancellationToken.ThrowIfCancellationRequested();
 		return result;
 	}
 
@@ -640,30 +796,101 @@ public sealed partial class DependencyFactsEngine : IDisposable
 				.ToArray()
 		};
 
+	private FileCacheEntry GetOrAddFileCacheEntry(FileCacheEntry created)
+	{
+		lock (_cacheTrimSync)
+		{
+			if (_fileCache.TryGetValue(created.Key, out var existing))
+				return existing;
+			_fileCache[created.Key] = created;
+			created.OrderNode = _fileCacheOrder.AddLast(created);
+			return created;
+		}
+	}
+
+	private IndexCacheEntry GetOrAddIndexCacheEntry(IndexCacheEntry created)
+	{
+		lock (_cacheTrimSync)
+		{
+			if (_indexCache.TryGetValue(created.Key, out var existing))
+				return existing;
+			_indexCache[created.Key] = created;
+			created.OrderNode = _indexCacheOrder.AddLast(created);
+			return created;
+		}
+	}
+
+	private void RemoveFileCacheEntry(FileCacheKey key, FileCacheEntry entry)
+	{
+		lock (_cacheTrimSync)
+			RemoveFileCacheEntryUnderLock(key, entry);
+	}
+
+	private void RemoveIndexCacheEntry(IndexCacheKey key, IndexCacheEntry entry)
+	{
+		lock (_cacheTrimSync)
+			RemoveIndexCacheEntryUnderLock(key, entry);
+	}
+
+	// A failed or evicted generation must not remove a replacement with the same key.
+	private void RemoveFileCacheEntryUnderLock(FileCacheKey key, FileCacheEntry entry)
+	{
+		if (!_fileCache.TryRemove(new KeyValuePair<FileCacheKey, FileCacheEntry>(key, entry)))
+			return;
+		if (entry.OrderNode is not null)
+		{
+			_fileCacheOrder.Remove(entry.OrderNode);
+			entry.OrderNode = null;
+		}
+		_fileCacheBytes -= entry.RegisteredWeight;
+		entry.RegisteredWeight = 0;
+	}
+
+	private void RemoveIndexCacheEntryUnderLock(IndexCacheKey key, IndexCacheEntry entry)
+	{
+		if (!_indexCache.TryRemove(new KeyValuePair<IndexCacheKey, IndexCacheEntry>(key, entry)))
+			return;
+		if (entry.OrderNode is not null)
+		{
+			_indexCacheOrder.Remove(entry.OrderNode);
+			entry.OrderNode = null;
+		}
+		_indexCacheBytes -= entry.RegisteredWeight;
+		entry.RegisteredWeight = 0;
+		foreach (var snapshot in _manifestSnapshots.Where(pair => pair.Value.IndexCacheKey == key).ToArray())
+			RemoveManifestSnapshotUnderLock(snapshot.Key, snapshot.Value);
+	}
+
 	private void RegisterFileCacheWeight(
 		FileCacheKey key,
-		Lazy<Task<FileFacts>> entry,
+		FileCacheEntry entry,
 		long weight)
 	{
 		lock (_cacheTrimSync)
 		{
 			if (_fileCache.TryGetValue(key, out var current) && ReferenceEquals(current, entry) &&
-				_fileCacheWeights.TryAdd(key, weight))
+				entry.RegisteredWeight == 0)
+			{
+				entry.RegisteredWeight = weight;
 				_fileCacheBytes += weight;
+			}
 			TrimFileCache();
 		}
 	}
 
 	private void RegisterIndexCacheWeight(
 		IndexCacheKey key,
-		Lazy<Task<ResolvedIndex>> entry,
+		IndexCacheEntry entry,
 		long weight)
 	{
 		lock (_cacheTrimSync)
 		{
 			if (_indexCache.TryGetValue(key, out var current) && ReferenceEquals(current, entry) &&
-				_indexCacheWeights.TryAdd(key, weight))
+				entry.RegisteredWeight == 0)
+			{
+				entry.RegisteredWeight = weight;
 				_indexCacheBytes += weight;
+			}
 			TrimIndexCache();
 		}
 	}
@@ -671,25 +898,15 @@ public sealed partial class DependencyFactsEngine : IDisposable
 	private void TrimFileCache()
 	{
 		while ((_fileCache.Count > _limits.MaximumCachedFiles || _fileCacheBytes > _limits.MaximumFileCacheBytes) &&
-			   _fileCacheOrder.TryDequeue(out var oldest))
-		{
-			_fileCache.TryRemove(oldest, out _);
-			if (_fileCacheWeights.TryRemove(oldest, out var weight))
-				_fileCacheBytes -= weight;
-		}
+			   _fileCacheOrder.First is { Value: var oldest })
+			RemoveFileCacheEntryUnderLock(oldest.Key, oldest);
 	}
 
 	private void TrimIndexCache()
 	{
 		while ((_indexCache.Count > _limits.MaximumCachedIndexes || _indexCacheBytes > _limits.MaximumIndexCacheBytes) &&
-			   _indexCacheOrder.TryDequeue(out var oldest))
-		{
-			_indexCache.TryRemove(oldest, out _);
-			foreach (var snapshot in _manifestSnapshots.Where(pair => pair.Value.IndexCacheKey == oldest).ToArray())
-				RemoveManifestSnapshotUnderLock(snapshot.Key, snapshot.Value);
-			if (_indexCacheWeights.TryRemove(oldest, out var weight))
-				_indexCacheBytes -= weight;
-		}
+			   _indexCacheOrder.First is { Value: var oldest })
+			RemoveIndexCacheEntryUnderLock(oldest.Key, oldest);
 	}
 
 	private void StoreManifestSnapshot(
@@ -698,16 +915,22 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		IReadOnlyList<FileStamp> stamps,
 		IReadOnlyList<string>? contentIdentities,
 		IReadOnlyList<string> absentControlFiles,
+		IReadOnlyList<PhysicalFileProbe> physicalFileProbes,
 		IndexCacheKey indexCacheKey,
+		IndexCacheEntry expectedIndexEntry,
 		DependencyIndexSnapshot snapshot)
 	{
 		lock (_cacheTrimSync)
 		{
-			if (!_indexCache.ContainsKey(indexCacheKey)) return;
+			// A retired generation must not retain another graph behind its replacement's budget.
+			if (!_indexCache.TryGetValue(indexCacheKey, out var current) ||
+				!ReferenceEquals(current, expectedIndexEntry))
+				return;
 			if (_manifestSnapshots.TryGetValue(key, out var previous))
 				RemoveManifestSnapshotUnderLock(key, previous);
 			var entry = new ManifestSnapshotCacheEntry(
-				key, manifestPaths, stamps, contentIdentities, absentControlFiles, indexCacheKey, snapshot);
+				key, manifestPaths, stamps, contentIdentities, absentControlFiles,
+				physicalFileProbes, indexCacheKey, snapshot);
 			_manifestSnapshots[key] = entry;
 			entry.OrderNode = _manifestSnapshotOrder.AddLast(entry);
 			while (_manifestSnapshots.Count > _limits.MaximumCachedIndexes &&
@@ -736,13 +959,17 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		source.LanguageId,
 		source.ExtractorIdentity);
 
-	private static IReadOnlyList<FileStamp>? TryCaptureFileStamps(IReadOnlyList<string> manifest)
+	private static IReadOnlyList<FileStamp>? TryCaptureFileStamps(
+		IReadOnlyList<string> manifest,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		try
 		{
 			var stamps = new FileStamp[manifest.Count];
 			for (var index = 0; index < manifest.Count; index++)
 			{
+				cancellationToken.ThrowIfCancellationRequested();
 				var info = new FileInfo(manifest[index]);
 				if (!info.Exists) return null;
 				stamps[index] = new FileStamp(
@@ -760,13 +987,16 @@ public sealed partial class DependencyFactsEngine : IDisposable
 
 	private static IReadOnlyList<string>? AlignContentIdentities(
 		IReadOnlyList<string> manifest,
-		DependencyManifestContentIdentities? contentIdentities)
+		DependencyManifestContentIdentities? contentIdentities,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		if (contentIdentities is null)
 			return null;
 		var aligned = new string[manifest.Count];
 		for (var index = 0; index < manifest.Count; index++)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			if (!contentIdentities.ByFullPath.TryGetValue(manifest[index], out var identity))
 			{
 				throw new ArgumentException(
@@ -827,11 +1057,35 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			strings.Add(edge.Reference) + edge.Reasons.Sum(strings.Add) +
 			edge.Evidence.Sum(site => SiteBytes(site, strings)) +
 			edge.Candidates.Sum(strings.Add) + edge.DeclarationFiles.Sum(strings.Add)) +
-			index.Files.Sum(file => EstimateFileFactsBytes(file, strings));
+			index.Files.Sum(file => EstimateFileFactsBytes(file, strings)) +
+			index.PhysicalFileProbes.Sum(probe => 32 + strings.Add(probe.Path));
 	}
 
-	private static bool AreControlFilesStillAbsent(IEnumerable<string> paths) =>
-		paths.All(static path => !File.Exists(path));
+	private static bool AreControlFilesStillAbsent(IEnumerable<string> paths, CancellationToken cancellationToken)
+	{
+		cancellationToken.ThrowIfCancellationRequested();
+		foreach (var path in paths)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (File.Exists(path))
+				return false;
+		}
+		return true;
+	}
+
+	private static bool ArePhysicalFileProbesCurrent(
+		IReadOnlyList<PhysicalFileProbe> probes,
+		CancellationToken cancellationToken)
+	{
+		for (var index = 0; index < probes.Count; index++)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var probe = probes[index];
+			if (File.Exists(probe.Path) != probe.Exists)
+				return false;
+		}
+		return true;
+	}
 
 	private static long SiteBytes(SourceSite site, RetainedStringEstimator strings) =>
 		64 + strings.Add(site.File) + strings.Add(site.Evidence);
@@ -928,8 +1182,11 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		}).ToArray();
 	}
 
-	private static string Hash(IEnumerable<string> values)
+	private static string Hash(IEnumerable<string> values) => HashWithCancellation(values, CancellationToken.None);
+
+	private static string HashWithCancellation(IEnumerable<string> values, CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
 		Span<byte> lengthPrefix = stackalloc byte[sizeof(int)];
 		var buffer = ArrayPool<byte>.Shared.Rent(4096);
@@ -938,6 +1195,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		{
 			foreach (var value in values)
 			{
+				cancellationToken.ThrowIfCancellationRequested();
 				var byteCount = Encoding.UTF8.GetByteCount(value);
 				BinaryPrimitives.WriteInt32BigEndian(lengthPrefix, byteCount);
 				hash.AppendData(lengthPrefix);
@@ -952,6 +1210,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 				var remaining = value.AsSpan();
 				do
 				{
+					cancellationToken.ThrowIfCancellationRequested();
 					encoder.Convert(
 						remaining,
 						buffer,
@@ -971,24 +1230,31 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			ArrayPool<byte>.Shared.Return(buffer);
 		}
 
+		cancellationToken.ThrowIfCancellationRequested();
 		return Convert.ToHexStringLower(hash.GetHashAndReset());
 	}
 
 	private static CanonicalManifestFile[] CreateCanonicalManifest(
 		string root,
-		IReadOnlyList<string> manifestFiles)
+		IReadOnlyList<string> manifestFiles,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		var unique = new Dictionary<string, CanonicalManifestFile>(manifestFiles.Count, PathComparer);
 		foreach (var path in manifestFiles)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			var fullPath = Path.GetFullPath(path);
 			if (!IsWithin(root, fullPath) || unique.ContainsKey(fullPath))
 				continue;
 			DependencyEngineDiagnostics.RecordPathNormalization();
 			unique.Add(fullPath, new CanonicalManifestFile(fullPath, PortableRelative(root, fullPath)));
 		}
+		cancellationToken.ThrowIfCancellationRequested();
 		DependencyEngineDiagnostics.RecordManifestSort();
-		return unique.Values.OrderBy(static file => file.RelativePath, StringComparer.Ordinal).ToArray();
+		var ordered = unique.Values.OrderBy(static file => file.RelativePath, StringComparer.Ordinal).ToArray();
+		cancellationToken.ThrowIfCancellationRequested();
+		return ordered;
 	}
 
 	private static bool IsWithin(string root, string path)
@@ -1018,6 +1284,12 @@ public sealed partial class DependencyFactsEngine : IDisposable
 	{
 		if (Interlocked.Exchange(ref _disposed, 1) == 0)
 		{
+			lock (_navigationCacheSync)
+			{
+				_navigationCache.Clear();
+				_navigationCacheOrder.Clear();
+				_navigationCacheBytes = 0;
+			}
 			lock (_cacheTrimSync)
 			{
 				_manifestSnapshots.Clear();
@@ -1033,6 +1305,13 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		string Fingerprint,
 		LanguageId LanguageId,
 		string ExtractorIdentity);
+
+	private readonly record struct NavigationCacheKey(string RelativePath, string ContentFingerprint);
+
+	private sealed record NavigationCacheEntry(
+		NavigationCacheKey Key,
+		IReadOnlyList<NavigationDeclaration> Declarations,
+		long Weight);
 
 	private readonly record struct PreparedDependencyIdentity(
 		string RelativePath,
@@ -1063,6 +1342,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 	private readonly record struct CanonicalManifestFile(string FullPath, string RelativePath);
 
 	private readonly record struct IndexCacheKey(
+		string SourceRoot,
 		string ManifestGeneration,
 		string DeclarationRevision,
 		string ConfigurationFingerprint);
@@ -1082,12 +1362,31 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		long LastWriteTimeUtcTicks,
 		long CreationTimeUtcTicks);
 
+	private readonly record struct PhysicalFileProbe(string Path, bool Exists);
+
+	private sealed class FileCacheEntry(FileCacheKey key, Lazy<Task<FileFacts>> value)
+	{
+		public FileCacheKey Key { get; } = key;
+		public Lazy<Task<FileFacts>> Value { get; } = value;
+		public long RegisteredWeight { get; set; }
+		public LinkedListNode<FileCacheEntry>? OrderNode { get; set; }
+	}
+
+	private sealed class IndexCacheEntry(IndexCacheKey key, Lazy<Task<ResolvedIndex>> value)
+	{
+		public IndexCacheKey Key { get; } = key;
+		public Lazy<Task<ResolvedIndex>> Value { get; } = value;
+		public long RegisteredWeight { get; set; }
+		public LinkedListNode<IndexCacheEntry>? OrderNode { get; set; }
+	}
+
 	private sealed record ManifestSnapshotCacheEntry(
 		ManifestRequestKey Key,
 		IReadOnlyList<string> ManifestPaths,
 		IReadOnlyList<FileStamp> Stamps,
 		IReadOnlyList<string>? ContentIdentities,
 		IReadOnlyList<string> AbsentControlFiles,
+		IReadOnlyList<PhysicalFileProbe> PhysicalFileProbes,
 		IndexCacheKey IndexCacheKey,
 		DependencyIndexSnapshot Snapshot)
 	{
@@ -1098,7 +1397,11 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		int ManifestSnapshots,
 		int ManifestEvictionEntries,
 		int ResolvedIndexes,
-		long ResolvedIndexBytes);
+		long ResolvedIndexBytes,
+		int IndexEvictionEntries,
+		int Files,
+		int FileEvictionEntries,
+		long FileBytes);
 
 	private sealed record ResolvedIndex(
 		IReadOnlyList<DependencyEdge> Edges,
@@ -1108,6 +1411,8 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		IReadOnlyDictionary<string, IReadOnlyList<DependencyEdge>> EdgesByTarget)
 	{
 		public long ResolverContextEstimatedBytes { get; init; }
+		public IReadOnlyList<PhysicalFileProbe> PhysicalFileProbes { get; init; } = [];
+		public bool CanCachePhysicalFileProbes { get; init; } = true;
 	}
 
 	private static class DependencyResolver
@@ -1197,7 +1502,9 @@ public sealed partial class DependencyFactsEngine : IDisposable
 				new Dictionary<string, IReadOnlyList<DependencyEdge>>(StringComparer.Ordinal),
 				new Dictionary<string, IReadOnlyList<DependencyEdge>>(StringComparer.Ordinal))
 			{
-				ResolverContextEstimatedBytes = context.EstimatedRetainedBytes
+				ResolverContextEstimatedBytes = context.EstimatedRetainedBytes,
+				PhysicalFileProbes = context.CapturePhysicalFileProbes(),
+				CanCachePhysicalFileProbes = context.CanCachePhysicalFileProbes
 			};
 		}
 
@@ -1375,7 +1682,22 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		private readonly IReadOnlySet<string> _manifestDirectoryPrefixes;
 		private readonly IReadOnlyDictionary<string, TypeScriptPathMapping[]> _typeScriptMappingsByScope;
 		private readonly bool _diagnosticsEnabled;
+		private readonly ConcurrentDictionary<string, int> _physicalFileProbes = new(PathComparer);
+		private int _physicalFileProbeCount;
+		private int _physicalFileProbeOverflow;
+		private int _physicalFileProbeConflict;
 		public long EstimatedRetainedBytes { get; }
+		public bool CanCachePhysicalFileProbes =>
+			Volatile.Read(ref _physicalFileProbeOverflow) == 0 &&
+			Volatile.Read(ref _physicalFileProbeConflict) == 0;
+
+		public IReadOnlyList<PhysicalFileProbe> CapturePhysicalFileProbes() =>
+			CanCachePhysicalFileProbes
+				? _physicalFileProbes
+					.OrderBy(static pair => pair.Key, PathComparer)
+					.Select(static pair => new PhysicalFileProbe(pair.Key, pair.Value == 2))
+					.ToArray()
+				: [];
 
 		public ResolverContext(
 			string root,
@@ -1947,11 +2269,29 @@ public sealed partial class DependencyFactsEngine : IDisposable
 					var relative = PortableRelative(_root, probe);
 					if (TryGetManifestPath(relative, out var manifestPath))
 						return [manifestPath];
-					if (File.Exists(probe))
+					if (ProbeUnselectedFile(probe))
 						return [];
 				}
 			}
 			return [];
+		}
+
+		private bool ProbeUnselectedFile(string path)
+		{
+			var exists = File.Exists(path);
+			if (Volatile.Read(ref _physicalFileProbeOverflow) != 0)
+				return exists;
+			var state = exists ? 2 : 1;
+			if (_physicalFileProbes.TryAdd(path, state))
+			{
+				if (Interlocked.Increment(ref _physicalFileProbeCount) > MaximumCachedPhysicalFileProbes)
+					Volatile.Write(ref _physicalFileProbeOverflow, 1);
+			}
+			else if (_physicalFileProbes.TryGetValue(path, out var previous) && previous != state)
+			{
+				Volatile.Write(ref _physicalFileProbeConflict, 1);
+			}
+			return exists;
 		}
 
 		private static bool Matches(string pattern, int star, string value) => star < 0

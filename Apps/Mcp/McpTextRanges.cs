@@ -307,6 +307,33 @@ internal static class McpTextRanges
 		ArgumentNullException.ThrowIfNull(text);
 		cancellationToken.ThrowIfCancellationRequested();
 		var total = CountLines(text, cancellationToken);
+		return SliceFromKnownLine(
+			text,
+			total,
+			firstLineNumber: 1,
+			firstLineOffset: 0,
+			startLine,
+			endLine,
+			maximumLines,
+			maximumCharacters,
+			cancellationToken,
+			startColumn);
+	}
+
+	internal static McpTextPage SliceFromKnownLine(
+		string text,
+		int total,
+		int firstLineNumber,
+		int firstLineOffset,
+		int? startLine,
+		int? endLine,
+		int maximumLines,
+		int maximumCharacters,
+		CancellationToken cancellationToken,
+		int? startColumn = null)
+	{
+		ArgumentNullException.ThrowIfNull(text);
+		cancellationToken.ThrowIfCancellationRequested();
 		if (total == 0)
 		{
 			if (startLine is > 1 || endLine is > 0)
@@ -321,6 +348,9 @@ internal static class McpTextRanges
 		var requestedEnd = Math.Min(endLine ?? total, total);
 		if (start < 1 || start > total || endLine < start)
 			throw InvalidRange(start, endLine, total);
+		if (firstLineNumber < 1 || firstLineNumber > start ||
+		    firstLineOffset < 0 || firstLineOffset > text.Length)
+			throw new InvalidOperationException("The requested line was not indexed.");
 
 		var upper = Math.Min(requestedEnd, checked(start + maximumLines - 1));
 		var builder = new StringBuilder();
@@ -363,10 +393,10 @@ internal static class McpTextRanges
 			return lineNumber < upper;
 		}
 
-		var lineStart = 0;
-		var lineNumber = 1;
+		var lineStart = firstLineOffset;
+		var lineNumber = firstLineNumber;
 		var continueScanning = true;
-		for (var index = 0; index < text.Length && continueScanning; index++)
+		for (var index = firstLineOffset; index < text.Length && continueScanning; index++)
 		{
 			if ((index & 0xFFF) == 0)
 				cancellationToken.ThrowIfCancellationRequested();

@@ -16,4 +16,8 @@ public sealed record ProjectProfileLookupResult(
 	DateTimeOffset? UpdatedUtc = null)
 {
 	public ProjectProfileLookupStatus? RecoveryStatus { get; init; }
+
+	// Operation-local marks and revision metadata from the same completed lookup/migration.
+	[System.Text.Json.Serialization.JsonIgnore]
+	public PersistentSecretMarksSnapshot? PersistentMarks { get; init; }
 }

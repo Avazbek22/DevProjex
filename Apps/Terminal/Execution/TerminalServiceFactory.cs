@@ -29,6 +29,11 @@ public sealed class TerminalServiceFactory(
 	private readonly Func<AppLanguage, TerminalServices>? _servicesProvider;
 	private readonly Action? _fullServiceCreationObserver;
 	private readonly IGitRepositoryService? _gitRepositoryService;
+	private readonly Func<StoreUserDataMigrationStatus> _migrationProbe =
+		StoreUserDataMigration.TryMigrateCurrentWindowsPackage;
+	private readonly Action<TimeSpan> _migrationWait = Thread.Sleep;
+	private readonly object _migrationGate = new();
+	private bool _migrationAdmitted;
 	internal Func<string>? AppDataPathProvider => appDataPathProvider;
 	internal TerminalHostCapabilities HostCapabilities { get; } =
 		hostCapabilities ?? TerminalHostCapabilities.Desktop;
@@ -38,6 +43,15 @@ public sealed class TerminalServiceFactory(
 	{
 		_servicesProvider = servicesProvider ??
 			throw new ArgumentNullException(nameof(servicesProvider));
+	}
+
+	internal TerminalServiceFactory(
+		Func<StoreUserDataMigrationStatus> migrationProbe,
+		Action<TimeSpan> migrationWait)
+		: this()
+	{
+		_migrationProbe = migrationProbe ?? throw new ArgumentNullException(nameof(migrationProbe));
+		_migrationWait = migrationWait ?? throw new ArgumentNullException(nameof(migrationWait));
 	}
 
 	internal TerminalServiceFactory(
@@ -60,7 +74,7 @@ public sealed class TerminalServiceFactory(
 
 	public TerminalServices Create(AppLanguage language)
 	{
-		_ = StoreUserDataMigration.TryMigrateCurrentWindowsPackage();
+		EnsureMigrationAdmission();
 		if (_servicesProvider is not null)
 			return _servicesProvider(language);
 		_fullServiceCreationObserver?.Invoke();
@@ -230,7 +244,7 @@ public sealed class TerminalServiceFactory(
 
 	internal TerminalCacheServiceScope CreateCacheScope(AppLanguage language)
 	{
-		_ = StoreUserDataMigration.TryMigrateCurrentWindowsPackage();
+		EnsureMigrationAdmission();
 		if (_servicesProvider is not null)
 		{
 			var fullScope = CreateScope(language);
@@ -256,7 +270,7 @@ public sealed class TerminalServiceFactory(
 
 	internal TerminalRecentServiceScope CreateRecentScope(AppLanguage language)
 	{
-		_ = StoreUserDataMigration.TryMigrateCurrentWindowsPackage();
+		EnsureMigrationAdmission();
 		if (_servicesProvider is not null)
 		{
 			var fullScope = CreateScope(language);
@@ -286,6 +300,23 @@ public sealed class TerminalServiceFactory(
 		appDataPathProvider is null
 			? new RecentProjectsStore()
 			: new RecentProjectsStore(resolvedAppDataPathProvider);
+
+	internal void EnsureMigrationAdmission()
+	{
+		if (appDataPathProvider is not null || _servicesProvider is not null)
+			return;
+
+		lock (_migrationGate)
+		{
+			if (_migrationAdmitted)
+				return;
+
+			var status = StoreUserDataMigrationAdmission.Run(_migrationProbe, _migrationWait);
+			if (!StoreUserDataMigrationAdmission.IsReady(status))
+				throw new StoreUserDataMigrationUnavailableException(status);
+			_migrationAdmitted = true;
+		}
+	}
 }
 
 internal sealed record TerminalCacheServices(

@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Security;
 using System.Text.Json;
 using DevProjex.Infrastructure.Persistence;
 
@@ -21,6 +22,9 @@ public sealed class LiveSessionRegistry(
 {
 	public static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(5);
 	public static readonly TimeSpan StaleHeartbeatAge = TimeSpan.FromSeconds(15);
+	private const UnixFileMode PrivateDirectoryMode =
+		UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+	private const UnixFileMode PrivateFileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
 	private const int MaximumRecordBytes = 64 * 1024;
 	private const int MaximumRegistryEntries = 1_024;
 	private const int MaximumClientNameCharacters = 256;
@@ -30,8 +34,24 @@ public sealed class LiveSessionRegistry(
 	private readonly TimeProvider clock = timeProvider ?? TimeProvider.System;
 	private readonly Func<int, DateTimeOffset?> processStart = processStartProvider ?? TryGetProcessStartUtc;
 
-	public string DirectoryPath =>
-		UserDataPathResolver.EnsurePhysicalServiceDirectory(stateRoot(), "live-sessions");
+	public string DirectoryPath
+	{
+		get
+		{
+			try
+			{
+				var directory = UserDataPathResolver.EnsurePhysicalServiceDirectory(
+					stateRoot(), "live-sessions");
+				if (!OperatingSystem.IsWindows())
+					File.SetUnixFileMode(directory, PrivateDirectoryMode);
+				return directory;
+			}
+			catch (Exception exception) when (exception is NotSupportedException or SecurityException)
+			{
+				throw new IOException("Live context session directory cannot be protected.", exception);
+			}
+		}
+	}
 
 	public LiveSessionWriter Start(
 		IReadOnlyList<string> roots,
@@ -62,7 +82,7 @@ public sealed class LiveSessionRegistry(
 				.Take(MaximumRegistryEntries)
 				.ToArray();
 		}
-		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or SecurityException)
 		{
 			return [];
 		}
@@ -111,15 +131,25 @@ public sealed class LiveSessionRegistry(
 	internal void Write(LiveSessionRecord record)
 	{
 		var directory = DirectoryPath;
-		Directory.CreateDirectory(directory);
-		var path = GetPath(record.Pid);
+		var path = Path.Combine(directory, $"{record.Pid}.json");
 		var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
 		try
 		{
-			var json = JsonSerializer.Serialize(
-				record,
-				InfrastructureJsonSerializerContext.Default.LiveSessionRecord);
-			File.WriteAllText(temporary, json, new UTF8Encoding(false));
+			var options = new FileStreamOptions
+			{
+				Mode = FileMode.CreateNew,
+				Access = FileAccess.Write,
+				Share = FileShare.None
+			};
+			if (!OperatingSystem.IsWindows())
+				options.UnixCreateMode = PrivateFileMode;
+			using (var stream = new FileStream(temporary, options))
+			{
+				JsonSerializer.Serialize(
+					stream,
+					record,
+					InfrastructureJsonSerializerContext.Default.LiveSessionRecord);
+			}
 			File.Move(temporary, path, overwrite: true);
 		}
 		finally
@@ -135,7 +165,7 @@ public sealed class LiveSessionRegistry(
 			Write(record);
 			return true;
 		}
-		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or SecurityException or NotSupportedException)
 		{
 			Trace.TraceWarning(
 				"Live context session could not be written: {0}",
@@ -150,7 +180,7 @@ public sealed class LiveSessionRegistry(
 		{
 			TryDelete(GetPath(pid));
 		}
-		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or SecurityException)
 		{
 		}
 	}
@@ -174,6 +204,7 @@ public sealed class LiveSessionRegistry(
 				FileShare.ReadWrite | FileShare.Delete,
 				bufferSize: 4096,
 				FileOptions.SequentialScan);
+			EnsurePrivateFileMode(stream);
 			if (stream.Length is <= 0 or > MaximumRecordBytes)
 			{
 				invalid = true;
@@ -207,9 +238,25 @@ public sealed class LiveSessionRegistry(
 			invalid = true;
 			return null;
 		}
-		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or SecurityException)
 		{
 			return null;
+		}
+	}
+
+	private static void EnsurePrivateFileMode(FileStream stream)
+	{
+		if (OperatingSystem.IsWindows())
+			return;
+		try
+		{
+			var handle = stream.SafeFileHandle;
+			if (File.GetUnixFileMode(handle) != PrivateFileMode)
+				File.SetUnixFileMode(handle, PrivateFileMode);
+		}
+		catch (NotSupportedException exception)
+		{
+			throw new IOException("Live context session file cannot be protected.", exception);
 		}
 	}
 
@@ -236,7 +283,7 @@ public sealed class LiveSessionRegistry(
 		{
 			return PathUtility.Normalize(path);
 		}
-		catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
+		catch (Exception exception) when (exception is ArgumentException or NotSupportedException or SecurityException)
 		{
 			return null;
 		}
@@ -256,7 +303,7 @@ public sealed class LiveSessionRegistry(
 		}
 		catch (Exception exception) when (exception is
 			   ArgumentException or InvalidOperationException or NotSupportedException or
-			   UnauthorizedAccessException or Win32Exception)
+			   UnauthorizedAccessException or SecurityException or Win32Exception)
 		{
 			return false;
 		}
@@ -279,7 +326,7 @@ public sealed class LiveSessionRegistry(
 		}
 		catch (Exception exception) when (exception is
 			   ArgumentException or InvalidOperationException or NotSupportedException or
-			   UnauthorizedAccessException or Win32Exception)
+			   UnauthorizedAccessException or SecurityException or Win32Exception)
 		{
 			return null;
 		}
@@ -291,7 +338,7 @@ public sealed class LiveSessionRegistry(
 		{
 			File.Delete(path);
 		}
-		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or SecurityException)
 		{
 		}
 	}

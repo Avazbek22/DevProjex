@@ -241,7 +241,9 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			// The caller-provided timestamp reflects when the profile became user-approved.
 			if (hasExisting && existing!.UpdatedUtc > normalizedUpdatedUtc)
 			{
-				return new ProjectProfileSaveResult(Succeeded: true, WasTruncated: false);
+				return enforceExpectedVersion
+					? new ProjectProfileSaveResult(ProjectProfileSaveStatus.Conflict)
+					: new ProjectProfileSaveResult(Succeeded: true, WasTruncated: false);
 			}
 
 			db.Profiles[normalizedPath] = persistedProfile;
@@ -490,7 +492,10 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		return new ProjectProfileLookupResult(
 			ProjectProfileLookupStatus.Found,
 			ToProfile(entry, marks.Snapshot.Marks),
-			NormalizeProfileTimestamp(entry.UpdatedUtc));
+			NormalizeProfileTimestamp(entry.UpdatedUtc))
+		{
+			PersistentMarks = marks.Snapshot
+		};
 	}
 
 	private static ProjectProfileLookupStatus MapMarkStoreStatus(PersistentSecretMarkStoreStatus status) =>
@@ -565,7 +570,11 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 
 	private bool EnsureStorageExistsCore(JsonStoreFileSet fileSet)
 	{
-		if (TryLoadFromPath(fileSet.PrimaryPath, out var primaryDb, out var primaryRequiresRewrite))
+		var primaryStatus = LoadFromPath(
+			fileSet.PrimaryPath,
+			out var primaryDb,
+			out var primaryRequiresRewrite);
+		if (primaryStatus == ProfileDocumentLoadStatus.Loaded)
 		{
 			if (primaryDb.ContainsInvalidEntries)
 				return false;
@@ -574,13 +583,20 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 
 			return true;
 		}
+		if (primaryStatus is ProfileDocumentLoadStatus.TemporarilyUnavailable or
+			ProfileDocumentLoadStatus.FutureSchema)
+			return false;
 
-		if (TryLoadFromPath(fileSet.BackupPath, out var backupDb, out _))
+		var backupStatus = LoadFromPath(fileSet.BackupPath, out var backupDb, out _);
+		if (backupStatus == ProfileDocumentLoadStatus.Loaded)
 		{
 			if (backupDb.ContainsInvalidEntries)
 				return false;
 			return TrySaveInternal(fileSet, backupDb);
 		}
+		if (backupStatus is ProfileDocumentLoadStatus.TemporarilyUnavailable or
+			ProfileDocumentLoadStatus.FutureSchema)
+			return false;
 
 		if (File.Exists(fileSet.PrimaryPath) || File.Exists(fileSet.BackupPath))
 			return false;
@@ -674,6 +690,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 				Exists: true,
 				stream.Length,
 				info.LastWriteTimeUtc.Ticks,
+				info.CreationTimeUtc.Ticks,
 				read,
 				hash);
 		}
@@ -1217,6 +1234,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			return false;
 		if (!root.TryGetProperty("profiles", out var profilesElement))
 		{
+			if (sourceSchemaVersion == CurrentSchemaVersion)
+				return false;
 			requiresRewrite = sourceSchemaVersion != CurrentSchemaVersion;
 			return true;
 		}
@@ -1278,11 +1297,12 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		bool Exists,
 		long Length,
 		long LastWriteUtcTicks,
+		long CreationUtcTicks,
 		int PrefixLength,
 		ulong PrefixHash)
 	{
-		public static DocumentIdentity Missing { get; } = new(true, false, 0, 0, 0, 0);
-		public static DocumentIdentity Unavailable { get; } = new(false, false, 0, 0, 0, 0);
+		public static DocumentIdentity Missing { get; } = new(true, false, 0, 0, 0, 0, 0);
+		public static DocumentIdentity Unavailable { get; } = new(false, false, 0, 0, 0, 0, 0);
 	}
 
 	private enum ProfileDocumentLoadStatus

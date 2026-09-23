@@ -20,12 +20,37 @@ internal static class GitRemoteIdentityStore
 		var safeUrl = GitNetworkPolicy.ValidateUrl(remoteUrl, allowFileTransport);
 		var path = Path.Combine(gitDirectory, IdentityFileName);
 		var safeSourceIdentity = RepositoryUrlUtility.ToSafeSourceIdentity(sourceIdentityUrl ?? safeUrl);
-		File.WriteAllText(
-			path,
-			safeUrl + "\n" + safeSourceIdentity,
-			new UTF8Encoding(false));
-		if (!OperatingSystem.IsWindows())
-			File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+		var temporaryPath = Path.Combine(gitDirectory, $".{IdentityFileName}.{Guid.NewGuid():N}.tmp");
+		try
+		{
+			var options = new FileStreamOptions
+			{
+				Mode = FileMode.CreateNew,
+				Access = FileAccess.Write,
+				Share = FileShare.None
+			};
+			if (!OperatingSystem.IsWindows())
+				options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+			using (var stream = new FileStream(temporaryPath, options))
+			using (var writer = new StreamWriter(stream, new UTF8Encoding(false)))
+			{
+				writer.Write(safeUrl);
+				writer.Write('\n');
+				writer.Write(safeSourceIdentity);
+			}
+			File.Move(temporaryPath, path, overwrite: true);
+		}
+		finally
+		{
+			try
+			{
+				File.Delete(temporaryPath);
+			}
+			catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+			                                  System.Security.SecurityException)
+			{
+			}
+		}
 	}
 
 	public static bool Matches(string repositoryPath, string remoteUrl)

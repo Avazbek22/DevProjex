@@ -20,7 +20,9 @@ public static class AvaloniaHeadlessTestApp
 			string.Equals(
 				Environment.GetEnvironmentVariable("DEVPROJEX_CAPTURE_JOURNAL_INTEGRITY"),
 				"1",
-				StringComparison.Ordinal);
+				StringComparison.Ordinal) ||
+			!string.IsNullOrWhiteSpace(
+				Environment.GetEnvironmentVariable("DEVPROJEX_UI_CAPTURE_DIRECTORY"));
 		var builder = AppBuilder.Configure<App>();
 		if (captureSnapshots)
 			builder = builder.UseSkia();

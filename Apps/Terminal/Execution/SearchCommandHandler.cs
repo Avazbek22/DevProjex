@@ -43,10 +43,14 @@ public sealed class SearchCommandHandler(
 		if (plan.HasErrors)
 			return CommandLineExitCodes.PolicyFailure;
 
-		SearchResult result;
+		string payload;
 		try
 		{
-			result = await SearchAsync(plan, request, cancellationToken).ConfigureAwait(false);
+			payload = await RenderSearchForPlanAsync(
+				plan,
+				request,
+				MaximumInspectedBytes,
+				cancellationToken).ConfigureAwait(false);
 		}
 		catch (McpToolException exception) when (exception.Code == McpErrorCodes.InvalidPattern)
 		{
@@ -56,7 +60,6 @@ public sealed class SearchCommandHandler(
 				exception);
 		}
 
-		var payload = Render(result, request.Format);
 		if (request.OutputPath is null or "-")
 		{
 			await environment.Output.WriteAsync(payload.AsMemory(), cancellationToken).ConfigureAwait(false);
@@ -85,22 +88,39 @@ public sealed class SearchCommandHandler(
 		return CommandLineExitCodes.Success;
 	}
 
+	internal async Task<string> RenderSearchForPlanAsync(
+		ProjectContextPlan plan,
+		SearchCommandRequest request,
+		long maximumInspectedBytes,
+		CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(plan);
+		ArgumentNullException.ThrowIfNull(request);
+		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumInspectedBytes);
+		var result = await SearchAsync(plan, request, maximumInspectedBytes, cancellationToken)
+			.ConfigureAwait(false);
+		return Render(result, request.Format);
+	}
+
 	private async Task<SearchResult> SearchAsync(
 		ProjectContextPlan plan,
 		SearchCommandRequest request,
+		long maximumInspectedBytes,
 		CancellationToken cancellationToken)
 	{
 		var regex = new McpSearchRegex(ToRegexPattern(request.Pattern, request.Mode), ignoreCase: true);
+		var context = CreateTransformationContext(plan);
 		var inspectedFiles = new List<string>(plan.IncludedFiles.Count);
 		long inspectedBytes = 0;
 		foreach (var path in plan.IncludedFiles)
 		{
-			var fileBytes = ResolveFileSize(plan, path);
-			if (fileBytes > MaximumInspectedBytes - inspectedBytes)
+			var fileBytes = ResolveFileSize(plan, path, recheckPlannedSize: context is not null);
+			if (fileBytes > maximumInspectedBytes - inspectedBytes)
 				break;
 			inspectedFiles.Add(path);
 			inspectedBytes += fileBytes;
 		}
+		var inspectionByteLimitReached = inspectedFiles.Count < plan.IncludedFiles.Count;
 
 		var candidates = new McpSearchCandidateCollector(MaximumStoredMatches, MaximumStoredCharacters);
 		var navigationByFile = new Dictionary<string, IReadOnlyList<NavigationDeclaration>>(StringComparer.Ordinal);
@@ -193,26 +213,36 @@ public sealed class SearchCommandHandler(
 			return ValueTask.CompletedTask;
 		}
 
-		var context = CreateTransformationContext(plan);
 		if (context is null)
 		{
 			var analyzer = new FileContentAnalyzer();
+			long inspectedActualBytes = 0;
 			foreach (var path in inspectedFiles)
 			{
 				cancellationToken.ThrowIfCancellationRequested();
-				var read = await analyzer.ReadClassifiedAsync(path, long.MaxValue, cancellationToken)
+				var read = await analyzer.ReadClassifiedAsync(
+						path,
+						maximumInspectedBytes - inspectedActualBytes,
+						cancellationToken)
 					.ConfigureAwait(false);
+				if (read.Classification == FileContentClassification.TooLarge)
+				{
+					unscannableSources++;
+					inspectionByteLimitReached = true;
+					break;
+				}
 				if (read.Classification != FileContentClassification.Text || read.Content is null)
 				{
 					unscannableSources++;
 					continue;
 				}
+				inspectedActualBytes += read.Content.SizeBytes;
 				await Consume(
 					new TransformedTextFile(path, read.Content.Content, []),
 					cancellationToken).ConfigureAwait(false);
 			}
 		}
-		else
+		else if (inspectedFiles.Count > 0)
 		{
 			await using var searched = await services.SecretRedactionOutputPreparer
 				.ConsumeTransformedTextAsync(context, inspectedFiles, Consume, cancellationToken)
@@ -284,7 +314,7 @@ public sealed class SearchCommandHandler(
 				namesWritten
 					? symbols.Names.Keys.Select(key => key.RelativePath).Distinct(StringComparer.Ordinal).Count()
 					: 0,
-				inspectedFiles.Count < plan.IncludedFiles.Count,
+				inspectionByteLimitReached,
 				candidates.MatchCapacityReached,
 				retainedMatchingFiles > McpSearchSymbols.MaximumAnnotatedFiles,
 				rendered.Truncated || !namesWritten,
@@ -364,10 +394,23 @@ public sealed class SearchCommandHandler(
 		return separator >= 0 ? name[(separator + 1)..] : name;
 	}
 
-	private static long ResolveFileSize(ProjectContextPlan plan, string path)
+	private static long ResolveFileSize(
+		ProjectContextPlan plan,
+		string path,
+		bool recheckPlannedSize)
 	{
 		if (plan.EffectiveFileSizes?.TryGetValue(path, out var size) == true)
-			return Math.Max(0, size);
+		{
+			var plannedSize = Math.Max(0, size);
+			return recheckPlannedSize
+				? Math.Max(plannedSize, ReadCurrentFileSize(path))
+				: plannedSize;
+		}
+		return ReadCurrentFileSize(path);
+	}
+
+	private static long ReadCurrentFileSize(string path)
+	{
 		try
 		{
 			return Math.Max(0, new FileInfo(path).Length);
@@ -465,13 +508,15 @@ public sealed class SearchCommandHandler(
 			var commandArguments = BuildDeclarationReadArguments(
 				request,
 				preview.Declaration.RelativePath);
-			var readCommand = string.Join(' ', commandArguments.Select(QuoteArgument));
+			var readInstruction = commandArguments is null
+				? "no standalone read command can preserve this remote profile's manual secret marks."
+				: string.Join(' ', commandArguments.Select(QuoteArgument));
 			var body = new StringBuilder()
 				.AppendLine()
 				.Append("Best declaration body (1 of ")
 				.Append(declarations.Count.ToString(CultureInfo.InvariantCulture))
 				.AppendLine("):")
-				.Append("Read declaration file: ").AppendLine(readCommand)
+				.Append("Read declaration file: ").AppendLine(readInstruction)
 				.Append("lines ").Append(preview.Declaration.StartLine.ToString(CultureInfo.InvariantCulture))
 				.Append('-').Append(preview.Declaration.EndLine.ToString(CultureInfo.InvariantCulture)).AppendLine()
 				.Append(preview.Text);
@@ -498,12 +543,16 @@ public sealed class SearchCommandHandler(
 		return safeSource.Length > 0 ? safeSource : request.ProjectPath;
 	}
 
-	internal static IReadOnlyList<string> BuildDeclarationReadArguments(
+	internal static IReadOnlyList<string>? BuildDeclarationReadArguments(
 		SearchCommandRequest request,
 		string relativePath)
 	{
 		ArgumentNullException.ThrowIfNull(request);
 		ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
+		var useLocalProfile = request.Selection.ProfileSource?.Kind == ProjectProfileSourceKind.Local &&
+							  ProjectSelectionMarkedSecretsResolver.Resolve(request.Selection).Count > 0;
+		if (useLocalProfile && !string.IsNullOrWhiteSpace(request.RepositorySourceUrl))
+			return null;
 		var arguments = new List<string>
 		{
 			"devprojex", "export", "context", ResolveDeclarationReadSource(request)
@@ -516,7 +565,7 @@ public sealed class SearchCommandHandler(
 		arguments.AddRange(
 		[
 			"--view", "content", "--format", "text", "-o", "-",
-			"--profile", "standard", "--select", relativePath
+			"--profile", useLocalProfile ? "local" : "standard", "--select", relativePath
 		]);
 		if (request.Selection.GitMode is { } gitMode)
 		{

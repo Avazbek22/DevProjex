@@ -1,4 +1,5 @@
 using DevProjex.Infrastructure.LiveContext;
+using System.Security;
 
 namespace DevProjex.Avalonia;
 
@@ -23,15 +24,16 @@ public partial class MainWindow
                 NotifyFilter = NotifyFilters.FileName |
                                NotifyFilters.LastWrite |
                                NotifyFilters.CreationTime,
-                IncludeSubdirectories = false,
-                EnableRaisingEvents = true
+                IncludeSubdirectories = false
             };
             _liveSessionWatcher.Created += OnLiveSessionFilesChanged;
             _liveSessionWatcher.Changed += OnLiveSessionFilesChanged;
             _liveSessionWatcher.Deleted += OnLiveSessionFilesChanged;
             _liveSessionWatcher.Renamed += OnLiveSessionFilesRenamed;
+            _liveSessionWatcher.EnableRaisingEvents = true;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (exception is
+                   IOException or UnauthorizedAccessException or SecurityException or NotSupportedException)
         {
             Trace.TraceWarning(
                 "Live context session directory could not be watched: {0}",

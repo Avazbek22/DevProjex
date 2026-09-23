@@ -243,7 +243,10 @@ public sealed class TerminalClonePtyTests
 			"NewView.qml",
 			timeout: TimeSpan.FromSeconds(30),
 			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendAsync("M", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenWithoutAsync(
+			"Repository updated and project context rebuilt.",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync("T", TestContext.Current.CancellationToken);
 		var parameters = await terminal.WaitForScreenAsync(
 			"[x] .qml",
 			timeout: TimeSpan.FromSeconds(30),
@@ -310,13 +313,16 @@ public sealed class TerminalClonePtyTests
 			timeout: TimeSpan.FromSeconds(30),
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.DoesNotContain("MainOnly.cs", feature, StringComparison.Ordinal);
+		await terminal.WaitForScreenWithoutAsync(
+			"Branch: feature",
+			cancellationToken: TestContext.Current.CancellationToken);
 
 		await terminal.SendAsync("3", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"internal sealed class FeatureOnly",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.False(terminal.HasExited);
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(

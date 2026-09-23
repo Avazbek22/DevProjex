@@ -53,7 +53,7 @@ internal static class DesktopProtocolMapper
 	{
 		if (!payload.TryGetProperty("view", out var value) || value.ValueKind == JsonValueKind.Null)
 			return null;
-		return ParsePreviewView(value.GetString());
+		return ParsePreviewView(value.ValueKind == JsonValueKind.String ? value.GetString() : null);
 	}
 
 	private static DesktopPreviewView ReadPreviewView(JsonElement payload) =>

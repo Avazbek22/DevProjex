@@ -47,6 +47,29 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
         }
     }
 
+    public bool TryLoad(out UserSettingsDb database)
+    {
+        lock (_sync)
+        {
+            database = CreateDefaultDb();
+            try
+            {
+                var fileSet = GetFileSet();
+                if (!CrossProcessFileLock.TryAcquire(fileSet, out var heldLock))
+                    return false;
+
+                using var _ = heldLock;
+                database = LoadInternal(fileSet, out var temporarilyUnavailable);
+                return !temporarilyUnavailable;
+            }
+            catch
+            {
+                database = CreateDefaultDb();
+                return false;
+            }
+        }
+    }
+
     public UserSettingsDb LoadForStartup(TimeSpan lockTimeout)
     {
         lock (_sync)
@@ -91,7 +114,12 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
         }
     }
 
-    public bool TryPersistViewSettings(UserSettingsDb database)
+    public bool TryPersistViewSettings(UserSettingsDb database) =>
+        TryPersistViewSettings(database, _ => database.ViewSettings);
+
+    public bool TryPersistViewSettings(
+        UserSettingsDb database,
+        Func<AppViewSettings, AppViewSettings> applyChanges)
     {
         lock (_sync)
         {
@@ -104,8 +132,10 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
                 using var _ = heldLock;
                 if (HasFutureSchema(fileSet))
                     return false;
-                var latest = LoadInternal(fileSet);
-                latest.ViewSettings = NormalizeViewSettings(database.ViewSettings);
+                var latest = LoadInternal(fileSet, out var temporarilyUnavailable);
+                if (temporarilyUnavailable)
+                    return false;
+                latest.ViewSettings = NormalizeViewSettings(applyChanges(latest.ViewSettings));
                 if (!TrySaveInternal(fileSet, Normalize(latest)))
                     return false;
 
@@ -120,7 +150,12 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
         }
     }
 
-    public bool TryPersistUpdateCheckSettings(UserSettingsDb database)
+    public bool TryPersistUpdateCheckSettings(UserSettingsDb database) =>
+        TryPersistUpdateCheckSettings(database, _ => database.UpdateCheckSettings);
+
+    public bool TryPersistUpdateCheckSettings(
+        UserSettingsDb database,
+        Func<UpdateCheckSettings, UpdateCheckSettings> applyChanges)
     {
         lock (_sync)
         {
@@ -133,9 +168,11 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
                 using var _ = heldLock;
                 if (HasFutureSchema(fileSet))
                     return false;
-                var latest = LoadInternal(fileSet);
+                var latest = LoadInternal(fileSet, out var temporarilyUnavailable);
+                if (temporarilyUnavailable)
+                    return false;
                 latest.UpdateCheckSettings = NormalizeUpdateCheckSettings(
-                    database.UpdateCheckSettings);
+                    applyChanges(latest.UpdateCheckSettings));
                 if (!TrySaveInternal(fileSet, Normalize(latest)))
                     return false;
 
@@ -220,19 +257,35 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
     private JsonStoreFileSet GetFileSet()
         => JsonStoreFileSet.Create(_appDataPathProvider, FolderName, FileName);
 
-    private UserSettingsDb LoadInternal(JsonStoreFileSet fileSet)
+    private UserSettingsDb LoadInternal(JsonStoreFileSet fileSet) =>
+        LoadInternal(fileSet, out _);
+
+    private UserSettingsDb LoadInternal(JsonStoreFileSet fileSet, out bool temporarilyUnavailable)
     {
+        temporarilyUnavailable = false;
         if (HasFutureSchema(fileSet))
             return CreateDefaultDb();
 
-        if (TryRead(fileSet.PrimaryPath, out var primary, out var primaryRequiresRewrite))
+        var primaryStatus = TryRead(fileSet.PrimaryPath, out var primary, out var primaryRequiresRewrite);
+        if (primaryStatus == SettingsReadStatus.TemporarilyUnavailable)
+        {
+            temporarilyUnavailable = true;
+            return CreateDefaultDb();
+        }
+        if (primaryStatus == SettingsReadStatus.Loaded)
         {
             if (primaryRequiresRewrite)
                 TrySaveInternal(fileSet, primary);
             return primary;
         }
 
-        if (TryRead(fileSet.BackupPath, out var backup, out _))
+        var backupStatus = TryRead(fileSet.BackupPath, out var backup, out _);
+        if (backupStatus == SettingsReadStatus.TemporarilyUnavailable)
+        {
+            temporarilyUnavailable = true;
+            return CreateDefaultDb();
+        }
+        if (backupStatus == SettingsReadStatus.Loaded)
         {
             TrySaveInternal(fileSet, backup);
             return backup;
@@ -244,25 +297,48 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
         return fallback;
     }
 
-    private bool TryRead(string path, out UserSettingsDb database, out bool requiresRewrite)
+    private SettingsReadStatus TryRead(string path, out UserSettingsDb database, out bool requiresRewrite)
     {
-        var storedPreferences = ReadStoredViewPreferences(path);
-        return JsonStorePersistence.TryReadNormalized(
+        var storedPreferences = ReadStoredViewPreferences(path, out var preferencesUnavailable);
+        var loaded = JsonStorePersistence.TryReadNormalized(
             path,
             SerializerOptions,
             CreateDefaultDb,
             value => NormalizeAfterRead(value, storedPreferences),
             out database,
             out requiresRewrite,
-            JsonStorePersistence.SmallDocumentMaximumBytes);
+            out var temporarilyUnavailable,
+            JsonStorePersistence.SmallDocumentMaximumBytes,
+            IsValidCurrentSchemaDocument);
+        if (preferencesUnavailable || temporarilyUnavailable)
+            return SettingsReadStatus.TemporarilyUnavailable;
+        return loaded
+            ? SettingsReadStatus.Loaded
+            : SettingsReadStatus.MissingOrInvalid;
     }
 
-    private static StoredViewPreferences ReadStoredViewPreferences(string path)
+    private static bool IsValidCurrentSchemaDocument(string json)
     {
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        if (root.ValueKind != JsonValueKind.Object ||
+            !root.TryGetProperty("schemaVersion", out var schemaVersion) ||
+            !schemaVersion.TryGetInt32(out var version) ||
+            version != CurrentSchemaVersion)
+        {
+            return true;
+        }
+
+        return root.TryGetProperty("viewSettings", out var viewSettings) &&
+               viewSettings.ValueKind == JsonValueKind.Object;
+    }
+
+    private static StoredViewPreferences ReadStoredViewPreferences(string path, out bool temporarilyUnavailable)
+    {
+        temporarilyUnavailable = false;
         try
         {
-            if (!File.Exists(path) ||
-                !JsonStorePersistence.TryReadAllTextWithinSizeLimit(
+            if (!JsonStorePersistence.TryReadAllTextWithinSizeLimit(
                     path,
                     checked((int)JsonStorePersistence.SmallDocumentMaximumBytes),
                     out var json))
@@ -279,7 +355,17 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
 
             return new StoredViewPreferences(
                 ReadOptionalBoolean(viewSettings, "isStatusMetricsAnimationEnabled"),
-				ReadOptionalBoolean(viewSettings, "isToolAnimationEnabled"));
+                ReadOptionalBoolean(viewSettings, "isToolAnimationEnabled"));
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return default;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                          System.Security.SecurityException)
+        {
+            temporarilyUnavailable = true;
+            return default;
         }
         catch
         {
@@ -305,14 +391,20 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
         if (HasFutureSchema(fileSet))
             return true;
 
-        if (TryRead(fileSet.PrimaryPath, out var primary, out var primaryRequiresRewrite))
+        var primaryStatus = TryRead(fileSet.PrimaryPath, out var primary, out var primaryRequiresRewrite);
+        if (primaryStatus == SettingsReadStatus.TemporarilyUnavailable)
+            return false;
+        if (primaryStatus == SettingsReadStatus.Loaded)
         {
             if (primaryRequiresRewrite || !File.Exists(fileSet.BackupPath))
                 return TrySaveInternal(fileSet, primary);
             return true;
         }
 
-        if (TryRead(fileSet.BackupPath, out var backup, out _))
+        var backupStatus = TryRead(fileSet.BackupPath, out var backup, out _);
+        if (backupStatus == SettingsReadStatus.TemporarilyUnavailable)
+            return false;
+        if (backupStatus == SettingsReadStatus.Loaded)
             return TrySaveInternal(fileSet, backup);
 
         if (File.Exists(fileSet.PrimaryPath) || File.Exists(fileSet.BackupPath))
@@ -340,4 +432,11 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
     private readonly record struct StoredViewPreferences(
         bool? StatusMetricsAnimation,
 		bool? ToolAnimation);
+
+    private enum SettingsReadStatus
+    {
+        MissingOrInvalid,
+        Loaded,
+        TemporarilyUnavailable
+    }
 }

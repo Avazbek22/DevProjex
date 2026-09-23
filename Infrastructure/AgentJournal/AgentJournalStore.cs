@@ -15,6 +15,9 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 {
 	public const int MaximumDeliveredPaths = 200;
 	public const int MaximumArgumentValueCharacters = 4096;
+	private const UnixFileMode PrivateDirectoryMode =
+		UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+	private const UnixFileMode PrivateFileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
 	private const int MaximumLineCharacters = 2 * 1024 * 1024;
 	private const int TailBoundaryProbeBytes = 64;
 	private const int MaximumCachedCalls = 8_192;
@@ -65,14 +68,32 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 		Retention = retention ?? AgentJournalRetentionPolicy.Default;
 		activeSessions = activeSessionProvider ??
 			(() => new LiveSessionRegistry(stateRoot, clock).ReadActive());
-		_ = DirectoryPath;
+		TryRestrictDirectoryForStartup(DirectoryPath);
 		Sweep();
 	}
 
 	public AgentJournalRetentionPolicy Retention { get; }
 
-	public string DirectoryPath =>
-		UserDataPathResolver.EnsurePhysicalServiceDirectory(stateRoot(), "agent-journal");
+	public string DirectoryPath
+	{
+		get
+		{
+			var root = UserDataPathResolver.EnsurePhysicalDirectory(stateRoot(), createIfMissing: true);
+			var directory = Path.Combine(root, "agent-journal");
+			if (!OperatingSystem.IsWindows() && !Directory.Exists(directory))
+			{
+				try
+				{
+					Directory.CreateDirectory(directory, PrivateDirectoryMode);
+				}
+				catch (NotSupportedException)
+				{
+					// Keep the directory accessible for diagnostics; journal I/O fails closed without Unix modes.
+				}
+			}
+			return UserDataPathResolver.EnsurePhysicalDirectory(directory, createIfMissing: true);
+		}
+	}
 
 	public static string CreateSessionId(DateTimeOffset startedUtc, int pid)
 	{
@@ -89,7 +110,7 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 		var normalizedSession = NormalizeSession(session);
 		sessionHeaders[session.Id] = normalizedSession;
 		Sweep();
-		Directory.CreateDirectory(DirectoryPath);
+		EnsurePrivateDirectoryForWrite();
 		var path = ResolveSessionPath(session.Id);
 		var gate = fileLocks.GetOrAdd(session.Id, static _ => new SemaphoreSlim(1, 1));
 		await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -191,6 +212,7 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 		await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
 		try
 		{
+			EnsurePhysicalSessionFile(path);
 			var length = new FileInfo(path).Length;
 			if (summaries.TryGetValue(path, out var cached) && length >= cached.Offset)
 			{
@@ -235,6 +257,13 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 			summaries[path] = summary;
 			return summary;
 		}
+		catch (Exception exception) when (exception is
+				   IOException or UnauthorizedAccessException or System.Security.SecurityException or
+				   ArgumentException or NotSupportedException)
+		{
+			summaries.TryRemove(path, out _);
+			return null;
+		}
 		finally
 		{
 			gate.Release();
@@ -245,9 +274,8 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 		string path,
 		CancellationToken cancellationToken)
 	{
-		await using var stream = new FileStream(
+		await using var stream = OpenExistingSessionFile(
 			path,
-			FileMode.Open,
 			FileAccess.Read,
 			FileShare.ReadWrite | FileShare.Delete,
 			bufferSize: 4096,
@@ -405,9 +433,8 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 		var length = checked((int)Math.Min(offset, TailBoundaryProbeBytes));
 		if (length == 0)
 			return [];
-		await using var stream = new FileStream(
+		await using var stream = OpenExistingSessionFile(
 			path,
-			FileMode.Open,
 			FileAccess.Read,
 			FileShare.ReadWrite | FileShare.Delete,
 			bufferSize: TailBoundaryProbeBytes,
@@ -432,9 +459,8 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 		long offset,
 		CancellationToken cancellationToken)
 	{
-		await using var stream = new FileStream(
+		await using var stream = OpenExistingSessionFile(
 			path,
-			FileMode.Open,
 			FileAccess.Read,
 			FileShare.ReadWrite | FileShare.Delete,
 			bufferSize: 4096,
@@ -561,12 +587,12 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 		await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
 		try
 		{
+			EnsurePrivateDirectoryForWrite();
 			var recoveredTail = false;
 			if (!File.Exists(path))
 			{
 				if (!sessionHeaders.TryGetValue(sessionId, out var header))
 					throw new FileNotFoundException("The journal session does not exist.", path);
-				Directory.CreateDirectory(DirectoryPath);
 				await WriteLineAsync(
 					path,
 					new AgentJournalLine("session", Session: header),
@@ -654,9 +680,8 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 		string path,
 		CancellationToken cancellationToken)
 	{
-		await using var stream = new FileStream(
+		await using var stream = OpenExistingSessionFile(
 			path,
-			FileMode.Open,
 			FileAccess.ReadWrite,
 			FileShare.Read,
 			bufferSize: 4096,
@@ -726,15 +751,104 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 		var framed = new byte[bytes.Length + 1];
 		bytes.CopyTo(framed, 0);
 		framed[^1] = (byte)'\n';
-		await using var stream = new FileStream(
-			path,
-			mode,
-			FileAccess.Write,
-			FileShare.Read,
-			bufferSize: 4096,
-			FileOptions.Asynchronous | FileOptions.WriteThrough);
+		if (mode != FileMode.CreateNew)
+			EnsurePhysicalSessionFile(path);
+		var options = new FileStreamOptions
+		{
+			// Append must not create a headerless file if another process removed the session.
+			Mode = mode == FileMode.Append ? FileMode.Open : mode,
+			Access = FileAccess.Write,
+			Share = FileShare.Read,
+			BufferSize = 4096,
+			Options = FileOptions.Asynchronous | FileOptions.WriteThrough
+		};
+		if (!OperatingSystem.IsWindows() && mode is (FileMode.CreateNew or FileMode.Create))
+			options.UnixCreateMode = PrivateFileMode;
+		await using var stream = new FileStream(path, options);
+		EnsurePrivateFileMode(stream);
+		if (mode == FileMode.Append)
+			stream.Seek(0, SeekOrigin.End);
 		await stream.WriteAsync(framed, cancellationToken).ConfigureAwait(false);
 		await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+	}
+
+	private void EnsurePrivateDirectoryForWrite()
+	{
+		var directory = DirectoryPath;
+		if (OperatingSystem.IsWindows())
+			return;
+		try
+		{
+			if (File.GetUnixFileMode(directory) != PrivateDirectoryMode)
+				File.SetUnixFileMode(directory, PrivateDirectoryMode);
+		}
+		catch (Exception exception) when (exception is NotSupportedException or System.Security.SecurityException)
+		{
+			throw new IOException("Agent journal directory cannot be protected.", exception);
+		}
+	}
+
+	private static void TryRestrictDirectoryForStartup(string directory)
+	{
+		if (OperatingSystem.IsWindows())
+			return;
+		try
+		{
+			if (File.GetUnixFileMode(directory) != PrivateDirectoryMode)
+				File.SetUnixFileMode(directory, PrivateDirectoryMode);
+		}
+		catch (Exception exception) when (exception is
+			   IOException or UnauthorizedAccessException or System.Security.SecurityException or
+			   ArgumentException or NotSupportedException)
+		{
+			Trace.TraceWarning(
+				"Agent journal directory could not be protected: {0}",
+				exception.GetType().Name);
+		}
+	}
+
+	private static FileStream OpenExistingSessionFile(
+		string path,
+		FileAccess access,
+		FileShare share,
+		int bufferSize,
+		FileOptions options)
+	{
+		EnsurePhysicalSessionFile(path);
+		var stream = new FileStream(path, FileMode.Open, access, share, bufferSize, options);
+		try
+		{
+			EnsurePrivateFileMode(stream);
+			return stream;
+		}
+		catch
+		{
+			stream.Dispose();
+			throw;
+		}
+	}
+
+	private static void EnsurePhysicalSessionFile(string path)
+	{
+		var attributes = File.GetAttributes(path);
+		if ((attributes & (FileAttributes.ReparsePoint | FileAttributes.Directory)) != 0)
+			throw new IOException("The journal session must be a physical file.");
+	}
+
+	private static void EnsurePrivateFileMode(FileStream stream)
+	{
+		if (OperatingSystem.IsWindows())
+			return;
+		try
+		{
+			var handle = stream.SafeFileHandle;
+			if (File.GetUnixFileMode(handle) != PrivateFileMode)
+				File.SetUnixFileMode(handle, PrivateFileMode);
+		}
+		catch (Exception exception) when (exception is NotSupportedException or System.Security.SecurityException)
+		{
+			throw new IOException("Agent journal session file cannot be protected.", exception);
+		}
 	}
 
 	private async ValueTask<JournalContent> ReadContentAsync(
@@ -743,7 +857,12 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 	{
 		if (!File.Exists(path))
 			return JournalContent.Empty;
-		BytesReadObserver?.Invoke(new FileInfo(path).Length);
+		var bytesReadObserver = BytesReadObserver;
+		if (bytesReadObserver is not null)
+		{
+			EnsurePhysicalSessionFile(path);
+			bytesReadObserver(new FileInfo(path).Length);
+		}
 		var content = new JournalContent();
 		await foreach (var line in ReadCompleteLinesAsync(path, cancellationToken).ConfigureAwait(false))
 		{
@@ -782,9 +901,8 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 		string path,
 		[EnumeratorCancellation] CancellationToken cancellationToken)
 	{
-		await using var stream = new FileStream(
+		await using var stream = OpenExistingSessionFile(
 			path,
-			FileMode.Open,
 			FileAccess.Read,
 			FileShare.ReadWrite | FileShare.Delete,
 			bufferSize: 4096,
@@ -843,7 +961,14 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 			throw new InvalidOperationException("Journal retention must keep a positive age and session count.");
 		var cutoff = clock.GetUtcNow() - Retention.MaximumAge;
 		var live = ActiveSessionKeys();
-		var files = EnumerateSessionFiles()
+		var paths = EnumerateSessionFiles();
+		// No verified subset can be evicted when every physical file is recent and under the cap.
+		if (paths.Length <= Retention.MaximumSessions &&
+			paths.All(path => HasRecentPhysicalWriteTime(path, cutoff.UtcDateTime)))
+		{
+			return;
+		}
+		var files = paths
 			.Select(TryCreateRetentionCandidate)
 			.Where(static candidate => candidate is not null)
 			.Cast<RetentionCandidate>()
@@ -863,6 +988,26 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 			catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
 			{
 			}
+		}
+	}
+
+	private static bool HasRecentPhysicalWriteTime(string path, DateTime cutoffUtc)
+	{
+		try
+		{
+			var attributes = File.GetAttributes(path);
+			if ((attributes & (FileAttributes.ReparsePoint | FileAttributes.Directory)) != 0)
+				return false;
+			return File.GetLastWriteTimeUtc(path) >= cutoffUtc;
+		}
+		catch (Exception exception) when (exception is
+			   IOException or
+			   UnauthorizedAccessException or
+			   System.Security.SecurityException or
+			   ArgumentException or
+			   NotSupportedException)
+		{
+			return false;
 		}
 	}
 
@@ -902,9 +1047,8 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 		session = null;
 		try
 		{
-			using var stream = new FileStream(
+			using var stream = OpenExistingSessionFile(
 				path,
-				FileMode.Open,
 				FileAccess.Read,
 				FileShare.ReadWrite | FileShare.Delete,
 				bufferSize: 4096,

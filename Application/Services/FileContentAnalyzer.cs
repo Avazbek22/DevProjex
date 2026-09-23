@@ -131,24 +131,24 @@ public sealed class FileContentAnalyzer :
 		long maxSizeForFullRead,
 		CancellationToken cancellationToken = default) =>
 		ValueTask.FromResult(
-			ReadFactWithIdentitySync(path, maxSizeForFullRead, cancellationToken).Fact.ToReadResult());
+			ReadFactWithIdentitySync(path, maxSizeForFullRead, cancellationToken, captureStability: false).Fact.ToReadResult());
 
 	public ValueTask<ContentReadFact> ReadFactAsync(
 		string path,
 		long maxSizeForFullRead,
 		CancellationToken cancellationToken = default) =>
-		ValueTask.FromResult(ReadFactWithIdentitySync(path, maxSizeForFullRead, cancellationToken).Fact);
+		ValueTask.FromResult(ReadFactWithIdentitySync(path, maxSizeForFullRead, cancellationToken, captureStability: false).Fact);
 
 	ValueTask<IdentifiedContentReadFact> ICoherentFileContentAnalyzer.ReadFactWithIdentityAsync(
 		string path,
 		long maximumReadBytes,
 		CancellationToken cancellationToken) =>
-		ValueTask.FromResult(ReadFactWithIdentitySync(path, maximumReadBytes, cancellationToken));
+		ValueTask.FromResult(ReadFactWithIdentitySync(path, maximumReadBytes, cancellationToken, captureStability: true));
 
 	/// <inheritdoc />
 	public ValueTask<bool> IsTextFileAsync(string path, CancellationToken cancellationToken = default)
 	{
-		var result = GetClassifiedMetricsWithIdentitySync(path, cancellationToken).Result;
+		var result = GetClassifiedMetricsWithIdentitySync(path, cancellationToken, captureStability: false).Result;
 		return ValueTask.FromResult(result.IsText);
 	}
 
@@ -157,20 +157,20 @@ public sealed class FileContentAnalyzer :
 		string path,
 		CancellationToken cancellationToken = default)
 	{
-		var result = GetClassifiedMetricsWithIdentitySync(path, cancellationToken).Result;
+		var result = GetClassifiedMetricsWithIdentitySync(path, cancellationToken, captureStability: false).Result;
 		return ValueTask.FromResult(result.IsText ? result.Metrics : null);
 	}
 
 	public ValueTask<FileContentMetricsResult> GetClassifiedMetricsAsync(
 		string path,
 		CancellationToken cancellationToken = default) =>
-		ValueTask.FromResult(GetClassifiedMetricsWithIdentitySync(path, cancellationToken).Result);
+		ValueTask.FromResult(GetClassifiedMetricsWithIdentitySync(path, cancellationToken, captureStability: false).Result);
 
 	ValueTask<IdentifiedFileContentMetricsResult>
 		IPrewarmFileContentAnalyzer.GetClassifiedMetricsWithIdentityAsync(
 			string path,
 			CancellationToken cancellationToken) =>
-		ValueTask.FromResult(GetClassifiedMetricsWithIdentitySync(path, cancellationToken));
+		ValueTask.FromResult(GetClassifiedMetricsWithIdentitySync(path, cancellationToken, captureStability: true));
 
 	async ValueTask<BudgetedContentReadResult>
 		IPrewarmFileContentAnalyzer.ReadFactWithBudgetAsync(
@@ -194,16 +194,21 @@ public sealed class FileContentAnalyzer :
 			}
 
 			using var stream = _openSequentialRead(path, StreamingBufferSize, SourceFileReadPolicy.Share, false);
+			var identityBeforeRead = FileContentIdentity.TryCapture(stream);
 			var reservation = EstimateMaximumRetainedFactBytes(stream.Length, maximumReadBytes);
 			lease = await byteBudget.AcquireAsync(reservation, cancellationToken).ConfigureAwait(false);
 			await decodeScratchGate.WaitAsync(cancellationToken).ConfigureAwait(false);
 			enteredDecodeGate = true;
 			var fact = ReadFactFromOpenStream(stream, maximumReadBytes, cancellationToken);
 			Debug.Assert(fact.ApproximateRetainedBytes <= reservation);
+			var identity = FileContentIdentity.TryCapture(stream);
 			return new BudgetedContentReadResult(
 				fact,
-				FileContentIdentity.TryCapture(stream),
-				lease);
+				identity,
+				lease)
+			{
+				IsStable = identityBeforeRead is not null && identityBeforeRead == identity
+			};
 		}
 		catch (OperationCanceledException)
 		{
@@ -276,19 +281,22 @@ public sealed class FileContentAnalyzer :
 		string path,
 		long maximumBytes,
 		CancellationToken cancellationToken = default) =>
-		ValueTask.FromResult(OpenCompleteTextBufferWithIdentitySync(path, maximumBytes, cancellationToken).Buffer);
+		ValueTask.FromResult(OpenCompleteTextBufferWithIdentitySync(
+			path, maximumBytes, cancellationToken, captureStability: false).Buffer);
 
 	ValueTask<IdentifiedCompleteTextFileBuffer>
 		ICoherentFileContentAnalyzer.OpenCompleteTextBufferWithIdentityAsync(
 			string path,
 			long maximumBytes,
 			CancellationToken cancellationToken) =>
-		ValueTask.FromResult(OpenCompleteTextBufferWithIdentitySync(path, maximumBytes, cancellationToken));
+		ValueTask.FromResult(OpenCompleteTextBufferWithIdentitySync(
+			path, maximumBytes, cancellationToken, captureStability: true));
 
 	private IdentifiedCompleteTextFileBuffer OpenCompleteTextBufferWithIdentitySync(
 		string path,
 		long maximumBytes,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		bool captureStability)
 	{
 		ArgumentOutOfRangeException.ThrowIfNegative(maximumBytes);
 		char[]? buffer = null;
@@ -308,11 +316,13 @@ public sealed class FileContentAnalyzer :
 				1,
 				SourceFileReadPolicy.Share,
 				false);
+			var identityBeforeRead = captureStability ? FileContentIdentity.TryCapture(stream) : null;
 			var sizeBytes = stream.Length;
 			if (sizeBytes == 0)
 			{
 				return IdentifiedBuffer(
 					stream,
+					identityBeforeRead,
 					new ClassifiedCompleteTextFileBuffer(FileContentClassification.Text));
 			}
 
@@ -323,6 +333,7 @@ public sealed class FileContentAnalyzer :
 			{
 				return IdentifiedBuffer(
 					stream,
+					identityBeforeRead,
 					new ClassifiedCompleteTextFileBuffer(FileContentClassification.Binary, sizeBytes));
 			}
 			// The scan limit is a text-buffer bound, not a project-copy size limit.
@@ -332,6 +343,7 @@ public sealed class FileContentAnalyzer :
 			{
 				return IdentifiedBuffer(
 					stream,
+					identityBeforeRead,
 					new ClassifiedCompleteTextFileBuffer(
 						FileContentClassification.TooLarge,
 						sizeBytes));
@@ -392,13 +404,14 @@ public sealed class FileContentAnalyzer :
 			{
 				return IdentifiedBuffer(
 					stream,
+					identityBeforeRead,
 					new ClassifiedCompleteTextFileBuffer(FileContentClassification.Binary, sizeBytes));
 			}
 
 			var result = new PooledCompleteTextFileBuffer(buffer, written, sizeBytes);
 			buffer = null;
 			written = 0;
-			return IdentifiedBuffer(stream, result);
+			return IdentifiedBuffer(stream, identityBeforeRead, result);
 		}
 		catch (OperationCanceledException)
 		{
@@ -440,8 +453,15 @@ public sealed class FileContentAnalyzer :
 
 	private static IdentifiedCompleteTextFileBuffer IdentifiedBuffer(
 		FileStream stream,
-		ICompleteTextFileBuffer buffer) =>
-		new(buffer, FileContentIdentity.TryCapture(stream));
+		FileContentIdentity? identityBeforeRead,
+		ICompleteTextFileBuffer buffer)
+	{
+		var identity = FileContentIdentity.TryCapture(stream);
+		return new IdentifiedCompleteTextFileBuffer(buffer, identity)
+		{
+			IsStable = identityBeforeRead is not null && identityBeforeRead == identity
+		};
+	}
 
 	private static IdentifiedCompleteTextFileBuffer UnidentifiedBuffer(
 		FileContentClassification classification) =>
@@ -463,7 +483,8 @@ public sealed class FileContentAnalyzer :
 
 	private IdentifiedFileContentMetricsResult GetClassifiedMetricsWithIdentitySync(
 		string path,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		bool captureStability)
 	{
 		try
 		{
@@ -477,12 +498,14 @@ public sealed class FileContentAnalyzer :
 
 			// Decoding owns pooled byte/char buffers; a second FileStream buffer only duplicates memory.
 			using var stream = _openSequentialRead(path, 1, SourceFileReadPolicy.Share, false);
+			var identityBeforeRead = captureStability ? FileContentIdentity.TryCapture(stream) : null;
 			var sizeBytes = stream.Length;
 
 			if (sizeBytes == 0)
 			{
 				return Identified(
 					stream,
+					identityBeforeRead,
 					new FileContentMetricsResult(
 						FileContentClassification.Text,
 						new TextFileMetrics(
@@ -500,12 +523,14 @@ public sealed class FileContentAnalyzer :
 			if (!prefix.IsText)
 				return Identified(
 					stream,
+					identityBeforeRead,
 					new FileContentMetricsResult(FileContentClassification.Binary));
 
 			if (sizeBytes > DefaultMaxSizeForFullRead)
 			{
 				return Identified(
 					stream,
+					identityBeforeRead,
 					new FileContentMetricsResult(
 						FileContentClassification.TooLarge,
 						new TextFileMetrics(
@@ -531,6 +556,7 @@ public sealed class FileContentAnalyzer :
 				out _);
 			return Identified(
 				stream,
+				identityBeforeRead,
 				metrics is null
 					? new FileContentMetricsResult(FileContentClassification.Binary)
 					: new FileContentMetricsResult(FileContentClassification.Text, metrics));
@@ -579,8 +605,15 @@ public sealed class FileContentAnalyzer :
 
 	private static IdentifiedFileContentMetricsResult Identified(
 		FileStream stream,
-		FileContentMetricsResult result) =>
-		new(result, FileContentIdentity.TryCapture(stream));
+		FileContentIdentity? identityBeforeRead,
+		FileContentMetricsResult result)
+	{
+		var identity = FileContentIdentity.TryCapture(stream);
+		return new IdentifiedFileContentMetricsResult(result, identity)
+		{
+			IsStable = identityBeforeRead is not null && identityBeforeRead == identity
+		};
+	}
 
 	private IFileContentSnapshot OpenCompleteSnapshotSync(
 		string path,
@@ -718,14 +751,16 @@ public sealed class FileContentAnalyzer :
 
 	private TextFileContent? TryReadAsTextSync(string path, long maxSizeForFullRead, CancellationToken cancellationToken)
 	{
-		var result = ReadFactWithIdentitySync(path, maxSizeForFullRead, cancellationToken).Fact.ToReadResult();
+		var result = ReadFactWithIdentitySync(
+			path, maxSizeForFullRead, cancellationToken, captureStability: false).Fact.ToReadResult();
 		return result.IsText ? result.Content : null;
 	}
 
 	private IdentifiedContentReadFact ReadFactWithIdentitySync(
 		string path,
 		long maxSizeForFullRead,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		bool captureStability)
 	{
 		try
 		{
@@ -739,8 +774,13 @@ public sealed class FileContentAnalyzer :
 			}
 
 			using var stream = _openSequentialRead(path, StreamingBufferSize, SourceFileReadPolicy.Share, false);
+			var identityBeforeRead = captureStability ? FileContentIdentity.TryCapture(stream) : null;
 			var fact = ReadFactFromOpenStream(stream, maxSizeForFullRead, cancellationToken);
-			return new IdentifiedContentReadFact(fact, FileContentIdentity.TryCapture(stream));
+			var identity = FileContentIdentity.TryCapture(stream);
+			return new IdentifiedContentReadFact(fact, identity)
+			{
+				IsStable = identityBeforeRead is not null && identityBeforeRead == identity
+			};
 		}
 		catch (OperationCanceledException)
 		{
@@ -852,7 +892,16 @@ public sealed class FileContentAnalyzer :
 		stream.Position = 0;
 		int toRead = (int)Math.Min(BinaryCheckBufferSize, stream.Length);
 		Span<byte> buffer = stackalloc byte[toRead];
-		int bytesRead = stream.Read(buffer);
+		var bytesRead = 0;
+		while (bytesRead < toRead)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var read = stream.Read(buffer[bytesRead..]);
+			if (read == 0)
+				break;
+			bytesRead += read;
+		}
+		cancellationToken.ThrowIfCancellationRequested();
 
 		stream.Position = 0;
 		if (TryResolveBomEncoding(buffer[..bytesRead], out var encoding))

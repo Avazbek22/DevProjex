@@ -1,0 +1,150 @@
+{
+  "schemaVersion": 1,
+  "recordedDate": "2026-09-23",
+  "productionRevision": "245c8190",
+  "harnessRevision": "cf78e962",
+  "interpretation": "Current-only synthetic diagnostic of synchronous AgentJournalStore construction including its existing retention sweep. No production change or GUI speedup is measured.",
+  "methodology": [
+    "Release test host on Windows, .NET SDK 10.0.401 / runtime 10.0.12.",
+    "Isolated synthetic journal directories only; actual user journals are never inspected.",
+    "Default retention remains 200 sessions / 30 days. All generated headers are valid and recent; the isolated default live-session registry is empty.",
+    "Fixture creation and restoration are outside timing. Setup warms filesystem data and serializer metadata.",
+    "One first observation plus three repeated observations per fixture in a single process; first-per-fixture is not process-cold or disk-cold.",
+    "Timing includes constructor and sweep; current-thread managed allocation is measured because execution is synchronous. Disposal and file-count assertions are outside timing.",
+    "Presented header-file counts are workload counters, not instrumented header-read/syscall counts.",
+    "The 512-file scenario includes 312 normal retention removals per observation; it is not a pure header-read benchmark."
+  ],
+  "warmSummary": [
+    {
+      "validHeaderFilesPresented": 0,
+      "warmObservations": 3,
+      "constructorMedianMilliseconds": 0.4119,
+      "currentThreadMedianAllocatedBytes": 11840,
+      "filesAfter": 0
+    },
+    {
+      "validHeaderFilesPresented": 200,
+      "warmObservations": 3,
+      "constructorMedianMilliseconds": 19.253,
+      "currentThreadMedianAllocatedBytes": 2334096,
+      "filesAfter": 200
+    },
+    {
+      "validHeaderFilesPresented": 512,
+      "warmObservations": 3,
+      "constructorMedianMilliseconds": 66.465,
+      "currentThreadMedianAllocatedBytes": 5953672,
+      "filesAfter": 200
+    }
+  ],
+  "samples": [
+    {
+      "ValidHeaderFilesPresented": 0,
+      "FixtureHeaderBytes": 0,
+      "Iteration": 0,
+      "ConstructorMilliseconds": 5.4377,
+      "ConstructorAllocatedBytes": 29912,
+      "FilesBefore": 0,
+      "FilesAfter": 0
+    },
+    {
+      "ValidHeaderFilesPresented": 0,
+      "FixtureHeaderBytes": 0,
+      "Iteration": 1,
+      "ConstructorMilliseconds": 0.639,
+      "ConstructorAllocatedBytes": 11840,
+      "FilesBefore": 0,
+      "FilesAfter": 0
+    },
+    {
+      "ValidHeaderFilesPresented": 0,
+      "FixtureHeaderBytes": 0,
+      "Iteration": 2,
+      "ConstructorMilliseconds": 0.4119,
+      "ConstructorAllocatedBytes": 11840,
+      "FilesBefore": 0,
+      "FilesAfter": 0
+    },
+    {
+      "ValidHeaderFilesPresented": 0,
+      "FixtureHeaderBytes": 0,
+      "Iteration": 3,
+      "ConstructorMilliseconds": 0.4019,
+      "ConstructorAllocatedBytes": 11840,
+      "FilesBefore": 0,
+      "FilesAfter": 0
+    },
+    {
+      "ValidHeaderFilesPresented": 200,
+      "FixtureHeaderBytes": 129600,
+      "Iteration": 0,
+      "ConstructorMilliseconds": 30.6462,
+      "ConstructorAllocatedBytes": 2360440,
+      "FilesBefore": 200,
+      "FilesAfter": 200
+    },
+    {
+      "ValidHeaderFilesPresented": 200,
+      "FixtureHeaderBytes": 129600,
+      "Iteration": 1,
+      "ConstructorMilliseconds": 18.0293,
+      "ConstructorAllocatedBytes": 2334096,
+      "FilesBefore": 200,
+      "FilesAfter": 200
+    },
+    {
+      "ValidHeaderFilesPresented": 200,
+      "FixtureHeaderBytes": 129600,
+      "Iteration": 2,
+      "ConstructorMilliseconds": 19.253,
+      "ConstructorAllocatedBytes": 2334096,
+      "FilesBefore": 200,
+      "FilesAfter": 200
+    },
+    {
+      "ValidHeaderFilesPresented": 200,
+      "FixtureHeaderBytes": 129600,
+      "Iteration": 3,
+      "ConstructorMilliseconds": 23.7715,
+      "ConstructorAllocatedBytes": 2334096,
+      "FilesBefore": 200,
+      "FilesAfter": 200
+    },
+    {
+      "ValidHeaderFilesPresented": 512,
+      "FixtureHeaderBytes": 331776,
+      "Iteration": 0,
+      "ConstructorMilliseconds": 74.5276,
+      "ConstructorAllocatedBytes": 5960768,
+      "FilesBefore": 512,
+      "FilesAfter": 200
+    },
+    {
+      "ValidHeaderFilesPresented": 512,
+      "FixtureHeaderBytes": 331776,
+      "Iteration": 1,
+      "ConstructorMilliseconds": 68.452,
+      "ConstructorAllocatedBytes": 5953672,
+      "FilesBefore": 512,
+      "FilesAfter": 200
+    },
+    {
+      "ValidHeaderFilesPresented": 512,
+      "FixtureHeaderBytes": 331776,
+      "Iteration": 2,
+      "ConstructorMilliseconds": 62.0727,
+      "ConstructorAllocatedBytes": 5953672,
+      "FilesBefore": 512,
+      "FilesAfter": 200
+    },
+    {
+      "ValidHeaderFilesPresented": 512,
+      "FixtureHeaderBytes": 331776,
+      "Iteration": 3,
+      "ConstructorMilliseconds": 66.465,
+      "ConstructorAllocatedBytes": 5953896,
+      "FilesBefore": 512,
+      "FilesAfter": 200
+    }
+  ]
+}

@@ -359,8 +359,9 @@ public sealed class MainWindowCoordinatorRefactorTests
             metricsOperationTextProvider: () => viewModel.StatusOperationCalculatingData);
         using var pipeline = new ProjectLoadPipeline(host, status);
 
-        await pipeline.OpenFolderAsync(@"C:\Project", fromDialog: true, recordRecentFolder: true);
+        var published = await pipeline.OpenFolderAsync(@"C:\Project", fromDialog: true, recordRecentFolder: true);
 
+		Assert.True(published);
         Assert.Equal(ProjectSourceType.LocalFolder, viewModel.ProjectSourceType);
         Assert.True(viewModel.IsProjectLoaded);
         Assert.Equal(
@@ -457,6 +458,38 @@ public sealed class MainWindowCoordinatorRefactorTests
         Assert.Contains(ProjectLoadHostCall.ScheduleInitialProjectLoadCleanup, host.Calls);
     }
 
+	[Fact]
+	public async Task ProjectLoadPipeline_CancellationAfterPublicationKeepsSuccessfulOpen()
+	{
+		var viewModel = CreateViewModel();
+		var persistenceStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var host = new RecordingProjectLoadHost(viewModel)
+		{
+			RecordRecentFolderHandler = async cancellationToken =>
+			{
+				persistenceStarted.SetResult();
+				await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+			}
+		};
+		var status = new StatusOperationCoordinator(
+			viewModel,
+			isBackgroundMetricsActive: () => false,
+			metricsOperationTextProvider: () => viewModel.StatusOperationCalculatingData);
+		using var pipeline = new ProjectLoadPipeline(host, status);
+
+		var loadTask = pipeline.OpenFolderAsync(
+			@"C:\Project",
+			fromDialog: false,
+			recordRecentFolder: true);
+		await persistenceStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+		pipeline.CancelActiveLoad();
+
+		Assert.True(await loadTask.WaitAsync(TestContext.Current.CancellationToken));
+		Assert.Equal(@"C:\Project", host.StableIdentity);
+		Assert.DoesNotContain(ProjectLoadHostCall.ApplyCancellationFallback, host.Calls);
+		Assert.False(viewModel.StatusBusy);
+	}
+
     [Fact]
     public async Task ProjectLoadPipeline_OpenFolderAsync_CancellationAppliesFallbackWithoutSuccessSideEffects()
     {
@@ -478,9 +511,10 @@ public sealed class MainWindowCoordinatorRefactorTests
         };
         pipeline = new ProjectLoadPipeline(host, status);
 
-        await pipeline.OpenFolderAsync(@"C:\Canceled", fromDialog: true, recordRecentFolder: true);
+        var published = await pipeline.OpenFolderAsync(@"C:\Canceled", fromDialog: true, recordRecentFolder: true);
         pipeline.Dispose();
 
+		Assert.False(published);
         Assert.Contains(ProjectLoadHostCall.ApplyCancellationFallback, host.Calls);
         Assert.Contains(ProjectLoadHostCall.ShowLoadCanceledToast, host.Calls);
         Assert.DoesNotContain(ProjectLoadHostCall.RecordRecentFolder, host.Calls);
@@ -1451,6 +1485,69 @@ public sealed class MainWindowCoordinatorRefactorTests
         Assert.Equal(1, host.BuildTreeCount);
         Assert.Equal(0, host.ApplyCount);
         Assert.Empty(viewModel.TreeNodes);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RefreshTreePipeline_StaleBuild_DoesNotHandleEarlyDiagnostics(
+        bool rootAccessDenied)
+    {
+        var buildStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseBuild = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var host = new RecordingRefreshTreeHost(CreateViewModel())
+        {
+            SelectionRevision = 41,
+            BuildTreeHandler = token =>
+            {
+                buildStarted.TrySetResult();
+                releaseBuild.Task.Wait(token);
+                return new BuildTreeSnapshotResult(
+                    RecordingRefreshTreeHost.CreateResult("obsolete") with
+                    {
+                        RootAccessDenied = rootAccessDenied
+                    },
+                    RecordingRefreshTreeHost.CreateInventorySnapshot());
+            }
+        };
+        using var pipeline = new RefreshTreePipeline(host);
+
+        var refreshTask = pipeline.RefreshTreeAsync(
+            cancellationToken: TestContext.Current.CancellationToken);
+        await buildStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+        host.SelectionRevision++;
+        releaseBuild.SetResult();
+
+        Assert.Equal(TreeRefreshOutcome.StaleInput, await refreshTask);
+        Assert.Equal(0, host.GitScopeDiagnosticsCheckCount);
+        Assert.Equal(0, host.RootAccessDeniedCheckCount);
+        Assert.Equal(0, host.ApplyCount);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RefreshTreePipeline_CurrentBuild_StillHandlesEarlyDiagnostics(
+        bool rootAccessDenied)
+    {
+        var host = new RecordingRefreshTreeHost(CreateViewModel())
+        {
+            BuildTreeHandler = _ => new BuildTreeSnapshotResult(
+                RecordingRefreshTreeHost.CreateResult("current") with
+                {
+                    RootAccessDenied = rootAccessDenied
+                },
+                RecordingRefreshTreeHost.CreateInventorySnapshot())
+        };
+        using var pipeline = new RefreshTreePipeline(host);
+
+        Assert.Equal(
+            rootAccessDenied ? TreeRefreshOutcome.Skipped : TreeRefreshOutcome.Applied,
+            await pipeline.RefreshTreeAsync(
+                cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal(1, host.GitScopeDiagnosticsCheckCount);
+        Assert.Equal(1, host.RootAccessDeniedCheckCount);
+        Assert.Equal(rootAccessDenied ? 0 : 1, host.ApplyCount);
     }
 
     [Fact]
@@ -2460,6 +2557,10 @@ public sealed class MainWindowCoordinatorRefactorTests
 
 		public int IncompleteScanReportCount { get; private set; }
 
+		public int GitScopeDiagnosticsCheckCount { get; private set; }
+
+		public int RootAccessDeniedCheckCount { get; private set; }
+
         public bool LastUsedInMemoryFilter { get; private set; }
 
         public BuildTreeSnapshotResult? LastAppliedResult { get; private set; }
@@ -2505,9 +2606,17 @@ public sealed class MainWindowCoordinatorRefactorTests
                    new BuildTreeSnapshotResult(CreateResult("root"), CreateInventorySnapshot());
         }
 
+		public bool TryHandleGitScopeDiagnostics(BuildTreeSnapshotResult result)
+		{
+			_ = result;
+			GitScopeDiagnosticsCheckCount++;
+			return false;
+		}
+
         public bool TryHandleRootAccessDenied(TreeRefreshInput input, BuildTreeResult result)
         {
             _ = input;
+            RootAccessDeniedCheckCount++;
             return result.RootAccessDenied;
         }
 

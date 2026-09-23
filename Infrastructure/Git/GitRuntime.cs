@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using System.Security;
 using DevProjex.Infrastructure.Persistence;
 
 namespace DevProjex.Infrastructure.Git;
@@ -29,6 +30,27 @@ internal static class GitRuntime
 	public static string? SshExecutable => SshPath.Value;
 	public static GitIsolationPaths IsolationPaths => Isolation.Value;
 	public static string VersionDisplay => Version.Value;
+	internal static bool IsVersionProbeComplete => Version.IsValueCreated;
+
+	internal static void PinExecutables()
+	{
+		try
+		{
+			_ = GitExecutable;
+		}
+		catch (Exception exception) when (exception is
+		       Win32Exception or
+		       IOException or
+		       UnauthorizedAccessException or
+		       ArgumentException or
+		       NotSupportedException or
+		       System.Security.SecurityException)
+		{
+			// An unavailable Git executable is reported by the later version probe.
+		}
+
+		_ = SshExecutable;
+	}
 
 	internal static bool IsAtLeastVersion(int major, int minor)
 	{
@@ -117,33 +139,46 @@ internal static class GitExecutableLocator
 	public static string? TryResolve(string executableName)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(executableName);
-		var pathValue = Environment.GetEnvironmentVariable("PATH");
+		try
+		{
+			return TryResolveFromPath(
+				executableName,
+				Environment.GetEnvironmentVariable("PATH"),
+				Environment.CurrentDirectory);
+		}
+		catch (Exception exception) when (IsPathInspectionFailure(exception))
+		{
+			return null;
+		}
+	}
+
+	internal static string? TryResolveFromPath(
+		string executableName,
+		string? pathValue,
+		string currentDirectory)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(executableName);
 		if (string.IsNullOrWhiteSpace(pathValue))
 			return null;
+		if (!TryResolvePhysicalPath(currentDirectory, allowMissingTail: false, out var current))
+			return null;
 
-		var current = Path.GetFullPath(Environment.CurrentDirectory);
 		foreach (var rawEntry in pathValue.Split(Path.PathSeparator))
 		{
 			var entry = rawEntry.Trim().Trim('"');
-			if (!Path.IsPathFullyQualified(entry))
-				continue;
-			string directory;
-			string candidate;
 			try
 			{
-				directory = Path.GetFullPath(entry);
-				if (PathsAreNested(directory, current))
+				if (!Path.IsPathFullyQualified(entry))
 					continue;
-				candidate = Path.GetFullPath(Path.Combine(directory, executableName));
+				var candidate = Path.GetFullPath(Path.Combine(entry, executableName));
+				if (TryResolvePhysicalFile(candidate, out var resolved) &&
+				    !PathsAreNested(Path.GetDirectoryName(resolved)!, current))
+				{
+					return resolved;
+				}
 			}
-			catch
+			catch (Exception exception) when (IsPathInspectionFailure(exception))
 			{
-				continue;
-			}
-			if (TryResolvePhysicalFile(candidate, out var resolved) &&
-			    !PathsAreNested(Path.GetDirectoryName(resolved)!, current))
-			{
-				return resolved;
 			}
 		}
 		return null;
@@ -153,9 +188,25 @@ internal static class GitExecutableLocator
 	{
 		if (string.IsNullOrWhiteSpace(repositoryPath))
 			return true;
-		var executableDirectory = Path.GetDirectoryName(Path.GetFullPath(executable));
-		var repository = Path.GetFullPath(repositoryPath);
-		return executableDirectory is not null && !PathsAreNested(executableDirectory, repository);
+		try
+		{
+			var executablePath = Path.GetFullPath(executable);
+			var executableDirectory = Path.GetDirectoryName(executablePath);
+			var repository = Path.GetFullPath(repositoryPath);
+			if (executableDirectory is null || PathsAreNested(executableDirectory, repository) ||
+			    !TryResolvePhysicalPath(executablePath, allowMissingTail: false, out var physicalExecutable) ||
+			    !TryResolvePhysicalPath(repository, allowMissingTail: true, out var physicalRepository))
+			{
+				return false;
+			}
+			var physicalExecutableDirectory = Path.GetDirectoryName(physicalExecutable);
+			return physicalExecutableDirectory is not null &&
+			       !PathsAreNested(physicalExecutableDirectory, physicalRepository);
+		}
+		catch (Exception exception) when (IsPathInspectionFailure(exception))
+		{
+			return false;
+		}
 	}
 
 	private static bool PathsAreNested(string left, string right) =>
@@ -181,15 +232,111 @@ internal static class GitExecutableLocator
 			var info = new FileInfo(path);
 			if (!info.Exists || info.Attributes.HasFlag(FileAttributes.Directory))
 				return false;
-			var target = info.LinkTarget is null ? info : info.ResolveLinkTarget(returnFinalTarget: true);
-			if (target is null || !target.Exists || target.Attributes.HasFlag(FileAttributes.Directory))
+			if (!TryResolvePhysicalPath(path, allowMissingTail: false, out resolved) ||
+			    !new FileInfo(resolved).Exists)
+			{
 				return false;
-			resolved = Path.GetFullPath(target.FullName);
+			}
 			return true;
 		}
-		catch
+		catch (Exception exception) when (IsPathInspectionFailure(exception))
 		{
 			return false;
 		}
 	}
+
+	private static bool TryResolvePhysicalPath(string path, bool allowMissingTail, out string resolved)
+	{
+		try
+		{
+			return TryResolvePhysicalPath(
+				Path.GetFullPath(path),
+				allowMissingTail,
+				new HashSet<string>(PathComparer.Default),
+				out resolved);
+		}
+		catch (Exception exception) when (IsPathInspectionFailure(exception))
+		{
+			resolved = string.Empty;
+			return false;
+		}
+	}
+
+	private static bool TryResolvePhysicalPath(
+		string path,
+		bool allowMissingTail,
+		HashSet<string> resolvingLinks,
+		out string resolved)
+	{
+		resolved = string.Empty;
+		var root = Path.GetPathRoot(path);
+		if (string.IsNullOrWhiteSpace(root) ||
+		    File.GetAttributes(root).HasFlag(FileAttributes.ReparsePoint))
+		{
+			return false;
+		}
+
+		var lexical = root;
+		var physical = root;
+		var missingTail = false;
+		foreach (var segment in path[root.Length..].Split(
+		         [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+		         StringSplitOptions.RemoveEmptyEntries))
+		{
+			lexical = Path.Combine(lexical, segment);
+			var nextPhysical = Path.Combine(physical, segment);
+			if (missingTail)
+			{
+				physical = nextPhysical;
+				continue;
+			}
+
+			FileAttributes attributes;
+			try
+			{
+				attributes = File.GetAttributes(lexical);
+			}
+			catch (Exception exception) when (
+				allowMissingTail && exception is FileNotFoundException or DirectoryNotFoundException)
+			{
+				missingTail = true;
+				physical = nextPhysical;
+				continue;
+			}
+
+			if (!attributes.HasFlag(FileAttributes.ReparsePoint))
+			{
+				physical = nextPhysical;
+				continue;
+			}
+
+			FileSystemInfo link = attributes.HasFlag(FileAttributes.Directory)
+				? new DirectoryInfo(lexical)
+				: new FileInfo(lexical);
+			var target = link.ResolveLinkTarget(returnFinalTarget: false);
+			if (target is null || resolvingLinks.Count >= 32 || !resolvingLinks.Add(lexical))
+				return false;
+			try
+			{
+				if (!TryResolvePhysicalPath(
+					    Path.GetFullPath(target.FullName),
+					    allowMissingTail: false,
+					    resolvingLinks,
+					    out physical))
+				{
+					return false;
+				}
+			}
+			finally
+			{
+				resolvingLinks.Remove(lexical);
+			}
+		}
+		resolved = Path.GetFullPath(physical);
+		return true;
+	}
+
+	private static bool IsPathInspectionFailure(Exception exception) =>
+		exception is IOException or UnauthorizedAccessException or ArgumentException or
+		NotSupportedException or SecurityException;
 }

@@ -231,7 +231,19 @@ public sealed class DesktopControlServer : IAsyncDisposable
 					new DesktopProtocolError(
 						result.ErrorCode ?? "DPX-DESKTOP-REQUEST-FAILED",
 						"The desktop could not apply the requested state."));
-			await TouchRegistrationAsync(result.State, cancellationToken).ConfigureAwait(false);
+			try
+			{
+				await TouchRegistrationAsync(result.State, cancellationToken).ConfigureAwait(false);
+			}
+			catch (Exception exception) when (exception is
+			       IOException or
+			       UnauthorizedAccessException or
+			       System.Security.SecurityException or
+			       NotSupportedException)
+			{
+				// Registry persistence cannot change the outcome of an applied desktop action.
+				Trace.TraceWarning("Desktop control registration update failed: {0}", exception.GetType().Name);
+			}
 		}
 		catch (OperationCanceledException)
 		{

@@ -521,7 +521,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 		RebuildVisibleRows();
 	}
 
-	private bool TryResolvePersistedPath(string? path, out string fullPath)
+	internal bool TryResolvePersistedPath(string? path, out string fullPath)
 	{
 		fullPath = string.Empty;
 		if (string.IsNullOrWhiteSpace(path))
@@ -533,7 +533,8 @@ public sealed class TerminalWorkspaceState : IDisposable
 				path.Replace('/', Path.DirectorySeparatorChar)));
 			return true;
 		}
-		catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
+		catch (Exception exception) when (exception is
+			ArgumentException or NotSupportedException or PathTooLongException)
 		{
 			return false;
 		}
@@ -587,7 +588,6 @@ public sealed class TerminalWorkspaceState : IDisposable
 		if (targets.Count == 0)
 			return new TerminalTreeSelectionResult(0, missing, SelectionChanged: false);
 
-		Interlocked.Increment(ref _revision);
 		foreach (var target in targets.Order(ProjectTreePathIdentity.CanonicalComparer))
 			SetSubtreeSelection(_nodesByPath[target], selected);
 		RecomputeCheckStates();
@@ -604,6 +604,8 @@ public sealed class TerminalWorkspaceState : IDisposable
 		var selectionChanged = changed > 0 || !SelectedPathsEqual(
 			previousSelectedPaths,
 			BuildSelection().SelectedPaths);
+		if (selectionChanged)
+			Interlocked.Increment(ref _revision);
 		return new TerminalTreeSelectionResult(changed, missing, selectionChanged);
 	}
 

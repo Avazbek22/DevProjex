@@ -22,6 +22,7 @@ public sealed class LocalizationToastKeysTests
 		"Toast.Git.BranchSwitched",
 		"Toast.Refresh.Success",
 		"Toast.Settings.Reset",
+		"Toast.Settings.Reset.Failed",
 		"Toast.Data.Reset",
 		"Toast.Data.Reset.Busy",
 		"Toast.Data.Reset.FutureSchema",
@@ -92,6 +93,16 @@ public sealed class LocalizationToastKeysTests
 		string expectedKey)
 	{
 		Assert.Equal(expectedKey, MainWindow.ResolveResetDataResultLocalizationKey(status));
+	}
+
+	[Theory]
+	[InlineData(true, "Toast.Settings.Reset")]
+	[InlineData(false, "Toast.Settings.Reset.Failed")]
+	public void ResetSettingsResult_MapsToAnExplicitLocalizedMessage(
+		bool succeeded,
+		string expectedKey)
+	{
+		Assert.Equal(expectedKey, MainWindow.ResolveResetSettingsResultLocalizationKey(succeeded));
 	}
 
 	[Theory]

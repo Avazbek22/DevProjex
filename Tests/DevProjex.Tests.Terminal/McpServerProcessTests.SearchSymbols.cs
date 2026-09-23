@@ -1,10 +1,79 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
+using DevProjex.Application.Dependencies;
+using DevProjex.Infrastructure.Dependencies;
+using DevProjex.Mcp;
 
 namespace DevProjex.Tests.Terminal;
 
 public sealed partial class McpServerProcessTests
 {
+	[Fact]
+	public void NavigationExtractionReusesAnUnchangedTransformedSnapshot()
+	{
+		using var engine = new DependencyFactsEngine(
+			new TreeSitterDependencyFactExtractor(),
+			new FileDependencyConfigurationProvider());
+		const string initial = "namespace Example; public class Finder { public void Find() {} }";
+		const string changed = "namespace Example; public class Finder { public void Find() {} public void Refresh() {} }";
+
+		var first = McpSearchSymbols.CaptureNavigation(engine, "src/Finder.cs", initial, TestContext.Current.CancellationToken);
+		var parsedAfterFirst = engine.ParseCount;
+		Assert.True(parsedAfterFirst > 0);
+
+		var repeated = McpSearchSymbols.CaptureNavigation(engine, "src/Finder.cs", initial, TestContext.Current.CancellationToken);
+		Assert.Equal(first, repeated);
+		Assert.Equal(parsedAfterFirst, engine.ParseCount);
+
+		var updated = McpSearchSymbols.CaptureNavigation(engine, "src/Finder.cs", changed, TestContext.Current.CancellationToken);
+		Assert.Contains(updated, static declaration => declaration.Name == "Example.Finder.Refresh");
+		Assert.True(engine.ParseCount > parsedAfterFirst);
+
+		using var cancelled = new CancellationTokenSource();
+		cancelled.Cancel();
+		Assert.Throws<OperationCanceledException>(() => McpSearchSymbols.CaptureNavigation(
+			engine, "src/Finder.cs", initial, cancelled.Token));
+	}
+
+	[Fact(Timeout = 30_000)]
+	public void NavigationCacheEvictsOlderProtectedSnapshots()
+	{
+		var extractor = new CountingNavigationExtractor();
+		using var engine = new DependencyFactsEngine(extractor, new FileDependencyConfigurationProvider());
+		const string source = "class Example { void Marker() {} }";
+		for (var index = 0; index <= 2_048; index++)
+			_ = McpSearchSymbols.CaptureNavigation(
+				engine, $"src/File{index:D4}.cs", source, TestContext.Current.CancellationToken);
+
+		Assert.Equal(2_049, extractor.ParseCount);
+		_ = McpSearchSymbols.CaptureNavigation(engine, "src/File0000.cs", source, TestContext.Current.CancellationToken);
+		Assert.Equal(2_050, extractor.ParseCount);
+		_ = McpSearchSymbols.CaptureNavigation(engine, "src/File2048.cs", source, TestContext.Current.CancellationToken);
+		Assert.Equal(2_050, extractor.ParseCount);
+	}
+
+	[Fact]
+	public void NavigationCacheDoesNotRetainFailedOrUnprotectedExtractions()
+	{
+		var extractor = new CountingNavigationExtractor(failFirst: true);
+		using var engine = new DependencyFactsEngine(extractor, new FileDependencyConfigurationProvider());
+		const string source = "class Example { void Marker() {} }";
+		const string path = "src/Example.cs";
+		var cancellationToken = TestContext.Current.CancellationToken;
+
+		Assert.Throws<InvalidOperationException>(() =>
+			McpSearchSymbols.CaptureNavigation(engine, path, source, cancellationToken));
+		Assert.Equal(1, extractor.ParseCount);
+
+		Assert.Single(McpSearchSymbols.CaptureNavigation(engine, path, source, cancellationToken));
+		Assert.Single(McpSearchSymbols.CaptureNavigation(engine, path, source, cancellationToken));
+		Assert.Equal(2, extractor.ParseCount);
+
+		_ = engine.ExtractNavigation(path, source, "raw-fingerprint", cancellationToken);
+		_ = engine.ExtractNavigation(path, source, "raw-fingerprint", cancellationToken);
+		Assert.Equal(4, extractor.ParseCount);
+	}
+
 	public static TheoryData<string, string, string, string> MemberNavigationCases => new()
 	{
 		{
@@ -820,6 +889,45 @@ public sealed partial class McpServerProcessTests
 
 	private static string Normalize(string text) =>
 		text.Replace("\r\n", "\n", StringComparison.Ordinal);
+
+	private sealed class CountingNavigationExtractor : IDependencyFactExtractor, IDependencyNavigationExtractor
+	{
+		private int _parseCount;
+		private int _failNext;
+
+		public CountingNavigationExtractor(bool failFirst = false) => _failNext = failFirst ? 1 : 0;
+
+		public int ParseCount => Volatile.Read(ref _parseCount);
+		public int CompiledQuerySetCount => 0;
+
+		public IReadOnlyList<NavigationDeclaration> ExtractNavigation(
+			string relativePath,
+			string source,
+			string contentFingerprint,
+			CancellationToken cancellationToken)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			Interlocked.Increment(ref _parseCount);
+			if (Interlocked.Exchange(ref _failNext, 0) != 0)
+				throw new InvalidOperationException("Simulated navigation failure.");
+			return [new NavigationDeclaration(relativePath, NavigationSymbolKind.Method, null, 1, 1, contentFingerprint)];
+		}
+
+		public ValueTask<PreparedDependencySource> PrepareAsync(
+			string sourceRoot,
+			string fullPath,
+			DependencyResolverConfiguration configuration,
+			DependencyFactsLimits limits,
+			CancellationToken cancellationToken,
+			string? contentIdentity = null) => throw new NotSupportedException();
+
+		public FileFacts Extract(PreparedDependencySource source, DependencyFactsLimits limits) =>
+			throw new NotSupportedException();
+
+		public void Dispose()
+		{
+		}
+	}
 
 	private static int CountOccurrences(string text, string value)
 	{

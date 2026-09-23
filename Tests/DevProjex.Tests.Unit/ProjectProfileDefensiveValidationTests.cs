@@ -45,6 +45,63 @@ public sealed class ProjectProfileDefensiveValidationTests
 	}
 
 	[Fact]
+	public void CurrentSchemaWithoutProfiles_RecoversExistingProfileFromBackup()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var appData = workspace.CreateFolder("app-data");
+		var store = new ProjectProfileStore(() => appData);
+		Assert.True(store.TrySaveProfile(
+			project,
+			new ProjectSelectionProfile([], [], [], SelectedPaths: ["src"])));
+		var primaryPath = store.GetPath();
+		using var savedBackup = JsonDocument.Parse(File.ReadAllText(primaryPath + ".bak"));
+		var schemaVersion = savedBackup.RootElement.GetProperty("schemaVersion").GetInt32();
+		File.WriteAllText(primaryPath, JsonSerializer.Serialize(new { schemaVersion }));
+
+		var lookup = store.LookupProfile(project, TimeSpan.FromSeconds(1));
+
+		Assert.Equal(ProjectProfileLookupStatus.Found, lookup.Status);
+		Assert.Equal(ProjectProfileLookupStatus.InvalidStorage, lookup.RecoveryStatus);
+		Assert.Equal(["src"], lookup.Profile!.SelectedPaths);
+		using var backup = JsonDocument.Parse(File.ReadAllText(primaryPath + ".bak"));
+		Assert.True(backup.RootElement.GetProperty("profiles")
+			.TryGetProperty(PathUtility.Normalize(project), out _));
+	}
+
+	[Fact]
+	public void CurrentSchemaWithoutProfiles_SavePreservesExistingBackupProfiles()
+	{
+		using var workspace = new TemporaryDirectory();
+		var existingProject = workspace.CreateFolder("existing");
+		var newProject = workspace.CreateFolder("new");
+		var appData = workspace.CreateFolder("app-data");
+		var store = new ProjectProfileStore(() => appData);
+		Assert.True(store.TrySaveProfile(
+			existingProject,
+			new ProjectSelectionProfile([], [], [], SelectedPaths: ["src"])));
+		var primaryPath = store.GetPath();
+		using var savedBackup = JsonDocument.Parse(File.ReadAllText(primaryPath + ".bak"));
+		var schemaVersion = savedBackup.RootElement.GetProperty("schemaVersion").GetInt32();
+		File.WriteAllText(primaryPath, JsonSerializer.Serialize(new { schemaVersion }));
+
+		Assert.True(store.TrySaveProfile(
+			newProject,
+			new ProjectSelectionProfile([], [], [], SelectedPaths: ["tests"])));
+
+		var existingLookup = store.LookupProfile(existingProject, TimeSpan.FromSeconds(1));
+		var newLookup = store.LookupProfile(newProject, TimeSpan.FromSeconds(1));
+		Assert.Equal(ProjectProfileLookupStatus.Found, existingLookup.Status);
+		Assert.Equal(ProjectProfileLookupStatus.Found, newLookup.Status);
+		Assert.Equal(["src"], existingLookup.Profile!.SelectedPaths);
+		Assert.Equal(["tests"], newLookup.Profile!.SelectedPaths);
+		using var backup = JsonDocument.Parse(File.ReadAllText(primaryPath + ".bak"));
+		var profiles = backup.RootElement.GetProperty("profiles");
+		Assert.True(profiles.TryGetProperty(PathUtility.Normalize(existingProject), out _));
+		Assert.True(profiles.TryGetProperty(PathUtility.Normalize(newProject), out _));
+	}
+
+	[Fact]
 	public void Utf8BomStorage_LoadsNormally()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -197,6 +254,119 @@ public sealed class ProjectProfileDefensiveValidationTests
 
 		Assert.Equal(ProjectProfileLookupStatus.Found, lookup.Status);
 		Assert.Equal(["src"], lookup.Profile!.SelectedPaths);
+	}
+
+	[Fact]
+	public void EnsureStorageExists_UnreadablePrimaryDoesNotRestoreStaleBackup()
+	{
+		Assert.SkipWhen(!OperatingSystem.IsWindows(),
+			"This test requires Windows file sharing and replacement semantics.");
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var appData = workspace.CreateFolder("app-data");
+		var store = new ProjectProfileStore(() => appData);
+		Assert.True(store.TrySaveProfile(
+			project,
+			new ProjectSelectionProfile([], [], [], SelectedPaths: ["src"])));
+		var primaryPath = store.GetPath();
+		var olderDocument = File.ReadAllBytes(primaryPath);
+		Assert.True(store.TrySaveProfile(
+			project,
+			new ProjectSelectionProfile([], [], [], SelectedPaths: ["tests"])));
+		var currentDocument = File.ReadAllBytes(primaryPath);
+		File.WriteAllBytes(primaryPath + ".bak", olderDocument);
+
+		using (new FileStream(primaryPath, FileMode.Open, FileAccess.ReadWrite, FileShare.Delete))
+		{
+			Assert.Equal(
+				ProjectProfileLookupStatus.TemporarilyUnavailable,
+				store.LookupProfile(project, TimeSpan.FromMilliseconds(250)).Status);
+			Assert.False(store.EnsureStorageExists());
+		}
+
+		Assert.Equal(currentDocument, File.ReadAllBytes(primaryPath));
+		var reloaded = store.LookupProfile(project, TimeSpan.FromSeconds(1));
+		Assert.Equal(ProjectProfileLookupStatus.Found, reloaded.Status);
+		Assert.Equal(["tests"], reloaded.Profile!.SelectedPaths);
+	}
+
+	[Fact]
+	public void EnsureStorageExists_CorruptPrimaryRestoresValidBackup()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var appData = workspace.CreateFolder("app-data");
+		var store = new ProjectProfileStore(() => appData);
+		Assert.True(store.TrySaveProfile(
+			project,
+			new ProjectSelectionProfile([], [], [], SelectedPaths: ["src"])));
+		File.WriteAllText(store.GetPath(), "{ invalid");
+
+		Assert.True(store.EnsureStorageExists());
+
+		var reloaded = store.LookupProfile(project, TimeSpan.FromSeconds(1));
+		Assert.Equal(ProjectProfileLookupStatus.Found, reloaded.Status);
+		Assert.Equal(["src"], reloaded.Profile!.SelectedPaths);
+		Assert.DoesNotContain("{ invalid", File.ReadAllText(store.GetPath()));
+	}
+
+	[Fact]
+	public async Task ExclusivePrimaryMarkLock_DoesNotRecoverStaleBackup()
+	{
+		Assert.SkipWhen(!OperatingSystem.IsWindows(),
+			"This test requires Windows file sharing and replacement semantics.");
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var appData = workspace.CreateFolder("app-data");
+		var store = new ProjectProfileStore(() => appData);
+		var first = new MarkedSecretProfileEntry("001122334455", "FIRST", 12);
+		var second = new MarkedSecretProfileEntry("aabbccddeeff", "SECOND", 12);
+		Assert.True((await store.AddMarkAsync(project, first, TestContext.Current.CancellationToken)).Succeeded);
+		var primaryPath = Path.Combine(appData, "DevProjex", "project-secret-marks.json");
+		var olderDocument = File.ReadAllBytes(primaryPath);
+		Assert.True((await store.AddMarkAsync(project, second, TestContext.Current.CancellationToken)).Succeeded);
+		var currentDocument = File.ReadAllBytes(primaryPath);
+		File.WriteAllBytes(primaryPath + ".bak", olderDocument);
+
+		PersistentSecretMarksLoadResult result;
+		using (new FileStream(primaryPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+		{
+			result = await store.LoadMarksAsync(project, TestContext.Current.CancellationToken);
+		}
+
+		Assert.Equal(PersistentSecretMarkStoreStatus.TemporarilyUnavailable, result.Status);
+		Assert.Equal(currentDocument, File.ReadAllBytes(primaryPath));
+		var loaded = await store.LoadMarksAsync(project, TestContext.Current.CancellationToken);
+		Assert.True(loaded.Succeeded);
+		Assert.Contains(first, loaded.Snapshot!.Marks);
+		Assert.Contains(second, loaded.Snapshot.Marks);
+	}
+
+	[Fact]
+	public async Task CorruptPrimaryMarkDocument_RecoversValidBackup()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var appData = workspace.CreateFolder("app-data");
+		var store = new ProjectProfileStore(() => appData);
+		var mark = new MarkedSecretProfileEntry("001122334455", "TOKEN", 12);
+		Assert.True((await store.AddMarkAsync(project, mark, TestContext.Current.CancellationToken)).Succeeded);
+		var primaryPath = Path.Combine(appData, "DevProjex", "project-secret-marks.json");
+		File.WriteAllText(primaryPath, "{ invalid");
+		var corruptDocument = File.ReadAllBytes(primaryPath);
+		using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(
+			TestContext.Current.CancellationToken);
+		cancellation.Cancel();
+
+		await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+			await store.LoadMarksAsync(project, cancellation.Token));
+		Assert.Equal(corruptDocument, File.ReadAllBytes(primaryPath));
+
+		var loaded = await store.LoadMarksAsync(project, TestContext.Current.CancellationToken);
+
+		Assert.True(loaded.Succeeded);
+		Assert.Contains(mark, loaded.Snapshot!.Marks);
+		Assert.DoesNotContain("{ invalid", File.ReadAllText(primaryPath));
 	}
 
 	[Fact]

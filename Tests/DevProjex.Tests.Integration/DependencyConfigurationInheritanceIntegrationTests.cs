@@ -25,6 +25,28 @@ public sealed class DependencyConfigurationInheritanceIntegrationTests
 	}
 
 	[Fact]
+	public async Task InvalidTypeScriptPathMappingReportsUnsupportedConfiguration()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile(
+			"tsconfig.json",
+			"{\"compilerOptions\":{\"paths\":{\"alias\":[\"\\u0000\"]}}}");
+		var provider = new FileDependencyConfigurationProvider();
+
+		var result = await provider.ReadAsync(
+			fixture.Path,
+			[config],
+			TestContext.Current.CancellationToken);
+
+		var diagnostic = Assert.Single(result.ConfigurationDiagnostics);
+		Assert.Equal(DependencyConfigurationState.UnsupportedSemantics, diagnostic.State);
+		Assert.Equal(FileDependencyConfigurationProvider.TypeScriptInvalidOptionPathReason, diagnostic.Reason);
+		Assert.Equal(
+			DependencyConfigurationState.UnsupportedSemantics,
+			Assert.Single(result.Scopes, scope => scope.HasConfiguration).ConfigurationState);
+	}
+
+	[Fact]
 	public async Task InheritedBaseUrlAndPathsRetainTheirDeclaringConfigOrigin()
 	{
 		using var fixture = new TemporaryDirectory();
@@ -323,6 +345,36 @@ public sealed class DependencyConfigurationInheritanceIntegrationTests
 	}
 
 	[Fact]
+	public async Task InvalidProjectReferencePathReportsUnsupportedConfigurationWithoutAffectingOtherProjects()
+	{
+		using var fixture = new TemporaryDirectory();
+		var invalid = fixture.CreateFile(
+			"Invalid.csproj",
+			"<Project><ItemGroup><ProjectReference Include=\"" +
+			new string('x', 40_000) +
+			".csproj\" /></ItemGroup></Project>");
+		var valid = fixture.CreateFile(
+			"Valid.csproj",
+			"<Project><ItemGroup><ProjectReference Include=\"Leaf.csproj\" /></ItemGroup></Project>");
+		var leaf = fixture.CreateFile("Leaf.csproj", "<Project />");
+
+		var result = await new FileDependencyConfigurationProvider().ReadAsync(
+			fixture.Path,
+			[invalid, valid, leaf],
+			TestContext.Current.CancellationToken);
+
+		var diagnostic = Assert.Single(result.ConfigurationDiagnostics);
+		Assert.Equal(DependencyConfigurationState.UnsupportedSemantics, diagnostic.State);
+		Assert.Equal("C# ProjectReference path is invalid", diagnostic.Reason);
+		Assert.Equal(
+			DependencyConfigurationState.UnsupportedSemantics,
+			Assert.Single(result.Scopes, scope => scope.ScopeId == "csharp:Invalid.csproj").ConfigurationState);
+		Assert.Equal(
+			["csharp:Leaf.csproj"],
+			Assert.Single(result.Scopes, scope => scope.ScopeId == "csharp:Valid.csproj").ProjectReferences);
+	}
+
+	[Fact]
 	public async Task ExternalAndNetworkProjectReferencesAreRejectedBeforeMetadataAccess()
 	{
 		using var fixture = new TemporaryDirectory();
@@ -381,6 +433,177 @@ public sealed class DependencyConfigurationInheritanceIntegrationTests
 		Assert.DoesNotContain(link, result.AbsentControlFiles, PathComparer.Default);
 	}
 
+	[Fact]
+	public async Task TypeScriptExtendsSymlinkOutsideTheRootIsRejectedBeforeReading()
+	{
+		using var fixture = new TemporaryDirectory();
+		using var outside = new TemporaryDirectory();
+		var config = fixture.CreateFile("tsconfig.json", "{\"extends\":\"./base.json\"}");
+		var externalConfig = outside.CreateFile(
+			"base.json", "{\"compilerOptions\":{\"moduleResolution\":\"NodeNext\"}}");
+		var link = Path.Combine(fixture.Path, "base.json");
+		try
+		{
+			File.CreateSymbolicLink(link, externalConfig);
+		}
+		catch (Exception exception) when (
+			exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+		{
+			Assert.Skip($"File symbolic links are unavailable: {exception.GetType().Name}.");
+			return;
+		}
+
+		var reader = new RecordingControlFileReader();
+		var result = await new FileDependencyConfigurationProvider(reader).ReadAsync(
+			fixture.Path,
+			[config],
+			TestContext.Current.CancellationToken);
+
+		Assert.DoesNotContain(link, reader.Paths, PathComparer.Default);
+		Assert.Equal(FileDependencyConfigurationProvider.TypeScriptExtendsOutsideRootReason,
+			Assert.Single(result.ConfigurationDiagnostics).Reason);
+		Assert.Equal(DependencyConfigurationState.UnsupportedSemantics,
+			Assert.Single(result.Scopes, scope => scope.HasConfiguration).ConfigurationState);
+	}
+
+	[Fact]
+	public async Task TypeScriptExtendsNestedSymlinkOutsideTheRootIsRejectedBeforeReading()
+	{
+		using var fixture = new TemporaryDirectory();
+		using var outside = new TemporaryDirectory();
+		var config = fixture.CreateFile("tsconfig.json", "{\"extends\":\"./first.json\"}");
+		var externalConfig = outside.CreateFile(
+			"base.json", "{\"compilerOptions\":{\"moduleResolution\":\"NodeNext\"}}");
+		var first = Path.Combine(fixture.Path, "first.json");
+		var second = Path.Combine(fixture.Path, "second.json");
+		try
+		{
+			File.CreateSymbolicLink(second, externalConfig);
+			File.CreateSymbolicLink(first, second);
+		}
+		catch (Exception exception) when (
+			exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+		{
+			Assert.Skip($"File symbolic links are unavailable: {exception.GetType().Name}.");
+			return;
+		}
+
+		var reader = new RecordingControlFileReader();
+		var result = await new FileDependencyConfigurationProvider(reader).ReadAsync(
+			fixture.Path,
+			[config],
+			TestContext.Current.CancellationToken);
+
+		Assert.DoesNotContain(first, reader.Paths, PathComparer.Default);
+		Assert.Equal(FileDependencyConfigurationProvider.TypeScriptExtendsOutsideRootReason,
+			Assert.Single(result.ConfigurationDiagnostics).Reason);
+	}
+
+	[Fact]
+	public async Task TypeScriptExtendsChecksPhysicalContainmentBeforeReading()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("tsconfig.json", "{\"extends\":\"./base.json\"}");
+		var baseConfig = fixture.CreateFile(
+			"base.json", "{\"compilerOptions\":{\"moduleResolution\":\"NodeNext\"}}");
+		var reader = new RecordingControlFileReader();
+		var metadata = new RecordingPathMetadata(baseConfig);
+		var result = await new FileDependencyConfigurationProvider(reader, metadata).ReadAsync(
+			fixture.Path,
+			[config],
+			TestContext.Current.CancellationToken);
+
+		Assert.Contains(baseConfig, metadata.ContainmentChecks, PathComparer.Default);
+		Assert.DoesNotContain(baseConfig, reader.Paths, PathComparer.Default);
+		Assert.Equal(FileDependencyConfigurationProvider.TypeScriptExtendsOutsideRootReason,
+			Assert.Single(result.ConfigurationDiagnostics).Reason);
+		Assert.Equal(DependencyConfigurationState.UnsupportedSemantics,
+			Assert.Single(result.Scopes, scope => scope.HasConfiguration).ConfigurationState);
+	}
+
+	[Fact]
+	public void ContainedPathResolutionRejectsNestedLinkEscape()
+	{
+		using var fixture = new TemporaryDirectory();
+		using var outside = new TemporaryDirectory();
+		var first = Path.Combine(fixture.Path, "first.json");
+		var second = Path.Combine(fixture.Path, "second.json");
+		var external = Path.Combine(outside.Path, "base.json");
+		var visited = new List<string>();
+		var metadata = new DependencyPathMetadata(path =>
+		{
+			visited.Add(path);
+			if (PathComparer.Default.Equals(path, first))
+				return (FileAttributes.ReparsePoint, second);
+			if (PathComparer.Default.Equals(path, second))
+				return (FileAttributes.ReparsePoint, external);
+			return (FileAttributes.Normal, (string?)null);
+		});
+
+		Assert.False(metadata.TryResolveContainedPath(fixture.Path, first, out _));
+		Assert.Contains(second, visited, PathComparer.Default);
+		Assert.DoesNotContain(external, visited, PathComparer.Default);
+	}
+
+	[Fact]
+	public void ContainedPathResolutionRejectsLinkCycles()
+	{
+		using var fixture = new TemporaryDirectory();
+		var first = Path.Combine(fixture.Path, "first.json");
+		var second = Path.Combine(fixture.Path, "second.json");
+		var visits = 0;
+		var metadata = new DependencyPathMetadata(path =>
+		{
+			visits++;
+			return PathComparer.Default.Equals(path, first)
+				? (FileAttributes.ReparsePoint, second)
+				: (FileAttributes.ReparsePoint, first);
+		});
+
+		Assert.False(metadata.TryResolveContainedPath(fixture.Path, first, out _));
+		Assert.InRange(visits, 2, 40);
+	}
+
+	[Fact]
+	public void ContainedPathResolutionLimitsLinkTransitions()
+	{
+		using var fixture = new TemporaryDirectory();
+		var links = Enumerable.Range(0, 42)
+			.Select(index => Path.Combine(fixture.Path, $"link-{index}.json"))
+			.ToArray();
+		var linkTargets = Enumerable.Range(0, links.Length - 1)
+			.ToDictionary(index => links[index], index => links[index + 1], PathComparer.Default);
+		var visits = 0;
+		var metadata = new DependencyPathMetadata(path =>
+		{
+			visits++;
+			return linkTargets.TryGetValue(path, out var target)
+				? (FileAttributes.ReparsePoint, target)
+				: (FileAttributes.Normal, (string?)null);
+		});
+
+		Assert.False(metadata.TryResolveContainedPath(fixture.Path, links[0], out _));
+		Assert.InRange(visits, 40, 41);
+	}
+
+	[Fact]
+	public void ContainedPathResolutionFollowsNestedInternalLinks()
+	{
+		using var fixture = new TemporaryDirectory();
+		var first = Path.Combine(fixture.Path, "first.json");
+		var second = Path.Combine(fixture.Path, "second.json");
+		var final = Path.Combine(fixture.Path, "base.json");
+		var metadata = new DependencyPathMetadata(path =>
+			PathComparer.Default.Equals(path, first)
+				? (FileAttributes.ReparsePoint, second)
+				: PathComparer.Default.Equals(path, second)
+					? (FileAttributes.ReparsePoint, final)
+					: (FileAttributes.Normal, (string?)null));
+
+		Assert.True(metadata.TryResolveContainedPath(fixture.Path, first, out var resolved));
+		Assert.Equal(final, resolved);
+	}
+
 	private static bool IsWithin(string root, string path)
 	{
 		var relative = Path.GetRelativePath(root, path);
@@ -389,7 +612,7 @@ public sealed class DependencyConfigurationInheritanceIntegrationTests
 		       !Path.IsPathRooted(relative);
 	}
 
-	private sealed class RecordingPathMetadata : IDependencyPathMetadata
+	private sealed class RecordingPathMetadata(string? rejectedPath = null) : IDependencyPathMetadata
 	{
 		public List<string> FileExistenceChecks { get; } = [];
 		public List<string> ContainmentChecks { get; } = [];
@@ -404,7 +627,22 @@ public sealed class DependencyConfigurationInheritanceIntegrationTests
 		{
 			ContainmentChecks.Add(path);
 			resolvedPath = path;
-			return true;
+			return rejectedPath is null || !PathComparer.Default.Equals(path, rejectedPath);
+		}
+	}
+
+	private sealed class RecordingControlFileReader : IDependencyControlFileReader
+	{
+		private readonly BoundedDependencyControlFileReader _inner = new();
+		public List<string> Paths { get; } = [];
+
+		public ValueTask<DependencyControlFileSnapshot> ReadAsync(
+			string path,
+			int maximumBytes,
+			CancellationToken cancellationToken)
+		{
+			Paths.Add(path);
+			return _inner.ReadAsync(path, maximumBytes, cancellationToken);
 		}
 	}
 

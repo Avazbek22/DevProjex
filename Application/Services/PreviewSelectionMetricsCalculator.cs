@@ -12,15 +12,62 @@ public static class PreviewSelectionMetricsCalculator
         var normalizedRange = selectionRange.Normalize();
         if (normalizedRange.IsCollapsed)
             return ExportOutputMetrics.Empty;
+        cancellationToken.ThrowIfCancellationRequested();
 
         long totalChars = 0;
         long lineBreaks = 0;
 
-        for (var lineNumber = normalizedRange.StartLine; lineNumber <= normalizedRange.EndLine; lineNumber++)
+        if (normalizedRange.EndLine <= document.LineCount)
+        {
+            document.VisitLines(
+                normalizedRange.StartLine,
+                normalizedRange.EndLine,
+                AccumulateLine,
+                cancellationToken);
+        }
+        else if (document is InMemoryPreviewTextDocument or FileBackedPreviewTextDocument)
+        {
+            if (normalizedRange.StartLine <= document.LineCount)
+            {
+                document.VisitLines(
+                    normalizedRange.StartLine,
+                    document.LineCount,
+                    AccumulateLine,
+                    cancellationToken);
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            var tail = CalculateClampedTail(
+                normalizedRange,
+                document.LineCount,
+                document.GetLineText(document.LineCount).Length);
+            totalChars += tail.Chars;
+            lineBreaks += tail.LineBreaks;
+        }
+        else
+        {
+            // Custom documents may define their own out-of-range line behavior.
+            for (var lineNumber = normalizedRange.StartLine; ; lineNumber++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                AccumulateLine(lineNumber, document.GetLineText(lineNumber));
+                if (lineNumber == normalizedRange.EndLine)
+                    break;
+            }
+        }
+
+        if (totalChars <= 0)
+            return ExportOutputMetrics.Empty;
+
+        return new ExportOutputMetrics(
+            Lines: lineBreaks + 1,
+            Chars: totalChars,
+            Tokens: EstimateTokens(totalChars));
+
+        bool AccumulateLine(int lineNumber, ReadOnlySpan<char> lineText)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var lineText = document.GetLineText(lineNumber);
             var segmentStart = lineNumber == normalizedRange.StartLine
                 ? Math.Clamp(normalizedRange.StartColumn, 0, lineText.Length)
                 : 0;
@@ -36,15 +83,28 @@ public static class PreviewSelectionMetricsCalculator
                 totalChars++;
                 lineBreaks++;
             }
+            return true;
         }
+    }
 
-        if (totalChars <= 0)
-            return ExportOutputMetrics.Empty;
-
-        return new ExportOutputMetrics(
-            Lines: lineBreaks + 1,
-            Chars: totalChars,
-            Tokens: EstimateTokens(totalChars));
+    private static (long Chars, long LineBreaks) CalculateClampedTail(
+        PreviewSelectionRange range,
+        int lineCount,
+        int lastLineLength)
+    {
+        var firstTailLine = Math.Max((long)range.StartLine, (long)lineCount + 1);
+        var tailLineCount = (long)range.EndLine - firstTailLine + 1;
+        var firstColumn = firstTailLine == range.StartLine
+            ? Math.Clamp(range.StartColumn, 0, lastLineLength)
+            : 0;
+        var lastColumn = Math.Clamp(
+            range.EndColumn,
+            tailLineCount == 1 ? firstColumn : 0,
+            lastLineLength);
+        var lineBreaks = tailLineCount - 1;
+        var chars = tailLineCount * lastLineLength - firstColumn -
+                    (lastLineLength - lastColumn) + lineBreaks;
+        return (chars, lineBreaks);
     }
 
     private static long EstimateTokens(long chars) =>

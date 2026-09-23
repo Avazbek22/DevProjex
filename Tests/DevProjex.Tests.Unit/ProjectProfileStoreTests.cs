@@ -29,6 +29,26 @@ public sealed class ProjectProfileStoreTests
 	}
 
 	[Fact]
+	public void OlderUnconditionalRetryKeepsTheNewerProfile()
+	{
+		using var temporary = new TemporaryDirectory();
+		var project = temporary.CreateFolder("project");
+		var store = CreateStore(temporary.Path);
+		Assert.True(store.TrySaveProfile(
+			project,
+			new ProjectSelectionProfile([], [".cs"], []),
+			DateTimeOffset.UtcNow.AddMinutes(1)));
+
+		var retry = store.TrySaveProfileWithResult(
+			project,
+			new ProjectSelectionProfile([], [".md"], []));
+
+		Assert.True(retry.Succeeded);
+		Assert.True(store.TryLoadProfile(project, out var current));
+		Assert.Equal([".cs"], current.SelectedExtensions);
+	}
+
+	[Fact]
 	public void TrySaveProfilesWithResult_PersistsEveryProfileInOneBatch()
 	{
 		using var temporary = new TemporaryDirectory();

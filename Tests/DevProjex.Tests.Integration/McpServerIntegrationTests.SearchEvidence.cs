@@ -160,6 +160,74 @@ public sealed partial class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task SearchDistinguishesEmptyTextFromUnsearchedBinaryContent()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Empty.txt"), string.Empty);
+		File.WriteAllBytes(Path.Combine(project, "Blob.bin"), [0x00, 0x01, 0x02, 0xFF]);
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var emptyOnly = await server.CallAsync("search_project", new Dictionary<string, object?>
+		{
+			["pattern"] = "needle",
+			["include_patterns"] = new[] { "Empty.txt" }
+		});
+		Assert.NotEqual(true, emptyOnly.IsError);
+		Assert.Contains("[Search boundary] complete · sources inspected=1/1", Text(emptyOnly), StringComparison.Ordinal);
+
+		var binaryOnly = await server.CallAsync("search_project", new Dictionary<string, object?>
+		{
+			["pattern"] = "needle",
+			["include_patterns"] = new[] { "Blob.bin" }
+		});
+		Assert.NotEqual(true, binaryOnly.IsError);
+		Assert.Contains("[Search boundary] partial · sources inspected=0/1", Text(binaryOnly), StringComparison.Ordinal);
+		Assert.Contains("[Search skipped] 1 selected binary file was not searched as text.",
+			Text(binaryOnly), StringComparison.Ordinal);
+
+		var mixed = await server.CallAsync("search_project", new Dictionary<string, object?>
+		{
+			["pattern"] = "needle"
+		});
+		Assert.NotEqual(true, mixed.IsError);
+		Assert.Contains("[Search boundary] partial · sources inspected=1/2", Text(mixed), StringComparison.Ordinal);
+		Assert.Contains("limits=unscannable-sources", Text(mixed), StringComparison.Ordinal);
+		Assert.Contains("[Search skipped] 1 selected binary file was not searched as text.",
+			Text(mixed), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task BatchReadDistinguishesEmptyWholeFileFromInvalidRangeAndBinary()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Empty.txt"), string.Empty);
+		File.WriteAllBytes(Path.Combine(project, "Blob.bin"), [0x00, 0x01, 0x02, 0xFF]);
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var reads = await server.CallAsync("get_file", new Dictionary<string, object?>
+		{
+			["requests"] = new object[]
+			{
+				new { path = "Empty.txt" },
+				new { path = "Empty.txt", ranges = new[] { new { start_line = 1, end_line = 1 } } },
+				new { path = "Blob.bin" }
+			}
+		});
+		Assert.NotEqual(true, reads.IsError);
+		var text = Text(reads);
+		Assert.Contains("1.1 — ok", text, StringComparison.Ordinal);
+		Assert.Contains("2.1 — not-returned", text, StringComparison.Ordinal);
+		Assert.Contains($"3.1 — unavailable — {McpErrorCodes.PayloadTruncated}",
+			text, StringComparison.Ordinal);
+		Assert.Contains("File: Empty.txt", text, StringComparison.Ordinal);
+		Assert.Contains("Lines: 0-0 of 0", text, StringComparison.Ordinal);
+		Assert.Contains("[Batch read] ok=1 · partial=0 · not-returned=1 · unavailable=1.",
+			text, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task SearchReportsTheAnnotationFileLimitSeparately()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -202,6 +270,49 @@ public sealed partial class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task SearchRetainsShortMatchWhenAdjacentContextExceedsStorageLimit()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "LargeContext.txt"), new string('x', 2_000_000) + "\nneedle\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync("search_project", new Dictionary<string, object?>
+		{
+			["pattern"] = "needle",
+			["context_lines"] = 1,
+			["ignore_case"] = false
+		});
+		var text = Text(result);
+
+		Assert.NotEqual(true, result.IsError);
+		McpSearchOutputAssertions.ContainsMatch(text, "LargeContext.txt", 2, "needle");
+		Assert.Contains("matches retained=1/1 · matches written=1", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task SearchMarksOversizedMatchingLineAsPartial()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "LongLine.txt"), "needle" + new string('x', 2_000_000));
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync("search_project", new Dictionary<string, object?>
+		{
+			["pattern"] = "needle",
+			["context_lines"] = 1,
+			["ignore_case"] = false
+		});
+		var text = Text(result);
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.Contains("[Search boundary] partial", text, StringComparison.Ordinal);
+		Assert.Contains("matches retained=0/1 · matches written=0", text, StringComparison.Ordinal);
+		Assert.Contains("limits=retained-characters", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task SearchKeepsCoordinatesAndTextFromOneSnapshotWhenSourceChangesAfterScanning()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -230,6 +341,47 @@ public sealed partial class McpServerIntegrationTests
 			Assert.True(changed);
 			McpSearchOutputAssertions.ContainsMatch(text, "Mutable.txt", 2, "needle old");
 			Assert.DoesNotContain("needle new", text, StringComparison.Ordinal);
+		}
+		finally
+		{
+			McpSearchExecutionHooks.AfterScan = null;
+		}
+	}
+
+	[Fact]
+	public async Task SearchKeepsObservedMatchesWhenLaterSelectedSourceDisappears()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		for (var index = 0; index < 9; index++)
+			File.WriteAllText(Path.Combine(project, $"{index:D2}.txt"), index == 0 ? "needle\n" : "clean\n");
+		var disappearing = Path.Combine(project, "08.txt");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+		var deleted = false;
+		McpSearchExecutionHooks.AfterScan = path =>
+		{
+			if (deleted || path != "00.txt")
+				return;
+			File.Delete(disappearing);
+			deleted = true;
+		};
+		try
+		{
+			var result = await server.CallAsync("search_project", new Dictionary<string, object?>
+			{
+				["pattern"] = "needle",
+				["context_lines"] = 0,
+				["ignore_case"] = false
+			});
+			var text = Text(result);
+
+			Assert.True(deleted);
+			Assert.True(result.IsError != true, text);
+			McpSearchOutputAssertions.ContainsMatch(text, "00.txt", 1, "needle");
+			Assert.Contains("sources inspected=8/9 · matches retained=1/1 · matches written=1", text,
+				StringComparison.Ordinal);
+			Assert.Contains("limits=unscannable-sources", text, StringComparison.Ordinal);
+			Assert.Contains("Uninspected content was not searched", text, StringComparison.Ordinal);
 		}
 		finally
 		{

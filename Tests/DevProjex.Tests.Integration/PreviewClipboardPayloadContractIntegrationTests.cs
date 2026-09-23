@@ -1,3 +1,5 @@
+using DevProjex.Application.Preview;
+
 namespace DevProjex.Tests.Integration;
 
 public sealed class PreviewClipboardPayloadContractIntegrationTests
@@ -31,6 +33,32 @@ public sealed class PreviewClipboardPayloadContractIntegrationTests
         var actual = PreviewClipboardPayloadBuilder.BuildFullDocumentPayload(document);
 
         Assert.Equal(expected, actual);
+    }
+
+    [Fact]
+    public async Task BuildFullDocumentPayload_FileBackedContentPreview_MatchesTextExportLineEndings()
+    {
+        using var temp = new TemporaryDirectory();
+        var sourcePath = temp.CreateFile("large.txt", new string('x', 500_000) + "\nsecond");
+        var analyzer = new FileContentAnalyzer();
+        var contentExport = new SelectedContentExportService(analyzer);
+        var previewBuilder = new PreviewDocumentBuilder(analyzer);
+        using var document = await previewBuilder.CreateDocumentAsync(
+            (stream, cancellationToken) => contentExport.WriteAsync(
+                stream,
+                [sourcePath],
+                cancellationToken,
+                Path.GetFileName),
+            TestContext.Current.CancellationToken);
+
+        Assert.IsType<FileBackedPreviewTextDocument>(document);
+        var textExport = await contentExport.BuildAsync(
+            [sourcePath],
+            TestContext.Current.CancellationToken,
+            Path.GetFileName);
+        Assert.Equal(
+            NormalizeForClipboard(textExport),
+            PreviewClipboardPayloadBuilder.BuildFullDocumentPayload(document));
     }
 
     [Fact]

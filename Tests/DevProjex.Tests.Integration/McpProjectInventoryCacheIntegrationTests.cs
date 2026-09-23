@@ -8,6 +8,168 @@ namespace DevProjex.Tests.Integration;
 
 public sealed class McpProjectInventoryCacheIntegrationTests
 {
+	[Fact(Timeout = 30_000)]
+	public async Task CancelingOneInventoryWaiterDoesNotCancelAnotherWaiterForTheSameBuild()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.CreateFile("project/Anchor.cs", "anchor\n");
+		var buildEntered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+		var releaseBuild = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+		var buildCount = 0;
+		await using var harness = CreateHarness(project, async (_, token) =>
+		{
+			Interlocked.Increment(ref buildCount);
+			buildEntered.TrySetResult(true);
+			await releaseBuild.Task.WaitAsync(token);
+		});
+		var request = new ProjectContextRequest(project, ProjectSelectionSpec.Standard);
+
+		using var canceledCaller = new CancellationTokenSource();
+		var first = BuildCachedBasePlanAsync(harness.Service, request, canceledCaller.Token);
+		try
+		{
+			await buildEntered.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+			var second = BuildCachedBasePlanAsync(harness.Service, request, TestContext.Current.CancellationToken);
+			Assert.False(second.IsCompleted);
+			Assert.Equal(1, Volatile.Read(ref buildCount));
+
+			canceledCaller.Cancel();
+			await Assert.ThrowsAnyAsync<OperationCanceledException>(() => first);
+			releaseBuild.TrySetResult(true);
+			var result = await second.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+
+			Assert.True(HasFile(result, "Anchor.cs"));
+			Assert.Equal(1, Volatile.Read(ref buildCount));
+		}
+		finally
+		{
+			releaseBuild.TrySetResult(true);
+		}
+	}
+
+	[Fact(Timeout = 30_000)]
+	public async Task DisposingInventoryServiceCancelsAnActiveSharedBuild()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.CreateFile("project/Anchor.cs", "anchor\n");
+		var buildEntered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+		var releaseBuild = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+		await using var harness = CreateHarness(project, async (_, token) =>
+		{
+			buildEntered.TrySetResult(true);
+			await releaseBuild.Task.WaitAsync(token);
+		});
+		var request = new ProjectContextRequest(project, ProjectSelectionSpec.Standard);
+		var pending = BuildCachedBasePlanAsync(harness.Service, request, CancellationToken.None);
+		try
+		{
+			await buildEntered.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+			harness.Service.Dispose();
+			await Assert.ThrowsAnyAsync<OperationCanceledException>(
+				() => pending.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken));
+		}
+		finally
+		{
+			releaseBuild.TrySetResult(true);
+		}
+	}
+
+	[Fact(Timeout = 30_000)]
+	public async Task RepeatedCanceledUniqueInventoriesStopTheirScansAndAllowFreshJoins()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.CreateFile("project/Anchor.cs", "anchor\n");
+		using var buildEntered = new SemaphoreSlim(0);
+		using var buildExited = new SemaphoreSlim(0);
+		var activeBuilds = 0;
+		var buildCount = 0;
+		await using var harness = CreateHarness(project, async (_, token) =>
+		{
+			if (Interlocked.Increment(ref buildCount) > 12)
+				return;
+			Interlocked.Increment(ref activeBuilds);
+			buildEntered.Release();
+			try
+			{
+				await Task.Delay(Timeout.Infinite, token);
+			}
+			finally
+			{
+				Interlocked.Decrement(ref activeBuilds);
+				buildExited.Release();
+			}
+		});
+		ProjectContextRequest? lastRequest = null;
+		for (var index = 0; index < 12; index++)
+		{
+			var selection = ProjectSelectionSpec.Standard with
+			{
+				Extensions = [".cs", $".unused{index}"]
+			};
+			lastRequest = new ProjectContextRequest(project, selection);
+			using var cancellation = new CancellationTokenSource();
+			var pending = BuildCachedBasePlanAsync(harness.Service, lastRequest, cancellation.Token);
+			Assert.True(await buildEntered.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
+			cancellation.Cancel();
+			await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending);
+			Assert.True(await buildExited.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
+			Assert.Equal(0, Volatile.Read(ref activeBuilds));
+			Assert.InRange(ReadCacheCount(harness.Service, "inventoryCache"), 0, 8);
+		}
+
+		var retry = await BuildCachedBasePlanAsync(
+			harness.Service,
+			lastRequest!,
+			TestContext.Current.CancellationToken);
+		Assert.True(HasFile(retry, "Anchor.cs"));
+		Assert.Equal(13, Volatile.Read(ref buildCount));
+	}
+
+	[Fact(Timeout = 30_000)]
+	public async Task EvictingAnActiveInventoryDoesNotCancelItsWaiter()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.CreateFile("project/Anchor.cs", "anchor\n");
+		var buildEntered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+		var releaseBuild = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+		var buildCount = 0;
+		await using var harness = CreateHarness(project, async (_, token) =>
+		{
+			if (Interlocked.Increment(ref buildCount) != 1)
+				return;
+			buildEntered.TrySetResult(true);
+			await releaseBuild.Task.WaitAsync(token);
+		});
+		var request = new ProjectContextRequest(project, ProjectSelectionSpec.Standard);
+		var pending = BuildCachedBasePlanAsync(harness.Service, request, TestContext.Current.CancellationToken);
+		try
+		{
+			await buildEntered.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+			for (var index = 0; index < 9; index++)
+			{
+				var differentRequest = new ProjectContextRequest(
+					project,
+					ProjectSelectionSpec.Standard with { Extensions = [".cs", $".unused{index}"] });
+				_ = await BuildCachedBasePlanAsync(
+					harness.Service,
+					differentRequest,
+					TestContext.Current.CancellationToken);
+			}
+			Assert.False(pending.IsCompleted);
+			releaseBuild.TrySetResult(true);
+			var result = await pending.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+			Assert.True(HasFile(result, "Anchor.cs"));
+		}
+		finally
+		{
+			releaseBuild.TrySetResult(true);
+		}
+	}
+
 	[Fact]
 	public async Task MaximumFileSizeRefreshReadsOnlyTheNarrowedCandidates()
 	{
@@ -210,6 +372,61 @@ public sealed class McpProjectInventoryCacheIntegrationTests
 	}
 
 	[Fact]
+	public async Task BuildPlan_MaximumFileBytesRefreshesIncludedBytesWhenTheFileStillFits()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var path = workspace.CreateFile("project/Payload.txt", "small\n");
+		await using var harness = CreateHarness(project);
+
+		var initial = await BuildAsync(harness.Service, maximumFileBytes: 64);
+		Assert.Equal(6, initial.IncludedBytes);
+		DisableWatcher(harness.Service);
+		File.WriteAllText(path, new string('x', 32));
+
+		var changed = await BuildAsync(harness.Service, maximumFileBytes: 64);
+
+		Assert.Same(initial.EffectiveTree, changed.EffectiveTree);
+		Assert.True(HasFile(changed, "Payload.txt"));
+		Assert.Equal(32, changed.EffectiveFileSizes![Assert.Single(changed.IncludedFiles)]);
+		Assert.Equal(32, changed.IncludedBytes);
+	}
+
+	[Fact(Timeout = 30_000)]
+	public async Task BuildPlan_CancellationStopsMaximumFileBytesSizeRefresh()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		for (var index = 0; index < 100; index++)
+			workspace.CreateFile($"project/File{index:D3}.txt", "content\n");
+		using var canceled = CancellationTokenSource.CreateLinkedTokenSource(
+			TestContext.Current.CancellationToken);
+		var sizeReads = 0;
+		await using var harness = CreateHarness(
+			project,
+			effectiveFileSizeRead: _ =>
+			{
+				if (Interlocked.Increment(ref sizeReads) == 1)
+					canceled.Cancel();
+			});
+
+		await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+			harness.Service.BuildPlanAsync(
+				project: null,
+				branch: null,
+				paths: null,
+				includePatterns: null,
+				excludePatterns: null,
+				profile: null,
+				trackedOnly: false,
+				gitScope: null,
+				maximumFileBytes: 64,
+				canceled.Token,
+				includeOutputMetrics: false));
+		Assert.Equal(1, Volatile.Read(ref sizeReads));
+	}
+
+	[Fact]
 	public async Task BuildPlan_GitIndexStampInvalidatesWithoutAWatcherEvent()
 	{
 		if (!IsGitAvailable())
@@ -352,6 +569,32 @@ public sealed class McpProjectInventoryCacheIntegrationTests
 		Assert.Equal(buildsAfterInitial + 1, buildCount);
 	}
 
+	[Fact]
+	public async Task RemovingAnArtifactSignatureInvalidatesThePreviouslyIgnoredInventory()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.CreateFile("project/Anchor.cs", "anchor\n");
+		var signature = workspace.CreateFile("project/node_modules/.package-lock.json", "{}\n");
+		workspace.CreateFile("project/node_modules/package/index.js", "module.exports = 1;\n");
+		await using var harness = CreateHarness(project);
+
+		var initial = await BuildAsync(harness.Service);
+		Assert.False(HasFile(initial, "node_modules/package/index.js"));
+		Assert.True(IsIgnoredMonitorChange(harness.Service, "node_modules/package/index.js"));
+
+		File.Delete(signature);
+		var removedSignature = new FileSystemEventArgs(
+			WatcherChangeTypes.Deleted,
+			project,
+			"node_modules/.package-lock.json");
+		RaiseWatcherEvent(harness.Service, removedSignature);
+		var updated = await BuildAsync(harness.Service);
+
+		Assert.True(HasFile(updated, "node_modules/package/index.js"));
+		Assert.NotSame(initial, updated);
+	}
+
 	[Theory]
 	[InlineData(WatcherChangeTypes.Changed)]
 	[InlineData(WatcherChangeTypes.Created)]
@@ -481,6 +724,19 @@ public sealed class McpProjectInventoryCacheIntegrationTests
 			TestContext.Current.CancellationToken,
 			includeOutputMetrics: false);
 
+	private static Task<ProjectContextPlan> BuildCachedBasePlanAsync(
+		McpProjectService service,
+		ProjectContextRequest request,
+		CancellationToken cancellationToken)
+	{
+		var method = typeof(McpProjectService).GetMethod(
+			"BuildBasePlanAsync",
+			BindingFlags.Instance | BindingFlags.NonPublic)!;
+		return (Task<ProjectContextPlan>)method.Invoke(
+			service,
+			[request, false, true, null, cancellationToken])!;
+	}
+
 	private static CacheHarness CreateHarness(
 		string project,
 		Func<string, CancellationToken, ValueTask>? inventoryBuilt = null,
@@ -533,12 +789,15 @@ public sealed class McpProjectInventoryCacheIntegrationTests
 		watcher.EnableRaisingEvents = false;
 	}
 
-	private static void RaiseWatcherChange(McpProjectService service, string name = "Anchor.cs")
+	private static void RaiseWatcherChange(McpProjectService service, string name = "Anchor.cs") =>
+		RaiseWatcherEvent(service, new FileSystemEventArgs(WatcherChangeTypes.Changed, ".", name));
+
+	private static void RaiseWatcherEvent(McpProjectService service, FileSystemEventArgs eventArgs)
 	{
 		var monitor = GetMonitor(service);
 		monitor.GetType()
 			.GetMethod("OnChanged", BindingFlags.Instance | BindingFlags.NonPublic)!
-			.Invoke(monitor, [monitor, new FileSystemEventArgs(WatcherChangeTypes.Changed, ".", name)]);
+			.Invoke(monitor, [monitor, eventArgs]);
 	}
 
 	private static bool IsIgnoredMonitorChange(McpProjectService service, string name)

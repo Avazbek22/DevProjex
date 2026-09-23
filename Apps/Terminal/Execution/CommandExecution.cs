@@ -1,6 +1,7 @@
 using DevProjex.Terminal.CommandLine;
 using DevProjex.Terminal.Rendering;
 using DevProjex.Application.Secrets;
+using DevProjex.Infrastructure.Persistence;
 
 namespace DevProjex.Terminal.Execution;
 
@@ -120,6 +121,14 @@ internal static class CommandExecution
 				CommandLineExitCodes.DestinationConflict,
 				exception,
 				exception.Path));
+		}
+		catch (StoreUserDataMigrationUnavailableException exception)
+		{
+			return WriteError(environment, outputOptions, text, new TerminalError(
+				"DPX-STORE-MIGRATION-UNAVAILABLE",
+				text["Terminal.Error.StoreMigrationUnavailable"],
+				ExitCode: CommandLineExitCodes.RuntimeError,
+				Exception: exception));
 		}
 		catch (UnauthorizedAccessException exception)
 		{

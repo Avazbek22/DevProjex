@@ -56,17 +56,35 @@ internal static class JsonStorePersistence
         Func<TDocument, TDocument> normalize,
         out TDocument document,
         out bool requiresRewrite,
-        long maximumDocumentBytes = long.MaxValue)
+        long maximumDocumentBytes = long.MaxValue) =>
+        TryReadNormalized(
+            path,
+            serializerOptions,
+            createDefault,
+            normalize,
+            out document,
+            out requiresRewrite,
+            out _,
+            maximumDocumentBytes);
+
+    public static bool TryReadNormalized<TDocument>(
+        string path,
+        JsonSerializerOptions serializerOptions,
+        Func<TDocument> createDefault,
+        Func<TDocument, TDocument> normalize,
+        out TDocument document,
+        out bool requiresRewrite,
+        out bool temporarilyUnavailable,
+        long maximumDocumentBytes = long.MaxValue,
+        Func<string, bool>? validateJson = null)
     {
         document = createDefault();
         requiresRewrite = false;
+        temporarilyUnavailable = false;
 
-        if (!File.Exists(path))
-            return false;
-
-        TryEnsurePrivateUnixFileMode(path);
         try
         {
+            TryEnsurePrivateUnixFileMode(path);
             string json;
             if (maximumDocumentBytes == long.MaxValue)
             {
@@ -84,6 +102,9 @@ internal static class JsonStorePersistence
             {
                 return false;
             }
+            if (validateJson is not null && !validateJson(json))
+                return false;
+
             var deserialized = JsonSerializer.Deserialize<TDocument>(json, serializerOptions);
             if (deserialized is null)
                 return false;
@@ -96,6 +117,16 @@ internal static class JsonStorePersistence
             requiresRewrite = !string.Equals(originalSnapshot, normalizedSnapshot, StringComparison.Ordinal);
             document = normalized;
             return true;
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return false;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                          System.Security.SecurityException)
+        {
+            temporarilyUnavailable = true;
+            return false;
         }
         catch
         {
@@ -198,7 +229,10 @@ internal static class JsonStorePersistence
             {
 				try
 				{
-					writeOperations.Replace(tempPath, fileSet.PrimaryPath, fileSet.BackupPath);
+					writeOperations.Replace(
+						tempPath,
+						fileSet.PrimaryPath,
+						File.Exists(fileSet.BackupPath) ? null : fileSet.BackupPath);
 				}
 				catch (NotSupportedException)
 				{
@@ -352,21 +386,55 @@ internal static class JsonStorePersistence
 		JsonStoreFileSet fileSet,
 		JsonStoreWriteOperations writeOperations)
     {
+		string? temporaryBackupPath = null;
         try
         {
             // The backup must mirror the final committed primary snapshot.
             // This keeps recovery deterministic across multiple processes.
             if (File.Exists(fileSet.PrimaryPath))
 			{
-				writeOperations.Copy(fileSet.PrimaryPath, fileSet.BackupPath, overwrite: true);
+				temporaryBackupPath = Path.Combine(
+					fileSet.DirectoryPath,
+					$"{fileSet.FileName}.{Guid.NewGuid():N}.bak.tmp");
+				writeOperations.Copy(fileSet.PrimaryPath, temporaryBackupPath, overwrite: false);
+				EnsurePrivateUnixFileMode(temporaryBackupPath);
+				if (File.Exists(fileSet.BackupPath))
+				{
+					try
+					{
+						File.Replace(temporaryBackupPath, fileSet.BackupPath, null);
+					}
+					catch (NotSupportedException)
+					{
+						File.Move(temporaryBackupPath, fileSet.BackupPath, overwrite: true);
+					}
+				}
+				else
+				{
+					File.Move(temporaryBackupPath, fileSet.BackupPath);
+				}
 				EnsurePrivateUnixFileMode(fileSet.BackupPath);
 			}
 			return true;
         }
         catch
-        {
+		{
 			return false;
         }
+		finally
+		{
+			if (temporaryBackupPath is not null)
+			{
+				try
+				{
+					File.Delete(temporaryBackupPath);
+				}
+				catch
+				{
+					// Best-effort cleanup must not change the committed write result.
+				}
+			}
+		}
     }
 
     internal static bool IsDocumentWithinSizeLimit(string path, long maximumDocumentBytes)
@@ -598,14 +666,14 @@ internal enum JsonStoreWriteResult
 }
 
 internal sealed class JsonStoreWriteOperations(
-	Action<string, string, string> replace,
+	Action<string, string, string?> replace,
 	Action<string, string, bool> copy)
 {
 	internal static JsonStoreWriteOperations Default { get; } = new(
 		static (source, destination, backup) => File.Replace(source, destination, backup),
 		static (source, destination, overwrite) => File.Copy(source, destination, overwrite));
 
-	internal void Replace(string source, string destination, string backup) =>
+	internal void Replace(string source, string destination, string? backup) =>
 		replace(source, destination, backup);
 
 	internal void Copy(string source, string destination, bool overwrite) =>

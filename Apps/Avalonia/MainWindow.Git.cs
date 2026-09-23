@@ -925,6 +925,10 @@ public partial class MainWindow
         try
         {
             var branches = await _gitService.GetBranchesAsync(repositoryPath, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!_viewModel.IsGitMode ||
+                !PathComparer.Default.Equals(_currentPath, repositoryPath))
+                return;
 
             _viewModel.GitBranches.Clear();
             foreach (var branch in branches)

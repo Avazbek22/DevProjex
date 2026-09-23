@@ -74,6 +74,86 @@ public sealed class MetricsPipelineIoMeasurementTests(ITestOutputHelper output)
 		Assert.Equal(1, ReadPublishedContentChars(pipeline) - publishedContentCharsBefore);
 	}
 
+	[AvaloniaTheory(Timeout = 15_000)]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task FileMetricsInvalidationDuringAggregation_DoesNotCacheStaleTotals(
+		bool recoverChangedFile)
+	{
+		var rootPath = Path.Combine(Path.GetTempPath(), "DevProjex-Metrics-Content-Revision");
+		var filePath = Path.Combine(rootPath, "Changed.cs");
+		var root = new TreeNodeDescriptor(
+			"root", rootPath, true, false, "folder",
+			[new TreeNodeDescriptor("Changed.cs", filePath, false, false, "csharp", [])]);
+		var currentTree = new BuildTreeResult(root, false, false, [filePath]);
+		var viewModel = CreateViewModel();
+		viewModel.IsProjectLoaded = true;
+		viewModel.TreeNodes.Add(new TreeNodeViewModel(root, parent: null, icon: null));
+		var versions = new ControlledMetricsFileSourceVersionProvider([filePath]);
+		var analyzer = new SyntheticMetricsAnalyzer(versions);
+		var io = new MetricsPipelineIoTestPoint();
+		using var status = new StatusOperationCoordinator(
+			viewModel, () => false, () => viewModel.StatusOperationCalculatingData);
+		using var background = new BackgroundTaskRegistry();
+		using var pipeline = new MetricsPipeline(
+			viewModel, CreateLocalization(), analyzer, new TreeExportService(), status,
+			() => currentTree, () => rootPath,
+			() => new HashSet<string>([rootPath], PathComparer.Default),
+			() => TreeTextFormat.Ascii, () => null, () => 1400,
+			backgroundTasks: background, fileSourceVersionProvider: versions, ioTestPoint: io);
+
+		await pipeline.InitializeFileMetricsCacheSoonAfterFirstPaintAsync(
+			currentTree, TestContext.Current.CancellationToken);
+		await WaitUntilAsync(
+			() => pipeline.HasCompleteBaseline && pipeline.HasStatusMetricsSnapshot,
+			TimeSpan.FromSeconds(5));
+		var initialContentChars = ReadPublishedContentChars(pipeline);
+		pipeline.InvalidateComputedCaches();
+		var snapshotCaptured = NewSignal();
+		var releaseAggregation = NewSignal();
+		var pauseOnce = 1;
+		io.AfterContentMetricsSnapshot = () =>
+		{
+			if (Interlocked.Exchange(ref pauseOnce, 0) != 1)
+				return;
+			snapshotCaptured.TrySetResult();
+			releaseAggregation.Task.WaitAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
+		};
+
+		try
+		{
+			var publication = InvokePublishWithoutRecoveryAsync(pipeline, currentTree);
+			await snapshotCaptured.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+			versions.Change(filePath);
+			if (recoverChangedFile)
+			{
+				pipeline.Recalculate();
+				await WaitUntilAsync(
+					() => analyzer.MetricsCallCount == 2 &&
+						  ReadPublishedContentChars(pipeline) == initialContentChars + 1 &&
+						  background.TrackedTaskCount == 0,
+						TimeSpan.FromSeconds(5));
+			}
+			else
+			{
+				Assert.Equal([filePath], InvokeMissingPathSweep(pipeline, [filePath]));
+			}
+			releaseAggregation.TrySetResult();
+			await publication.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+			var emptyContentChars = ContextRootPresentation.FormatLine(rootPath).Length;
+			var expectedContentChars = recoverChangedFile ? initialContentChars + 1 : emptyContentChars;
+			Assert.Equal(expectedContentChars, ReadPublishedContentChars(pipeline));
+			await InvokePublishWithoutRecoveryAsync(pipeline, currentTree);
+			Assert.Equal(expectedContentChars, ReadPublishedContentChars(pipeline));
+		}
+		finally
+		{
+			releaseAggregation.TrySetResult();
+			io.AfterContentMetricsSnapshot = null;
+		}
+	}
+
 	[AvaloniaTheory(Timeout = 60_000)]
 	[InlineData(100, false)]
 	[InlineData(100, true)]
@@ -219,6 +299,21 @@ public sealed class MetricsPipelineIoMeasurementTests(ITestOutputHelper output)
 			[paths, CancellationToken.None])
 			?? throw new InvalidOperationException("The freshness sweep returned no result."));
 	}
+
+	private static Task InvokePublishWithoutRecoveryAsync(
+		MetricsPipeline pipeline,
+		BuildTreeResult tree)
+	{
+		var method = typeof(MetricsPipeline).GetMethod(
+			"PublishAvailableMetricsWithoutRecoveryAsync",
+			BindingFlags.Instance | BindingFlags.NonPublic)
+			?? throw new MissingMethodException(nameof(MetricsPipeline), "PublishAvailableMetricsWithoutRecoveryAsync");
+		return (Task)(method.Invoke(pipeline, [tree, TestContext.Current.CancellationToken])
+			?? throw new InvalidOperationException("Metrics publication did not start."));
+	}
+
+	private static TaskCompletionSource NewSignal() =>
+		new(TaskCreationOptions.RunContinuationsAsynchronously);
 
 	private static MainWindowViewModel CreateViewModel() =>
 		new(CreateLocalization(), new HelpContentProvider());

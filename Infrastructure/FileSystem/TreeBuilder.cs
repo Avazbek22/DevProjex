@@ -137,7 +137,8 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder, IP
 		options = WithExactRootFolderIdentity(options);
 		var allowedExtensions = new AllowedExtensionLookup(options.AllowedExtensions);
 		ref readonly var rootEntry = ref inventory.GetEntryRef(0);
-		var gitIgnoreContext = options.IgnoreRules.CreateGitIgnoreScanContext(
+		var gitScopeIndex = ProjectionGitScopeIndex.TryCreate(inventory, options.IgnoreRules, cancellationToken);
+		var gitIgnoreContext = gitScopeIndex?.RootContext ?? options.IgnoreRules.CreateGitIgnoreScanContext(
 			rootEntry.FullPath,
 			inventory.DiscoveredGitIgnoreMatchers,
 			inventory.DiscoveredGitTrackedPathIndexes);
@@ -156,6 +157,7 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder, IP
 			options,
 			allowedExtensions,
 			gitIgnoreContext,
+			gitScopeIndex,
 			hasNameFilter,
 			cancellationToken);
 
@@ -188,6 +190,7 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder, IP
 		TreeFilterOptions options,
 		AllowedExtensionLookup allowedExtensions,
 		IgnoreRules.GitIgnoreScanContext gitIgnoreContext,
+		ProjectionGitScopeIndex? gitScopeIndex,
 		bool hasNameFilter,
 		CancellationToken cancellationToken)
 	{
@@ -214,6 +217,7 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder, IP
 				options,
 				allowedExtensions,
 				gitIgnoreContext,
+				gitScopeIndex,
 				hasNameFilter,
 				shouldApplySmartIgnoreForFiles,
 				cancellationToken);
@@ -230,6 +234,7 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder, IP
 				options,
 				allowedExtensions,
 				gitIgnoreContext,
+				gitScopeIndex,
 				hasNameFilter,
 				shouldApplySmartIgnoreForFiles,
 				cancellationToken);
@@ -245,6 +250,7 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder, IP
 		TreeFilterOptions options,
 		AllowedExtensionLookup allowedExtensions,
 		IgnoreRules.GitIgnoreScanContext gitIgnoreContext,
+		ProjectionGitScopeIndex? gitScopeIndex,
 		bool hasNameFilter,
 		bool shouldApplySmartIgnoreForFiles,
 		CancellationToken cancellationToken)
@@ -265,6 +271,7 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder, IP
 					options,
 					allowedExtensions,
 					gitIgnoreContext,
+					gitScopeIndex,
 					hasNameFilter,
 					shouldApplySmartIgnoreForFiles,
 					cancellationToken);
@@ -290,6 +297,7 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder, IP
 				options,
 				allowedExtensions,
 				gitIgnoreContext,
+				gitScopeIndex,
 				hasNameFilter,
 				shouldApplySmartIgnoreForFiles,
 				parallelOptions.CancellationToken);
@@ -318,6 +326,7 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder, IP
 		TreeFilterOptions options,
 		AllowedExtensionLookup allowedExtensions,
 		IgnoreRules.GitIgnoreScanContext gitIgnoreContext,
+		ProjectionGitScopeIndex? gitScopeIndex,
 		bool hasNameFilter,
 		bool shouldApplySmartIgnoreForFiles,
 		CancellationToken cancellationToken)
@@ -332,6 +341,7 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder, IP
 				options,
 				allowedExtensions,
 				gitIgnoreContext,
+				gitScopeIndex,
 				hasNameFilter,
 				cancellationToken);
 
@@ -350,6 +360,7 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder, IP
 		TreeFilterOptions options,
 		AllowedExtensionLookup allowedExtensions,
 		IgnoreRules.GitIgnoreScanContext gitIgnoreContext,
+		ProjectionGitScopeIndex? gitScopeIndex,
 		bool hasNameFilter,
 		CancellationToken cancellationToken)
 	{
@@ -357,7 +368,8 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder, IP
 			inventory,
 			entryIndex,
 			options,
-			gitIgnoreContext);
+			gitIgnoreContext,
+			gitScopeIndex);
 		if (rootFrame is null)
 			return null;
 
@@ -378,7 +390,8 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder, IP
 						inventory,
 						childIndex,
 						options,
-						gitIgnoreContext);
+						frame.GitIgnoreContext,
+						gitScopeIndex);
 					if (childFrame is not null)
 						pending.Add(childFrame.Value);
 				}
@@ -388,7 +401,7 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder, IP
 						in childEntry,
 						options,
 						allowedExtensions,
-						gitIgnoreContext,
+						frame.GitIgnoreContext,
 						hasNameFilter,
 						frame.ShouldApplySmartIgnoreForFiles);
 					if (child is not null)
@@ -421,9 +434,11 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder, IP
 		ProjectTreeInventorySnapshot inventory,
 		int entryIndex,
 		TreeFilterOptions options,
-		IgnoreRules.GitIgnoreScanContext gitIgnoreContext)
+		IgnoreRules.GitIgnoreScanContext gitIgnoreContext,
+		ProjectionGitScopeIndex? gitScopeIndex)
 	{
 		var entry = inventory.GetEntry(entryIndex);
+		gitIgnoreContext = gitScopeIndex?.EnterDirectory(entry, gitIgnoreContext) ?? gitIgnoreContext;
 		var directoryGitIgnore = gitIgnoreContext.Evaluate(entry.FullPath, entry.RelativePath, isDirectory: true, entry.Name);
 		if (ShouldSkipDirectory(in entry, options.IgnoreRules, directoryGitIgnore))
 			return null;
@@ -431,6 +446,7 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder, IP
 		return new DirectoryProjectionFrame(
 			entry,
 			directoryGitIgnore,
+			gitIgnoreContext,
 			options.IgnoreRules.ShouldApplySmartIgnore(entry.FullPath, isDirectory: true));
 	}
 
@@ -580,6 +596,107 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder, IP
 		}
 	}
 
+	private sealed class ProjectionGitScopeIndex(
+		IgnoreRules.GitIgnoreScanContext rootContext,
+		Dictionary<string, DirectoryGitScopes> directoryScopes)
+	{
+		public IgnoreRules.GitIgnoreScanContext RootContext { get; } = rootContext;
+
+		public static ProjectionGitScopeIndex? TryCreate(
+			ProjectTreeInventorySnapshot inventory,
+			IgnoreRules rules,
+			CancellationToken cancellationToken)
+		{
+			var matchers = inventory.DiscoveredGitIgnoreMatchers;
+			var trackedIndexes = inventory.DiscoveredGitTrackedPathIndexes;
+			if (!rules.IsGitIgnoreTraversalEnabled || matchers.Count + trackedIndexes.Count <= 1)
+				return null;
+
+			// Scanner inventories order ancestors before descendants. Keep the original
+			// global-context path for custom inventories whose order carries other precedence.
+			for (var index = 1; index < matchers.Count; index++)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				if (matchers[index].ScopeRootPath.Length < matchers[index - 1].ScopeRootPath.Length)
+					return null;
+			}
+
+			var rootPath = inventory.GetEntry(0).FullPath;
+			if (!matchers.Any(matcher => matcher.ScopeRootPath.Length > rootPath.Length) &&
+			    !trackedIndexes.Any(index => index.RepositoryRootPath.Length > rootPath.Length))
+				return null;
+
+			var directoryPaths = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
+			for (var index = 1; index < inventory.Entries.Count; index++)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				ref readonly var entry = ref inventory.GetEntryRef(index);
+				if (entry.IsDirectory)
+					directoryPaths.Add(entry.FullPath);
+			}
+
+			var rootMatchers = new List<ScopedGitIgnoreMatcher>();
+			var rootTrackedIndexes = new List<GitTrackedPathIndex>();
+			var scopes = new Dictionary<string, DirectoryGitScopes>(ProjectTreePathIdentity.CanonicalComparer);
+			foreach (var matcher in matchers)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				if (directoryPaths.Contains(matcher.ScopeRootPath))
+					GetDirectoryScopes(matcher.ScopeRootPath).Matchers.Add(matcher);
+				else if (matcher.ScopeRootPath.Length <= rootPath.Length)
+					rootMatchers.Add(matcher);
+				else
+					// A noncanonical or missing directory identity may still match through
+					// existing path semantics. Let the established global context resolve it.
+					return null;
+			}
+			foreach (var trackedIndex in trackedIndexes)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				if (directoryPaths.Contains(trackedIndex.RepositoryRootPath))
+					GetDirectoryScopes(trackedIndex.RepositoryRootPath).TrackedIndexes.Add(trackedIndex);
+				else if (trackedIndex.RepositoryRootPath.Length <= rootPath.Length)
+					rootTrackedIndexes.Add(trackedIndex);
+				else
+					return null;
+			}
+
+			// A file sees only its ancestor scopes, as during filesystem discovery. Sharing
+			// one context containing every sibling scope makes projection files × scopes.
+			return new ProjectionGitScopeIndex(
+				rules.CreateGitIgnoreScanContext(rootPath, rootMatchers, rootTrackedIndexes), scopes);
+
+			DirectoryGitScopes GetDirectoryScopes(string path)
+			{
+				if (!scopes.TryGetValue(path, out var scope))
+				{
+					scope = new DirectoryGitScopes();
+					scopes.Add(path, scope);
+				}
+				return scope;
+			}
+		}
+
+		public IgnoreRules.GitIgnoreScanContext EnterDirectory(
+			in ProjectTreeInventoryEntry entry,
+			IgnoreRules.GitIgnoreScanContext inheritedContext)
+		{
+			if (!directoryScopes.TryGetValue(entry.FullPath, out var scopes))
+				return inheritedContext;
+			foreach (var matcher in scopes.Matchers)
+				inheritedContext = inheritedContext.WithScope(matcher, entry.RelativePath);
+			foreach (var index in scopes.TrackedIndexes)
+				inheritedContext = inheritedContext.WithTrackedPathIndex(index);
+			return inheritedContext;
+		}
+	}
+
+	private sealed class DirectoryGitScopes
+	{
+		public List<ScopedGitIgnoreMatcher> Matchers { get; } = [];
+		public List<GitTrackedPathIndex> TrackedIndexes { get; } = [];
+	}
+
 	private struct DirectoryProjectionFrame
 	{
 		private List<FileSystemNode>? _children;
@@ -588,16 +705,19 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder, IP
 		public DirectoryProjectionFrame(
 			ProjectTreeInventoryEntry entry,
 			IgnoreRules.GitIgnoreEvaluation directoryGitIgnore,
+			IgnoreRules.GitIgnoreScanContext gitIgnoreContext,
 			bool shouldApplySmartIgnoreForFiles)
 		{
 			Entry = entry;
 			DirectoryGitIgnore = directoryGitIgnore;
+			GitIgnoreContext = gitIgnoreContext;
 			ShouldApplySmartIgnoreForFiles = shouldApplySmartIgnoreForFiles;
 			_childCapacity = entry.ChildCount;
 		}
 
 		public ProjectTreeInventoryEntry Entry { get; }
 		public IgnoreRules.GitIgnoreEvaluation DirectoryGitIgnore { get; }
+		public IgnoreRules.GitIgnoreScanContext GitIgnoreContext { get; }
 		public bool ShouldApplySmartIgnoreForFiles { get; }
 		public IReadOnlyList<FileSystemNode> Children => _children ?? FileSystemNode.EmptyChildren;
 		public int NextChildOffset { get; set; }
