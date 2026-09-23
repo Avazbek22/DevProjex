@@ -461,6 +461,7 @@ not a unique-test total.
 | MCP batch file continuation options | `6cc00d09` | Generated `get_file` continuation arguments now retain the request's explicit profile and exclusions, including an explicitly empty exclusion list. Without these, a later page could resolve a different selection and fail to read the same file. Two regressions failed before the fix; 5 focused Integration checks passed afterward. |
 | TUI secret-mark publication | `d83f072d` | Failed or canceled context planning no longer replaces marks on the still-active workspace. TUI opening defers mark application until its prepared workspace is published, closing the superseded-open gap while successful direct factory callers retain their marks. Two regressions failed before the fix; 9 focused Terminal checks passed, 1 optional benchmark was skipped, and the existing profile-mark planning Unit invariant passed. |
 | Managed cache trash containment | `7851c6e0` | Startup cleanup and cache-removal paths now reject linked `.staging` or `.trash` components before enumerating, moving, or deleting trash entries. Four deterministic regressions showed external deletion or incorrect movement before the guard; all four and four adjacent normal-cleanup controls passed in Release afterward. Concurrent path replacement remains outside the path-based API's guarantee. |
+| Current-schema profile backup recovery | `4a9ecdd0` | A primary profile document declaring the current schema but missing its required `profiles` object is now invalid, allowing a valid backup to supply existing profiles. Previously lookup returned missing and the next save could overwrite both copies without the old entries. Two regressions failed before the fix; 28 defensive-validation and 7 version-compatibility Unit checks passed afterward. Legacy schema migration is unchanged. |
 
 The CLI dense-search dictionary experiment was intentionally discarded: three 5,000-hit
 process samples per variant gave medians of 475 ms for the prior lookup and 480 ms for
@@ -516,6 +517,11 @@ speedup is claimed.
   Concurrent changes to ancestor directories on Unix are not covered by the final-file
   no-follow open; a strict physical-root guarantee requires descriptor-relative traversal.
   This was not broadened into a late cross-platform I/O rewrite without comparable tests.
+- A local profile with an explicitly empty selected-path list has different established
+  meanings across surfaces: CLI/TUI/MCP select no files, while GUI intentionally treats
+  zero checked tree boxes as the entire tree. Opening such a cross-surface profile in GUI
+  can therefore preview or export all files. Aligning this behavior requires a product
+  decision; this stabilization branch preserves the existing GUI contract.
 
 ## Cleanup status
 
