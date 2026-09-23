@@ -3566,6 +3566,17 @@ internal sealed class DevProjexMcpTools(
 						.ToArray(),
 					StartsNewGroup: false);
 				var rendered = RenderGroupLines(relativePath, content, candidateContext);
+				var storageCharacters = StorageCharacters(relativePath, rendered);
+				if (candidateContext.Lines.Count > 1 &&
+					(rendered.Count == 0 || storageCharacters > MaximumStoredSearchCharacters))
+				{
+					// A very long context line must not hide a shorter matching line.
+					rendered = RenderGroupLines(
+						relativePath,
+						content,
+						candidateContext with { Lines = [line] });
+					storageCharacters = StorageCharacters(relativePath, rendered);
+				}
 				if (rendered.Count == 0)
 					continue;
 
@@ -3605,13 +3616,16 @@ internal sealed class DevProjexMcpTools(
 						ownerOccurrence,
 						repeated),
 					stableText,
-					checked(rendered.Sum(static item => item.Text.Length + Environment.NewLine.Length) +
-							relativePath.Length + Environment.NewLine.Length),
+					storageCharacters,
 					declaration is null ? null : declarationPreviews?.Get(declaration),
 					protectedLines));
 			}
 		}
 	}
+
+	private static int StorageCharacters(string relativePath, IReadOnlyList<McpSearchGroupLine> lines) =>
+		checked(lines.Sum(static line => line.Text.Length + Environment.NewLine.Length) +
+		        relativePath.Length + Environment.NewLine.Length);
 
 	internal static IReadOnlyList<McpSearchRenderedGroup> BuildOrderedSearchGroups(
 		IReadOnlyList<McpSearchCandidate> candidates)

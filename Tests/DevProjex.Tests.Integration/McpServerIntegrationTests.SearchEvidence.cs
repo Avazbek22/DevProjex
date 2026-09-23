@@ -270,6 +270,49 @@ public sealed partial class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task SearchRetainsShortMatchWhenAdjacentContextExceedsStorageLimit()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "LargeContext.txt"), new string('x', 2_000_000) + "\nneedle\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync("search_project", new Dictionary<string, object?>
+		{
+			["pattern"] = "needle",
+			["context_lines"] = 1,
+			["ignore_case"] = false
+		});
+		var text = Text(result);
+
+		Assert.NotEqual(true, result.IsError);
+		McpSearchOutputAssertions.ContainsMatch(text, "LargeContext.txt", 2, "needle");
+		Assert.Contains("matches retained=1/1 · matches written=1", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task SearchMarksOversizedMatchingLineAsPartial()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "LongLine.txt"), "needle" + new string('x', 2_000_000));
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync("search_project", new Dictionary<string, object?>
+		{
+			["pattern"] = "needle",
+			["context_lines"] = 1,
+			["ignore_case"] = false
+		});
+		var text = Text(result);
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.Contains("[Search boundary] partial", text, StringComparison.Ordinal);
+		Assert.Contains("matches retained=0/1 · matches written=0", text, StringComparison.Ordinal);
+		Assert.Contains("limits=retained-characters", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task SearchKeepsCoordinatesAndTextFromOneSnapshotWhenSourceChangesAfterScanning()
 	{
 		using var workspace = new TemporaryDirectory();
