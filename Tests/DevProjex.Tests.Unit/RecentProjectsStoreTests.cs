@@ -847,4 +847,114 @@ public sealed class RecentProjectsStoreTests
 		Assert.Equal(RecentProjectsLoadStatus.TemporarilyUnavailable, result.Status);
 		Assert.Empty(result.Database.RecentFolders);
 	}
+
+	[Fact]
+	public void ReadBlockedPrimary_DoesNotRestoreStaleBackupOrOverwriteRecentHistory()
+	{
+		if (!OperatingSystem.IsWindows())
+		{
+			Assert.Skip("The file-sharing read block requires Windows.");
+			return;
+		}
+
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+		var initialFolder = temp.CreateFolder("Initial");
+		var latestFolder = temp.CreateFolder("Latest");
+		var pendingFolder = temp.CreateFolder("Pending");
+		var initial = store.AddFolder(null, initialFolder);
+		var staleBackup = File.ReadAllBytes(store.GetPath());
+		store.AddFolder(initial, latestFolder);
+		var primaryPath = store.GetPath();
+		var latestPrimary = File.ReadAllBytes(primaryPath);
+		File.WriteAllBytes(primaryPath + ".bak", staleBackup);
+
+		RecentProjectsDb pending;
+		using (new FileStream(primaryPath, FileMode.Open, FileAccess.Write, FileShare.Delete))
+		{
+			var startup = store.LoadForStartupWithStatus(TimeSpan.Zero);
+
+			Assert.Equal(RecentProjectsLoadStatus.TemporarilyUnavailable, startup.Status);
+			Assert.Empty(startup.Database.RecentFolders);
+			pending = store.AddFolder(null, pendingFolder);
+			pending = store.RemoveFolder(pending, initialFolder);
+			Assert.Equal(PathUtility.Normalize(pendingFolder), Assert.Single(pending.RecentFolders).Path);
+			Assert.False(store.EnsureStorageExists());
+			Assert.False(store.TryPersist(null));
+		}
+
+		Assert.Equal(latestPrimary, File.ReadAllBytes(primaryPath));
+		Assert.Equal(staleBackup, File.ReadAllBytes(primaryPath + ".bak"));
+		Assert.Equal(2, store.Load().RecentFolders.Count);
+		Assert.True(store.TryPersist(pending));
+		var recovered = store.Load();
+		Assert.Equal(2, recovered.RecentFolders.Count);
+		Assert.Contains(recovered.RecentFolders, entry => PathComparer.Default.Equals(entry.Path, latestFolder));
+		Assert.Contains(recovered.RecentFolders, entry => PathComparer.Default.Equals(entry.Path, pendingFolder));
+		Assert.DoesNotContain(recovered.RecentFolders, entry => PathComparer.Default.Equals(entry.Path, initialFolder));
+	}
+
+	[Fact]
+	public void ReadBlockedBackup_DoesNotReplaceRecoverableHistoryWithDefaults()
+	{
+		if (!OperatingSystem.IsWindows())
+		{
+			Assert.Skip("The file-sharing read block requires Windows.");
+			return;
+		}
+
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+		var folder = temp.CreateFolder("Recoverable");
+		store.AddFolder(null, folder);
+		var primaryPath = store.GetPath();
+		var backupPath = primaryPath + ".bak";
+		var validBackup = File.ReadAllBytes(backupPath);
+		File.WriteAllText(primaryPath, "{ invalid-primary");
+		var invalidPrimary = File.ReadAllBytes(primaryPath);
+
+		using (new FileStream(backupPath, FileMode.Open, FileAccess.Write, FileShare.Delete))
+		{
+			var startup = store.LoadForStartupWithStatus(TimeSpan.Zero);
+
+			Assert.Equal(RecentProjectsLoadStatus.TemporarilyUnavailable, startup.Status);
+			Assert.Empty(startup.Database.RecentFolders);
+			Assert.False(store.EnsureStorageExists());
+			Assert.False(store.TryPersist(null));
+		}
+
+		Assert.Equal(invalidPrimary, File.ReadAllBytes(primaryPath));
+		Assert.Equal(validBackup, File.ReadAllBytes(backupPath));
+		Assert.Single(store.Load().RecentFolders);
+	}
+
+	[Fact]
+	public void CorruptPrimaryAndBackup_KeepOriginalBytesUntilRecovery()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+		var originalFolder = temp.CreateFolder("Original");
+		var pendingFolder = temp.CreateFolder("Pending");
+		store.AddFolder(null, originalFolder);
+		var primaryPath = store.GetPath();
+		var backupPath = primaryPath + ".bak";
+		var recoverableBackup = File.ReadAllBytes(backupPath);
+		var invalidPrimary = "{ invalid-primary"u8.ToArray();
+		var invalidBackup = "{ invalid-backup"u8.ToArray();
+		File.WriteAllBytes(primaryPath, invalidPrimary);
+		File.WriteAllBytes(backupPath, invalidBackup);
+
+		var pending = store.AddFolder(null, pendingFolder);
+		Assert.Equal(PathUtility.Normalize(pendingFolder), Assert.Single(pending.RecentFolders).Path);
+		Assert.False(store.TryPersist(pending));
+		Assert.False(store.EnsureStorageExists());
+		Assert.Equal(invalidPrimary, File.ReadAllBytes(primaryPath));
+		Assert.Equal(invalidBackup, File.ReadAllBytes(backupPath));
+
+		File.WriteAllBytes(backupPath, recoverableBackup);
+		Assert.True(store.TryPersist(pending));
+		var recovered = store.Load();
+		Assert.Contains(recovered.RecentFolders, entry => PathComparer.Default.Equals(entry.Path, originalFolder));
+		Assert.Contains(recovered.RecentFolders, entry => PathComparer.Default.Equals(entry.Path, pendingFolder));
+	}
 }
