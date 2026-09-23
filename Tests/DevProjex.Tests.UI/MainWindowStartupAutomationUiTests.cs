@@ -4,6 +4,7 @@ using System.Text.Json;
 using DevProjex.Application.Context;
 using DevProjex.Infrastructure.RecentProjects;
 using DevProjex.Infrastructure.ThemePresets;
+using DevProjex.Terminal.DesktopControl;
 
 namespace DevProjex.Tests.UI;
 
@@ -71,6 +72,100 @@ public sealed class MainWindowStartupAutomationUiTests
 		}
 		finally
 		{
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+	}
+
+	[AvaloniaTheory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task DesktopOpen_RegistryWriteFailureDoesNotFailAppliedRequest(bool alreadyLoaded)
+	{
+		using var project = UiTestProject.CreateDefault();
+		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var unavailableRoot = Path.Combine(project.AppDataPath, "unavailable-registry-root");
+		File.WriteAllText(unavailableRoot, string.Empty);
+		var registryRoot = appDataPath;
+		var paths = new DesktopControlPaths(() => registryRoot);
+		var options = DesktopStartupOptions.Default;
+		var services = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath) with
+		{
+			DesktopControlServerFactory = (handler, projectPath, cancellationToken) =>
+				DesktopControlServer.StartAsync(handler, projectPath, paths, cancellationToken)
+		};
+		var window = new MainWindow(options, services);
+		UiTestDriver.TrackTopLevelWindow(window);
+
+		try
+		{
+			window.Show();
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => GetDesktopControlServer(window) is not null,
+				"Desktop control server to publish before the registry becomes unavailable");
+			if (alreadyLoaded)
+			{
+				var initialOpen = await InvokeDesktopInteractionAsync(
+					window,
+					new DesktopOpenProjectRequest(new DesktopOpenRequest(project.RootPath)));
+				Assert.True(initialOpen.Success, initialOpen.ErrorCode ?? "Initial project open failed.");
+			}
+
+			registryRoot = unavailableRoot;
+			var result = await InvokeDesktopInteractionAsync(
+				window,
+				new DesktopOpenProjectRequest(
+					new DesktopOpenRequest(project.RootPath, Language: AppLanguage.Ru)));
+
+			Assert.True(result.Success, result.ErrorCode ?? "Desktop open request failed.");
+			Assert.NotNull(result.State);
+			Assert.True(Assert.IsType<bool>(result.State["projectLoaded"]));
+			Assert.Equal(
+				GetComparablePath(project.RootPath),
+				GetComparablePath(Assert.IsType<string>(result.State["projectPath"])));
+			Assert.True(UiTestDriver.GetViewModel(window).IsProjectLoaded);
+			Assert.Equal(GetComparablePath(project.RootPath), GetComparablePath(GetCurrentPath(window)));
+			Assert.Equal(AppLanguage.Ru, services.Localization.CurrentLanguage);
+		}
+		finally
+		{
+			registryRoot = appDataPath;
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task DesktopOpen_MissingProjectStillReturnsOpenFailure()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var window = CreateStartupWindow(DesktopStartupOptions.Default, appDataPath);
+		Window? dialog = null;
+
+		try
+		{
+			window.Show();
+			var missingPath = Path.Combine(project.RootPath, "missing-project");
+			var requestTask = InvokeDesktopInteractionAsync(
+				window,
+				new DesktopOpenProjectRequest(new DesktopOpenRequest(missingPath)));
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => window.OwnedWindows.Count == 1,
+				"missing-project error dialog to open");
+			dialog = Assert.Single(window.OwnedWindows);
+			await UiTestDriver.CloseTopLevelWindowAsync(dialog);
+			dialog = null;
+
+			var result = await requestTask;
+			Assert.False(result.Success);
+			Assert.Equal("DPX-DESKTOP-PROJECT-OPEN-FAILED", result.ErrorCode);
+			Assert.False(UiTestDriver.GetViewModel(window).IsProjectLoaded);
+		}
+		finally
+		{
+			if (dialog?.IsVisible == true)
+				await UiTestDriver.CloseTopLevelWindowAsync(dialog);
 			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
 		}
 	}
@@ -703,6 +798,12 @@ public sealed class MainWindowStartupAutomationUiTests
 	{
 		var field = typeof(MainWindow).GetField("_currentPath", BindingFlags.Instance | BindingFlags.NonPublic);
 		return Assert.IsType<string>(field?.GetValue(window));
+	}
+
+	private static DesktopControlServer? GetDesktopControlServer(MainWindow window)
+	{
+		var field = typeof(MainWindow).GetField("_desktopControlServer", BindingFlags.Instance | BindingFlags.NonPublic);
+		return field?.GetValue(window) as DesktopControlServer;
 	}
 
 	private static string GetComparablePath(string? path)

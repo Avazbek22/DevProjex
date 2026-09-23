@@ -1234,8 +1234,7 @@ public partial class MainWindow : Window
                 _currentCachedRepoPath = null;
             }
 
-            if (_desktopControlServer is not null)
-                await _desktopControlServer.UpdateProjectAsync(normalizedPath);
+            await UpdateDesktopControlProjectBestEffortAsync(normalizedPath);
             _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: true);
             return true;
         }

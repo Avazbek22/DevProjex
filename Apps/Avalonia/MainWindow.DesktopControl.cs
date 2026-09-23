@@ -1,3 +1,4 @@
+using System.Security;
 using DevProjex.Application.Context;
 using DevProjex.Application.DesktopControl;
 using DevProjex.Avalonia.Coordinators;
@@ -123,9 +124,27 @@ public partial class MainWindow
             _toastService.Show(_localization["Terminal.Diagnostic.TrackedIndexPartial"]);
         await controller.ApplyUiOptionsAsync();
         ActivateDesktop();
-        if (_desktopControlServer is not null)
-            await _desktopControlServer.UpdateProjectAsync(_currentPath, cancellationToken);
+        await UpdateDesktopControlProjectBestEffortAsync(_currentPath, cancellationToken);
         return SuccessState();
+    }
+
+    private async Task UpdateDesktopControlProjectBestEffortAsync(
+        string? projectPath,
+        CancellationToken cancellationToken = default)
+    {
+        var server = _desktopControlServer;
+        if (server is null)
+            return;
+
+        try
+        {
+            await server.UpdateProjectAsync(projectPath, cancellationToken);
+        }
+        catch (Exception exception) when (exception is
+               IOException or UnauthorizedAccessException or SecurityException or NotSupportedException)
+        {
+            Trace.TraceWarning("Desktop control registration update failed: {0}", exception.GetType().Name);
+        }
     }
 
     private async Task WaitForProjectSwitchAvailabilityAsync(CancellationToken cancellationToken)
