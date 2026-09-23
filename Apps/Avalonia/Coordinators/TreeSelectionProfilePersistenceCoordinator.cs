@@ -30,6 +30,7 @@ internal sealed class TreeSelectionProfilePersistenceCoordinator : IDisposable
     private CancellationTokenSource? _delayCts;
     private SelectionPersistenceState _state = new(SelectionPersistencePhase.Idle);
     private long _version;
+    private int _activeWriteCalls;
     private int _disposed;
 
     public event EventHandler? StateChanged;
@@ -181,8 +182,8 @@ internal sealed class TreeSelectionProfilePersistenceCoordinator : IDisposable
     public async Task CancelPendingAndDrainAsync(CancellationToken cancellationToken = default)
     {
         CancelPending();
-        await _writeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        _writeGate.Release();
+        if (await TryEnterWriteAsync(cancellationToken).ConfigureAwait(false))
+            ReleaseWriteGate();
     }
 
     private async Task PersistAfterDelayAsync(long version, CancellationToken cancellationToken)
@@ -209,7 +210,9 @@ internal sealed class TreeSelectionProfilePersistenceCoordinator : IDisposable
         long? expectedVersion,
         CancellationToken cancellationToken)
     {
-        await _writeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        if (!await TryEnterWriteAsync(cancellationToken).ConfigureAwait(false))
+            return true;
+
         try
         {
             PendingSelectionWrite? pending;
@@ -278,8 +281,49 @@ internal sealed class TreeSelectionProfilePersistenceCoordinator : IDisposable
         }
         finally
         {
-            _writeGate.Release();
+            ReleaseWriteGate();
         }
+    }
+
+    private async Task<bool> TryEnterWriteAsync(CancellationToken cancellationToken)
+    {
+        lock (_sync)
+        {
+            if (_disposed != 0)
+                return false;
+
+            _activeWriteCalls++;
+        }
+
+        try
+        {
+            await _writeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            return true;
+        }
+        catch
+        {
+            ExitWriteCall();
+            throw;
+        }
+    }
+
+    private void ReleaseWriteGate()
+    {
+        _writeGate.Release();
+        ExitWriteCall();
+    }
+
+    private void ExitWriteCall()
+    {
+        bool disposeWriteGate;
+        lock (_sync)
+        {
+            _activeWriteCalls--;
+            disposeWriteGate = _disposed != 0 && _activeWriteCalls == 0;
+        }
+
+        if (disposeWriteGate)
+            _writeGate.Dispose();
     }
 
     private void PublishStateForVersion(long version, SelectionPersistenceState state)
@@ -304,11 +348,20 @@ internal sealed class TreeSelectionProfilePersistenceCoordinator : IDisposable
 
     public void Dispose()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0)
-            return;
+        bool disposeWriteGate;
+        lock (_sync)
+        {
+            if (_disposed != 0)
+                return;
+
+            _disposed = 1;
+            disposeWriteGate = _activeWriteCalls == 0;
+        }
 
         CancelPending();
-        _writeGate.Dispose();
+        // Queued calls also retain the gate until their wait and release have completed.
+        if (disposeWriteGate)
+            _writeGate.Dispose();
     }
 
     private sealed record PendingSelectionWrite(

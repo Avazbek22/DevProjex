@@ -262,6 +262,92 @@ public sealed class TreeSelectionProfilePersistenceCoordinatorTests
 		Assert.Equal(["write", "clear"], operations);
 	}
 
+	[Fact]
+	public async Task Dispose_AllowsAnActiveFlushToFinishWithoutReleasingADisposedGate()
+	{
+		var delay = new ControlledDelay();
+		var writeStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		using var coordinator = new TreeSelectionProfilePersistenceCoordinator(
+			async (_, _, _) =>
+			{
+				writeStarted.TrySetResult();
+				await releaseWrite.Task;
+			},
+			delay.WaitAsync);
+
+		coordinator.Schedule(@"C:\Project", ["src"]);
+		var flush = coordinator.FlushAsync(TestContext.Current.CancellationToken);
+		await writeStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+
+		coordinator.Dispose();
+		Assert.False(flush.IsCompleted);
+		releaseWrite.TrySetResult();
+
+		Assert.True(await flush.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+		Assert.Equal(SelectionPersistencePhase.Idle, coordinator.State.Phase);
+	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task Dispose_AllowsQueuedPersistenceCallsToDrain(bool cancelPending)
+	{
+		var delay = new ControlledDelay();
+		var writeStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var writeCount = 0;
+		using var coordinator = new TreeSelectionProfilePersistenceCoordinator(
+			async (_, _, _) =>
+			{
+				writeCount++;
+				writeStarted.TrySetResult();
+				await releaseWrite.Task;
+			},
+			delay.WaitAsync);
+		using var queuedCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+			TestContext.Current.CancellationToken);
+		queuedCancellation.CancelAfter(TimeSpan.FromSeconds(5));
+
+		coordinator.Schedule(@"C:\Project", ["src"]);
+		var activeFlush = coordinator.FlushAsync(TestContext.Current.CancellationToken);
+		await writeStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+		Task queuedCall = cancelPending
+			? coordinator.CancelPendingAndDrainAsync(queuedCancellation.Token)
+			: coordinator.FlushAsync(queuedCancellation.Token);
+		Assert.False(queuedCall.IsCompleted);
+
+		coordinator.Dispose();
+		releaseWrite.TrySetResult();
+		Assert.True(await activeFlush.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+		await queuedCall.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+		Assert.Equal(1, writeCount);
+		Assert.Equal(SelectionPersistencePhase.Idle, coordinator.State.Phase);
+	}
+
+	[Fact]
+	public async Task DisposedCoordinator_IgnoresNewFlushAndDrainRequests()
+	{
+		var delay = new ControlledDelay();
+		var writeCount = 0;
+		using var coordinator = new TreeSelectionProfilePersistenceCoordinator(
+			(_, _, _) =>
+			{
+				writeCount++;
+				return Task.CompletedTask;
+			},
+			delay.WaitAsync);
+
+		coordinator.Dispose();
+		coordinator.Schedule(@"C:\Project", ["src"]);
+
+		Assert.True(await coordinator.FlushAsync(TestContext.Current.CancellationToken));
+		await coordinator.CancelPendingAndDrainAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(0, writeCount);
+		Assert.Equal(SelectionPersistencePhase.Idle, coordinator.State.Phase);
+	}
+
 	private sealed class ControlledDelay
 	{
 		private readonly TaskCompletionSource _release =
