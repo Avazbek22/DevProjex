@@ -1,10 +1,12 @@
+using DevProjex.Infrastructure.ProjectProfiles;
+
 namespace DevProjex.Tests.Terminal;
 
 [Collection(TerminalProcessCollection.Name)]
 public sealed class TerminalPreviewRevisionPtyTests
 {
 	[Fact(Timeout = 90_000)]
-	public async Task CtrlUProjectsAnExplicitlyEmptySelectionUntilCtrlA()
+	public async Task CtrlUShowsUncheckedTreeWhileRetainingWholeTreePreview()
 	{
 		using var project = new TemporaryDirectory();
 		project.WriteFile("first.cs", "internal sealed class First { }");
@@ -54,6 +56,73 @@ public sealed class TerminalPreviewRevisionPtyTests
 		Assert.Contains("[x]", restored, StringComparison.Ordinal);
 		Assert.Contains("Files 2", restored, StringComparison.Ordinal);
 		Assert.Contains("internal sealed class First", restored, StringComparison.Ordinal);
+
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(
+				cancellationToken: TestContext.Current.CancellationToken));
+	}
+
+	[Fact(Timeout = 90_000)]
+	public async Task ExplicitlyEmptyLocalSelectionStartsWithNoPreviewUntilTreeChanges()
+	{
+		using var project = new TemporaryDirectory();
+		project.WriteFile("first.cs", "internal sealed class First { }");
+		project.WriteFile("second.cs", "internal sealed class Second { }");
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			project.Path,
+			[
+				"tui",
+				project.Path,
+				"--profile",
+				"local",
+				"--screen",
+				"inline",
+				"--no-mouse",
+				"--language",
+				"en"
+			],
+			columns: 120,
+			rows: 30,
+			initializeDataRoot: dataRoot => new ProjectProfileStore(() => dataRoot).SaveProfile(
+				project.Path,
+				new ProjectSelectionProfile(
+					SelectedRootFolders: [],
+					SelectedExtensions: [".cs"],
+					SelectedIgnoreOptions: [],
+					ExtensionStates: new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+					{
+						[".cs"] = true
+					},
+					SelectedPaths: [])),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var initial = await terminal.WaitForStableScreenAsync(
+			screen =>
+				screen.Contains("PROJECT TREE", StringComparison.Ordinal) &&
+				screen.Contains("Files 0", StringComparison.Ordinal),
+			"showing an explicitly empty local selection",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains("[ ]", initial, StringComparison.Ordinal);
+
+		await terminal.SendAsync("3", TestContext.Current.CancellationToken);
+		var emptyPreview = await terminal.WaitForStableScreenAsync(
+			screen =>
+				screen.Contains("CONTEXT PREVIEW · Tree + content", StringComparison.Ordinal) &&
+				screen.Contains("Files 0", StringComparison.Ordinal),
+			"showing no content for an explicitly empty local selection",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.DoesNotContain("internal sealed class First", emptyPreview, StringComparison.Ordinal);
+		Assert.DoesNotContain("internal sealed class Second", emptyPreview, StringComparison.Ordinal);
+		Assert.DoesNotContain("DPX-TUI-PREVIEW-FAILED", emptyPreview, StringComparison.Ordinal);
+
+		await terminal.SendCtrlAAsync(TestContext.Current.CancellationToken);
+		var selected = await terminal.WaitForStableScreenAsync(
+			required: "internal sealed class First",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains("Files 2", selected, StringComparison.Ordinal);
+		Assert.Contains("internal sealed class Second", selected, StringComparison.Ordinal);
 
 		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
@@ -118,7 +187,6 @@ public sealed class TerminalPreviewRevisionPtyTests
 		Assert.Contains("<d n=", latestView, StringComparison.Ordinal);
 		Assert.DoesNotContain("LatestContentMarker", latestView, StringComparison.Ordinal);
 
-		await terminal.SendSpaceAsync(TestContext.Current.CancellationToken);
 		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
 		await terminal.SendSpaceAsync(TestContext.Current.CancellationToken);
 		// Switch view while the debounced selection reprojection is still pending. The final
