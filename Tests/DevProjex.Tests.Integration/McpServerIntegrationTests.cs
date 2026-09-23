@@ -7566,6 +7566,39 @@ public sealed partial class McpServerIntegrationTests
 		Assert.Contains(AgentJournalNoticeCodes.Unavailable, call.Notices);
 	}
 
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task ProjectToolMetadataUsesListedAbsoluteProjectAddresses(bool allowRemote)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			allowRemote: allowRemote);
+		var tools = await server.Client.ListToolsAsync(
+			options: null,
+			TestContext.Current.CancellationToken);
+
+		Assert.Contains(
+			"absolute path",
+			tools.Single(static tool => tool.Name == "list_projects").ProtocolTool.Description,
+			StringComparison.Ordinal);
+		foreach (var tool in tools.Where(static tool => tool.Name is
+			"get_tree" or "analyze" or "pack_context" or "search_project" or "related_files" or "get_file"))
+		{
+			Assert.Contains("absolute path returned by list_projects", tool.ProtocolTool.Description,
+				StringComparison.Ordinal);
+			Assert.Contains("unique listed name", tool.ProtocolTool.Description, StringComparison.Ordinal);
+			var address = tool.ProtocolTool.InputSchema.GetProperty("properties")
+				.GetProperty("project").GetProperty("description").GetString();
+			Assert.Contains("absolute path returned by list_projects", address, StringComparison.Ordinal);
+			Assert.Contains("unique listed name", address, StringComparison.Ordinal);
+			Assert.Contains("#index", address, StringComparison.Ordinal);
+		}
+	}
+
 	[Fact]
 	public async Task RelatedFilesStoredResultReportsUninspectedEvidenceInImmediateResponse()
 	{

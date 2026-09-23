@@ -118,7 +118,7 @@ internal sealed class DevProjexMcpTools(
 	private McpProjectService Projects => projectService.Value;
 
 	[Description(
-		"Lists configured local projects, saved profiles, and baseline filters. Use it to choose among roots or inspect active policy; use get_tree instead for structure. Returns indexes, protected names and paths, root types, profiles, and Git/exclusion policy. Local project accepts #index, a unique listed name, or a path; remote URLs require opt-in. This tool has no parameters.")]
+		"Lists configured local projects, saved profiles, and baseline filters. Use it to choose among roots or inspect active policy; use get_tree instead for structure. Returns indexes, protected names and paths, root types, profiles, and Git/exclusion policy. A local project accepts its listed #index, unique name, or absolute path from this result; remote URLs require opt-in. This tool has no parameters.")]
 	public Task<CallToolResult> ListProjects(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken)
