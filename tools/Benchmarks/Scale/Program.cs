@@ -4,6 +4,12 @@ using System.Reflection;
 using DevProjex.Avalonia.ViewModels;
 using DevProjex.Kernel.Contracts;
 
+if (args.FirstOrDefault() == "sparse-projection")
+{
+	SparseProjectionBenchmark.Run(args[1..]);
+	return;
+}
+
 if (args.FirstOrDefault() == "profile-reads")
 {
 	ProfileReadBenchmark.Run(args[1..]);
@@ -11,7 +17,7 @@ if (args.FirstOrDefault() == "profile-reads")
 }
 
 if (args.FirstOrDefault() != "tree-realization")
-	throw new ArgumentException("Specify tree-realization or profile-reads.");
+	throw new ArgumentException("Specify tree-realization, profile-reads, or sparse-projection.");
 
 var repetitions = ReadRepetitions(args[1..]);
 Console.WriteLine(

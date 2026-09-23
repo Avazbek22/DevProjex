@@ -1453,16 +1453,9 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			selectsNoEffectivePaths: false,
 			cancellationToken,
 			effectivePathComparer);
-		var includedFiles = ProjectTreeSelectionProjection.BuildOrderedSelectedFilePathsWithCancellation(
-			root,
-			selectedFullPaths,
-			ensureExists: false,
-			cancellationToken,
-			effectivePathComparer);
-		var includedFolders = BuildOrderedIncludedFolders(
+		var (includedFiles, includedFolders) = BuildOrderedIncludedPaths(
 			includedNodes,
-			cancellationToken,
-			effectivePathComparer);
+			cancellationToken);
 		return (projectedTree, includedFiles, includedFolders);
 	}
 
@@ -1573,20 +1566,23 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			   root with { Children = [] };
 	}
 
-	private static string[] BuildOrderedIncludedFolders(
+	private static (IReadOnlyList<string> Files, IReadOnlyList<string> Folders) BuildOrderedIncludedPaths(
 		IReadOnlyList<TreeNodeDescriptor> includedNodes,
-		CancellationToken cancellationToken,
-		StringComparer? pathComparer = null)
+		CancellationToken cancellationToken)
 	{
+		var includedFiles = new List<string>();
 		var includedFolders = new List<string>();
 		foreach (var node in includedNodes)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			if (node.IsDirectory)
 				includedFolders.Add(node.FullPath);
+			else
+				includedFiles.Add(node.FullPath);
 		}
 
+		CancellationAwareSort.Sort(includedFiles, ProjectTreePathIdentity.CanonicalComparer, cancellationToken);
 		CancellationAwareSort.Sort(includedFolders, ProjectTreePathIdentity.CanonicalComparer, cancellationToken);
-		return includedFolders.ToArray();
+		return (includedFiles, includedFolders.ToArray());
 	}
 }
