@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO.Compression;
 using System.Text.Json;
 using System.Xml.Linq;
 using DevProjex.Application.Diagnostics;
@@ -140,6 +141,67 @@ public sealed class TerminalWorkspaceMetricsLoadTests
 		}
 	}
 
+	[Fact(Timeout = 300_000)]
+	[Trait("Category", "LocalPerformance")]
+	public async Task RealProjectMeasuresProjectExportPlanningWithAndWithoutContentMetrics()
+	{
+		var projectRoot = Environment.GetEnvironmentVariable("DEVPROJEX_GUI_BENCHMARK_ROOT");
+		Assert.SkipWhen(string.IsNullOrWhiteSpace(projectRoot),
+			"Set DEVPROJEX_GUI_BENCHMARK_ROOT for read-only profiling.");
+		projectRoot = Path.GetFullPath(projectRoot!);
+		using var appData = new TemporaryDirectory();
+		using var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		var analyzer = new CountingMetricsAnalyzer(new FileContentAnalyzer());
+		var (controller, _) = CreateMeasuredController(services, analyzer);
+		var cancellationToken = TestContext.Current.CancellationToken;
+		using var state = await controller.OpenAsync(
+			projectRoot,
+			ProjectProfileReference.Standard,
+			cancellationToken);
+		var sourceStamps = CaptureSourceStamps(state.Plan.IncludedFiles);
+
+		async Task<(ProjectContextPlan Plan, BackendMeasurement Measurement)> MeasureAsync(bool contentMetrics)
+		{
+			var callsBefore = analyzer.MetricsCalls;
+			using var pipeline = ContentPipelineDiagnostics.BeginMeasurement();
+			var allocatedBefore = GC.GetTotalAllocatedBytes(precise: true);
+			var started = Stopwatch.GetTimestamp();
+			var plan = contentMetrics
+				? await controller.BuildCurrentPlanAsync(state, cancellationToken)
+				: await controller.BuildReprojectedPlanAsync(
+					state.Plan,
+					state.BuildSelectedRelativePaths(),
+					state.IsEffectiveRootUnchecked,
+					cancellationToken);
+			return (plan, CaptureMeasurement(started, allocatedBefore, callsBefore, analyzer, pipeline.Capture()));
+		}
+
+		for (var iteration = -1; iteration < 5; iteration++)
+		{
+			var firstHasMetrics = iteration % 2 == 0;
+			var first = await MeasureAsync(firstHasMetrics);
+			var second = await MeasureAsync(!firstHasMetrics);
+			var full = firstHasMetrics ? first : second;
+			var deferred = firstHasMetrics ? second : first;
+			Assert.Equal(sourceStamps, CaptureSourceStamps(state.Plan.IncludedFiles));
+			Assert.Equal(full.Plan.IncludedFiles, deferred.Plan.IncludedFiles);
+			Assert.Equal(full.Plan.IncludedBytes, deferred.Plan.IncludedBytes);
+			Assert.Equal(full.Plan.Fingerprint, deferred.Plan.Fingerprint);
+			Assert.Equal(full.Plan.Diagnostics, deferred.Plan.Diagnostics);
+			Assert.Equal(full.Plan.IncludedFiles.Count, full.Measurement.MetricCalls);
+			Assert.Equal(0, deferred.Measurement.MetricCalls);
+			TestContext.Current.TestOutputHelper?.WriteLine(JsonSerializer.Serialize(new
+			{
+				iteration,
+				phase = iteration < 0 ? "warm-up" : "sample",
+				order = firstHasMetrics ? "full-then-deferred" : "deferred-then-full",
+				includedFiles = full.Plan.IncludedFiles.Count,
+				full = full.Measurement,
+				deferred = deferred.Measurement
+			}));
+		}
+	}
+
 	[Fact]
 	public async Task StructuredPreviewAndExactDocumentKeepContentMetricsAfterDeferredOpen()
 	{
@@ -228,6 +290,76 @@ public sealed class TerminalWorkspaceMetricsLoadTests
 		Assert.Empty(empty.IncludedFiles);
 		Assert.Equal(ProjectOutputMetricsReport.Empty, empty.Analysis.Metrics.Content);
 		Assert.Equal(2, analyzer.MetricsCalls);
+	}
+
+	[Fact]
+	public async Task ProjectExportReusesPreparedSelectionWithoutRepeatingContentMetrics()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var output = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		workspace.WriteFile("src/First.cs", "class First {}\n");
+		workspace.WriteFile("src/Second.cs", "class Second {}\n");
+		using var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		var analyzer = new CountingMetricsAnalyzer(new FileContentAnalyzer());
+		var (controller, _) = CreateMeasuredController(services, analyzer);
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+		state.RestoreSelectedRelativePaths(["src/First.cs"]);
+		var destination = Path.Combine(output.Path, "project.zip");
+
+		var summary = await controller.PrepareProjectExportAsync(
+			state,
+			ProjectCopyExportFormat.Zip,
+			destination,
+			TestContext.Current.CancellationToken);
+		Assert.Equal(1, summary.FileCount);
+		Assert.True(summary.Characters > 0);
+		Assert.Equal(1, analyzer.MetricsCalls);
+
+		var written = await controller.ExportProjectAsync(
+			state,
+			ProjectCopyExportFormat.Zip,
+			destination,
+			TestContext.Current.CancellationToken);
+		Assert.Equal(1, analyzer.MetricsCalls);
+		using var archive = ZipFile.OpenRead(written);
+		var file = Assert.Single(archive.Entries, static entry => entry.Name.Length > 0);
+		Assert.EndsWith("/src/First.cs", file.FullName, StringComparison.Ordinal);
+		using var reader = new StreamReader(file.Open());
+		Assert.Equal("class First {}\n", await reader.ReadToEndAsync(TestContext.Current.CancellationToken));
+	}
+
+	[Fact]
+	public async Task PortableProfileSaveProjectsSelectionWithoutReadingContentMetrics()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var output = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		workspace.WriteFile("src/First.cs", "class First {}\n");
+		workspace.WriteFile("src/Second.cs", "class Second {}\n");
+		using var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		var analyzer = new CountingMetricsAnalyzer(new FileContentAnalyzer());
+		var (controller, _) = CreateMeasuredController(services, analyzer);
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+		state.RestoreSelectedRelativePaths(["src/First.cs"]);
+
+		var written = await controller.SavePortableProfileAsync(
+			state,
+			Path.Combine(output.Path, "profile.json"),
+			overwrite: false,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(0, analyzer.MetricsCalls);
+		var loaded = await services.PortableProfileService.LoadAsync(
+			written,
+			TestContext.Current.CancellationToken);
+		Assert.Equal(["src/First.cs"], loaded.SelectedPaths);
 	}
 
 	private static (TerminalWorkspaceController Controller, TerminalServices MeasuredServices)

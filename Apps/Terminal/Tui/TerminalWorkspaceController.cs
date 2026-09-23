@@ -1016,7 +1016,11 @@ public sealed class TerminalWorkspaceController(
 	{
 		ValidateProjectDestinationExtension(format, destination);
 
-		var plan = await BuildCurrentPlanAsync(state, cancellationToken).ConfigureAwait(false);
+		var plan = await BuildReprojectedPlanAsync(
+			state.Plan,
+			state.BuildSelectedRelativePaths(),
+			state.IsEffectiveRootUnchecked,
+			cancellationToken).ConfigureAwait(false);
 		EnsureExportable(plan);
 		var requestedDestination = TerminalWorkspacePathResolver.Resolve(
 			destination,
@@ -1216,7 +1220,11 @@ public sealed class TerminalWorkspaceController(
 		bool overwrite,
 		CancellationToken cancellationToken)
 	{
-		var plan = await BuildCurrentPlanAsync(state, cancellationToken).ConfigureAwait(false);
+		var plan = await BuildReprojectedPlanAsync(
+			state.Plan,
+			state.BuildSelectedRelativePaths(),
+			state.IsEffectiveRootUnchecked,
+			cancellationToken).ConfigureAwait(false);
 		return await services.PortableProfileService
 			.SaveAsync(
 				plan.SourceRoot,
