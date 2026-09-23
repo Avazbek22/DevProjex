@@ -412,6 +412,38 @@ public sealed class ThemeSettingsStoreTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public void ObsoletePrimary_RecoversCurrentBackupBeforeResettingPresets(bool ensureStorageExists)
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new ThemeSettingsStore(() => temp.Path);
+        var customized = store.Load();
+        var edited = CreatePreset(47);
+        store.SetPreset(customized, ThemeVariant.Light, ThemeEffectMode.Mica, edited);
+        customized.SelectedPreset = "Light.Mica";
+        Assert.True(store.TrySave(customized));
+
+        var primaryPath = store.GetPath();
+        WriteDocument(primaryPath, new ThemeSettingsDocument
+        {
+            SchemaVersion = ThemeSettingsStore.CurrentSchemaVersion,
+            DefaultsRevision = ThemeSettingsStore.CurrentDefaultsRevision - 1,
+            SelectedPreset = "Dark.Acrylic",
+            Presets = new Dictionary<string, ThemePreset>()
+        });
+
+        if (ensureStorageExists)
+            Assert.True(store.EnsureStorageExists());
+
+        var recovered = store.LoadForStartup(TimeSpan.FromSeconds(1));
+
+        Assert.Equal("Light.Mica", recovered.SelectedPreset);
+        Assert.Equal(edited, recovered.Presets["Light.Mica"]);
+        Assert.Equal(File.ReadAllText(primaryPath), File.ReadAllText(primaryPath + ".bak"));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public void CurrentSchemaWithoutPresetsObject_RecoversBackupBeforeRewriting(bool includeNullPresets)
     {
         using var temp = new TemporaryDirectory();

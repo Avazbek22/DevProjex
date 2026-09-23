@@ -263,9 +263,6 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
             return CreateFactoryDefaults();
         }
 
-        if (primaryStatus == ThemeDocumentReadStatus.Obsolete)
-            return ResetObsoleteDocument(fileSet, persistReset);
-
         var backupStatus = TryReadCurrent(fileSet.BackupPath, out var backup, out _);
         if (backupStatus == ThemeDocumentReadStatus.Current)
         {
