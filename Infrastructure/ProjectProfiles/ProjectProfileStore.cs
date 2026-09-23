@@ -688,6 +688,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 				Exists: true,
 				stream.Length,
 				info.LastWriteTimeUtc.Ticks,
+				info.CreationTimeUtc.Ticks,
 				read,
 				hash);
 		}
@@ -1292,11 +1293,12 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		bool Exists,
 		long Length,
 		long LastWriteUtcTicks,
+		long CreationUtcTicks,
 		int PrefixLength,
 		ulong PrefixHash)
 	{
-		public static DocumentIdentity Missing { get; } = new(true, false, 0, 0, 0, 0);
-		public static DocumentIdentity Unavailable { get; } = new(false, false, 0, 0, 0, 0);
+		public static DocumentIdentity Missing { get; } = new(true, false, 0, 0, 0, 0, 0);
+		public static DocumentIdentity Unavailable { get; } = new(false, false, 0, 0, 0, 0, 0);
 	}
 
 	private enum ProfileDocumentLoadStatus
