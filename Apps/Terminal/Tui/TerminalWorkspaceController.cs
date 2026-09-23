@@ -669,6 +669,18 @@ public sealed class TerminalWorkspaceController(
 				state.BuildSelectedRelativePaths(),
 				cancellationToken);
 
+	private Task<ProjectContextPlan> BuildContextExportPlanAsync(
+		TerminalWorkspaceState state,
+		ProjectContextDocumentFormat format,
+		CancellationToken cancellationToken) =>
+		format is ProjectContextDocumentFormat.Text or ProjectContextDocumentFormat.Markdown
+			? BuildReprojectedPlanAsync(
+				state.Plan,
+				state.BuildSelectedRelativePaths(),
+				state.IsEffectiveRootUnchecked,
+				cancellationToken)
+			: BuildCurrentPlanAsync(state, cancellationToken);
+
 	public async Task RefreshPreviewAsync(
 		TerminalWorkspaceState state,
 		ProjectContextView view,
@@ -922,7 +934,7 @@ public sealed class TerminalWorkspaceController(
 	{
 		ValidateView(view);
 		ValidateDocumentFormat(format);
-		var plan = await BuildCurrentPlanAsync(state, cancellationToken).ConfigureAwait(false);
+		var plan = await BuildContextExportPlanAsync(state, format, cancellationToken).ConfigureAwait(false);
 		EnsureExportable(plan);
 		var requestedDestination = TerminalWorkspacePathResolver.Resolve(
 			destination,
@@ -961,7 +973,7 @@ public sealed class TerminalWorkspaceController(
 	{
 		ValidateView(view);
 		ValidateDocumentFormat(format);
-		var plan = await BuildCurrentPlanAsync(state, cancellationToken).ConfigureAwait(false);
+		var plan = await BuildContextExportPlanAsync(state, format, cancellationToken).ConfigureAwait(false);
 		EnsureExportable(plan);
 		var (exactDestination, destinationState) = ResolveDestination(
 			plan.SourceRoot,

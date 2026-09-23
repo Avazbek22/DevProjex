@@ -332,6 +332,66 @@ public sealed class TerminalWorkspaceMetricsLoadTests
 		Assert.Equal("class First {}\n", await reader.ReadToEndAsync(TestContext.Current.CancellationToken));
 	}
 
+	[Theory]
+	[InlineData(ProjectContextDocumentFormat.Text)]
+	[InlineData(ProjectContextDocumentFormat.Markdown)]
+	public async Task HumanContextExportKeepsBytesAndSummaryWithoutAnalysisMetrics(
+		ProjectContextDocumentFormat format)
+	{
+		using var workspace = new TemporaryDirectory();
+		using var output = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		workspace.WriteFile("src/First.cs", "class First {}\n");
+		workspace.WriteFile("src/Second.cs", "class Second {}\n");
+		using var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		var analyzer = new CountingMetricsAnalyzer(new FileContentAnalyzer());
+		var (controller, _) = CreateMeasuredController(services, analyzer);
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+		state.RestoreSelectedRelativePaths(["src/First.cs"]);
+		var destination = Path.Combine(
+			output.Path,
+			format == ProjectContextDocumentFormat.Text ? "context.txt" : "context.md");
+
+		var summary = await controller.PrepareContextExportAsync(
+			state,
+			ProjectContextView.TreeContent,
+			format,
+			destination,
+			overwrite: false,
+			TestContext.Current.CancellationToken);
+		Assert.Equal(1, summary.FileCount);
+		Assert.Equal(0, analyzer.MetricsCalls);
+
+		var written = await controller.ExportContextAsync(
+			state,
+			ProjectContextView.TreeContent,
+			format,
+			destination,
+			overwrite: false,
+			TestContext.Current.CancellationToken);
+		Assert.Equal(0, analyzer.MetricsCalls);
+		var actual = await File.ReadAllBytesAsync(written, TestContext.Current.CancellationToken);
+		var outputMetrics = ExportOutputMetricsCalculator.FromText(Encoding.UTF8.GetString(actual));
+		Assert.Equal(outputMetrics.Chars, summary.Characters);
+		Assert.Equal(outputMetrics.Tokens, summary.EstimatedTokens);
+
+		var fullPlan = await controller.BuildCurrentPlanAsync(
+			state,
+			TestContext.Current.CancellationToken);
+		Assert.Equal(1, analyzer.MetricsCalls);
+		using var expected = new MemoryStream();
+		await services.ContextDocumentService.WriteCompleteAsync(
+			fullPlan,
+			ProjectContextView.TreeContent,
+			format,
+			expected,
+			TestContext.Current.CancellationToken);
+		Assert.Equal(expected.ToArray(), actual);
+	}
+
 	[Fact]
 	public async Task PortableProfileSaveProjectsSelectionWithoutReadingContentMetrics()
 	{
