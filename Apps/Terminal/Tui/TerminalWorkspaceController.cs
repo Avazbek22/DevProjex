@@ -1024,6 +1024,21 @@ public sealed class TerminalWorkspaceController(
 		string destination,
 		bool overwrite,
 		CancellationToken cancellationToken,
+		IProgress<ProjectCopyExportProgress>? progress = null) =>
+		(await ExportProjectResultAsync(
+			state,
+			format,
+			destination,
+			overwrite,
+			cancellationToken,
+			progress).ConfigureAwait(false)).DestinationPath;
+
+	internal async Task<ProjectCopyExportResult> ExportProjectResultAsync(
+		TerminalWorkspaceState state,
+		ProjectCopyExportFormat format,
+		string destination,
+		bool overwrite,
+		CancellationToken cancellationToken,
 		IProgress<ProjectCopyExportProgress>? progress = null)
 	{
 		ValidateProjectDestinationExtension(format, destination);
@@ -1064,7 +1079,7 @@ public sealed class TerminalWorkspaceController(
 				progress,
 				cancellationToken: cancellationToken)
 			.ConfigureAwait(false);
-		return result.DestinationPath;
+		return result;
 	}
 
 	public async Task<TerminalExportSummary> PrepareProjectExportAsync(
