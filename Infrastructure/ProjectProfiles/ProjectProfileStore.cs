@@ -1232,6 +1232,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			return false;
 		if (!root.TryGetProperty("profiles", out var profilesElement))
 		{
+			if (sourceSchemaVersion == CurrentSchemaVersion)
+				return false;
 			requiresRewrite = sourceSchemaVersion != CurrentSchemaVersion;
 			return true;
 		}

@@ -45,6 +45,63 @@ public sealed class ProjectProfileDefensiveValidationTests
 	}
 
 	[Fact]
+	public void CurrentSchemaWithoutProfiles_RecoversExistingProfileFromBackup()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var appData = workspace.CreateFolder("app-data");
+		var store = new ProjectProfileStore(() => appData);
+		Assert.True(store.TrySaveProfile(
+			project,
+			new ProjectSelectionProfile([], [], [], SelectedPaths: ["src"])));
+		var primaryPath = store.GetPath();
+		using var savedBackup = JsonDocument.Parse(File.ReadAllText(primaryPath + ".bak"));
+		var schemaVersion = savedBackup.RootElement.GetProperty("schemaVersion").GetInt32();
+		File.WriteAllText(primaryPath, JsonSerializer.Serialize(new { schemaVersion }));
+
+		var lookup = store.LookupProfile(project, TimeSpan.FromSeconds(1));
+
+		Assert.Equal(ProjectProfileLookupStatus.Found, lookup.Status);
+		Assert.Equal(ProjectProfileLookupStatus.InvalidStorage, lookup.RecoveryStatus);
+		Assert.Equal(["src"], lookup.Profile!.SelectedPaths);
+		using var backup = JsonDocument.Parse(File.ReadAllText(primaryPath + ".bak"));
+		Assert.True(backup.RootElement.GetProperty("profiles")
+			.TryGetProperty(PathUtility.Normalize(project), out _));
+	}
+
+	[Fact]
+	public void CurrentSchemaWithoutProfiles_SavePreservesExistingBackupProfiles()
+	{
+		using var workspace = new TemporaryDirectory();
+		var existingProject = workspace.CreateFolder("existing");
+		var newProject = workspace.CreateFolder("new");
+		var appData = workspace.CreateFolder("app-data");
+		var store = new ProjectProfileStore(() => appData);
+		Assert.True(store.TrySaveProfile(
+			existingProject,
+			new ProjectSelectionProfile([], [], [], SelectedPaths: ["src"])));
+		var primaryPath = store.GetPath();
+		using var savedBackup = JsonDocument.Parse(File.ReadAllText(primaryPath + ".bak"));
+		var schemaVersion = savedBackup.RootElement.GetProperty("schemaVersion").GetInt32();
+		File.WriteAllText(primaryPath, JsonSerializer.Serialize(new { schemaVersion }));
+
+		Assert.True(store.TrySaveProfile(
+			newProject,
+			new ProjectSelectionProfile([], [], [], SelectedPaths: ["tests"])));
+
+		var existingLookup = store.LookupProfile(existingProject, TimeSpan.FromSeconds(1));
+		var newLookup = store.LookupProfile(newProject, TimeSpan.FromSeconds(1));
+		Assert.Equal(ProjectProfileLookupStatus.Found, existingLookup.Status);
+		Assert.Equal(ProjectProfileLookupStatus.Found, newLookup.Status);
+		Assert.Equal(["src"], existingLookup.Profile!.SelectedPaths);
+		Assert.Equal(["tests"], newLookup.Profile!.SelectedPaths);
+		using var backup = JsonDocument.Parse(File.ReadAllText(primaryPath + ".bak"));
+		var profiles = backup.RootElement.GetProperty("profiles");
+		Assert.True(profiles.TryGetProperty(PathUtility.Normalize(existingProject), out _));
+		Assert.True(profiles.TryGetProperty(PathUtility.Normalize(newProject), out _));
+	}
+
+	[Fact]
 	public void Utf8BomStorage_LoadsNormally()
 	{
 		using var workspace = new TemporaryDirectory();
