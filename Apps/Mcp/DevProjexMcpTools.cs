@@ -1564,11 +1564,15 @@ internal sealed class DevProjexMcpTools(
 					if (!evidenceBySource.TryGetValue(file.Path, out var sourceEvidence))
 						return ValueTask.CompletedTask;
 					var redactedLines = new HashSet<int>();
+					var lineCursor = new McpRelatedEvidenceLineCursor(
+						file.Content,
+						sourceEvidence.Select(static item => item.Site.Line));
+					var protectedRanges = new McpRelatedEvidenceRangeIndex(file.ReplacementRanges);
 					foreach (var item in sourceEvidence)
 					{
 						cancellationToken.ThrowIfCancellationRequested();
-						if (TryReadLine(file.Content, item.Site.Line, out var line, out var start, out var end) &&
-							!file.ReplacementRanges.Any(range => range.Start < end && range.End > start) &&
+						if (lineCursor.TryReadLine(item.Site.Line, out var line, out var start, out var end) &&
+							!protectedRanges.Intersects(start, end) &&
 							line.Contains(item.Edge.Reference, StringComparison.Ordinal))
 						{
 							continue;
@@ -1634,37 +1638,6 @@ internal sealed class DevProjexMcpTools(
 		EvidenceLayer.TypeReference => "type reference",
 		_ => "reference"
 	};
-
-	private static bool TryReadLine(
-		string content,
-		int lineNumber,
-		out string line,
-		out int lineStart,
-		out int lineEnd)
-	{
-		line = string.Empty;
-		lineStart = 0;
-		lineEnd = 0;
-		if (lineNumber < 1)
-			return false;
-		var start = 0;
-		for (var current = 1; current < lineNumber; current++)
-		{
-			start = content.IndexOf('\n', start);
-			if (start < 0)
-				return false;
-			start++;
-		}
-		var end = content.IndexOf('\n', start);
-		if (end < 0)
-			end = content.Length;
-		if (end > start && content[end - 1] == '\r')
-			end--;
-		line = content[start..end];
-		lineStart = start;
-		lineEnd = end;
-		return true;
-	}
 
 	[Description(
 		"Reads selected file text after mandatory secret and configured private-data replacement. Use it after get_tree or search_project; use pack_context for broad multi-file context. Pass path for one page or requests for up to eight files and sixteen whole-file, range, or symbol selections; forms are exclusive. Send one batched call whenever you want more than one file, range, or known symbol: requests=[{\"path\":\"src/a.ts\",\"symbol\":\"Router.load\"}]. Every item reports ok, partial, not-returned, or unavailable; overlaps merge under the shared 1,000-line/50,000-character limit. Coordinates address returned text; start_column continues a scalar page.")]
