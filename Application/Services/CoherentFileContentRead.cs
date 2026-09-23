@@ -53,28 +53,45 @@ internal readonly record struct FileContentIdentity(long Length, long LastWriteT
 
 internal readonly record struct IdentifiedFileContentMetricsResult(
 	FileContentMetricsResult Result,
-	FileContentIdentity? Identity);
+	FileContentIdentity? Identity)
+{
+	internal bool IsStable { get; init; }
+	internal FileContentIdentity? StableIdentity => IsStable ? Identity : null;
+}
 
 internal readonly record struct IdentifiedContentReadFact(
 	ContentReadFact Fact,
 	FileContentIdentity? Identity)
 {
+	internal bool IsStable { get; init; }
+	internal FileContentIdentity? StableIdentity => IsStable ? Identity : null;
+
 	internal static IdentifiedContentReadFact Unidentified(FileContentClassification classification) =>
 		new(new ContentReadFact(null, classification, null, null), null);
 }
 
 internal readonly record struct IdentifiedCompleteTextFileBuffer(
 	ICompleteTextFileBuffer Buffer,
-	FileContentIdentity? Identity);
+	FileContentIdentity? Identity)
+{
+	internal bool IsStable { get; init; }
+	internal FileContentIdentity? StableIdentity => IsStable ? Identity : null;
+}
 
 internal readonly record struct BudgetedContentReadResult(
 	ContentReadFact Fact,
 	FileContentIdentity? Identity,
-	WeightedByteBudget.Lease? Lease);
+	WeightedByteBudget.Lease? Lease)
+{
+	internal bool IsStable { get; init; }
+	internal FileContentIdentity? StableIdentity => IsStable ? Identity : null;
+}
 
 /// <summary>
 /// Internal prewarm contract that opens once, reserves from that handle's length, and only then
 /// materializes content. Other analyzer implementations use the conservative fallback budget.
+/// StableIdentity is present only when that handle's metadata agrees before and after reading;
+/// cache consumers must still validate the path because atomic replacement can change its target.
 /// </summary>
 internal interface IPrewarmFileContentAnalyzer
 {
@@ -92,7 +109,9 @@ internal interface IPrewarmFileContentAnalyzer
 
 /// <summary>
 /// Internal file-reading contract for consumers whose cache metadata must describe the same
-/// handle that supplied the inspected bytes.
+/// handle that supplied the inspected bytes. Identity preserves the after-read observation;
+/// StableIdentity additionally requires matching metadata before reading. An absent StableIdentity
+/// must not be replaced with a later path observation when deciding whether to cache these bytes.
 /// </summary>
 internal interface ICoherentFileContentAnalyzer
 {
