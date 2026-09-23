@@ -91,8 +91,9 @@ internal sealed class McpProjectSourceResolver : IDisposable
 				$"{McpErrorCodes.InvalidArguments}: 'branch' is not a valid Git branch name.");
 		}
 
+		var cacheSourceIdentity = RepositoryUrlUtility.ToSafeSourceIdentity(project);
 		var key = new RemoteProjectKey(
-			RepositoryUrlUtility.GetComparisonKey(safeUrl),
+			RepositoryUrlUtility.GetSourceCacheKey(cacheSourceIdentity),
 			branch ?? string.Empty);
 		var reservationHeld = false;
 		lock (_sync)
@@ -115,7 +116,7 @@ internal sealed class McpProjectSourceResolver : IDisposable
 
 		try
 		{
-			return await AcquireRemoteAsync(project!, safeUrl, branch, key, cancellationToken)
+			return await AcquireRemoteAsync(project!, safeUrl, cacheSourceIdentity, branch, key, cancellationToken)
 				.ConfigureAwait(false);
 		}
 		finally
@@ -184,6 +185,7 @@ internal sealed class McpProjectSourceResolver : IDisposable
 	private async Task<McpResolvedProjectSource> AcquireRemoteAsync(
 		string sourceUrl,
 		string safeUrl,
+		string cacheSourceIdentity,
 		string? branch,
 		RemoteProjectKey key,
 		CancellationToken cancellationToken)
@@ -194,7 +196,7 @@ internal sealed class McpProjectSourceResolver : IDisposable
 		{
 			services = _remoteServices.Value;
 			await using (await services.RepoCacheService
-				.AcquireRepositoryOperationAsync(safeUrl, cancellationToken)
+				.AcquireRepositoryOperationAsync(cacheSourceIdentity, cancellationToken)
 				.ConfigureAwait(false))
 			{
 				lock (_sync)
@@ -205,6 +207,7 @@ internal sealed class McpProjectSourceResolver : IDisposable
 
 				var cached = await TryAcquireSessionAsync(
 					services.RepoCacheService,
+					cacheSourceIdentity,
 					safeUrl,
 					branch,
 					cancellationToken).ConfigureAwait(false);
@@ -245,7 +248,8 @@ internal sealed class McpProjectSourceResolver : IDisposable
 
 				var session = await TryAcquireSessionAsync(
 					services.RepoCacheService,
-					repositoryUrl,
+					cacheSourceIdentity,
+					safeUrl,
 					branch,
 					cancellationToken).ConfigureAwait(false);
 				if (session is null)
@@ -326,13 +330,14 @@ internal sealed class McpProjectSourceResolver : IDisposable
 
 	private static async Task<IRepositoryCacheSession?> TryAcquireSessionAsync(
 		IRepoCacheService cache,
+		string cacheSourceIdentity,
 		string safeUrl,
 		string? branch,
 		CancellationToken cancellationToken)
 	{
 		try
 		{
-			return await cache.TryAcquireRepositorySessionAsync(safeUrl, branch, cancellationToken)
+			return await cache.TryAcquireRepositorySessionAsync(cacheSourceIdentity, branch, cancellationToken)
 				.ConfigureAwait(false);
 		}
 		catch (RepositoryBranchUnavailableException)

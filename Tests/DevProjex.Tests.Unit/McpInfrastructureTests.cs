@@ -1130,6 +1130,74 @@ public sealed class McpInfrastructureTests
 		Assert.All(cache.Sessions, static session => Assert.Equal(1, session.DisposeCount));
 	}
 
+	[Fact(Timeout = 15_000)]
+	public async Task AuthenticatedRemoteSourcesUseCredentialFreeAccountIdentities()
+	{
+		using var workspace = new TemporaryDirectory();
+		var local = workspace.CreateFolder("local");
+		var aliceRoot = workspace.CreateFolder("cache/alice");
+		var bobRoot = workspace.CreateFolder("cache/bob");
+		const string aliceSource = "https://alice:alice-secret@example.test/owner/shared.git";
+		const string bobSource = "https://bob:bob-secret@example.test/owner/shared.git";
+		const string aliceIdentity = "https://alice@example.test/owner/shared.git";
+		const string bobIdentity = "https://bob@example.test/owner/shared.git";
+		var cache = new TrackingRemoteCache(new Dictionary<string, string>(StringComparer.Ordinal)
+		{
+			[aliceIdentity] = aliceRoot,
+			[bobIdentity] = bobRoot
+		});
+		using var resolver = new McpProjectSourceResolver(
+			new McpRootRegistry([local]),
+			allowRemote: true,
+			() => new McpRemoteProjectServices(cache, new GitRepositoryService()));
+
+		var alice = await resolver.ResolveAsync(aliceSource, branch: null, TestContext.Current.CancellationToken);
+		var bob = await resolver.ResolveAsync(bobSource, branch: null, TestContext.Current.CancellationToken);
+		var repeatedAlice = await resolver.ResolveAsync(aliceSource, branch: null, TestContext.Current.CancellationToken);
+
+		Assert.Equal(PathUtility.Normalize(aliceRoot), alice.Root);
+		Assert.Equal(PathUtility.Normalize(bobRoot), bob.Root);
+		Assert.NotSame(alice, bob);
+		Assert.Same(alice, repeatedAlice);
+		Assert.Equal(2, cache.AcquireSessionCallCount);
+		Assert.Equal(new[] { aliceIdentity, bobIdentity }, cache.OperationUrls);
+		Assert.Equal(new[] { aliceIdentity, bobIdentity }, cache.Sessions.Select(static session => session.RepositoryUrl));
+		Assert.DoesNotContain("secret", string.Join(' ', cache.Sessions.Select(static session => session.RepositoryUrl)),
+			StringComparison.Ordinal);
+		Assert.Equal("https://example.test/owner/shared.git", alice.Address);
+		Assert.Equal(alice.Address, bob.Address);
+	}
+
+	[Fact]
+	public async Task AuthenticatedRemoteBranchFailureUsesCredentialFreeDisplay()
+	{
+		using var workspace = new TemporaryDirectory();
+		var local = workspace.CreateFolder("local");
+		var cachedRoot = workspace.CreateFolder("cache/alice");
+		const string source = "https://alice:alice-secret@example.test/owner/shared.git";
+		const string identity = "https://alice@example.test/owner/shared.git";
+		var cache = new TrackingRemoteCache(new Dictionary<string, string>(StringComparer.Ordinal)
+		{
+			[identity] = cachedRoot
+		})
+		{
+			RejectedBranch = "missing"
+		};
+		using var resolver = new McpProjectSourceResolver(
+			new McpRootRegistry([local]),
+			allowRemote: true,
+			() => new McpRemoteProjectServices(cache, new GitRepositoryService()));
+
+		var failure = await Assert.ThrowsAsync<McpToolException>(() =>
+			resolver.ResolveAsync(source, "missing", TestContext.Current.CancellationToken));
+
+		Assert.Equal(McpErrorCodes.RemoteFailed, failure.Code);
+		Assert.Contains("https://example.test/owner/shared.git", failure.Message, StringComparison.Ordinal);
+		Assert.DoesNotContain("alice", failure.Message, StringComparison.Ordinal);
+		Assert.DoesNotContain("secret", failure.Message, StringComparison.Ordinal);
+		Assert.Equal(new[] { identity }, cache.OperationUrls);
+	}
+
 	[Fact]
 	public async Task ConcurrentRemoteSourceReservationsShareAKeyAndKeepTheHardCap()
 	{
@@ -2488,6 +2556,7 @@ public sealed class McpInfrastructureTests
 	{
 		private readonly object _sync = new();
 		private readonly List<TrackingRemoteSession> _sessions = [];
+		private readonly List<string> _operationUrls = [];
 		private int _acquireSessionCallCount;
 		private int _disposeCount;
 
@@ -2503,6 +2572,15 @@ public sealed class McpInfrastructureTests
 		}
 		public int AcquireSessionCallCount => Volatile.Read(ref _acquireSessionCallCount);
 		public int DisposeCount => Volatile.Read(ref _disposeCount);
+		public string? RejectedBranch { get; init; }
+		public IReadOnlyList<string> OperationUrls
+		{
+			get
+			{
+				lock (_sync)
+					return _operationUrls.ToArray();
+			}
+		}
 		public Task? SessionGate { get; init; }
 
 		public async Task<IRepositoryCacheSession?> TryAcquireRepositorySessionAsync(
@@ -2511,6 +2589,8 @@ public sealed class McpInfrastructureTests
 			CancellationToken cancellationToken = default)
 		{
 			Interlocked.Increment(ref _acquireSessionCallCount);
+			if (string.Equals(branch, RejectedBranch, StringComparison.Ordinal) && branch is not null)
+				throw new RepositoryBranchUnavailableException(branch, RepositoryBranchUnavailableReason.NotFound);
 			if (SessionGate is not null)
 				await SessionGate.WaitAsync(cancellationToken);
 			var session = new TrackingRemoteSession(repositories[repositoryUrl], repositoryUrl, branch);
@@ -2524,6 +2604,8 @@ public sealed class McpInfrastructureTests
 			CancellationToken cancellationToken = default)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
+			lock (_sync)
+				_operationUrls.Add(repositoryUrl);
 			return Task.FromResult<IAsyncDisposable>(NoopAsyncDisposable.Instance);
 		}
 
