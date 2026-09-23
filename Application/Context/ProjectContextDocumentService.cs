@@ -62,6 +62,7 @@ public sealed class ProjectContextDocumentService(
 	internal const long MaximumCompleteSnapshotReadAheadRetainedBytes = 4L * 1024 * 1024;
 	private const long MaximumBoundedReadAheadRetainedBytes = 4L * 1024 * 1024;
 	private static readonly UTF8Encoding Utf8WithoutBom = new(encoderShouldEmitUTF8Identifier: false);
+	private static readonly OutputPathRedactionDecision BoundedPrivatePathRedaction = new(string.Empty, Keep: false);
 	private static readonly RepositoryWebPathPresentationService WebPathPresentation = new();
 
 	public async Task<string> BuildAsync(
@@ -1975,7 +1976,7 @@ public sealed class ProjectContextDocumentService(
 				plan.SourceRoot,
 				plan.ProjectedTree,
 				TreeTextFormat.Ascii,
-				GetDocumentRoot(plan),
+				GetDocumentRoot(plan, protectPrivateData: true),
 				GetProjectName(plan),
 				includeRootPath: true,
 				cancellationToken: cancellationToken));
@@ -2009,7 +2010,7 @@ public sealed class ProjectContextDocumentService(
 				plan.SourceRoot,
 				plan.ProjectedTree,
 				TreeTextFormat.Ascii,
-				GetDocumentRoot(plan),
+				GetDocumentRoot(plan, protectPrivateData: true),
 				GetProjectName(plan),
 				includeRootPath: true,
 				cancellationToken: cancellationToken);
@@ -2067,7 +2068,7 @@ public sealed class ProjectContextDocumentService(
 		writer.WriteNumber("schemaVersion", SchemaVersion);
 		writer.WriteString("kind", Kind);
 		writer.WriteStartObject("project");
-		writer.WriteString("root", NormalizePath(GetDocumentRoot(plan)));
+		writer.WriteString("root", NormalizePath(GetDocumentRoot(plan, protectPrivateData: true)));
 		writer.WriteString("name", GetProjectName(plan));
 		WriteRepositorySource(writer, plan.SourceIdentity);
 		writer.WriteEndObject();
@@ -2098,7 +2099,7 @@ public sealed class ProjectContextDocumentService(
 			writer.WriteEndObject();
 		}
 		writer.WriteEndArray();
-		WriteDiagnostics(writer, plan.Diagnostics);
+		WriteDiagnostics(writer, plan.Diagnostics, pathRedaction: GetBoundedPathRedactionDecision(plan));
 		if (truncated)
 			writer.WriteBoolean("truncated", true);
 		writer.WriteString("fingerprint", plan.Fingerprint);
@@ -2132,7 +2133,10 @@ public sealed class ProjectContextDocumentService(
 		writer.WriteAttributeString("schemaVersion", XmlConvert.ToString(SchemaVersion));
 		writer.WriteAttributeString("kind", Kind);
 		writer.WriteStartElement("project");
-		WriteSanitizedXmlElementString(writer, "root", NormalizePath(GetDocumentRoot(plan)));
+		WriteSanitizedXmlElementString(
+			writer,
+			"root",
+			NormalizePath(GetDocumentRoot(plan, protectPrivateData: true)));
 		WriteSanitizedXmlElementString(writer, "name", GetProjectName(plan));
 		WriteRepositorySourceXml(writer, plan.SourceIdentity);
 		writer.WriteEndElement();
@@ -2160,6 +2164,7 @@ public sealed class ProjectContextDocumentService(
 			writer.WriteEndElement();
 		}
 		writer.WriteEndElement();
+		var pathRedaction = GetBoundedPathRedactionDecision(plan);
 		writer.WriteStartElement("diagnostics");
 		foreach (var diagnostic in plan.Diagnostics)
 		{
@@ -2167,7 +2172,10 @@ public sealed class ProjectContextDocumentService(
 			WriteSanitizedXmlAttributeString(writer, "code", diagnostic.Code);
 			writer.WriteAttributeString("severity", ToToken(diagnostic.Severity));
 			if (!string.IsNullOrWhiteSpace(diagnostic.Path))
-				WriteSanitizedXmlAttributeString(writer, "path", NormalizePath(diagnostic.Path));
+				WriteSanitizedXmlAttributeString(
+					writer,
+					"path",
+					ResolveDiagnosticPath(diagnostic.Path, pathMapper: null, pathRedaction: pathRedaction));
 			WriteSanitizedXmlString(writer, diagnostic.Message);
 			writer.WriteEndElement();
 		}
@@ -2915,6 +2923,9 @@ public sealed class ProjectContextDocumentService(
 			displayRootPath,
 			protectPrivateData && plan.Selection.HidePrivateData == true);
 	}
+
+	private static OutputPathRedactionDecision? GetBoundedPathRedactionDecision(ProjectContextPlan plan) =>
+		plan.Selection.HidePrivateData == true ? BoundedPrivatePathRedaction : null;
 
 	private static string GetDocumentRoot(
 		ProjectContextPlan plan,
