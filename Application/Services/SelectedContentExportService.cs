@@ -36,7 +36,8 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		Func<string, string>? displayPathMapper,
 		ContentTransformationContext? transformationContext = null,
 		string? displayRootPath = null,
-		OutputPathRedactionDecision? outputPathRedaction = null)
+		OutputPathRedactionDecision? outputPathRedaction = null,
+		string? projectRoot = null)
 		=> (await BuildCoreAsync(
 			filePaths,
 			cancellationToken,
@@ -47,7 +48,8 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 			transformationContext,
 			publishCompressionSnapshot: true,
 			displayRootPath,
-			outputPathRedaction).ConfigureAwait(false)).Text;
+			outputPathRedaction,
+			projectRoot: projectRoot).ConfigureAwait(false)).Text;
 
 	public Task<SelectedContentExportResult> BuildResultAsync(
 		IEnumerable<string> filePaths,
@@ -55,7 +57,8 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		Func<string, string>? displayPathMapper,
 		ContentTransformationContext? transformationContext,
 		string? displayRootPath = null,
-		OutputPathRedactionDecision? outputPathRedaction = null) =>
+		OutputPathRedactionDecision? outputPathRedaction = null,
+		string? projectRoot = null) =>
 		BuildCoreAsync(
 			filePaths,
 			cancellationToken,
@@ -66,7 +69,8 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 			transformationContext,
 			publishCompressionSnapshot: true,
 			displayRootPath,
-			outputPathRedaction);
+			outputPathRedaction,
+			projectRoot: projectRoot);
 
 	public async Task WriteAsync(
 		Stream destination,
@@ -75,7 +79,8 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		Func<string, string>? displayPathMapper,
 		ContentTransformationContext? transformationContext = null,
 		string? displayRootPath = null,
-		OutputPathRedactionDecision? outputPathRedaction = null)
+		OutputPathRedactionDecision? outputPathRedaction = null,
+		string? projectRoot = null)
 	{
 		ArgumentNullException.ThrowIfNull(destination);
 		if (!destination.CanWrite)
@@ -98,7 +103,8 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 			publishCompressionSnapshot: true,
 			displayRootPath,
 			outputPathRedaction,
-			output).ConfigureAwait(false);
+			output,
+			projectRoot).ConfigureAwait(false);
 	}
 
 	public async Task<string> BuildBoundedPreviewAsync(
@@ -109,7 +115,8 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		CancellationToken cancellationToken,
 		Func<string, string>? displayPathMapper,
 		CodeCompressionContext? compressionContext = null,
-		string? displayRootPath = null)
+		string? displayRootPath = null,
+		string? projectRoot = null)
 	{
 		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxFileCount);
 		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxFileSizeForFullRead);
@@ -125,7 +132,8 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 			ContentTransformationContext.For(compressionContext, redaction: null),
 			publishCompressionSnapshot: false,
 			displayRootPath,
-			outputPathRedaction: null).ConfigureAwait(false)).Text;
+			outputPathRedaction: null,
+			projectRoot: projectRoot).ConfigureAwait(false)).Text;
 	}
 
 	private async Task<SelectedContentExportResult> BuildCoreAsync(
@@ -139,9 +147,12 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		bool publishCompressionSnapshot,
 		string? displayRootPath = null,
 		OutputPathRedactionDecision? outputPathRedaction = null,
-		SelectedContentOutput? destination = null)
+		SelectedContentOutput? destination = null,
+		string? projectRoot = null)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
+		projectRoot ??= transformationContext?.Redaction?.ProjectRoot ??
+		               transformationContext?.Compression?.ProjectRoot;
 
 		var files = ContentPathOrdering.BuildOrderedUnique(filePaths, cancellationToken);
 		outputPathRedaction ??= OutputRootPathPresentation.CaptureRedactionDecision(transformationContext);
@@ -196,6 +207,7 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 						   transformationScope,
 						   redactionScope,
 						   allowParallelPreparation,
+						   projectRoot,
 						   cancellationToken).ConfigureAwait(false))
 		{
 			using (prepared)
@@ -319,6 +331,7 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		ContentTransformationScope? transformationScope,
 		SecretRedactionScope? redactionScope,
 		bool allowParallelPreparation,
+		string? projectRoot,
 		[EnumeratorCancellation] CancellationToken cancellationToken)
 	{
 		if (!allowParallelPreparation || files.Count <= 1)
@@ -332,6 +345,7 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 						maxFileSizeForFullRead,
 						transformationScope,
 						redactionScope,
+						projectRoot,
 						cancellationToken)
 					.ConfigureAwait(false);
 			}
@@ -357,6 +371,7 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 							maxFileSizeForFullRead,
 							transformationScope,
 							redactionScope,
+							projectRoot,
 							preparationToken)
 						.ConfigureAwait(false);
 					continue;
@@ -369,6 +384,7 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 						maxFileSizeForFullRead,
 						transformationScope,
 						redactionScope,
+						projectRoot,
 						preparationToken).AsTask(),
 					preparationToken));
 				if (pending.Count >= MaximumParallelPreparations)
@@ -391,8 +407,12 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		long? maxFileSizeForFullRead,
 		ContentTransformationScope? transformationScope,
 		SecretRedactionScope? redactionScope,
+		string? projectRoot,
 		CancellationToken cancellationToken)
 	{
+		if (ClassifyUnavailableSource(projectRoot, file) is { } unavailableBeforeRead)
+			return UnavailableEntry(file, unavailableBeforeRead, redactionScope);
+
 		TextFileContent? content;
 		ContentFingerprint? contentFingerprint = null;
 		SecretFileMetadata? redactionMetadata = null;
@@ -438,6 +458,8 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 						$"Hide Secrets could not inspect '{file}' ({readResult.Classification}).");
 			}
 		}
+		if (ClassifyUnavailableSource(projectRoot, file) is { } unavailableAfterRead)
+			return UnavailableEntry(file, unavailableAfterRead, redactionScope);
 
 		if (content is null)
 			return new PreparedContentEntry(file, file, null, null, contentFingerprint, redactionMetadata, null);
@@ -474,6 +496,21 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 			contentLease?.Dispose();
 			throw;
 		}
+	}
+
+	private static FileContentClassification? ClassifyUnavailableSource(string? projectRoot, string path) =>
+		string.IsNullOrWhiteSpace(projectRoot)
+			? null
+			: ProjectSourcePathPolicy.ClassifyUnavailable(projectRoot, path);
+
+	private static PreparedContentEntry UnavailableEntry(
+		string file,
+		FileContentClassification classification,
+		SecretRedactionScope? redactionScope)
+	{
+		if (redactionScope is not null)
+			throw new SecretDetectionException($"Hide Secrets could not inspect '{file}' ({classification}).");
+		return new PreparedContentEntry(file, file, null, null, null, null, null);
 	}
 
 	private static bool IsSmallFile(string path)

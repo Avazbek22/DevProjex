@@ -124,7 +124,8 @@ internal sealed class ProjectTextOutputPipeline(
 				displayPathMapper,
 				snapshot.RedactionContext,
 				displayRootPath,
-				outputPathRedaction),
+				outputPathRedaction,
+				snapshot.RootPath),
 			cancellationToken).ConfigureAwait(false);
 	}
 
@@ -175,7 +176,8 @@ internal sealed class ProjectTextOutputPipeline(
 				TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(snapshot.RootPath),
 				snapshot.RedactionContext,
 				displayRootPath: ResolveContentRoot(snapshot),
-				outputPathRedaction: outputPathRedaction)
+				outputPathRedaction: outputPathRedaction,
+				projectRoot: snapshot.RootPath)
             .ConfigureAwait(false);
 
 		return new ProjectTextOutputResult(content, files.Count);

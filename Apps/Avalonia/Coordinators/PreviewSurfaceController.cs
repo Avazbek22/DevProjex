@@ -1200,7 +1200,8 @@ internal sealed class PreviewSurfaceController : IDisposable
 						TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(
 							currentPath),
 						compressionContext,
-						pathPresentation?.DisplayRootPath ?? currentPath)
+						pathPresentation?.DisplayRootPath ?? currentPath,
+						projectRoot: currentPath)
                     .GetAwaiter()
                     .GetResult();
                 if (string.IsNullOrWhiteSpace(contentText))
@@ -1252,7 +1253,8 @@ internal sealed class PreviewSurfaceController : IDisposable
                     TreeAndContentExportService
                         .CreateRelativeContentHeaderPathMapper(
                             currentPath),
-                    compressionContext)
+					compressionContext,
+					projectRoot: currentPath)
                 .GetAwaiter()
                 .GetResult();
             if (string.IsNullOrWhiteSpace(combinedContent))

@@ -145,6 +145,37 @@ public sealed class ProjectTextOutputPipelineTests
 		Assert.Equal(1, result.Content.Split(displayRoot, StringSplitOptions.None).Length - 1);
 	}
 
+	[Fact]
+	public async Task ContentOutputDoesNotReadAnOrderedFileOutsideTheProject()
+	{
+		using var workspace = new TemporaryDirectory();
+		var projectRoot = workspace.CreateFolder("project");
+		var externalFile = workspace.CreateFile("outside.txt", "external private content");
+		var displayRoot = "https://example.test/repository";
+		var snapshot = CreateSnapshot(
+			projectRoot,
+			DirectoryNode(projectRoot),
+			new HashSet<string>(PathComparer.Default)) with
+		{
+			OrderedFilePaths = [externalFile],
+			PathPresentation = new ExportPathPresentation(displayRoot, _ => displayRoot)
+		};
+		var pipeline = CreatePipeline();
+
+		var clipboard = await pipeline.BuildAsync(
+			ProjectTextOutputMode.Content,
+			snapshot,
+			TestContext.Current.CancellationToken);
+		using var savedDocument = await pipeline.BuildDocumentAsync(
+			ProjectTextOutputMode.Content,
+			snapshot,
+			TestContext.Current.CancellationToken);
+
+		var expected = ContextRootPresentation.FormatLine(displayRoot);
+		Assert.Equal(expected, clipboard.Content);
+		Assert.Equal(expected, savedDocument.Document.GetFullText());
+	}
+
 	[Theory]
 	[InlineData((int)ProjectTextOutputMode.Tree, "git@example.com:owner/repository.git", "git@example.com:owner/repository")]
 	[InlineData((int)ProjectTextOutputMode.Content, "git@example.com:owner/repository.git", "git@example.com:owner/repository")]
