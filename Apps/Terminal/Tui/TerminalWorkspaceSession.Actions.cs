@@ -1818,13 +1818,19 @@ internal sealed partial class TerminalWorkspaceSession
 			L("Terminal.Tui.Action.GetUpdates"),
 			async token =>
 			{
-				var updated = await _services.GitRepositoryService
-					.PullUpdatesAsync(state.Plan.SourceRoot, cancellationToken: token)
+				var updated = await RunPostRepositoryMutationRefreshAsync(
+					cancellationToken => _services.GitRepositoryService.PullUpdatesAsync(
+						state.Plan.SourceRoot,
+						cancellationToken: cancellationToken),
+					cancellationToken => BuildAndApplyStructuralRefreshAsync(
+						state,
+						refreshRequest,
+						cancellationToken),
+					SetRepositoryStateInconsistent,
+					token)
 					.ConfigureAwait(false);
 				if (!updated)
 					throw new TerminalWorkspaceOperationException("DPX-TUI-GIT-UPDATE-FAILED");
-				await BuildAndApplyStructuralRefreshAsync(state, refreshRequest, token)
-					.ConfigureAwait(false);
 				return L("Terminal.Tui.RepositoryUpdated");
 			},
 			modalProgress: true,
@@ -1866,7 +1872,7 @@ internal sealed partial class TerminalWorkspaceSession
 						throw new TerminalWorkspaceOperationException("DPX-TUI-GIT-BRANCH-NOT-FOUND");
 					return null;
 				}
-				var switched = await RunPostCheckoutRefreshAsync(
+				var switched = await RunPostRepositoryMutationRefreshAsync(
 						cancellationToken => _services.GitRepositoryService.SwitchBranchAsync(
 							state.Plan.SourceRoot,
 							selected,
@@ -1886,7 +1892,7 @@ internal sealed partial class TerminalWorkspaceSession
 			originatedFromCommandLine: originatedFromCommandLine));
 	}
 
-	internal static async Task<bool> RunPostCheckoutRefreshAsync(
+	internal static async Task<bool> RunPostRepositoryMutationRefreshAsync(
 		Func<CancellationToken, Task<bool>> checkout,
 		Func<CancellationToken, Task> refresh,
 		Action<bool> setRepositoryStateInconsistent,

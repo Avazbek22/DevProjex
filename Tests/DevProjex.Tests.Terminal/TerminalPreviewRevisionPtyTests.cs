@@ -29,26 +29,31 @@ public sealed class TerminalPreviewRevisionPtyTests
 		await terminal.WaitForScreenAsync(
 			"Files 2",
 			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendCtrlAAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"[x]",
+			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendAsync("3", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"internal sealed class First",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendAsync("\u0015", TestContext.Current.CancellationToken);
-		var empty = await terminal.WaitForStableScreenAsync(
-			required: "Files 0",
-			forbidden: "internal sealed class First",
+		var uncheckedTree = await terminal.WaitForStableScreenAsync(
+			required: "internal sealed class First",
+			forbidden: "[x]",
 			cancellationToken: TestContext.Current.CancellationToken);
-		Assert.Contains("[ ]", empty, StringComparison.Ordinal);
-		Assert.DoesNotContain("First", empty, StringComparison.Ordinal);
-		Assert.DoesNotContain("Second", empty, StringComparison.Ordinal);
+		Assert.Contains("[ ]", uncheckedTree, StringComparison.Ordinal);
+		Assert.Contains("Files 2", uncheckedTree, StringComparison.Ordinal);
+		Assert.Contains("second.cs", uncheckedTree, StringComparison.Ordinal);
 
 		await terminal.SendCtrlAAsync(TestContext.Current.CancellationToken);
-		var restored = await terminal.WaitForScreenAsync(
-			"internal sealed class First",
-			timeout: TimeSpan.FromSeconds(30),
+		var restored = await terminal.WaitForStableScreenAsync(
+			required: "[x]",
+			forbidden: "[ ]",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("[x]", restored, StringComparison.Ordinal);
 		Assert.Contains("Files 2", restored, StringComparison.Ordinal);
+		Assert.Contains("internal sealed class First", restored, StringComparison.Ordinal);
 
 		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(

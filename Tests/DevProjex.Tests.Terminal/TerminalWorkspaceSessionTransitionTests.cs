@@ -169,7 +169,7 @@ public sealed class TerminalWorkspaceSessionTransitionTests
 		var inconsistent = false;
 		var refreshed = false;
 
-		var switched = await TerminalWorkspaceSession.RunPostCheckoutRefreshAsync(
+		var switched = await TerminalWorkspaceSession.RunPostRepositoryMutationRefreshAsync(
 			_ =>
 			{
 				cancellation.Cancel();
@@ -196,7 +196,7 @@ public sealed class TerminalWorkspaceSessionTransitionTests
 		var inconsistent = false;
 
 		await Assert.ThrowsAsync<InvalidOperationException>(() =>
-			TerminalWorkspaceSession.RunPostCheckoutRefreshAsync(
+			TerminalWorkspaceSession.RunPostRepositoryMutationRefreshAsync(
 				_ =>
 				{
 					cancellation.Cancel();
@@ -212,5 +212,23 @@ public sealed class TerminalWorkspaceSessionTransitionTests
 
 		Assert.True(inconsistent);
 		Assert.False(TerminalWorkspaceSession.IsRepositoryExportAllowed(inconsistent));
+	}
+
+	[Fact]
+	public void RepositoryUpdateUsesTheMutationConsistencyRefresh()
+	{
+		var source = File.ReadAllText(Path.Combine(
+			PublishedApplicationLocator.FindRepositoryRoot(),
+			"Apps",
+			"Terminal",
+			"Tui",
+			"TerminalWorkspaceSession.Actions.cs"));
+		var updateStart = source.IndexOf("private void GetRepositoryUpdates(", StringComparison.Ordinal);
+		Assert.InRange(updateStart, 0, source.Length - 1);
+		var branchStart = source.IndexOf("private void SwitchRepositoryBranch(", updateStart, StringComparison.Ordinal);
+		Assert.InRange(branchStart, updateStart + 1, source.Length);
+
+		var updateAction = source[updateStart..branchStart];
+		Assert.Contains("RunPostRepositoryMutationRefreshAsync(", updateAction, StringComparison.Ordinal);
 	}
 }
