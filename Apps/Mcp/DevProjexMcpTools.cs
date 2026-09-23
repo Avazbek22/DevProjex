@@ -297,7 +297,9 @@ internal sealed class DevProjexMcpTools(
 						plan.SourceRoot,
 						renderedTree,
 						format,
-						displayRootPath: McpProjectService.ResolveAddressDocumentRoot(plan),
+						displayRootPath: McpProjectService.IsPrivateDataHidden(plan)
+							? Projects.ResolveProtectedDocumentRoot(plan)
+							: McpProjectService.ResolveAddressDocumentRoot(plan),
 						cancellationToken: cancellationToken)
 					.ConfigureAwait(false);
 			}
@@ -1876,7 +1878,7 @@ internal sealed class DevProjexMcpTools(
 			resolvedRequests,
 			transformed,
 			new McpDeclarationReadContext(
-				McpProjectService.ResolveAddressDocumentRoot(plan),
+				ResolveActionableProjectReference(plan),
 				plan.SourceIdentity is { SourceType: ProjectSourceType.GitClone } remote
 					? remote.Branch
 					: null),
@@ -4107,8 +4109,21 @@ internal sealed class DevProjexMcpTools(
 		if (!remote && roots.Roots.Count == 1)
 			return null;
 		return new McpDeclarationReadContext(
-			McpProjectService.ResolveAddressDocumentRoot(plan),
+			ResolveActionableProjectReference(plan),
 			remote ? plan.SourceIdentity?.Branch : null);
+	}
+
+	private string ResolveActionableProjectReference(ProjectContextPlan plan)
+	{
+		var address = McpProjectService.ResolveAddressDocumentRoot(plan);
+		if (!McpProjectService.IsPrivateDataHidden(plan) ||
+			plan.SourceIdentity is { SourceType: ProjectSourceType.GitClone } ||
+			StringComparer.Ordinal.Equals(address, Projects.ResolveProtectedDocumentRoot(plan)))
+		{
+			return address;
+		}
+
+		return $"#{roots.GetProjectIndex(plan.SourceRoot).ToString(CultureInfo.InvariantCulture)}";
 	}
 
 	private static string FormatDeclarationReadArguments(
