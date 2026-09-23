@@ -10,6 +10,42 @@ namespace DevProjex.Tests.UI;
 public sealed class MainWindowStartupAutomationUiTests
 {
 	[AvaloniaFact]
+	public async Task StartupUi_DesktopControlStorageFailureDoesNotBlockRequestedProject()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+		Directory.CreateDirectory(appDataPath);
+		var options = new DesktopStartupOptions(
+			new DesktopOpenRequest(ProjectPath: project.RootPath, Language: AppLanguage.En));
+		var services = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath) with
+		{
+			DesktopControlServerFactory = (_, _, _) =>
+				Task.FromException<DevProjex.Terminal.DesktopControl.DesktopControlServer>(
+					new IOException("Desktop control storage is unavailable."))
+		};
+		var window = new MainWindow(options, services);
+		UiTestDriver.TrackTopLevelWindow(window);
+
+		try
+		{
+			window.Show();
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => UiTestDriver.GetViewModel(window).IsProjectLoaded,
+				"requested project to load despite desktop control storage failure");
+			Assert.Equal(GetComparablePath(project.RootPath), GetComparablePath(GetCurrentPath(window)));
+			var startupError = typeof(MainWindow).GetField(
+				"_desktopStartupErrorCode",
+				BindingFlags.Instance | BindingFlags.NonPublic);
+			Assert.Equal("DPX-DESKTOP-STARTUP-FAILED", startupError?.GetValue(window));
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task StartupUi_ExplicitEmptySelectionUnchecksEveryTreeNode()
 	{
 		using var project = UiTestProject.CreateDefault();
