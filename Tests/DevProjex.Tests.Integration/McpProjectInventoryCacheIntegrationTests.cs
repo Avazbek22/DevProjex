@@ -392,6 +392,40 @@ public sealed class McpProjectInventoryCacheIntegrationTests
 		Assert.Equal(32, changed.IncludedBytes);
 	}
 
+	[Fact(Timeout = 30_000)]
+	public async Task BuildPlan_CancellationStopsMaximumFileBytesSizeRefresh()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		for (var index = 0; index < 100; index++)
+			workspace.CreateFile($"project/File{index:D3}.txt", "content\n");
+		using var canceled = CancellationTokenSource.CreateLinkedTokenSource(
+			TestContext.Current.CancellationToken);
+		var sizeReads = 0;
+		await using var harness = CreateHarness(
+			project,
+			effectiveFileSizeRead: _ =>
+			{
+				if (Interlocked.Increment(ref sizeReads) == 1)
+					canceled.Cancel();
+			});
+
+		await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+			harness.Service.BuildPlanAsync(
+				project: null,
+				branch: null,
+				paths: null,
+				includePatterns: null,
+				excludePatterns: null,
+				profile: null,
+				trackedOnly: false,
+				gitScope: null,
+				maximumFileBytes: 64,
+				canceled.Token,
+				includeOutputMetrics: false));
+		Assert.Equal(1, Volatile.Read(ref sizeReads));
+	}
+
 	[Fact]
 	public async Task BuildPlan_GitIndexStampInvalidatesWithoutAWatcherEvent()
 	{

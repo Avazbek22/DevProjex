@@ -340,7 +340,7 @@ internal sealed class McpProjectService(
 		}
 
 		if (maximumFileBytes is not null)
-			narrowed = RefreshEffectiveFileSizes(narrowed);
+			narrowed = RefreshEffectiveFileSizes(narrowed, cancellationToken);
 		var final = await ProjectFileSizeFilter
 			.ApplyAsync(services.Planner, narrowed, maximumFileBytes, cancellationToken)
 			.ConfigureAwait(false);
@@ -504,11 +504,14 @@ internal sealed class McpProjectService(
 			: services.Planner.BuildStructureAsync(request, buildCancellationToken);
 	}
 
-	private ProjectContextPlan RefreshEffectiveFileSizes(ProjectContextPlan plan)
+	private ProjectContextPlan RefreshEffectiveFileSizes(
+		ProjectContextPlan plan,
+		CancellationToken cancellationToken)
 	{
 		var sizes = new Dictionary<string, long>(plan.IncludedFiles.Count, ProjectTreePathIdentity.CanonicalComparer);
 		foreach (var path in plan.IncludedFiles)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			effectiveFileSizeRead?.Invoke(path);
 			try
 			{
