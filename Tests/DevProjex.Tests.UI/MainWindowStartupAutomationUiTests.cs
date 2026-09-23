@@ -98,6 +98,51 @@ public sealed class MainWindowStartupAutomationUiTests
 	}
 
 	[AvaloniaFact]
+	public async Task OpenFolder_OlderAccessFailureCannotPromptOrElevateAfterNewerProjectOpens()
+	{
+		using var olderProject = UiTestProject.CreateDefault();
+		using var newerProject = UiTestProject.CreateDefault();
+		using var scanner = new BlockingRootProbeScanner(olderProject.RootPath, canReadBlockedRoot: false);
+		var elevation = new RecordingElevationService();
+		var appDataPath = Path.Combine(olderProject.AppDataPath, Guid.NewGuid().ToString("N"));
+		var options = DesktopStartupOptions.Default;
+		var services = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath) with
+		{
+			ScanOptionsUseCase = new ScanOptionsUseCase(scanner),
+			Elevation = elevation
+		};
+		var window = new MainWindow(options, services);
+		UiTestDriver.TrackTopLevelWindow(window);
+
+		try
+		{
+			window.Show();
+			var olderOpen = Assert.IsAssignableFrom<Task<bool>>(
+				await UiTestDriver.BeginOpenFolderAsync(window, olderProject.RootPath));
+			await scanner.Started.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+			await UiTestDriver.OpenFolderAsync(window, newerProject.RootPath);
+			scanner.Release();
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => olderOpen.IsCompleted || elevation.RelaunchCount != 0,
+				"older open to finish or request elevation",
+				TimeSpan.FromSeconds(5));
+			Assert.Equal(0, elevation.RelaunchCount);
+			Assert.False(await olderOpen.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+			Assert.Equal(GetComparablePath(newerProject.RootPath), GetComparablePath(GetCurrentPath(window)));
+			Assert.Empty(window.OwnedWindows);
+		}
+		finally
+		{
+			scanner.Release();
+			foreach (var dialog in window.OwnedWindows.ToArray())
+				await UiTestDriver.CloseTopLevelWindowAsync(dialog);
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task StartupUi_AgentActivityPreferenceStorageFailureDoesNotBlockRequestedProject()
 	{
 		using var project = UiTestProject.CreateDefault();
@@ -997,7 +1042,7 @@ public sealed class MainWindowStartupAutomationUiTests
 		public void Dispose() => Environment.SetEnvironmentVariable(_name, _previousValue);
 	}
 
-	private sealed class BlockingRootProbeScanner(string blockedPath)
+	private sealed class BlockingRootProbeScanner(string blockedPath, bool canReadBlockedRoot = true)
 		: IFileSystemScannerProjectWorkspaceScanner, IDisposable
 	{
 		private readonly FileSystemScanner _inner = new();
@@ -1018,7 +1063,8 @@ public sealed class MainWindowStartupAutomationUiTests
 					throw new TimeoutException("The controlled root probe was not released.");
 			}
 
-			return _inner.CanReadRoot(rootPath);
+			return (!PathComparer.Default.Equals(rootPath, blockedPath) || canReadBlockedRoot) &&
+			       _inner.CanReadRoot(rootPath);
 		}
 
 		public ScanResult<HashSet<string>> GetExtensions(
@@ -1045,5 +1091,17 @@ public sealed class MainWindowStartupAutomationUiTests
 			_inner.ScanProjectWorkspace(request, cancellationToken);
 
 		public void Dispose() => _release.Dispose();
+	}
+
+	private sealed class RecordingElevationService : IElevationService
+	{
+		public bool IsAdministrator => false;
+		public int RelaunchCount { get; private set; }
+
+		public bool TryRelaunchAsAdministrator(IReadOnlyList<string> arguments)
+		{
+			RelaunchCount++;
+			return false;
+		}
 	}
 }
