@@ -265,6 +265,35 @@ public sealed class McpAgentJournalTests
 	}
 
 	[Fact]
+	public async Task CanceledSessionStartsDoNotExhaustFailureRetries()
+	{
+		using var temporary = new TemporaryDirectory();
+		var writer = new CancelingStartWriter();
+		await using var journal = new McpAgentJournal(
+			writer,
+			new McpRootRegistry([temporary.CreateFolder("project")]),
+			AgentJournalMode.Standard,
+			AgentJournalToolSet.Full,
+			"5.2.0",
+			hidePrivateData: false,
+			pid: 147,
+			processStartUtc: new DateTimeOffset(2026, 9, 20, 1, 0, 0, TimeSpan.Zero));
+
+		for (var attempt = 0; attempt < 3; attempt++)
+		{
+			using var cancellation = new CancellationTokenSource();
+			writer.CancelNextStart = cancellation;
+			await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+				await journal.StartAsync("sample-client", "1.0", cancellation.Token));
+		}
+		writer.CancelNextStart = null;
+		await journal.StartAsync("sample-client", "1.0", TestContext.Current.CancellationToken);
+
+		Assert.Equal(4, writer.StartAttempts);
+		Assert.Single(writer.Sessions);
+	}
+
+	[Fact]
 	public async Task NoticesAreRecordedFromExplicitStateRatherThanResponseText()
 	{
 		using var temporary = new TemporaryDirectory();
@@ -506,6 +535,21 @@ public sealed class McpAgentJournalTests
 			return AllowStart
 				? base.StartSession(session, cancellationToken)
 				: ValueTask.FromException(new IOException("unavailable"));
+		}
+	}
+
+	private sealed class CancelingStartWriter : RecordingWriter
+	{
+		public CancellationTokenSource? CancelNextStart { get; set; }
+		public int StartAttempts { get; private set; }
+
+		public override ValueTask StartSession(AgentJournalSession session, CancellationToken cancellationToken = default)
+		{
+			StartAttempts++;
+			if (CancelNextStart is not { } cancellation)
+				return base.StartSession(session, cancellationToken);
+			cancellation.Cancel();
+			return ValueTask.FromCanceled(cancellationToken);
 		}
 	}
 
