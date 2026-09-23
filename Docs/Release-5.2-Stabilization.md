@@ -208,6 +208,39 @@ two directory, and one file enumeration. These counters must not be added togeth
 presented as complete duplicated workspace IO. This investigation changed only the probe,
 not the production discovery/cache architecture.
 
+### Deferred: synchronous journal housekeeping at GUI startup
+
+GUI composition constructs `AgentJournalStore` unconditionally, before creating the window.
+Its constructor synchronously performs the existing retention sweep, even when the activity
+panel is disabled. This reads the live-session registry and validates journal headers;
+it is startup work, not part of ordinary project reload or the main backend A/B above.
+No accidental startup of the MCP server, TUI, or dependency-facts engine was found on
+the normal GUI route. Desktop IPC and live-session monitoring serve existing contracts.
+
+The opt-in `cf78e962` probe measures isolated synthetic journal directories, never actual
+user journals. [All twelve observations are recorded](Benchmarks/v5.2-journal-startup.json).
+Default retention remains 200 sessions / 30 days; valid recent fixtures are restored
+outside timing. Each fixture has one first observation and three repeated observations
+in the same process. Setup warms filesystem data and serializer metadata, so these are
+not process-cold or disk-cold measurements.
+
+| Valid journal headers presented | Repeated constructor median | Current-thread managed allocation, median | Files remaining |
+| --- | ---: | ---: | ---: |
+| 0 | 0.4119 ms | 11,840 B | 0 |
+| 200 | 19.2530 ms | 2,334,096 B | 200 |
+| 512 | 66.4650 ms | 5,953,672 B | 200 |
+
+Timing includes the synchronous constructor and retention sweep, not disposal or fixture
+setup. The 512-file case includes 312 normal retention removals per observation; this is
+not a pure header-read comparison. Presented-file counts are not measured syscall/read
+counters. First observations were 5.4377 / 30.6462 / 74.5276 ms respectively.
+
+This quantifies a startup follow-up, not a GUI improvement or the cause of the reported
+whole-second regression. Deferring or rescheduling cleanup was deliberately not implemented:
+retention ordering, concurrent readers/writers, and the packaged desktop startup path need
+separate validation. No retention behavior or UI timings changed. The enabled probe passed;
+its default-disabled execution was verified to skip.
+
 ## MCP process A/B: no broad speedup established
 
 A real stdio MCP process comparison used a 20k-file synthetic corpus, one warm-up, and five
@@ -384,3 +417,7 @@ full-selection and partial-selection methods separately. The latter alternates r
 and explicitly discarded compact facts on a single binary; preserve this distinction
 when reporting results. The stored transformed-load JSON retains every observation,
 not just the three-observation medians.
+
+`AgentJournalStartupMeasurementTests` is enabled only with
+`DEVPROJEX_JOURNAL_STARTUP_BENCHMARK=1`. It creates disposable synthetic journals with
+default retention and does not inspect the user's application-data directory.
