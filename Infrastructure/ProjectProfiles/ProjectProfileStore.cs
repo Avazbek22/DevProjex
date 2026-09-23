@@ -568,7 +568,11 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 
 	private bool EnsureStorageExistsCore(JsonStoreFileSet fileSet)
 	{
-		if (TryLoadFromPath(fileSet.PrimaryPath, out var primaryDb, out var primaryRequiresRewrite))
+		var primaryStatus = LoadFromPath(
+			fileSet.PrimaryPath,
+			out var primaryDb,
+			out var primaryRequiresRewrite);
+		if (primaryStatus == ProfileDocumentLoadStatus.Loaded)
 		{
 			if (primaryDb.ContainsInvalidEntries)
 				return false;
@@ -577,13 +581,20 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 
 			return true;
 		}
+		if (primaryStatus is ProfileDocumentLoadStatus.TemporarilyUnavailable or
+		    ProfileDocumentLoadStatus.FutureSchema)
+			return false;
 
-		if (TryLoadFromPath(fileSet.BackupPath, out var backupDb, out _))
+		var backupStatus = LoadFromPath(fileSet.BackupPath, out var backupDb, out _);
+		if (backupStatus == ProfileDocumentLoadStatus.Loaded)
 		{
 			if (backupDb.ContainsInvalidEntries)
 				return false;
 			return TrySaveInternal(fileSet, backupDb);
 		}
+		if (backupStatus is ProfileDocumentLoadStatus.TemporarilyUnavailable or
+		    ProfileDocumentLoadStatus.FutureSchema)
+			return false;
 
 		if (File.Exists(fileSet.PrimaryPath) || File.Exists(fileSet.BackupPath))
 			return false;

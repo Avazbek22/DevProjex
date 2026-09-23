@@ -346,6 +346,56 @@ public sealed class UserSettingsStoreTests
     }
 
     [Fact]
+    public void LoadForStartup_UnreadablePrimaryAndCorruptBackupRemainUnchanged()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("This test relies on Windows file-sharing behavior.");
+            return;
+        }
+
+        using var temp = new TemporaryDirectory();
+        var store = new UserSettingsStore(() => temp.Path);
+        Assert.True(store.TrySave(new UserSettingsDb
+        {
+            ViewSettings = new AppViewSettings
+            {
+                IsCompactMode = true,
+                PreferredLanguage = AppLanguage.It
+            },
+            UpdateCheckSettings = new UpdateCheckSettings
+            {
+                IsAutomaticCheckEnabled = true,
+                LatestKnownVersion = "5.2"
+            }
+        }));
+        var primaryPath = store.GetPath();
+        var backupPath = primaryPath + ".bak";
+        File.WriteAllText(backupPath, "{ invalid-backup");
+        var originalPrimary = File.ReadAllBytes(primaryPath);
+        var originalBackup = File.ReadAllBytes(backupPath);
+
+        using (var primaryReadBlock = new FileStream(
+                   primaryPath, FileMode.Open, FileAccess.Write, FileShare.Delete))
+        {
+            var loaded = store.LoadForStartup(TimeSpan.FromSeconds(1));
+            Assert.False(loaded.ViewSettings.IsCompactMode);
+            Assert.False(store.TryLoad(out _));
+            loaded.ViewSettings = loaded.ViewSettings with { IsCompactMode = true };
+            loaded.UpdateCheckSettings = loaded.UpdateCheckSettings with
+            {
+                IsAutomaticCheckEnabled = true
+            };
+            Assert.False(store.TryPersistViewSettings(loaded));
+            Assert.False(store.TryPersistUpdateCheckSettings(loaded));
+            Assert.False(store.EnsureStorageExists());
+        }
+
+        Assert.Equal(originalPrimary, File.ReadAllBytes(primaryPath));
+        Assert.Equal(originalBackup, File.ReadAllBytes(backupPath));
+    }
+
+    [Fact]
     public void FutureSchema_IsNeverOverwrittenByOlderApplication()
     {
         using var temp = new TemporaryDirectory();

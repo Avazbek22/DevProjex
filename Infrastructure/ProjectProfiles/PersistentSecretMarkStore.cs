@@ -127,6 +127,11 @@ internal sealed class PersistentSecretMarkStore(
 			var database = load.Database!;
 			if (database.InvalidProjects.Contains(normalizedPath))
 				return new PersistentSecretMarksLoadResult(PersistentSecretMarkStoreStatus.InvalidStorage, null);
+			if (!database.Projects.ContainsKey(normalizedPath) &&
+			    database.Projects.Count >= ProjectProfileStorageLimits.MaximumPersistentMarkProjects)
+			{
+				return new PersistentSecretMarksLoadResult(PersistentSecretMarkStoreStatus.WriteFailed, null);
+			}
 			var project = GetOrCreateProject(database, normalizedPath);
 			var changed = false;
 			foreach (var mark in NormalizeMarks(legacyMarks))
@@ -410,13 +415,19 @@ internal sealed class PersistentSecretMarkStore(
 			return StoreLoadResult.Failure(PersistentSecretMarkStoreStatus.InvalidStorage);
 		if (JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
 			return StoreLoadResult.Failure(PersistentSecretMarkStoreStatus.UnsupportedFutureSchema);
-		if (TryLoadFromPath(fileSet.PrimaryPath, out var primary, out var primaryRequiresRewrite))
+		var primaryStatus = LoadFromPath(fileSet.PrimaryPath, out var primary, out var primaryRequiresRewrite);
+		if (primaryStatus == MarkDocumentLoadStatus.TemporarilyUnavailable)
+			return StoreLoadResult.Failure(PersistentSecretMarkStoreStatus.TemporarilyUnavailable);
+		if (primaryStatus == MarkDocumentLoadStatus.Loaded)
 		{
 			if (primaryRequiresRewrite && !TrySave(fileSet, primary))
 				return StoreLoadResult.Failure(PersistentSecretMarkStoreStatus.WriteFailed);
 			return StoreLoadResult.Success(primary);
 		}
-		if (TryLoadFromPath(fileSet.BackupPath, out var backup, out _))
+		var backupStatus = LoadFromPath(fileSet.BackupPath, out var backup, out _);
+		if (backupStatus == MarkDocumentLoadStatus.TemporarilyUnavailable)
+			return StoreLoadResult.Failure(PersistentSecretMarkStoreStatus.TemporarilyUnavailable);
+		if (backupStatus == MarkDocumentLoadStatus.Loaded)
 		{
 			if (!TrySave(fileSet, backup))
 				return StoreLoadResult.Failure(PersistentSecretMarkStoreStatus.WriteFailed);
@@ -428,7 +439,7 @@ internal sealed class PersistentSecretMarkStore(
 		return StoreLoadResult.Success(CreateDefaultDatabase());
 	}
 
-	private bool TryLoadFromPath(
+	private MarkDocumentLoadStatus LoadFromPath(
 		string path,
 		out PersistentSecretMarkDb database,
 		out bool requiresRewrite)
@@ -436,7 +447,7 @@ internal sealed class PersistentSecretMarkStore(
 		database = CreateDefaultDatabase();
 		requiresRewrite = false;
 		if (!File.Exists(path))
-			return false;
+			return MarkDocumentLoadStatus.Missing;
 		try
 		{
 			using var stream = new FileStream(
@@ -451,16 +462,22 @@ internal sealed class PersistentSecretMarkStore(
 				new JsonDocumentOptions { MaxDepth = 64 },
 				out var document))
 			{
-				return false;
+				return MarkDocumentLoadStatus.Invalid;
 			}
 			using (document)
 			{
-				return TryParseDatabase(document.RootElement, out database, out requiresRewrite);
+				return TryParseDatabase(document.RootElement, out database, out requiresRewrite)
+					? MarkDocumentLoadStatus.Loaded
+					: MarkDocumentLoadStatus.Invalid;
 			}
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+		{
+			return MarkDocumentLoadStatus.TemporarilyUnavailable;
 		}
 		catch
 		{
-			return false;
+			return MarkDocumentLoadStatus.Invalid;
 		}
 	}
 
@@ -867,5 +884,13 @@ internal sealed class PersistentSecretMarkStore(
 
 		public static StoreLoadResult Failure(PersistentSecretMarkStoreStatus status) =>
 			new(status, null);
+	}
+
+	private enum MarkDocumentLoadStatus
+	{
+		Missing,
+		Loaded,
+		Invalid,
+		TemporarilyUnavailable
 	}
 }

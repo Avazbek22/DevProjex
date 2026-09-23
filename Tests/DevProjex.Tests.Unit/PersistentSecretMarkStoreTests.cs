@@ -441,6 +441,68 @@ public sealed class PersistentSecretMarkStoreTests
 	}
 
 	[Fact]
+	public void LegacyMigrationAtProjectCapacity_PreservesTheLegacyMarkAndMarkStore()
+	{
+		using var temporary = new TemporaryDirectory();
+		var project = temporary.CreateFolder("new-project");
+		var directory = temporary.CreateFolder("DevProjex");
+		var projects = new Dictionary<string, PersistedProjectSecretMarks>(PathComparer.Default);
+		for (var index = 0; index < ProjectProfileStorageLimits.MaximumPersistentMarkProjects; index++)
+		{
+			projects.Add(
+				Path.Combine(temporary.Path, $"existing-{index:D4}"),
+				new PersistedProjectSecretMarks());
+		}
+		var markPath = Path.Combine(directory, "project-secret-marks.json");
+		File.WriteAllText(
+			markPath,
+			JsonSerializer.Serialize(
+				new PersistentSecretMarkDb { SchemaVersion = 4, Projects = projects },
+				new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+		var markBytesBefore = File.ReadAllBytes(markPath);
+		var normalizedProject = PathUtility.Normalize(project).Replace("\\", "\\\\", StringComparison.Ordinal);
+		var profilePath = Path.Combine(directory, "project-profiles.json");
+		File.WriteAllText(
+			profilePath,
+			$$"""
+			  {
+			    "schemaVersion": 3,
+			    "profiles": {
+			      "{{normalizedProject}}": {
+			        "selectedRootFolders": [],
+			        "selectedExtensions": [],
+			        "selectedIgnoreOptions": [],
+			        "rootFolderStates": {},
+			        "extensionStates": {},
+			        "ignoreOptionStates": {},
+			        "selectedPaths": [],
+			        "markedSecrets": [ { "h": "{{FirstHash}}", "key": "TOKEN", "length": 12 } ],
+			        "updatedUtc": "2026-01-01T00:00:00+00:00"
+			      }
+			    }
+			  }
+			  """);
+
+		var lookup = new ProjectProfileStore(() => temporary.Path)
+			.LookupProfile(project, TimeSpan.FromSeconds(5));
+
+		Assert.Equal(ProjectProfileLookupStatus.InvalidStorage, lookup.Status);
+		Assert.Contains("\"markedSecrets\"", File.ReadAllText(profilePath), StringComparison.Ordinal);
+		Assert.Equal(markBytesBefore, File.ReadAllBytes(markPath));
+		Assert.False(File.Exists(markPath + ".bak"));
+
+		var existingProject = projects.Keys.First();
+		var existingMigration = new PersistentSecretMarkStore(() => temporary.Path)
+			.MergeLegacy(existingProject, [Mark(FirstHash, 12)], TimeSpan.FromSeconds(5));
+		Assert.True(existingMigration.Succeeded);
+		Assert.Single(existingMigration.Snapshot!.Marks);
+		using var persisted = JsonDocument.Parse(File.ReadAllBytes(markPath));
+		Assert.Equal(
+			ProjectProfileStorageLimits.MaximumPersistentMarkProjects,
+			persisted.RootElement.GetProperty("projects").EnumerateObject().Count());
+	}
+
+	[Fact]
 	public async Task TombstoneCapacity_RejectsNewIdentityWithoutDiscardingExistingState()
 	{
 		using var temporary = new TemporaryDirectory();

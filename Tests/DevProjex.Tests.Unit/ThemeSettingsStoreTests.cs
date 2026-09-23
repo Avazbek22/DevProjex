@@ -96,6 +96,39 @@ public sealed class ThemeSettingsStoreTests
     }
 
     [Fact]
+    public void LoadForStartup_UnreadablePrimaryAndCorruptBackupRemainUnchanged()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("This test relies on Windows file-sharing behavior.");
+            return;
+        }
+
+        using var temp = new TemporaryDirectory();
+        var store = new ThemeSettingsStore(() => temp.Path);
+        var document = store.Load();
+        document.SelectedPreset = "Light.Mica";
+        Assert.True(store.TrySave(document));
+        var primaryPath = store.GetPath();
+        var backupPath = primaryPath + ".bak";
+        File.WriteAllText(backupPath, "{ invalid-backup");
+        var originalPrimary = File.ReadAllBytes(primaryPath);
+        var originalBackup = File.ReadAllBytes(backupPath);
+
+        using (var primaryReadBlock = new FileStream(
+                   primaryPath, FileMode.Open, FileAccess.Write, FileShare.Delete))
+        {
+            var loaded = store.LoadForStartup(TimeSpan.FromSeconds(1));
+            Assert.Equal("Dark.Acrylic", loaded.SelectedPreset);
+            Assert.False(store.TryPersistChanges(loaded, [], "Light.Mica"));
+            Assert.False(store.EnsureStorageExists());
+        }
+
+        Assert.Equal(originalPrimary, File.ReadAllBytes(primaryPath));
+        Assert.Equal(originalBackup, File.ReadAllBytes(backupPath));
+    }
+
+    [Fact]
     public void LoadForStartup_WhenStoreLockIsHeld_ReturnsFactoryDefaultsWithinBoundedTime()
     {
         using var temp = new TemporaryDirectory();

@@ -56,17 +56,34 @@ internal static class JsonStorePersistence
         Func<TDocument, TDocument> normalize,
         out TDocument document,
         out bool requiresRewrite,
+        long maximumDocumentBytes = long.MaxValue) =>
+        TryReadNormalized(
+            path,
+            serializerOptions,
+            createDefault,
+            normalize,
+            out document,
+            out requiresRewrite,
+            out _,
+            maximumDocumentBytes);
+
+    public static bool TryReadNormalized<TDocument>(
+        string path,
+        JsonSerializerOptions serializerOptions,
+        Func<TDocument> createDefault,
+        Func<TDocument, TDocument> normalize,
+        out TDocument document,
+        out bool requiresRewrite,
+        out bool temporarilyUnavailable,
         long maximumDocumentBytes = long.MaxValue)
     {
         document = createDefault();
         requiresRewrite = false;
+        temporarilyUnavailable = false;
 
-        if (!File.Exists(path))
-            return false;
-
-        TryEnsurePrivateUnixFileMode(path);
         try
         {
+            TryEnsurePrivateUnixFileMode(path);
             string json;
             if (maximumDocumentBytes == long.MaxValue)
             {
@@ -96,6 +113,16 @@ internal static class JsonStorePersistence
             requiresRewrite = !string.Equals(originalSnapshot, normalizedSnapshot, StringComparison.Ordinal);
             document = normalized;
             return true;
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return false;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                          System.Security.SecurityException)
+        {
+            temporarilyUnavailable = true;
+            return false;
         }
         catch
         {

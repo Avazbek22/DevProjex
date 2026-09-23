@@ -113,7 +113,9 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
                 using var _ = heldLock;
                 if (ContainsFutureDocument(fileSet))
                     return false;
-                var latest = LoadInternal(fileSet, persistReset: false);
+                var latest = LoadInternal(fileSet, persistReset: false, out var temporarilyUnavailable);
+                if (temporarilyUnavailable)
+                    return false;
                 foreach (var key in changedPresetKeys.Distinct(StringComparer.OrdinalIgnoreCase))
                 {
                     if (!TryParseKey(key, out var theme, out var effect) ||
@@ -205,8 +207,15 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
         return true;
     }
 
-    private ThemeSettingsDocument LoadInternal(JsonStoreFileSet fileSet, bool persistReset)
+    private ThemeSettingsDocument LoadInternal(JsonStoreFileSet fileSet, bool persistReset) =>
+        LoadInternal(fileSet, persistReset, out _);
+
+    private ThemeSettingsDocument LoadInternal(
+        JsonStoreFileSet fileSet,
+        bool persistReset,
+        out bool temporarilyUnavailable)
     {
+        temporarilyUnavailable = false;
         if (ContainsFutureDocument(fileSet))
             return CreateFactoryDefaults();
 
@@ -221,6 +230,12 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
         if (primaryStatus == ThemeDocumentReadStatus.Future)
             return CreateFactoryDefaults();
 
+        if (primaryStatus == ThemeDocumentReadStatus.TemporarilyUnavailable)
+        {
+            temporarilyUnavailable = true;
+            return CreateFactoryDefaults();
+        }
+
         if (primaryStatus == ThemeDocumentReadStatus.Obsolete)
             return ResetObsoleteDocument(fileSet, persistReset);
 
@@ -234,6 +249,12 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
 
         if (backupStatus == ThemeDocumentReadStatus.Future)
             return CreateFactoryDefaults();
+
+        if (backupStatus == ThemeDocumentReadStatus.TemporarilyUnavailable)
+        {
+            temporarilyUnavailable = true;
+            return CreateFactoryDefaults();
+        }
 
         return ResetObsoleteDocument(fileSet, persistReset);
     }
@@ -253,9 +274,6 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
     {
         document = CreateFactoryDefaults();
         requiresRewrite = false;
-        if (!File.Exists(path))
-            return ThemeDocumentReadStatus.MissingOrInvalid;
-
         try
         {
             if (!JsonStorePersistence.TryReadAllTextWithinSizeLimit(
@@ -289,6 +307,19 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
                 StringComparison.Ordinal);
             return ThemeDocumentReadStatus.Current;
         }
+        catch (FileNotFoundException)
+        {
+            return ThemeDocumentReadStatus.MissingOrInvalid;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return ThemeDocumentReadStatus.MissingOrInvalid;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                          System.Security.SecurityException)
+        {
+            return ThemeDocumentReadStatus.TemporarilyUnavailable;
+        }
         catch
         {
             return ThemeDocumentReadStatus.MissingOrInvalid;
@@ -303,6 +334,8 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
         var status = TryReadCurrent(fileSet.PrimaryPath, out var primary, out var requiresRewrite);
         if (status == ThemeDocumentReadStatus.Future)
             return true;
+        if (status == ThemeDocumentReadStatus.TemporarilyUnavailable)
+            return false;
         if (status == ThemeDocumentReadStatus.Current)
         {
             if (requiresRewrite || !File.Exists(fileSet.BackupPath))
@@ -313,6 +346,8 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
         var backupStatus = TryReadCurrent(fileSet.BackupPath, out var backup, out _);
         if (backupStatus == ThemeDocumentReadStatus.Future)
             return true;
+        if (backupStatus == ThemeDocumentReadStatus.TemporarilyUnavailable)
+            return false;
         if (backupStatus == ThemeDocumentReadStatus.Current)
             return TrySaveInternal(fileSet, backup);
 
@@ -482,6 +517,7 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
     private enum ThemeDocumentReadStatus
     {
         MissingOrInvalid,
+        TemporarilyUnavailable,
         Obsolete,
         Current,
         Future

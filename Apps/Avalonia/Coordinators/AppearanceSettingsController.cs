@@ -31,6 +31,7 @@ internal sealed class AppearanceSettingsController(
     private ThemePresetEffect _currentEffect = ThemePresetEffect.Transparent;
     private bool _wasThemePopoverOpen;
     private int _applyingPresetDepth;
+    private ViewSettingsChanges _pendingViewSettingsChanges;
 
     public AppViewSettings ViewSettings =>
         _userSettings.ViewSettings ?? new AppViewSettings();
@@ -135,28 +136,28 @@ internal sealed class AppearanceSettingsController(
 
         viewModel.IsCompactMode = !viewModel.IsCompactMode;
         workspace.UpdateCompactModeVisualState();
-        SaveCurrentViewSettings();
+        SaveCurrentViewSettings(ViewSettingsChanges.CompactMode);
     }
 
     public void ToggleTreeExpansionAnimation()
     {
         viewModel.IsTreeExpansionAnimationEnabled =
             !viewModel.IsTreeExpansionAnimationEnabled;
-        SaveCurrentViewSettings();
+        SaveCurrentViewSettings(ViewSettingsChanges.TreeExpansionAnimation);
     }
 
     public void ToggleStatusMetricsAnimation()
     {
         viewModel.IsStatusMetricsAnimationEnabled =
             !viewModel.IsStatusMetricsAnimationEnabled;
-        SaveCurrentViewSettings();
+        SaveCurrentViewSettings(ViewSettingsChanges.StatusMetricsAnimation);
     }
 
     public void ToggleToolAnimation()
     {
         viewModel.IsToolAnimationEnabled =
             !viewModel.IsToolAnimationEnabled;
-        SaveCurrentViewSettings();
+        SaveCurrentViewSettings(ViewSettingsChanges.ToolAnimation);
     }
 
     public void ToggleThemePopover()
@@ -188,7 +189,7 @@ internal sealed class AppearanceSettingsController(
         {
             PreferredLanguage = localization.CurrentLanguage
         };
-        userSettingsStore.TryPersistViewSettings(_userSettings);
+        PersistViewSettingsChanges(ViewSettingsChanges.PreferredLanguage);
     }
 
     public void SetLanguageForCurrentSession(AppLanguage language)
@@ -200,7 +201,7 @@ internal sealed class AppearanceSettingsController(
         {
             IsTerminalCommandPromptDismissed = true
         };
-        userSettingsStore.TryPersistViewSettings(_userSettings);
+        PersistViewSettingsChanges(ViewSettingsChanges.TerminalPromptDismissed);
     }
 
     public void ResetThemeSettings()
@@ -211,7 +212,7 @@ internal sealed class AppearanceSettingsController(
                 ViewSettings.IsTerminalCommandPromptDismissed
         };
         _userSettings.ViewSettings = resetViewSettings;
-        userSettingsStore.TryPersistViewSettings(_userSettings);
+        PersistViewSettingsChanges(ViewSettingsChanges.Resettable);
         ApplyViewSettings(resetViewSettings);
 
         var resetLanguage =
@@ -391,8 +392,11 @@ internal sealed class AppearanceSettingsController(
             session.Persist(CreateCurrentThemePreset());
     }
 
-    private void SaveCurrentViewSettings()
+    private void SaveCurrentViewSettings(ViewSettingsChanges changes = ViewSettingsChanges.None)
     {
+        if (changes == ViewSettingsChanges.None && _pendingViewSettingsChanges == ViewSettingsChanges.None)
+            return;
+
         var current = ViewSettings;
         _userSettings.ViewSettings = new AppViewSettings
         {
@@ -407,7 +411,69 @@ internal sealed class AppearanceSettingsController(
                 current.IsTerminalCommandPromptDismissed,
             PreferredLanguage = current.PreferredLanguage
         };
-        userSettingsStore.TryPersistViewSettings(_userSettings);
+        PersistViewSettingsChanges(changes);
+    }
+
+    private void PersistViewSettingsChanges(ViewSettingsChanges changes)
+    {
+        _pendingViewSettingsChanges |= changes;
+        var pendingChanges = _pendingViewSettingsChanges;
+        var requested = ViewSettings;
+        if (!userSettingsStore.TryPersistViewSettings(
+                _userSettings,
+                latest => MergeViewSettings(latest, requested, pendingChanges)))
+        {
+            return;
+        }
+
+        _pendingViewSettingsChanges = ViewSettingsChanges.None;
+        var persisted = ViewSettings;
+        if (viewModel.IsCompactMode != persisted.IsCompactMode ||
+            viewModel.IsTreeExpansionAnimationEnabled != persisted.IsTreeExpansionAnimationEnabled ||
+            viewModel.IsStatusMetricsAnimationEnabled != persisted.IsStatusMetricsAnimationEnabled ||
+            viewModel.IsToolAnimationEnabled != persisted.IsToolAnimationEnabled)
+        {
+            ApplyViewSettings(persisted);
+        }
+
+        if ((pendingChanges & ViewSettingsChanges.PreferredLanguage) == 0 &&
+            requested.PreferredLanguage != persisted.PreferredLanguage)
+        {
+            ApplySavedLanguagePreference(persisted);
+        }
+    }
+
+    private static AppViewSettings MergeViewSettings(
+        AppViewSettings latest,
+        AppViewSettings requested,
+        ViewSettingsChanges changes) => latest with
+    {
+        IsCompactMode = (changes & ViewSettingsChanges.CompactMode) != 0
+            ? requested.IsCompactMode : latest.IsCompactMode,
+        IsTreeExpansionAnimationEnabled = (changes & ViewSettingsChanges.TreeExpansionAnimation) != 0
+            ? requested.IsTreeExpansionAnimationEnabled : latest.IsTreeExpansionAnimationEnabled,
+        IsStatusMetricsAnimationEnabled = (changes & ViewSettingsChanges.StatusMetricsAnimation) != 0
+            ? requested.IsStatusMetricsAnimationEnabled : latest.IsStatusMetricsAnimationEnabled,
+        IsToolAnimationEnabled = (changes & ViewSettingsChanges.ToolAnimation) != 0
+            ? requested.IsToolAnimationEnabled : latest.IsToolAnimationEnabled,
+        IsTerminalCommandPromptDismissed = (changes & ViewSettingsChanges.TerminalPromptDismissed) != 0
+            ? requested.IsTerminalCommandPromptDismissed : latest.IsTerminalCommandPromptDismissed,
+        PreferredLanguage = (changes & ViewSettingsChanges.PreferredLanguage) != 0
+            ? requested.PreferredLanguage : latest.PreferredLanguage
+    };
+
+    [Flags]
+    private enum ViewSettingsChanges
+    {
+        None = 0,
+        CompactMode = 1,
+        TreeExpansionAnimation = 2,
+        StatusMetricsAnimation = 4,
+        ToolAnimation = 8,
+        TerminalPromptDismissed = 16,
+        PreferredLanguage = 32,
+        Resettable = CompactMode | TreeExpansionAnimation | StatusMetricsAnimation |
+                     ToolAnimation | PreferredLanguage
     }
 
     private ThemePresetEffect GetSelectedEffectMode()

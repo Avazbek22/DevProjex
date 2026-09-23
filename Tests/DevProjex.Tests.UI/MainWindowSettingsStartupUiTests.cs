@@ -1,0 +1,248 @@
+using System.Reflection;
+using DevProjex.Avalonia.Coordinators;
+using DevProjex.Infrastructure.ThemePresets;
+
+namespace DevProjex.Tests.UI;
+
+[Collection(UiWorkspaceCollection.Name)]
+public sealed class MainWindowSettingsStartupUiTests
+{
+    [AvaloniaFact]
+    public async Task CloseAfterTransientThemeRead_DoesNotOverwritePersistedTheme()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("This test relies on Windows file-sharing behavior.");
+            return;
+        }
+
+        using var project = UiTestProject.CreateDefault();
+        var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+        var store = new ThemeSettingsStore(() => appDataPath);
+        var document = store.Load();
+        document.SelectedThemeMode = ThemeSelectionMode.Light;
+        document.LightThemeEffect = ThemeEffectMode.Solid;
+        document.SelectedPreset = "Light.Solid";
+        Assert.True(store.TrySave(document));
+        var primaryPath = store.GetPath();
+        var backupPath = primaryPath + ".bak";
+        File.WriteAllText(backupPath, "{ invalid-backup");
+        var originalPrimary = File.ReadAllBytes(primaryPath);
+        var originalBackup = File.ReadAllBytes(backupPath);
+
+        MainWindow window;
+        using (var primaryReadBlock = new FileStream(
+                   primaryPath, FileMode.Open, FileAccess.Write, FileShare.Delete))
+        {
+            window = await UiTestDriver.CreateLoadedMainWindowAsync(
+                project,
+                appDataPathOverride: appDataPath);
+        }
+
+        await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+
+        Assert.Equal(originalPrimary, File.ReadAllBytes(primaryPath));
+        Assert.Equal(originalBackup, File.ReadAllBytes(backupPath));
+    }
+
+    [AvaloniaFact]
+    public async Task ViewToggleAfterTransientSettingsRead_PreservesOtherPersistedPreferences()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("This test relies on Windows file-sharing behavior.");
+            return;
+        }
+
+        using var project = UiTestProject.CreateDefault();
+        var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+        var store = new UserSettingsStore(() => appDataPath);
+        Assert.True(store.TrySave(new UserSettingsDb
+        {
+            ViewSettings = new AppViewSettings
+            {
+                IsCompactMode = true,
+                IsToolAnimationEnabled = false,
+                PreferredLanguage = AppLanguage.It
+            }
+        }));
+        var primaryPath = store.GetPath();
+        File.WriteAllText(primaryPath + ".bak", "{ invalid-backup");
+
+        MainWindow window;
+        using (var primaryReadBlock = new FileStream(
+                   primaryPath, FileMode.Open, FileAccess.Write, FileShare.Delete))
+        {
+            window = await UiTestDriver.CreateLoadedMainWindowAsync(
+                project,
+                appDataPathOverride: appDataPath);
+        }
+
+        try
+        {
+            GetAppearanceController(window).ToggleStatusMetricsAnimation();
+            var viewModel = UiTestDriver.GetViewModel(window);
+            Assert.True(viewModel.IsCompactMode);
+            Assert.False(viewModel.IsToolAnimationEnabled);
+            Assert.False(viewModel.IsStatusMetricsAnimationEnabled);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+        }
+
+        var persisted = store.Load().ViewSettings;
+        Assert.True(persisted.IsCompactMode);
+        Assert.False(persisted.IsToolAnimationEnabled);
+        Assert.False(persisted.IsStatusMetricsAnimationEnabled);
+        Assert.Equal(AppLanguage.It, persisted.PreferredLanguage);
+    }
+
+    [AvaloniaFact]
+    public async Task ResetAfterTransientSettingsRead_PreservesDismissedTerminalPrompt()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("This test relies on Windows file-sharing behavior.");
+            return;
+        }
+
+        using var project = UiTestProject.CreateDefault();
+        var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+        var store = new UserSettingsStore(() => appDataPath);
+        Assert.True(store.TrySave(new UserSettingsDb
+        {
+            ViewSettings = new AppViewSettings
+            {
+                IsCompactMode = true,
+                IsTerminalCommandPromptDismissed = true,
+                PreferredLanguage = AppLanguage.It
+            }
+        }));
+        var primaryPath = store.GetPath();
+        File.WriteAllText(primaryPath + ".bak", "{ invalid-backup");
+
+        MainWindow window;
+        using (var primaryReadBlock = new FileStream(
+                   primaryPath, FileMode.Open, FileAccess.Write, FileShare.Delete))
+        {
+            window = await UiTestDriver.CreateLoadedMainWindowAsync(
+                project,
+                appDataPathOverride: appDataPath);
+        }
+
+        try
+        {
+            GetAppearanceController(window).ResetThemeSettings();
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+        }
+
+        var persisted = store.Load().ViewSettings;
+        Assert.False(persisted.IsCompactMode);
+        Assert.True(persisted.IsTerminalCommandPromptDismissed);
+        Assert.Null(persisted.PreferredLanguage);
+    }
+
+    [AvaloniaFact]
+    public async Task FailedViewChangeWrite_RetriesOnlyChangedPreferenceOnClose()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("This test relies on Windows file-sharing behavior.");
+            return;
+        }
+
+        using var project = UiTestProject.CreateDefault();
+        var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+        var store = new UserSettingsStore(() => appDataPath);
+        Assert.True(store.TrySave(new UserSettingsDb
+        {
+            ViewSettings = new AppViewSettings
+            {
+                IsCompactMode = true,
+                IsToolAnimationEnabled = false,
+                PreferredLanguage = AppLanguage.It
+            }
+        }));
+        var primaryPath = store.GetPath();
+        File.WriteAllText(primaryPath + ".bak", "{ invalid-backup");
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+            project,
+            appDataPathOverride: appDataPath);
+
+        try
+        {
+            var originalPrimary = File.ReadAllBytes(primaryPath);
+            using (var primaryReadBlock = new FileStream(
+                       primaryPath, FileMode.Open, FileAccess.Write, FileShare.Delete))
+            {
+                GetAppearanceController(window).ToggleStatusMetricsAnimation();
+            }
+
+            Assert.Equal(originalPrimary, File.ReadAllBytes(primaryPath));
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+        }
+
+        var persisted = store.Load().ViewSettings;
+        Assert.True(persisted.IsCompactMode);
+        Assert.False(persisted.IsToolAnimationEnabled);
+        Assert.False(persisted.IsStatusMetricsAnimationEnabled);
+        Assert.Equal(AppLanguage.It, persisted.PreferredLanguage);
+    }
+
+    [AvaloniaFact]
+    public async Task CloseAfterTransientSettingsRead_DoesNotOverwritePersistedViewSettings()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("This test relies on Windows file-sharing behavior.");
+            return;
+        }
+
+        using var project = UiTestProject.CreateDefault();
+        var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+        var store = new UserSettingsStore(() => appDataPath);
+        Assert.True(store.TrySave(new UserSettingsDb
+        {
+            ViewSettings = new AppViewSettings
+            {
+                IsCompactMode = true,
+                IsToolAnimationEnabled = false,
+                PreferredLanguage = AppLanguage.It
+            }
+        }));
+        var primaryPath = store.GetPath();
+        var backupPath = primaryPath + ".bak";
+        File.WriteAllText(backupPath, "{ invalid-backup");
+        var originalPrimary = File.ReadAllBytes(primaryPath);
+        var originalBackup = File.ReadAllBytes(backupPath);
+
+        MainWindow window;
+        using (var primaryReadBlock = new FileStream(
+                   primaryPath, FileMode.Open, FileAccess.Write, FileShare.Delete))
+        {
+            window = await UiTestDriver.CreateLoadedMainWindowAsync(
+                project,
+                appDataPathOverride: appDataPath);
+        }
+
+        await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+
+        Assert.Equal(originalPrimary, File.ReadAllBytes(primaryPath));
+        Assert.Equal(originalBackup, File.ReadAllBytes(backupPath));
+    }
+
+    private static AppearanceSettingsController GetAppearanceController(MainWindow window)
+    {
+        var field = typeof(MainWindow).GetField(
+            "_appearanceSettings",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        return Assert.IsType<AppearanceSettingsController>(field?.GetValue(window));
+    }
+}
