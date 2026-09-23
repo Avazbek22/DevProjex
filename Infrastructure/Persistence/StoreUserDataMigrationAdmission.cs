@@ -19,8 +19,8 @@ public static class StoreUserDataMigrationAdmission
 				status = migrationProbe();
 			}
 			catch (Exception exception) when (exception is
-			           IOException or UnauthorizedAccessException or
-			           System.Security.SecurityException or ArgumentException or NotSupportedException)
+					   IOException or UnauthorizedAccessException or
+					   System.Security.SecurityException or ArgumentException or NotSupportedException)
 			{
 				status = StoreUserDataMigrationStatus.Failed;
 			}

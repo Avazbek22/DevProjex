@@ -5041,7 +5041,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var dryRun = CreateDialogButton(L("Terminal.Tui.DryRun"));
 		dialog.AddButton(dryRun);
 		var canExport = summary.Kind != TerminalExportKind.Folder ||
-		                summary.DestinationState != TerminalExportDestinationState.Conflict;
+						summary.DestinationState != TerminalExportDestinationState.Conflict;
 		var focusedButton = cancel;
 		if (canExport)
 		{
