@@ -33,6 +33,7 @@ internal sealed class TerminalSelectionProfilePersistenceCoordinator : IDisposab
 	private Task _activePersistence = Task.CompletedTask;
 	private TerminalSelectionPersistenceState _state = new(TerminalSelectionPersistencePhase.Idle);
 	private long _version;
+	private int _activeWriteCalls;
 	private int _disposed;
 
 	public event EventHandler? StateChanged;
@@ -251,17 +252,6 @@ internal sealed class TerminalSelectionProfilePersistenceCoordinator : IDisposab
 							result.Reason));
 					return false;
 				}
-				EventHandler? stateChanged = null;
-				lock (_sync)
-				{
-					if (_pending?.Version == version)
-					{
-						_pending = null;
-						stateChanged = SetStateLocked(new TerminalSelectionPersistenceState(
-							TerminalSelectionPersistencePhase.Idle));
-					}
-				}
-				stateChanged?.Invoke(this, EventArgs.Empty);
 				return true;
 			}
 			catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -322,34 +312,107 @@ internal sealed class TerminalSelectionProfilePersistenceCoordinator : IDisposab
 		PendingWrite pending,
 		CancellationToken cancellationToken)
 	{
-		await _writeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+		if (!await TryEnterWriteAsync(cancellationToken).ConfigureAwait(false))
+			return ProjectProfilePersistenceResult.Unchanged();
+
+		EventHandler? stateChanged = null;
+		ProjectProfilePersistenceResult result;
 		try
 		{
-			return await _persistAsync(
+			lock (_sync)
+			{
+				if (_disposed != 0 || _pending?.Version != pending.Version)
+					return ProjectProfilePersistenceResult.Unchanged();
+			}
+
+			result = await _persistAsync(
 				pending.ProjectPath,
 				pending.Profile,
 				cancellationToken).ConfigureAwait(false);
+			if (result.Completed)
+			{
+				lock (_sync)
+				{
+					if (_pending?.Version == pending.Version)
+					{
+						// Publish completion before releasing the gate so a queued flush cannot
+						// write the same snapshot again or revive a discarded selection.
+						_pending = null;
+						stateChanged = SetStateLocked(new TerminalSelectionPersistenceState(
+							TerminalSelectionPersistencePhase.Idle));
+					}
+				}
+			}
 		}
 		finally
 		{
-			_writeGate.Release();
+			ReleaseWriteGate();
 		}
+
+		stateChanged?.Invoke(this, EventArgs.Empty);
+		return result;
+	}
+
+	private async Task<bool> TryEnterWriteAsync(CancellationToken cancellationToken)
+	{
+		lock (_sync)
+		{
+			if (_disposed != 0)
+				return false;
+
+			_activeWriteCalls++;
+		}
+
+		try
+		{
+			await _writeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+			return true;
+		}
+		catch
+		{
+			ExitWriteCall();
+			throw;
+		}
+	}
+
+	private void ReleaseWriteGate()
+	{
+		_writeGate.Release();
+		ExitWriteCall();
+	}
+
+	private void ExitWriteCall()
+	{
+		bool disposeWriteGate;
+		lock (_sync)
+		{
+			_activeWriteCalls--;
+			disposeWriteGate = _disposed != 0 && _activeWriteCalls == 0;
+		}
+
+		if (disposeWriteGate)
+			_writeGate.Dispose();
 	}
 
 	public void Dispose()
 	{
-		if (Interlocked.Exchange(ref _disposed, 1) != 0)
-			return;
-
+		bool disposeWriteGate;
 		lock (_sync)
 		{
+			if (_disposed != 0)
+				return;
+
+			_disposed = 1;
+			disposeWriteGate = _activeWriteCalls == 0;
 			_delayCts?.Cancel();
 			_delayCts?.Dispose();
 			_delayCts = null;
 			_pending = null;
 			_version = checked(_version + 1);
 		}
-		_writeGate.Dispose();
+		// Queued calls also retain the gate until their wait and release have completed.
+		if (disposeWriteGate)
+			_writeGate.Dispose();
 	}
 
 	private sealed record PendingWrite(
