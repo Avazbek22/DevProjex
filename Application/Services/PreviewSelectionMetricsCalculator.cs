@@ -16,11 +16,36 @@ public static class PreviewSelectionMetricsCalculator
         long totalChars = 0;
         long lineBreaks = 0;
 
-        for (var lineNumber = normalizedRange.StartLine; lineNumber <= normalizedRange.EndLine; lineNumber++)
+        if (normalizedRange.EndLine <= document.LineCount)
+        {
+            document.VisitLines(
+                normalizedRange.StartLine,
+                normalizedRange.EndLine,
+                AccumulateLine,
+                cancellationToken);
+        }
+        else
+        {
+            // Preserve the document's clamped random-access behavior for stale selection ranges.
+            for (var lineNumber = normalizedRange.StartLine; lineNumber <= normalizedRange.EndLine; lineNumber++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                AccumulateLine(lineNumber, document.GetLineText(lineNumber));
+            }
+        }
+
+        if (totalChars <= 0)
+            return ExportOutputMetrics.Empty;
+
+        return new ExportOutputMetrics(
+            Lines: lineBreaks + 1,
+            Chars: totalChars,
+            Tokens: EstimateTokens(totalChars));
+
+        bool AccumulateLine(int lineNumber, ReadOnlySpan<char> lineText)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var lineText = document.GetLineText(lineNumber);
             var segmentStart = lineNumber == normalizedRange.StartLine
                 ? Math.Clamp(normalizedRange.StartColumn, 0, lineText.Length)
                 : 0;
@@ -36,15 +61,8 @@ public static class PreviewSelectionMetricsCalculator
                 totalChars++;
                 lineBreaks++;
             }
+            return true;
         }
-
-        if (totalChars <= 0)
-            return ExportOutputMetrics.Empty;
-
-        return new ExportOutputMetrics(
-            Lines: lineBreaks + 1,
-            Chars: totalChars,
-            Tokens: EstimateTokens(totalChars));
     }
 
     private static long EstimateTokens(long chars) =>

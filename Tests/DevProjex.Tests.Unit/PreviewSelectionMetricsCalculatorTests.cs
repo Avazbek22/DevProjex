@@ -78,6 +78,73 @@ public sealed class PreviewSelectionMetricsCalculatorTests
         Assert.True(metrics.Chars > int.MaxValue);
     }
 
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public void Calculate_UnicodeAndEmptyLines_PreservesPartialAndOutOfBoundsRanges(bool fileBacked)
+	{
+		using var directory = new TemporaryDirectory();
+		using var document = CreateDocument(directory, fileBacked, "😀alpha\r\n\r\nβeta 文書\r\ngamma");
+		(PreviewSelectionRange Range, ExportOutputMetrics Expected)[] cases =
+		[
+			(new(1, 1, 4, 3), new(4, 19, 5)),
+			(new(4, 3, 1, 1), new(4, 19, 5)),
+			(new(2, 0, 3, 5), new(2, 6, 2)),
+			(new(3, -5, 3, 100), new(1, 7, 2)),
+			(new(3, 7, 4, 0), new(2, 1, 1)),
+			(new(2, 0, 2, 99), ExportOutputMetrics.Empty),
+			(new(1, 100, 4, 100), new(4, 15, 4)),
+			(new(3, 2, 6, 3), new(4, 21, 6)),
+			(new(6, 1, 7, 3), new(2, 8, 2))
+		];
+
+		foreach (var (range, expected) in cases)
+		{
+			Assert.Equal(expected, PreviewSelectionMetricsCalculator.Calculate(
+				document,
+				range,
+				TestContext.Current.CancellationToken));
+		}
+	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public void Calculate_CanceledSelection_ThrowsWithTheSuppliedToken(bool fileBacked)
+	{
+		using var directory = new TemporaryDirectory();
+		using var document = CreateDocument(directory, fileBacked, "alpha\r\nbeta");
+		using var cancellation = new CancellationTokenSource();
+		cancellation.Cancel();
+
+		var exception = Assert.ThrowsAny<OperationCanceledException>(() =>
+			PreviewSelectionMetricsCalculator.Calculate(
+				document,
+				new PreviewSelectionRange(1, 0, 2, 4),
+				cancellation.Token));
+
+		Assert.Equal(cancellation.Token, exception.CancellationToken);
+	}
+
+	private static IPreviewTextDocument CreateDocument(
+		TemporaryDirectory directory,
+		bool fileBacked,
+		string text)
+	{
+		if (!fileBacked)
+			return new InMemoryPreviewTextDocument(text);
+
+		var bytes = Encoding.UTF8.GetBytes(text);
+		var path = directory.CreateBinaryFile("selection.preview.txt", bytes);
+		var offsets = new List<long> { 0 };
+		for (var index = 0; index < bytes.Length; index++)
+		{
+			if (bytes[index] == '\n')
+				offsets.Add(index + 1);
+		}
+		return new FileBackedPreviewTextDocument(path, offsets.ToArray(), bytes.Length, text.Length, text.Length);
+	}
+
     private sealed class RepeatedLinePreviewDocument(int lineCount, int lineLength) : IPreviewTextDocument
     {
         private readonly string _line = new('x', lineLength);
