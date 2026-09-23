@@ -1396,7 +1396,9 @@ internal sealed class DevProjexMcpTools(
 				direction,
 				progress.MeasureFacts("Indexing dependency facts", 5, 90),
 				cancellationToken).ConfigureAwait(false);
-			related = await ProtectRelatedEvidenceAsync(plan, related, cancellationToken).ConfigureAwait(false);
+			var protectedEvidence = await ProtectRelatedEvidenceAsync(plan, related, cancellationToken)
+				.ConfigureAwait(false);
+			related = protectedEvidence.Result;
 			await progress.CompleteAsync(100, related.Index.Metrics.ResolutionCacheHit
 				? "Dependency index reused"
 				: "Dependency index complete").ConfigureAwait(false);
@@ -1413,11 +1415,16 @@ internal sealed class DevProjexMcpTools(
 					? "[No related files] in the effective selection."
 					: $"[No related files] in the effective selection; unresolved references={resolution.Unresolved.ToString(CultureInfo.InvariantCulture)}."
 				: null;
+			var partialEvidenceNotice = protectedEvidence.UninspectedSources == 0
+				? null
+				: $"[Related evidence] partial · uninspected-sources={protectedEvidence.UninspectedSources.ToString(CultureInfo.InvariantCulture)}; " +
+				  "unverified reference text was withheld.";
 			var trustedNotices = CombineTrustedNotices(
 				$"[Resolution] resolved={resolution.Resolved.ToString(CultureInfo.InvariantCulture)} · ambiguous={resolution.Ambiguous.ToString(CultureInfo.InvariantCulture)} · unresolved={resolution.Unresolved.ToString(CultureInfo.InvariantCulture)} · external={resolution.External.ToString(CultureInfo.InvariantCulture)}",
 				$"[Facts coverage] files={coverage.Files}, supported={coverage.Supported}, unsupported={coverage.Unsupported}, extraction-failed={coverage.ExtractionFailed}; supported means facts were extracted for a recognized language, unsupported means no supported extractor was available",
 				FormatDependencyConfigurationDiagnostics(coverage.ConfigurationDiagnostics),
 				$"[Search scope] files={plan.IncludedFiles.Count}",
+				partialEvidenceNotice,
 				SelectionNotices(plan, includeFilters: true, selectionContext),
 				FormatSafeNoFactsNotice(related.Seeds),
 				noRelatedNotice);
@@ -1488,13 +1495,14 @@ internal sealed class DevProjexMcpTools(
 					relatedRanges.Select(static range => range.Path),
 					prepared: null,
 					relatedRanges));
+			var storedNotice = $"Related-files result stored as '{pack.Id}' ({pack.Characters} characters). " +
+				"Call read_pack with this pack_id to read it.";
 			return McpToolResults.TextSuccess(
-				$"Related-files result stored as '{pack.Id}' ({pack.Characters} characters). " +
-				"Call read_pack with this pack_id to read it.",
+				partialEvidenceNotice is null ? storedNotice : storedNotice + "\n" + partialEvidenceNotice,
 				advertiseLargeResult: true);
 		}, cancellationToken);
 
-	private async Task<DependencyRelatedResult> ProtectRelatedEvidenceAsync(
+	private async Task<(DependencyRelatedResult Result, int UninspectedSources)> ProtectRelatedEvidenceAsync(
 		ProjectContextPlan plan,
 		DependencyRelatedResult related,
 		CancellationToken cancellationToken)
@@ -1511,7 +1519,7 @@ internal sealed class DevProjexMcpTools(
 			.Where(item => displayedReasons.Contains(item.Reason))
 			.ToArray();
 		if (evidence.Length == 0)
-			return related;
+			return (related, 0);
 
 		var candidateSourcePaths = evidence
 			.Select(item => Path.GetFullPath(item.Site.File, plan.SourceRoot))
@@ -1574,34 +1582,34 @@ internal sealed class DevProjexMcpTools(
 				cancellationToken).ConfigureAwait(false);
 			protectionSnapshot = protectedSources.Snapshot;
 		}
-		var hasUnavailableSources = false;
+		var uninspectedSources = 0;
 		foreach (var (sourcePath, sourceEvidence) in evidenceBySource)
 		{
 			if (processedSources.Contains(sourcePath))
 				continue;
-			hasUnavailableSources = true;
+			uninspectedSources++;
 			foreach (var item in sourceEvidence)
 			{
 				replacements[item.Reason] =
 					$"{RelatedEvidenceLabel(item.Edge.Layer)} at line {item.Site.Line.ToString(CultureInfo.InvariantCulture)}";
 			}
 		}
-		if (hasUnavailableSources)
+		if (uninspectedSources > 0)
 			journal?.RecordNotice(AgentJournalNoticeCodes.Unavailable);
 
 		foreach (var redactionCount in returnedRedactions.Values)
 			journal?.RecordProtection(redactionCount, protectionSnapshot);
 		if (replacements.Count == 0)
-			return related;
+			return (related, uninspectedSources);
 
-		return related with
+		return (related with
 		{
 			Seeds = related.Seeds.Select(seed => seed with
 			{
 				Dependencies = Protect(seed.Dependencies),
 				Dependents = Protect(seed.Dependents)
 			}).ToArray()
-		};
+		}, uninspectedSources);
 
 		IReadOnlyList<RelatedFile> Protect(IReadOnlyList<RelatedFile> files) => files
 			.Select(file => file with

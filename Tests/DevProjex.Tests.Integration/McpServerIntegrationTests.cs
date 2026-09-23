@@ -7554,6 +7554,9 @@ public sealed partial class McpServerIntegrationTests
 
 		Assert.NotEqual(true, result.IsError);
 		Assert.False(File.Exists(consumerPath));
+		AssertTrustedTrailerOutsideSpotlight(
+			result,
+			"[Related evidence] partial · uninspected-sources=1");
 		using var journal = new AgentJournalStore(
 			() => Path.Combine(workspace.Path, "app-data"),
 			activeSessionProvider: static () => []);
@@ -7561,6 +7564,44 @@ public sealed partial class McpServerIntegrationTests
 		var call = Assert.Single(await journal.ReadCallsAsync(session.Id, TestContext.Current.CancellationToken));
 		Assert.Equal("related_files", call.Tool);
 		Assert.Contains(AgentJournalNoticeCodes.Unavailable, call.Notices);
+	}
+
+	[Fact]
+	public async Task RelatedFilesStoredResultReportsUninspectedEvidenceInImmediateResponse()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "tsconfig.json"),
+			"{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}\n");
+		File.WriteAllText(Path.Combine(project, "Target.ts"), "export default 1;\n");
+		for (var index = 0; index < 700; index++)
+		{
+			File.WriteAllText(
+				Path.Combine(project, $"Consumer{index:D4}.ts"),
+				$"import target from './Target.js'; export const value{index:D4} = target;\n");
+		}
+		var sourcePath = Path.Combine(project, "Consumer0000.ts");
+		using var measurement = McpRelatedEvidenceRetentionDiagnostics.BeginMeasurement(paths =>
+		{
+			Assert.Equal(700, paths.Count);
+			Assert.Contains(sourcePath, paths);
+			File.Delete(sourcePath);
+		});
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync("related_files", new Dictionary<string, object?>
+		{
+			["path"] = "Target.ts",
+			["direction"] = "dependents"
+		});
+
+		Assert.False(result.IsError == true, Text(result));
+		Assert.False(File.Exists(sourcePath));
+		Assert.Matches("Related-files result stored as '[^']+'", Text(result));
+		Assert.Contains(
+			"[Related evidence] partial · uninspected-sources=1",
+			Text(result),
+			StringComparison.Ordinal);
 	}
 
 	[Fact]
