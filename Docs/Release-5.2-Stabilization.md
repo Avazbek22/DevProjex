@@ -218,6 +218,15 @@ the same growing repository improved one timing slice but regressed another; its
 and test changes were discarded after 29 focused checks passed. Neither probe justifies
 a new speedup claim or a late cache redesign.
 
+A subsequent current-only Release profile of the same 2,755-file/3,041-entry tree
+published identical six-metric tuples in all nine runs. Six warm samples had median
+backend time 147.62 ms, with 63.78 ms in selection, 22.31 ms in projection, 28.93 ms
+in metrics scanning, and 60.32 ms through metrics publication. These phase timings
+overlap and are not additive. The scan opened 2,326 full files (29,165,211 B), while
+2,755 of 5,939 metadata checks were post-scan version revalidation needed to prevent
+stale totals. No independently repeatable, safely removable >10 ms wall-time cost was
+established in this pass; no production change followed it.
+
 ### Journal retention fast path at GUI startup
 
 GUI composition constructs `AgentJournalStore` unconditionally, before creating the window.
@@ -535,6 +544,7 @@ not a unique-test total.
 | Desktop-control preview shutdown | `11248e4e` | Final window closing could wait for desktop-control server disposal while an IPC `preview.open` was awaiting the preview's first content, whose cancellation previously ran only in the later Closed event. The final Closing path now cancels preview refresh alongside project load and tree refresh, after all existing close vetoes. A headless blocked-preview IPC regression timed out before the fix; five focused/adjacent Release UI tests passed afterward. Animation timing is unchanged. |
 | Atomic output error classification | `44d8e43d` | A write/source-read `IOException` could be misreported as a destination conflict when another process created the destination during an atomic export. Conflict remapping now applies only to the final file commit, preserving an explicit validator conflict and the original writer failure. A deterministic race test failed before the fix; eight focused/adjacent Release Integration cases passed afterward, with one Windows symlink-capability skip. |
 | Related-files journal protection truth | `ab3ac1c8` | Large stored `related_files` results used to journal source-evidence masks before any body was delivered, while `read_pack` later reported a known zero even on a redacted page. The inline journal now uses the actual synthetic response's protection snapshot; stored production records no masks, and redacted stored pages report unknown protection (`unavailable`) until page-level provenance exists. A 700-import regression failed before the fix with 700 premature masks and passed twice afterward in focused Release Integration runs. MCP response text is unchanged. |
+| Dependency config containment | `4b4c56e7` | TypeScript `extends` had only a lexical root check, so a symlink could make it read an external config. Its pre-read check now uses the shared physical resolver. That resolver also now revisits every internal link target from the root, rejects cycles/outside/network paths, and caps traversal at 40 links; the previous single-hop walk accepted a link-to-link escape. Deterministic direct, chain, cycle, and valid-internal cases failed before their respective fixes and the affected Release Integration class passed 29/29 afterward. Three real symlink tests were skipped on this Windows host due to unavailable link creation and remain for Unix CI. Concurrent link retargeting between validation and open is not an atomic guarantee. |
 
 The CLI dense-search dictionary experiment was intentionally discarded: three 5,000-hit
 process samples per variant gave medians of 475 ms for the prior lookup and 480 ms for
