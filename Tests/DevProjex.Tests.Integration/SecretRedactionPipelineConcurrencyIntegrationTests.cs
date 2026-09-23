@@ -133,6 +133,41 @@ public sealed class SecretRedactionPipelineConcurrencyIntegrationTests
 		Assert.Equal(0, ReadInFlightBytes(diagnostics));
 	}
 
+	[Fact(Timeout = 15_000)]
+	public async Task ConsumeTransformedTextAsync_DisappearingSourceIsReportedWithoutLosingOtherFiles()
+	{
+		using var temporary = new TemporaryDirectory();
+		var projectRoot = temporary.CreateDirectory("project");
+		var paths = CreateFiles(temporary, 12);
+		var disappearing = paths[5];
+		var analyzer = new DeleteBeforeReadAnalyzer(new FileContentAnalyzer(), disappearing);
+		using var session = new SecretRedactionSession(new ExactSecretDetector("secret"));
+		var preparer = new SecretRedactionOutputPreparer(analyzer);
+		var delivered = new List<string>();
+		using var diagnostics = ContentPipelineDiagnostics.BeginMeasurement();
+
+		await using var prepared = await preparer.ConsumeTransformedTextAsync(
+			new ContentTransformationContext(
+				Compression: null,
+				new SecretRedactionContext(projectRoot, session)),
+			paths,
+			(file, _) =>
+			{
+				delivered.Add(file.Path);
+				return ValueTask.CompletedTask;
+			},
+			TestContext.Current.CancellationToken);
+
+		Assert.False(File.Exists(disappearing));
+		Assert.Equal(paths.Where(path => path != disappearing), delivered);
+		Assert.Equal(new UnscannableFile(disappearing, FileContentClassification.Missing),
+			Assert.Single(prepared.UnscannableFiles));
+		Assert.Equal(1, prepared.Snapshot?.SkippedFileCount);
+		Assert.Throws<KeyNotFoundException>(() => prepared.GetFile(disappearing));
+		Assert.Equal(0, diagnostics.Capture().PreparedFilesMaterialized);
+		Assert.Equal(0, ReadInFlightBytes(diagnostics));
+	}
+
 	[Fact]
 	public async Task PrepareAsync_LargeSelectionUsesOneImmutableSnapshotWithoutChangingContent()
 	{

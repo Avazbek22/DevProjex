@@ -167,7 +167,8 @@ public sealed class SecretRedactionOutputPreparer
 	/// Applies the normal compression and redaction pipeline and delivers each safe text payload
 	/// directly to a bounded consumer in selection order. No prepared content is written to disk.
 	/// Files that cannot be inspected under the mandatory redaction limit are withheld and reported
-	/// through <see cref="PreparedSecretRedactionOutput.UnscannableFiles"/>.
+	/// through <see cref="PreparedSecretRedactionOutput.UnscannableFiles"/>. A source that disappears
+	/// during consumption is reported as Missing and has no prepared-file entry.
 	/// </summary>
 	public Task<PreparedSecretRedactionOutput> ConsumeTransformedTextAsync(
 		ContentTransformationContext context,
@@ -281,7 +282,8 @@ public sealed class SecretRedactionOutputPreparer
 							   transformationScope,
 							   orderedFilePaths,
 							   cancellationToken,
-							   transformedTextConsumer is null ? requiredInspectionScope : null).ConfigureAwait(false))
+							   transformedTextConsumer is null ? requiredInspectionScope : null,
+							   tolerateMissingSources: transformedTextConsumer is not null).ConfigureAwait(false))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
 				var completed = false;
@@ -293,6 +295,11 @@ public sealed class SecretRedactionOutputPreparer
 
 					switch (result.Classification)
 					{
+						case FileContentClassification.Missing when transformedTextConsumer is not null:
+							// No source identity exists to cache, and no content can be delivered.
+							unscannableFiles.Add(new UnscannableFile(sourcePath, FileContentClassification.Missing));
+							completed = true;
+							continue;
 						case FileContentClassification.Binary:
 							scope?.AnalyzeBinary(sourcePath, metadataAfterRead);
 							preparedFiles[sourcePath] = PreparedSecretFile.Binary(sourcePath) with
@@ -545,7 +552,8 @@ public sealed class SecretRedactionOutputPreparer
 		ContentTransformationScope transformationScope,
 		IReadOnlyList<string> orderedFilePaths,
 		[EnumeratorCancellation] CancellationToken cancellationToken,
-		SecretRedactionScope? requiredInspectionScope = null)
+		SecretRedactionScope? requiredInspectionScope = null,
+		bool tolerateMissingSources = false)
 	{
 		if (orderedFilePaths.Count == 0)
 			yield break;
@@ -663,17 +671,28 @@ public sealed class SecretRedactionOutputPreparer
 					WeightedByteBudget.Lease? byteLease = null;
 					try
 					{
+						var scheduled = template;
 						if (!IsUnsupportedNonRegularSource(context, template.SourcePath))
 						{
-							EnsureSourcePathAvailable(context, template.SourcePath);
-							var size = SecretFileMetadata.Capture(template.SourcePath).Length;
-							byteLease = await retainedBytes.AcquireAsync(
-								EstimateRetainedTransformationBytes(size),
-								linkedCancellation.Token).ConfigureAwait(false);
+							try
+							{
+								EnsureSourcePathAvailable(context, template.SourcePath);
+								var size = SecretFileMetadata.Capture(template.SourcePath).Length;
+								byteLease = await retainedBytes.AcquireAsync(
+									EstimateRetainedTransformationBytes(size),
+									linkedCancellation.Token).ConfigureAwait(false);
+							}
+							catch (Exception exception) when (
+								tolerateMissingSources &&
+								exception is FileNotFoundException or DirectoryNotFoundException &&
+								ClassifySourcePath(context, template.SourcePath) == FileContentClassification.Missing)
+							{
+								scheduled = template with { SourceMissing = true };
+							}
 						}
 						await WriteWithQueueTimingAsync(
 							input.Writer,
-							template with { RetainedBudget = byteLease, WindowLease = windowLease },
+							scheduled with { RetainedBudget = byteLease, WindowLease = windowLease },
 							linkedCancellation.Token).ConfigureAwait(false);
 						byteLease = null;
 						windowLease = null!;
@@ -701,13 +720,25 @@ public sealed class SecretRedactionOutputPreparer
 				var ownsItemReservations = true;
 				try
 				{
-					entry = IsUnsupportedNonRegularSource(context, item.SourcePath)
-						? CreateUnreadableTransformationEntry(item)
-						: await PrepareTransformationEntryAsync(
-							context,
-							transformationScope,
-							item,
-							linkedCancellation.Token).ConfigureAwait(false);
+					try
+					{
+						entry = item.SourceMissing
+							? CreateMissingTransformationEntry(item)
+							: IsUnsupportedNonRegularSource(context, item.SourcePath)
+								? CreateUnreadableTransformationEntry(item)
+								: await PrepareTransformationEntryAsync(
+									context,
+									transformationScope,
+									item,
+									linkedCancellation.Token).ConfigureAwait(false);
+					}
+					catch (Exception exception) when (
+						tolerateMissingSources &&
+						exception is FileNotFoundException or DirectoryNotFoundException &&
+						ClassifySourcePath(context, item.SourcePath) == FileContentClassification.Missing)
+					{
+						entry = CreateMissingTransformationEntry(item);
+					}
 					ownsItemReservations = false;
 					await WriteWithQueueTimingAsync(
 						output.Writer,
@@ -1353,12 +1384,27 @@ public sealed class SecretRedactionOutputPreparer
 			item.WindowLease,
 			sourceIndex: item.EffectiveSourceIndex);
 
+	private static PreparedTransformationEntry CreateMissingTransformationEntry(CompressionWorkItem item) =>
+		new(
+			item.Index,
+			item.SourcePath,
+			default,
+			new FileContentReadResult(FileContentClassification.Missing),
+			new CodeCompressionResult(string.Empty, ContentTransformMap.Identity),
+			sourceFingerprint: null,
+			contentLease: null,
+			detectionEntry: null,
+			item.RetainedBudget,
+			item.WindowLease,
+			sourceIndex: item.EffectiveSourceIndex);
+
 	private readonly record struct CompressionWorkItem(
 		int Index,
 		string SourcePath,
 		WeightedByteBudget.Lease? RetainedBudget = null,
 		WorkWindowLease? WindowLease = null,
-		int SourceIndex = -1)
+		int SourceIndex = -1,
+		bool SourceMissing = false)
 	{
 		public int EffectiveSourceIndex => SourceIndex < 0 ? Index : SourceIndex;
 

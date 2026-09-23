@@ -349,6 +349,47 @@ public sealed partial class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task SearchKeepsObservedMatchesWhenLaterSelectedSourceDisappears()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		for (var index = 0; index < 9; index++)
+			File.WriteAllText(Path.Combine(project, $"{index:D2}.txt"), index == 0 ? "needle\n" : "clean\n");
+		var disappearing = Path.Combine(project, "08.txt");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+		var deleted = false;
+		McpSearchExecutionHooks.AfterScan = path =>
+		{
+			if (deleted || path != "00.txt")
+				return;
+			File.Delete(disappearing);
+			deleted = true;
+		};
+		try
+		{
+			var result = await server.CallAsync("search_project", new Dictionary<string, object?>
+			{
+				["pattern"] = "needle",
+				["context_lines"] = 0,
+				["ignore_case"] = false
+			});
+			var text = Text(result);
+
+			Assert.True(deleted);
+			Assert.True(result.IsError != true, text);
+			McpSearchOutputAssertions.ContainsMatch(text, "00.txt", 1, "needle");
+			Assert.Contains("sources inspected=8/9 · matches retained=1/1 · matches written=1", text,
+				StringComparison.Ordinal);
+			Assert.Contains("limits=unscannable-sources", text, StringComparison.Ordinal);
+			Assert.Contains("Uninspected content was not searched", text, StringComparison.Ordinal);
+		}
+		finally
+		{
+			McpSearchExecutionHooks.AfterScan = null;
+		}
+	}
+
+	[Fact]
 	public async Task ProtectedUnicodePrefixDoesNotShiftReturnedMatchOrBoundaryCounts()
 	{
 		using var workspace = new TemporaryDirectory();
