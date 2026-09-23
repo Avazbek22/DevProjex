@@ -1,4 +1,9 @@
 {
+  "Dialog.ProjectCopy.ZipReplace.Title": "Ganti ZIP yang ada?",
+  "Dialog.ProjectCopy.ZipReplace.Message": "File ZIP sudah ada:\n{0}\n\nGanti?",
+  "Dialog.StoreMigration.Title": "Data Store tidak dapat disiapkan",
+  "Dialog.StoreMigration.Message": "DevProjex tidak dapat dibuka sampai data dari versi Microsoft Store sebelumnya siap. Tutup jendela DevProjex lain, periksa akses ke data, lalu coba lagi. Penyimpanan data baru tidak dibuat.",
+  "Terminal.Error.StoreMigrationUnavailable": "Data Microsoft Store yang ada tidak dapat disiapkan. Tutup instans DevProjex lain lalu coba lagi; penyimpanan data baru tidak dibuat.",
   "Mcp.Connect.ProjectConfigurationWritten": "{0}: konfigurasi ditulis ke {1}.",
   "Mcp.Connect.Cursor.NextStep": "Mulai ulang Cursor di proyek ini.",
   "Mcp.Connect.VsCode.NextStep": "Di VS Code, jalankan MCP: List Servers, pilih devprojex, pilih Enable/Start, lalu konfirmasikan kepercayaan ruang kerja.",

@@ -1,4 +1,9 @@
 {
+  "Dialog.ProjectCopy.ZipReplace.Title": "기존 ZIP 파일을 바꾸시겠습니까?",
+  "Dialog.ProjectCopy.ZipReplace.Message": "ZIP 파일이 이미 있습니다:\n{0}\n\n바꾸시겠습니까?",
+  "Dialog.StoreMigration.Title": "Store 데이터를 준비할 수 없습니다",
+  "Dialog.StoreMigration.Message": "이전 Microsoft Store 버전의 데이터가 준비될 때까지 DevProjex를 열 수 없습니다. 다른 DevProjex 창을 닫고 데이터 접근 권한을 확인한 뒤 다시 시도하세요. 새 데이터 저장소는 생성되지 않았습니다.",
+  "Terminal.Error.StoreMigrationUnavailable": "기존 Microsoft Store 데이터를 준비할 수 없습니다. 다른 DevProjex 인스턴스를 닫고 다시 시도하세요. 새 데이터 저장소는 생성되지 않았습니다.",
   "Mcp.Connect.ProjectConfigurationWritten": "{0}: 구성을 {1}에 기록했습니다.",
   "Mcp.Connect.Cursor.NextStep": "이 프로젝트에서 Cursor를 다시 시작하세요.",
   "Mcp.Connect.VsCode.NextStep": "VS Code에서 MCP: List Servers를 실행하고 devprojex와 Enable/Start를 차례로 선택한 다음 작업 영역 신뢰를 확인하세요.",

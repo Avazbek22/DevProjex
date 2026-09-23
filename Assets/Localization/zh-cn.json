@@ -1,4 +1,9 @@
 {
+  "Dialog.ProjectCopy.ZipReplace.Title": "替换现有 ZIP 文件？",
+  "Dialog.ProjectCopy.ZipReplace.Message": "ZIP 文件已存在：\n{0}\n\n要替换吗？",
+  "Dialog.StoreMigration.Title": "无法准备 Store 数据",
+  "Dialog.StoreMigration.Message": "在旧版 Microsoft Store 数据准备就绪前，DevProjex 无法启动。请关闭其他 DevProjex 窗口，检查数据访问权限，然后重试。未创建新的数据存储。",
+  "Terminal.Error.StoreMigrationUnavailable": "无法准备现有的 Microsoft Store 数据。请关闭其他 DevProjex 实例后重试；未创建新的数据存储。",
   "Mcp.Connect.ProjectConfigurationWritten": "{0}：配置已写入 {1}。",
   "Mcp.Connect.Cursor.NextStep": "请在此项目中重启 Cursor。",
   "Mcp.Connect.VsCode.NextStep": "在 VS Code 中运行 MCP: List Servers，选择 devprojex，再选择 Enable/Start，并确认信任工作区。",

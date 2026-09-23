@@ -1,4 +1,9 @@
 {
+  "Dialog.ProjectCopy.ZipReplace.Title": "Thay thế tệp ZIP hiện có?",
+  "Dialog.ProjectCopy.ZipReplace.Message": "Tệp ZIP đã tồn tại:\n{0}\n\nThay thế?",
+  "Dialog.StoreMigration.Title": "Không thể chuẩn bị dữ liệu Store",
+  "Dialog.StoreMigration.Message": "DevProjex không thể mở cho đến khi dữ liệu từ phiên bản Microsoft Store trước đó sẵn sàng. Đóng các cửa sổ DevProjex khác, kiểm tra quyền truy cập dữ liệu rồi thử lại. Không có kho dữ liệu mới nào được tạo.",
+  "Terminal.Error.StoreMigrationUnavailable": "Không thể chuẩn bị dữ liệu Microsoft Store hiện có. Đóng các phiên DevProjex khác rồi thử lại; không có kho dữ liệu mới nào được tạo.",
   "Mcp.Connect.ProjectConfigurationWritten": "{0}: cấu hình đã được ghi vào {1}.",
   "Mcp.Connect.Cursor.NextStep": "Khởi động lại Cursor trong dự án này.",
   "Mcp.Connect.VsCode.NextStep": "Trong VS Code, chạy MCP: List Servers, chọn devprojex, chọn Enable/Start rồi xác nhận tin cậy không gian làm việc.",

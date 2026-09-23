@@ -6,6 +6,7 @@ using DevProjex.Terminal.Rendering;
 using DevProjex.Terminal.Tui;
 using DevProjex.Mcp;
 using DevProjex.Infrastructure.AgentJournal;
+using DevProjex.Infrastructure.Persistence;
 
 namespace DevProjex.Terminal.CommandLine;
 
@@ -247,6 +248,12 @@ public sealed class DevProjexCommandTree
 					.ConfigureAwait(false);
 				return CommandLineExitCodes.Success;
 			}
+			catch (StoreUserDataMigrationUnavailableException)
+			{
+				environment.Error.WriteLine(
+					$"error[DPX-STORE-MIGRATION-UNAVAILABLE]: {_localization["Terminal.Error.StoreMigrationUnavailable"]}");
+				return CommandLineExitCodes.RuntimeError;
+			}
 			catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException)
 			{
 				environment.Error.WriteLine(
@@ -339,6 +346,7 @@ public sealed class DevProjexCommandTree
 				_output.Get(parseResult),
 				async () =>
 				{
+					_serviceFactory.EnsureMigrationAdmission();
 					using var store = new AgentJournalStore(_serviceFactory.AppDataPathProvider);
 					return await new AgentJournalCommandHandler(
 							store,

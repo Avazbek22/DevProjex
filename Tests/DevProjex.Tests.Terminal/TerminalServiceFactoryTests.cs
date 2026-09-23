@@ -8,6 +8,96 @@ namespace DevProjex.Tests.Terminal;
 
 public sealed class TerminalServiceFactoryTests
 {
+	[Fact]
+	public void RecentScopeFailsClosedAfterThreeUnavailableMigrationAttempts()
+	{
+		var probes = 0;
+		var factory = new TerminalServiceFactory(
+			() =>
+			{
+				probes++;
+				return StoreUserDataMigrationStatus.TemporarilyUnavailable;
+			},
+			_ => { });
+
+		var error = Assert.Throws<StoreUserDataMigrationUnavailableException>(
+			() => factory.CreateRecentScope(AppLanguage.En));
+
+		Assert.Equal(StoreUserDataMigrationStatus.TemporarilyUnavailable, error.Status);
+		Assert.Equal(3, probes);
+	}
+
+	[Fact]
+	public void MigrationAdmissionIsReusedAcrossFactoryScopes()
+	{
+		var probes = 0;
+		var factory = new TerminalServiceFactory(
+			() =>
+			{
+				probes++;
+				return probes < 3
+					? StoreUserDataMigrationStatus.TemporarilyUnavailable
+					: StoreUserDataMigrationStatus.Migrated;
+			},
+			_ => { });
+
+		using var first = factory.CreateRecentScope(AppLanguage.En);
+		using var second = factory.CreateRecentScope(AppLanguage.En);
+
+		Assert.Equal(3, probes);
+	}
+
+	[Fact]
+	public async Task RecentCommandReportsLocalizedMigrationFailureWithoutCreatingServices()
+	{
+		var probes = 0;
+		var factory = new TerminalServiceFactory(
+			() =>
+			{
+				probes++;
+				return StoreUserDataMigrationStatus.TemporarilyUnavailable;
+			},
+			_ => { });
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(environment, factory)
+			.RunAsync(["recent", "--language", "ru"], TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.RuntimeError, exitCode);
+		Assert.Equal(3, probes);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("DPX-STORE-MIGRATION-UNAVAILABLE", environment.StandardError);
+		Assert.Contains("Не удалось подготовить данные", environment.StandardError);
+	}
+
+	[Fact]
+	public async Task McpLogDoesNotOpenJournalWhenMigrationIsUnavailable()
+	{
+		using var workspace = new TemporaryDirectory();
+		var journalDirectory = Path.Combine(UserDataPathResolver.GetStateRoot(), "agent-journal");
+		var journalExistedBefore = Directory.Exists(journalDirectory);
+		var probes = 0;
+		var factory = new TerminalServiceFactory(
+			() =>
+			{
+				probes++;
+				return StoreUserDataMigrationStatus.TemporarilyUnavailable;
+			},
+			_ => { });
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(environment, factory)
+			.RunAsync(["mcp", "log", workspace.Path, "--language", "ru"],
+				TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.RuntimeError, exitCode);
+		Assert.Equal(3, probes);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("DPX-STORE-MIGRATION-UNAVAILABLE", environment.StandardError);
+		Assert.Contains("Не удалось подготовить данные", environment.StandardError);
+		Assert.Equal(journalExistedBefore, Directory.Exists(journalDirectory));
+	}
+
 	[Theory]
 	[InlineData(null)]
 	[InlineData("")]

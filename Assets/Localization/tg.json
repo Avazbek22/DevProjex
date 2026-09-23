@@ -1,4 +1,9 @@
 {
+  "Dialog.ProjectCopy.ZipReplace.Title": "Файли ZIP-и мавҷударо иваз кунед?",
+  "Dialog.ProjectCopy.ZipReplace.Message": "Файли ZIP аллакай вуҷуд дорад:\n{0}\n\nОнро иваз кунед?",
+  "Dialog.StoreMigration.Title": "Омода кардани маълумоти Store имкон надод",
+  "Dialog.StoreMigration.Message": "То омода шудани маълумоти версияи пешинаи Microsoft Store, DevProjex кушода намешавад. Равзанаҳои дигари DevProjex-ро пӯшед, дастрасӣ ба маълумотро санҷед ва дубора кӯшиш кунед. Анбори нави маълумот сохта нашуд.",
+  "Terminal.Error.StoreMigrationUnavailable": "Омода кардани маълумоти мавҷудаи Microsoft Store имкон надод. Нусхаҳои дигари DevProjex-ро пӯшед ва дубора кӯшиш кунед; анбори нави маълумот сохта нашуд.",
   "Mcp.Connect.ProjectConfigurationWritten": "{0}: конфигуратсия ба {1} навишта шуд.",
   "Mcp.Connect.Cursor.NextStep": "Cursor-ро дар ин лоиҳа аз нав оғоз кунед.",
   "Mcp.Connect.VsCode.NextStep": "Дар VS Code фармони MCP: List Servers-ро иҷро кунед, devprojex ва баъд Enable/Start-ро интихоб карда, эътимоди фазои кориро тасдиқ кунед.",

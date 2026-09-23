@@ -1,4 +1,9 @@
 {
+  "Dialog.ProjectCopy.ZipReplace.Title": "Substituir o ZIP existente?",
+  "Dialog.ProjectCopy.ZipReplace.Message": "O ficheiro ZIP já existe:\n{0}\n\nSubstituí-lo?",
+  "Dialog.StoreMigration.Title": "Não foi possível preparar os dados da Store",
+  "Dialog.StoreMigration.Message": "O DevProjex não pode abrir até os dados da versão anterior da Microsoft Store estarem prontos. Feche outras janelas do DevProjex, verifique o acesso aos dados e tente novamente. Não foi criado nenhum novo armazenamento de dados.",
+  "Terminal.Error.StoreMigrationUnavailable": "Não foi possível preparar os dados existentes da Microsoft Store. Feche outras instâncias do DevProjex e tente novamente; não foi criado nenhum novo armazenamento de dados.",
     "Mcp.Connect.ProjectConfigurationWritten":  "{0}: a configuração foi escrita em {1}.",
     "Mcp.Connect.Cursor.NextStep":  "Reinicie o Cursor neste projeto.",
     "Mcp.Connect.VsCode.NextStep":  "No VS Code, execute MCP: List Servers, escolha devprojex, selecione Enable/Start e confirme a confiança na área de trabalho.",

@@ -1,4 +1,9 @@
 {
+  "Dialog.ProjectCopy.ZipReplace.Title": "Mevcut ZIP değiştirilsin mi?",
+  "Dialog.ProjectCopy.ZipReplace.Message": "ZIP dosyası zaten var:\n{0}\n\nDeğiştirilsin mi?",
+  "Dialog.StoreMigration.Title": "Store verileri hazırlanamadı",
+  "Dialog.StoreMigration.Message": "Önceki Microsoft Store sürümünün verileri hazır olana kadar DevProjex açılamaz. Diğer DevProjex pencerelerini kapatın, verilere erişimi kontrol edin ve yeniden deneyin. Yeni bir veri deposu oluşturulmadı.",
+  "Terminal.Error.StoreMigrationUnavailable": "Mevcut Microsoft Store verileri hazırlanamadı. Diğer DevProjex örneklerini kapatıp yeniden deneyin; yeni bir veri deposu oluşturulmadı.",
   "Mcp.Connect.ProjectConfigurationWritten": "{0}: yapılandırma {1} konumuna yazıldı.",
   "Mcp.Connect.Cursor.NextStep": "Cursor'ı bu projede yeniden başlatın.",
   "Mcp.Connect.VsCode.NextStep": "VS Code'da MCP: List Servers komutunu çalıştırın, devprojex'i seçin, Enable/Start seçeneğini belirleyin ve çalışma alanına güveni onaylayın.",

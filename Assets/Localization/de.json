@@ -1,4 +1,9 @@
 {
+  "Dialog.ProjectCopy.ZipReplace.Title": "Vorhandene ZIP-Datei ersetzen?",
+  "Dialog.ProjectCopy.ZipReplace.Message": "Die ZIP-Datei ist bereits vorhanden:\n{0}\n\nErsetzen?",
+  "Dialog.StoreMigration.Title": "Store-Daten konnten nicht vorbereitet werden",
+  "Dialog.StoreMigration.Message": "DevProjex kann erst geöffnet werden, wenn die Daten der vorherigen Microsoft Store-Version bereit sind. Schließen Sie andere DevProjex-Fenster, prüfen Sie den Zugriff auf die Daten und versuchen Sie es erneut. Es wurde kein neuer Datenspeicher erstellt.",
+  "Terminal.Error.StoreMigrationUnavailable": "Vorhandene Microsoft Store-Daten konnten nicht vorbereitet werden. Schließen Sie andere DevProjex-Instanzen und versuchen Sie es erneut; es wurde kein neuer Datenspeicher erstellt.",
   "Mcp.Connect.ProjectConfigurationWritten": "{0}: Die Konfiguration wurde in {1} geschrieben.",
   "Mcp.Connect.Cursor.NextStep": "Starten Sie Cursor in diesem Projekt neu.",
   "Mcp.Connect.VsCode.NextStep": "Führen Sie in VS Code MCP: List Servers aus, wählen Sie devprojex, dann Enable/Start, und bestätigen Sie das Vertrauen in den Arbeitsbereich.",

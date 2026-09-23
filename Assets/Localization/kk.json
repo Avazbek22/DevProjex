@@ -1,4 +1,9 @@
 {
+  "Dialog.ProjectCopy.ZipReplace.Title": "Бар ZIP файлын ауыстыру керек пе?",
+  "Dialog.ProjectCopy.ZipReplace.Message": "ZIP файлы бұрыннан бар:\n{0}\n\nАуыстыру керек пе?",
+  "Dialog.StoreMigration.Title": "Store деректерін дайындау мүмкін болмады",
+  "Dialog.StoreMigration.Message": "Microsoft Store дүкеніндегі алдыңғы нұсқаның деректері дайын болмайынша, DevProjex ашылмайды. Басқа DevProjex терезелерін жауып, деректерге қатынасты тексеріп, қайталап көріңіз. Жаңа деректер қоймасы жасалған жоқ.",
+  "Terminal.Error.StoreMigrationUnavailable": "Қолданыстағы Microsoft Store деректерін дайындау мүмкін болмады. Басқа DevProjex даналарын жауып, қайталап көріңіз; жаңа деректер қоймасы жасалған жоқ.",
   "Mcp.Connect.ProjectConfigurationWritten": "{0}: конфигурация {1} файлына жазылды.",
   "Mcp.Connect.Cursor.NextStep": "Осы жобада Cursor қолданбасын қайта іске қосыңыз.",
   "Mcp.Connect.VsCode.NextStep": "VS Code ішінде MCP: List Servers пәрменін орындап, devprojex таңдаңыз, Enable/Start басып, жұмыс кеңістігіне сенімді растаңыз.",

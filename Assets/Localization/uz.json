@@ -1,4 +1,9 @@
 {
+  "Dialog.ProjectCopy.ZipReplace.Title": "Mavjud ZIP fayl almashtirilsinmi?",
+  "Dialog.ProjectCopy.ZipReplace.Message": "ZIP fayl allaqachon mavjud:\n{0}\n\nUni almashtirasizmi?",
+  "Dialog.StoreMigration.Title": "Store maʼlumotlarini tayyorlab boʻlmadi",
+  "Dialog.StoreMigration.Message": "Microsoft Storeʼning oldingi versiyasi maʼlumotlari tayyor boʻlmaguncha DevProjex ochilmaydi. Boshqa DevProjex oynalarini yoping, maʼlumotlarga kirishni tekshiring va qayta urinib koʻring. Yangi maʼlumotlar ombori yaratilmadi.",
+  "Terminal.Error.StoreMigrationUnavailable": "Mavjud Microsoft Store maʼlumotlarini tayyorlab boʻlmadi. Boshqa DevProjex nusxalarini yoping va qayta urinib koʻring; yangi maʼlumotlar ombori yaratilmadi.",
   "Mcp.Connect.ProjectConfigurationWritten": "{0}: konfiguratsiya {1} fayliga yozildi.",
   "Mcp.Connect.Cursor.NextStep": "Cursor dasturini shu loyihada qayta ishga tushiring.",
   "Mcp.Connect.VsCode.NextStep": "VS Code ichida MCP: List Servers buyrug‘ini bajaring, devprojex-ni tanlang, Enable/Start-ni bosing va ish maydoniga ishonchni tasdiqlang.",

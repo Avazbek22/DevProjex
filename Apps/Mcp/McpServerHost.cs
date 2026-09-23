@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Reflection;
 using DevProjex.Infrastructure.AgentJournal;
+using DevProjex.Infrastructure.Persistence;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -158,7 +159,9 @@ public static class McpServerHost
 		McpToolSet toolSet = McpToolSet.Full,
 		int searchBodyCharacters = DevProjexMcpTools.MaximumSearchDeclarationBodyCharacters,
 		bool live = false,
-		Func<IReadOnlyList<string>, McpRootRegistry>? rootRegistryFactory = null)
+		Func<IReadOnlyList<string>, McpRootRegistry>? rootRegistryFactory = null,
+		Func<StoreUserDataMigrationStatus>? migrationProbe = null,
+		Action<TimeSpan>? migrationWait = null)
 	{
 		ArgumentNullException.ThrowIfNull(roots);
 		ArgumentNullException.ThrowIfNull(input);
@@ -167,6 +170,12 @@ public static class McpServerHost
 		ValidateSearchBodyCharacters(searchBodyCharacters);
 		ValidateGitMode(gitMode);
 		ValidateExclusions(exclusions);
+		if (appDataPathProvider is null)
+		{
+			var migrationStatus = StoreUserDataMigrationAdmission.Run(migrationProbe, migrationWait);
+			if (!StoreUserDataMigrationAdmission.IsReady(migrationStatus))
+				throw new StoreUserDataMigrationUnavailableException(migrationStatus);
+		}
 
 		var rootRegistry = rootRegistryFactory?.Invoke(roots) ?? new McpRootRegistry(roots);
 		using var projectSources = new McpProjectSourceResolver(
