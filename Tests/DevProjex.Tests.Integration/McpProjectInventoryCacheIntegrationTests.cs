@@ -372,6 +372,27 @@ public sealed class McpProjectInventoryCacheIntegrationTests
 	}
 
 	[Fact]
+	public async Task BuildPlan_MaximumFileBytesRefreshesIncludedBytesWhenTheFileStillFits()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var path = workspace.CreateFile("project/Payload.txt", "small\n");
+		await using var harness = CreateHarness(project);
+
+		var initial = await BuildAsync(harness.Service, maximumFileBytes: 64);
+		Assert.Equal(6, initial.IncludedBytes);
+		DisableWatcher(harness.Service);
+		File.WriteAllText(path, new string('x', 32));
+
+		var changed = await BuildAsync(harness.Service, maximumFileBytes: 64);
+
+		Assert.Same(initial.EffectiveTree, changed.EffectiveTree);
+		Assert.True(HasFile(changed, "Payload.txt"));
+		Assert.Equal(32, changed.EffectiveFileSizes![Assert.Single(changed.IncludedFiles)]);
+		Assert.Equal(32, changed.IncludedBytes);
+	}
+
+	[Fact]
 	public async Task BuildPlan_GitIndexStampInvalidatesWithoutAWatcherEvent()
 	{
 		if (!IsGitAvailable())
