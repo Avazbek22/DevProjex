@@ -13,6 +13,50 @@ namespace DevProjex.Tests.UI;
 [Collection("AvaloniaUI")]
 public sealed class MainWindowApplySettingsSelectionUiTests
 {
+	[AvaloniaFact]
+	public async Task CancelledReopenOfSameProjectDoesNotReportSuccess()
+	{
+		using var project = UiTestProject.CreateWithDynamicIgnoreEntries();
+		var blockingTreeBuilder = new BlockingTreeBuilder();
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			configureServices: services => services with
+			{
+				BuildTreeUseCase = new BuildTreeUseCase(
+					blockingTreeBuilder,
+					new TreeNodePresentationService(
+						services.Localization,
+						new IconMapper()))
+			});
+		try
+		{
+			blockingTreeBuilder.Arm();
+			var opening = Assert.IsAssignableFrom<Task<bool>>(
+				await UiTestDriver.BeginOpenFolderAsync(
+					window,
+					project.RootPath,
+					fromDialog: false,
+					recordRecentFolder: false));
+			await blockingTreeBuilder.BuildStarted.Task.WaitAsync(
+				TimeSpan.FromSeconds(10),
+				TestContext.Current.CancellationToken);
+
+			await UiTestDriver.RaiseButtonClickAsync(
+				UiTestDriver.GetRequiredStatusCancelButton(window));
+			blockingTreeBuilder.Release();
+			Assert.False(await opening.WaitAsync(
+				TimeSpan.FromSeconds(30),
+				TestContext.Current.CancellationToken));
+			Assert.True(UiTestDriver.GetViewModel(window).IsProjectLoaded);
+			Assert.NotEmpty(UiTestDriver.GetViewModel(window).TreeNodes);
+		}
+		finally
+		{
+			blockingTreeBuilder.Release();
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
     [AvaloniaFact]
     public async Task StructuralApply_PreservesManualSubsetWithoutRetainingOldTree()
     {

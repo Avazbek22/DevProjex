@@ -1175,11 +1175,12 @@ public partial class MainWindow : Window
         }
         try
         {
-            await _projectLoadPipeline.OpenFolderAsync(
+            var published = await _projectLoadPipeline.OpenFolderAsync(
                 normalizedPath,
                 candidateSession is null && (fromDialog || _currentRepositorySession is not null),
                 recordRecentFolder);
-            if (!PathComparer.Default.Equals(_currentPath, normalizedPath) ||
+            if (!published ||
+                !PathComparer.Default.Equals(_currentPath, normalizedPath) ||
                 !_viewModel.IsProjectLoaded)
             {
                 if (ownsCandidateSession)

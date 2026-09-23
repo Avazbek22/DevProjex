@@ -359,8 +359,9 @@ public sealed class MainWindowCoordinatorRefactorTests
             metricsOperationTextProvider: () => viewModel.StatusOperationCalculatingData);
         using var pipeline = new ProjectLoadPipeline(host, status);
 
-        await pipeline.OpenFolderAsync(@"C:\Project", fromDialog: true, recordRecentFolder: true);
+        var published = await pipeline.OpenFolderAsync(@"C:\Project", fromDialog: true, recordRecentFolder: true);
 
+		Assert.True(published);
         Assert.Equal(ProjectSourceType.LocalFolder, viewModel.ProjectSourceType);
         Assert.True(viewModel.IsProjectLoaded);
         Assert.Equal(
@@ -457,6 +458,38 @@ public sealed class MainWindowCoordinatorRefactorTests
         Assert.Contains(ProjectLoadHostCall.ScheduleInitialProjectLoadCleanup, host.Calls);
     }
 
+	[Fact]
+	public async Task ProjectLoadPipeline_CancellationAfterPublicationKeepsSuccessfulOpen()
+	{
+		var viewModel = CreateViewModel();
+		var persistenceStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var host = new RecordingProjectLoadHost(viewModel)
+		{
+			RecordRecentFolderHandler = async cancellationToken =>
+			{
+				persistenceStarted.SetResult();
+				await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+			}
+		};
+		var status = new StatusOperationCoordinator(
+			viewModel,
+			isBackgroundMetricsActive: () => false,
+			metricsOperationTextProvider: () => viewModel.StatusOperationCalculatingData);
+		using var pipeline = new ProjectLoadPipeline(host, status);
+
+		var loadTask = pipeline.OpenFolderAsync(
+			@"C:\Project",
+			fromDialog: false,
+			recordRecentFolder: true);
+		await persistenceStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+		pipeline.CancelActiveLoad();
+
+		Assert.True(await loadTask.WaitAsync(TestContext.Current.CancellationToken));
+		Assert.Equal(@"C:\Project", host.StableIdentity);
+		Assert.DoesNotContain(ProjectLoadHostCall.ApplyCancellationFallback, host.Calls);
+		Assert.False(viewModel.StatusBusy);
+	}
+
     [Fact]
     public async Task ProjectLoadPipeline_OpenFolderAsync_CancellationAppliesFallbackWithoutSuccessSideEffects()
     {
@@ -478,9 +511,10 @@ public sealed class MainWindowCoordinatorRefactorTests
         };
         pipeline = new ProjectLoadPipeline(host, status);
 
-        await pipeline.OpenFolderAsync(@"C:\Canceled", fromDialog: true, recordRecentFolder: true);
+        var published = await pipeline.OpenFolderAsync(@"C:\Canceled", fromDialog: true, recordRecentFolder: true);
         pipeline.Dispose();
 
+		Assert.False(published);
         Assert.Contains(ProjectLoadHostCall.ApplyCancellationFallback, host.Calls);
         Assert.Contains(ProjectLoadHostCall.ShowLoadCanceledToast, host.Calls);
         Assert.DoesNotContain(ProjectLoadHostCall.RecordRecentFolder, host.Calls);
