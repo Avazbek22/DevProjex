@@ -521,7 +521,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 		RebuildVisibleRows();
 	}
 
-	private bool TryResolvePersistedPath(string? path, out string fullPath)
+	internal bool TryResolvePersistedPath(string? path, out string fullPath)
 	{
 		fullPath = string.Empty;
 		if (string.IsNullOrWhiteSpace(path))
@@ -533,7 +533,8 @@ public sealed class TerminalWorkspaceState : IDisposable
 				path.Replace('/', Path.DirectorySeparatorChar)));
 			return true;
 		}
-		catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
+		catch (Exception exception) when (exception is
+			ArgumentException or NotSupportedException or PathTooLongException)
 		{
 			return false;
 		}

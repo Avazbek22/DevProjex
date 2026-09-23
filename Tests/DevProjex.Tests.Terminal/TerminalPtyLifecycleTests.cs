@@ -41,6 +41,68 @@ public sealed class TerminalPtyLifecycleTests
 			await terminal.WaitForExitAsync(cancellationToken: TestContext.Current.CancellationToken));
 	}
 
+	[Theory(Timeout = 60_000)]
+	[InlineData("\0", ".")]
+	[InlineData("../outside.txt", ".")]
+	[InlineData("notes.txt", "notes.txt")]
+	public async Task PersistedFocusedPathOnlyRestoresNodesInCurrentTree(
+		string persistedFocusedPath,
+		string expectedFocusedPath)
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("notes.txt", "markerless directory");
+		string? dataRoot = null;
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			workspace.Path,
+			[
+				"tui",
+				workspace.Path,
+				"--profile",
+				"standard",
+				"--screen",
+				"inline",
+				"--no-mouse",
+				"--language",
+				"en"
+			],
+			columns: 80,
+			rows: 24,
+			initializeDataRoot: root =>
+			{
+				dataRoot = root;
+				new TerminalSettingsStore(() => root)
+					.SaveProjectSettingsAsync(
+						new TerminalProjectSettings(
+							workspace.Path,
+							[],
+							[],
+							persistedFocusedPath,
+							ProjectContextView.Tree,
+							ProjectContextDocumentFormat.Text,
+							DateTimeOffset.UtcNow),
+						TestContext.Current.CancellationToken)
+					.GetAwaiter()
+					.GetResult();
+			},
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"notes.txt",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.False(terminal.HasExited);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(cancellationToken: TestContext.Current.CancellationToken));
+		Assert.Equal(
+			expectedFocusedPath,
+			new TerminalSettingsStore(() => dataRoot!)
+				.LoadProjectSettings(workspace.Path)?.FocusedPath);
+	}
+
 	[Fact(Timeout = 60_000)]
 	public async Task QuitRetriesAfterProjectAppearsBeforeRecentHistoryWriteCompletes()
 	{

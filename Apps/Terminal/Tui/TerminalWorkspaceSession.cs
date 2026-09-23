@@ -1279,12 +1279,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			_format = Enum.IsDefined(persisted.Format)
 				? persisted.Format
 				: ProjectContextDocumentFormat.Text;
-			if (!string.IsNullOrWhiteSpace(persisted.FocusedPath))
+			if (state.TryResolvePersistedPath(persisted.FocusedPath, out var focusedPath) &&
+				state.Reveal(focusedPath) >= 0)
 			{
-				_selectedTreePath = Path.GetFullPath(Path.Combine(
-					state.Plan.SourceRoot,
-					persisted.FocusedPath.Replace('/', Path.DirectorySeparatorChar)));
-				state.Reveal(_selectedTreePath);
+				_selectedTreePath = focusedPath;
 			}
 		}
 		_state = state;
