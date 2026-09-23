@@ -109,6 +109,7 @@ public partial class MainWindow
         {
             _projectLoadPipeline.CancelActiveLoad();
             _refreshPipeline.CancelActiveRefresh();
+            _previewPipeline.CancelRefresh();
             await desktopControlServer.DisposeAsync();
         }
         catch (Exception exception)

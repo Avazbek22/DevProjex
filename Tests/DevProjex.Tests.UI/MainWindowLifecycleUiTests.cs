@@ -3,6 +3,7 @@ using Avalonia.Media;
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Application.Compression;
 using DevProjex.Application.Secrets;
+using DevProjex.Application.Services;
 using DevProjex.Application.UseCases;
 using DevProjex.Infrastructure.FileSystem;
 using DevProjex.Infrastructure.Git;
@@ -70,6 +71,64 @@ public sealed class MainWindowLifecycleUiTests
 		finally
 		{
 			scanner.Release();
+			if (requestTask is not null)
+				_ = await Record.ExceptionAsync(() => requestTask.WaitAsync(TimeSpan.FromSeconds(5)));
+			if (window.IsVisible)
+				await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task ClosingWindow_CancelsInFlightDesktopPreviewBeforeStoppingServer()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var paths = new DesktopControlPaths(() => appDataPath);
+		var options = DesktopStartupOptions.Default;
+		var defaultServices = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath);
+		var analyzer = new BlockingPreviewContentAnalyzer(defaultServices.FileContentAnalyzer);
+		var contentExport = new SelectedContentExportService(analyzer);
+		var services = defaultServices with
+		{
+			ContentExportService = contentExport,
+			TreeAndContentExportService = new TreeAndContentExportService(
+				defaultServices.TreeExportService,
+				contentExport),
+			PreviewDocumentBuilder = new PreviewDocumentBuilder(analyzer),
+			DesktopControlServerFactory = (handler, projectPath, cancellationToken) =>
+				DesktopControlServer.StartAsync(handler, projectPath, paths, cancellationToken)
+		};
+		var window = new MainWindow(options, services);
+		UiTestDriver.TrackTopLevelWindow(window);
+		Task<DesktopProtocolResponse>? requestTask = null;
+		var cancellationToken = TestContext.Current.CancellationToken;
+
+		try
+		{
+			window.Show();
+			await UiTestDriver.OpenFolderAsync(window, project.RootPath);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => GetPrivateFieldValue(window, new OwnedField(null, "_desktopControlServer")) is not null,
+				"desktop control server publication");
+			var client = new DesktopControlClient(new DesktopInstanceRegistry(paths));
+			var registration = Assert.Single(await client.ListAsync(cancellationToken));
+			analyzer.BlockReads();
+			requestTask = client.SendAsync(
+				registration,
+				"preview.open",
+				new { view = "content" },
+				TimeSpan.FromSeconds(15),
+				cancellationToken);
+			await analyzer.Started.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
+
+			window.Close();
+			await window.ShutdownCompletion.WaitAsync(TimeSpan.FromSeconds(2), cancellationToken);
+			Assert.False(window.IsVisible);
+		}
+		finally
+		{
+			analyzer.Release();
 			if (requestTask is not null)
 				_ = await Record.ExceptionAsync(() => requestTask.WaitAsync(TimeSpan.FromSeconds(5)));
 			if (window.IsVisible)
@@ -212,6 +271,66 @@ public sealed class MainWindowLifecycleUiTests
 		branchUnavailable
 			? new RepositoryBranchUnavailableException("main", RepositoryBranchUnavailableReason.NotFound)
 			: new IOException("Simulated repository session failure.");
+
+	private sealed class BlockingPreviewContentAnalyzer(IFileContentAnalyzer inner) : IFileContentAnalyzer
+	{
+		private readonly TaskCompletionSource _started = new(
+			TaskCreationOptions.RunContinuationsAsynchronously);
+		private readonly TaskCompletionSource _release = new(
+			TaskCreationOptions.RunContinuationsAsynchronously);
+		private int _blockReads;
+
+		public Task Started => _started.Task;
+
+		public void BlockReads() => Volatile.Write(ref _blockReads, 1);
+
+		public void Release() => _release.TrySetResult();
+
+		public ValueTask<bool> IsTextFileAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			inner.IsTextFileAsync(path, cancellationToken);
+
+		public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			inner.GetTextFileMetricsAsync(path, cancellationToken);
+
+		public async ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			CancellationToken cancellationToken = default)
+		{
+			await WaitIfBlockedAsync(cancellationToken);
+			return await inner.TryReadAsTextAsync(path, cancellationToken);
+		}
+
+		public async ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default)
+		{
+			await WaitIfBlockedAsync(cancellationToken);
+			return await inner.TryReadAsTextAsync(path, maxSizeForFullRead, cancellationToken);
+		}
+
+		public async ValueTask<ContentReadFact> ReadFactAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default)
+		{
+			await WaitIfBlockedAsync(cancellationToken);
+			return await inner.ReadFactAsync(path, maxSizeForFullRead, cancellationToken);
+		}
+
+		private async Task WaitIfBlockedAsync(CancellationToken cancellationToken)
+		{
+			if (Volatile.Read(ref _blockReads) == 0)
+				return;
+
+			_started.TrySetResult();
+			await _release.Task.WaitAsync(cancellationToken);
+		}
+	}
 
 	[AvaloniaFact]
 	public async Task ClosingWindow_WithPublishedDesktopServer_CompletesTeardownBeforeClosedReturns()
