@@ -474,6 +474,73 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 	}
 
 	[Theory]
+	[InlineData(ProjectCopyConflictPolicy.Fail)]
+	[InlineData(ProjectCopyConflictPolicy.ReplaceAtomically)]
+	public async Task AutomaticZipExportUsesNextAvailableNameWithoutReplacingExistingEntries(
+		ProjectCopyConflictPolicy conflictPolicy)
+	{
+		using var workspace = ProjectCopyWorkspace.Create();
+		var firstPath = Path.Combine(workspace.DestinationParent, "Sample-copy.zip");
+		var secondPath = Path.Combine(workspace.DestinationParent, "Sample-copy (2).zip");
+		var expectedPath = Path.Combine(workspace.DestinationParent, "Sample-copy (3).zip");
+		await File.WriteAllTextAsync(firstPath, "first archive", TestContext.Current.CancellationToken);
+		Directory.CreateDirectory(secondPath);
+
+		var result = await new ProjectCopyExportService(new ProjectCopyExportPlanBuilder()).ExportAsync(
+			new ProjectCopyExportRequest(
+				workspace.SourceRoot,
+				"Sample",
+				workspace.Root,
+				new HashSet<string>(PathComparer.Default),
+				Path.Combine(workspace.DestinationParent, "Sample-copy"),
+				ProjectCopyExportFormat.Zip,
+				ProjectCopyDestinationMode.AutomaticName,
+				conflictPolicy),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Equal(expectedPath, result.DestinationPath);
+		Assert.Equal("first archive", await File.ReadAllTextAsync(
+			firstPath,
+			TestContext.Current.CancellationToken));
+		Assert.True(Directory.Exists(secondPath));
+		using var archive = ZipFile.OpenRead(expectedPath);
+		Assert.Contains(archive.Entries, static entry => entry.FullName == "Sample/README.md");
+		Assert.Empty(FindStagingArtifacts(workspace.DestinationParent));
+	}
+
+	[Fact]
+	public async Task AutomaticZipExportRetriesWhenPreferredNameAppearsDuringCopy()
+	{
+		using var workspace = ProjectCopyWorkspace.Create();
+		var preferredPath = Path.Combine(workspace.DestinationParent, "race.zip");
+		var expectedPath = Path.Combine(workspace.DestinationParent, "race (2).zip");
+		var competingFileCreated = false;
+		var progress = new CallbackProgress<ProjectCopyExportProgress>(_ =>
+		{
+			if (competingFileCreated)
+				return;
+			competingFileCreated = true;
+			File.WriteAllText(preferredPath, "competing archive");
+		});
+
+		var result = await workspace.ExportAsync(
+			ProjectCopyExportFormat.Zip,
+			preferredPath,
+			[],
+			progress: progress,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.True(competingFileCreated);
+		Assert.Equal(expectedPath, result.DestinationPath);
+		Assert.Equal("competing archive", await File.ReadAllTextAsync(
+			preferredPath,
+			TestContext.Current.CancellationToken));
+		using var archive = ZipFile.OpenRead(expectedPath);
+		Assert.Contains(archive.Entries, static entry => entry.FullName == "Sample/README.md");
+		Assert.Empty(FindStagingArtifacts(workspace.DestinationParent));
+	}
+
+	[Theory]
 	[InlineData(ProjectCopyExportFormat.Folder)]
 	[InlineData(ProjectCopyExportFormat.Zip)]
 	public async Task ProgressCountsDirectoriesAndFilesFromEffectiveExportPlan(ProjectCopyExportFormat format)

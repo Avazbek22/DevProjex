@@ -599,7 +599,10 @@ public sealed class ProjectCopyExportService(
 			requestedDestinationDirectory);
 		EnsureDestinationDirectoryExists(destinationDirectory);
 		destinationDirectory = ResolveSafeDestinationOutsideSource(plan.ProjectRootPath, destinationDirectory);
-		var destinationPath = Path.Combine(destinationDirectory, Path.GetFileName(requestedDestinationPath));
+		var requestedFileName = Path.GetFileName(requestedDestinationPath);
+		var destinationPath = destinationMode == ProjectCopyDestinationMode.AutomaticName
+			? ResolveAvailableZipPath(destinationDirectory, requestedFileName)
+			: Path.Combine(destinationDirectory, requestedFileName);
 		ValidateDestinationOutsideSource(plan.ProjectRootPath, destinationPath);
 		if (destinationMode == ProjectCopyDestinationMode.Exact &&
 		    conflictPolicy == ProjectCopyConflictPolicy.Fail)
@@ -679,22 +682,32 @@ public sealed class ProjectCopyExportService(
 			}
 
 			cancellationToken.ThrowIfCancellationRequested();
-			ValidateDestinationOutsideSource(plan.ProjectRootPath, stagingPath);
-			ValidateDestinationOutsideSource(plan.ProjectRootPath, destinationPath);
-			cancellationToken.ThrowIfCancellationRequested();
-			try
+			while (true)
 			{
-				var overwrite = destinationMode == ProjectCopyDestinationMode.AutomaticName ||
-				                conflictPolicy == ProjectCopyConflictPolicy.ReplaceAtomically;
-				CommitZipArchive(stagingPath, destinationPath, overwrite);
-			}
-			catch (IOException exception) when (AtomicFileCommit.DestinationEntryExists(destinationPath))
-			{
-				throw DestinationConflict(
-					ResolveReportedDestinationPath(
-						requestedDestinationPath,
-						destinationPath),
-					exception);
+				ValidateDestinationOutsideSource(plan.ProjectRootPath, stagingPath);
+				ValidateDestinationOutsideSource(plan.ProjectRootPath, destinationPath);
+				cancellationToken.ThrowIfCancellationRequested();
+				try
+				{
+					var overwrite = destinationMode == ProjectCopyDestinationMode.Exact &&
+					                conflictPolicy == ProjectCopyConflictPolicy.ReplaceAtomically;
+					CommitZipArchive(stagingPath, destinationPath, overwrite);
+					break;
+				}
+				catch (IOException exception) when (AtomicFileCommit.DestinationEntryExists(destinationPath))
+				{
+					if (destinationMode == ProjectCopyDestinationMode.AutomaticName)
+					{
+						destinationPath = ResolveAvailableZipPath(destinationDirectory, requestedFileName);
+						continue;
+					}
+
+					throw DestinationConflict(
+						ResolveReportedDestinationPath(
+							requestedDestinationPath,
+							destinationPath),
+						exception);
+				}
 			}
 			var reportedPath = ResolveReportedDestinationPath(requestedDestinationPath, destinationPath);
 			return new ProjectCopyExportResult(
@@ -1398,11 +1411,25 @@ public sealed class ProjectCopyExportService(
 		}
 	}
 
-	private static string ResolveAvailableDirectoryPath(string parentPath, string baseName)
+	private static string ResolveAvailableDirectoryPath(string parentPath, string baseName) =>
+		ResolveAvailableDestinationPath(parentPath, baseName, string.Empty);
+
+	private static string ResolveAvailableZipPath(string parentPath, string fileName) =>
+		ResolveAvailableDestinationPath(
+			parentPath,
+			Path.GetFileNameWithoutExtension(fileName),
+			Path.GetExtension(fileName));
+
+	private static string ResolveAvailableDestinationPath(
+		string parentPath,
+		string baseName,
+		string extension)
 	{
 		for (var suffix = 1; ; suffix++)
 		{
-			var name = suffix == 1 ? baseName : $"{baseName} ({suffix})";
+			var name = suffix == 1
+				? baseName + extension
+				: $"{baseName} ({suffix}){extension}";
 			var candidate = Path.Combine(parentPath, name);
 			if (!AtomicFileCommit.DestinationEntryExists(candidate))
 				return candidate;

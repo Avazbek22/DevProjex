@@ -79,7 +79,7 @@ public partial class MainWindow
                 Title = _localization["Picker.ProjectCopy.Zip"],
                 SuggestedFileName = $"{GetProjectCopyName()}-copy.zip",
                 DefaultExtension = "zip",
-                ShowOverwritePrompt = true,
+                ShowOverwritePrompt = false,
                 FileTypeChoices =
                 [
                     new FilePickerFileType("ZIP")
@@ -105,11 +105,15 @@ public partial class MainWindow
             if (!destinationPath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
                 destinationPath += ".zip";
 
-            await ExportProjectCopyIfSourceCurrentAsync(
+            var conflictPolicy = await ConfirmZipReplacementIfNeededAsync(destinationPath);
+            if (conflictPolicy is null || !IsProjectCopySourceCurrent(sourcePath, sourceTree))
+                return;
+
+            await ExportProjectCopyAsync(
                 ProjectCopyExportFormat.Zip,
                 destinationPath,
-                sourcePath,
-                sourceTree);
+                ProjectCopyDestinationMode.Exact,
+                conflictPolicy.Value);
         }
         catch (Exception exception)
         {
@@ -118,7 +122,11 @@ public partial class MainWindow
         }
     }
 
-    private async Task ExportProjectCopyAsync(ProjectCopyExportFormat format, string destinationPath)
+    private async Task ExportProjectCopyAsync(
+        ProjectCopyExportFormat format,
+        string destinationPath,
+        ProjectCopyDestinationMode destinationMode = ProjectCopyDestinationMode.AutomaticName,
+        ProjectCopyConflictPolicy conflictPolicy = ProjectCopyConflictPolicy.Fail)
     {
         if (_currentTree is null || string.IsNullOrWhiteSpace(_currentPath) || _projectCopyExportCts is not null)
             return;
@@ -135,6 +143,8 @@ public partial class MainWindow
             selectedPaths,
             destinationPath,
 			format,
+			destinationMode,
+			conflictPolicy,
 			RedactSecrets: _appliedHideSecretsEnabled,
 			CompressCode: _appliedCompressCodeEnabled,
 			StripComments: _appliedStripCommentsEnabled,
@@ -247,6 +257,31 @@ public partial class MainWindow
 			_localization["Dialog.Cancel"],
 			height: reasons.Count > 1 ? 300 : 230);
 	}
+
+    private async Task<ProjectCopyConflictPolicy?> ConfirmZipReplacementIfNeededAsync(string destinationPath)
+    {
+        if (!AtomicFileCommit.DestinationEntryExists(destinationPath))
+            return ProjectCopyConflictPolicy.Fail;
+
+        if (!File.Exists(destinationPath) ||
+            (File.GetAttributes(destinationPath) &
+             (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0 ||
+            new FileInfo(destinationPath).LinkTarget is not null)
+        {
+            ShowProjectCopyExportError(_localization["Error.ProjectCopy.DestinationConflict"]);
+            return null;
+        }
+
+        var confirmed = await MessageDialog.ShowConfirmationAsync(
+            this,
+            _localization["Dialog.ProjectCopy.ZipReplace.Title"],
+            _localization.Format(
+                "Dialog.ProjectCopy.ZipReplace.Message",
+                AddPathWrapOpportunities(destinationPath)),
+            _localization["Terminal.Tui.Overwrite"],
+            _localization["Dialog.Cancel"]);
+        return confirmed ? ProjectCopyConflictPolicy.ReplaceAtomically : null;
+    }
 
     private string GetProjectCopyName()
     {

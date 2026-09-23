@@ -1,5 +1,7 @@
 using System.Collections.ObjectModel;
+using System.IO.Compression;
 using System.Reflection;
+using Avalonia.VisualTree;
 using DevProjex.Application.Services;
 using DevProjex.Kernel.Contracts;
 
@@ -142,6 +144,104 @@ public sealed class MainWindowProjectCopyExportUiTests(UiWorkspaceFixture worksp
 	}
 
 	[AvaloniaFact]
+	public async Task ZipDestinationPolicyUsesExactNewPathAndRejectsExistingDirectory()
+	{
+		var toasts = new RecordingToastService();
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			workspace.Project,
+			configureServices: services => services with { ToastService = toasts });
+		var destinationParent = Path.Combine(
+			workspace.Project.AppDataPath,
+			"project-copy-zip-policy",
+			Guid.NewGuid().ToString("N"));
+		Directory.CreateDirectory(destinationParent);
+
+		try
+		{
+			var newZipPath = Path.Combine(destinationParent, "new.zip");
+			Assert.Equal(
+				ProjectCopyConflictPolicy.Fail,
+				await InvokeZipConflictPolicyAsync(window, newZipPath));
+
+			var existingDirectoryPath = Path.Combine(destinationParent, "directory.zip");
+			Directory.CreateDirectory(existingDirectoryPath);
+			Assert.Null(await InvokeZipConflictPolicyAsync(window, existingDirectoryPath));
+			Assert.Single(toasts.Items);
+			Assert.True(Directory.Exists(existingDirectoryPath));
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task ExistingZipRequiresExplicitConfirmationBeforeReplacement()
+	{
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+		var destinationParent = Path.Combine(
+			workspace.Project.AppDataPath,
+			"project-copy-zip-replace",
+			Guid.NewGuid().ToString("N"));
+		Directory.CreateDirectory(destinationParent);
+		var destinationPath = Path.Combine(destinationParent, "existing.zip");
+		var originalBytes = "original archive"u8.ToArray();
+		await File.WriteAllBytesAsync(destinationPath, originalBytes, TestContext.Current.CancellationToken);
+
+		try
+		{
+			var canceledDecision = await BeginZipConflictPolicyAsync(window, destinationPath);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => window.OwnedWindows.Count == 1,
+				"the ZIP replacement confirmation");
+			Assert.False(canceledDecision.IsCompleted);
+			var dialog = Assert.Single(window.OwnedWindows);
+			var cancel = Assert.Single(
+				dialog.GetVisualDescendants().OfType<Button>(),
+				static button => Equals(button.Content, "Cancel"));
+			await UiTestDriver.RaiseButtonClickAsync(cancel);
+			Assert.Null(await canceledDecision.WaitAsync(
+				TimeSpan.FromSeconds(30),
+				TestContext.Current.CancellationToken));
+			Assert.Equal(originalBytes, await File.ReadAllBytesAsync(
+				destinationPath,
+				TestContext.Current.CancellationToken));
+
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => window.OwnedWindows.Count == 0,
+				"the canceled ZIP confirmation to close");
+			var approvedDecision = await BeginZipConflictPolicyAsync(window, destinationPath);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => window.OwnedWindows.Count == 1,
+				"the ZIP replacement confirmation to reopen");
+			Assert.False(approvedDecision.IsCompleted);
+			dialog = Assert.Single(window.OwnedWindows);
+			var overwrite = Assert.Single(
+				dialog.GetVisualDescendants().OfType<Button>(),
+				static button => Equals(button.Content, "Overwrite"));
+			await UiTestDriver.RaiseButtonClickAsync(overwrite);
+			var policy = Assert.IsType<ProjectCopyConflictPolicy>(
+				await approvedDecision.WaitAsync(
+					TimeSpan.FromSeconds(30),
+					TestContext.Current.CancellationToken));
+			Assert.Equal(ProjectCopyConflictPolicy.ReplaceAtomically, policy);
+
+			await InvokeZipExportAsync(window, destinationPath, policy);
+			using var archive = ZipFile.OpenRead(destinationPath);
+			Assert.NotEmpty(archive.Entries);
+		}
+		finally
+		{
+			foreach (var dialog in window.OwnedWindows.ToArray())
+				await UiTestDriver.CloseTopLevelWindowAsync(dialog);
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task ActiveProjectExport_AllowsClosingExistingPreviewButBlocksReopening()
 	{
 		var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
@@ -200,6 +300,48 @@ public sealed class MainWindowProjectCopyExportUiTests(UiWorkspaceFixture worksp
 			Assert.IsAssignableFrom<Task>(export.Invoke(
 				window,
 				[ProjectCopyExportFormat.Folder, destinationParent, expectedPath, expectedTree])));
+		await operation.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+	}
+
+	private static async Task<ProjectCopyConflictPolicy?> InvokeZipConflictPolicyAsync(
+		MainWindow window,
+		string destinationPath)
+	{
+		var operation = await BeginZipConflictPolicyAsync(window, destinationPath);
+		return await operation.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+	}
+
+	private static async Task<Task<ProjectCopyConflictPolicy?>> BeginZipConflictPolicyAsync(
+		MainWindow window,
+		string destinationPath)
+	{
+		var resolve = typeof(MainWindow).GetMethod(
+			"ConfirmZipReplacementIfNeededAsync",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(resolve);
+		return await window.Dispatcher.InvokeAsync<Task<ProjectCopyConflictPolicy?>>(() =>
+			Assert.IsAssignableFrom<Task<ProjectCopyConflictPolicy?>>(
+				resolve.Invoke(window, [destinationPath])));
+	}
+
+	private static async Task InvokeZipExportAsync(
+		MainWindow window,
+		string destinationPath,
+		ProjectCopyConflictPolicy conflictPolicy)
+	{
+		var export = typeof(MainWindow).GetMethod(
+			"ExportProjectCopyAsync",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(export);
+		var operation = await window.Dispatcher.InvokeAsync<Task>(() =>
+			Assert.IsAssignableFrom<Task>(export.Invoke(
+				window,
+				[
+					ProjectCopyExportFormat.Zip,
+					destinationPath,
+					ProjectCopyDestinationMode.Exact,
+					conflictPolicy
+				])));
 		await operation.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
 	}
 
