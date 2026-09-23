@@ -234,6 +234,129 @@ public sealed class ProjectScopeDiscoveryServiceTests
 	}
 
 	[Fact]
+	public async Task Revalidate_MismatchDiscardsStaleReplacementPublishedDuringValidation()
+	{
+		using var validationStarted = new ManualResetEventSlim();
+		using var releaseValidation = new ManualResetEventSlim();
+		var rootPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")));
+		var nowTicks = new DateTime(2026, 9, 23, 0, 0, 0, DateTimeKind.Utc).Ticks;
+		var buildCount = 0;
+		var factsProvider = new ProjectRootFactsProvider(
+			cacheTtl: TimeSpan.FromMinutes(1),
+			cacheLimit: 8,
+			utcNowProvider: null,
+			factsBuilder: path =>
+			{
+				var build = Interlocked.Increment(ref buildCount);
+				if (build == 2)
+				{
+					validationStarted.Set();
+					if (!releaseValidation.Wait(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken))
+						throw new TimeoutException("The controlled validation was not released.");
+				}
+
+				return RootFactsWithMarker(path, hasMarker: build is 2 or >= 4);
+			});
+		var discovery = new ProjectScopeDiscoveryService(
+			new SmartIgnoreService([]),
+			factsProvider,
+			utcNowProvider: () => new DateTime(Interlocked.Read(ref nowTicks), DateTimeKind.Utc));
+		var initial = discovery.Discover(rootPath, selectedRootFolders: null);
+		Assert.False(initial.Scopes[0].HasProjectMarker);
+
+		var revalidation = Task.Factory.StartNew(
+			() => discovery.Revalidate(rootPath, TestContext.Current.CancellationToken),
+			TestContext.Current.CancellationToken,
+			TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach,
+			TaskScheduler.Default);
+		try
+		{
+			Assert.True(validationStarted.Wait(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken));
+			Interlocked.Add(ref nowTicks, TimeSpan.FromSeconds(6).Ticks);
+			var staleReplacement = discovery.Discover(rootPath, selectedRootFolders: null);
+			Assert.False(staleReplacement.Scopes[0].HasProjectMarker);
+		}
+		finally
+		{
+			releaseValidation.Set();
+		}
+
+		Assert.False(await revalidation);
+		var refreshed = discovery.Discover(rootPath, selectedRootFolders: null);
+		Assert.True(refreshed.Scopes[0].HasProjectMarker);
+		Assert.Equal(4, Volatile.Read(ref buildCount));
+	}
+
+	[Fact]
+	public async Task Revalidate_MismatchPreventsInFlightStaleDiscoveryPublication()
+	{
+		using var validationStarted = new ManualResetEventSlim();
+		using var releaseValidation = new ManualResetEventSlim();
+		using var discoveryStarted = new ManualResetEventSlim();
+		using var releaseDiscovery = new ManualResetEventSlim();
+		var rootPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")));
+		var nowTicks = new DateTime(2026, 9, 23, 0, 0, 0, DateTimeKind.Utc).Ticks;
+		var buildCount = 0;
+		var factsProvider = new ProjectRootFactsProvider(
+			cacheTtl: TimeSpan.FromMinutes(1),
+			cacheLimit: 8,
+			utcNowProvider: null,
+			factsBuilder: path =>
+			{
+				var build = Interlocked.Increment(ref buildCount);
+				if (build == 2)
+				{
+					validationStarted.Set();
+					if (!releaseValidation.Wait(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken))
+						throw new TimeoutException("The controlled validation was not released.");
+				}
+				if (build == 3)
+				{
+					discoveryStarted.Set();
+					if (!releaseDiscovery.Wait(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken))
+						throw new TimeoutException("The controlled discovery was not released.");
+				}
+
+				return RootFactsWithMarker(path, hasMarker: build is 2 or >= 4);
+			});
+		var discovery = new ProjectScopeDiscoveryService(
+			new SmartIgnoreService([]),
+			factsProvider,
+			utcNowProvider: () => new DateTime(Interlocked.Read(ref nowTicks), DateTimeKind.Utc));
+		Assert.False(discovery.Discover(rootPath, selectedRootFolders: null).Scopes[0].HasProjectMarker);
+
+		var revalidation = Task.Factory.StartNew(
+			() => discovery.Revalidate(rootPath, TestContext.Current.CancellationToken),
+			TestContext.Current.CancellationToken,
+			TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach,
+			TaskScheduler.Default);
+		Task<ProjectScanContext>? staleDiscovery = null;
+		try
+		{
+			Assert.True(validationStarted.Wait(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken));
+			Interlocked.Add(ref nowTicks, TimeSpan.FromSeconds(6).Ticks);
+			staleDiscovery = Task.Factory.StartNew(
+				() => discovery.Discover(rootPath, selectedRootFolders: null),
+				TestContext.Current.CancellationToken,
+				TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach,
+				TaskScheduler.Default);
+			Assert.True(discoveryStarted.Wait(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken));
+			releaseValidation.Set();
+			Assert.False(await revalidation);
+		}
+		finally
+		{
+			releaseValidation.Set();
+			releaseDiscovery.Set();
+		}
+
+		Assert.NotNull(staleDiscovery);
+		Assert.False((await staleDiscovery).Scopes[0].HasProjectMarker);
+		Assert.True(discovery.Discover(rootPath, selectedRootFolders: null).Scopes[0].HasProjectMarker);
+		Assert.Equal(4, Volatile.Read(ref buildCount));
+	}
+
+	[Fact]
 	public void Discover_PosixDelimiterNames_DoNotShareCachedScopeTopology()
 	{
 		if (OperatingSystem.IsWindows())
@@ -428,6 +551,15 @@ public sealed class ProjectScopeDiscoveryServiceTests
 
 	private static ProjectScopeDiscoveryService CreateDiscovery() =>
 		new(new SmartIgnoreService([]));
+
+	private static ProjectRootFacts RootFactsWithMarker(string path, bool hasMarker) =>
+		new(
+			path,
+			exists: true,
+			isAccessible: true,
+			files: hasMarker ? [new ProjectRootFileFact("package.json", ".json")] : [],
+			directories: [],
+			gitIgnoreSignature: null);
 
 	private static bool ScopeEndsWith(ProjectScope scope, string relativePath) =>
 		scope.RootPath.EndsWith(Normalize(relativePath), StringComparison.OrdinalIgnoreCase);
