@@ -1,6 +1,7 @@
 using DevProjex.Infrastructure.LiveContext;
 using DevProjex.Terminal.DesktopControl;
 using System.Reflection;
+using System.Security;
 
 namespace DevProjex.Tests.UI;
 
@@ -77,6 +78,30 @@ public sealed class MainWindowLiveContextCompositionUiTests
 		finally
 		{
 			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task WindowStartsWhenLiveSessionStorageIsUnavailable()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var registry = new LiveSessionRegistry(
+			() => throw new SecurityException("State root is unavailable."));
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			configureServices: services => services with { LiveSessionRegistry = registry });
+		try
+		{
+			Assert.True(window.IsVisible);
+			var field = typeof(MainWindow).GetField(
+				"_liveSessionWatcher",
+				BindingFlags.Instance | BindingFlags.NonPublic);
+			Assert.NotNull(field);
+			Assert.Null(field.GetValue(window));
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
 		}
 	}
 }
