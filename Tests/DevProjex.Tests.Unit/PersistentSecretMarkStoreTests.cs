@@ -30,6 +30,7 @@ public sealed class PersistentSecretMarkStoreTests
 
 	private const string FirstHash = "001122334455";
 	private const string SecondHash = "aabbccddeeff";
+	private const string ThirdHash = "112233445566";
 	private const string V2Hash = "v2:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 	[Fact]
@@ -94,6 +95,57 @@ public sealed class PersistentSecretMarkStoreTests
 			.ToArray();
 		Assert.Contains(FirstHash, states);
 		Assert.Contains(SecondHash, states);
+	}
+
+	[Theory]
+	[InlineData("null")]
+	[InlineData("42")]
+	public async Task CurrentSchemaProjectWithNonArrayStates_PreservesBackupAcrossSiblingWrite(
+		string invalidStatesJson)
+	{
+		using var temporary = new TemporaryDirectory();
+		var damagedProject = temporary.CreateFolder("damaged");
+		var siblingProject = temporary.CreateFolder("sibling");
+		var store = new ProjectProfileStore(() => temporary.Path);
+		var cancellationToken = TestContext.Current.CancellationToken;
+		Assert.True((await store.AddMarkAsync(damagedProject, Mark(FirstHash, 12), cancellationToken)).Succeeded);
+		Assert.True((await store.AddMarkAsync(siblingProject, Mark(SecondHash, 16), cancellationToken)).Succeeded);
+		var primaryPath = Path.Combine(temporary.Path, "DevProjex", "project-secret-marks.json");
+		using (var validBackup = JsonDocument.Parse(File.ReadAllText(primaryPath + ".bak")))
+		{
+			var savedProjects = validBackup.RootElement.GetProperty("projects");
+			Assert.Single(savedProjects.GetProperty(PathUtility.Normalize(damagedProject))
+				.GetProperty("states").EnumerateArray());
+			Assert.Single(savedProjects.GetProperty(PathUtility.Normalize(siblingProject))
+				.GetProperty("states").EnumerateArray());
+		}
+		var damagedPrimary = JsonNode.Parse(File.ReadAllText(primaryPath))!.AsObject();
+		damagedPrimary["projects"]![PathUtility.Normalize(damagedProject)]!["states"] =
+			JsonNode.Parse(invalidStatesJson);
+		File.WriteAllText(primaryPath, damagedPrimary.ToJsonString());
+
+		var siblingBeforeWrite = await store.LoadMarksAsync(siblingProject, cancellationToken);
+		var added = await store.AddMarkAsync(siblingProject, Mark(ThirdHash, 20), cancellationToken);
+		var restored = await store.LoadMarksAsync(damagedProject, cancellationToken);
+
+		Assert.True(siblingBeforeWrite.Succeeded);
+		Assert.Contains(siblingBeforeWrite.Snapshot!.Marks, mark => mark.H == SecondHash);
+		Assert.True(added.Succeeded);
+		Assert.Contains(added.Snapshot!.Marks, mark => mark.H == SecondHash);
+		Assert.Contains(added.Snapshot.Marks, mark => mark.H == ThirdHash);
+		Assert.True(restored.Succeeded);
+		Assert.Contains(restored.Snapshot!.Marks, mark => mark.H == FirstHash);
+		using var backup = JsonDocument.Parse(File.ReadAllText(primaryPath + ".bak"));
+		var projects = backup.RootElement.GetProperty("projects");
+		var restoredStates = projects.GetProperty(PathUtility.Normalize(damagedProject))
+			.GetProperty("states").EnumerateArray()
+			.Select(static state => state.GetProperty("hash").GetString());
+		var siblingStates = projects.GetProperty(PathUtility.Normalize(siblingProject))
+			.GetProperty("states").EnumerateArray()
+			.Select(static state => state.GetProperty("hash").GetString()).ToArray();
+		Assert.Contains(FirstHash, restoredStates);
+		Assert.Contains(SecondHash, siblingStates);
+		Assert.Contains(ThirdHash, siblingStates);
 	}
 
 	[Fact]

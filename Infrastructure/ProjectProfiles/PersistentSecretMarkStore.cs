@@ -510,7 +510,8 @@ internal sealed class PersistentSecretMarkStore(
 				continue;
 			if (schemaVersion == CurrentSchemaVersion &&
 			    property.Value.ValueKind == JsonValueKind.Object &&
-			    !property.Value.TryGetProperty("states", out _))
+			    (!property.Value.TryGetProperty("states", out var statesElement) ||
+			     statesElement.ValueKind != JsonValueKind.Array))
 				return false;
 			if (++projectCount > ProjectProfileStorageLimits.MaximumPersistentMarkProjects)
 			{
