@@ -187,8 +187,11 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 	{
 		EnsurePrivateCacheDirectory(CacheRootPath);
 		var stagingRoot = Path.Combine(CacheRootPath, RepositoryCacheLayout.StagingDirectoryName);
+		EnsurePrivateCacheDirectory(stagingRoot);
 		var path = CreateUniqueRepositoryPath(stagingRoot, repositoryUrl);
 		Directory.CreateDirectory(path);
+		if (IsLinkedCacheRoot(path))
+			throw new IOException("Repository staging path must not be a symbolic link or junction.");
 		return path;
 	}
 
@@ -198,6 +201,9 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 		var stagingRoot = Path.Combine(CacheRootPath, RepositoryCacheLayout.StagingDirectoryName);
 		var normalizedStagingPath = PathUtility.Normalize(stagingPath);
 		if (!PathUtility.IsPathInside(normalizedStagingPath, stagingRoot) ||
+		    !PathComparer.Default.Equals(Path.GetDirectoryName(normalizedStagingPath), PathUtility.Normalize(stagingRoot)) ||
+		    IsLinkedCacheRoot(stagingRoot) ||
+		    IsLinkedCacheRoot(normalizedStagingPath) ||
 		    !Directory.Exists(normalizedStagingPath))
 		{
 			throw new InvalidOperationException("Repository staging path is invalid.");
@@ -231,6 +237,8 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 					Path.Combine(container, RepositoryCacheLayout.MarkerFileName),
 					contentKind == RepositoryCacheContentKind.Git ? "git" : "zip");
 				Directory.Move(normalizedStagingPath, destination);
+				if (IsLinkedCacheRoot(destination))
+					throw new InvalidOperationException("Repository staging path is invalid.");
 				var approximateSize = CalculateDirectorySizeBounded(
 					container,
 					MaximumSynchronousPublicationFileCount,
