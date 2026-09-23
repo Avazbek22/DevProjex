@@ -213,6 +213,103 @@ public sealed class ProjectScopeDiscoveryServiceTests
 	}
 
 	[Fact]
+	public async Task Revalidate_ConcurrentInvalidationDoesNotReportTheOldScopeAsReusable()
+	{
+		using var validationStarted = new ManualResetEventSlim();
+		using var releaseValidation = new ManualResetEventSlim();
+		var rootPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")));
+		var buildCount = 0;
+		var factsProvider = new ProjectRootFactsProvider(
+			cacheTtl: TimeSpan.FromMinutes(1),
+			cacheLimit: 8,
+			utcNowProvider: null,
+			factsBuilder: path =>
+			{
+				var build = Interlocked.Increment(ref buildCount);
+				if (build == 2)
+				{
+					validationStarted.Set();
+					if (!releaseValidation.Wait(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken))
+						throw new TimeoutException("The controlled validation was not released.");
+				}
+
+				return RootFactsWithMarker(path, hasMarker: build >= 3);
+			});
+		var discovery = new ProjectScopeDiscoveryService(new SmartIgnoreService([]), factsProvider);
+		var initial = discovery.Discover(rootPath, selectedRootFolders: null);
+		Assert.False(initial.Scopes[0].HasProjectMarker);
+
+		var revalidation = Task.Factory.StartNew(
+			() => discovery.Revalidate(rootPath, TestContext.Current.CancellationToken),
+			TestContext.Current.CancellationToken,
+			TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach,
+			TaskScheduler.Default);
+		ProjectScanContext? replacement = null;
+		try
+		{
+			Assert.True(validationStarted.Wait(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken));
+			discovery.Invalidate(rootPath);
+			replacement = discovery.Discover(rootPath, selectedRootFolders: null);
+			Assert.True(replacement.Scopes[0].HasProjectMarker);
+		}
+		finally
+		{
+			releaseValidation.Set();
+		}
+
+		Assert.False(await revalidation);
+		Assert.Same(replacement, discovery.Discover(rootPath, selectedRootFolders: null));
+		Assert.Equal(3, Volatile.Read(ref buildCount));
+	}
+
+	[Fact]
+	public async Task Revalidate_ConcurrentUnrelatedRootInvalidationKeepsTheCurrentScopeReusable()
+	{
+		using var validationStarted = new ManualResetEventSlim();
+		using var releaseValidation = new ManualResetEventSlim();
+		var firstPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")));
+		var secondPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")));
+		var firstRootBuilds = 0;
+		var factsProvider = new ProjectRootFactsProvider(
+			cacheTtl: TimeSpan.FromMinutes(1),
+			cacheLimit: 8,
+			utcNowProvider: null,
+			factsBuilder: path =>
+			{
+				if (PathComparer.Default.Equals(path, firstPath) &&
+				    Interlocked.Increment(ref firstRootBuilds) == 2)
+				{
+					validationStarted.Set();
+					if (!releaseValidation.Wait(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken))
+						throw new TimeoutException("The controlled validation was not released.");
+				}
+
+				return RootFactsWithMarker(path, hasMarker: true);
+			});
+		var discovery = new ProjectScopeDiscoveryService(new SmartIgnoreService([]), factsProvider);
+		var initial = discovery.Discover(firstPath, selectedRootFolders: null);
+		discovery.Discover(secondPath, selectedRootFolders: null);
+
+		var revalidation = Task.Factory.StartNew(
+			() => discovery.Revalidate(firstPath, TestContext.Current.CancellationToken),
+			TestContext.Current.CancellationToken,
+			TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach,
+			TaskScheduler.Default);
+		try
+		{
+			Assert.True(validationStarted.Wait(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken));
+			discovery.Invalidate(secondPath);
+		}
+		finally
+		{
+			releaseValidation.Set();
+		}
+
+		Assert.True(await revalidation);
+		Assert.Same(initial, discovery.Discover(firstPath, selectedRootFolders: null));
+	}
+
+	[Fact]
 	public void Revalidate_NewNestedProjectScope_InvalidatesCachedTopology()
 	{
 		using var temp = new TemporaryDirectory();

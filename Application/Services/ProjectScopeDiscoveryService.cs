@@ -335,6 +335,19 @@ public sealed class ProjectScopeDiscoveryService(
 		var now = _utcNowProvider();
 		lock (_scopeCacheSync)
 		{
+			if (allCurrent)
+			{
+				foreach (var candidate in candidates)
+				{
+					if (!_scopeCache.TryGetValue(candidate.Key, out var currentNode) ||
+					    !ReferenceEquals(currentNode, candidate.Value))
+					{
+						// Validation of a retired entry cannot certify a concurrent reload.
+						return false;
+					}
+				}
+			}
+
 			if (!allCurrent)
 			{
 				_scopeCacheGeneration = unchecked(_scopeCacheGeneration + 1);
