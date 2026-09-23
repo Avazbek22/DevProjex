@@ -175,10 +175,10 @@ public sealed class MainWindowSettingsStartupUiTests
 			var originalUser = File.ReadAllBytes(userStore.GetPath());
 
 			using (var heldLock = new FileStream(
-			           themeStore.GetPath() + ".lock",
-			           FileMode.OpenOrCreate,
-			           FileAccess.ReadWrite,
-			           FileShare.None))
+					   themeStore.GetPath() + ".lock",
+					   FileMode.OpenOrCreate,
+					   FileAccess.ReadWrite,
+					   FileShare.None))
 			{
 				Assert.False(GetAppearanceController(window).ResetThemeSettings());
 				Assert.Equal(ThemeSelectionMode.Light, viewModel.SelectedThemeMode);
@@ -227,7 +227,7 @@ public sealed class MainWindowSettingsStartupUiTests
 			var originalUser = File.ReadAllBytes(primaryPath);
 			File.WriteAllText(primaryPath + ".bak", "{ invalid-backup");
 			using (var primaryReadBlock = new FileStream(
-			           primaryPath, FileMode.Open, FileAccess.Write, FileShare.Delete))
+					   primaryPath, FileMode.Open, FileAccess.Write, FileShare.Delete))
 			{
 				Assert.False(GetAppearanceController(window).ResetThemeSettings());
 				var viewModel = UiTestDriver.GetViewModel(window);
