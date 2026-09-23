@@ -126,6 +126,8 @@ public sealed class ExportContextCommandHandler(
 						ProjectContextDocumentFormat.Json or ProjectContextDocumentFormat.Xml,
 					cancellationToken)
 				.ConfigureAwait(false);
+		if (admissionResult is not null)
+			measured!.EnsureSourceVersionsCurrent(plan.IncludedFiles);
 		var prepared = request.DryRun ? measured : materialized;
 		if (prepared?.CompressionSnapshot is { } compressionSnapshot)
 			plan = CodeCompressionDiagnostic.Append(plan, compressionSnapshot.Availability);
