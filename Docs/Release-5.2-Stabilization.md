@@ -417,6 +417,12 @@ not a unique-test total.
 | TUI initial plan and settings | `8a2d5632`, `6d4be2dc`, `7abbf120` | Content-output metrics are deferred until requested while selection marks and structured output remain identical. Transient settings reads no longer replace saved history/language with defaults, and an inaccessible optional settings root does not block defaults. A malformed or out-of-tree persisted focus no longer prevents project opening. Metrics: Terminal 43/43 and Integration 10/10; settings: 26 pass/two platform skips; focus PTY and adjacent controls 4/4. Real-root timing observations are recorded above. |
 | Retention and cache boundaries | `bd3a8f73`, `7d1766e6`, `0df248c4` | Recent journals skip unnecessary header reads without changing retention eligibility; unreadable repository-cache indexes and remote identity writes fail safely; MCP search navigation reuses bounded unchanged-content results. These are separate workloads, not an aggregate application speedup. |
 | Git executable trust | `33795715` | PATH directory aliases, project/current-directory aliases, and final file links are resolved to physical paths before accepting a Git/SSH executable. A Windows junction reproduced the original bypass; 71 focused Release checks passed, while the direct file-symlink test skipped on this host for lack of privilege. Current normal PATH resolution was 0.597 ms first and 0.374–0.405 ms in five warm samples; this is an absolute cost, not an A/B speedup. |
+| GUI reload publication | `b13ca0b6` | Canceling a same-project reopen before the new tree is published no longer reports a successful open through the restored prior project state. One headless UI regression failed before and passed after; four focused Unit checks include cancellation after publication, which remains a success. |
+| MCP related evidence | `8fe4fb94` | `related_files` reports the number of unique uninspected evidence sources in both inline and immediate stored-result responses while withholding unverified reference text. One new regression failed before; two focused and three adjacent Integration checks passed after. |
+| Dependency cache root and probe ownership | `87839528`, `43882c7e` | Equal manifest/config fingerprints from distinct physical roots cannot share a resolved dependency graph. The cross-root TypeScript shadow-path regression and two nearby Integration checks passed. Appearance or removal of an unselected shadow path within one root now invalidates cached resolution without reparsing source facts; both regressions failed before the fix, then 9 focused Unit and 3 Integration checks passed. Exact physical probes are capped at 4,096; overflow disables resolved-index retention. A warm real-root index of 1,807 files took 30 ms (absolute timing, no pre-change baseline). |
+| CLI search read budget | `516244c6` | Raw search rechecks actual file size against the remaining 64 MiB inspection budget instead of relying solely on pre-scan metadata. A grown-file regression failed before; two focused and 19 process checks passed after. The response now marks such a partial inspection explicitly. |
+| MCP journal cancellation | `f13e6029` | Canceling journal start no longer consumes its bounded startup retry. One new regression failed before the fix; four focused Unit checks passed afterward. |
+| MCP artifact inventory | `f8c9a25b` | Removing the final signature from a previously ignored generated-looking directory invalidates its stale inventory proof, so source files become visible. The new regression failed before; six focused Integration checks passed afterward, including a 50,000-event deep-change fast-path control. |
 
 The CLI dense-search dictionary experiment was intentionally discarded: three 5,000-hit
 process samples per variant gave medians of 475 ms for the prior lookup and 480 ms for
@@ -448,6 +454,11 @@ speedup is claimed.
 - The combined backend measurements are complete for the recorded workload. A real
   desktop run remains a separate release check, outside this backend task, before drawing
   conclusions about the complete visible project-opening experience.
+- MCP discovery dependency-facts warm-up remains a separate release risk. The current
+  `list_projects` path has no selection plan; a background build would mutate shared
+  state, while holding its operation gate through a 4.7-second cold index could delay
+  the next tool. A cancellable, foreground-priority scheduler and disposal drain need
+  independent design and verification; no speculative warm-up was added here.
 
 ## Cleanup status
 
