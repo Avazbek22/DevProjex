@@ -508,13 +508,15 @@ public sealed class SearchCommandHandler(
 			var commandArguments = BuildDeclarationReadArguments(
 				request,
 				preview.Declaration.RelativePath);
-			var readCommand = string.Join(' ', commandArguments.Select(QuoteArgument));
+			var readInstruction = commandArguments is null
+				? "no standalone read command can preserve this remote profile's manual secret marks."
+				: string.Join(' ', commandArguments.Select(QuoteArgument));
 			var body = new StringBuilder()
 				.AppendLine()
 				.Append("Best declaration body (1 of ")
 				.Append(declarations.Count.ToString(CultureInfo.InvariantCulture))
 				.AppendLine("):")
-				.Append("Read declaration file: ").AppendLine(readCommand)
+				.Append("Read declaration file: ").AppendLine(readInstruction)
 				.Append("lines ").Append(preview.Declaration.StartLine.ToString(CultureInfo.InvariantCulture))
 				.Append('-').Append(preview.Declaration.EndLine.ToString(CultureInfo.InvariantCulture)).AppendLine()
 				.Append(preview.Text);
@@ -541,12 +543,16 @@ public sealed class SearchCommandHandler(
 		return safeSource.Length > 0 ? safeSource : request.ProjectPath;
 	}
 
-	internal static IReadOnlyList<string> BuildDeclarationReadArguments(
+	internal static IReadOnlyList<string>? BuildDeclarationReadArguments(
 		SearchCommandRequest request,
 		string relativePath)
 	{
 		ArgumentNullException.ThrowIfNull(request);
 		ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
+		var useLocalProfile = request.Selection.ProfileSource?.Kind == ProjectProfileSourceKind.Local &&
+		                      ProjectSelectionMarkedSecretsResolver.Resolve(request.Selection).Count > 0;
+		if (useLocalProfile && !string.IsNullOrWhiteSpace(request.RepositorySourceUrl))
+			return null;
 		var arguments = new List<string>
 		{
 			"devprojex", "export", "context", ResolveDeclarationReadSource(request)
@@ -559,7 +565,7 @@ public sealed class SearchCommandHandler(
 		arguments.AddRange(
 		[
 			"--view", "content", "--format", "text", "-o", "-",
-			"--profile", "standard", "--select", relativePath
+			"--profile", useLocalProfile ? "local" : "standard", "--select", relativePath
 		]);
 		if (request.Selection.GitMode is { } gitMode)
 		{
