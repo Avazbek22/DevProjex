@@ -422,6 +422,60 @@ public sealed class TerminalWorkspaceMetricsLoadTests
 		Assert.Equal(["src/First.cs"], loaded.SelectedPaths);
 	}
 
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task CliProfileUpdateProjectsSelectionWithoutReadingContentMetrics(bool import)
+	{
+		using var workspace = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		var projectPath = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/src/First.cs", "class First {}\n");
+		workspace.WriteFile("project/src/Second.cs", "class Second {}\n");
+		using var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		var analyzer = new CountingMetricsAnalyzer(new FileContentAnalyzer());
+		var (_, measuredServices) = CreateMeasuredController(services, analyzer);
+		var handler = new ProfileCommandHandler(measuredServices, new TestTerminalEnvironment());
+		var cancellationToken = TestContext.Current.CancellationToken;
+		var selection = new ProjectSelectionSpec(
+			Roots: ["src"],
+			Extensions: [".cs"],
+			SelectedPaths: ["src/First.cs"],
+			GitMode: GitFilteringMode.None,
+			Exclusions: []);
+
+		int exitCode;
+		if (import)
+		{
+			var profilePath = workspace.WriteFile("selection.json", """
+				{
+				  "schemaVersion": 1,
+				  "selection": {
+				    "roots": ["src"],
+				    "extensions": [".cs"],
+				    "selectedPaths": ["src/First.cs"],
+				    "gitMode": "none",
+				    "exclusions": []
+				  }
+				}
+				""");
+			exitCode = await handler.ImportAsync(profilePath, projectPath, apply: true, cancellationToken);
+		}
+		else
+		{
+			exitCode = await handler.SaveAsync(projectPath, selection, cancellationToken);
+		}
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Equal(0, analyzer.MetricsCalls);
+		Assert.True(services.LocalProfileStore.TryLoadProfile(projectPath, out var saved));
+		Assert.Equal(["src"], saved.SelectedRootFolders);
+		Assert.Equal([".cs"], saved.SelectedExtensions);
+		Assert.Equal(["src/First.cs"], saved.SelectedPaths);
+		Assert.True(saved.RootFolderStates!["src"]);
+		Assert.True(saved.ExtensionStates![".cs"]);
+	}
+
 	private static (TerminalWorkspaceController Controller, TerminalServices MeasuredServices)
 		CreateMeasuredController(TerminalServices services, CountingMetricsAnalyzer analyzer)
 	{
