@@ -949,9 +949,11 @@ internal sealed class MetricsPipeline(
 			var projectRoot = ResolveTransformationProjectRoot();
 			if (candidateReadFacts is not null && projectRoot.Length > 0)
 			{
+				// File-local facts may come from a partial selection. Keep the root check;
+				// the scan below validates each current tree file's transform and source version.
 				var selection = ContentSelectionSnapshot.CreateWithCancellation(
 					projectRoot,
-					filePaths,
+					candidateReadFacts.Selection.OrderedPaths,
 					linkedCts.Token);
 				if (string.Equals(
 						candidateReadFacts.Selection.SelectionFingerprint,
