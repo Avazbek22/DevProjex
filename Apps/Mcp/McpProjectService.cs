@@ -1155,7 +1155,7 @@ internal sealed class McpProjectService(
 				cancellationToken)
 			.ConfigureAwait(false);
 
-	public string RedactSyntheticText(
+	public (string Text, SecretRedactionSnapshot Snapshot) RedactSyntheticText(
 		ProjectContextPlan plan,
 		string identityPath,
 		string content,
@@ -1167,9 +1167,8 @@ internal sealed class McpProjectService(
 		var redaction = CreateTransformationContext(plan).Redaction ??
 						throw new InvalidOperationException("MCP text redaction is unavailable.");
 		var scope = redaction.BeginOutput([identityPath], cancellationToken);
-		var result = scope.Redact(identityPath, content, cancellationToken).Text;
-		_ = scope.Complete();
-		return result;
+		var result = scope.Redact(identityPath, content, cancellationToken);
+		return (result.Text, scope.Complete());
 	}
 
 	public static async Task EnsureRankingSourcesCurrentAsync(

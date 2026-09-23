@@ -5,6 +5,64 @@ namespace DevProjex.Tests.Integration;
 public sealed partial class McpServerIntegrationTests
 {
 	[Fact]
+	public async Task RelatedFilesJournalAttributesProtectionOnlyToReturnedText()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "tsconfig.json"),
+			"{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}\n");
+		File.WriteAllText(Path.Combine(project, "Main.ts"), $"import value from './{Secret}.js';\n");
+		File.WriteAllText(Path.Combine(project, Secret + ".ts"), "export default 1;\n");
+		var imports = new StringBuilder();
+		for (var index = 0; index < 700; index++)
+		{
+			var name = $"target{index:D4}-{Secret}";
+			File.WriteAllText(Path.Combine(project, name + ".ts"), $"export default {index};\n");
+			imports.Append("import value").Append(index).Append(" from './").Append(name).AppendLine(".js';");
+		}
+		File.WriteAllText(Path.Combine(project, "Large.ts"), imports.ToString());
+		var appData = workspace.CreateDirectory("app-data");
+
+		await using (var server = await McpTestServer.StartAsync(project, workspace.Path))
+		{
+			var inline = await server.CallAsync("related_files", new Dictionary<string, object?>
+			{
+				["path"] = "Main.ts",
+				["direction"] = "dependencies"
+			});
+			Assert.NotEqual(true, inline.IsError);
+			Assert.Contains("DEVPROJEX_REDACTED[", AllText(inline), StringComparison.Ordinal);
+
+			var stored = await server.CallAsync("related_files", new Dictionary<string, object?>
+			{
+				["path"] = "Large.ts",
+				["direction"] = "dependencies"
+			});
+			var match = Regex.Match(AllText(stored), "Related-files result stored as '([^']+)'");
+			Assert.True(match.Success, AllText(stored));
+			var page = await server.CallAsync("read_pack", new Dictionary<string, object?>
+			{
+				["pack_id"] = match.Groups[1].Value
+			});
+			Assert.NotEqual(true, page.IsError);
+			Assert.Contains("DEVPROJEX_REDACTED[", AllText(page), StringComparison.Ordinal);
+		}
+
+		using var journal = new AgentJournalStore(() => appData, activeSessionProvider: static () => []);
+		var session = Assert.Single(await journal.ListSessionsAsync(
+			project,
+			cancellationToken: TestContext.Current.CancellationToken));
+		var calls = await journal.ReadCallsAsync(session.Id, TestContext.Current.CancellationToken);
+		Assert.Equal(["related_files", "related_files", "read_pack"],
+			calls.Select(static call => call.Tool));
+		Assert.True(calls[0].SecretsMasked > 0);
+		Assert.Equal(0, calls[1].SecretsMasked);
+		Assert.Empty(calls[1].DeliveredPaths);
+		Assert.Equal(0, calls[2].SecretsMasked);
+		Assert.Contains(AgentJournalNoticeCodes.Unavailable, calls[2].Notices);
+	}
+
+	[Fact]
 	public async Task TreeOnlyPackJournalDoesNotMarkFileContentDelivered()
 	{
 		using var workspace = new TemporaryDirectory();

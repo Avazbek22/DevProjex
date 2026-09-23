@@ -1463,7 +1463,7 @@ internal sealed class DevProjexMcpTools(
 			using var inline = new McpBoundedStringTextWriter(MaximumInlinePackCharacters);
 			try
 			{
-				WriteRelatedMessage(inline, protectedBody, trustedNotices);
+				WriteRelatedMessage(inline, protectedBody.Text, trustedNotices);
 			}
 			catch (McpLineLimitReachedException)
 			{
@@ -1471,6 +1471,7 @@ internal sealed class DevProjexMcpTools(
 			}
 			if (!inline.IsTruncated)
 			{
+				journal?.RecordProtection(protectedBody.Snapshot);
 				journal?.RecordDeliveredPaths(
 					plan.SourceRoot,
 					related.Seeds.SelectMany(static seed =>
@@ -1488,7 +1489,7 @@ internal sealed class DevProjexMcpTools(
 						new UTF8Encoding(false),
 						bufferSize: 16 * 1024,
 						leaveOpen: true);
-					WriteRelatedMessage(writer, protectedBody, trustedNotices);
+					WriteRelatedMessage(writer, protectedBody.Text, trustedNotices);
 					await writer.FlushAsync(token).ConfigureAwait(false);
 				},
 				McpStoredResultKind.Related,
@@ -1504,7 +1505,8 @@ internal sealed class DevProjexMcpTools(
 					plan,
 					relatedRanges.Select(static range => range.Path),
 					prepared: null,
-					relatedRanges));
+					relatedRanges,
+					protectionKnown: protectedBody.Snapshot.RedactedCount == 0));
 			var storedNotice = $"Related-files result stored as '{pack.Id}' ({pack.Characters} characters). " +
 				"Call read_pack with this pack_id to read it.";
 			return McpToolResults.TextSuccess(
@@ -1558,9 +1560,7 @@ internal sealed class DevProjexMcpTools(
 			.GroupBy(item => Path.GetFullPath(item.Site.File, plan.SourceRoot), PathComparer.Default)
 			.ToDictionary(static group => group.Key, static group => group.ToArray(), PathComparer.Default);
 		var replacements = new Dictionary<string, string>(StringComparer.Ordinal);
-		var returnedRedactions = new Dictionary<string, int>(PathComparer.Default);
 		var processedSources = new HashSet<string>(PathComparer.Default);
-		SecretRedactionSnapshot? protectionSnapshot = null;
 		if (sourcePaths.Count > 0)
 		{
 			await using var protectedSources = await Projects.ConsumeSearchTextAsync(
@@ -1571,7 +1571,6 @@ internal sealed class DevProjexMcpTools(
 					processedSources.Add(file.Path);
 					if (!evidenceBySource.TryGetValue(file.Path, out var sourceEvidence))
 						return ValueTask.CompletedTask;
-					var redactedLines = new HashSet<int>();
 					var lineCursor = new McpRelatedEvidenceLineCursor(
 						file.Content,
 						sourceEvidence.Select(static item => item.Site.Line));
@@ -1587,14 +1586,10 @@ internal sealed class DevProjexMcpTools(
 						}
 						replacements[item.Reason] =
 							$"{RelatedEvidenceLabel(item.Edge.Layer)} at line {item.Site.Line.ToString(CultureInfo.InvariantCulture)}";
-						redactedLines.Add(item.Site.Line);
 					}
-					if (redactedLines.Count > 0)
-						returnedRedactions[file.Path] = CountRedactionsOnLines(file, redactedLines);
 					return ValueTask.CompletedTask;
 				},
 				cancellationToken).ConfigureAwait(false);
-			protectionSnapshot = protectedSources.Snapshot;
 		}
 		var uninspectedSources = 0;
 		foreach (var (sourcePath, sourceEvidence) in evidenceBySource)
@@ -1611,8 +1606,6 @@ internal sealed class DevProjexMcpTools(
 		if (uninspectedSources > 0)
 			journal?.RecordNotice(AgentJournalNoticeCodes.Unavailable);
 
-		foreach (var redactionCount in returnedRedactions.Values)
-			journal?.RecordProtection(redactionCount, protectionSnapshot);
 		if (replacements.Count == 0)
 			return (related, uninspectedSources);
 
@@ -1926,7 +1919,8 @@ internal sealed class DevProjexMcpTools(
 		ProjectContextPlan plan,
 		IEnumerable<string> paths,
 		PreparedSecretRedactionOutput? prepared,
-		IEnumerable<ProjectContextFileLineRange>? fileLineRanges = null)
+		IEnumerable<ProjectContextFileLineRange>? fileLineRanges = null,
+		bool protectionKnown = true)
 	{
 		var rangesByPath = fileLineRanges?
 			.GroupBy(range => Path.GetFullPath(range.Path), PathComparer.Default)
@@ -1945,7 +1939,7 @@ internal sealed class DevProjexMcpTools(
 			.Select(path =>
 			{
 				var protection = TryGetPreparedRedactionCount(prepared, path);
-				if (!protection.Known)
+				if (protectionKnown && !protection.Known)
 					hasUnknownProtection = true;
 				var counts = ResolveProtectionCounts(protection.Count, prepared?.Snapshot);
 				return new McpStoredJournalPath(
@@ -1953,7 +1947,7 @@ internal sealed class DevProjexMcpTools(
 					counts.Secrets,
 					counts.PrivateData,
 					rangesByPath?.GetValueOrDefault(path) ?? [],
-					protection.Known);
+					protectionKnown && protection.Known);
 			})
 			.ToArray();
 		if (hasUnknownProtection)
