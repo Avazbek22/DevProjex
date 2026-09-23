@@ -130,8 +130,8 @@ public sealed class MetricsPipelineIoMeasurementTests(ITestOutputHelper output)
 				pipeline.Recalculate();
 				await WaitUntilAsync(
 					() => analyzer.MetricsCallCount == 2 &&
-					      ReadPublishedContentChars(pipeline) == initialContentChars + 1 &&
-					      background.TrackedTaskCount == 0,
+						  ReadPublishedContentChars(pipeline) == initialContentChars + 1 &&
+						  background.TrackedTaskCount == 0,
 						TimeSpan.FromSeconds(5));
 			}
 			else
