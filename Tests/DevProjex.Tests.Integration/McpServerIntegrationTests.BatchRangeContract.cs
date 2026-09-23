@@ -1,10 +1,48 @@
 using DevProjex.Application.Context;
+using DevProjex.Infrastructure.AgentJournal;
 using DevProjex.Mcp;
 
 namespace DevProjex.Tests.Integration;
 
 public sealed partial class McpServerIntegrationTests
 {
+	[Fact]
+	public async Task BatchReadRetainsPerRangeJournalProtectionCounts()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(
+			Path.Combine(project, "Ranges.txt"),
+			$"first {Secret}\nplain\nlast {Secret}\n");
+		await using (var server = await McpTestServer.StartAsync(project, workspace.Path))
+		{
+			var result = await server.CallAsync("get_file", new Dictionary<string, object?>
+			{
+				["requests"] = new object[]
+				{
+					new
+					{
+						path = "Ranges.txt",
+						ranges = new[]
+						{
+							new { start_line = 1, end_line = 1 },
+							new { start_line = 3, end_line = 3 }
+						}
+					}
+				}
+			});
+			Assert.NotEqual(true, result.IsError);
+			Assert.Equal(2, Regex.Matches(Text(result), "DEVPROJEX_REDACTED\\[").Count);
+		}
+
+		using var journal = new AgentJournalStore(
+			() => Path.Combine(workspace.Path, "app-data"),
+			activeSessionProvider: static () => []);
+		var session = Assert.Single(await journal.ListSessionsAsync(cancellationToken: TestContext.Current.CancellationToken));
+		var call = Assert.Single(await journal.ReadCallsAsync(session.Id, TestContext.Current.CancellationToken));
+		Assert.Equal(2, call.SecretsMasked);
+	}
+
 	[Fact]
 	public async Task BatchReadReportsEachMergedRangeFromItsReturnedCoverage()
 	{

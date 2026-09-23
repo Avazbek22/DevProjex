@@ -1861,14 +1861,22 @@ internal sealed class DevProjexMcpTools(
 			exclusions,
 			cancellationToken);
 		journal?.RecordDeliveredPaths(plan.SourceRoot, rendered.DeliveredPaths);
+		var redactionCountsByPath = new Dictionary<string, IReadOnlyDictionary<int, int>>(PathComparer.Default);
 		foreach (var returned in rendered.DeliveredRanges)
 		{
-			if (returned.PhysicalPath is not null)
-				journal?.RecordProtection(
+			if (journal is not null && returned.PhysicalPath is not null)
+			{
+				if (!redactionCountsByPath.TryGetValue(returned.PhysicalPath, out var lineCounts))
+				{
+					lineCounts = BuildRedactionLineCounts(transformed[returned.PhysicalPath]);
+					redactionCountsByPath.Add(returned.PhysicalPath, lineCounts);
+				}
+				journal.RecordProtection(
 					CountRedactionsOnLines(
-						transformed[returned.PhysicalPath],
+						lineCounts,
 						Enumerable.Range(returned.StartLine, returned.EndLine - returned.StartLine + 1)),
 					inspected.Snapshot);
+			}
 		}
 		var spotlighted = McpSpotlight.Wrap(rendered.Text);
 		if (liveContext is not null)
@@ -2075,6 +2083,13 @@ internal sealed class DevProjexMcpTools(
 	private static int CountRedactionsOnLines(TransformedTextFile file, IEnumerable<int> returnedLines)
 	{
 		var counts = BuildRedactionLineCounts(file);
+		return CountRedactionsOnLines(counts, returnedLines);
+	}
+
+	private static int CountRedactionsOnLines(
+		IReadOnlyDictionary<int, int> counts,
+		IEnumerable<int> returnedLines)
+	{
 		return returnedLines.Distinct().Sum(line => counts.GetValueOrDefault(line));
 	}
 
@@ -2120,6 +2135,7 @@ internal sealed class DevProjexMcpTools(
 				unavailableReasons[(range.RequestIndex, range.RangeIndex)] = reason;
 		}
 		var groups = BuildMergedReadGroups(requests);
+		var lineViews = new Dictionary<string, McpBatchTextLineView>(PathComparer.Default);
 		var sectionBudgetLines = MaximumPageLines - status.Count - 1;
 		var statusReserve = "Requests:\n" + string.Join('\n', status.Keys.Select(key =>
 			$"{key.RequestIndex}.{key.RangeIndex} — not-returned" +
@@ -2168,8 +2184,17 @@ internal sealed class DevProjexMcpTools(
 			McpTextPage page;
 			try
 			{
-				page = McpTextRanges.Slice(
-					file.Content,
+				if (!lineViews.TryGetValue(group.PhysicalPath, out var lineView))
+				{
+					lineView = new McpBatchTextLineView(
+						file.Content,
+						groups.Where(candidate => PathComparer.Default.Equals(
+							candidate.PhysicalPath,
+							group.PhysicalPath)).Select(static candidate => candidate.StartLine),
+						cancellationToken);
+					lineViews.Add(group.PhysicalPath, lineView);
+				}
+				page = lineView.Slice(
 					isEmptyContent ? null : group.StartLine,
 					isEmptyContent ? null : group.EndLine,
 					availableLines,
