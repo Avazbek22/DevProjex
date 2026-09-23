@@ -462,6 +462,11 @@ not a unique-test total.
 | TUI secret-mark publication | `d83f072d` | Failed or canceled context planning no longer replaces marks on the still-active workspace. TUI opening defers mark application until its prepared workspace is published, closing the superseded-open gap while successful direct factory callers retain their marks. Two regressions failed before the fix; 9 focused Terminal checks passed, 1 optional benchmark was skipped, and the existing profile-mark planning Unit invariant passed. |
 | Managed cache trash containment | `7851c6e0` | Startup cleanup and cache-removal paths now reject linked `.staging` or `.trash` components before enumerating, moving, or deleting trash entries. Four deterministic regressions showed external deletion or incorrect movement before the guard; all four and four adjacent normal-cleanup controls passed in Release afterward. Concurrent path replacement remains outside the path-based API's guarantee. |
 | Current-schema profile backup recovery | `4a9ecdd0` | A primary profile document declaring the current schema but missing its required `profiles` object is now invalid, allowing a valid backup to supply existing profiles. Previously lookup returned missing and the next save could overwrite both copies without the old entries. Two regressions failed before the fix; 28 defensive-validation and 7 version-compatibility Unit checks passed afterward. Legacy schema migration is unchanged. |
+| Recent-project backup recovery | `53c16df1` | Current-schema recent-project documents must contain their four writer-required arrays; a semantically incomplete primary no longer masks a valid backup or loses history on the next write. One backup-preservation regression failed before the fix; the 2 new regressions and a focused 78-pass Recent/persistence Unit set passed afterward, with 2 Unix-only cases skipped on Windows. A validation callback reuses the single physical read; legacy schemas retain their migration path. |
+| Current-schema user-settings backup recovery | `aeeb60b0` | A current-schema settings document missing required `viewSettings` no longer masks a valid backup, so a subsequent view change preserves existing language, compact mode, and update metadata. The regression failed before the fix; 29 focused UserSettings/backup/terminal-command Unit checks passed afterward. `updateCheckSettings` remains optional to preserve an existing compatibility contract. |
+| Desktop-control committed-open reporting | `7596bfa0` | A failed registry refresh after a successful GUI project open or an already-loaded desktop request no longer reports that the applied action failed. Two headless UI regressions failed before the fix; 5 focused open/startup/language UI checks passed afterward, including the unchanged error for a genuinely missing project. Expected registry I/O failures remain logged and do not suppress load errors. |
+| Current-theme backup recovery | `5b39c80f` | A current-schema/revision theme document without an object-valued `presets` property is invalid, so it cannot replace a valid backup containing a customized preset with factory defaults. The missing and null cases failed before the fix; a 51-pass focused theme/persistence Unit set passed afterward. Partial preset dictionaries retain the existing normalization contract. |
+| Optional journal GUI startup | `a4cb9aca` | GUI composition now remains available when the optional journal directory cannot be opened. The fallback reader rejects every read, watch, and clear operation without accessing that path; the journal store itself and MCP/CLI fail-closed behavior remain unchanged. Two focused headless Unit checks passed for unavailable and normal storage; an existing symlink-specific case was skipped on this Windows environment. A pre-fix run of the new composition test was not recorded. |
 
 The CLI dense-search dictionary experiment was intentionally discarded: three 5,000-hit
 process samples per variant gave medians of 475 ms for the prior lookup and 480 ms for
@@ -522,6 +527,14 @@ speedup is claimed.
   zero checked tree boxes as the entire tree. Opening such a cross-surface profile in GUI
   can therefore preview or export all files. Aligning this behavior requires a product
   decision; this stabilization branch preserves the existing GUI contract.
+- GUI view-setting persistence can synchronously wait for the cross-process settings
+  lock for up to five seconds when another process holds it. Moving persistence off the
+  UI path requires a lifetime/ordering design and an end-to-end contention regression;
+  no lock timeout or saved-setting semantics were changed late in this branch.
+- Managed Git quota checks do not test cancellation inside their filesystem enumeration.
+  A very large or slow cache tree can therefore delay completion of a canceled operation
+  beyond the process-reap deadline. No deterministic timing reproduction or safe bounded
+  scanner change was established for this release patch.
 
 ## Cleanup status
 
