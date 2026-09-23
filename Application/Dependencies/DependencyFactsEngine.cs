@@ -90,27 +90,35 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
 		ArgumentException.ThrowIfNullOrWhiteSpace(sourceRoot);
 		ArgumentNullException.ThrowIfNull(manifestFiles);
+		cancellationToken.ThrowIfCancellationRequested();
 		var started = Stopwatch.StartNew();
 		var root = Path.GetFullPath(sourceRoot);
-		var canonicalManifest = CreateCanonicalManifest(root, manifestFiles);
-		var manifest = canonicalManifest.Select(static file => file.FullPath).ToArray();
-		var manifestRelativePaths = canonicalManifest.Select(static file => file.RelativePath).ToArray();
+		var canonicalManifest = CreateCanonicalManifest(root, manifestFiles, cancellationToken);
+		var manifest = new string[canonicalManifest.Length];
+		var manifestRelativePaths = new string[canonicalManifest.Length];
+		for (var index = 0; index < canonicalManifest.Length; index++)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			manifest[index] = canonicalManifest[index].FullPath;
+			manifestRelativePaths[index] = canonicalManifest[index].RelativePath;
+		}
 		var manifestRequestKey = new ManifestRequestKey(
 			root,
-			Hash(manifestRelativePaths));
-		var initialStamps = TryCaptureFileStamps(manifest);
-		var alignedContentIdentities = AlignContentIdentities(manifest, contentIdentities);
+			HashWithCancellation(manifestRelativePaths, cancellationToken));
+		var initialStamps = TryCaptureFileStamps(manifest, cancellationToken);
+		var alignedContentIdentities = AlignContentIdentities(manifest, contentIdentities, cancellationToken);
 		if (initialStamps is not null &&
 			_manifestSnapshots.TryGetValue(manifestRequestKey, out var cachedSnapshot) &&
 			cachedSnapshot.ManifestPaths.SequenceEqual(manifestRelativePaths, StringComparer.Ordinal) &&
 			cachedSnapshot.Stamps.SequenceEqual(initialStamps) &&
-			AreControlFilesStillAbsent(cachedSnapshot.AbsentControlFiles) &&
+			AreControlFilesStillAbsent(cachedSnapshot.AbsentControlFiles, cancellationToken) &&
 			ContentIdentitiesMatch(cachedSnapshot.ContentIdentities, alignedContentIdentities) &&
 			_indexCache.ContainsKey(cachedSnapshot.IndexCacheKey))
 		{
 			DependencyEngineDiagnostics.RecordResolutionCacheHit();
 			var snapshot = cachedSnapshot.Snapshot;
 			progress?.Report(new DependencyIndexProgress(manifest.Length, manifest.Length));
+			cancellationToken.ThrowIfCancellationRequested();
 			return snapshot with
 			{
 				Metrics = new DependencyIndexMetrics(
@@ -216,13 +224,13 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			}
 		}
 
-		var manifestGeneration = Hash(prepared.Select(source =>
-			$"{source.RelativePath}\0{source.ContentFingerprint}\0{source.LanguageId}"));
+		var manifestGeneration = HashWithCancellation(prepared.Select(source =>
+			$"{source.RelativePath}\0{source.ContentFingerprint}\0{source.LanguageId}"), cancellationToken);
 		var parsedFiles = _extractor.ParseCount - parsedBefore;
 		// Parallel extraction writes by canonical manifest index, so this array is already ordered.
 		var orderedFacts = facts;
 		var declarations = MergeDeclarations(orderedFacts);
-		var declarationRevision = Hash(declarations.Select(DeclarationKey));
+		var declarationRevision = HashWithCancellation(declarations.Select(DeclarationKey), cancellationToken);
 		var cacheKey = new IndexCacheKey(
 			manifestGeneration,
 			declarationRevision,
@@ -297,9 +305,9 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			FileByPath = resolved.FileByPath,
 			ContentObservations = contentObservations
 		};
-		var finalStamps = TryCaptureFileStamps(manifest);
+		var finalStamps = TryCaptureFileStamps(manifest, cancellationToken);
 		if (canCacheIndex && initialStamps is not null && finalStamps is not null && initialStamps.SequenceEqual(finalStamps) &&
-			AreControlFilesStillAbsent(configuration.AbsentControlFiles))
+			AreControlFilesStillAbsent(configuration.AbsentControlFiles, cancellationToken))
 		{
 			if (_indexCache.ContainsKey(cacheKey))
 				StoreManifestSnapshot(
@@ -311,6 +319,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 					cacheKey,
 					result);
 		}
+		cancellationToken.ThrowIfCancellationRequested();
 		return result;
 	}
 
@@ -795,13 +804,17 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		source.LanguageId,
 		source.ExtractorIdentity);
 
-	private static IReadOnlyList<FileStamp>? TryCaptureFileStamps(IReadOnlyList<string> manifest)
+	private static IReadOnlyList<FileStamp>? TryCaptureFileStamps(
+		IReadOnlyList<string> manifest,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		try
 		{
 			var stamps = new FileStamp[manifest.Count];
 			for (var index = 0; index < manifest.Count; index++)
 			{
+				cancellationToken.ThrowIfCancellationRequested();
 				var info = new FileInfo(manifest[index]);
 				if (!info.Exists) return null;
 				stamps[index] = new FileStamp(
@@ -819,13 +832,16 @@ public sealed partial class DependencyFactsEngine : IDisposable
 
 	private static IReadOnlyList<string>? AlignContentIdentities(
 		IReadOnlyList<string> manifest,
-		DependencyManifestContentIdentities? contentIdentities)
+		DependencyManifestContentIdentities? contentIdentities,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		if (contentIdentities is null)
 			return null;
 		var aligned = new string[manifest.Count];
 		for (var index = 0; index < manifest.Count; index++)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			if (!contentIdentities.ByFullPath.TryGetValue(manifest[index], out var identity))
 			{
 				throw new ArgumentException(
@@ -889,8 +905,17 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			index.Files.Sum(file => EstimateFileFactsBytes(file, strings));
 	}
 
-	private static bool AreControlFilesStillAbsent(IEnumerable<string> paths) =>
-		paths.All(static path => !File.Exists(path));
+	private static bool AreControlFilesStillAbsent(IEnumerable<string> paths, CancellationToken cancellationToken)
+	{
+		cancellationToken.ThrowIfCancellationRequested();
+		foreach (var path in paths)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (File.Exists(path))
+				return false;
+		}
+		return true;
+	}
 
 	private static long SiteBytes(SourceSite site, RetainedStringEstimator strings) =>
 		64 + strings.Add(site.File) + strings.Add(site.Evidence);
@@ -987,8 +1012,11 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		}).ToArray();
 	}
 
-	private static string Hash(IEnumerable<string> values)
+	private static string Hash(IEnumerable<string> values) => HashWithCancellation(values, CancellationToken.None);
+
+	private static string HashWithCancellation(IEnumerable<string> values, CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
 		Span<byte> lengthPrefix = stackalloc byte[sizeof(int)];
 		var buffer = ArrayPool<byte>.Shared.Rent(4096);
@@ -997,6 +1025,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		{
 			foreach (var value in values)
 			{
+				cancellationToken.ThrowIfCancellationRequested();
 				var byteCount = Encoding.UTF8.GetByteCount(value);
 				BinaryPrimitives.WriteInt32BigEndian(lengthPrefix, byteCount);
 				hash.AppendData(lengthPrefix);
@@ -1011,6 +1040,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 				var remaining = value.AsSpan();
 				do
 				{
+					cancellationToken.ThrowIfCancellationRequested();
 					encoder.Convert(
 						remaining,
 						buffer,
@@ -1030,24 +1060,31 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			ArrayPool<byte>.Shared.Return(buffer);
 		}
 
+		cancellationToken.ThrowIfCancellationRequested();
 		return Convert.ToHexStringLower(hash.GetHashAndReset());
 	}
 
 	private static CanonicalManifestFile[] CreateCanonicalManifest(
 		string root,
-		IReadOnlyList<string> manifestFiles)
+		IReadOnlyList<string> manifestFiles,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		var unique = new Dictionary<string, CanonicalManifestFile>(manifestFiles.Count, PathComparer);
 		foreach (var path in manifestFiles)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			var fullPath = Path.GetFullPath(path);
 			if (!IsWithin(root, fullPath) || unique.ContainsKey(fullPath))
 				continue;
 			DependencyEngineDiagnostics.RecordPathNormalization();
 			unique.Add(fullPath, new CanonicalManifestFile(fullPath, PortableRelative(root, fullPath)));
 		}
+		cancellationToken.ThrowIfCancellationRequested();
 		DependencyEngineDiagnostics.RecordManifestSort();
-		return unique.Values.OrderBy(static file => file.RelativePath, StringComparer.Ordinal).ToArray();
+		var ordered = unique.Values.OrderBy(static file => file.RelativePath, StringComparer.Ordinal).ToArray();
+		cancellationToken.ThrowIfCancellationRequested();
+		return ordered;
 	}
 
 	private static bool IsWithin(string root, string path)
