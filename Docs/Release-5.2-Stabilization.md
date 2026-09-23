@@ -3,8 +3,9 @@
 Status: draft, 2026-09-23. This report records local evidence, not release approval.
 
 The stabilization baseline is `dfcaff70e7407457378aee07a29f158aad0306c5`. The
-combined backend comparison extends through `0ec72b78`; later isolated profile-load
-verification (`4b5b3520`) and root-facts profiling (`6d79b72f`) are recorded separately.
+combined backend comparison extends through `0ec72b78`; later profile-load verification
+(`4b5b3520`), root-facts profiling (`6d79b72f`), and partial-selection compression-fact
+reuse (`01b3fac1`) are recorded separately.
 The backend task does not include a real desktop run; desktop readiness remains a
 separate release check.
 
@@ -136,6 +137,56 @@ and identity-readiness gates. Missing/custom lookup results retain the independe
 fallback; subsequent lookups remain fresh. The operation-local payload is excluded from
 JSON serialization. No persistent cache, storage format, or new store interface is added.
 
+### Compression-enabled loading and partial-selection reuse
+
+[The transformed-load samples](Benchmarks/v5.2-gui-transformed.json) record two separate
+read-only diagnostics on DevProjex. Both use body compression with redaction disabled,
+one window-lifetime compression session, and a fresh metrics pipeline per load. Session
+construction is outside the timed loop; native cold preparation is included in Run 0.
+These short diagnostics do not replace the longer raw-load baseline comparison above.
+
+The first diagnostic, before `01b3fac1`, used full selection: 2,716 tree files and
+2,287 full content reads per preparation pass. Existing full-selection reuse was healthy:
+the following metrics phase performed **zero** full reads, fingerprints, or native analyses.
+One session-cold preparation took 2,058.2621 ms with 1,785 native analyses. Three warm
+preparations took 84.9848 / 78.1575 / 85.9329 ms, each with 1,785 cache hits and zero
+native analyses. Required source reads for fingerprint freshness remain. Estimated retained
+budget counters were 585,472 B for compact facts before metrics and zero afterwards;
+the compression cache counter was 4,649,616 B, below its existing 64 MiB bound. These are
+budget estimates, not measured retained memory or working set. This is current-only profiling,
+not evidence that this change improved cold preparation.
+
+A partial selection exposed a different path: preparation retained facts for selected
+files, but metrics initialization rejected the entire snapshot because it scans the full
+tree. `01b3fac1` validates the retained selection against the current root instead. The
+existing scan then consumes only current-tree files and checks each fact's transform
+identity and source version. Final freshness/publication checks, cache bounds, cancellation,
+and full-tree metrics population are unchanged; no new persistent cache was introduced.
+
+The second diagnostic uses one final binary and one frozen corpus: 2,717 tree files,
+1,359 selected paths, and 1,143 selected text files. It compares normal retention with
+an explicit `ReleasePostLoadReadFacts` immediately after preparation. The discarded-facts
+control models the old rejection, but **is not historical-binary release A/B timing**.
+After one cold-session priming load, three warm pairs ran in D/R, R/D, D/R order.
+
+| Metrics phase, three observations per variant | Discarded facts control | Retained facts |
+| --- | ---: | ---: |
+| Full content reads per pass | 2,288 | 1,145 |
+| Full content bytes per pass | 28,518,607 B | 13,446,049 B |
+| Selected supported / unsupported content stream opens | 897 / 246 | 0 / 0 |
+| Unselected supported / unsupported content stream opens | 889 / 256 | 889 / 256 |
+| Content fingerprints per pass | 1,786 | 889 |
+| Native analyses in warm passes | 0 | 0 |
+| Time through metrics publication, median | 80.1720 ms | 56.9065 ms |
+| Managed allocation, median | 108,635,864 B | 54,307,808 B |
+
+All seven observations retain all 2,717 file-cache entries and publish identical six-metric
+tuples. Preparation reads the same 1,143 selected text files in each observation; subsequent
+metrics avoid rereading those files, removing 15,072,558 B of repeated content IO. Retained
+facts are released after consumption. Stream-open counts and full-read counts are separate
+diagnostics and must not be added. The robust result is eliminated repeated work; timings
+are only three-observation warm medians, not a new whole-GUI speedup claim.
+
 ### Deferred: broader root-facts reuse
 
 The read-only `6d79b72f` probe used the actual repository at 3,001 inventory entries,
@@ -204,6 +255,7 @@ Counts below overlap across runs and must not be summed into a unique-test total
 | `0ec72b78` | Raw GUI metrics reuse stable same-handle identity while retaining final path/publication checks and conservative fallbacks | 55/55 targeted passes, including 16 new cases: seven initial IO-counter failures, seven controls, and two cancellation checks |
 | `4b5b3520` | GUI profile load reuses its successful lookup's marks snapshot without losing revision, recovery, cancellation, or fallback semantics | One initial duplicate-load failure + four controls; final 102 targeted passes / two opt-in skips, including eight new correctness cases; separate enabled benchmark run: two passes |
 | `6d79b72f` | Measure repeated root-facts work before considering broader session reuse | One enabled read-only probe passed; production optimization deferred, not claimed as a speedup |
+| `01b3fac1` | Reuse selected compression facts while populating metrics for the full tree | Two baseline read-count failures + five passing controls; 37/37 after passes, including seven new cases and existing freshness, coherent-read, visual-gate, and cancellation checks; two separately enabled transformed-load probes passed |
 
 An additional cross-surface run covering selection contracts, MCP inventory caching, and
 inventory projection passed 31/31 tests.
@@ -242,7 +294,8 @@ intentionally conservative.
 
 - This is not evidence of real desktop GUI readiness. The backend/headless checks do not
   validate first paint, actual perceived load completion, popup rendering, DPI, platform
-  composition, or the complete desktop lifecycle.
+  composition, or the complete desktop lifecycle. Measurements use Release test hosts,
+  not packaged desktop or ReadyToRun release artifacts.
 - There is no trustworthy, comparable v5.0/v5.1 baseline. Recalled historical load times
   cannot be used to claim that a previous performance level has been restored.
 - Local runs were on Windows. Platform skips include filesystem cases such as filename
@@ -271,8 +324,8 @@ inventoried at 1,283,874,520 B; reported reclaimed space is **0 B**. Baseline so
 benchmark outputs, and other generated build artifacts also remain to be addressed under
 the applicable cleanup policy. The rejection must not be bypassed through another shell.
 
-A later read-only inventory found 56 project-derived `bin`/`obj` directories totaling
-14,461,093,197 B of logical file sizes. Resolved paths were restricted to the workspace
+A final read-only inventory at 09:12 UTC found 56 project-derived `bin`/`obj` directories totaling
+14,461,441,581 B of logical file sizes. Resolved paths were restricted to the workspace
 and reparse points were rejected. This is a pending-artifact inventory, not space reclaimed
 or a claim that all these bytes were created by this task; no initial inventory exists.
 Source archives and other non-`bin`/`obj` temporary outputs are additional pending items.
@@ -300,3 +353,9 @@ repeating measurements. Keep backend probes distinct from a real desktop run.
 `DEVPROJEX_PROFILE_MARKS_BENCHMARK=1`. `ProjectScopeDiscoveryRootFactsMeasurementTests`
 uses `DEVPROJEX_GUI_BENCHMARK_ROOT` for read-only profiling; its diagnostics distinguish
 summed work, overlapping wall-clock coverage, and scanner hook events.
+
+`GuiTransformedLoadMeasurementTests` also uses `DEVPROJEX_GUI_BENCHMARK_ROOT`. Run its
+full-selection and partial-selection methods separately. The latter alternates retained
+and explicitly discarded compact facts on a single binary; preserve this distinction
+when reporting results. The stored transformed-load JSON retains every observation,
+not just the three-observation medians.

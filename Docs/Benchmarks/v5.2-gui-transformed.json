@@ -1,0 +1,1255 @@
+{
+  "schemaVersion": 1,
+  "recordedDate": "2026-09-23",
+  "environment": {
+    "os": "Windows",
+    "dotnetSdk": "10.0.401",
+    "dotnetRuntime": "10.0.12",
+    "configuration": "Release test host, not packaged desktop"
+  },
+  "boundaries": [
+    "Real SelectionSyncCoordinator and inventory projection, followed by body compression preparation and MetricsPipeline through background publication.",
+    "Compression session construction occurs before the timed loop. Native cold preparation is included in Run 0.",
+    "A single compression session survives while every load uses a fresh metrics pipeline. Redaction is disabled.",
+    "No desktop window, animation, first paint, profile persistence, or filesystem-cache purge is included.",
+    "Content stream opens can include prefix-only classification and are separate from full-file read counters.",
+    "Allocation figures are managed allocated bytes, not retained memory or resident memory.",
+    "Retained fact/cache byte counters are implementation budget estimates, not measurements of actual retained memory or working set."
+  ],
+  "fullSelection": {
+    "productionRevision": "fb8fc4b2",
+    "harnessState": "Initial uncommitted GuiTransformedLoadMeasurementTests probe; later extended and committed in 01b3fac1.",
+    "interpretation": "Current-only diagnostic: one cold-session observation and three warm observations. Not a historical baseline comparison.",
+    "samples": [
+      {
+        "Scenario": "gui-body-compression-prewarm-and-retained-metrics",
+        "Run": 0,
+        "Phase": "cold-compression-session",
+        "Files": 2716,
+        "InventoryEntries": 3002,
+        "GitMode": "RespectGitIgnore",
+        "SelectionMilliseconds": 573.2199,
+        "ProjectionMilliseconds": 107.945,
+        "PrewarmMilliseconds": 2058.2621,
+        "PrewarmAllocatedBytes": 595790536,
+        "MetricsScanMilliseconds": 45.6906,
+        "MetricsPublicationMilliseconds": 77.1018,
+        "MetricsAllocatedBytes": 3571696,
+        "TotalBackendMilliseconds": 2843.4218,
+        "TotalBackendAllocatedBytes": 720841480,
+        "RetainedFactsBeforeMetrics": 2287,
+        "RetainedFactBytesBeforeMetrics": 585472,
+        "RetainedFactBytesAfterMetrics": 0,
+        "PrewarmCompression": {
+          "HashComputations": 0,
+          "CacheHits": 0,
+          "CacheMisses": 0,
+          "AnalysisExecutions": 1785,
+          "PrewarmRequests": 1785,
+          "PrewarmCacheHits": 0,
+          "PrewarmAnalyses": 1785,
+          "PrewarmReuses": 0,
+          "UnsupportedFastPaths": 502
+        },
+        "MetricsCompression": {
+          "HashComputations": 0,
+          "CacheHits": 0,
+          "CacheMisses": 0,
+          "AnalysisExecutions": 0,
+          "PrewarmRequests": 0,
+          "PrewarmCacheHits": 0,
+          "PrewarmAnalyses": 0,
+          "PrewarmReuses": 0,
+          "UnsupportedFastPaths": 0
+        },
+        "CompressionCache": {
+          "CacheEntries": 1785,
+          "RetainedCacheBytes": 4649616,
+          "MaximumCacheEntries": 16384,
+          "MaximumRetainedCacheBytes": 67108864,
+          "Runtime": {
+            "CompiledQuerySets": 4,
+            "MaterializedWorkers": 0,
+            "AvailableWorkers": 0,
+            "LeasedWorkers": 0,
+            "GlobalWorkerCapacity": 8,
+            "GlobalActiveWorkers": 0,
+            "GlobalPeakActiveWorkers": 8,
+            "GlobalRetainedWorkers": 0,
+            "GlobalRetainedWorkerCapacity": 20
+          }
+        },
+        "CompressionOutcome": {
+          "CompressedFiles": 1562,
+          "UnchangedFiles": 725,
+          "SourceCharacters": 27650943,
+          "TransformedCharacters": 11916472,
+          "BodyTransformedFiles": 1562
+        },
+        "MetricsIo": {
+          "FileVersionOpenCount": 8148,
+          "MetricsLockAttemptCount": 3,
+          "MetricsLockAcquisitionCount": 3,
+          "MetricsLockWait": "00:00:00.0000514"
+        },
+        "PublishedMetrics": {
+          "TreeLines": 2986,
+          "TreeChars": 121414,
+          "TreeTokens": 30354,
+          "ContentLines": 284499,
+          "ContentChars": 11813570,
+          "ContentTokens": 2953393
+        },
+        "PrewarmContent": {
+          "FullFileReads": 2287,
+          "FullFileReadBytes": 28505926,
+          "ContentFingerprintComputations": 1785,
+          "PlanApplications": 1562,
+          "PeakInFlightBytes": 2312934
+        },
+        "MetricsContent": {
+          "FullFileReads": 0,
+          "FullFileReadBytes": 0,
+          "ContentFingerprintComputations": 0,
+          "PlanApplications": 0,
+          "PeakInFlightBytes": 0
+        }
+      },
+      {
+        "Scenario": "gui-body-compression-prewarm-and-retained-metrics",
+        "Run": 1,
+        "Phase": "warm-compression-cache-fresh-metrics",
+        "Files": 2716,
+        "InventoryEntries": 3002,
+        "GitMode": "RespectGitIgnore",
+        "SelectionMilliseconds": 323.8389,
+        "ProjectionMilliseconds": 86.681,
+        "PrewarmMilliseconds": 84.9848,
+        "PrewarmAllocatedBytes": 109784608,
+        "MetricsScanMilliseconds": 24.5792,
+        "MetricsPublicationMilliseconds": 58.0046,
+        "MetricsAllocatedBytes": 3561680,
+        "TotalBackendMilliseconds": 561.1336,
+        "TotalBackendAllocatedBytes": 168401904,
+        "RetainedFactsBeforeMetrics": 2287,
+        "RetainedFactBytesBeforeMetrics": 585472,
+        "RetainedFactBytesAfterMetrics": 0,
+        "PrewarmCompression": {
+          "HashComputations": 0,
+          "CacheHits": 0,
+          "CacheMisses": 0,
+          "AnalysisExecutions": 0,
+          "PrewarmRequests": 1785,
+          "PrewarmCacheHits": 1785,
+          "PrewarmAnalyses": 0,
+          "PrewarmReuses": 0,
+          "UnsupportedFastPaths": 502
+        },
+        "MetricsCompression": {
+          "HashComputations": 0,
+          "CacheHits": 0,
+          "CacheMisses": 0,
+          "AnalysisExecutions": 0,
+          "PrewarmRequests": 0,
+          "PrewarmCacheHits": 0,
+          "PrewarmAnalyses": 0,
+          "PrewarmReuses": 0,
+          "UnsupportedFastPaths": 0
+        },
+        "CompressionCache": {
+          "CacheEntries": 1785,
+          "RetainedCacheBytes": 4649616,
+          "MaximumCacheEntries": 16384,
+          "MaximumRetainedCacheBytes": 67108864,
+          "Runtime": {
+            "CompiledQuerySets": 4,
+            "MaterializedWorkers": 0,
+            "AvailableWorkers": 0,
+            "LeasedWorkers": 0,
+            "GlobalWorkerCapacity": 8,
+            "GlobalActiveWorkers": 0,
+            "GlobalPeakActiveWorkers": 8,
+            "GlobalRetainedWorkers": 0,
+            "GlobalRetainedWorkerCapacity": 20
+          }
+        },
+        "CompressionOutcome": {
+          "CompressedFiles": 1562,
+          "UnchangedFiles": 725,
+          "SourceCharacters": 27650943,
+          "TransformedCharacters": 11916472,
+          "BodyTransformedFiles": 1562
+        },
+        "MetricsIo": {
+          "FileVersionOpenCount": 8148,
+          "MetricsLockAttemptCount": 3,
+          "MetricsLockAcquisitionCount": 3,
+          "MetricsLockWait": "00:00:00.0000019"
+        },
+        "PublishedMetrics": {
+          "TreeLines": 2986,
+          "TreeChars": 121414,
+          "TreeTokens": 30354,
+          "ContentLines": 284499,
+          "ContentChars": 11813570,
+          "ContentTokens": 2953393
+        },
+        "PrewarmContent": {
+          "FullFileReads": 2287,
+          "FullFileReadBytes": 28505926,
+          "ContentFingerprintComputations": 1785,
+          "PlanApplications": 0,
+          "PeakInFlightBytes": 992060
+        },
+        "MetricsContent": {
+          "FullFileReads": 0,
+          "FullFileReadBytes": 0,
+          "ContentFingerprintComputations": 0,
+          "PlanApplications": 0,
+          "PeakInFlightBytes": 0
+        }
+      },
+      {
+        "Scenario": "gui-body-compression-prewarm-and-retained-metrics",
+        "Run": 2,
+        "Phase": "warm-compression-cache-fresh-metrics",
+        "Files": 2716,
+        "InventoryEntries": 3002,
+        "GitMode": "RespectGitIgnore",
+        "SelectionMilliseconds": 153.1874,
+        "ProjectionMilliseconds": 86.7648,
+        "PrewarmMilliseconds": 78.1575,
+        "PrewarmAllocatedBytes": 109811248,
+        "MetricsScanMilliseconds": 23.3852,
+        "MetricsPublicationMilliseconds": 48.2394,
+        "MetricsAllocatedBytes": 3557296,
+        "TotalBackendMilliseconds": 374.6775,
+        "TotalBackendAllocatedBytes": 162555016,
+        "RetainedFactsBeforeMetrics": 2287,
+        "RetainedFactBytesBeforeMetrics": 585472,
+        "RetainedFactBytesAfterMetrics": 0,
+        "PrewarmCompression": {
+          "HashComputations": 0,
+          "CacheHits": 0,
+          "CacheMisses": 0,
+          "AnalysisExecutions": 0,
+          "PrewarmRequests": 1785,
+          "PrewarmCacheHits": 1785,
+          "PrewarmAnalyses": 0,
+          "PrewarmReuses": 0,
+          "UnsupportedFastPaths": 502
+        },
+        "MetricsCompression": {
+          "HashComputations": 0,
+          "CacheHits": 0,
+          "CacheMisses": 0,
+          "AnalysisExecutions": 0,
+          "PrewarmRequests": 0,
+          "PrewarmCacheHits": 0,
+          "PrewarmAnalyses": 0,
+          "PrewarmReuses": 0,
+          "UnsupportedFastPaths": 0
+        },
+        "CompressionCache": {
+          "CacheEntries": 1785,
+          "RetainedCacheBytes": 4649616,
+          "MaximumCacheEntries": 16384,
+          "MaximumRetainedCacheBytes": 67108864,
+          "Runtime": {
+            "CompiledQuerySets": 4,
+            "MaterializedWorkers": 0,
+            "AvailableWorkers": 0,
+            "LeasedWorkers": 0,
+            "GlobalWorkerCapacity": 8,
+            "GlobalActiveWorkers": 0,
+            "GlobalPeakActiveWorkers": 8,
+            "GlobalRetainedWorkers": 0,
+            "GlobalRetainedWorkerCapacity": 20
+          }
+        },
+        "CompressionOutcome": {
+          "CompressedFiles": 1562,
+          "UnchangedFiles": 725,
+          "SourceCharacters": 27650943,
+          "TransformedCharacters": 11916472,
+          "BodyTransformedFiles": 1562
+        },
+        "MetricsIo": {
+          "FileVersionOpenCount": 8148,
+          "MetricsLockAttemptCount": 3,
+          "MetricsLockAcquisitionCount": 3,
+          "MetricsLockWait": "00:00:00.0000033"
+        },
+        "PublishedMetrics": {
+          "TreeLines": 2986,
+          "TreeChars": 121414,
+          "TreeTokens": 30354,
+          "ContentLines": 284499,
+          "ContentChars": 11813570,
+          "ContentTokens": 2953393
+        },
+        "PrewarmContent": {
+          "FullFileReads": 2287,
+          "FullFileReadBytes": 28505926,
+          "ContentFingerprintComputations": 1785,
+          "PlanApplications": 0,
+          "PeakInFlightBytes": 1000522
+        },
+        "MetricsContent": {
+          "FullFileReads": 0,
+          "FullFileReadBytes": 0,
+          "ContentFingerprintComputations": 0,
+          "PlanApplications": 0,
+          "PeakInFlightBytes": 0
+        }
+      },
+      {
+        "Scenario": "gui-body-compression-prewarm-and-retained-metrics",
+        "Run": 3,
+        "Phase": "warm-compression-cache-fresh-metrics",
+        "Files": 2716,
+        "InventoryEntries": 3002,
+        "GitMode": "RespectGitIgnore",
+        "SelectionMilliseconds": 156.8727,
+        "ProjectionMilliseconds": 88.2372,
+        "PrewarmMilliseconds": 85.9329,
+        "PrewarmAllocatedBytes": 109798672,
+        "MetricsScanMilliseconds": 20.7815,
+        "MetricsPublicationMilliseconds": 73.2091,
+        "MetricsAllocatedBytes": 3559728,
+        "TotalBackendMilliseconds": 412.1656,
+        "TotalBackendAllocatedBytes": 160478376,
+        "RetainedFactsBeforeMetrics": 2287,
+        "RetainedFactBytesBeforeMetrics": 585472,
+        "RetainedFactBytesAfterMetrics": 0,
+        "PrewarmCompression": {
+          "HashComputations": 0,
+          "CacheHits": 0,
+          "CacheMisses": 0,
+          "AnalysisExecutions": 0,
+          "PrewarmRequests": 1785,
+          "PrewarmCacheHits": 1785,
+          "PrewarmAnalyses": 0,
+          "PrewarmReuses": 0,
+          "UnsupportedFastPaths": 502
+        },
+        "MetricsCompression": {
+          "HashComputations": 0,
+          "CacheHits": 0,
+          "CacheMisses": 0,
+          "AnalysisExecutions": 0,
+          "PrewarmRequests": 0,
+          "PrewarmCacheHits": 0,
+          "PrewarmAnalyses": 0,
+          "PrewarmReuses": 0,
+          "UnsupportedFastPaths": 0
+        },
+        "CompressionCache": {
+          "CacheEntries": 1785,
+          "RetainedCacheBytes": 4649616,
+          "MaximumCacheEntries": 16384,
+          "MaximumRetainedCacheBytes": 67108864,
+          "Runtime": {
+            "CompiledQuerySets": 4,
+            "MaterializedWorkers": 0,
+            "AvailableWorkers": 0,
+            "LeasedWorkers": 0,
+            "GlobalWorkerCapacity": 8,
+            "GlobalActiveWorkers": 0,
+            "GlobalPeakActiveWorkers": 8,
+            "GlobalRetainedWorkers": 0,
+            "GlobalRetainedWorkerCapacity": 20
+          }
+        },
+        "CompressionOutcome": {
+          "CompressedFiles": 1562,
+          "UnchangedFiles": 725,
+          "SourceCharacters": 27650943,
+          "TransformedCharacters": 11916472,
+          "BodyTransformedFiles": 1562
+        },
+        "MetricsIo": {
+          "FileVersionOpenCount": 8148,
+          "MetricsLockAttemptCount": 3,
+          "MetricsLockAcquisitionCount": 3,
+          "MetricsLockWait": "00:00:00.0000018"
+        },
+        "PublishedMetrics": {
+          "TreeLines": 2986,
+          "TreeChars": 121414,
+          "TreeTokens": 30354,
+          "ContentLines": 284499,
+          "ContentChars": 11813570,
+          "ContentTokens": 2953393
+        },
+        "PrewarmContent": {
+          "FullFileReads": 2287,
+          "FullFileReadBytes": 28505926,
+          "ContentFingerprintComputations": 1785,
+          "PlanApplications": 0,
+          "PeakInFlightBytes": 997456
+        },
+        "MetricsContent": {
+          "FullFileReads": 0,
+          "FullFileReadBytes": 0,
+          "ContentFingerprintComputations": 0,
+          "PlanApplications": 0,
+          "PeakInFlightBytes": 0
+        }
+      }
+    ]
+  },
+  "partialSelection": {
+    "sourceRevision": "01b3fac1003eba5deb4163b393fad848b3b3de85",
+    "interpretation": "Same final binary and frozen corpus, retained facts versus explicit ReleasePostLoadReadFacts after preparation. The discard control models the former all-or-nothing rejection; this is not historical-binary release A/B timing.",
+    "selection": "Every second ordered tree path, 1,359 selected paths out of 2,717.",
+    "sampling": "One cold-session priming load followed by three warm control pairs, D/R, R/D, D/R. Warm medians use all three observations per variant.",
+    "invariantAudit": {
+      "observations": 7,
+      "files": 2717,
+      "selectedFiles": 1359,
+      "inventoryEntries": 3003,
+      "completeMetricsCacheEntries": 2717,
+      "uniquePublishedMetricTuples": 1,
+      "prewarmFullReads": 1143,
+      "retainedCompactFacts": 1143,
+      "retainedFactBytesAfterMetrics": 0
+    },
+    "warmSummary": [
+      {
+        "discard": true,
+        "n": 3,
+        "publication": 80.172,
+        "allocation": 108635864,
+        "fullReads": [
+          2288
+        ],
+        "fullReadBytes": [
+          28518607
+        ],
+        "metrics": {
+          "TreeLines": 1600,
+          "TreeChars": 62963,
+          "TreeTokens": 15741,
+          "ContentLines": 151982,
+          "ContentChars": 6110676,
+          "ContentTokens": 1527669
+        },
+        "opens": {
+          "SelectedSupported": 897,
+          "SelectedUnsupported": 246,
+          "UnselectedSupported": 889,
+          "UnselectedUnsupported": 256
+        },
+        "runNumbers": [
+          1,
+          4,
+          5
+        ]
+      },
+      {
+        "discard": false,
+        "n": 3,
+        "publication": 56.9065,
+        "allocation": 54307808,
+        "fullReads": [
+          1145
+        ],
+        "fullReadBytes": [
+          13446049
+        ],
+        "metrics": {
+          "TreeLines": 1600,
+          "TreeChars": 62963,
+          "TreeTokens": 15741,
+          "ContentLines": 151982,
+          "ContentChars": 6110676,
+          "ContentTokens": 1527669
+        },
+        "opens": {
+          "SelectedSupported": 0,
+          "SelectedUnsupported": 0,
+          "UnselectedSupported": 889,
+          "UnselectedUnsupported": 256
+        },
+        "runNumbers": [
+          2,
+          3,
+          6
+        ]
+      }
+    ],
+    "samples": [
+      {
+        "Scenario": "gui-partial-selection-retained-vs-discarded-facts-control",
+        "Run": 0,
+        "Phase": "cold-compression-session",
+        "DiscardReadFactsBeforeMetrics": false,
+        "Files": 2717,
+        "SelectedFiles": 1359,
+        "SupportedFiles": 1786,
+        "CachedFileCount": 2717,
+        "InventoryEntries": 3003,
+        "GitMode": "RespectGitIgnore",
+        "SelectionMilliseconds": 611.0998,
+        "ProjectionMilliseconds": 112.3509,
+        "PrewarmMilliseconds": 1179.6871,
+        "PrewarmAllocatedBytes": 320614584,
+        "MetricsScanMilliseconds": 897.3597,
+        "MetricsPublicationMilliseconds": 921.2891,
+        "MetricsAllocatedBytes": 285039512,
+        "TotalBackendMilliseconds": 2852.3743,
+        "TotalBackendAllocatedBytes": 733298656,
+        "RetainedFactsBeforeMetrics": 1143,
+        "RetainedFactBytesBeforeMetrics": 292608,
+        "RetainedFactBytesAfterMetrics": 0,
+        "PrewarmContentOpens": {
+          "SelectedSupported": 897,
+          "SelectedUnsupported": 246,
+          "UnselectedSupported": 0,
+          "UnselectedUnsupported": 0
+        },
+        "MetricsContentOpens": {
+          "SelectedSupported": 0,
+          "SelectedUnsupported": 0,
+          "UnselectedSupported": 889,
+          "UnselectedUnsupported": 256
+        },
+        "PrewarmCompression": {
+          "HashComputations": 0,
+          "CacheHits": 0,
+          "CacheMisses": 0,
+          "AnalysisExecutions": 897,
+          "PrewarmRequests": 897,
+          "PrewarmCacheHits": 0,
+          "PrewarmAnalyses": 897,
+          "PrewarmReuses": 0,
+          "UnsupportedFastPaths": 246
+        },
+        "MetricsCompression": {
+          "HashComputations": 0,
+          "CacheHits": 0,
+          "CacheMisses": 889,
+          "AnalysisExecutions": 889,
+          "PrewarmRequests": 0,
+          "PrewarmCacheHits": 0,
+          "PrewarmAnalyses": 0,
+          "PrewarmReuses": 0,
+          "UnsupportedFastPaths": 0
+        },
+        "CompressionCache": {
+          "CacheEntries": 1786,
+          "RetainedCacheBytes": 4652672,
+          "MaximumCacheEntries": 16384,
+          "MaximumRetainedCacheBytes": 67108864,
+          "Runtime": {
+            "CompiledQuerySets": 4,
+            "MaterializedWorkers": 7,
+            "AvailableWorkers": 7,
+            "LeasedWorkers": 0,
+            "GlobalWorkerCapacity": 8,
+            "GlobalActiveWorkers": 0,
+            "GlobalPeakActiveWorkers": 8,
+            "GlobalRetainedWorkers": 7,
+            "GlobalRetainedWorkerCapacity": 20
+          }
+        },
+        "CompressionOutcome": {
+          "CompressedFiles": 786,
+          "UnchangedFiles": 357,
+          "SourceCharacters": 14693700,
+          "TransformedCharacters": 6169492,
+          "BodyTransformedFiles": 786
+        },
+        "MetricsIo": {
+          "FileVersionOpenCount": 7938,
+          "MetricsLockAttemptCount": 3,
+          "MetricsLockAcquisitionCount": 3,
+          "MetricsLockWait": "00:00:00.0000175"
+        },
+        "PublishedMetrics": {
+          "TreeLines": 1600,
+          "TreeChars": 62963,
+          "TreeTokens": 15741,
+          "ContentLines": 151982,
+          "ContentChars": 6110676,
+          "ContentTokens": 1527669
+        },
+        "PrewarmContent": {
+          "FullFileReads": 1143,
+          "FullFileReadBytes": 15072558,
+          "ContentFingerprintComputations": 897,
+          "PlanApplications": 786,
+          "PeakInFlightBytes": 2548376
+        },
+        "MetricsContent": {
+          "FullFileReads": 1145,
+          "FullFileReadBytes": 13446049,
+          "ContentFingerprintComputations": 889,
+          "PlanApplications": 777,
+          "PeakInFlightBytes": 0
+        }
+      },
+      {
+        "Scenario": "gui-partial-selection-retained-vs-discarded-facts-control",
+        "Run": 1,
+        "Phase": "warm-compression-cache-fresh-metrics",
+        "DiscardReadFactsBeforeMetrics": true,
+        "Files": 2717,
+        "SelectedFiles": 1359,
+        "SupportedFiles": 1786,
+        "CachedFileCount": 2717,
+        "InventoryEntries": 3003,
+        "GitMode": "RespectGitIgnore",
+        "SelectionMilliseconds": 263.743,
+        "ProjectionMilliseconds": 87.1267,
+        "PrewarmMilliseconds": 45.4314,
+        "PrewarmAllocatedBytes": 58374712,
+        "MetricsScanMilliseconds": 66.932,
+        "MetricsPublicationMilliseconds": 80.172,
+        "MetricsAllocatedBytes": 115177136,
+        "TotalBackendMilliseconds": 487.0028,
+        "TotalBackendAllocatedBytes": 226077528,
+        "RetainedFactsBeforeMetrics": 1143,
+        "RetainedFactBytesBeforeMetrics": 292608,
+        "RetainedFactBytesAfterMetrics": 0,
+        "PrewarmContentOpens": {
+          "SelectedSupported": 897,
+          "SelectedUnsupported": 246,
+          "UnselectedSupported": 0,
+          "UnselectedUnsupported": 0
+        },
+        "MetricsContentOpens": {
+          "SelectedSupported": 897,
+          "SelectedUnsupported": 246,
+          "UnselectedSupported": 889,
+          "UnselectedUnsupported": 256
+        },
+        "PrewarmCompression": {
+          "HashComputations": 0,
+          "CacheHits": 0,
+          "CacheMisses": 0,
+          "AnalysisExecutions": 0,
+          "PrewarmRequests": 897,
+          "PrewarmCacheHits": 897,
+          "PrewarmAnalyses": 0,
+          "PrewarmReuses": 0,
+          "UnsupportedFastPaths": 246
+        },
+        "MetricsCompression": {
+          "HashComputations": 0,
+          "CacheHits": 1786,
+          "CacheMisses": 0,
+          "AnalysisExecutions": 0,
+          "PrewarmRequests": 0,
+          "PrewarmCacheHits": 0,
+          "PrewarmAnalyses": 0,
+          "PrewarmReuses": 0,
+          "UnsupportedFastPaths": 0
+        },
+        "CompressionCache": {
+          "CacheEntries": 1786,
+          "RetainedCacheBytes": 4652672,
+          "MaximumCacheEntries": 16384,
+          "MaximumRetainedCacheBytes": 67108864,
+          "Runtime": {
+            "CompiledQuerySets": 4,
+            "MaterializedWorkers": 0,
+            "AvailableWorkers": 0,
+            "LeasedWorkers": 0,
+            "GlobalWorkerCapacity": 8,
+            "GlobalActiveWorkers": 0,
+            "GlobalPeakActiveWorkers": 8,
+            "GlobalRetainedWorkers": 0,
+            "GlobalRetainedWorkerCapacity": 20
+          }
+        },
+        "CompressionOutcome": {
+          "CompressedFiles": 786,
+          "UnchangedFiles": 357,
+          "SourceCharacters": 14693700,
+          "TransformedCharacters": 6169492,
+          "BodyTransformedFiles": 786
+        },
+        "MetricsIo": {
+          "FileVersionOpenCount": 9081,
+          "MetricsLockAttemptCount": 3,
+          "MetricsLockAcquisitionCount": 3,
+          "MetricsLockWait": "00:00:00.0000013"
+        },
+        "PublishedMetrics": {
+          "TreeLines": 1600,
+          "TreeChars": 62963,
+          "TreeTokens": 15741,
+          "ContentLines": 151982,
+          "ContentChars": 6110676,
+          "ContentTokens": 1527669
+        },
+        "PrewarmContent": {
+          "FullFileReads": 1143,
+          "FullFileReadBytes": 15072558,
+          "ContentFingerprintComputations": 897,
+          "PlanApplications": 0,
+          "PeakInFlightBytes": 905556
+        },
+        "MetricsContent": {
+          "FullFileReads": 2288,
+          "FullFileReadBytes": 28518607,
+          "ContentFingerprintComputations": 1786,
+          "PlanApplications": 0,
+          "PeakInFlightBytes": 0
+        }
+      },
+      {
+        "Scenario": "gui-partial-selection-retained-vs-discarded-facts-control",
+        "Run": 2,
+        "Phase": "warm-compression-cache-fresh-metrics",
+        "DiscardReadFactsBeforeMetrics": false,
+        "Files": 2717,
+        "SelectedFiles": 1359,
+        "SupportedFiles": 1786,
+        "CachedFileCount": 2717,
+        "InventoryEntries": 3003,
+        "GitMode": "RespectGitIgnore",
+        "SelectionMilliseconds": 145.7423,
+        "ProjectionMilliseconds": 81.2237,
+        "PrewarmMilliseconds": 47.7578,
+        "PrewarmAllocatedBytes": 57849736,
+        "MetricsScanMilliseconds": 38.3058,
+        "MetricsPublicationMilliseconds": 58.0895,
+        "MetricsAllocatedBytes": 55347112,
+        "TotalBackendMilliseconds": 343.2761,
+        "TotalBackendAllocatedBytes": 160646256,
+        "RetainedFactsBeforeMetrics": 1143,
+        "RetainedFactBytesBeforeMetrics": 292608,
+        "RetainedFactBytesAfterMetrics": 0,
+        "PrewarmContentOpens": {
+          "SelectedSupported": 897,
+          "SelectedUnsupported": 246,
+          "UnselectedSupported": 0,
+          "UnselectedUnsupported": 0
+        },
+        "MetricsContentOpens": {
+          "SelectedSupported": 0,
+          "SelectedUnsupported": 0,
+          "UnselectedSupported": 889,
+          "UnselectedUnsupported": 256
+        },
+        "PrewarmCompression": {
+          "HashComputations": 0,
+          "CacheHits": 0,
+          "CacheMisses": 0,
+          "AnalysisExecutions": 0,
+          "PrewarmRequests": 897,
+          "PrewarmCacheHits": 897,
+          "PrewarmAnalyses": 0,
+          "PrewarmReuses": 0,
+          "UnsupportedFastPaths": 246
+        },
+        "MetricsCompression": {
+          "HashComputations": 0,
+          "CacheHits": 889,
+          "CacheMisses": 0,
+          "AnalysisExecutions": 0,
+          "PrewarmRequests": 0,
+          "PrewarmCacheHits": 0,
+          "PrewarmAnalyses": 0,
+          "PrewarmReuses": 0,
+          "UnsupportedFastPaths": 0
+        },
+        "CompressionCache": {
+          "CacheEntries": 1786,
+          "RetainedCacheBytes": 4652672,
+          "MaximumCacheEntries": 16384,
+          "MaximumRetainedCacheBytes": 67108864,
+          "Runtime": {
+            "CompiledQuerySets": 4,
+            "MaterializedWorkers": 0,
+            "AvailableWorkers": 0,
+            "LeasedWorkers": 0,
+            "GlobalWorkerCapacity": 8,
+            "GlobalActiveWorkers": 0,
+            "GlobalPeakActiveWorkers": 8,
+            "GlobalRetainedWorkers": 0,
+            "GlobalRetainedWorkerCapacity": 20
+          }
+        },
+        "CompressionOutcome": {
+          "CompressedFiles": 786,
+          "UnchangedFiles": 357,
+          "SourceCharacters": 14693700,
+          "TransformedCharacters": 6169492,
+          "BodyTransformedFiles": 786
+        },
+        "MetricsIo": {
+          "FileVersionOpenCount": 7938,
+          "MetricsLockAttemptCount": 3,
+          "MetricsLockAcquisitionCount": 3,
+          "MetricsLockWait": "00:00:00.0000015"
+        },
+        "PublishedMetrics": {
+          "TreeLines": 1600,
+          "TreeChars": 62963,
+          "TreeTokens": 15741,
+          "ContentLines": 151982,
+          "ContentChars": 6110676,
+          "ContentTokens": 1527669
+        },
+        "PrewarmContent": {
+          "FullFileReads": 1143,
+          "FullFileReadBytes": 15072558,
+          "ContentFingerprintComputations": 897,
+          "PlanApplications": 0,
+          "PeakInFlightBytes": 905556
+        },
+        "MetricsContent": {
+          "FullFileReads": 1145,
+          "FullFileReadBytes": 13446049,
+          "ContentFingerprintComputations": 889,
+          "PlanApplications": 0,
+          "PeakInFlightBytes": 0
+        }
+      },
+      {
+        "Scenario": "gui-partial-selection-retained-vs-discarded-facts-control",
+        "Run": 3,
+        "Phase": "warm-compression-cache-fresh-metrics",
+        "DiscardReadFactsBeforeMetrics": false,
+        "Files": 2717,
+        "SelectedFiles": 1359,
+        "SupportedFiles": 1786,
+        "CachedFileCount": 2717,
+        "InventoryEntries": 3003,
+        "GitMode": "RespectGitIgnore",
+        "SelectionMilliseconds": 141.4,
+        "ProjectionMilliseconds": 92.9677,
+        "PrewarmMilliseconds": 53.5244,
+        "PrewarmAllocatedBytes": 57872984,
+        "MetricsScanMilliseconds": 37.0546,
+        "MetricsPublicationMilliseconds": 56.9065,
+        "MetricsAllocatedBytes": 54307808,
+        "TotalBackendMilliseconds": 354.2009,
+        "TotalBackendAllocatedBytes": 159868368,
+        "RetainedFactsBeforeMetrics": 1143,
+        "RetainedFactBytesBeforeMetrics": 292608,
+        "RetainedFactBytesAfterMetrics": 0,
+        "PrewarmContentOpens": {
+          "SelectedSupported": 897,
+          "SelectedUnsupported": 246,
+          "UnselectedSupported": 0,
+          "UnselectedUnsupported": 0
+        },
+        "MetricsContentOpens": {
+          "SelectedSupported": 0,
+          "SelectedUnsupported": 0,
+          "UnselectedSupported": 889,
+          "UnselectedUnsupported": 256
+        },
+        "PrewarmCompression": {
+          "HashComputations": 0,
+          "CacheHits": 0,
+          "CacheMisses": 0,
+          "AnalysisExecutions": 0,
+          "PrewarmRequests": 897,
+          "PrewarmCacheHits": 897,
+          "PrewarmAnalyses": 0,
+          "PrewarmReuses": 0,
+          "UnsupportedFastPaths": 246
+        },
+        "MetricsCompression": {
+          "HashComputations": 0,
+          "CacheHits": 889,
+          "CacheMisses": 0,
+          "AnalysisExecutions": 0,
+          "PrewarmRequests": 0,
+          "PrewarmCacheHits": 0,
+          "PrewarmAnalyses": 0,
+          "PrewarmReuses": 0,
+          "UnsupportedFastPaths": 0
+        },
+        "CompressionCache": {
+          "CacheEntries": 1786,
+          "RetainedCacheBytes": 4652672,
+          "MaximumCacheEntries": 16384,
+          "MaximumRetainedCacheBytes": 67108864,
+          "Runtime": {
+            "CompiledQuerySets": 4,
+            "MaterializedWorkers": 0,
+            "AvailableWorkers": 0,
+            "LeasedWorkers": 0,
+            "GlobalWorkerCapacity": 8,
+            "GlobalActiveWorkers": 0,
+            "GlobalPeakActiveWorkers": 8,
+            "GlobalRetainedWorkers": 0,
+            "GlobalRetainedWorkerCapacity": 20
+          }
+        },
+        "CompressionOutcome": {
+          "CompressedFiles": 786,
+          "UnchangedFiles": 357,
+          "SourceCharacters": 14693700,
+          "TransformedCharacters": 6169492,
+          "BodyTransformedFiles": 786
+        },
+        "MetricsIo": {
+          "FileVersionOpenCount": 7938,
+          "MetricsLockAttemptCount": 3,
+          "MetricsLockAcquisitionCount": 3,
+          "MetricsLockWait": "00:00:00.0000009"
+        },
+        "PublishedMetrics": {
+          "TreeLines": 1600,
+          "TreeChars": 62963,
+          "TreeTokens": 15741,
+          "ContentLines": 151982,
+          "ContentChars": 6110676,
+          "ContentTokens": 1527669
+        },
+        "PrewarmContent": {
+          "FullFileReads": 1143,
+          "FullFileReadBytes": 15072558,
+          "ContentFingerprintComputations": 897,
+          "PlanApplications": 0,
+          "PeakInFlightBytes": 905556
+        },
+        "MetricsContent": {
+          "FullFileReads": 1145,
+          "FullFileReadBytes": 13446049,
+          "ContentFingerprintComputations": 889,
+          "PlanApplications": 0,
+          "PeakInFlightBytes": 0
+        }
+      },
+      {
+        "Scenario": "gui-partial-selection-retained-vs-discarded-facts-control",
+        "Run": 4,
+        "Phase": "warm-compression-cache-fresh-metrics",
+        "DiscardReadFactsBeforeMetrics": true,
+        "Files": 2717,
+        "SelectedFiles": 1359,
+        "SupportedFiles": 1786,
+        "CachedFileCount": 2717,
+        "InventoryEntries": 3003,
+        "GitMode": "RespectGitIgnore",
+        "SelectionMilliseconds": 137.5086,
+        "ProjectionMilliseconds": 90.9947,
+        "PrewarmMilliseconds": 42.9641,
+        "PrewarmAllocatedBytes": 57850024,
+        "MetricsScanMilliseconds": 58.4651,
+        "MetricsPublicationMilliseconds": 85.5118,
+        "MetricsAllocatedBytes": 107737384,
+        "TotalBackendMilliseconds": 368.5396,
+        "TotalBackendAllocatedBytes": 214561808,
+        "RetainedFactsBeforeMetrics": 1143,
+        "RetainedFactBytesBeforeMetrics": 292608,
+        "RetainedFactBytesAfterMetrics": 0,
+        "PrewarmContentOpens": {
+          "SelectedSupported": 897,
+          "SelectedUnsupported": 246,
+          "UnselectedSupported": 0,
+          "UnselectedUnsupported": 0
+        },
+        "MetricsContentOpens": {
+          "SelectedSupported": 897,
+          "SelectedUnsupported": 246,
+          "UnselectedSupported": 889,
+          "UnselectedUnsupported": 256
+        },
+        "PrewarmCompression": {
+          "HashComputations": 0,
+          "CacheHits": 0,
+          "CacheMisses": 0,
+          "AnalysisExecutions": 0,
+          "PrewarmRequests": 897,
+          "PrewarmCacheHits": 897,
+          "PrewarmAnalyses": 0,
+          "PrewarmReuses": 0,
+          "UnsupportedFastPaths": 246
+        },
+        "MetricsCompression": {
+          "HashComputations": 0,
+          "CacheHits": 1786,
+          "CacheMisses": 0,
+          "AnalysisExecutions": 0,
+          "PrewarmRequests": 0,
+          "PrewarmCacheHits": 0,
+          "PrewarmAnalyses": 0,
+          "PrewarmReuses": 0,
+          "UnsupportedFastPaths": 0
+        },
+        "CompressionCache": {
+          "CacheEntries": 1786,
+          "RetainedCacheBytes": 4652672,
+          "MaximumCacheEntries": 16384,
+          "MaximumRetainedCacheBytes": 67108864,
+          "Runtime": {
+            "CompiledQuerySets": 4,
+            "MaterializedWorkers": 0,
+            "AvailableWorkers": 0,
+            "LeasedWorkers": 0,
+            "GlobalWorkerCapacity": 8,
+            "GlobalActiveWorkers": 0,
+            "GlobalPeakActiveWorkers": 8,
+            "GlobalRetainedWorkers": 0,
+            "GlobalRetainedWorkerCapacity": 20
+          }
+        },
+        "CompressionOutcome": {
+          "CompressedFiles": 786,
+          "UnchangedFiles": 357,
+          "SourceCharacters": 14693700,
+          "TransformedCharacters": 6169492,
+          "BodyTransformedFiles": 786
+        },
+        "MetricsIo": {
+          "FileVersionOpenCount": 9081,
+          "MetricsLockAttemptCount": 3,
+          "MetricsLockAcquisitionCount": 3,
+          "MetricsLockWait": "00:00:00.0000013"
+        },
+        "PublishedMetrics": {
+          "TreeLines": 1600,
+          "TreeChars": 62963,
+          "TreeTokens": 15741,
+          "ContentLines": 151982,
+          "ContentChars": 6110676,
+          "ContentTokens": 1527669
+        },
+        "PrewarmContent": {
+          "FullFileReads": 1143,
+          "FullFileReadBytes": 15072558,
+          "ContentFingerprintComputations": 897,
+          "PlanApplications": 0,
+          "PeakInFlightBytes": 905556
+        },
+        "MetricsContent": {
+          "FullFileReads": 2288,
+          "FullFileReadBytes": 28518607,
+          "ContentFingerprintComputations": 1786,
+          "PlanApplications": 0,
+          "PeakInFlightBytes": 0
+        }
+      },
+      {
+        "Scenario": "gui-partial-selection-retained-vs-discarded-facts-control",
+        "Run": 5,
+        "Phase": "warm-compression-cache-fresh-metrics",
+        "DiscardReadFactsBeforeMetrics": true,
+        "Files": 2717,
+        "SelectedFiles": 1359,
+        "SupportedFiles": 1786,
+        "CachedFileCount": 2717,
+        "InventoryEntries": 3003,
+        "GitMode": "RespectGitIgnore",
+        "SelectionMilliseconds": 143.0051,
+        "ProjectionMilliseconds": 84.3389,
+        "PrewarmMilliseconds": 44.5296,
+        "PrewarmAllocatedBytes": 58373792,
+        "MetricsScanMilliseconds": 56.2037,
+        "MetricsPublicationMilliseconds": 74.9709,
+        "MetricsAllocatedBytes": 108635864,
+        "TotalBackendMilliseconds": 356.4536,
+        "TotalBackendAllocatedBytes": 213956656,
+        "RetainedFactsBeforeMetrics": 1143,
+        "RetainedFactBytesBeforeMetrics": 292608,
+        "RetainedFactBytesAfterMetrics": 0,
+        "PrewarmContentOpens": {
+          "SelectedSupported": 897,
+          "SelectedUnsupported": 246,
+          "UnselectedSupported": 0,
+          "UnselectedUnsupported": 0
+        },
+        "MetricsContentOpens": {
+          "SelectedSupported": 897,
+          "SelectedUnsupported": 246,
+          "UnselectedSupported": 889,
+          "UnselectedUnsupported": 256
+        },
+        "PrewarmCompression": {
+          "HashComputations": 0,
+          "CacheHits": 0,
+          "CacheMisses": 0,
+          "AnalysisExecutions": 0,
+          "PrewarmRequests": 897,
+          "PrewarmCacheHits": 897,
+          "PrewarmAnalyses": 0,
+          "PrewarmReuses": 0,
+          "UnsupportedFastPaths": 246
+        },
+        "MetricsCompression": {
+          "HashComputations": 0,
+          "CacheHits": 1786,
+          "CacheMisses": 0,
+          "AnalysisExecutions": 0,
+          "PrewarmRequests": 0,
+          "PrewarmCacheHits": 0,
+          "PrewarmAnalyses": 0,
+          "PrewarmReuses": 0,
+          "UnsupportedFastPaths": 0
+        },
+        "CompressionCache": {
+          "CacheEntries": 1786,
+          "RetainedCacheBytes": 4652672,
+          "MaximumCacheEntries": 16384,
+          "MaximumRetainedCacheBytes": 67108864,
+          "Runtime": {
+            "CompiledQuerySets": 4,
+            "MaterializedWorkers": 0,
+            "AvailableWorkers": 0,
+            "LeasedWorkers": 0,
+            "GlobalWorkerCapacity": 8,
+            "GlobalActiveWorkers": 0,
+            "GlobalPeakActiveWorkers": 8,
+            "GlobalRetainedWorkers": 0,
+            "GlobalRetainedWorkerCapacity": 20
+          }
+        },
+        "CompressionOutcome": {
+          "CompressedFiles": 786,
+          "UnchangedFiles": 357,
+          "SourceCharacters": 14693700,
+          "TransformedCharacters": 6169492,
+          "BodyTransformedFiles": 786
+        },
+        "MetricsIo": {
+          "FileVersionOpenCount": 9081,
+          "MetricsLockAttemptCount": 3,
+          "MetricsLockAcquisitionCount": 3,
+          "MetricsLockWait": "00:00:00.0000027"
+        },
+        "PublishedMetrics": {
+          "TreeLines": 1600,
+          "TreeChars": 62963,
+          "TreeTokens": 15741,
+          "ContentLines": 151982,
+          "ContentChars": 6110676,
+          "ContentTokens": 1527669
+        },
+        "PrewarmContent": {
+          "FullFileReads": 1143,
+          "FullFileReadBytes": 15072558,
+          "ContentFingerprintComputations": 897,
+          "PlanApplications": 0,
+          "PeakInFlightBytes": 905556
+        },
+        "MetricsContent": {
+          "FullFileReads": 2288,
+          "FullFileReadBytes": 28518607,
+          "ContentFingerprintComputations": 1786,
+          "PlanApplications": 0,
+          "PeakInFlightBytes": 0
+        }
+      },
+      {
+        "Scenario": "gui-partial-selection-retained-vs-discarded-facts-control",
+        "Run": 6,
+        "Phase": "warm-compression-cache-fresh-metrics",
+        "DiscardReadFactsBeforeMetrics": false,
+        "Files": 2717,
+        "SelectedFiles": 1359,
+        "SupportedFiles": 1786,
+        "CachedFileCount": 2717,
+        "InventoryEntries": 3003,
+        "GitMode": "RespectGitIgnore",
+        "SelectionMilliseconds": 214.8446,
+        "ProjectionMilliseconds": 124.9575,
+        "PrewarmMilliseconds": 39.4891,
+        "PrewarmAllocatedBytes": 58374416,
+        "MetricsScanMilliseconds": 37.3397,
+        "MetricsPublicationMilliseconds": 51.7696,
+        "MetricsAllocatedBytes": 53432880,
+        "TotalBackendMilliseconds": 440.5405,
+        "TotalBackendAllocatedBytes": 159647904,
+        "RetainedFactsBeforeMetrics": 1143,
+        "RetainedFactBytesBeforeMetrics": 292608,
+        "RetainedFactBytesAfterMetrics": 0,
+        "PrewarmContentOpens": {
+          "SelectedSupported": 897,
+          "SelectedUnsupported": 246,
+          "UnselectedSupported": 0,
+          "UnselectedUnsupported": 0
+        },
+        "MetricsContentOpens": {
+          "SelectedSupported": 0,
+          "SelectedUnsupported": 0,
+          "UnselectedSupported": 889,
+          "UnselectedUnsupported": 256
+        },
+        "PrewarmCompression": {
+          "HashComputations": 0,
+          "CacheHits": 0,
+          "CacheMisses": 0,
+          "AnalysisExecutions": 0,
+          "PrewarmRequests": 897,
+          "PrewarmCacheHits": 897,
+          "PrewarmAnalyses": 0,
+          "PrewarmReuses": 0,
+          "UnsupportedFastPaths": 246
+        },
+        "MetricsCompression": {
+          "HashComputations": 0,
+          "CacheHits": 889,
+          "CacheMisses": 0,
+          "AnalysisExecutions": 0,
+          "PrewarmRequests": 0,
+          "PrewarmCacheHits": 0,
+          "PrewarmAnalyses": 0,
+          "PrewarmReuses": 0,
+          "UnsupportedFastPaths": 0
+        },
+        "CompressionCache": {
+          "CacheEntries": 1786,
+          "RetainedCacheBytes": 4652672,
+          "MaximumCacheEntries": 16384,
+          "MaximumRetainedCacheBytes": 67108864,
+          "Runtime": {
+            "CompiledQuerySets": 4,
+            "MaterializedWorkers": 0,
+            "AvailableWorkers": 0,
+            "LeasedWorkers": 0,
+            "GlobalWorkerCapacity": 8,
+            "GlobalActiveWorkers": 0,
+            "GlobalPeakActiveWorkers": 8,
+            "GlobalRetainedWorkers": 0,
+            "GlobalRetainedWorkerCapacity": 20
+          }
+        },
+        "CompressionOutcome": {
+          "CompressedFiles": 786,
+          "UnchangedFiles": 357,
+          "SourceCharacters": 14693700,
+          "TransformedCharacters": 6169492,
+          "BodyTransformedFiles": 786
+        },
+        "MetricsIo": {
+          "FileVersionOpenCount": 7938,
+          "MetricsLockAttemptCount": 3,
+          "MetricsLockAcquisitionCount": 3,
+          "MetricsLockWait": "00:00:00.0000013"
+        },
+        "PublishedMetrics": {
+          "TreeLines": 1600,
+          "TreeChars": 62963,
+          "TreeTokens": 15741,
+          "ContentLines": 151982,
+          "ContentChars": 6110676,
+          "ContentTokens": 1527669
+        },
+        "PrewarmContent": {
+          "FullFileReads": 1143,
+          "FullFileReadBytes": 15072558,
+          "ContentFingerprintComputations": 897,
+          "PlanApplications": 0,
+          "PeakInFlightBytes": 905556
+        },
+        "MetricsContent": {
+          "FullFileReads": 1145,
+          "FullFileReadBytes": 13446049,
+          "ContentFingerprintComputations": 889,
+          "PlanApplications": 0,
+          "PeakInFlightBytes": 0
+        }
+      }
+    ]
+  }
+}
