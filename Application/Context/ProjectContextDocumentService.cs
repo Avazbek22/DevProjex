@@ -429,19 +429,32 @@ public sealed class ProjectContextDocumentService(
 		var metricsByPath = measured.TransformedFileMetrics.ToDictionary(
 			static metrics => Path.GetFullPath(metrics.Path),
 			PathComparer.Default);
+		var unscannableByPath = measured.UnscannableFiles.ToDictionary(
+			static file => Path.GetFullPath(file.Path),
+			PathComparer.Default);
 		var measuredAnalyzer = CreatePreparedAnalyzer(measured);
 		var orderedPaths = ResolveOrderedPaths(plan.IncludedFiles, ranking);
 		for (var index = 0; index < orderedPaths.Count; index++)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			var path = orderedPaths[index];
 			metricsByPath.TryGetValue(Path.GetFullPath(path), out var metrics);
-			var preparedFile = measured.GetFile(path);
-			var result = metrics.Path is not null && !metrics.IsEstimated
-				? new FileContentMetricsResult(
-					preparedFile.Classification,
-					ToTextFileMetrics(metrics))
-				: await ReadExactMetricsAsync(plan.SourceRoot, path, measuredAnalyzer, cancellationToken)
+			FileContentMetricsResult result;
+			if (unscannableByPath.TryGetValue(Path.GetFullPath(path), out var unscannable))
+			{
+				result = new FileContentMetricsResult(unscannable.Classification);
+			}
+			else if (metrics.Path is not null && !metrics.IsEstimated)
+			{
+				result = new FileContentMetricsResult(
+					measured.GetFile(path).Classification,
+					ToTextFileMetrics(metrics));
+			}
+			else
+			{
+				result = await ReadExactMetricsAsync(plan.SourceRoot, path, measuredAnalyzer, cancellationToken)
 					.ConfigureAwait(false);
+			}
 			var file = CreateCompleteFileDocument(
 				path,
 				result,

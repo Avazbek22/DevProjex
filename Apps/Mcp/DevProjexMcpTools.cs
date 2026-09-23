@@ -815,17 +815,23 @@ internal sealed class DevProjexMcpTools(
 							captureFileLineRanges: true)
 						.ConfigureAwait(false);
 					if (admissionResult is not null)
-						writeResult = writeResult with { UnscannableFiles = admissionResult.UnscannableFiles };
+						writeResult = writeResult with
+						{
+							UnscannableFiles = McpPackDelivery.MergeUnscannableFiles(
+								admissionResult.UnscannableFiles,
+								writeResult.UnscannableFiles)
+						};
 				},
 				cancellationToken).ConfigureAwait(false);
 			var retainPack = false;
 			try
 			{
-				var deliveredPackFiles = writeResult?.TokenBudget is { } tokenBudget
+				var admittedPackFiles = writeResult?.TokenBudget is { } tokenBudget
 					? tokenBudget.AdmittedSourceFiles.ToArray()
-					: plan.IncludedFiles.Except(
-						writeResult?.UnscannableFiles.Select(static file => file.Path) ?? [],
-						PathComparer.Default).ToArray();
+					: plan.IncludedFiles;
+				var deliveredPackFiles = McpPackDelivery.DeliveredPaths(
+					admittedPackFiles,
+					writeResult?.UnscannableFiles ?? []);
 				packs.RecordJournalContext(
 					pack.Id,
 					CreateStoredJournalContext(
