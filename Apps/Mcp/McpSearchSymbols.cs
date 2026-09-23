@@ -13,8 +13,8 @@ namespace DevProjex.Mcp;
 internal static class McpSearchSymbols
 {
 	/// <summary>
-	/// A search can touch many files, and every one of them would be a parse. Hits beyond this many
-	/// distinct files are left unannotated and counted, rather than turning a search into an index.
+	/// Limits final declaration annotations, not the navigation parses used to score search candidates.
+	/// Additional matching files are counted as unannotated.
 	/// </summary>
 	public const int MaximumAnnotatedFiles = 64;
 
@@ -220,7 +220,7 @@ internal static class McpSearchSymbols
 		ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
 		ArgumentNullException.ThrowIfNull(transformedText);
 		var fingerprint = ContentFingerprint.Compute(transformedText.AsSpan()).ToHexString().ToLowerInvariant();
-		return engine.ExtractNavigation(relativePath, transformedText, fingerprint, cancellationToken);
+		return engine.ExtractNavigationFromProtectedText(relativePath, transformedText, fingerprint, cancellationToken);
 	}
 
 	public static McpSearchDeclarationPreview? SelectDeclarationBodyPreview(

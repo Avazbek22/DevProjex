@@ -13,6 +13,8 @@ public sealed partial class DependencyFactsEngine : IDisposable
 {
 	public const int MaximumRelatedTraversalSeeds = 256;
 	internal const string AccumulatedFactBudgetReason = "index fact memory limit exceeded";
+	private const int MaximumCachedNavigationFiles = 2_048;
+	private const long MaximumNavigationCacheBytes = 8L * 1024 * 1024;
 
 	private readonly IDependencyFactExtractor _extractor;
 	private readonly IDependencyConfigurationProvider _configurationProvider;
@@ -23,9 +25,13 @@ public sealed partial class DependencyFactsEngine : IDisposable
 	private readonly LinkedList<IndexCacheEntry> _indexCacheOrder = [];
 	private readonly ConcurrentDictionary<ManifestRequestKey, ManifestSnapshotCacheEntry> _manifestSnapshots = [];
 	private readonly LinkedList<ManifestSnapshotCacheEntry> _manifestSnapshotOrder = [];
+	private readonly Dictionary<NavigationCacheKey, LinkedListNode<NavigationCacheEntry>> _navigationCache = [];
+	private readonly LinkedList<NavigationCacheEntry> _navigationCacheOrder = [];
+	private readonly object _navigationCacheSync = new();
 	private readonly object _cacheTrimSync = new();
 	private long _fileCacheBytes;
 	private long _indexCacheBytes;
+	private long _navigationCacheBytes;
 	private int _disposed;
 
 	public DependencyFactsEngine(
@@ -62,6 +68,79 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			source,
 			contentFingerprint,
 			cancellationToken);
+	}
+
+	/// <summary>Caches navigation extracted from a caller-provided immutable text snapshot.</summary>
+	internal IReadOnlyList<NavigationDeclaration> ExtractNavigationFromProtectedText(
+		string relativePath,
+		string source,
+		string contentFingerprint,
+		CancellationToken cancellationToken)
+	{
+		ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+		ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
+		ArgumentNullException.ThrowIfNull(source);
+		ArgumentException.ThrowIfNullOrWhiteSpace(contentFingerprint);
+		cancellationToken.ThrowIfCancellationRequested();
+		if (source.Length > _limits.MaximumCharactersPerFile ||
+			_extractor is not IDependencyNavigationExtractor)
+			return [];
+		var key = new NavigationCacheKey(relativePath, contentFingerprint);
+		lock (_navigationCacheSync)
+		{
+			if (_navigationCache.TryGetValue(key, out var cached))
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				_navigationCacheOrder.Remove(cached);
+				_navigationCacheOrder.AddLast(cached);
+				return cached.Value.Declarations;
+			}
+		}
+		var declarations = ExtractNavigation(
+			relativePath,
+			source,
+			contentFingerprint,
+			cancellationToken);
+		cancellationToken.ThrowIfCancellationRequested();
+		var retained = Array.AsReadOnly(declarations.ToArray());
+		var weight = EstimateNavigationCacheBytes(key, retained);
+		if (weight > MaximumNavigationCacheBytes)
+			return retained;
+		lock (_navigationCacheSync)
+		{
+			if (_navigationCache.TryGetValue(key, out var cached))
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				_navigationCacheOrder.Remove(cached);
+				_navigationCacheOrder.AddLast(cached);
+				return cached.Value.Declarations;
+			}
+			if (Volatile.Read(ref _disposed) != 0)
+				return retained;
+			var entry = new NavigationCacheEntry(key, retained, weight);
+			_navigationCache[key] = _navigationCacheOrder.AddLast(entry);
+			_navigationCacheBytes += weight;
+			while ((_navigationCache.Count > MaximumCachedNavigationFiles ||
+			        _navigationCacheBytes > MaximumNavigationCacheBytes) &&
+			       _navigationCacheOrder.First is { Value: var oldest })
+			{
+				_navigationCache.Remove(oldest.Key);
+				_navigationCacheOrder.RemoveFirst();
+				_navigationCacheBytes -= oldest.Weight;
+			}
+		}
+		return retained;
+	}
+
+	private static long EstimateNavigationCacheBytes(
+		NavigationCacheKey key,
+		IReadOnlyList<NavigationDeclaration> declarations)
+	{
+		var strings = new RetainedStringEstimator();
+		return 160 + strings.Add(key.RelativePath) + strings.Add(key.ContentFingerprint) +
+		       declarations.Count * 8L + declarations.Sum(declaration =>
+			       96 + strings.Add(declaration.Name) + strings.Add(declaration.Owner) +
+			       strings.Add(declaration.ContentFingerprint));
 	}
 	internal DependencyFactsCacheState CacheState
 	{
@@ -1121,6 +1200,12 @@ public sealed partial class DependencyFactsEngine : IDisposable
 	{
 		if (Interlocked.Exchange(ref _disposed, 1) == 0)
 		{
+			lock (_navigationCacheSync)
+			{
+				_navigationCache.Clear();
+				_navigationCacheOrder.Clear();
+				_navigationCacheBytes = 0;
+			}
 			lock (_cacheTrimSync)
 			{
 				_manifestSnapshots.Clear();
@@ -1136,6 +1221,13 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		string Fingerprint,
 		LanguageId LanguageId,
 		string ExtractorIdentity);
+
+	private readonly record struct NavigationCacheKey(string RelativePath, string ContentFingerprint);
+
+	private sealed record NavigationCacheEntry(
+		NavigationCacheKey Key,
+		IReadOnlyList<NavigationDeclaration> Declarations,
+		long Weight);
 
 	private readonly record struct PreparedDependencyIdentity(
 		string RelativePath,

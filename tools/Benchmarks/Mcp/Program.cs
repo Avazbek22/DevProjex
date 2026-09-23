@@ -49,6 +49,12 @@ var temporaryCorpus = options.SyntheticFileCount is null ? null : SyntheticCorpu
 var root = temporaryCorpus?.Path ?? options.Root ?? throw new ArgumentException("Specify --root or --synthetic-files.");
 try
 {
+	if (options.ColdFirstSearch)
+	{
+		await RunColdFirstSearchAsync(root, options);
+		return;
+	}
+
 	await using var session = await McpProcessSession.StartAsync(options.Host, root, options.Timeout);
 	var operations = CreateOperations(root, options)
 		.Where(operation => options.Only is null || options.Only.Contains(operation.Name))
@@ -147,6 +153,74 @@ static async Task<CallToolResult> Call(
 
 static string ResponseText(CallToolResult response) =>
 	string.Join('\n', response.Content.OfType<TextContentBlock>().Select(static block => block.Text));
+
+static async Task RunColdFirstSearchAsync(string root, BenchmarkOptions options)
+{
+	var operations = CreateOperations(root, options).ToDictionary(static operation => operation.Name);
+	var search = options.ColdSearchPattern is null
+		? operations["search_project"]
+		: new BenchmarkOperation("search_project", (client, token) => Call(client, "search_project",
+			new Dictionary<string, object?>
+			{
+				["pattern"] = options.ColdSearchPattern,
+				["max_results"] = 50
+			}, token));
+	Console.WriteLine("run,operation,elapsed_ms,server_cpu_ms,client_alloc_bytes,response_chars,inspected_sources,eligible_sources,server_peak_rss_bytes");
+	for (var run = 1; run <= options.Repetitions; run++)
+	{
+		GC.Collect();
+		GC.WaitForPendingFinalizers();
+		var allocatedBeforeStartup = GC.GetTotalAllocatedBytes(precise: true);
+		var startupTimer = Stopwatch.StartNew();
+		await using var session = await McpProcessSession.StartAsync(options.Host, root, options.Timeout);
+		startupTimer.Stop();
+		Console.WriteLine(string.Join(',',
+			run,
+			"mcp_initialize",
+			Format(startupTimer.Elapsed.TotalMilliseconds),
+			Format(session.ServerCpuTime.TotalMilliseconds),
+			(GC.GetTotalAllocatedBytes(precise: true) - allocatedBeforeStartup).ToString(CultureInfo.InvariantCulture),
+			0,
+			string.Empty,
+			string.Empty,
+			session.ServerPeakWorkingSetBytes.ToString(CultureInfo.InvariantCulture)));
+
+		await MeasureColdStepAsync(run, "list_projects", operations["list_projects"], session);
+		await MeasureColdStepAsync(run, "get_tree", operations["get_tree"], session);
+		await MeasureColdStepAsync(run, "search_project_first", search, session);
+		await MeasureColdStepAsync(run, "search_project_repeat", search, session);
+	}
+}
+
+static async Task MeasureColdStepAsync(
+	int run,
+	string label,
+	BenchmarkOperation operation,
+	McpProcessSession session)
+{
+	GC.Collect();
+	GC.WaitForPendingFinalizers();
+	var allocatedBefore = GC.GetTotalAllocatedBytes(precise: true);
+	var cpuBefore = session.ServerCpuTime;
+	var timer = Stopwatch.StartNew();
+	var response = await operation.Invoke(session.Client, session.Token);
+	timer.Stop();
+	var serverCpu = session.ServerCpuTime - cpuBefore;
+	var responseText = ResponseText(response);
+	if (response.IsError == true)
+		throw new InvalidOperationException($"{operation.Name} failed: {responseText}");
+	var boundary = Regex.Match(responseText, @"sources inspected=(\d+)/(\d+)");
+	Console.WriteLine(string.Join(',',
+		run,
+		label,
+		Format(timer.Elapsed.TotalMilliseconds),
+		Format(serverCpu.TotalMilliseconds),
+		(GC.GetTotalAllocatedBytes(precise: true) - allocatedBefore).ToString(CultureInfo.InvariantCulture),
+		responseText.Length.ToString(CultureInfo.InvariantCulture),
+		boundary.Success ? boundary.Groups[1].Value : string.Empty,
+		boundary.Success ? boundary.Groups[2].Value : string.Empty,
+		session.ServerPeakWorkingSetBytes.ToString(CultureInfo.InvariantCulture)));
+}
 
 static string FindRepresentativeFile(string root)
 {
@@ -618,7 +692,9 @@ internal sealed record BenchmarkOptions(
 	string? Seed,
 	IReadOnlySet<string>? Only,
 	int Repetitions,
-	TimeSpan Timeout)
+	TimeSpan Timeout,
+	bool ColdFirstSearch,
+	string? ColdSearchPattern)
 {
 	public static BenchmarkOptions Parse(string[] arguments)
 	{
@@ -630,6 +706,8 @@ internal sealed record BenchmarkOptions(
 		int? synthetic = null;
 		var repetitions = 5;
 		var timeout = TimeSpan.FromMinutes(15);
+		var coldFirstSearch = false;
+		string? coldSearchPattern = null;
 		for (var index = 0; index < arguments.Length; index++)
 		{
 			var value = index + 1 < arguments.Length ? arguments[index + 1] : null;
@@ -643,6 +721,8 @@ internal sealed record BenchmarkOptions(
 				case "--synthetic-files": synthetic = int.Parse(RequireValue(value, arguments[index]), CultureInfo.InvariantCulture); index++; break;
 				case "--repetitions": repetitions = int.Parse(RequireValue(value, arguments[index]), CultureInfo.InvariantCulture); index++; break;
 				case "--timeout-seconds": timeout = TimeSpan.FromSeconds(int.Parse(RequireValue(value, arguments[index]), CultureInfo.InvariantCulture)); index++; break;
+				case "--cold-first-search": coldFirstSearch = true; break;
+				case "--cold-search-pattern": coldSearchPattern = RequireValue(value, arguments[index]); index++; break;
 				default: throw new ArgumentException($"Unknown argument: {arguments[index]}");
 			}
 		}
@@ -654,7 +734,12 @@ internal sealed record BenchmarkOptions(
 			throw new ArgumentOutOfRangeException(nameof(repetitions), "At least five repetitions are required.");
 		if (synthetic is <= 0)
 			throw new ArgumentOutOfRangeException(nameof(synthetic));
-		return new BenchmarkOptions(Path.GetFullPath(host!), root, synthetic, file, seed, only, repetitions, timeout);
+		if (coldFirstSearch && only is not null)
+			throw new ArgumentException("--cold-first-search cannot be combined with --only.");
+		if (coldSearchPattern is not null && !coldFirstSearch)
+			throw new ArgumentException("--cold-search-pattern requires --cold-first-search.");
+		return new BenchmarkOptions(Path.GetFullPath(host!), root, synthetic, file, seed, only, repetitions, timeout,
+			coldFirstSearch, coldSearchPattern);
 	}
 
 	private static string RequireValue(string? value, string option) =>
@@ -677,6 +762,22 @@ internal sealed class McpProcessSession : IAsyncDisposable
 
 	public McpClient Client { get; }
 	public CancellationToken Token => _timeout.Token;
+	public TimeSpan ServerCpuTime
+	{
+		get
+		{
+			_process.Refresh();
+			return _process.TotalProcessorTime;
+		}
+	}
+	public long ServerPeakWorkingSetBytes
+	{
+		get
+		{
+			_process.Refresh();
+			return _process.PeakWorkingSet64;
+		}
+	}
 
 	public static async Task<McpProcessSession> StartAsync(string host, string root, TimeSpan timeout)
 	{
