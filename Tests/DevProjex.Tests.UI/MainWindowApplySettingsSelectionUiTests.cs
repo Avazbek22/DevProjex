@@ -7,12 +7,80 @@ using DevProjex.Infrastructure.FileSystem;
 using DevProjex.Infrastructure.LiveContext;
 using DevProjex.Infrastructure.ResourceStore;
 using DevProjex.Kernel.Abstractions;
+using DevProjex.Terminal.DesktopControl;
 
 namespace DevProjex.Tests.UI;
 
 [Collection("AvaloniaUI")]
 public sealed class MainWindowApplySettingsSelectionUiTests
 {
+	[AvaloniaFact]
+	public async Task ClosingWindow_CancelsInFlightDesktopFilterTreeBuild()
+	{
+		using var project = UiTestProject.CreateWithDynamicIgnoreEntries();
+		var blockingTreeBuilder = new BlockingTreeBuilder();
+		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var paths = new DesktopControlPaths(() => appDataPath);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			appDataPathOverride: appDataPath,
+			configureServices: services => services with
+			{
+				BuildTreeUseCase = new BuildTreeUseCase(
+					blockingTreeBuilder,
+					new TreeNodePresentationService(
+						services.Localization,
+						new IconMapper())),
+				DesktopControlServerFactory = (handler, projectPath, cancellationToken) =>
+					DesktopControlServer.StartAsync(handler, projectPath, paths, cancellationToken)
+			});
+		Task<DesktopProtocolResponse>? pendingFilter = null;
+		var cancellationToken = TestContext.Current.CancellationToken;
+
+		try
+		{
+			var client = new DesktopControlClient(new DesktopInstanceRegistry(paths));
+			var registration = Assert.Single(await client.ListAsync(cancellationToken));
+			var initialFilter = await client.SendAsync(
+				registration,
+				"filter.set",
+				new { query = "src" },
+				TimeSpan.FromSeconds(10),
+				cancellationToken);
+			Assert.True(initialFilter.Ok);
+			await UiTestDriver.WaitForFilterAppliedAsync(window, "src");
+			await InvokePrivateTaskAsync(window, "ReloadCurrentProjectAsync");
+			var baseline = typeof(MainWindow).GetField(
+				"_filterBaseTree",
+				System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+			Assert.NotNull(baseline);
+			Assert.Null(baseline.GetValue(window));
+
+			blockingTreeBuilder.Arm();
+			pendingFilter = client.SendAsync(
+				registration,
+				"filter.set",
+				new { query = "project" },
+				TimeSpan.FromSeconds(15),
+				cancellationToken);
+			await blockingTreeBuilder.BuildStarted.Task.WaitAsync(
+				TimeSpan.FromSeconds(5),
+				cancellationToken);
+
+			window.Close();
+			await window.ShutdownCompletion.WaitAsync(TimeSpan.FromSeconds(2), cancellationToken);
+			Assert.False(window.IsVisible);
+		}
+		finally
+		{
+			blockingTreeBuilder.Release();
+			if (pendingFilter is not null)
+				_ = await Record.ExceptionAsync(() => pendingFilter.WaitAsync(TimeSpan.FromSeconds(5)));
+			if (window.IsVisible)
+				await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
 	[AvaloniaFact]
 	public async Task CancelledReopenOfSameProjectDoesNotReportSuccess()
 	{
