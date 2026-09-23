@@ -987,6 +987,86 @@ public class RepoCacheServiceTests : IDisposable
         Assert.Equal("main", indexed.Branch);
     }
 
+	[Theory]
+	[InlineData("current", "missing")]
+	[InlineData("current", "null")]
+	[InlineData("legacy", "missing")]
+	[InlineData("legacy", "null")]
+	[InlineData(null, "missing")]
+	[InlineData(null, "null")]
+	[InlineData(null, "empty")]
+	public void StartupCleanup_RecoversFromIncompleteIndex(
+		string? schemaKind,
+		string entriesKind)
+	{
+		const string retainedUrl = "https://github.com/example/retained-index.git";
+		const string addedUrl = "https://github.com/example/added-index.git";
+		var retainedPath = PublishZip(_service, retainedUrl);
+		var sentinelPath = Path.Combine(retainedPath, "payload.txt");
+		var indexPath = Path.Combine(_testCacheRoot, "cache-index.json");
+		var backupPath = indexPath + ".bak";
+		using (var backup = JsonDocument.Parse(File.ReadAllText(backupPath)))
+		{
+			var schemaVersion = backup.RootElement.GetProperty("schemaVersion").GetInt32();
+			var incompleteIndex = new Dictionary<string, object?>();
+			if (schemaKind is not null)
+				incompleteIndex["schemaVersion"] = schemaKind == "current" ? schemaVersion : 1;
+			if (entriesKind == "null")
+				incompleteIndex["entries"] = null;
+			else if (entriesKind == "empty")
+				incompleteIndex["entries"] = Array.Empty<object>();
+			File.WriteAllText(indexPath, JsonSerializer.Serialize(incompleteIndex));
+		}
+
+		_service.CleanupStaleCacheOnStartup();
+
+		Assert.Equal(retainedUrl, File.ReadAllText(sentinelPath));
+		Assert.Equal(retainedPath, _service.FindIndexedRepository(retainedUrl)?.LocalPath, PathComparer.Default);
+
+		var addedPath = _service.CreateRepositoryDirectory(addedUrl);
+		_service.RecordIndexedRepository(addedUrl, addedPath);
+		foreach (var path in new[] { indexPath, backupPath })
+		{
+			using var document = JsonDocument.Parse(File.ReadAllText(path));
+			var entries = document.RootElement.GetProperty("entries").EnumerateArray().ToArray();
+			Assert.Equal(2, entries.Length);
+			Assert.Contains(entries, entry =>
+				string.Equals(entry.GetProperty("repositoryUrl").GetString(), retainedUrl, StringComparison.Ordinal));
+			Assert.Contains(entries, entry =>
+				string.Equals(entry.GetProperty("repositoryUrl").GetString(), addedUrl, StringComparison.Ordinal));
+		}
+	}
+
+	[Fact]
+	public void StartupCleanup_LeavesFutureIndexAndCachedRepositoryUntouched()
+	{
+		const string retainedUrl = "https://github.com/example/future-retained-index.git";
+		const string addedUrl = "https://github.com/example/future-added-index.git";
+		var retainedPath = PublishZip(_service, retainedUrl);
+		var sentinelPath = Path.Combine(retainedPath, "payload.txt");
+		var indexPath = Path.Combine(_testCacheRoot, "cache-index.json");
+		var backupPath = indexPath + ".bak";
+		var originalBackup = File.ReadAllBytes(backupPath);
+		using (var backup = JsonDocument.Parse(originalBackup))
+		{
+			var futureVersion = backup.RootElement.GetProperty("schemaVersion").GetInt32() + 1;
+			File.WriteAllText(indexPath, JsonSerializer.Serialize(new
+			{
+				SchemaVersion = futureVersion,
+				Entries = Array.Empty<object>()
+			}, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+		}
+		var futureIndex = File.ReadAllBytes(indexPath);
+
+		_service.CleanupStaleCacheOnStartup();
+		var addedPath = _service.CreateRepositoryDirectory(addedUrl);
+		_service.RecordIndexedRepository(addedUrl, addedPath);
+
+		Assert.Equal(retainedUrl, File.ReadAllText(sentinelPath));
+		Assert.Equal(futureIndex, File.ReadAllBytes(indexPath));
+		Assert.Equal(originalBackup, File.ReadAllBytes(backupPath));
+	}
+
     [Fact]
     public void RecordIndexedRepository_DoesNotReplaceTemporarilyUnreadableIndex()
     {

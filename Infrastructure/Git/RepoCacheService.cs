@@ -2799,11 +2799,14 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 
 	private RepositoryCacheIndexDocument NormalizeIndex(RepositoryCacheIndexDocument document)
 	{
+		if (document.SchemaVersion is not (1 or CacheIndexSchemaVersion) || document.Entries is null)
+			throw new JsonException("The repository cache index is incomplete or has an unsupported schema.");
+
 		var utcNow = _timeProvider.GetUtcNow();
 		var maximumAcceptedTimestamp = utcNow <= DateTimeOffset.MaxValue - MaximumPersistedClockSkew
 			? utcNow + MaximumPersistedClockSkew
 			: DateTimeOffset.MaxValue;
-		var entries = (document.Entries ?? [])
+		var entries = document.Entries
 			.Where(entry => entry is not null &&
 			                !string.IsNullOrWhiteSpace(entry.Identity) &&
 			                !string.IsNullOrWhiteSpace(entry.RepositoryUrl) &&
