@@ -241,7 +241,9 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			// The caller-provided timestamp reflects when the profile became user-approved.
 			if (hasExisting && existing!.UpdatedUtc > normalizedUpdatedUtc)
 			{
-				return new ProjectProfileSaveResult(Succeeded: true, WasTruncated: false);
+				return enforceExpectedVersion
+					? new ProjectProfileSaveResult(ProjectProfileSaveStatus.Conflict)
+					: new ProjectProfileSaveResult(Succeeded: true, WasTruncated: false);
 			}
 
 			db.Profiles[normalizedPath] = persistedProfile;
