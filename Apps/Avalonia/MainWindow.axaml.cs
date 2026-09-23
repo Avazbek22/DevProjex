@@ -1114,7 +1114,8 @@ public partial class MainWindow : Window
                 CanRead: exists && _scanOptions.CanReadRoot(normalizedPath));
         });
 
-        if (requestId < Volatile.Read(ref _latestEligibleFolderOpenRequestId))
+        if (_windowLifetimeCts is not { IsCancellationRequested: false } ||
+            requestId < Volatile.Read(ref _latestEligibleFolderOpenRequestId))
         {
             if (ownsCandidateSession)
                 candidateSession?.Dispose();

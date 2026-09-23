@@ -143,6 +143,50 @@ public sealed class MainWindowStartupAutomationUiTests
 	}
 
 	[AvaloniaFact]
+	public async Task OpenFolder_ClosedWindowRejectsLateRootAccessFailureWithoutElevation()
+	{
+		using var project = UiTestProject.CreateDefault();
+		using var scanner = new BlockingRootProbeScanner(project.RootPath, canReadBlockedRoot: false);
+		var elevation = new RecordingElevationService();
+		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var options = DesktopStartupOptions.Default;
+		var services = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath) with
+		{
+			ScanOptionsUseCase = new ScanOptionsUseCase(scanner),
+			Elevation = elevation
+		};
+		var window = new MainWindow(options, services);
+		UiTestDriver.TrackTopLevelWindow(window);
+
+		try
+		{
+			window.Show();
+			var openTask = Assert.IsAssignableFrom<Task<bool>>(
+				await UiTestDriver.BeginOpenFolderAsync(window, project.RootPath));
+			await scanner.Started.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+			window.Close();
+			await window.ShutdownCompletion.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+			scanner.Release();
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => openTask.IsCompleted || elevation.RelaunchCount != 0,
+				"closed-window open to finish or request elevation",
+				TimeSpan.FromSeconds(5));
+			Assert.Equal(0, elevation.RelaunchCount);
+			Assert.False(await openTask.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+			Assert.Empty(window.OwnedWindows);
+		}
+		finally
+		{
+			scanner.Release();
+			foreach (var dialog in window.OwnedWindows.ToArray())
+				await UiTestDriver.CloseTopLevelWindowAsync(dialog);
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task StartupUi_AgentActivityPreferenceStorageFailureDoesNotBlockRequestedProject()
 	{
 		using var project = UiTestProject.CreateDefault();
