@@ -1088,6 +1088,17 @@ internal sealed class DevProjexMcpTools(
 					return ValueTask.CompletedTask;
 				},
 				cancellationToken).ConfigureAwait(false);
+			var skippedBinarySources = 0;
+			if (inspectedFiles.Count > inspectedSourceCount + searched.UnscannableFiles.Count)
+			{
+				var unscannablePaths = searched.UnscannableFiles
+					.Select(static file => file.Path)
+					.ToHashSet(PathComparer.Default);
+				skippedBinarySources = inspectedFiles
+					.Where(path => !unscannablePaths.Contains(path))
+					.Distinct(PathComparer.Default)
+					.Count(path => searched.GetFile(path).Classification == FileContentClassification.Binary);
+			}
 			// Candidate priority is applied before response sizing, so the retained set and the
 			// displayed slice are both independent of directory traversal order.
 			var candidateSnapshot = candidates.Snapshot();
@@ -1268,7 +1279,7 @@ internal sealed class DevProjexMcpTools(
 				requestResultLimitReached,
 				retentionCharacterBoundReached,
 				storeHitCharacterBound,
-				searched.UnscannableFiles.Count);
+				searched.UnscannableFiles.Count + skippedBinarySources);
 			if (!boundary.IsComplete)
 				journal?.RecordNotice(AgentJournalNoticeCodes.SearchPartial);
 			if (totalMatches > shownMatches)
@@ -1285,6 +1296,11 @@ internal sealed class DevProjexMcpTools(
 				var result = McpToolResults.TextSuccess(AppendTrustedNotices(
 					projectContent,
 					FormatUnscannableNotice(searched.UnscannableFiles, UnscannableResultKind.Search),
+					skippedBinarySources == 0
+						? null
+						: $"[Search skipped] {skippedBinarySources.ToString(CultureInfo.InvariantCulture)} selected binary " +
+						  (skippedBinarySources == 1 ? "file was" : "files were") +
+						  " not searched as text. Results are partial.",
 					McpTrustedDiagnosticFormatter.FormatWarnings(plan),
 					noMatches,
 					ordered.Count == 0 ? null : SearchOrderNotice,
@@ -2117,9 +2133,19 @@ internal sealed class DevProjexMcpTools(
 				continue;
 			if (!transformed.TryGetValue(group.PhysicalPath, out var file))
 				continue;
+			var isEmptyContent = file.Content.Length == 0;
+			IReadOnlyList<McpGetFileRange> deliveredRequests = isEmptyContent
+				? group.Ranges.Where(static range => range.IsWholeFile).ToArray()
+				: group.Ranges;
+			if (deliveredRequests.Count == 0)
+			{
+				foreach (var range in group.Ranges)
+					status[(range.RequestIndex, range.RangeIndex)] = "not-returned";
+				continue;
+			}
 
 			var separator = sections.Length == 0 ? string.Empty : "\n\n";
-			var requestIds = string.Join(", ", group.Ranges.Select(static range =>
+			var requestIds = string.Join(", ", deliveredRequests.Select(static range =>
 				$"{range.RequestIndex}.{range.RangeIndex}"));
 			var escapedPath = McpTextEscaping.EscapeSingleLine(group.DisplayPath);
 			var headerPrefix = $"File: {escapedPath}\nRequests: {requestIds}\n";
@@ -2139,8 +2165,8 @@ internal sealed class DevProjexMcpTools(
 			{
 				page = McpTextRanges.Slice(
 					file.Content,
-					group.StartLine,
-					group.EndLine,
+					isEmptyContent ? null : group.StartLine,
+					isEmptyContent ? null : group.EndLine,
 					availableLines,
 					availableCharacters,
 					cancellationToken);
@@ -2168,10 +2194,11 @@ internal sealed class DevProjexMcpTools(
 			}
 
 			sections.Append(section);
-			deliveredRanges.Add(new McpDeliveredFileRange(
-				group.PhysicalPath,
-				page.StartLine,
-				page.EndLine));
+			if (page.TotalLines > 0)
+				deliveredRanges.Add(new McpDeliveredFileRange(
+					group.PhysicalPath,
+					page.StartLine,
+					page.EndLine));
 			usedLines += CountResponseLines(section);
 			foreach (var range in group.Ranges)
 			{
@@ -2191,7 +2218,7 @@ internal sealed class DevProjexMcpTools(
 					page,
 					continuationContext));
 			}
-			else if (group.EndLine > page.TotalLines)
+			else if (page.TotalLines > 0 && group.EndLine > page.TotalLines)
 			{
 				rangeNotices.Add(
 					$"[Range clamped] requests={requestIds}; end_line exceeded the file; returned through line {page.TotalLines}.");

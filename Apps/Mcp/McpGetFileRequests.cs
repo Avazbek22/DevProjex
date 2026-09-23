@@ -9,11 +9,18 @@ internal enum McpGetFileRangeDeliveryStatus
 	NotReturned
 }
 
-internal sealed record McpGetFileRange(int RequestIndex, int RangeIndex, int StartLine, int EndLine)
+internal sealed record McpGetFileRange(
+	int RequestIndex,
+	int RangeIndex,
+	int StartLine,
+	int EndLine,
+	bool IsWholeFile = false)
 {
 	public McpGetFileRangeDeliveryStatus ClassifyDelivery(McpTextPage page)
 	{
-		if (page.TotalLines <= 0 || page.StartLine <= 0 || page.EndLine < page.StartLine)
+		if (page.TotalLines == 0)
+			return IsWholeFile ? McpGetFileRangeDeliveryStatus.Ok : McpGetFileRangeDeliveryStatus.NotReturned;
+		if (page.StartLine <= 0 || page.EndLine < page.StartLine)
 			return McpGetFileRangeDeliveryStatus.NotReturned;
 		var effectiveEndLine = Math.Min(EndLine, page.TotalLines);
 		if (StartLine > effectiveEndLine || page.EndLine < StartLine || page.StartLine > effectiveEndLine)
@@ -148,7 +155,12 @@ internal sealed record McpGetFileRequestSet(bool IsBatch, IReadOnlyList<McpGetFi
 				ranges.Add(new McpGetFileRange(requestIndex, rangeIndex, start, end));
 			}
 			if (symbol is not null || !hasRanges)
-				ranges.Add(new McpGetFileRange(requestIndex, 1, 1, int.MaxValue));
+				ranges.Add(new McpGetFileRange(
+					requestIndex,
+					1,
+					1,
+					int.MaxValue,
+					IsWholeFile: !hasRanges && symbol is null));
 			requests.Add(new McpGetFileRequest(requestIndex, path, ranges, symbol));
 		}
 
