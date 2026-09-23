@@ -2433,6 +2433,17 @@ public sealed partial class McpServerIntegrationTests
 			Assert.False(protocol.Meta.ContainsKey("anthropic/alwaysLoad"));
 		});
 		Assert.All(tools, static tool => Assert.Null(tool.ProtocolTool.OutputSchema));
+		foreach (var name in new[] { "analyze", "search_project", "related_files" })
+		{
+			var protocol = tools.Single(tool => tool.Name == name).ProtocolTool;
+			var parameters = protocol.InputSchema.GetProperty("properties");
+			Assert.False(parameters.TryGetProperty("patterns", out _));
+			Assert.True(parameters.TryGetProperty("include_patterns", out _));
+			Assert.True(parameters.TryGetProperty("exclude_patterns", out _));
+			Assert.Contains("include_patterns", protocol.Description, StringComparison.Ordinal);
+			Assert.Contains("exclude_patterns", protocol.Description, StringComparison.Ordinal);
+			Assert.DoesNotContain(", patterns,", protocol.Description, StringComparison.Ordinal);
+		}
 		Assert.Equal(
 			200_000,
 			tools.Single(static tool => tool.Name == "pack_context")

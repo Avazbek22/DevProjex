@@ -337,7 +337,7 @@ internal sealed class DevProjexMcpTools(
 		}, cancellationToken);
 
 	[Description(
-		"Measures a selection before packaging: protected content metrics, estimates, canonical content/text document size, and largest files. Use it to choose pack_context filters or max_tokens; use get_tree for structure and pack_context for actual content. Returns measured-versus-estimated metrics without file bodies. Key parameters: detail=full|compact|signatures, top_files, git_scope, paths, patterns, profile, and max_file_bytes. detail_by_pattern uses its last match. max_tokens reports the same greedy admission as pack_context; rank and focus require it.")]
+		"Measures a selection before packaging: protected content metrics, estimates, canonical content/text document size, and largest files. Use it to choose pack_context filters or max_tokens; use get_tree for structure and pack_context for actual content. Returns measured-versus-estimated metrics without file bodies. Key parameters: detail=full|compact|signatures, top_files, git_scope, paths, include_patterns, exclude_patterns, profile, and max_file_bytes. detail_by_pattern uses its last match. max_tokens reports the same greedy admission as pack_context; rank and focus require it.")]
 	public Task<CallToolResult> Analyze(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -979,7 +979,7 @@ internal sealed class DevProjexMcpTools(
 	}
 
 	[Description(
-		"Searches safe transformed project text with a timed .NET regex and bounded evidence. It matches file content, never paths; find names with get_tree include_patterns. Use it for symbols or phrases; use related_files instead for dependency links. Returns path-grouped numbered matches, merged context, and a complete|partial boundary with inspected, retained, and written counts plus continuation. Line numbers address returned text; generated redaction replacements never match. Key parameters: pattern, paths, context_lines, ignore_case, max_results=1..200, git_scope, patterns, and max_file_bytes. The best unique declaration includes up to 1,800 protected body characters within the same cap.")]
+		"Searches safe transformed project text with a timed .NET regex and bounded evidence. It matches file content, never paths; find names with get_tree include_patterns. Use it for symbols or phrases; use related_files instead for dependency links. Returns path-grouped numbered matches, merged context, and a complete|partial boundary with inspected, retained, and written counts plus continuation. Line numbers address returned text; generated redaction replacements never match. Key parameters: pattern, paths, context_lines, ignore_case, max_results=1..200, git_scope, include_patterns, exclude_patterns, and max_file_bytes. The best unique declaration includes up to 1,800 protected body characters within the same cap.")]
 	public Task<CallToolResult> SearchProject(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -1355,7 +1355,7 @@ internal sealed class DevProjexMcpTools(
 		}, cancellationToken);
 
 	[Description(
-		"Finds statically evidenced dependencies and dependents for one to 16 seed files without widening selection. Use it after search_project or get_tree; use search_project instead for text references, or get_file for content. Returns paths, evidence, resolution status, token estimates, language-limited coverage, partial-parse and configuration diagnostics, and scope; results above 50,000 characters use read_pack. Key parameters: path, direction=dependencies|dependents|both, profile, git_scope, patterns, and max_file_bytes.")]
+		"Finds statically evidenced dependencies and dependents for one to 16 seed files without widening selection. Use it after search_project or get_tree; use search_project instead for text references, or get_file for content. Returns paths, evidence, resolution status, token estimates, language-limited coverage, partial-parse and configuration diagnostics, and scope; results above 50,000 characters use read_pack. Key parameters: path, direction=dependencies|dependents|both, profile, git_scope, include_patterns, exclude_patterns, and max_file_bytes.")]
 	public Task<CallToolResult> RelatedFiles(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
