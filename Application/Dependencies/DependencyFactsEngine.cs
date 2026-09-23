@@ -17,12 +17,10 @@ public sealed partial class DependencyFactsEngine : IDisposable
 	private readonly IDependencyFactExtractor _extractor;
 	private readonly IDependencyConfigurationProvider _configurationProvider;
 	private readonly DependencyFactsLimits _limits;
-	private readonly ConcurrentDictionary<FileCacheKey, Lazy<Task<FileFacts>>> _fileCache = [];
-	private readonly ConcurrentQueue<FileCacheKey> _fileCacheOrder = [];
-	private readonly ConcurrentDictionary<FileCacheKey, long> _fileCacheWeights = [];
-	private readonly ConcurrentDictionary<IndexCacheKey, Lazy<Task<ResolvedIndex>>> _indexCache = [];
-	private readonly ConcurrentQueue<IndexCacheKey> _indexCacheOrder = [];
-	private readonly ConcurrentDictionary<IndexCacheKey, long> _indexCacheWeights = [];
+	private readonly ConcurrentDictionary<FileCacheKey, FileCacheEntry> _fileCache = [];
+	private readonly LinkedList<FileCacheEntry> _fileCacheOrder = [];
+	private readonly ConcurrentDictionary<IndexCacheKey, IndexCacheEntry> _indexCache = [];
+	private readonly LinkedList<IndexCacheEntry> _indexCacheOrder = [];
 	private readonly ConcurrentDictionary<ManifestRequestKey, ManifestSnapshotCacheEntry> _manifestSnapshots = [];
 	private readonly LinkedList<ManifestSnapshotCacheEntry> _manifestSnapshotOrder = [];
 	private readonly object _cacheTrimSync = new();
@@ -74,7 +72,11 @@ public sealed partial class DependencyFactsEngine : IDisposable
 					_manifestSnapshots.Count,
 					_manifestSnapshotOrder.Count,
 					_indexCache.Count,
-					_indexCacheBytes);
+					_indexCacheBytes,
+					_indexCacheOrder.Count,
+					_fileCache.Count,
+					_fileCacheOrder.Count,
+					_fileCacheBytes);
 		}
 	}
 
@@ -172,15 +174,13 @@ public sealed partial class DependencyFactsEngine : IDisposable
 					else
 					{
 						var key = CreateFileCacheKey(source);
-						Lazy<Task<FileFacts>>? created = null;
+						FileCacheEntry? created = null;
 						if (!_fileCache.TryGetValue(key, out var lazy))
 						{
-							created = new Lazy<Task<FileFacts>>(
+							created = new FileCacheEntry(key, new Lazy<Task<FileFacts>>(
 								() => Task.Run(() => _extractor.Extract(source, _limits, token), token),
-								LazyThreadSafetyMode.ExecutionAndPublication);
-							lazy = _fileCache.GetOrAdd(key, created);
-							if (ReferenceEquals(lazy, created))
-								_fileCacheOrder.Enqueue(key);
+								LazyThreadSafetyMode.ExecutionAndPublication));
+							lazy = GetOrAddFileCacheEntry(created);
 						}
 						if (!ReferenceEquals(lazy, created))
 						{
@@ -189,15 +189,15 @@ public sealed partial class DependencyFactsEngine : IDisposable
 						}
 						try
 						{
-							extracted = await lazy.Value.ConfigureAwait(false);
+							extracted = await lazy.Value.Value.ConfigureAwait(false);
 							if (!extracted.CanCache)
-								_fileCache.TryRemove(new KeyValuePair<FileCacheKey, Lazy<Task<FileFacts>>>(key, lazy));
+								RemoveFileCacheEntry(key, lazy);
 							else if (created is not null && ReferenceEquals(lazy, created))
 								RegisterFileCacheWeight(key, lazy, EstimateFileFactsBytes(extracted));
 						}
 						catch
 						{
-							_fileCache.TryRemove(new KeyValuePair<FileCacheKey, Lazy<Task<FileFacts>>>(key, lazy));
+							RemoveFileCacheEntry(key, lazy);
 							throw;
 						}
 					}
@@ -243,21 +243,19 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		}
 		else
 		{
-			Lazy<Task<ResolvedIndex>>? createdIndex = null;
+			IndexCacheEntry? createdIndex = null;
 			if (!_indexCache.TryGetValue(cacheKey, out var cachedIndex))
 			{
-				createdIndex = CreateIndex();
-				cachedIndex = _indexCache.GetOrAdd(cacheKey, createdIndex);
-				if (ReferenceEquals(cachedIndex, createdIndex))
-					_indexCacheOrder.Enqueue(cacheKey);
+				createdIndex = new IndexCacheEntry(cacheKey, CreateIndex());
+				cachedIndex = GetOrAddIndexCacheEntry(createdIndex);
 			}
 			try
 			{
-				resolved = await cachedIndex.Value.ConfigureAwait(false);
+				resolved = await cachedIndex.Value.Value.ConfigureAwait(false);
 			}
 			catch
 			{
-				_indexCache.TryRemove(new KeyValuePair<IndexCacheKey, Lazy<Task<ResolvedIndex>>>(cacheKey, cachedIndex));
+				RemoveIndexCacheEntry(cacheKey, cachedIndex);
 				throw;
 			}
 			resolutionCacheHit = createdIndex is null || !ReferenceEquals(cachedIndex, createdIndex);
@@ -640,30 +638,101 @@ public sealed partial class DependencyFactsEngine : IDisposable
 				.ToArray()
 		};
 
+	private FileCacheEntry GetOrAddFileCacheEntry(FileCacheEntry created)
+	{
+		lock (_cacheTrimSync)
+		{
+			if (_fileCache.TryGetValue(created.Key, out var existing))
+				return existing;
+			_fileCache[created.Key] = created;
+			created.OrderNode = _fileCacheOrder.AddLast(created);
+			return created;
+		}
+	}
+
+	private IndexCacheEntry GetOrAddIndexCacheEntry(IndexCacheEntry created)
+	{
+		lock (_cacheTrimSync)
+		{
+			if (_indexCache.TryGetValue(created.Key, out var existing))
+				return existing;
+			_indexCache[created.Key] = created;
+			created.OrderNode = _indexCacheOrder.AddLast(created);
+			return created;
+		}
+	}
+
+	private void RemoveFileCacheEntry(FileCacheKey key, FileCacheEntry entry)
+	{
+		lock (_cacheTrimSync)
+			RemoveFileCacheEntryUnderLock(key, entry);
+	}
+
+	private void RemoveIndexCacheEntry(IndexCacheKey key, IndexCacheEntry entry)
+	{
+		lock (_cacheTrimSync)
+			RemoveIndexCacheEntryUnderLock(key, entry);
+	}
+
+	// A failed or evicted generation must not remove a replacement with the same key.
+	private void RemoveFileCacheEntryUnderLock(FileCacheKey key, FileCacheEntry entry)
+	{
+		if (!_fileCache.TryRemove(new KeyValuePair<FileCacheKey, FileCacheEntry>(key, entry)))
+			return;
+		if (entry.OrderNode is not null)
+		{
+			_fileCacheOrder.Remove(entry.OrderNode);
+			entry.OrderNode = null;
+		}
+		_fileCacheBytes -= entry.RegisteredWeight;
+		entry.RegisteredWeight = 0;
+	}
+
+	private void RemoveIndexCacheEntryUnderLock(IndexCacheKey key, IndexCacheEntry entry)
+	{
+		if (!_indexCache.TryRemove(new KeyValuePair<IndexCacheKey, IndexCacheEntry>(key, entry)))
+			return;
+		if (entry.OrderNode is not null)
+		{
+			_indexCacheOrder.Remove(entry.OrderNode);
+			entry.OrderNode = null;
+		}
+		_indexCacheBytes -= entry.RegisteredWeight;
+		entry.RegisteredWeight = 0;
+		foreach (var snapshot in _manifestSnapshots.Where(pair => pair.Value.IndexCacheKey == key).ToArray())
+			RemoveManifestSnapshotUnderLock(snapshot.Key, snapshot.Value);
+	}
+
 	private void RegisterFileCacheWeight(
 		FileCacheKey key,
-		Lazy<Task<FileFacts>> entry,
+		FileCacheEntry entry,
 		long weight)
 	{
 		lock (_cacheTrimSync)
 		{
 			if (_fileCache.TryGetValue(key, out var current) && ReferenceEquals(current, entry) &&
-				_fileCacheWeights.TryAdd(key, weight))
+				entry.RegisteredWeight == 0)
+			{
+				entry.RegisteredWeight = weight;
 				_fileCacheBytes += weight;
+			}
 			TrimFileCache();
 		}
 	}
 
 	private void RegisterIndexCacheWeight(
 		IndexCacheKey key,
-		Lazy<Task<ResolvedIndex>> entry,
+		IndexCacheEntry entry,
 		long weight)
 	{
 		lock (_cacheTrimSync)
 		{
 			if (_indexCache.TryGetValue(key, out var current) && ReferenceEquals(current, entry) &&
-				_indexCacheWeights.TryAdd(key, weight))
+				entry.RegisteredWeight == 0)
+			{
+				entry.RegisteredWeight = weight;
 				_indexCacheBytes += weight;
+			}
 			TrimIndexCache();
 		}
 	}
@@ -671,25 +740,15 @@ public sealed partial class DependencyFactsEngine : IDisposable
 	private void TrimFileCache()
 	{
 		while ((_fileCache.Count > _limits.MaximumCachedFiles || _fileCacheBytes > _limits.MaximumFileCacheBytes) &&
-			   _fileCacheOrder.TryDequeue(out var oldest))
-		{
-			_fileCache.TryRemove(oldest, out _);
-			if (_fileCacheWeights.TryRemove(oldest, out var weight))
-				_fileCacheBytes -= weight;
-		}
+			   _fileCacheOrder.First is { Value: var oldest })
+			RemoveFileCacheEntryUnderLock(oldest.Key, oldest);
 	}
 
 	private void TrimIndexCache()
 	{
 		while ((_indexCache.Count > _limits.MaximumCachedIndexes || _indexCacheBytes > _limits.MaximumIndexCacheBytes) &&
-			   _indexCacheOrder.TryDequeue(out var oldest))
-		{
-			_indexCache.TryRemove(oldest, out _);
-			foreach (var snapshot in _manifestSnapshots.Where(pair => pair.Value.IndexCacheKey == oldest).ToArray())
-				RemoveManifestSnapshotUnderLock(snapshot.Key, snapshot.Value);
-			if (_indexCacheWeights.TryRemove(oldest, out var weight))
-				_indexCacheBytes -= weight;
-		}
+			   _indexCacheOrder.First is { Value: var oldest })
+			RemoveIndexCacheEntryUnderLock(oldest.Key, oldest);
 	}
 
 	private void StoreManifestSnapshot(
@@ -1082,6 +1141,22 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		long LastWriteTimeUtcTicks,
 		long CreationTimeUtcTicks);
 
+	private sealed class FileCacheEntry(FileCacheKey key, Lazy<Task<FileFacts>> value)
+	{
+		public FileCacheKey Key { get; } = key;
+		public Lazy<Task<FileFacts>> Value { get; } = value;
+		public long RegisteredWeight { get; set; }
+		public LinkedListNode<FileCacheEntry>? OrderNode { get; set; }
+	}
+
+	private sealed class IndexCacheEntry(IndexCacheKey key, Lazy<Task<ResolvedIndex>> value)
+	{
+		public IndexCacheKey Key { get; } = key;
+		public Lazy<Task<ResolvedIndex>> Value { get; } = value;
+		public long RegisteredWeight { get; set; }
+		public LinkedListNode<IndexCacheEntry>? OrderNode { get; set; }
+	}
+
 	private sealed record ManifestSnapshotCacheEntry(
 		ManifestRequestKey Key,
 		IReadOnlyList<string> ManifestPaths,
@@ -1098,7 +1173,11 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		int ManifestSnapshots,
 		int ManifestEvictionEntries,
 		int ResolvedIndexes,
-		long ResolvedIndexBytes);
+		long ResolvedIndexBytes,
+		int IndexEvictionEntries,
+		int Files,
+		int FileEvictionEntries,
+		long FileBytes);
 
 	private sealed record ResolvedIndex(
 		IReadOnlyList<DependencyEdge> Edges,
