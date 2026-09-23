@@ -1186,12 +1186,21 @@ internal sealed class MetricsPipeline(
 						retainedIdentity.SourceLastWriteTimeUtcTicks,
 						IsMissing: false)
 					: null;
-				var sourceVersionBeforeRead = TryCaptureCurrentSourceVersion(filePath);
+				var coherentAnalyzer = retainedMetrics is null && transformationScope is null &&
+					fileContentAnalyzer is FileContentAnalyzer &&
+					ReferenceEquals(_fileSourceVersionProvider, PhysicalMetricsFileSourceVersionProvider.Instance)
+						? fileContentAnalyzer as IPrewarmFileContentAnalyzer
+						: null;
+				var sourceVersionBeforeRead = coherentAnalyzer is null
+					? TryCaptureCurrentSourceVersion(filePath)
+					: null;
 				if (retainedSourceVersion != sourceVersionBeforeRead)
 					retainedMetrics = null;
                 if (fileContentAnalyzer.ClassifyWithoutReading(filePath) ==
                     FileContentClassification.Binary)
                 {
+					if (coherentAnalyzer is not null)
+						sourceVersionBeforeRead = TryCaptureCurrentSourceVersion(filePath);
 					var binarySourceVersion = TryCaptureStableSourceVersion(
 						filePath,
 						sourceVersionBeforeRead);
@@ -1238,9 +1247,42 @@ internal sealed class MetricsPipeline(
                 }
                 else
                 {
-					var result = await fileContentAnalyzer
-						.GetClassifiedMetricsAsync(filePath, ct)
-						.ConfigureAwait(false);
+					FileContentMetricsResult result;
+					if (coherentAnalyzer is not null)
+					{
+						var identified = await coherentAnalyzer
+							.GetClassifiedMetricsWithIdentityAsync(filePath, ct)
+							.ConfigureAwait(false);
+						if (identified.StableIdentity is { } stableIdentity)
+						{
+							result = identified.Result;
+							sourceVersion = new MetricsFileSourceVersion(
+								stableIdentity.Length,
+								stableIdentity.LastWriteTimeUtcTicks,
+								IsMissing: false);
+						}
+						else if (identified.Identity is not null)
+						{
+							Interlocked.Exchange(ref hadReadFailures, 1);
+							return;
+						}
+						else
+						{
+							// An unidentified result cannot borrow metadata from a later path observation.
+							// Retry inside the legacy before/after checks to preserve failure classification.
+							ct.ThrowIfCancellationRequested();
+							sourceVersionBeforeRead = TryCaptureCurrentSourceVersion(filePath);
+							result = await fileContentAnalyzer
+								.GetClassifiedMetricsAsync(filePath, ct)
+								.ConfigureAwait(false);
+						}
+					}
+					else
+					{
+						result = await fileContentAnalyzer
+							.GetClassifiedMetricsAsync(filePath, ct)
+							.ConfigureAwait(false);
+					}
 					rawMetrics = result.IsText ? result.Metrics : null;
                     effectiveMetrics = rawMetrics;
                 }
