@@ -72,26 +72,26 @@ public sealed class McpBatchTextLineViewTests
 			for (var start = 1; start <= total + 1; start++)
 			{
 				foreach (var end in new int?[] { null, start, start + 2 })
-				foreach (var maximumLines in new[] { 1, 3 })
-				foreach (var maximumCharacters in new[] { 1, 4, 50 })
-				foreach (var column in new[] { 1, 2, 4 })
-				{
-					McpTextPage expected;
-					try
-					{
-						expected = McpTextRanges.Slice(
-							text, start, end, maximumLines, maximumCharacters, CancellationToken.None, column);
-					}
-					catch (McpToolException exception)
-					{
-						var actual = Assert.Throws<McpToolException>(() => view.Slice(
-							start, end, maximumLines, maximumCharacters, CancellationToken.None, column));
-						Assert.Equal(exception.Code, actual.Code);
-						continue;
-					}
-					Assert.Equal(expected, view.Slice(
-						start, end, maximumLines, maximumCharacters, CancellationToken.None, column));
-				}
+					foreach (var maximumLines in new[] { 1, 3 })
+						foreach (var maximumCharacters in new[] { 1, 4, 50 })
+							foreach (var column in new[] { 1, 2, 4 })
+							{
+								McpTextPage expected;
+								try
+								{
+									expected = McpTextRanges.Slice(
+										text, start, end, maximumLines, maximumCharacters, CancellationToken.None, column);
+								}
+								catch (McpToolException exception)
+								{
+									var actual = Assert.Throws<McpToolException>(() => view.Slice(
+										start, end, maximumLines, maximumCharacters, CancellationToken.None, column));
+									Assert.Equal(exception.Code, actual.Code);
+									continue;
+								}
+								Assert.Equal(expected, view.Slice(
+									start, end, maximumLines, maximumCharacters, CancellationToken.None, column));
+							}
 			}
 		}
 	}
