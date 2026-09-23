@@ -313,7 +313,13 @@ public sealed class SecretRedactionOutputPreparer
 								scope.AnalyzeUnscannable(sourcePath, metadataAfterRead, result.Classification);
 								preparedFiles[sourcePath] = PreparedSecretFile.Unscannable(
 									sourcePath,
-									result.Classification);
+									result.Classification) with
+								{
+									EstimatedContent = result.Classification == FileContentClassification.TooLarge &&
+									                   result.Content is { IsEstimated: true, Content.Length: 0 }
+										? result.Content
+										: null
+								};
 								unscannableFiles.Add(new UnscannableFile(sourcePath, result.Classification));
 								completed = true;
 								continue;
@@ -2815,6 +2821,7 @@ public sealed record PreparedSecretFile(
 	public IReadOnlyList<EffectiveRedactionFinding> Findings => EffectiveFindings ?? [];
 	internal SecretFileMetadata? SourceMetadata { get; init; }
 	internal PreparedContentSlice? ContentSlice { get; init; }
+	internal TextFileContent? EstimatedContent { get; init; }
 
 	public int ClampLengthToCompleteRedactions(int requestedLength)
 	{
@@ -3127,6 +3134,12 @@ public sealed class PreparedSecretFileContentAnalyzer :
 		CancellationToken cancellationToken = default)
 	{
 		var file = prepared.GetFile(path);
+		if (file.IsUnscannable)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			file.EnsureSourceVersion();
+			return new FileContentReadResult(file.Classification, file.EstimatedContent);
+		}
 		if (!file.IsText && !file.IsUnscannable)
 			return new FileContentReadResult(FileContentClassification.Binary);
 
@@ -3162,6 +3175,12 @@ public sealed class PreparedSecretFileContentAnalyzer :
 		CancellationToken cancellationToken = default)
 	{
 		var file = prepared.GetFile(path);
+		if (file.IsUnscannable)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			file.EnsureSourceVersion();
+			return file.Classification == FileContentClassification.TooLarge;
+		}
 		if (!file.IsText && !file.IsUnscannable)
 			return false;
 		if (file.ContentSlice is not null)
@@ -3208,7 +3227,9 @@ public sealed class PreparedSecretFileContentAnalyzer :
 		var result = await ResolveAnalyzer(file).GetClassifiedMetricsAsync(file.ContentPath, cancellationToken)
 			.ConfigureAwait(false);
 		file.EnsureSourceVersion();
-		return result;
+		return file.IsUnscannable
+			? new FileContentMetricsResult(file.Classification, result.Metrics)
+			: result;
 	}
 
 	public async ValueTask<IFileContentSnapshot> OpenCompleteSnapshotAsync(
@@ -3301,6 +3322,12 @@ public sealed class PreparedSecretFileContentAnalyzer :
 		CancellationToken cancellationToken = default)
 	{
 		var file = prepared.GetFile(path);
+		if (file.IsUnscannable)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			file.EnsureSourceVersion();
+			return null;
+		}
 		if (!file.IsText && !file.IsUnscannable)
 			return null;
 		if (TryResolveStoredSlice(file, out var store, out var slice))
