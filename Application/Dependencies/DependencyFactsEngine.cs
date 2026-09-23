@@ -243,6 +243,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 				allowed)),
 			LazyThreadSafetyMode.ExecutionAndPublication);
 		ResolvedIndex resolved;
+		IndexCacheEntry? resolvedIndexEntry = null;
 		var resolutionCacheHit = false;
 		if (!canCacheIndex)
 		{
@@ -257,6 +258,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 				createdIndex = new IndexCacheEntry(cacheKey, CreateIndex());
 				cachedIndex = GetOrAddIndexCacheEntry(createdIndex);
 			}
+			resolvedIndexEntry = cachedIndex;
 			try
 			{
 				resolved = await cachedIndex.Value.Value.ConfigureAwait(false);
@@ -306,18 +308,19 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			ContentObservations = contentObservations
 		};
 		var finalStamps = TryCaptureFileStamps(manifest, cancellationToken);
-		if (canCacheIndex && initialStamps is not null && finalStamps is not null && initialStamps.SequenceEqual(finalStamps) &&
+		if (canCacheIndex && resolvedIndexEntry is not null &&
+			initialStamps is not null && finalStamps is not null && initialStamps.SequenceEqual(finalStamps) &&
 			AreControlFilesStillAbsent(configuration.AbsentControlFiles, cancellationToken))
 		{
-			if (_indexCache.ContainsKey(cacheKey))
-				StoreManifestSnapshot(
-					manifestRequestKey,
-					manifestRelativePaths,
-					initialStamps,
-					alignedContentIdentities,
-					configuration.AbsentControlFiles,
-					cacheKey,
-					result);
+			StoreManifestSnapshot(
+				manifestRequestKey,
+				manifestRelativePaths,
+				initialStamps,
+				alignedContentIdentities,
+				configuration.AbsentControlFiles,
+				cacheKey,
+				resolvedIndexEntry,
+				result);
 		}
 		cancellationToken.ThrowIfCancellationRequested();
 		return result;
@@ -767,11 +770,15 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		IReadOnlyList<string>? contentIdentities,
 		IReadOnlyList<string> absentControlFiles,
 		IndexCacheKey indexCacheKey,
+		IndexCacheEntry expectedIndexEntry,
 		DependencyIndexSnapshot snapshot)
 	{
 		lock (_cacheTrimSync)
 		{
-			if (!_indexCache.ContainsKey(indexCacheKey)) return;
+			// A retired generation must not retain another graph behind its replacement's budget.
+			if (!_indexCache.TryGetValue(indexCacheKey, out var current) ||
+				!ReferenceEquals(current, expectedIndexEntry))
+				return;
 			if (_manifestSnapshots.TryGetValue(key, out var previous))
 				RemoveManifestSnapshotUnderLock(key, previous);
 			var entry = new ManifestSnapshotCacheEntry(
