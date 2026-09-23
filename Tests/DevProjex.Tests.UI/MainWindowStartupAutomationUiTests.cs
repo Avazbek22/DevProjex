@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Security;
 using System.Text.Json;
 using DevProjex.Application.Context;
 using DevProjex.Infrastructure.RecentProjects;
@@ -9,6 +10,35 @@ namespace DevProjex.Tests.UI;
 [Collection(UiWorkspaceCollection.Name)]
 public sealed class MainWindowStartupAutomationUiTests
 {
+	[AvaloniaFact]
+	public async Task StartupUi_AgentActivityPreferenceStorageFailureDoesNotBlockRequestedProject()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var options = new DesktopStartupOptions(
+			new DesktopOpenRequest(ProjectPath: project.RootPath, Language: AppLanguage.En));
+		var services = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath) with
+		{
+			AgentActivityPreferenceStore = new AgentActivityPreferenceStore(
+				() => throw new SecurityException("Agent activity preference storage is unavailable."))
+		};
+		var window = new MainWindow(options, services);
+		UiTestDriver.TrackTopLevelWindow(window);
+
+		try
+		{
+			window.Show();
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => UiTestDriver.GetViewModel(window).IsProjectLoaded,
+				"requested project to load despite agent activity preference storage failure");
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+	}
+
 	[AvaloniaFact]
 	public async Task StartupUi_DesktopControlStorageFailureDoesNotBlockRequestedProject()
 	{

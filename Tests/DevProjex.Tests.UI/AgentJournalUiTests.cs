@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Reflection;
+using System.Security;
 using System.Threading.Channels;
 using Avalonia.Automation;
 using Avalonia.Media;
@@ -1181,6 +1182,19 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 		Assert.True(new AgentActivityPreferenceStore(() => root).Load());
 		Assert.True(store.TrySave(enabled: false));
 		Assert.False(new AgentActivityPreferenceStore(() => root).Load());
+	}
+
+	[Fact]
+	public void AgentActivityPreferenceUnavailableStateRootKeepsOptionalFeatureDisabled()
+	{
+		var denied = new AgentActivityPreferenceStore(
+			() => throw new SecurityException("State root access is denied."));
+		Assert.False(denied.Load());
+		Assert.False(denied.TrySave(enabled: true));
+
+		var malformed = new AgentActivityPreferenceStore(() => "\0");
+		Assert.False(malformed.Load());
+		Assert.False(malformed.TrySave(enabled: true));
 	}
 
 	[Fact]

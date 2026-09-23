@@ -17,7 +17,9 @@ public sealed class AgentActivityPreferenceStore(Func<string> stateRootProvider)
             var document = JsonSerializer.Deserialize<AgentActivityPreference>(File.ReadAllBytes(path));
             return document?.Enabled == true;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+        catch (Exception exception) when (exception is
+                   IOException or UnauthorizedAccessException or JsonException or
+                   System.Security.SecurityException or ArgumentException or NotSupportedException)
         {
             Trace.TraceWarning("Agent activity preference could not be read: {0}", exception.GetType().Name);
             return false;
@@ -39,7 +41,9 @@ public sealed class AgentActivityPreferenceStore(Func<string> stateRootProvider)
             File.Move(temporaryPath, path, overwrite: true);
             return true;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (exception is
+                   IOException or UnauthorizedAccessException or System.Security.SecurityException or
+                   ArgumentException or NotSupportedException)
         {
             Trace.TraceWarning("Agent activity preference could not be saved: {0}", exception.GetType().Name);
             return false;
@@ -52,7 +56,8 @@ public sealed class AgentActivityPreferenceStore(Func<string> stateRootProvider)
                 {
                     File.Delete(temporaryPath);
                 }
-                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                catch (Exception exception) when (exception is
+                           IOException or UnauthorizedAccessException or System.Security.SecurityException)
                 {
                     Trace.TraceWarning("Agent activity preference temporary file could not be removed: {0}", exception.GetType().Name);
                 }
