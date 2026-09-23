@@ -603,20 +603,22 @@ public sealed class GitRepositoryService : IGitRepositoryService, IDisposable
             if (fetchResult.ExitCode != 0)
                 return false;  // Network error or branch doesn't exist
 
-            cancellationToken.ThrowIfCancellationRequested();
-
             // Reset local branch to match remote exactly
             // Using --hard is the reliable way to ensure clean state
             // This discards any local changes (which should never exist in a cached copy)
-            var resetResult = await RunGitCommandAsync(
-                repositoryPath,
-				GitProcessOperation.ManagedCheckout(
-					GitManagedCheckoutKind.HardReset,
-					$"refs/remotes/origin/{currentBranch}",
-					filterDrivers: safety.CheckoutFilterDrivers),
-                cancellationToken);
-
-            return resetResult.ExitCode == 0;
+            return await ApplyFetchedResetAsync(
+                async resetToken =>
+                {
+                    var resetResult = await RunGitCommandAsync(
+                        repositoryPath,
+						GitProcessOperation.ManagedCheckout(
+							GitManagedCheckoutKind.HardReset,
+							$"refs/remotes/origin/{currentBranch}",
+							filterDrivers: safety.CheckoutFilterDrivers),
+                        resetToken).ConfigureAwait(false);
+                    return resetResult.ExitCode == 0;
+                },
+                cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -626,6 +628,17 @@ public sealed class GitRepositoryService : IGitRepositoryService, IDisposable
         {
             return false;
         }
+    }
+
+    internal static Task<bool> ApplyFetchedResetAsync(
+        Func<CancellationToken, Task<bool>> reset,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(reset);
+        cancellationToken.ThrowIfCancellationRequested();
+        // Once reset starts, caller cancellation must not terminate it halfway through
+        // materializing the cached worktree.
+        return reset(CancellationToken.None);
     }
 
     public async Task<string?> GetHeadCommitAsync(

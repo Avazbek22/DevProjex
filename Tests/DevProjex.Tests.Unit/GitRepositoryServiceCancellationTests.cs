@@ -23,6 +23,46 @@ public sealed class GitRepositoryServiceCancellationTests
     }
 
     [Fact]
+    public async Task FetchedResetFinishesWhenCallerCancelsDuringMaterialization()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var resetStarted = false;
+
+        var succeeded = await GitRepositoryService.ApplyFetchedResetAsync(
+            async resetToken =>
+            {
+                resetStarted = true;
+                cancellation.Cancel();
+                await Task.Yield();
+                resetToken.ThrowIfCancellationRequested();
+                return true;
+            },
+            cancellation.Token);
+
+        Assert.True(resetStarted);
+        Assert.True(succeeded);
+    }
+
+    [Fact]
+    public async Task FetchedResetHonorsCancellationBeforeMaterialization()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var resetStarted = false;
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            GitRepositoryService.ApplyFetchedResetAsync(
+                _ =>
+                {
+                    resetStarted = true;
+                    return Task.FromResult(true);
+                },
+                cancellation.Token));
+
+        Assert.False(resetStarted);
+    }
+
+    [Fact]
     public async Task WaitForExitOrTerminateAsync_CancellationWaitsForProcessTreeAndReleasesFileHandle()
     {
         using var temp = new TemporaryDirectory();
