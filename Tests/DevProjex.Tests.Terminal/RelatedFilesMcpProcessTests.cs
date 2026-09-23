@@ -1,4 +1,6 @@
+using System.ComponentModel;
 using System.Diagnostics;
+using System.Text.Json;
 using DevProjex.Mcp;
 using ModelContextProtocol;
 using ModelContextProtocol.Client;
@@ -278,7 +280,7 @@ public sealed partial class McpServerProcessTests
 		Assert.True(string.IsNullOrWhiteSpace(await errorTask), await errorTask);
 	}
 
-	[Fact]
+	[Fact(Timeout = 120_000)]
 	public async Task RealProcessRelatedFilesReportsBothDirectionsAmbiguityCoverageAndProgress()
 	{
 		if (!await IsGitAvailableAsync())
@@ -342,9 +344,11 @@ public sealed partial class McpServerProcessTests
 		startInfo.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = workspace.CreateDirectory("data");
 
 		using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("MCP process did not start.");
+		using var processCleanup = new RelatedFilesProcessCleanup(process);
 		var errorTask = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+		await using var recordingOutput = new RecordingReadStream(process.StandardOutput.BaseStream);
 		await using (var client = await McpClient.CreateAsync(
-			new StreamClientTransport(process.StandardInput.BaseStream, process.StandardOutput.BaseStream),
+			new StreamClientTransport(process.StandardInput.BaseStream, recordingOutput),
 			clientOptions: null,
 			loggerFactory: null,
 			TestContext.Current.CancellationToken))
@@ -370,9 +374,6 @@ public sealed partial class McpServerProcessTests
 			Assert.Contains("[Facts coverage] files=10, supported=9, unsupported=1, extraction-failed=0", text, StringComparison.Ordinal);
 			Assert.Contains("[Search scope] files=10", text, StringComparison.Ordinal);
 			Assert.Contains("[Effective filters]", text, StringComparison.Ordinal);
-			await progress.WaitForValueAsync(TestContext.Current.CancellationToken);
-			Assert.NotEmpty(progress.Values);
-
 			var overlappingDependencies = await client.CallToolAsync(
 				"related_files",
 				new Dictionary<string, object?>
@@ -451,10 +452,38 @@ public sealed partial class McpServerProcessTests
 		}
 
 		process.StandardInput.Close();
-		await process.WaitForExitAsync(TestContext.Current.CancellationToken)
-			.WaitAsync(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken);
+		await Task.WhenAll(
+			process.WaitForExitAsync(TestContext.Current.CancellationToken)
+				.WaitAsync(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken),
+			recordingOutput.WaitForSourceEofAsync(TestContext.Current.CancellationToken)
+				.WaitAsync(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken));
 		Assert.Equal(0, process.ExitCode);
 		Assert.True(string.IsNullOrWhiteSpace(await errorTask), await errorTask);
+		// Callback dispatch can outlive the tool response; the transcript verifies what the server sent.
+		Assert.Contains(ParseJsonRpcMessages(recordingOutput.GetRecordedText()), static message =>
+		{
+			using var document = JsonDocument.Parse(message);
+			return document.RootElement.TryGetProperty("method", out var method) &&
+			       method.GetString() == NotificationMethods.ProgressNotification;
+		});
+	}
+
+	private sealed class RelatedFilesProcessCleanup(Process process) : IDisposable
+	{
+		public void Dispose()
+		{
+			try
+			{
+				if (!process.HasExited)
+					process.Kill(entireProcessTree: true);
+			}
+			catch (Exception exception) when (process.HasExited &&
+				(exception is InvalidOperationException or Win32Exception))
+			{
+			}
+			if (!process.WaitForExit(5_000))
+				throw new TimeoutException("The MCP test process did not exit during cleanup.");
+		}
 	}
 
 	private static int CountLinesStartingWith(string value, string prefix) =>
