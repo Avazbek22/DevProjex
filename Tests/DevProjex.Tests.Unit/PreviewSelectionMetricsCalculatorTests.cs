@@ -126,6 +126,86 @@ public sealed class PreviewSelectionMetricsCalculatorTests
 		Assert.Equal(cancellation.Token, exception.CancellationToken);
 	}
 
+	[Theory(Timeout = 15_000)]
+	[InlineData(false)]
+	[InlineData(true)]
+	public void Calculate_ClampedTailAtInt32Boundary_CompletesWithExactMetrics(bool fileBacked)
+	{
+		using var directory = new TemporaryDirectory();
+		using var document = CreateDocument(directory, fileBacked, "alpha\nxy");
+
+		var metrics = PreviewSelectionMetricsCalculator.Calculate(
+			document,
+			new PreviewSelectionRange(int.MaxValue - 1, 1, int.MaxValue, 1),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(new ExportOutputMetrics(2, 3, 1), metrics);
+	}
+
+	[Theory(Timeout = 15_000)]
+	[InlineData(false)]
+	[InlineData(true)]
+	public void Calculate_BillionLineClampedTail_CompletesWithExactMetrics(bool fileBacked)
+	{
+		using var directory = new TemporaryDirectory();
+		using var document = CreateDocument(directory, fileBacked, "x");
+
+		var metrics = PreviewSelectionMetricsCalculator.Calculate(
+			document,
+			new PreviewSelectionRange(1, 0, int.MaxValue, 1),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(new ExportOutputMetrics(int.MaxValue, 4_294_967_293L, 1_073_741_824L), metrics);
+	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public void Calculate_ModerateClampedTail_PreservesPartialEndpoints(bool fileBacked)
+	{
+		using var directory = new TemporaryDirectory();
+		using var document = CreateDocument(directory, fileBacked, "alpha\nbeta");
+
+		var metrics = PreviewSelectionMetricsCalculator.Calculate(
+			document,
+			new PreviewSelectionRange(3, 2, 7, 3),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(new ExportOutputMetrics(5, 21, 6), metrics);
+	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public void Calculate_CanceledClampedTail_ThrowsBeforeReading(bool fileBacked)
+	{
+		using var directory = new TemporaryDirectory();
+		using var document = CreateDocument(directory, fileBacked, "alpha\nbeta");
+		using var cancellation = new CancellationTokenSource();
+		cancellation.Cancel();
+
+		var exception = Assert.ThrowsAny<OperationCanceledException>(() =>
+			PreviewSelectionMetricsCalculator.Calculate(
+				document,
+				new PreviewSelectionRange(3, 1, int.MaxValue, 2),
+				cancellation.Token));
+
+		Assert.Equal(cancellation.Token, exception.CancellationToken);
+	}
+
+	[Fact(Timeout = 15_000)]
+	public void Calculate_CustomDocument_PreservesItsOutOfRangeLineBehavior()
+	{
+		using var document = new VariableOutOfBoundsPreviewDocument();
+
+		var metrics = PreviewSelectionMetricsCalculator.Calculate(
+			document,
+			new PreviewSelectionRange(int.MaxValue - 1, 1, int.MaxValue, 1),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(new ExportOutputMetrics(2, 5, 2), metrics);
+	}
+
 	private static IPreviewTextDocument CreateDocument(
 		TemporaryDirectory directory,
 		bool fileBacked,
@@ -169,4 +249,21 @@ public sealed class PreviewSelectionMetricsCalculatorTests
         {
         }
     }
+
+	private sealed class VariableOutOfBoundsPreviewDocument : IPreviewTextDocument
+	{
+		public int LineCount => 1;
+		public int MaxLineLength => 1;
+		public long CharacterCount => 1;
+		public IReadOnlyList<PreviewDocumentSection> Sections => [];
+		public string GetFullText() => "z";
+		public string GetLineText(int lineNumber) => lineNumber switch
+		{
+			int.MaxValue - 1 => "abcd",
+			int.MaxValue => "xy",
+			_ => "z"
+		};
+		public string GetLineRangeText(int firstLine, int lastLine) => "z";
+		public void Dispose() { }
+	}
 }
