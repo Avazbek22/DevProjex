@@ -208,6 +208,22 @@ Counts below overlap across runs and must not be summed into a unique-test total
 An additional cross-surface run covering selection contracts, MCP inventory caching, and
 inventory projection passed 31/31 tests.
 
+After `d7acb762`, a final interaction-focused batch passed all **146 selected checks**:
+
+- 60 Unit checks for coherent metrics reads, bounded freshness concurrency, discovery
+  refresh, profile/selection persistence, cancellation, and unchanged visual gating.
+- Nine headless UI checks for latest-project publication, rapid selection cancellation,
+  ignore-filter round trips, window shutdown, detached event handlers, and canceled
+  preview traversal.
+- 44 Integration checks for cross-surface selection, MCP inventory, dependency-cache
+  generations/budgets, coherent source reads, redaction, and search completeness.
+- 33 Terminal checks for export read counts, snapshot/read-ahead cancellation, output
+  integrity, and real-process discovery/search/read/pack workflows.
+
+These are targeted checks, not a full-suite run or 146 newly added tests. UI execution
+used the project's Microsoft Testing Platform method filters; other projects used
+VSTest filters. Existing unrelated xUnit analyzer warnings were not changed.
+
 The dependency changes preserve cache budgets, exact-generation removal, and separate
 parse/resolution invalidation. Stable content identities preserve the existing `Identity`
 observation for export/redaction consumers and add an opt-in `StableIdentity`; public
@@ -254,6 +270,12 @@ Cleanup is **pending**, not completed. The attempted cleanup of four preview ben
 inventoried at 1,283,874,520 B; reported reclaimed space is **0 B**. Baseline source archives,
 benchmark outputs, and other generated build artifacts also remain to be addressed under
 the applicable cleanup policy. The rejection must not be bypassed through another shell.
+
+A later read-only inventory found 56 project-derived `bin`/`obj` directories totaling
+14,461,093,197 B of logical file sizes. Resolved paths were restricted to the workspace
+and reparse points were rejected. This is a pending-artifact inventory, not space reclaimed
+or a claim that all these bytes were created by this task; no initial inventory exists.
+Source archives and other non-`bin`/`obj` temporary outputs are additional pending items.
 
 ## Evidence and reproducibility
 
