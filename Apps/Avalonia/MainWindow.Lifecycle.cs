@@ -107,6 +107,7 @@ public partial class MainWindow
         _desktopControlServerClosePending = true;
         try
         {
+            _projectLoadPipeline.CancelActiveLoad();
             await desktopControlServer.DisposeAsync();
         }
         catch (Exception exception)

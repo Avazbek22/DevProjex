@@ -3,6 +3,8 @@ using Avalonia.Media;
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Application.Compression;
 using DevProjex.Application.Secrets;
+using DevProjex.Application.UseCases;
+using DevProjex.Infrastructure.FileSystem;
 using DevProjex.Infrastructure.Git;
 using DevProjex.Infrastructure.ThemePresets;
 using DevProjex.Kernel.Abstractions;
@@ -24,6 +26,56 @@ public sealed class MainWindowLifecycleUiTests
 		new(null, "_gitCloneCts"),
 		new(null, "_gitOperationCts")
 	];
+
+	[AvaloniaFact]
+	public async Task ClosingWindow_CancelsInFlightDesktopOpenBeforeStoppingServer()
+	{
+		using var project = UiTestProject.CreateDefault();
+		using var scanner = new BlockingWorkspaceScanner(project.RootPath);
+		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var paths = new DesktopControlPaths(() => appDataPath);
+		var options = DesktopStartupOptions.Default;
+		var services = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath) with
+		{
+			ScanOptionsUseCase = new ScanOptionsUseCase(scanner),
+			DesktopControlServerFactory = (handler, projectPath, cancellationToken) =>
+				DesktopControlServer.StartAsync(handler, projectPath, paths, cancellationToken)
+		};
+		var window = new MainWindow(options, services);
+		UiTestDriver.TrackTopLevelWindow(window);
+		Task<DesktopProtocolResponse>? requestTask = null;
+		var cancellationToken = TestContext.Current.CancellationToken;
+
+		try
+		{
+			window.Show();
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => GetPrivateFieldValue(window, new OwnedField(null, "_desktopControlServer")) is not null,
+				"desktop control server publication");
+			var client = new DesktopControlClient(new DesktopInstanceRegistry(paths));
+			var registration = Assert.Single(await client.ListAsync(cancellationToken));
+			requestTask = client.SendAsync(
+				registration,
+				"open",
+				new DesktopOpenRequest(ProjectPath: project.RootPath),
+				TimeSpan.FromSeconds(15),
+				cancellationToken);
+			await scanner.Started.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
+
+			window.Close();
+			await window.ShutdownCompletion.WaitAsync(TimeSpan.FromSeconds(2), cancellationToken);
+			Assert.False(window.IsVisible);
+		}
+		finally
+		{
+			scanner.Release();
+			if (requestTask is not null)
+				_ = await Record.ExceptionAsync(() => requestTask.WaitAsync(TimeSpan.FromSeconds(5)));
+			if (window.IsVisible)
+				await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+	}
 
 	[AvaloniaFact]
 	public async Task ClosingWindow_WithPublishedDesktopServer_CompletesTeardownBeforeClosedReturns()
@@ -629,6 +681,59 @@ public sealed class MainWindowLifecycleUiTests
 			BindingFlags.Instance | BindingFlags.NonPublic);
 		Assert.NotNull(field);
 		return Assert.IsType<bool>(field!.GetValue(owner));
+	}
+
+	private sealed class BlockingWorkspaceScanner(string blockedPath)
+		: IFileSystemScannerProjectWorkspaceScanner, IDisposable
+	{
+		private readonly FileSystemScanner _inner = new();
+		private readonly ManualResetEventSlim _release = new(initialState: false);
+		private readonly TaskCompletionSource _started =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+		public Task Started => _started.Task;
+
+		public void Release() => _release.Set();
+
+		public bool CanReadRoot(string rootPath) => _inner.CanReadRoot(rootPath);
+
+		public ScanResult<HashSet<string>> GetExtensions(
+			string rootPath,
+			IgnoreRules rules,
+			CancellationToken cancellationToken = default) =>
+			_inner.GetExtensions(rootPath, rules, cancellationToken);
+
+		public ScanResult<HashSet<string>> GetRootFileExtensions(
+			string rootPath,
+			IgnoreRules rules,
+			CancellationToken cancellationToken = default) =>
+			_inner.GetRootFileExtensions(rootPath, rules, cancellationToken);
+
+		public ScanResult<List<string>> GetRootFolderNames(
+			string rootPath,
+			IgnoreRules rules,
+			CancellationToken cancellationToken = default) =>
+			_inner.GetRootFolderNames(rootPath, rules, cancellationToken);
+
+		public ScanResult<ProjectWorkspaceScanSnapshot> ScanProjectWorkspace(
+			ProjectWorkspaceScanRequest request,
+			CancellationToken cancellationToken = default)
+		{
+			if (!PathComparer.Default.Equals(request.RootPath, blockedPath))
+				return _inner.ScanProjectWorkspace(request, cancellationToken);
+
+			_started.TrySetResult();
+			var signaled = WaitHandle.WaitAny(
+				[_release.WaitHandle, cancellationToken.WaitHandle],
+				TimeSpan.FromSeconds(15));
+			if (signaled == WaitHandle.WaitTimeout)
+				throw new TimeoutException("The controlled project scan was not released.");
+
+			cancellationToken.ThrowIfCancellationRequested();
+			return _inner.ScanProjectWorkspace(request, cancellationToken);
+		}
+
+		public void Dispose() => _release.Dispose();
 	}
 
 	private readonly record struct OwnedField(string? OwnerFieldName, string FieldName)
