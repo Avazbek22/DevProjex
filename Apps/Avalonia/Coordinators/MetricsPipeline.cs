@@ -271,6 +271,7 @@ internal sealed class MetricsPipeline(
     private long _lastStatusTreeAndContentContentChars;
     private long _lastStatusTreeAndContentContentTokens;
     private bool _hasStatusMetricsSnapshot;
+	private bool _canReuseStatusMetricsForPreviewSelection;
 	private string? _statusMetricsProjectPath;
     private bool _hasTreeMetricsCache;
     private TreeMetricsCacheKey _treeMetricsCacheKey;
@@ -397,6 +398,8 @@ internal sealed class MetricsPipeline(
         if (Volatile.Read(ref _disposed) != 0)
             return;
 
+		InvalidatePreviewSelectionMetricsCache();
+
         // A parent checkbox can fire hundreds of child change notifications. Keep the
         // debounce timer inside the metrics pipeline so UI code does not own recalc state.
         if (_metricsDebounceTimer is null)
@@ -417,6 +420,8 @@ internal sealed class MetricsPipeline(
     {
         if (Volatile.Read(ref _disposed) != 0)
             return;
+
+		InvalidatePreviewSelectionMetricsCache();
 
         if (!viewModel.IsProjectLoaded || viewModel.TreeNodes.Count == 0)
         {
@@ -547,6 +552,7 @@ internal sealed class MetricsPipeline(
     {
         Interlocked.Increment(ref _metricsCacheGeneration);
         _hasCompleteMetricsBaseline = false;
+		InvalidatePreviewSelectionMetricsCache();
         CancelBackgroundCalculation();
         ClearFileMetricsCache(trimCapacity: true);
     }
@@ -559,8 +565,12 @@ internal sealed class MetricsPipeline(
 	{
 		_recalculateMetricsCts?.Cancel();
 		Interlocked.Increment(ref _metricsRecalcVersion);
+		InvalidatePreviewSelectionMetricsCache();
 		InvalidateComputedCaches();
 	}
+
+	private void InvalidatePreviewSelectionMetricsCache()
+		=> _canReuseStatusMetricsForPreviewSelection = false;
 
     public void CancelByUser()
     {
@@ -709,7 +719,8 @@ internal sealed class MetricsPipeline(
     public void UpdateStatusBarMetrics(
         long treeLines, long treeChars, long treeTokens,
         long contentLines, long contentChars, long contentTokens,
-        ExportOutputMetrics? treeAndContentContentMetrics = null)
+        ExportOutputMetrics? treeAndContentContentMetrics = null,
+		bool canReuseForPreviewSelection = true)
     {
         _lastStatusTreeLines = treeLines;
         _lastStatusTreeChars = treeChars;
@@ -721,8 +732,9 @@ internal sealed class MetricsPipeline(
         _lastStatusTreeAndContentContentLines = combinedContentMetrics.Lines;
         _lastStatusTreeAndContentContentChars = combinedContentMetrics.Chars;
         _lastStatusTreeAndContentContentTokens = combinedContentMetrics.Tokens;
-		_statusMetricsProjectPath = currentPathProvider();
+        _statusMetricsProjectPath = currentPathProvider();
         _hasStatusMetricsSnapshot = true;
+		_canReuseStatusMetricsForPreviewSelection = canReuseForPreviewSelection;
         RenderStatusBarMetrics();
     }
 
@@ -754,6 +766,7 @@ internal sealed class MetricsPipeline(
 			  PathComparer.Default.Equals(_statusMetricsProjectPath, currentProjectPath);
 		var currentDocument = viewModel.PreviewDocument;
 		if (!_hasStatusMetricsSnapshot ||
+		    !_canReuseStatusMetricsForPreviewSelection ||
 		    !projectMatches ||
 		    currentDocument is not null && currentDocument.CharacterCount != document.CharacterCount)
 		{
@@ -915,6 +928,7 @@ internal sealed class MetricsPipeline(
 
         _metricsCancellationRequestedByUser = false;
         _hasCompleteMetricsBaseline = false;
+		_canReuseStatusMetricsForPreviewSelection = false;
 		SetBackgroundMetricsActive(true);
         var statusOperationId = statusOperations.Begin(
             viewModel.StatusOperationCalculatingData,
@@ -1394,6 +1408,7 @@ internal sealed class MetricsPipeline(
 		_lastStatusTreeAndContentContentChars = 0;
 		_lastStatusTreeAndContentContentTokens = 0;
 		_statusMetricsProjectPath = null;
+		_canReuseStatusMetricsForPreviewSelection = false;
 	}
 
     private static Task WaitForInitialVisualReadyAsync(
@@ -1580,7 +1595,10 @@ internal sealed class MetricsPipeline(
                 return;
             }
 
-            UpdateStatusBarMetrics(treeMetrics.Lines, treeMetrics.Chars, treeMetrics.Tokens, 0, 0, 0);
+            UpdateStatusBarMetrics(
+				treeMetrics.Lines, treeMetrics.Chars, treeMetrics.Tokens,
+				0, 0, 0,
+				canReuseForPreviewSelection: false);
             viewModel.StatusMetricsVisible = true;
         });
     }
