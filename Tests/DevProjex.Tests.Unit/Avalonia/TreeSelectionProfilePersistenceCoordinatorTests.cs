@@ -348,6 +348,53 @@ public sealed class TreeSelectionProfilePersistenceCoordinatorTests
 		Assert.Equal(SelectionPersistencePhase.Idle, coordinator.State.Phase);
 	}
 
+	[Fact]
+	public async Task QueuedFlushPreservesANewerSelectionScheduledDuringTheActiveWrite()
+	{
+		var delay = new ControlledDelay();
+		var firstWriteStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var releaseFirstWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var writes = new List<IReadOnlyCollection<string>?>();
+		using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+		cancellation.CancelAfter(TimeSpan.FromSeconds(10));
+		using var coordinator = new TreeSelectionProfilePersistenceCoordinator(
+			async (_, selectedPaths, cancellationToken) =>
+			{
+				writes.Add(selectedPaths);
+				if (writes.Count == 1)
+				{
+					firstWriteStarted.TrySetResult();
+					await releaseFirstWrite.Task.WaitAsync(cancellationToken);
+				}
+			},
+			delay.WaitAsync);
+
+		try
+		{
+			coordinator.Schedule("project", ["src"]);
+			var activeFlush = coordinator.FlushAsync(cancellation.Token);
+			await firstWriteStarted.Task.WaitAsync(cancellation.Token);
+			var queuedFlush = coordinator.FlushAsync(cancellation.Token);
+			Assert.False(queuedFlush.IsCompleted);
+
+			coordinator.Schedule("project", ["tests"]);
+			Assert.Equal(SelectionPersistencePhase.Pending, coordinator.State.Phase);
+			releaseFirstWrite.TrySetResult();
+
+			Assert.All(await Task.WhenAll(activeFlush, queuedFlush).WaitAsync(cancellation.Token), saved => Assert.True(saved));
+			Assert.True(await coordinator.FlushAsync(cancellation.Token));
+			Assert.Collection(writes,
+				selection => Assert.Equal(["src"], selection),
+				selection => Assert.Equal(["tests"], selection));
+			Assert.Equal(SelectionPersistencePhase.Idle, coordinator.State.Phase);
+		}
+		finally
+		{
+			releaseFirstWrite.TrySetResult();
+			await cancellation.CancelAsync();
+		}
+	}
+
 	private sealed class ControlledDelay
 	{
 		private readonly TaskCompletionSource _release =

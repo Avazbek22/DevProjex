@@ -400,6 +400,53 @@ public sealed class TerminalSelectionProfilePersistenceCoordinatorTests
 		}
 	}
 
+	[Fact]
+	public async Task QueuedFlushPreservesANewerSelectionScheduledDuringTheActiveWrite()
+	{
+		var delay = new ControlledDelay();
+		var firstWriteStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var releaseFirstWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var writes = new List<IReadOnlyCollection<string>?>();
+		using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+		cancellation.CancelAfter(TimeSpan.FromSeconds(10));
+		using var coordinator = new TerminalSelectionProfilePersistenceCoordinator(
+			async (_, profile, cancellationToken) =>
+			{
+				writes.Add(profile.SelectedPaths);
+				if (writes.Count == 1)
+				{
+					firstWriteStarted.TrySetResult();
+					await releaseFirstWrite.Task.WaitAsync(cancellationToken);
+				}
+			},
+			delay.WaitAsync);
+
+		try
+		{
+			coordinator.Schedule("project", CreateProfile(["src"]));
+			var activeFlush = coordinator.FlushAsync(cancellation.Token);
+			await firstWriteStarted.Task.WaitAsync(cancellation.Token);
+			var queuedFlush = coordinator.FlushAsync(cancellation.Token);
+			Assert.False(queuedFlush.IsCompleted);
+
+			coordinator.Schedule("project", CreateProfile(["tests"]));
+			Assert.Equal(TerminalSelectionPersistencePhase.Pending, coordinator.State.Phase);
+			releaseFirstWrite.TrySetResult();
+
+			Assert.All(await Task.WhenAll(activeFlush, queuedFlush).WaitAsync(cancellation.Token), saved => Assert.True(saved));
+			Assert.True(await coordinator.FlushAsync(cancellation.Token));
+			Assert.Collection(writes,
+				selection => Assert.Equal(["src"], selection),
+				selection => Assert.Equal(["tests"], selection));
+			Assert.Equal(TerminalSelectionPersistencePhase.Idle, coordinator.State.Phase);
+		}
+		finally
+		{
+			releaseFirstWrite.TrySetResult();
+			await cancellation.CancelAsync();
+		}
+	}
+
 	private static ProjectSelectionProfile CreateProfile(IReadOnlyCollection<string>? selectedPaths) =>
 		new([], [".cs"], [], SelectedPaths: selectedPaths);
 
