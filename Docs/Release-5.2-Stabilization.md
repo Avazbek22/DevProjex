@@ -401,6 +401,28 @@ facts, edges/maps, coverage, root, manifest/declaration identities, cache weight
 reuse. Fixture sizes therefore are not a before/after memory benchmark. The demonstrated
 improvement is correct cache ownership, not a quantified reduction in working set.
 
+## Additional release-stabilization checks
+
+The following changes came after the frozen GUI backend A/B above. Their targeted checks
+do not change or extend that historical timing comparison. Test counts overlap; they are
+not a unique-test total.
+
+| Area | Commits | Targeted verification and contract |
+| --- | --- | --- |
+| GUI startup and settings | `0cf8d861`, `76b6b556`, `1a569854`, `7f1e5f82`, `c8b7c40e`, `77f4a5b6` | Optional IPC, session watcher, and agent-activity storage failures no longer block startup. Git version probing leaves the constructor path. Transient settings failures preserve prior state; concurrent windows merge update history and avoid stale update indicators. Update coordinator 25/25; final preference/headless startup checks 4/4. |
+| GUI selection and project history | `17d49cf4`, `6d0d6a80`, `19847436`, `169cfb67` | Unreadable recent-project state does not erase history; hidden marks survive legacy option profiles; a flush drains changes scheduled during it; replaced scope cache entries cannot publish stale results. Targeted 45 Unit + 15 Integration for history, 13 Unit for marks, 16 Unit for flush, and deterministic scope-race tests. |
+| MCP inventory and source safety | `86747971`, `fa8a2271`, `7f9edfac`, `8af6c6b1`, `2433384a`, `06ee8f2a` | Stored results are tied to the opened file handle, a genuinely empty `get_file` read remains distinguishable from withheld content, search reports partial counts, and one canceled inventory waiter cannot cancel another. Live `list_projects` and `read_pack` no longer change an active search's revision. Published filter descriptions match accepted schema keys. Inventory cancellation/invalidation 8/8 Integration plus 1/1 real-process check; live read/list races and queued cancellation 3/3; descriptor contract 2/2. Native identity behavior was locally exercised on Windows only. |
+| Prepared redaction | `040e0c96` | An unscannable source that later becomes readable cannot leak uninspected text through the prepared analyzer or bounded JSON output. Five targeted regressions failed before the fix; final targeted Unit checks 12/12. Original TooLarge estimates are retained. |
+| Dependency configuration | `2ca556a9`, `a54a705f` | Invalid TypeScript, C#, CMake, Cargo, and Ruby paths yield explicit unsupported-configuration diagnostics instead of exceptions. The Cargo/Ruby regressions failed 3/3 before and passed 3/3 after, with five adjacent controls. Parsing and resolution cache ownership remain separate. |
+| TUI initial plan and settings | `8a2d5632`, `6d4be2dc`, `7abbf120` | Content-output metrics are deferred until requested while selection marks and structured output remain identical. Transient settings reads no longer replace saved history/language with defaults, and an inaccessible optional settings root does not block defaults. A malformed or out-of-tree persisted focus no longer prevents project opening. Metrics: Terminal 43/43 and Integration 10/10; settings: 26 pass/two platform skips; focus PTY and adjacent controls 4/4. Real-root timing observations are recorded above. |
+| Retention and cache boundaries | `bd3a8f73`, `7d1766e6`, `0df248c4` | Recent journals skip unnecessary header reads without changing retention eligibility; unreadable repository-cache indexes and remote identity writes fail safely; MCP search navigation reuses bounded unchanged-content results. These are separate workloads, not an aggregate application speedup. |
+| Git executable trust | `33795715` | PATH directory aliases, project/current-directory aliases, and final file links are resolved to physical paths before accepting a Git/SSH executable. A Windows junction reproduced the original bypass; 71 focused Release checks passed, while the direct file-symlink test skipped on this host for lack of privilege. Current normal PATH resolution was 0.597 ms first and 0.374–0.405 ms in five warm samples; this is an absolute cost, not an A/B speedup. |
+
+The CLI dense-search dictionary experiment was intentionally discarded: three 5,000-hit
+process samples per variant gave medians of 475 ms for the prior lookup and 480 ms for
+the index. No production or test change from that experiment was kept, and no CLI
+speedup is claimed.
+
 ## Limitations and pending release checks
 
 - This is not evidence of real desktop GUI readiness. The backend/headless checks do not
