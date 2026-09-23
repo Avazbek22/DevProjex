@@ -28,6 +28,8 @@ public sealed partial class FileDependencyConfigurationProvider : IDependencyCon
 	internal const string ProjectReferenceConditionReason = "project reference condition could not be evaluated safely";
 	internal const string ProjectReferenceInvalidPathReason = "C# ProjectReference path is invalid";
 	internal const string CMakeInvalidIncludePathReason = "CMake include directory path is invalid";
+	internal const string CargoInvalidPathReason = "Cargo project path is invalid";
+	internal const string RubyInvalidPathReason = "Ruby project path is invalid";
 	internal const string CompileItemMembershipReason = "C# Compile item membership is not supported";
 	internal const string DisableTransitiveProjectReferencesReason = "DisableTransitiveProjectReferences could not be evaluated safely";
 	internal const string InvalidPyProjectReason = "invalid pyproject TOML";
@@ -521,20 +523,32 @@ public sealed partial class FileDependencyConfigurationProvider : IDependencyCon
 			{
 				var snapshot = await ReadSnapshotAsync(configPath).ConfigureAwait(false);
 				AddFingerprint(configPath, snapshot);
-				if (snapshot.State != DependencyConfigurationState.Valid)
+				var configState = snapshot.State;
+				var configReason = snapshot.Reason;
+				if (configState != DependencyConfigurationState.Valid)
 				{
-					state = snapshot.State;
-					reason = snapshot.Reason;
+					state = configState;
+					reason = configReason;
 				}
 				else
 				{
-					var parsed = ParseRubyProject(root, configPath, snapshot.Content);
-					packageName ??= parsed.PackageName;
-					foreach (var directory in parsed.ProjectDirectories) projectDirectories.Add(directory);
-					foreach (var dependency in parsed.ExternalPackages) externalPackages.Add(dependency);
-					foreach (var dependency in parsed.LocalPackages) localPackages.Add(dependency);
+					try
+					{
+						var parsed = ParseRubyProject(root, configPath, snapshot.Content);
+						packageName ??= parsed.PackageName;
+						foreach (var directory in parsed.ProjectDirectories) projectDirectories.Add(directory);
+						foreach (var dependency in parsed.ExternalPackages) externalPackages.Add(dependency);
+						foreach (var dependency in parsed.LocalPackages) localPackages.Add(dependency);
+					}
+					catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+					{
+						configState = DependencyConfigurationState.UnsupportedSemantics;
+						configReason = RubyInvalidPathReason;
+						state = configState;
+						reason = configReason;
+					}
 				}
-				AddDiagnostic(configPath, snapshot.State, snapshot.Reason,
+				AddDiagnostic(configPath, configState, configReason,
 					"ruby:" + PortableRelative(root, group.Key));
 			}
 			externalPackages.ExceptWith(localPackages);
@@ -1476,6 +1490,13 @@ public sealed partial class FileDependencyConfigurationProvider : IDependencyCon
 				RustProjectConfiguration.Empty,
 				DependencyConfigurationState.Corrupt,
 				"Cargo project configuration is invalid");
+		}
+		catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+		{
+			return ConfigurationParseResult<RustProjectConfiguration>.Failure(
+				RustProjectConfiguration.Empty,
+				DependencyConfigurationState.UnsupportedSemantics,
+				CargoInvalidPathReason);
 		}
 	}
 
