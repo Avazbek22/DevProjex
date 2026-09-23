@@ -582,7 +582,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			return true;
 		}
 		if (primaryStatus is ProfileDocumentLoadStatus.TemporarilyUnavailable or
-		    ProfileDocumentLoadStatus.FutureSchema)
+			ProfileDocumentLoadStatus.FutureSchema)
 			return false;
 
 		var backupStatus = LoadFromPath(fileSet.BackupPath, out var backupDb, out _);
@@ -593,7 +593,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			return TrySaveInternal(fileSet, backupDb);
 		}
 		if (backupStatus is ProfileDocumentLoadStatus.TemporarilyUnavailable or
-		    ProfileDocumentLoadStatus.FutureSchema)
+			ProfileDocumentLoadStatus.FutureSchema)
 			return false;
 
 		if (File.Exists(fileSet.PrimaryPath) || File.Exists(fileSet.BackupPath))

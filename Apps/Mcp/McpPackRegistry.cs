@@ -583,8 +583,8 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 			if (mode == FileMode.Open)
 				RejectLinkedPackFile(path);
 			if (expectedIdentity is { } expected &&
-			    (!FileSystemPathIdentity.TryReadHandle(stream.SafeFileHandle, out var actual) ||
-			     actual != expected))
+				(!FileSystemPathIdentity.TryReadHandle(stream.SafeFileHandle, out var actual) ||
+				 actual != expected))
 				throw new IOException("MCP stored-result file identity changed.");
 			if (!OperatingSystem.IsWindows())
 			{
@@ -609,8 +609,8 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 			return true;
 		}
 		catch (Exception exception) when (exception is
-			       IOException or UnauthorizedAccessException or System.Security.SecurityException or
-			       ArgumentException or NotSupportedException)
+				   IOException or UnauthorizedAccessException or System.Security.SecurityException or
+				   ArgumentException or NotSupportedException)
 		{
 			return false;
 		}

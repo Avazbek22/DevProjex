@@ -258,8 +258,8 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 			return summary;
 		}
 		catch (Exception exception) when (exception is
-			       IOException or UnauthorizedAccessException or System.Security.SecurityException or
-			       ArgumentException or NotSupportedException)
+				   IOException or UnauthorizedAccessException or System.Security.SecurityException or
+				   ArgumentException or NotSupportedException)
 		{
 			summaries.TryRemove(path, out _);
 			return null;
@@ -964,7 +964,7 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 		var paths = EnumerateSessionFiles();
 		// No verified subset can be evicted when every physical file is recent and under the cap.
 		if (paths.Length <= Retention.MaximumSessions &&
-		    paths.All(path => HasRecentPhysicalWriteTime(path, cutoff.UtcDateTime)))
+			paths.All(path => HasRecentPhysicalWriteTime(path, cutoff.UtcDateTime)))
 		{
 			return;
 		}

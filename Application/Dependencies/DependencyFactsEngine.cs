@@ -123,8 +123,8 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			_navigationCache[key] = _navigationCacheOrder.AddLast(entry);
 			_navigationCacheBytes += weight;
 			while ((_navigationCache.Count > MaximumCachedNavigationFiles ||
-			        _navigationCacheBytes > MaximumNavigationCacheBytes) &&
-			       _navigationCacheOrder.First is { Value: var oldest })
+					_navigationCacheBytes > MaximumNavigationCacheBytes) &&
+				   _navigationCacheOrder.First is { Value: var oldest })
 			{
 				_navigationCache.Remove(oldest.Key);
 				_navigationCacheOrder.RemoveFirst();
@@ -140,9 +140,9 @@ public sealed partial class DependencyFactsEngine : IDisposable
 	{
 		var strings = new RetainedStringEstimator();
 		return 160 + strings.Add(key.RelativePath) + strings.Add(key.ContentFingerprint) +
-		       declarations.Count * 8L + declarations.Sum(declaration =>
-			       96 + strings.Add(declaration.Name) + strings.Add(declaration.Owner) +
-			       strings.Add(declaration.ContentFingerprint));
+			   declarations.Count * 8L + declarations.Sum(declaration =>
+				   96 + strings.Add(declaration.Name) + strings.Add(declaration.Owner) +
+				   strings.Add(declaration.ContentFingerprint));
 	}
 	internal DependencyFactsCacheState CacheState
 	{
@@ -385,7 +385,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			try
 			{
 				probesCurrent = resolved.CanCachePhysicalFileProbes &&
-				                ArePhysicalFileProbesCurrent(resolved.PhysicalFileProbes, cancellationToken);
+								ArePhysicalFileProbesCurrent(resolved.PhysicalFileProbes, cancellationToken);
 			}
 			catch
 			{

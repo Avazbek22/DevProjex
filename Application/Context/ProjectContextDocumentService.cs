@@ -668,7 +668,7 @@ public sealed class ProjectContextDocumentService(
 		CancellationToken cancellationToken)
 	{
 		var sourceBacked = analyzer is not PreparedSecretFileContentAnalyzer prepared ||
-		                   !prepared.IsApplicationOwnedImmutableContent(path);
+						   !prepared.IsApplicationOwnedImmutableContent(path);
 		if (sourceBacked && ProjectSourcePathPolicy.ClassifyUnavailable(projectRoot, path) is { } unavailable)
 			return new FileContentMetricsResult(unavailable);
 		await using var snapshot = await analyzer

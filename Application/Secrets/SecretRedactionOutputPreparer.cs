@@ -317,7 +317,7 @@ public sealed class SecretRedactionOutputPreparer
 									result.Classification) with
 								{
 									EstimatedContent = result.Classification == FileContentClassification.TooLarge &&
-									                   result.Content is { IsEstimated: true, Content.Length: 0 }
+													   result.Content is { IsEstimated: true, Content.Length: 0 }
 										? result.Content
 										: null
 								};

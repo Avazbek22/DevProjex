@@ -3625,7 +3625,7 @@ internal sealed class DevProjexMcpTools(
 
 	private static int StorageCharacters(string relativePath, IReadOnlyList<McpSearchGroupLine> lines) =>
 		checked(lines.Sum(static line => line.Text.Length + Environment.NewLine.Length) +
-		        relativePath.Length + Environment.NewLine.Length);
+				relativePath.Length + Environment.NewLine.Length);
 
 	internal static IReadOnlyList<McpSearchRenderedGroup> BuildOrderedSearchGroups(
 		IReadOnlyList<McpSearchCandidate> candidates)

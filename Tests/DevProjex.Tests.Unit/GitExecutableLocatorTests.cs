@@ -140,7 +140,7 @@ public sealed class GitExecutableLocatorTests(ITestOutputHelper output)
 		{
 			Directory.CreateSymbolicLink(alias, target);
 			return Directory.Exists(alias) &&
-			       File.GetAttributes(alias).HasFlag(FileAttributes.ReparsePoint);
+				   File.GetAttributes(alias).HasFlag(FileAttributes.ReparsePoint);
 		}
 		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException)
 		{
@@ -173,7 +173,7 @@ public sealed class GitExecutableLocatorTests(ITestOutputHelper output)
 				return false;
 			}
 			return process.ExitCode == 0 && Directory.Exists(alias) &&
-			       File.GetAttributes(alias).HasFlag(FileAttributes.ReparsePoint);
+				   File.GetAttributes(alias).HasFlag(FileAttributes.ReparsePoint);
 		}
 		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception)
 		{
