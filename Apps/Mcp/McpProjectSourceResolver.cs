@@ -90,6 +90,9 @@ internal sealed class McpProjectSourceResolver : IDisposable
 				McpErrorCodes.InvalidArguments,
 				$"{McpErrorCodes.InvalidArguments}: 'branch' is not a valid Git branch name.");
 		}
+		using var redirectRestriction = _remoteHosts is null
+			? null
+			: GitHttpRedirectPolicy.BlockForCurrentOperation();
 
 		var cacheSourceIdentity = RepositoryUrlUtility.ToSafeSourceIdentity(project);
 		var key = new RemoteProjectKey(
@@ -138,7 +141,7 @@ internal sealed class McpProjectSourceResolver : IDisposable
 			return _remoteRoots.Values.ToArray();
 	}
 
-	public Task<string?> ResolveRemoteDiffRangeAsync(
+	public async Task<string?> ResolveRemoteDiffRangeAsync(
 		McpResolvedProjectSource source,
 		string repositoryUrl,
 		string diffRange,
@@ -146,14 +149,17 @@ internal sealed class McpProjectSourceResolver : IDisposable
 	{
 		ArgumentNullException.ThrowIfNull(source);
 		if (source.Identity?.SourceType != ProjectSourceType.GitClone)
-			return Task.FromResult<string?>(diffRange);
+			return diffRange;
 
-		return _remoteServices.Value.DiffRangeResolver.ResolveAsync(
+		using var redirectRestriction = _remoteHosts is null
+			? null
+			: GitHttpRedirectPolicy.BlockForCurrentOperation();
+		return await _remoteServices.Value.DiffRangeResolver.ResolveAsync(
 			source.Root,
 			repositoryUrl,
 			diffRange,
 			source.Identity.Branch,
-			cancellationToken);
+			cancellationToken).ConfigureAwait(false);
 	}
 
 	public void Dispose()
@@ -360,7 +366,8 @@ internal sealed class McpProjectSourceResolver : IDisposable
 			return false;
 		var colon = source.IndexOf(':');
 		return colon > 0 &&
-		       (source[..colon].Contains('@') || source[..colon].Contains('.'));
+		       (source[..colon].Contains('@') || source[..colon].Contains('.')) ||
+		       RepositoryUrlUtility.TryParseScpHost(source, out _);
 	}
 
 	private string? ResolveSessionCommitHash(IRepositoryCacheSession session) =>
@@ -389,13 +396,13 @@ internal sealed class McpProjectSourceResolver : IDisposable
 	internal static string? ResolveRemoteHost(string source)
 	{
 		var value = source.Trim();
+		if (RepositoryUrlUtility.TryParseScpHost(value, out var scpHost))
+			return scpHost;
 		if (Uri.TryCreate(value.Replace('\\', '/'), UriKind.Absolute, out var uri))
-			return uri.IsFile ? null : uri.IdnHost.ToLowerInvariant();
-		var at = value.LastIndexOf('@');
-		var colon = value.IndexOf(':', Math.Max(0, at + 1));
-		if (colon <= at + 1)
-			return null;
-		return value[(at + 1)..colon].Trim('[', ']').ToLowerInvariant();
+			return uri.IsFile || uri.IdnHost.Length == 0
+				? null
+				: uri.IdnHost.Trim('[', ']').ToLowerInvariant();
+		return null;
 	}
 
 	private int GetActiveRemoteSourceCountNoLock()

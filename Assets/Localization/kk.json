@@ -1,4 +1,11 @@
 {
+  "Mcp.Connect.ProjectEntryReplaceTitle": "DevProjex клиентінің баптауларын ауыстыру",
+  "Mcp.Connect.ProjectEntryReplacePrompt": "{0} үшін бар devprojex жазбасында жойылатын немесе үстінен жазылатын өрістер бар:\n{1}\n\nЖазба ауыстырылсын ба?",
+  "Mcp.Connect.ProjectEntryReplaceConfirm": "Ауыстыру",
+  "Mcp.Connect.ProjectEntryReplaceRequired": "{0} үшін бар devprojex жазбасында жойылатын немесе үстінен жазылатын өрістер бар: {1}. Растау үшін --replace параметрімен қайта іске қосыңыз.",
+  "Mcp.Connect.ProjectEntryReplaceCanceled": "Бар devprojex жазбасы өзгертілмеді.",
+  "Mcp.Connect.ProjectEntryFieldsReplaced": "Ауыстырылған өрістер: {0}.",
+  "Terminal.Option.McpReplace": "Cursor немесе VS Code үшін бар devprojex жазбасындағы қосымша өрістерді ауыстыруды растайды.",
   "Dialog.ProjectCopy.ZipReplace.Title": "Бар ZIP файлын ауыстыру керек пе?",
   "Dialog.ProjectCopy.ZipReplace.Message": "ZIP файлы бұрыннан бар:\n{0}\n\nАуыстыру керек пе?",
   "Dialog.StoreMigration.Title": "Store деректерін дайындау мүмкін болмады",

@@ -618,6 +618,39 @@ internal sealed partial class TerminalWorkspaceSession
 		McpConnectionRequest request,
 		CancellationTokenSource operationCts)
 	{
+		if (request.Client is McpConnectionClient.Cursor or McpConnectionClient.VsCode)
+		{
+			var initial = await _services.McpConnectionService
+				.ConnectAsync(request, operationCts.Token)
+				.ConfigureAwait(false);
+			if (initial.FieldsToReplace is not { Count: > 0 })
+				return initial;
+
+			var clientName = request.Client == McpConnectionClient.Cursor ? "Cursor" : "VS Code";
+			var entryReplacementConfirmed = await InvokeAsync(() => ShowChoice(
+				L("Mcp.Connect.ProjectEntryReplaceTitle"),
+				_services.Localization.Format(
+					"Mcp.Connect.ProjectEntryReplacePrompt",
+					clientName,
+					string.Join(", ", initial.FieldsToReplace.Select(SingleLineTextEscaping.Escape))),
+				L("Dialog.Cancel"),
+				L("Mcp.Connect.ProjectEntryReplaceConfirm")) == 1).ConfigureAwait(false);
+			if (!entryReplacementConfirmed)
+			{
+				return new McpConnectionResult(
+					McpConnectionStatus.InvalidConfiguration,
+					L("Mcp.Connect.ProjectEntryReplaceCanceled"));
+			}
+
+			return await _services.McpConnectionService.ConnectAsync(
+				request with
+				{
+					ReplaceExistingFields = true,
+					ExpectedExistingEntryFingerprint = initial.ExistingEntryFingerprint
+				},
+				operationCts.Token).ConfigureAwait(false);
+		}
+
 		if (request.Client != McpConnectionClient.Codex ||
 			_services.McpConnectionService is not IMcpConnectionReplacementService replacementService)
 		{

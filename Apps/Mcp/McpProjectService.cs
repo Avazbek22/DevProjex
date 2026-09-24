@@ -33,6 +33,7 @@ internal sealed class McpProjectService(
 	private long planMembershipBuildCount;
 	private long profileCatalogReadCount;
 	private long rootMonitorGeneration;
+	private long rootMonitorIdentity;
 	private int disposed;
 
 	/// <summary>The Git baseline every call starts from when it names no profile.</summary>
@@ -46,6 +47,78 @@ internal sealed class McpProjectService(
 	internal static bool IsPrivateDataHidden(ProjectContextPlan plan) => plan.Selection.HidePrivateData == true;
 	internal long PlanMembershipBuildCount => Volatile.Read(ref planMembershipBuildCount);
 	internal long ProfileCatalogReadCount => Volatile.Read(ref profileCatalogReadCount);
+
+	internal McpRootMonitorStamp? GetRootMonitorStamp(string projectRoot)
+	{
+		if (!CanMonitorRepositoryState(projectRoot))
+			return null;
+		var monitor = GetOrCreateRootMonitor(projectRoot);
+		return monitor is { IsReliable: true }
+			? new McpRootMonitorStamp(monitor.Identity, monitor.Revision)
+			: null;
+	}
+
+	internal static McpStoredProtectionContext? CaptureStoredProtection(
+		ProjectContextPlan plan,
+		McpStoredResultKind kind)
+	{
+		var profile = plan.Selection.ProfileSource;
+		return profile is null || profile.Kind == ProjectProfileSourceKind.Standard
+			? null
+			: new McpStoredProtectionContext(
+				plan.SourceRoot,
+				profile,
+				ProtectionFingerprint(plan.Selection),
+				kind);
+	}
+
+	internal async Task ValidateStoredProtectionAsync(
+		McpStoredProtectionContext? stored,
+		CancellationToken cancellationToken)
+	{
+		if (stored is null)
+			return;
+		ProjectSelectionSpec current;
+		try
+		{
+			current = await services.SelectionResolver.ResolveAsync(
+				stored.Root,
+				stored.Profile,
+				new ProjectSelectionSpec(HideSecrets: true, HidePrivateData: hidePrivateData),
+				cancellationToken).ConfigureAwait(false);
+		}
+		catch (Exception exception) when (exception is
+			ProjectContextValidationException or IOException or UnauthorizedAccessException or
+			System.Security.SecurityException or JsonException or NotSupportedException or ArgumentException)
+		{
+			throw new McpToolException(
+				"DPX-MCP-STORED-PROTECTION-UNAVAILABLE",
+				"DPX-MCP-STORED-PROTECTION-UNAVAILABLE: the current saved protection policy could not be verified. " +
+				"Retry read_pack after the saved selection is readable; do not use this stored result until then.");
+		}
+		if (StringComparer.Ordinal.Equals(stored.Fingerprint, ProtectionFingerprint(current)))
+			return;
+		var refreshTool = McpStoredResultAdvice.RefreshTool(McpToolSet.Full, stored.Kind);
+		throw new McpToolException(
+			"DPX-MCP-STORED-PROTECTION-CHANGED",
+			"DPX-MCP-STORED-PROTECTION-CHANGED: the saved protection policy changed after this result was stored. " +
+			$"Call {refreshTool} again before read_pack.");
+	}
+
+	private static string ProtectionFingerprint(ProjectSelectionSpec selection)
+	{
+		var value = new StringBuilder();
+		value.Append("hide-private-data:").Append(selection.HidePrivateData == true).Append(';');
+		foreach (var mark in ProjectSelectionMarkedSecretsResolver.Resolve(selection)
+					 .OrderBy(static item => item.H, StringComparer.Ordinal)
+					 .ThenBy(static item => item.RelativePath, StringComparer.Ordinal)
+					 .ThenBy(static item => item.SourceOffset))
+		{
+			value.Append(mark.H).Append('|').Append(mark.Key).Append('|').Append(mark.Length).Append('|')
+				.Append(mark.RelativePath).Append('|').Append(mark.SourceOffset).Append('|').Append(mark.Class).Append(';');
+		}
+		return value.ToString();
+	}
 
 	public async Task<ProjectContextPlan> BuildPlanAsync(
 		string? project,
@@ -191,6 +264,7 @@ internal sealed class McpProjectService(
 			profileReference.Kind != ProjectProfileSourceKind.Local || liveProfileRevision is not null;
 		// Explicit local profiles remain uncached because their store has no coherent revision.
 		// Live context supplies one after rereading the profile on every invocation.
+		var rootRevisionBeforePlan = liveContext is null ? null : GetRootMonitorStamp(projectRoot);
 		var plan = await BuildBasePlanAsync(
 			request,
 			includeOutputMetrics,
@@ -199,7 +273,11 @@ internal sealed class McpProjectService(
 				hasCoherentProfileRevision,
 			liveProfileRevision,
 			cancellationToken).ConfigureAwait(false);
-		liveContext?.RecordPlan(projectRoot, plan);
+		var rootRevisionAfterPlan = liveContext is null ? null : GetRootMonitorStamp(projectRoot);
+		liveContext?.RecordPlan(
+			projectRoot,
+			plan,
+			rootRevisionBeforePlan == rootRevisionAfterPlan ? rootRevisionAfterPlan : null);
 		if (allowNamedPathsOutsideSelection && liveContext is not null)
 		{
 			plan = await ExpandNamedPathsOutsideSelectionAsync(
@@ -567,7 +645,8 @@ internal sealed class McpProjectService(
 			}
 			var created = RootChangeMonitor.TryCreate(
 				normalizedRoot,
-				eventArgs => IsChangeInsideProvenIgnoredSubtree(normalizedRoot, eventArgs));
+				eventArgs => IsChangeInsideProvenIgnoredSubtree(normalizedRoot, eventArgs),
+				Interlocked.Increment(ref rootMonitorIdentity));
 			if (created is not null)
 			{
 				created.Touch(Interlocked.Increment(ref rootMonitorGeneration));
@@ -1917,10 +1996,14 @@ internal sealed class McpProjectService(
 
 		private readonly Func<FileSystemEventArgs, bool> ignoreChange;
 
-		private RootChangeMonitor(FileSystemWatcher watcher, Func<FileSystemEventArgs, bool> ignoreChange)
+		private RootChangeMonitor(
+			FileSystemWatcher watcher,
+			Func<FileSystemEventArgs, bool> ignoreChange,
+			long identity)
 		{
 			this.watcher = watcher;
 			this.ignoreChange = ignoreChange;
+			Identity = identity;
 			watcher.Changed += OnChanged;
 			watcher.Created += OnChanged;
 			watcher.Deleted += OnChanged;
@@ -1930,6 +2013,7 @@ internal sealed class McpProjectService(
 		}
 
 		public long Revision => Volatile.Read(ref revision);
+		public long Identity { get; }
 		public bool IsReliable => Volatile.Read(ref reliable) != 0;
 		public long LastAccessGeneration => Volatile.Read(ref lastAccessGeneration);
 
@@ -1937,7 +2021,8 @@ internal sealed class McpProjectService(
 
 		public static RootChangeMonitor? TryCreate(
 			string root,
-			Func<FileSystemEventArgs, bool> ignoreChange)
+			Func<FileSystemEventArgs, bool> ignoreChange,
+			long identity)
 		{
 			try
 			{
@@ -1950,7 +2035,7 @@ internal sealed class McpProjectService(
 								   NotifyFilters.Size |
 								   NotifyFilters.LastWrite |
 								   NotifyFilters.Security
-				}, ignoreChange);
+				}, ignoreChange, identity);
 			}
 			catch (Exception exception) when (exception is
 				   IOException or UnauthorizedAccessException or System.Security.SecurityException or
@@ -2007,3 +2092,5 @@ internal sealed class McpProjectService(
 }
 
 internal sealed record McpLocalProfileCatalog(IReadOnlySet<string> ProjectRoots, string Status);
+
+internal readonly record struct McpRootMonitorStamp(long Identity, long Revision);

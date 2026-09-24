@@ -1,4 +1,11 @@
 {
+  "Mcp.Connect.ProjectEntryReplaceTitle": "DevProjex-Clienteinstellungen ersetzen",
+  "Mcp.Connect.ProjectEntryReplacePrompt": "Der vorhandene devprojex-Eintrag für {0} enthält Felder, die entfernt oder überschrieben werden:\n{1}\n\nEintrag ersetzen?",
+  "Mcp.Connect.ProjectEntryReplaceConfirm": "Ersetzen",
+  "Mcp.Connect.ProjectEntryReplaceRequired": "Der vorhandene devprojex-Eintrag für {0} enthält Felder, die entfernt oder überschrieben werden: {1}. Führen Sie den Befehl mit --replace erneut aus, um dies zu bestätigen.",
+  "Mcp.Connect.ProjectEntryReplaceCanceled": "Der vorhandene devprojex-Eintrag blieb unverändert.",
+  "Mcp.Connect.ProjectEntryFieldsReplaced": "Ersetzte Felder: {0}.",
+  "Terminal.Option.McpReplace": "Bestätigt das Ersetzen zusätzlicher Felder in einem vorhandenen devprojex-Eintrag für Cursor oder VS Code.",
   "Dialog.ProjectCopy.ZipReplace.Title": "Vorhandene ZIP-Datei ersetzen?",
   "Dialog.ProjectCopy.ZipReplace.Message": "Die ZIP-Datei ist bereits vorhanden:\n{0}\n\nErsetzen?",
   "Dialog.StoreMigration.Title": "Store-Daten konnten nicht vorbereitet werden",

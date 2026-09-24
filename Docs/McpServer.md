@@ -201,8 +201,9 @@ devprojex mcp --root /absolute/path/to/project --allow-remote --remote-hosts git
 ```
 
 Without `--remote-hosts`, `--allow-remote` retains its unrestricted-host
-behavior. `list_projects.baseline.remote` reports both the network opt-in and
-the normalized active host list.
+behavior. With `--remote-hosts`, Git does not follow HTTP redirects.
+`list_projects.baseline.remote` reports both the network opt-in and the
+normalized active host list.
 
 The server baseline Git mode can be selected at startup with
 `--git-mode none|gitignore|tracked`. This applies only when a tool does not name
@@ -1686,11 +1687,15 @@ and writes a backup before the atomic update. It then checks the effective entry
 `codex mcp get devprojex --json`; a project `.codex/config.toml` override is reported
 and never rewritten.
 
-**Open in Cursor** atomically merges only `command` and `args` in the `devprojex`
-entry of `.cursor/mcp.json`; **Open in VS Code** does the same in `.vscode/mcp.json`,
-then each action opens the project through its URL scheme with its command-line
-launcher as a fallback. Fields such as `env`, `envFile`, `cwd`, `dev`, and
-`sandboxEnabled`, unrelated JSON properties, and other servers are retained. After
+**Open in Cursor** recreates the `devprojex` entry in `.cursor/mcp.json`;
+**Open in VS Code** does the same in `.vscode/mcp.json`, then each action opens
+the project through its URL scheme with its command-line launcher as a fallback.
+Only the existing `sandboxEnabled` and `dev` fields are preserved in that entry;
+other existing fields, including `env`, `envFile`, and `cwd`, may be replaced or
+removed. Desktop and Terminal Workspace list those fields and require **Replace**
+or **Cancel** before writing. The CLI refuses the update and lists the fields
+unless `--replace` is given. Unrelated JSON properties and other servers remain
+unchanged. After
 writing VS Code configuration, run **MCP: List Servers**, choose `devprojex`, select
 **Enable/Start**, and confirm workspace trust. Restart Cursor after its configuration
 is written. Valid VS Code JSONC with comments
@@ -1733,11 +1738,29 @@ always returns the manual configuration. Add `--print` to print the configuratio
 without discovering a client, starting a process, or writing a project file. Add
 `--open` to open the selected client after a successful registration; without it the
 CLI only registers the server and prints the result. The manual-only `json` client
-rejects `--open`.
+rejects `--open`. For Cursor and VS Code, `--replace` explicitly confirms replacing
+additional fields in an existing `devprojex` entry; without it, the CLI leaves
+that entry unchanged and prints the affected field names.
 
 ### Claude Code
 
-```shell
+In Windows PowerShell 5.1, run the two commands separately:
+
+```powershell
+cd "C:\Projects\My Project"
+claude mcp add --scope local devprojex -- devprojex mcp --root "C:\Projects\My Project"
+```
+
+In Windows Command Prompt, use `cd /d` so a root on another drive works:
+
+```bat
+cd /d "C:\Projects\My Project"
+claude mcp add --scope local devprojex -- devprojex mcp --root "C:\Projects\My Project"
+```
+
+On macOS or Linux:
+
+```sh
 cd "/absolute/path/to/project" && claude mcp add --scope local devprojex -- devprojex mcp --root "/absolute/path/to/project"
 ```
 

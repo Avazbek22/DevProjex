@@ -1,4 +1,11 @@
 {
+  "Mcp.Connect.ProjectEntryReplaceTitle": "Thay thế cài đặt ứng dụng DevProjex",
+  "Mcp.Connect.ProjectEntryReplacePrompt": "Mục devprojex hiện có cho {0} chứa các trường sẽ bị xóa hoặc ghi đè:\n{1}\n\nThay thế mục này?",
+  "Mcp.Connect.ProjectEntryReplaceConfirm": "Thay thế",
+  "Mcp.Connect.ProjectEntryReplaceRequired": "Mục devprojex hiện có cho {0} chứa các trường sẽ bị xóa hoặc ghi đè: {1}. Chạy lại với --replace để xác nhận.",
+  "Mcp.Connect.ProjectEntryReplaceCanceled": "Mục devprojex hiện có không bị thay đổi.",
+  "Mcp.Connect.ProjectEntryFieldsReplaced": "Các trường đã thay thế: {0}.",
+  "Terminal.Option.McpReplace": "Xác nhận thay thế các trường bổ sung trong mục devprojex hiện có của Cursor hoặc VS Code.",
   "Dialog.ProjectCopy.ZipReplace.Title": "Thay thế tệp ZIP hiện có?",
   "Dialog.ProjectCopy.ZipReplace.Message": "Tệp ZIP đã tồn tại:\n{0}\n\nThay thế?",
   "Dialog.StoreMigration.Title": "Không thể chuẩn bị dữ liệu Store",

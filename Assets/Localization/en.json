@@ -1,4 +1,11 @@
 {
+  "Mcp.Connect.ProjectEntryReplaceTitle": "Replace DevProjex client settings",
+  "Mcp.Connect.ProjectEntryReplacePrompt": "The existing devprojex entry for {0} has fields that will be removed or overwritten:\n{1}\n\nReplace it?",
+  "Mcp.Connect.ProjectEntryReplaceConfirm": "Replace",
+  "Mcp.Connect.ProjectEntryReplaceRequired": "The existing devprojex entry for {0} has fields that will be removed or overwritten: {1}. Run again with --replace to confirm.",
+  "Mcp.Connect.ProjectEntryReplaceCanceled": "The existing devprojex entry was left unchanged.",
+  "Mcp.Connect.ProjectEntryFieldsReplaced": "Replaced fields: {0}.",
+  "Terminal.Option.McpReplace": "Confirm replacement of additional fields in an existing Cursor or VS Code devprojex entry.",
   "Dialog.ProjectCopy.ZipReplace.Title": "Replace existing ZIP?",
   "Dialog.ProjectCopy.ZipReplace.Message": "The ZIP already exists:\n{0}\n\nReplace it?",
   "Dialog.StoreMigration.Title": "Store data could not be prepared",

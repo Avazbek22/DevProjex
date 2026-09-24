@@ -1,4 +1,11 @@
 {
+  "Mcp.Connect.ProjectEntryReplaceTitle": "Ganti pengaturan klien DevProjex",
+  "Mcp.Connect.ProjectEntryReplacePrompt": "Entri devprojex yang ada untuk {0} memiliki kolom yang akan dihapus atau ditimpa:\n{1}\n\nGanti entri ini?",
+  "Mcp.Connect.ProjectEntryReplaceConfirm": "Ganti",
+  "Mcp.Connect.ProjectEntryReplaceRequired": "Entri devprojex yang ada untuk {0} memiliki kolom yang akan dihapus atau ditimpa: {1}. Jalankan lagi dengan --replace untuk mengonfirmasi.",
+  "Mcp.Connect.ProjectEntryReplaceCanceled": "Entri devprojex yang ada tidak diubah.",
+  "Mcp.Connect.ProjectEntryFieldsReplaced": "Kolom yang diganti: {0}.",
+  "Terminal.Option.McpReplace": "Konfirmasi penggantian kolom tambahan pada entri devprojex Cursor atau VS Code yang sudah ada.",
   "Dialog.ProjectCopy.ZipReplace.Title": "Ganti ZIP yang ada?",
   "Dialog.ProjectCopy.ZipReplace.Message": "File ZIP sudah ada:\n{0}\n\nGanti?",
   "Dialog.StoreMigration.Title": "Data Store tidak dapat disiapkan",

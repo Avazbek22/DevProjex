@@ -1,4 +1,11 @@
 {
+  "Mcp.Connect.ProjectEntryReplaceTitle": "DevProjex 클라이언트 설정 바꾸기",
+  "Mcp.Connect.ProjectEntryReplacePrompt": "{0}의 기존 devprojex 항목에 제거되거나 덮어써질 필드가 있습니다:\n{1}\n\n항목을 바꾸시겠습니까?",
+  "Mcp.Connect.ProjectEntryReplaceConfirm": "바꾸기",
+  "Mcp.Connect.ProjectEntryReplaceRequired": "{0}의 기존 devprojex 항목에 제거되거나 덮어써질 필드가 있습니다: {1}. 확인하려면 --replace 옵션으로 다시 실행하세요.",
+  "Mcp.Connect.ProjectEntryReplaceCanceled": "기존 devprojex 항목은 변경되지 않았습니다.",
+  "Mcp.Connect.ProjectEntryFieldsReplaced": "바뀐 필드: {0}.",
+  "Terminal.Option.McpReplace": "기존 Cursor 또는 VS Code devprojex 항목의 추가 필드를 바꾸는 작업을 확인합니다.",
   "Dialog.ProjectCopy.ZipReplace.Title": "기존 ZIP 파일을 바꾸시겠습니까?",
   "Dialog.ProjectCopy.ZipReplace.Message": "ZIP 파일이 이미 있습니다:\n{0}\n\n바꾸시겠습니까?",
   "Dialog.StoreMigration.Title": "Store 데이터를 준비할 수 없습니다",

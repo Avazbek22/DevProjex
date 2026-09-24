@@ -1,4 +1,11 @@
 {
+  "Mcp.Connect.ProjectEntryReplaceTitle": "Zastąp ustawienia klienta DevProjex",
+  "Mcp.Connect.ProjectEntryReplacePrompt": "Istniejący wpis devprojex dla {0} zawiera pola, które zostaną usunięte lub nadpisane:\n{1}\n\nZastąpić wpis?",
+  "Mcp.Connect.ProjectEntryReplaceConfirm": "Zastąp",
+  "Mcp.Connect.ProjectEntryReplaceRequired": "Istniejący wpis devprojex dla {0} zawiera pola, które zostaną usunięte lub nadpisane: {1}. Uruchom ponownie z opcją --replace, aby potwierdzić.",
+  "Mcp.Connect.ProjectEntryReplaceCanceled": "Istniejący wpis devprojex pozostał bez zmian.",
+  "Mcp.Connect.ProjectEntryFieldsReplaced": "Zastąpione pola: {0}.",
+  "Terminal.Option.McpReplace": "Potwierdza zastąpienie dodatkowych pól w istniejącym wpisie devprojex dla Cursor lub VS Code.",
   "Dialog.ProjectCopy.ZipReplace.Title": "Zastąpić istniejący plik ZIP?",
   "Dialog.ProjectCopy.ZipReplace.Message": "Plik ZIP już istnieje:\n{0}\n\nZastąpić go?",
   "Dialog.StoreMigration.Title": "Nie można przygotować danych Store",

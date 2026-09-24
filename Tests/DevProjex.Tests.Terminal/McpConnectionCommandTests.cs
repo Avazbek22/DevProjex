@@ -1,5 +1,6 @@
 using DevProjex.Kernel.Abstractions;
 using DevProjex.Infrastructure.ResourceStore;
+using DevProjex.Infrastructure.TerminalCommands;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -95,6 +96,39 @@ public sealed class McpConnectionCommandTests
 		Assert.DoesNotContain("get: old registration", output, StringComparison.Ordinal);
 		Assert.DoesNotContain("remove: removed", output, StringComparison.Ordinal);
 		Assert.DoesNotContain("add: connected", output, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task CursorConnectionRequiresReplaceFlagBeforeDiscardingAdditionalFields()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		const string original = """
+			{
+			  "mcpServers": {
+			    "devprojex": {
+			      "command": "old",
+			      "args": [],
+			      "envFile": ".env",
+			      "cwd": "keep-me"
+			    }
+			  }
+			}
+			""";
+		var configurationPath = workspace.WriteFile(Path.Combine("project", ".cursor", "mcp.json"), original);
+		var service = new McpConnectionService(new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En));
+		var arguments = new[] { "mcp", "connect", project, "--client", "cursor", "--language", "en" };
+
+		var rejected = await RunAsync(workspace, service, arguments);
+		Assert.Equal(CommandLineExitCodes.RuntimeError, rejected.ExitCode);
+		Assert.Contains("cwd, envFile", rejected.Environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("--replace", rejected.Environment.StandardError, StringComparison.Ordinal);
+		Assert.Equal(original, await File.ReadAllTextAsync(configurationPath, TestContext.Current.CancellationToken));
+
+		var replaced = await RunAsync(workspace, service, [.. arguments, "--replace"]);
+		Assert.Equal(CommandLineExitCodes.Success, replaced.ExitCode);
+		Assert.Contains("Replaced fields: cwd, envFile.", replaced.Environment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("envFile", await File.ReadAllTextAsync(configurationPath, TestContext.Current.CancellationToken));
 	}
 
 	[Fact]
@@ -396,7 +430,7 @@ public sealed class McpConnectionCommandTests
 
 	private static async Task<CommandRun> RunAsync(
 		TemporaryDirectory workspace,
-		StubMcpConnectionService connectionService,
+		IMcpConnectionService connectionService,
 		IReadOnlyList<string> arguments,
 		StubMcpClientLaunchService? launchService = null)
 	{

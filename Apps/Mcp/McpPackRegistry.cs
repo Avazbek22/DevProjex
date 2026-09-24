@@ -242,6 +242,22 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 			return _packs.TryGetValue(packId, out var entry) ? entry.LiveContext : null;
 	}
 
+	internal void RecordProtectionContext(string packId, McpStoredProtectionContext context)
+	{
+		ArgumentNullException.ThrowIfNull(context);
+		lock (_sync)
+		{
+			if (_packs.TryGetValue(packId, out var entry))
+				entry.ProtectionContext = context;
+		}
+	}
+
+	internal McpStoredProtectionContext? GetProtectionContext(string packId)
+	{
+		lock (_sync)
+			return _packs.TryGetValue(packId, out var entry) ? entry.ProtectionContext : null;
+	}
+
 	internal void RecordJournalContext(string packId, McpStoredJournalContext context)
 	{
 		ArgumentNullException.ThrowIfNull(context);
@@ -784,6 +800,7 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 		public McpStoredResultKind Kind { get; } = kind;
 		public FileSystemHandleIdentity FileIdentity { get; } = fileIdentity;
 		public McpStoredResultContext? LiveContext { get; set; }
+		public McpStoredProtectionContext? ProtectionContext { get; set; }
 		public McpStoredJournalContext? JournalContext { get; set; }
 	}
 
@@ -1047,6 +1064,12 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 internal sealed record McpStoredResultContext(
 	string Root,
 	int Revision,
+	McpStoredResultKind Kind);
+
+internal sealed record McpStoredProtectionContext(
+	string Root,
+	ProjectProfileReference Profile,
+	string Fingerprint,
 	McpStoredResultKind Kind);
 
 internal sealed class McpStoredJournalContext

@@ -1,4 +1,11 @@
 {
+  "Mcp.Connect.ProjectEntryReplaceTitle": "Sostituisci le impostazioni del client DevProjex",
+  "Mcp.Connect.ProjectEntryReplacePrompt": "La voce devprojex esistente per {0} contiene campi che verranno rimossi o sovrascritti:\n{1}\n\nSostituirla?",
+  "Mcp.Connect.ProjectEntryReplaceConfirm": "Sostituisci",
+  "Mcp.Connect.ProjectEntryReplaceRequired": "La voce devprojex esistente per {0} contiene campi che verranno rimossi o sovrascritti: {1}. Esegui di nuovo con --replace per confermare.",
+  "Mcp.Connect.ProjectEntryReplaceCanceled": "La voce devprojex esistente non è stata modificata.",
+  "Mcp.Connect.ProjectEntryFieldsReplaced": "Campi sostituiti: {0}.",
+  "Terminal.Option.McpReplace": "Conferma la sostituzione di campi aggiuntivi in una voce devprojex esistente di Cursor o VS Code.",
   "Dialog.ProjectCopy.ZipReplace.Title": "Sostituire il file ZIP esistente?",
   "Dialog.ProjectCopy.ZipReplace.Message": "Il file ZIP esiste già:\n{0}\n\nSostituirlo?",
   "Dialog.StoreMigration.Title": "Impossibile preparare i dati dello Store",

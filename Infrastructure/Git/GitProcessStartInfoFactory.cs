@@ -136,6 +136,8 @@ internal static class GitProcessStartInfoFactory
 				break;
 			case GitProcessProfile.ExplicitNetwork:
 				AddConfig(startInfo, $"protocol.allow={operation.AllowedProtocols}");
+				if (GitHttpRedirectPolicy.BlocksRedirects)
+					AddConfig(startInfo, "http.followRedirects=false");
 				AddConfig(startInfo, "http.extraHeader=");
 				AddConfig(startInfo, "http.cookieFile=");
 				if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("GIT_SSL_CAINFO")))

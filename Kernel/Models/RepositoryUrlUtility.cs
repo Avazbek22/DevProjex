@@ -262,6 +262,18 @@ public static class RepositoryUrlUtility
 		return TryParseScpSyntax(normalized, out _);
 	}
 
+	public static bool TryParseScpHost(string source, out string host)
+	{
+		if (TryParseScpSyntax(source, out var scp))
+		{
+			host = scp.Host.Trim('[', ']').ToLowerInvariant();
+			return true;
+		}
+
+		host = string.Empty;
+		return false;
+	}
+
 	private static string BuildVersionedHostPathKey(string host, int port, string path)
 	{
 		var normalizedHost = host.Trim().ToLowerInvariant();
@@ -401,12 +413,19 @@ public static class RepositoryUrlUtility
 		if (value.Contains("://", StringComparison.Ordinal))
 			return false;
 
-		var colonIndex = value.IndexOf(':');
+		var openingBracket = value.IndexOf('[');
+		var closingBracket = openingBracket >= 0
+			? value.IndexOf(']', openingBracket + 1)
+			: -1;
+		var colonIndex = closingBracket >= 0 && closingBracket + 1 < value.Length &&
+		                 value[closingBracket + 1] == ':'
+			? closingBracket + 1
+			: value.IndexOf(':');
 		if (colonIndex <= 0 || colonIndex == value.Length - 1)
 			return false;
 
 		var authority = value[..colonIndex];
-		if (!authority.Contains('@') && !authority.Contains('.'))
+		if (!authority.Contains('@') && !authority.Contains('.') && !authority.StartsWith('['))
 			return false;
 
 		var atIndex = authority.LastIndexOf('@');
@@ -414,6 +433,11 @@ public static class RepositoryUrlUtility
 		var host = atIndex >= 0 ? authority[(atIndex + 1)..] : authority;
 		if (host.Length == 0)
 			return false;
+		if (host.StartsWith('[') &&
+		    (!host.EndsWith(']') || Uri.CheckHostName(host[1..^1]) != UriHostNameType.IPv6))
+		{
+			return false;
+		}
 
 		var path = value[(colonIndex + 1)..].TrimStart('/');
 		if (path.Length == 0)

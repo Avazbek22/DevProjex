@@ -1,4 +1,11 @@
 {
+  "Mcp.Connect.ProjectEntryReplaceTitle": "Замінити налаштування клієнта DevProjex",
+  "Mcp.Connect.ProjectEntryReplacePrompt": "У наявному записі devprojex для {0} є поля, які буде видалено або перезаписано:\n{1}\n\nЗамінити запис?",
+  "Mcp.Connect.ProjectEntryReplaceConfirm": "Замінити",
+  "Mcp.Connect.ProjectEntryReplaceRequired": "У наявному записі devprojex для {0} є поля, які буде видалено або перезаписано: {1}. Повторіть команду з --replace для підтвердження.",
+  "Mcp.Connect.ProjectEntryReplaceCanceled": "Наявний запис devprojex залишився без змін.",
+  "Mcp.Connect.ProjectEntryFieldsReplaced": "Замінені поля: {0}.",
+  "Terminal.Option.McpReplace": "Підтвердити заміну додаткових полів у наявному записі devprojex для Cursor або VS Code.",
   "Dialog.ProjectCopy.ZipReplace.Title": "Замінити наявний ZIP-архів?",
   "Dialog.ProjectCopy.ZipReplace.Message": "ZIP-архів уже існує:\n{0}\n\nЗамінити його?",
   "Dialog.StoreMigration.Title": "Не вдалося підготувати дані Store",
