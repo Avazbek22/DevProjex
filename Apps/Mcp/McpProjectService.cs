@@ -110,9 +110,9 @@ internal sealed class McpProjectService(
 		var value = new StringBuilder();
 		value.Append("hide-private-data:").Append(selection.HidePrivateData == true).Append(';');
 		foreach (var mark in ProjectSelectionMarkedSecretsResolver.Resolve(selection)
-			         .OrderBy(static item => item.H, StringComparer.Ordinal)
-			         .ThenBy(static item => item.RelativePath, StringComparer.Ordinal)
-			         .ThenBy(static item => item.SourceOffset))
+					 .OrderBy(static item => item.H, StringComparer.Ordinal)
+					 .ThenBy(static item => item.RelativePath, StringComparer.Ordinal)
+					 .ThenBy(static item => item.SourceOffset))
 		{
 			value.Append(mark.H).Append('|').Append(mark.Key).Append('|').Append(mark.Length).Append('|')
 				.Append(mark.RelativePath).Append('|').Append(mark.SourceOffset).Append('|').Append(mark.Class).Append(';');

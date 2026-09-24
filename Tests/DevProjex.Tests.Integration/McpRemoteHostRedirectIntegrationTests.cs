@@ -152,7 +152,7 @@ public sealed class McpRemoteHostRedirectIntegrationTests
 				var buffer = headers.GetBuffer();
 				var length = (int)headers.Length;
 				if (length >= 4 && buffer[length - 4] == '\r' && buffer[length - 3] == '\n' &&
-				    buffer[length - 2] == '\r' && buffer[length - 1] == '\n')
+					buffer[length - 2] == '\r' && buffer[length - 1] == '\n')
 					break;
 			}
 			return Encoding.ASCII.GetString(headers.GetBuffer(), 0, (int)headers.Length);

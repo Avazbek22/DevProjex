@@ -142,7 +142,7 @@ internal sealed class DevProjexMcpTools(
 					var revision = liveContext.RefreshProfile(root);
 					var rootRevision = Projects.GetRootMonitorStamp(root);
 					if (rootRevision is not null &&
-					    liveContext.HasSelectedFileCount(root, revision, rootRevision))
+						liveContext.HasSelectedFileCount(root, revision, rootRevision))
 						continue;
 					_ = await Projects.BuildPlanAsync(
 						root,
