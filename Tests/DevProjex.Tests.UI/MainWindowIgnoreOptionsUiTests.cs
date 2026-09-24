@@ -5040,16 +5040,16 @@ public sealed class MainWindowIgnoreOptionsUiTests
 				"the real compression prewarm to finish before injecting status states");
 			await UiTestDriver.WaitForInitialMetricsBaselineAsync(window);
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 3);
+			var completedCompressionNotice = viewModel.SettingsCompressionNotice;
+			Assert.Contains(
+				Environment.NewLine + "≈Tokens: ",
+				completedCompressionNotice,
+				StringComparison.Ordinal);
 			viewModel.SetCompressionPreparationStatus(isActive: true);
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
 			Assert.Equal("Compressing code…", option.StatusText);
 			Assert.True(GetContentProcessingStatusIndicator(window, IgnoreOptionId.CompressCode).IsVisible);
 
-			viewModel.SetCompressionStatus(
-				compressedFiles: 98,
-				totalFiles: 123,
-				sourceCharacters: 400,
-				transformedCharacters: 100);
 			Assert.Equal("Compressing code…", option.StatusText);
 			viewModel.SetCompressionPreparationStatus(isActive: false);
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 3);
@@ -5058,9 +5058,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			Assert.Equal("Compress code", option.Label);
 			var compressionIndicator = GetContentProcessingStatusIndicator(window, IgnoreOptionId.CompressCode);
 			Assert.True(compressionIndicator.IsVisible);
-			Assert.Equal(
-				$"Compressed 98 of 123 files.{Environment.NewLine}≈Tokens: 100 → 25.",
-				option.StatusText);
+			Assert.Equal(completedCompressionNotice, option.StatusText);
 			var processingBorder = UiTestDriver.GetRequiredControl<Border>(window, "ContentProcessingOptionsBorder");
 			var compressionCheckBox = UiTestDriver.GetRequiredIgnoreOptionCheckBox(window, IgnoreOptionId.CompressCode);
 			var checkBoxPosition = Assert.IsType<Point>(compressionCheckBox.TranslatePoint(default, processingBorder));

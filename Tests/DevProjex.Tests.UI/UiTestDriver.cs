@@ -135,7 +135,12 @@ internal static class UiTestDriver
         // teardown does not race app work that would still be running for a real user.
         await WaitForSelectionRefreshIdleAsync(window, TimeSpan.FromSeconds(10));
         window.Close();
-        await window.ShutdownCompletion.WaitAsync(TimeSpan.FromSeconds(10));
+        await WaitForConditionAsync(
+            window,
+            () => window.ShutdownCompletion.IsCompleted,
+            "window shutdown",
+            TimeSpan.FromSeconds(10));
+        await window.ShutdownCompletion;
         await WaitForSettledFramesAsync(frameCount: 2);
         UntrackTopLevelWindow(window);
         if (cleanupAppData)
