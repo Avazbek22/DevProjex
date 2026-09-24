@@ -51,6 +51,10 @@ jobs:
       - name: Test npm launcher contract
         run: node --test Packaging/Npm/test/*.test.js
 
+      - name: Test bounded headless gate scanning
+        shell: pwsh
+        run: ./Scripts/ci/Test-HeadlessGateStreaming.ps1
+
       - name: Test resumable package publication
         shell: pwsh
         run: ./Scripts/ci/Test-ResumableHeadlessPublish.ps1
