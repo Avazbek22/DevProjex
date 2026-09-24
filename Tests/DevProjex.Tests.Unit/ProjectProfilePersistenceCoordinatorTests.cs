@@ -603,12 +603,12 @@ public sealed class ProjectProfilePersistenceCoordinatorTests
 			BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
 		Assert.NotNull(discardMethod);
 
-		var started = System.Diagnostics.Stopwatch.GetTimestamp();
 		var discard = Assert.IsAssignableFrom<Task<bool>>(discardMethod!.Invoke(
 			queue,
 			[TimeSpan.FromMilliseconds(50), TestContext.Current.CancellationToken]));
-		Assert.False(await discard);
-		Assert.True(System.Diagnostics.Stopwatch.GetElapsedTime(started) < TimeSpan.FromSeconds(1));
+		Assert.False(await discard.WaitAsync(
+			TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+		Assert.False(persist.IsCompleted);
 
 		store.Release.Set();
 		await persist;

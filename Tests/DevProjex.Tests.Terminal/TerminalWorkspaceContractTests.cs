@@ -2104,8 +2104,12 @@ public sealed class TerminalWorkspaceContractTests
 		public void Report(T value) => report(value);
 	}
 
-	private static bool TryRunGit(string workingDirectory, params string[] arguments)
+	private static bool TryRunGit(string workingDirectory, params string[] arguments) =>
+		TryRunGitAsync(workingDirectory, arguments).GetAwaiter().GetResult();
+
+	private static async Task<bool> TryRunGitAsync(string workingDirectory, string[] arguments)
 	{
+		var command = $"git {string.Join(" ", arguments)}";
 		try
 		{
 			var startInfo = new ProcessStartInfo("git")
@@ -2120,17 +2124,34 @@ public sealed class TerminalWorkspaceContractTests
 				startInfo.ArgumentList.Add(argument);
 			using var process = Process.Start(startInfo);
 			if (process is null)
-				return false;
-			if (!process.WaitForExit(10_000))
 			{
-				process.Kill(entireProcessTree: true);
+				TestContext.Current.TestOutputHelper?.WriteLine($"{command} did not start.");
 				return false;
 			}
-			return process.ExitCode == 0;
+			using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+			timeout.CancelAfter(ProcessSafetyTimeout);
+			var outputTask = process.StandardOutput.ReadToEndAsync(timeout.Token);
+			var errorTask = process.StandardError.ReadToEndAsync(timeout.Token);
+			await ExternalProcessLifetime.WaitForExitOrTerminateAsync(process, timeout.Token).ConfigureAwait(false);
+			var output = await outputTask.WaitAsync(timeout.Token).ConfigureAwait(false);
+			var error = await errorTask.WaitAsync(timeout.Token).ConfigureAwait(false);
+			if (process.ExitCode != 0)
+			{
+				TestContext.Current.TestOutputHelper?.WriteLine(
+					$"{command} exited with code {process.ExitCode}. stdout: {output} stderr: {error}");
+				return false;
+			}
+			return true;
 		}
 		catch (Exception exception) when (
-			exception is InvalidOperationException or IOException or UnauthorizedAccessException)
+			exception is System.ComponentModel.Win32Exception or
+				InvalidOperationException or
+				IOException or
+				UnauthorizedAccessException or
+				OperationCanceledException)
 		{
+			TestContext.Current.TestOutputHelper?.WriteLine(
+				$"{command} failed or timed out after {ProcessSafetyTimeout}: {exception.Message}");
 			return false;
 		}
 	}
