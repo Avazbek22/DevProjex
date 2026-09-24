@@ -1,4 +1,11 @@
 {
+  "Mcp.Connect.ProjectEntryReplaceTitle": "DevProjex mijoz sozlamalarini almashtirish",
+  "Mcp.Connect.ProjectEntryReplacePrompt": "{0} uchun mavjud devprojex yozuvida o‘chiriladigan yoki ustiga yoziladigan maydonlar bor:\n{1}\n\nYozuv almashtirilsinmi?",
+  "Mcp.Connect.ProjectEntryReplaceConfirm": "Almashtirish",
+  "Mcp.Connect.ProjectEntryReplaceRequired": "{0} uchun mavjud devprojex yozuvida o‘chiriladigan yoki ustiga yoziladigan maydonlar bor: {1}. Tasdiqlash uchun --replace bilan qayta ishga tushiring.",
+  "Mcp.Connect.ProjectEntryReplaceCanceled": "Mavjud devprojex yozuvi o‘zgartirilmadi.",
+  "Mcp.Connect.ProjectEntryFieldsReplaced": "Almashtirilgan maydonlar: {0}.",
+  "Terminal.Option.McpReplace": "Cursor yoki VS Code uchun mavjud devprojex yozuvidagi qo‘shimcha maydonlarni almashtirishni tasdiqlaydi.",
   "Dialog.ProjectCopy.ZipReplace.Title": "Mavjud ZIP fayl almashtirilsinmi?",
   "Dialog.ProjectCopy.ZipReplace.Message": "ZIP fayl allaqachon mavjud:\n{0}\n\nUni almashtirasizmi?",
   "Dialog.StoreMigration.Title": "Store maʼlumotlarini tayyorlab boʻlmadi",

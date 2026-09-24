@@ -1,4 +1,11 @@
 {
+  "Mcp.Connect.ProjectEntryReplaceTitle": "替换 DevProjex 客户端设置",
+  "Mcp.Connect.ProjectEntryReplacePrompt": "{0} 的现有 devprojex 条目包含将被删除或覆盖的字段：\n{1}\n\n替换该条目？",
+  "Mcp.Connect.ProjectEntryReplaceConfirm": "替换",
+  "Mcp.Connect.ProjectEntryReplaceRequired": "{0} 的现有 devprojex 条目包含将被删除或覆盖的字段：{1}。请使用 --replace 重新运行以确认。",
+  "Mcp.Connect.ProjectEntryReplaceCanceled": "现有 devprojex 条目未更改。",
+  "Mcp.Connect.ProjectEntryFieldsReplaced": "已替换的字段：{0}。",
+  "Terminal.Option.McpReplace": "确认替换现有 Cursor 或 VS Code devprojex 条目中的其他字段。",
   "Dialog.ProjectCopy.ZipReplace.Title": "替换现有 ZIP 文件？",
   "Dialog.ProjectCopy.ZipReplace.Message": "ZIP 文件已存在：\n{0}\n\n要替换吗？",
   "Dialog.StoreMigration.Title": "无法准备 Store 数据",

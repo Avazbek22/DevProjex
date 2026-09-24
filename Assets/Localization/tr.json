@@ -1,4 +1,11 @@
 {
+  "Mcp.Connect.ProjectEntryReplaceTitle": "DevProjex istemci ayarlarını değiştir",
+  "Mcp.Connect.ProjectEntryReplacePrompt": "{0} için mevcut devprojex girdisinde kaldırılacak veya üzerine yazılacak alanlar var:\n{1}\n\nGirdi değiştirilsin mi?",
+  "Mcp.Connect.ProjectEntryReplaceConfirm": "Değiştir",
+  "Mcp.Connect.ProjectEntryReplaceRequired": "{0} için mevcut devprojex girdisinde kaldırılacak veya üzerine yazılacak alanlar var: {1}. Onaylamak için --replace ile yeniden çalıştırın.",
+  "Mcp.Connect.ProjectEntryReplaceCanceled": "Mevcut devprojex girdisi değiştirilmedi.",
+  "Mcp.Connect.ProjectEntryFieldsReplaced": "Değiştirilen alanlar: {0}.",
+  "Terminal.Option.McpReplace": "Mevcut bir Cursor veya VS Code devprojex girdisindeki ek alanların değiştirilmesini onaylar.",
   "Dialog.ProjectCopy.ZipReplace.Title": "Mevcut ZIP değiştirilsin mi?",
   "Dialog.ProjectCopy.ZipReplace.Message": "ZIP dosyası zaten var:\n{0}\n\nDeğiştirilsin mi?",
   "Dialog.StoreMigration.Title": "Store verileri hazırlanamadı",

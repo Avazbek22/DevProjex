@@ -8,14 +8,17 @@ public enum McpConnectionStatus
 	ClientNotFound,
 	InvalidConfiguration,
 	ProcessFailed,
-	TimedOut
+	TimedOut,
+	Canceled
 }
 
 public sealed record McpConnectionRequest(
 	McpConnectionClient Client,
 	McpConnectionMode Mode,
 	string ExecutablePath,
-	string ProjectRoot);
+	string ProjectRoot,
+	bool ReplaceExistingFields = false,
+	string? ExpectedExistingEntryFingerprint = null);
 
 public sealed record McpConnectionResult(
 	McpConnectionStatus Status,
@@ -25,7 +28,9 @@ public sealed record McpConnectionResult(
 	IReadOnlyList<string>? SuggestedConfigPaths = null,
 	string? CommandOutput = null,
 	string? TargetPath = null,
-	bool Replaced = false)
+	bool Replaced = false,
+	IReadOnlyList<string>? FieldsToReplace = null,
+	string? ExistingEntryFingerprint = null)
 {
 	public bool Succeeded => Status is McpConnectionStatus.Connected or McpConnectionStatus.Updated;
 

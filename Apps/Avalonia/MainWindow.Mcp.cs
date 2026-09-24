@@ -75,6 +75,8 @@ public partial class MainWindow
                 cancellationToken);
             if (result is null)
                 return;
+            if (result.Status == McpConnectionStatus.Canceled)
+                return;
             cancellationToken.ThrowIfCancellationRequested();
             if (!CanPresentMcpDialog(windowLifetime))
                 return;
@@ -154,6 +156,47 @@ public partial class MainWindow
         McpConnectionRequest request,
         CancellationToken cancellationToken)
     {
+        if (request.Client is McpConnectionClient.Cursor or McpConnectionClient.VsCode)
+        {
+            var initial = await _mcpConnectionService.ConnectAsync(request, cancellationToken);
+            if (initial.FieldsToReplace is not { Count: > 0 })
+                return initial;
+
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_windowLifetimeCts is not { } projectWindowLifetime ||
+                !CanPresentMcpDialog(projectWindowLifetime))
+            {
+                return new McpConnectionResult(McpConnectionStatus.Canceled, string.Empty);
+            }
+
+            var entryReplacementConfirmed = await MessageDialog.ShowScrollableConfirmationAsync(
+                this,
+                _localization["Mcp.Connect.ProjectEntryReplaceTitle"],
+                _localization.Format(
+                    "Mcp.Connect.ProjectEntryReplacePrompt",
+                    GetMcpClientDisplayName(request.Client),
+                    string.Join(", ", initial.FieldsToReplace.Select(SingleLineTextEscaping.Escape))),
+                _localization["Mcp.Connect.ProjectEntryReplaceConfirm"],
+                _localization["Dialog.Cancel"]);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!CanPresentMcpDialog(projectWindowLifetime))
+                return new McpConnectionResult(McpConnectionStatus.Canceled, string.Empty);
+            if (!entryReplacementConfirmed)
+            {
+                return new McpConnectionResult(
+                    McpConnectionStatus.Canceled,
+                    _localization["Mcp.Connect.ProjectEntryReplaceCanceled"]);
+            }
+
+            return await _mcpConnectionService.ConnectAsync(
+                request with
+                {
+                    ReplaceExistingFields = true,
+                    ExpectedExistingEntryFingerprint = initial.ExistingEntryFingerprint
+                },
+                cancellationToken);
+        }
+
         if (request.Client != McpConnectionClient.Codex ||
             _mcpConnectionService is not IMcpConnectionReplacementService replacementService)
         {

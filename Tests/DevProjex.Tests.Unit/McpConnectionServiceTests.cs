@@ -1054,6 +1054,124 @@ public sealed class McpConnectionServiceTests
 	[Theory]
 	[InlineData((int)McpConnectionClient.Cursor, ".cursor", "mcpServers")]
 	[InlineData((int)McpConnectionClient.VsCode, ".vscode", "servers")]
+	public async Task Connect_ProjectClientRefusesToDiscardAdditionalFieldsWithoutConfirmation(
+		int clientValue,
+		string directory,
+		string container)
+	{
+		using var project = new TemporaryDirectory();
+		var original = $$"""
+			{
+			  "{{container}}": {
+			    "devprojex": {
+			      "command": "old",
+			      "args": [],
+			      "envFile": ".env",
+			      "cwd": "keep-me"
+			    }
+			  }
+			}
+			""";
+		var targetPath = project.CreateFile(Path.Combine(directory, "mcp.json"), original);
+		var service = CreateService(new McpClientExecutableLocator(), new RecordingProcessRunner());
+		var executable = Path.Combine(project.Path, "DevProjex.exe");
+
+		var result = await service.ConnectAsync(
+			Request((McpConnectionClient)clientValue, McpConnectionMode.Live, executable, project.Path),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(McpConnectionStatus.InvalidConfiguration, result.Status);
+		Assert.Contains("envFile", result.UserMessage, StringComparison.Ordinal);
+		Assert.Contains("cwd", result.UserMessage, StringComparison.Ordinal);
+		Assert.Equal(original, await File.ReadAllTextAsync(targetPath, TestContext.Current.CancellationToken));
+	}
+
+	[Fact]
+	public async Task Connect_ProjectClientRefusesConfirmationAfterEntryChanges()
+	{
+		using var project = new TemporaryDirectory();
+		const string original = """
+			{"mcpServers":{"devprojex":{"command":"old","args":[],"cwd":"first"}}}
+			""";
+		var targetPath = project.CreateFile(Path.Combine(".cursor", "mcp.json"), original);
+		var service = CreateService(new McpClientExecutableLocator(), new RecordingProcessRunner());
+		var request = Request(
+			McpConnectionClient.Cursor,
+			McpConnectionMode.Live,
+			Path.Combine(project.Path, "DevProjex.exe"),
+			project.Path);
+		var inspection = await service.ConnectAsync(request, TestContext.Current.CancellationToken);
+		Assert.Equal(["cwd"], inspection.FieldsToReplace);
+		Assert.NotNull(inspection.ExistingEntryFingerprint);
+
+		var changed = original.Replace("first", "second", StringComparison.Ordinal);
+		await File.WriteAllTextAsync(targetPath, changed, TestContext.Current.CancellationToken);
+		var result = await service.ConnectAsync(
+			request with
+			{
+				ReplaceExistingFields = true,
+				ExpectedExistingEntryFingerprint = inspection.ExistingEntryFingerprint
+			},
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(McpConnectionStatus.InvalidConfiguration, result.Status);
+		Assert.Equal("Connection changed", result.UserMessage);
+		Assert.Equal(changed, await File.ReadAllTextAsync(targetPath, TestContext.Current.CancellationToken));
+	}
+
+	[Fact]
+	public async Task Connect_CursorDoesNotRemoveExistingTypeWithoutConfirmation()
+	{
+		using var project = new TemporaryDirectory();
+		const string original = """
+			{"mcpServers":{"devprojex":{"type":"stdio","command":"old","args":[]}}}
+			""";
+		var targetPath = project.CreateFile(Path.Combine(".cursor", "mcp.json"), original);
+		var service = CreateService(new McpClientExecutableLocator(), new RecordingProcessRunner());
+
+		var result = await service.ConnectAsync(
+			Request(
+				McpConnectionClient.Cursor,
+				McpConnectionMode.Live,
+				Path.Combine(project.Path, "DevProjex.exe"),
+				project.Path),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(McpConnectionStatus.InvalidConfiguration, result.Status);
+		Assert.Equal(["type"], result.FieldsToReplace);
+		Assert.Equal(original, await File.ReadAllTextAsync(targetPath, TestContext.Current.CancellationToken));
+	}
+
+	[Fact]
+	public async Task Connect_ProjectClientPreservesExplicitNullEditorFields()
+	{
+		using var project = new TemporaryDirectory();
+		const string original = """
+			{"mcpServers":{"devprojex":{"command":"old","args":[],"sandboxEnabled":null,"dev":null}}}
+			""";
+		var targetPath = project.CreateFile(Path.Combine(".cursor", "mcp.json"), original);
+		var service = CreateService(new McpClientExecutableLocator(), new RecordingProcessRunner());
+
+		var result = await service.ConnectAsync(
+			Request(
+				McpConnectionClient.Cursor,
+				McpConnectionMode.Live,
+				Path.Combine(project.Path, "DevProjex.exe"),
+				project.Path),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(McpConnectionStatus.Updated, result.Status);
+		using var document = JsonDocument.Parse(await File.ReadAllTextAsync(
+			targetPath,
+			TestContext.Current.CancellationToken));
+		var entry = document.RootElement.GetProperty("mcpServers").GetProperty("devprojex");
+		Assert.Equal(JsonValueKind.Null, entry.GetProperty("sandboxEnabled").ValueKind);
+		Assert.Equal(JsonValueKind.Null, entry.GetProperty("dev").ValueKind);
+	}
+
+	[Theory]
+	[InlineData((int)McpConnectionClient.Cursor, ".cursor", "mcpServers")]
+	[InlineData((int)McpConnectionClient.VsCode, ".vscode", "servers")]
 	public async Task Connect_ProjectClient_ReplacesExistingEntryAndKeepsOnlySupportedEditorFields(
 		int clientValue,
 		string directory,
@@ -1084,7 +1202,10 @@ public sealed class McpConnectionServiceTests
 		var executable = Path.Combine(project.Path, "DevProjex.exe");
 
 		var result = await service.ConnectAsync(
-			Request((McpConnectionClient)clientValue, McpConnectionMode.Live, executable, project.Path),
+			Request((McpConnectionClient)clientValue, McpConnectionMode.Live, executable, project.Path) with
+			{
+				ReplaceExistingFields = true
+			},
 			TestContext.Current.CancellationToken);
 
 		Assert.Equal(McpConnectionStatus.Updated, result.Status);
@@ -1098,16 +1219,7 @@ public sealed class McpConnectionServiceTests
 			Assert.False(environment.TryGetProperty("KEEP", out _));
 		Assert.True(entry.GetProperty("dev").GetProperty("watch").GetBoolean());
 		Assert.False(entry.TryGetProperty("cwd", out _));
-		Assert.EndsWith(
-			Environment.NewLine +
-			"Existing devprojex fields other than sandboxEnabled and dev were discarded.",
-			result.UserMessage,
-			StringComparison.Ordinal);
-		Assert.Equal(
-			1,
-			result.UserMessage.Split(
-				"Existing devprojex fields other than sandboxEnabled and dev were discarded.",
-				StringSplitOptions.None).Length - 1);
+		Assert.Contains("Replaced fields: cwd, env, envFile.", result.UserMessage, StringComparison.Ordinal);
 		AssertConnection(
 			entry,
 			executable,
@@ -1682,6 +1794,8 @@ public sealed class McpConnectionServiceTests
 			["Mcp.Connect.CommandFailedAfterRemoval"] = "Previous {0} connection removed: {1}",
 			["Mcp.Connect.CommandFailedRestored"] = "{0} failed: {1}; previous connection restored",
 			["Mcp.Connect.ReplaceRequired"] = "Replace {0} with {1}",
+			["Mcp.Connect.ProjectEntryReplaceRequired"] = "The existing devprojex entry for {0} has fields that will be removed or overwritten: {1}. Run again with --replace to confirm.",
+			["Mcp.Connect.ProjectEntryFieldsReplaced"] = "Replaced fields: {0}.",
 			["Mcp.Connect.ConnectionChanged"] = "Connection changed",
 			["Mcp.Connect.InspectionFailed"] = "Connection could not be inspected",
 			["Mcp.Connect.VsCodeJsoncManual"] = "The file contains comments or trailing commas and must be updated manually",

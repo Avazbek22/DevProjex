@@ -1,4 +1,11 @@
 {
+  "Mcp.Connect.ProjectEntryReplaceTitle": "DevProjex クライアント設定を置き換える",
+  "Mcp.Connect.ProjectEntryReplacePrompt": "{0} の既存の devprojex エントリには、削除または上書きされるフィールドがあります:\n{1}\n\n置き換えますか?",
+  "Mcp.Connect.ProjectEntryReplaceConfirm": "置き換える",
+  "Mcp.Connect.ProjectEntryReplaceRequired": "{0} の既存の devprojex エントリには、削除または上書きされるフィールドがあります: {1}。確認するには --replace を付けて再実行してください。",
+  "Mcp.Connect.ProjectEntryReplaceCanceled": "既存の devprojex エントリは変更されませんでした。",
+  "Mcp.Connect.ProjectEntryFieldsReplaced": "置き換えられたフィールド: {0}。",
+  "Terminal.Option.McpReplace": "Cursor または VS Code の既存の devprojex エントリにある追加フィールドの置き換えを確認します。",
   "Dialog.ProjectCopy.ZipReplace.Title": "既存の ZIP を置き換えますか？",
   "Dialog.ProjectCopy.ZipReplace.Message": "ZIP は既に存在します:\n{0}\n\n置き換えますか？",
   "Dialog.StoreMigration.Title": "Store データを準備できませんでした",

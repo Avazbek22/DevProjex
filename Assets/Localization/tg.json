@@ -1,4 +1,11 @@
 {
+  "Mcp.Connect.ProjectEntryReplaceTitle": "Иваз кардани танзимоти муштарии DevProjex",
+  "Mcp.Connect.ProjectEntryReplacePrompt": "Сабти мавҷудаи devprojex барои {0} майдонҳое дорад, ки ҳазф ё аз нав навишта мешаванд:\n{1}\n\nСабт иваз шавад?",
+  "Mcp.Connect.ProjectEntryReplaceConfirm": "Иваз кардан",
+  "Mcp.Connect.ProjectEntryReplaceRequired": "Сабти мавҷудаи devprojex барои {0} майдонҳое дорад, ки ҳазф ё аз нав навишта мешаванд: {1}. Барои тасдиқ фармонро бо --replace дубора иҷро кунед.",
+  "Mcp.Connect.ProjectEntryReplaceCanceled": "Сабти мавҷудаи devprojex бетағйир монд.",
+  "Mcp.Connect.ProjectEntryFieldsReplaced": "Майдонҳои ивазшуда: {0}.",
+  "Terminal.Option.McpReplace": "Иваз кардани майдонҳои иловагиро дар сабти мавҷудаи devprojex барои Cursor ё VS Code тасдиқ мекунад.",
   "Dialog.ProjectCopy.ZipReplace.Title": "Файли ZIP-и мавҷударо иваз кунед?",
   "Dialog.ProjectCopy.ZipReplace.Message": "Файли ZIP аллакай вуҷуд дорад:\n{0}\n\nОнро иваз кунед?",
   "Dialog.StoreMigration.Title": "Омода кардани маълумоти Store имкон надод",

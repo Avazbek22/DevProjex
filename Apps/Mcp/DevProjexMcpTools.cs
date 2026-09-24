@@ -140,7 +140,9 @@ internal sealed class DevProjexMcpTools(
 				foreach (var root in validatedRoots)
 				{
 					var revision = liveContext.RefreshProfile(root);
-					if (liveContext.HasSelectedFileCount(root, revision))
+					var rootRevision = Projects.GetRootMonitorStamp(root);
+					if (rootRevision is not null &&
+					    liveContext.HasSelectedFileCount(root, revision, rootRevision))
 						continue;
 					_ = await Projects.BuildPlanAsync(
 						root,
@@ -918,10 +920,11 @@ internal sealed class DevProjexMcpTools(
 						$"writing pack {writtenFileCount}/{writtenFileCount}")
 					.ConfigureAwait(false);
 				var response = McpToolResults.TextSuccess(message, advertiseLargeResult: true);
-				retainPack = true;
 				var storedContext = liveContext?.RecordPackBuild(plan.SourceRoot, pack.Id);
 				if (storedContext is not null)
 					packs.RecordLiveContext(pack.Id, storedContext);
+				RecordStoredProtection(plan, pack.Id, McpStoredResultKind.Pack);
+				retainPack = true;
 				return response;
 			}
 			finally
@@ -951,6 +954,10 @@ internal sealed class DevProjexMcpTools(
 			var end = arguments.OptionalInteger("end_line", 1, int.MaxValue);
 			var startColumn = arguments.OptionalInteger("start_column", 1, int.MaxValue);
 			ValidateLineRange(start, end);
+			if (liveContext is null)
+				await Projects.ValidateStoredProtectionAsync(
+					packs.GetProtectionContext(packId),
+					cancellationToken).ConfigureAwait(false);
 			await using var packLease = packs.OpenReadDocument(packId);
 			var journalContext = packs.GetJournalContext(packId);
 			if (journalContext is not null)
@@ -986,6 +993,15 @@ internal sealed class DevProjexMcpTools(
 				AppendTrustedNotices(McpSpotlight.Wrap(page.Text), rangeNotice, characterLimitNotice),
 				advertiseLargeResult: true);
 		}
+	}
+
+	private void RecordStoredProtection(ProjectContextPlan plan, string packId, McpStoredResultKind kind)
+	{
+		if (liveContext is not null)
+			return;
+		var protection = McpProjectService.CaptureStoredProtection(plan, kind);
+		if (protection is not null)
+			packs.RecordProtectionContext(packId, protection);
 	}
 
 	[Description(
@@ -1261,6 +1277,7 @@ internal sealed class DevProjexMcpTools(
 					McpStoredResultKind.Search);
 				if (storedContext is not null)
 					packs.RecordLiveContext(storedSearch.Id, storedContext);
+				RecordStoredProtection(plan, storedSearch.Id, McpStoredResultKind.Search);
 				packs.RecordJournalContext(
 					storedSearch.Id,
 					CreateStoredJournalContext(
@@ -1499,6 +1516,7 @@ internal sealed class DevProjexMcpTools(
 				McpStoredResultKind.Related);
 			if (storedContext is not null)
 				packs.RecordLiveContext(pack.Id, storedContext);
+			RecordStoredProtection(plan, pack.Id, McpStoredResultKind.Related);
 			packs.RecordJournalContext(
 				pack.Id,
 				CreateStoredJournalContext(

@@ -370,6 +370,81 @@ public sealed class MainWindowMcpConnectionUiTests(UiWorkspaceFixture workspace)
 	}
 
 	[AvaloniaFact]
+	public async Task CursorEntryReplacementListsFieldsAndWaitsForExplicitChoice()
+	{
+		var service = new RecordingMcpConnectionService(request =>
+			request.ReplaceExistingFields
+				? new McpConnectionResult(McpConnectionStatus.Updated, "updated", Replaced: true)
+				: new McpConnectionResult(
+					McpConnectionStatus.InvalidConfiguration,
+					"confirmation required",
+					FieldsToReplace: ["cwd", "envFile"],
+					ExistingEntryFingerprint: "expected-entry"));
+		var launcher = new RecordingMcpClientLaunchService(_ => new McpClientLaunchResult(
+			McpClientLaunchStatus.Opened));
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			workspace.Project,
+			configureServices: services => services with
+			{
+				McpConnectionService = service,
+				McpClientLaunchService = launcher,
+				TerminalCommandSetupService = new StubTerminalCommandSetupService(
+					CreateTerminalSnapshot(workspace.Project.RootPath, TerminalCommandSetupState.Installed))
+			});
+
+		try
+		{
+			var cursor = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "McpConnectCursorMenuItem");
+			await UiTestDriver.RaiseMenuItemClickAsync(cursor);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => window.OwnedWindows.Count == 1,
+				"the Cursor entry replacement confirmation");
+
+			var confirmation = Assert.Single(window.OwnedWindows);
+			var message = string.Join(
+				' ',
+				confirmation.GetVisualDescendants().OfType<TextBlock>().Select(static item => item.Text));
+			Assert.Contains("cwd, envFile", message, StringComparison.Ordinal);
+			Assert.Contains("removed or overwritten", message, StringComparison.Ordinal);
+			Assert.Single(confirmation.GetVisualDescendants().OfType<ScrollViewer>());
+			Assert.Single(service.Requests);
+			Assert.Empty(launcher.Requests);
+			var cancel = Assert.Single(
+				confirmation.GetVisualDescendants().OfType<Button>(),
+				static button => Equals(button.Content, "Cancel"));
+			await UiTestDriver.RaiseButtonClickAsync(cancel);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => window.OwnedWindows.Count == 0,
+				"canceled replacement to close without another dialog");
+			Assert.Single(service.Requests);
+			Assert.Empty(launcher.Requests);
+
+			await UiTestDriver.RaiseMenuItemClickAsync(cursor);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => window.OwnedWindows.Count == 1,
+				"the second Cursor replacement confirmation");
+			confirmation = Assert.Single(window.OwnedWindows);
+			var replace = Assert.Single(
+				confirmation.GetVisualDescendants().OfType<Button>(),
+				static button => Equals(button.Content, "Replace"));
+			await UiTestDriver.RaiseButtonClickAsync(replace);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => service.Requests.Count == 3 && launcher.Requests.Count == 1,
+				"the confirmed Cursor entry replacement");
+			Assert.True(service.Requests[2].ReplaceExistingFields);
+			Assert.Equal("expected-entry", service.Requests[2].ExpectedExistingEntryFingerprint);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task CodexConnectionForAnotherProjectRequiresConfirmationAndOpensWithoutSuccessToast()
 	{
 		var previousProject = Path.GetFullPath(Path.Combine(workspace.Project.RootPath, "..", "previous-project"));

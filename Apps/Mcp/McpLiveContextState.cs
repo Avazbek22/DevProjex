@@ -49,12 +49,16 @@ internal sealed class McpLiveContextState(
 		}
 	}
 
-	public bool HasSelectedFileCount(string projectRoot, int revision)
+	public bool HasSelectedFileCount(
+		string projectRoot,
+		int revision,
+		McpRootMonitorStamp? rootRevision = null)
 	{
 		var normalizedRoot = PathUtility.Normalize(projectRoot);
 		lock (sync)
 			return states.TryGetValue(normalizedRoot, out var state) &&
 				   state.Revision == revision &&
+				   (rootRevision is null || state.SelectedFileRootRevision == rootRevision) &&
 				   state.SelectedFileCount.HasValue;
 	}
 
@@ -107,7 +111,10 @@ internal sealed class McpLiveContextState(
 		}
 	}
 
-	public void RecordPlan(string projectRoot, ProjectContextPlan plan)
+	public void RecordPlan(
+		string projectRoot,
+		ProjectContextPlan plan,
+		McpRootMonitorStamp? rootRevision = null)
 	{
 		ArgumentNullException.ThrowIfNull(plan);
 		var normalizedRoot = PathUtility.Normalize(projectRoot);
@@ -124,6 +131,7 @@ internal sealed class McpLiveContextState(
 			state.EffectiveTree = new WeakReference<TreeNodeDescriptor>(plan.EffectiveTree);
 			state.PendingChange = ClassifyPendingChange(state.Root, state.PendingChange, plan.EffectiveTree);
 			state.SelectedFileCount = plan.IncludedFiles.Count;
+			state.SelectedFileRootRevision = rootRevision;
 			active.Roots.Add(normalizedRoot);
 		}
 	}
@@ -346,6 +354,7 @@ internal sealed class McpLiveContextState(
 			var previousRevision = state.Revision;
 			state.Revision++;
 			state.SelectedFileCount = null;
+			state.SelectedFileRootRevision = null;
 			var frontierChanges = BuildFrontierChanges(state.Frontier, frontier);
 			state.PendingChange = ClassifyPendingChange(
 				state.Root,
@@ -647,6 +656,7 @@ internal sealed class McpLiveContextState(
 		public bool HasSuccessfulSnapshot { get; set; }
 		public ProjectProfileLookupStatus? ReadFailure { get; set; }
 		public int? SelectedFileCount { get; set; }
+		public McpRootMonitorStamp? SelectedFileRootRevision { get; set; }
 		public WeakReference<TreeNodeDescriptor>? EffectiveTree { get; set; }
 		public PendingChange? PendingChange { get; set; }
 	}

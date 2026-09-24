@@ -1,4 +1,11 @@
 {
+  "Mcp.Connect.ProjectEntryReplaceTitle": "取代 DevProjex 用戶端設定",
+  "Mcp.Connect.ProjectEntryReplacePrompt": "{0} 的現有 devprojex 項目包含將被移除或覆寫的欄位：\n{1}\n\n要取代此項目嗎？",
+  "Mcp.Connect.ProjectEntryReplaceConfirm": "取代",
+  "Mcp.Connect.ProjectEntryReplaceRequired": "{0} 的現有 devprojex 項目包含將被移除或覆寫的欄位：{1}。請使用 --replace 重新執行以確認。",
+  "Mcp.Connect.ProjectEntryReplaceCanceled": "現有 devprojex 項目未變更。",
+  "Mcp.Connect.ProjectEntryFieldsReplaced": "已取代的欄位：{0}。",
+  "Terminal.Option.McpReplace": "確認取代現有 Cursor 或 VS Code devprojex 項目中的其他欄位。",
   "Dialog.ProjectCopy.ZipReplace.Title": "取代現有 ZIP 檔案？",
   "Dialog.ProjectCopy.ZipReplace.Message": "ZIP 檔案已存在：\n{0}\n\n要取代嗎？",
   "Dialog.StoreMigration.Title": "無法準備 Store 資料",

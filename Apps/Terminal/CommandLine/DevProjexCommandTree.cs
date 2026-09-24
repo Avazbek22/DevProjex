@@ -398,6 +398,10 @@ public sealed class DevProjexCommandTree
 		{
 			Description = L("Terminal.Option.McpOpen")
 		};
+		var replace = new Option<bool>("--replace")
+		{
+			Description = L("Terminal.Option.McpReplace")
+		};
 		client.CompletionSources.Add(McpConnectionClients);
 		mode.CompletionSources.Add(McpConnectionModes);
 		client.Validators.Add(result =>
@@ -421,6 +425,7 @@ public sealed class DevProjexCommandTree
 		command.Options.Add(mode);
 		command.Options.Add(print);
 		command.Options.Add(open);
+		command.Options.Add(replace);
 		command.Validators.Add(result =>
 		{
 			if (result.GetValue(print) && result.GetValue(open))
@@ -453,7 +458,8 @@ public sealed class DevProjexCommandTree
 								? McpConnectionMode.Live
 								: McpConnectionMode.Standard,
 							executablePath,
-							Path.GetFullPath(parseResult.GetValue(project) ?? Directory.GetCurrentDirectory()));
+							Path.GetFullPath(parseResult.GetValue(project) ?? Directory.GetCurrentDirectory()),
+							ReplaceExistingFields: parseResult.GetValue(replace));
 						if (parseResult.GetValue(print))
 						{
 							environment.Output.WriteLine(

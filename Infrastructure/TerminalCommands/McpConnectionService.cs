@@ -1,4 +1,6 @@
 using System.ComponentModel;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -318,6 +320,7 @@ internal enum McpProjectConfigurationError
 	InvalidData,
 	JsoncRequiresManualUpdate,
 	AccessDenied,
+	ConfigurationChanged,
 	OperationFailed
 }
 
@@ -326,13 +329,11 @@ internal sealed record McpProjectConfigurationWriteResult(
 	bool Replaced,
 	string TargetPath,
 	McpProjectConfigurationError Error = McpProjectConfigurationError.None,
-	bool DiscardedUnsupportedFields = false);
+	IReadOnlyList<string>? FieldsToReplace = null,
+	string? ExistingEntryFingerprint = null);
 
 internal sealed class McpProjectConfigurationWriter
 {
-	internal const string DiscardedFieldsNotice =
-		"Existing devprojex fields other than sandboxEnabled and dev were discarded.";
-
 	private const long MaximumConfigurationBytes = 4 * 1024 * 1024;
 	private static readonly JsonSerializerOptions SerializerOptions = new()
 	{
@@ -420,20 +421,41 @@ internal sealed class McpProjectConfigurationWriter
 			projectRoot);
 		var generatedRoot = JsonNode.Parse(printable)!.AsObject();
 		var generatedEntry = generatedRoot[containerName]!["devprojex"]!.AsObject();
-		var discardedUnsupportedFields = false;
+		IReadOnlyList<string> fieldsToReplace = [];
+		string? existingEntryFingerprint = null;
 		if (!replaced)
 		{
+			if (request.ExpectedExistingEntryFingerprint is not null)
+				return Failure(targetPath, McpProjectConfigurationError.ConfigurationChanged);
 			servers["devprojex"] = generatedEntry.DeepClone();
 		}
 		else if (servers["devprojex"] is JsonObject existingEntry)
 		{
+			existingEntryFingerprint = Fingerprint(existingEntry);
+			if (request.ExpectedExistingEntryFingerprint is not null &&
+				!string.Equals(
+					request.ExpectedExistingEntryFingerprint,
+					existingEntryFingerprint,
+					StringComparison.Ordinal))
+			{
+				return Failure(targetPath, McpProjectConfigurationError.ConfigurationChanged);
+			}
+			fieldsToReplace = FindFieldsToReplace(existingEntry, generatedEntry);
+			if (fieldsToReplace.Count > 0 && !request.ReplaceExistingFields)
+			{
+				return new McpProjectConfigurationWriteResult(
+					false,
+					true,
+					targetPath,
+					FieldsToReplace: fieldsToReplace,
+					ExistingEntryFingerprint: existingEntryFingerprint);
+			}
 			var replacement = generatedEntry.DeepClone().AsObject();
 			foreach (var preservedName in new[] { "sandboxEnabled", "dev" })
 			{
-				if (existingEntry[preservedName] is { } preserved)
-					replacement[preservedName] = preserved.DeepClone();
+				if (existingEntry.ContainsKey(preservedName))
+					replacement[preservedName] = existingEntry[preservedName]?.DeepClone();
 			}
-			discardedUnsupportedFields = HasDiscardedFields(existingEntry, generatedEntry);
 			servers["devprojex"] = replacement;
 		}
 		else
@@ -457,7 +479,7 @@ internal sealed class McpProjectConfigurationWriter
 				true,
 				replaced,
 				targetPath,
-				DiscardedUnsupportedFields: discardedUnsupportedFields);
+				FieldsToReplace: fieldsToReplace);
 		}
 		catch (UnauthorizedAccessException)
 		{
@@ -469,19 +491,28 @@ internal sealed class McpProjectConfigurationWriter
 		}
 	}
 
-	private static bool HasDiscardedFields(JsonObject existingEntry, JsonObject generatedEntry)
+	private static IReadOnlyList<string> FindFieldsToReplace(
+		JsonObject existingEntry,
+		JsonObject generatedEntry)
 	{
+		var fields = new List<string>();
 		foreach (var pair in existingEntry)
 		{
-			if (pair.Key is "sandboxEnabled" or "dev")
+			if (pair.Key is "command" or "args" or "sandboxEnabled" or "dev" ||
+				pair.Key == "type" && generatedEntry.ContainsKey("type"))
 				continue;
-			if (!generatedEntry.TryGetPropertyValue(pair.Key, out var generatedValue))
-				return true;
-			if (pair.Key == "env" && !JsonNode.DeepEquals(pair.Value, generatedValue))
-				return true;
+			if (!generatedEntry.TryGetPropertyValue(pair.Key, out var generatedValue) ||
+				!JsonNode.DeepEquals(pair.Value, generatedValue))
+			{
+				fields.Add(pair.Key);
+			}
 		}
-		return false;
+		fields.Sort(StringComparer.Ordinal);
+		return fields;
 	}
+
+	private static string Fingerprint(JsonObject entry) =>
+		Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(entry.ToJsonString())));
 
 	private static bool IsValidJsonc(string text)
 	{
@@ -1014,6 +1045,26 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 		CancellationToken cancellationToken)
 	{
 		var result = await _configurationWriter.WriteAsync(request, cancellationToken).ConfigureAwait(false);
+		var clientName = DisplayName(request.Client);
+		var fields = result.FieldsToReplace is { Count: > 0 }
+			? string.Join(", ", result.FieldsToReplace.Select(SingleLineTextEscaping.Escape))
+			: null;
+		if (!result.Succeeded && fields is not null)
+		{
+			return new McpConnectionResult(
+				McpConnectionStatus.InvalidConfiguration,
+				_localization.Format("Mcp.Connect.ProjectEntryReplaceRequired", clientName, fields),
+				TargetPath: result.TargetPath,
+				FieldsToReplace: result.FieldsToReplace,
+				ExistingEntryFingerprint: result.ExistingEntryFingerprint);
+		}
+		if (result.Error == McpProjectConfigurationError.ConfigurationChanged)
+		{
+			return new McpConnectionResult(
+				McpConnectionStatus.InvalidConfiguration,
+				_localization["Mcp.Connect.ConnectionChanged"],
+				TargetPath: result.TargetPath);
+		}
 		var manual = CreatePrintableConfiguration(request);
 		if (!result.Succeeded)
 		{
@@ -1021,13 +1072,12 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 				McpConnectionStatus.InvalidConfiguration,
 				WithManualFallback(_localization.Format(
 						"Mcp.Connect.ProjectConfigurationFailed",
-						DisplayName(request.Client),
+						clientName,
 						ProjectConfigurationErrorText(result.Error))),
 				ManualConfiguration: manual,
 				TargetPath: result.TargetPath);
 		}
 
-		var clientName = DisplayName(request.Client);
 		var relativePath = PathUtility.GetPortableRelativePath(request.ProjectRoot, result.TargetPath);
 		var nextStepKey = request.Client == McpConnectionClient.VsCode
 			? "Mcp.Connect.VsCode.NextStep"
@@ -1036,8 +1086,11 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 			"Mcp.Connect.ProjectConfigurationWritten",
 			clientName,
 			relativePath);
-		if (result.DiscardedUnsupportedFields)
-			message = string.Concat(message, Environment.NewLine, McpProjectConfigurationWriter.DiscardedFieldsNotice);
+		if (fields is not null)
+			message = string.Concat(
+				message,
+				Environment.NewLine,
+				_localization.Format("Mcp.Connect.ProjectEntryFieldsReplaced", fields));
 		return new McpConnectionResult(
 			result.Replaced ? McpConnectionStatus.Updated : McpConnectionStatus.Connected,
 			message,

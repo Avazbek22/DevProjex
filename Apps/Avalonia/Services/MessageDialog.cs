@@ -82,6 +82,23 @@ public static class MessageDialog
             height: 0,
             fitContentHeight: true);
 
+    internal static Task<bool> ShowScrollableConfirmationAsync(
+        Window owner,
+        string title,
+        string message,
+        string confirmButtonText,
+        string cancelButtonText) =>
+        ShowConfirmationCoreAsync(
+            owner,
+            title,
+            message,
+            confirmButtonText,
+            cancelButtonText,
+            width: 560,
+            height: 340,
+            fitContentHeight: false,
+            scrollMessage: true);
+
     private static async Task<bool> ShowConfirmationCoreAsync(
         Window owner,
         string title,
@@ -90,7 +107,8 @@ public static class MessageDialog
         string cancelButtonText,
         double width,
         double height,
-        bool fitContentHeight)
+        bool fitContentHeight,
+        bool scrollMessage = false)
     {
         var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var dialog = CreateConfirmationWindow(
@@ -102,7 +120,8 @@ public static class MessageDialog
             width,
             height,
             fitContentHeight,
-            completion);
+            completion,
+            scrollMessage);
 
         dialog.Closed += (_, _) => completion.TrySetResult(false);
 
@@ -123,7 +142,8 @@ public static class MessageDialog
         double width,
         double height,
         bool fitContentHeight,
-        TaskCompletionSource<bool> completion)
+        TaskCompletionSource<bool> completion,
+        bool scrollMessage = false)
     {
         ArgumentNullException.ThrowIfNull(completion);
         var themeVariant = DialogSurfaceFactory.ResolveThemeVariant(owner);
@@ -132,7 +152,7 @@ public static class MessageDialog
             title,
             themeVariant,
             brushes,
-            BuildConfirmationContent(message, confirmButtonText, cancelButtonText, completion),
+            BuildConfirmationContent(message, confirmButtonText, cancelButtonText, completion, scrollMessage),
             width,
             fitContentHeight ? null : height);
     }
@@ -171,7 +191,8 @@ public static class MessageDialog
         string message,
         string confirmButtonText,
         string cancelButtonText,
-        TaskCompletionSource<bool> completion)
+        TaskCompletionSource<bool> completion,
+        bool scrollMessage)
     {
         var text = new TextBlock
         {
@@ -214,7 +235,14 @@ public static class MessageDialog
         DockPanel.SetDock(buttonPanel, Dock.Bottom);
 
         panel.Children.Add(buttonPanel);
-        panel.Children.Add(text);
+        panel.Children.Add(scrollMessage
+            ? new ScrollViewer
+            {
+                Content = text,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
+            }
+            : text);
 
         confirmButton.Click += (_, _) =>
         {

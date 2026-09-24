@@ -71,12 +71,14 @@ public static class McpConnectionFragmentGenerator
 		string executablePath,
 		string projectRoot)
 	{
-		Func<string, string> quoteArgument = IsWindowsAbsolutePath(executablePath)
+		var usesPowerShell = IsWindowsAbsolutePath(executablePath);
+		Func<string, string> quoteArgument = usesPowerShell
 			? QuotePowerShellArgument
 			: QuotePosixShellArgument;
 		var builder = new StringBuilder("cd ");
 		builder.Append(quoteArgument(projectRoot));
-		builder.Append(" && claude mcp add --scope local devprojex");
+		builder.Append(usesPowerShell ? Environment.NewLine : " && ");
+		builder.Append("claude mcp add --scope local devprojex");
 		AppendClaudeEnvironment(builder, GetRequiredServerEnvironment());
 		builder.Append(" -- ");
 		builder.Append(quoteArgument(executablePath));

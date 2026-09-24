@@ -100,6 +100,45 @@ public sealed class McpInfrastructureTests
 		Assert.Throws<ArgumentException>(() => McpServerHost.NormalizeRemoteHosts([value]));
 	}
 
+	[Theory]
+	[InlineData("github.com:owner/repo.git", "github.com")]
+	[InlineData("user@github.com:owner/repo.git", "github.com")]
+	[InlineData("https://github.com/owner/repo.git", "github.com")]
+	[InlineData("[2001:db8::1]:owner/repo.git", "2001:db8::1")]
+	[InlineData("user@[2001:db8::1]:owner/repo.git", "2001:db8::1")]
+	[InlineData("ssh://user@[2001:db8::1]/owner/repo.git", "2001:db8::1")]
+	public void RemoteHostAllowlistResolvesSupportedRepositoryForms(string source, string expectedHost)
+	{
+		Assert.Equal(expectedHost, McpProjectSourceResolver.ResolveRemoteHost(source));
+		Assert.True(RepositoryUrlUtility.IsSupportedCloneSource(source));
+	}
+
+	[Fact]
+	public async Task RedirectRestrictionStaysWithinItsAsyncOperation()
+	{
+		using var temporary = new TemporaryDirectory();
+		var operation = GitProcessOperation.CloneRepository(
+			"https://github.com/owner/repo.git",
+			Path.Combine(temporary.Path, "clone"));
+		var restricted = Task.Run(async () =>
+		{
+			using (GitHttpRedirectPolicy.BlockForCurrentOperation())
+			{
+				await Task.Yield();
+				return GitProcessStartInfoFactory.Create(null, operation).ArgumentList.ToArray();
+			}
+		});
+		var unrestricted = Task.Run(async () =>
+		{
+			await Task.Yield();
+			return GitProcessStartInfoFactory.Create(null, operation).ArgumentList.ToArray();
+		});
+
+		Assert.Contains("http.followRedirects=false", await restricted);
+		Assert.DoesNotContain("http.followRedirects=false", await unrestricted);
+		Assert.False(GitHttpRedirectPolicy.BlocksRedirects);
+	}
+
 	[Fact]
 	public async Task BoundedTreeWriter_StopsBeforeMaterializingLinesBeyondTheLimit()
 	{

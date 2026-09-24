@@ -97,6 +97,45 @@ public sealed class McpConnectionFragmentGeneratorTests
 	}
 
 	[Fact]
+	public void Generate_ClaudeCodeWindowsPowerShellUsesSeparateCommands()
+	{
+		var fragment = McpConnectionFragmentGenerator.Generate(
+			McpConnectionClient.ClaudeCode,
+			McpConnectionMode.Standard,
+			@"C:\Program Files\DevProjex\DevProjex.exe",
+			@"C:\Projects\My Project");
+
+		var lines = fragment.Split(Environment.NewLine, StringSplitOptions.None);
+		Assert.Equal(2, lines.Length);
+		Assert.Equal("cd \"C:\\Projects\\My Project\"", lines[0]);
+		Assert.Equal(
+			"claude mcp add --scope local devprojex -- \"C:\\Program Files\\DevProjex\\DevProjex.exe\" mcp --root \"C:\\Projects\\My Project\"",
+			lines[1]);
+		Assert.DoesNotContain("&&", fragment, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task Generate_ClaudeCodeWindowsFragmentRunsInWindowsPowerShell51()
+	{
+		if (!OperatingSystem.IsWindows())
+			return;
+
+		const string executable = @"C:\Program Files\DevProjex\DevProjex.exe";
+		const string root = @"C:\Projects\My Project";
+		var fragment = McpConnectionFragmentGenerator.Generate(
+			McpConnectionClient.ClaudeCode,
+			McpConnectionMode.Standard,
+			executable,
+			root);
+
+		var parsedFragments = await ParseWithPowerShellAsync([fragment], "powershell.exe");
+
+		var parsed = Assert.Single(parsedFragments);
+		// The PowerShell function shim consumes --; the fragment assertion above checks the literal separator.
+		Assert.Equal(["mcp", "add", "--scope", "local", "devprojex", executable, "mcp", "--root", root], parsed);
+	}
+
+	[Fact]
 	public void Generate_AppImageExtractionFallbackCarriesTheRequiredEnvironment()
 	{
 		var previous = Environment.GetEnvironmentVariable("APPIMAGE_EXTRACT_AND_RUN");
@@ -355,7 +394,8 @@ public sealed class McpConnectionFragmentGeneratorTests
 	}
 
 	private static async Task<IReadOnlyList<string[]>> ParseWithPowerShellAsync(
-		IReadOnlyList<string> fragments)
+		IReadOnlyList<string> fragments,
+		string shell = "pwsh")
 	{
 		const string script = "Remove-Item Alias:cd -ErrorAction SilentlyContinue; " +
 							  "Set-Item Function:cd -Value { param([string]$Path) }; " +
@@ -369,7 +409,7 @@ public sealed class McpConnectionFragmentGeneratorTests
 							  "$results.Add([object[]]$script:capturedArgs) }; " +
 							  "[Console]::Out.Write((ConvertTo-Json -Compress -Depth 4 -InputObject $results))";
 		var result = await RunShellAsync(
-			"pwsh",
+			shell,
 			["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
 			JsonSerializer.Serialize(new { command = "claude", fragments }));
 		return JsonSerializer.Deserialize<string[][]>(result) ?? [];

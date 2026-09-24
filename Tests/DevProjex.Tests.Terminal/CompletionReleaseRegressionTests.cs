@@ -45,6 +45,7 @@ public sealed class CompletionReleaseRegressionTests
 
 		Assert.Contains("--print", candidates);
 		Assert.Contains("--open", candidates);
+		Assert.Contains("--replace", candidates);
 	}
 
 	[Fact]

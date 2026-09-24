@@ -141,6 +141,26 @@ public sealed class McpLiveContextStateTests
 	}
 
 	[Fact]
+	public void SelectedFileCountRequiresTheSameReliableRootRevision()
+	{
+		using var temporary = new TemporaryDirectory();
+		var state = new McpLiveContextState(
+			new McpRootRegistry([temporary.Path]),
+			() => new SequenceProfileStore(Found(Profile(["src"]))),
+			TimeSpan.Zero);
+
+		using var invocation = state.BeginInvocation();
+		var revision = state.ReadProfile(temporary.Path).Revision;
+		state.RecordPlan(temporary.Path, Plan(temporary.Path, 1), rootRevision: new McpRootMonitorStamp(1, 4));
+
+		Assert.True(state.HasSelectedFileCount(temporary.Path, revision, rootRevision: new McpRootMonitorStamp(1, 4)));
+		Assert.False(state.HasSelectedFileCount(temporary.Path, revision, rootRevision: new McpRootMonitorStamp(1, 5)));
+		Assert.False(state.HasSelectedFileCount(temporary.Path, revision, rootRevision: new McpRootMonitorStamp(2, 4)));
+		state.RecordPlan(temporary.Path, Plan(temporary.Path, 2), rootRevision: null);
+		Assert.False(state.HasSelectedFileCount(temporary.Path, revision, rootRevision: new McpRootMonitorStamp(2, 4)));
+	}
+
+	[Fact]
 	public void ChangedPathKindsComeOnlyFromTheEffectivePlanTree()
 	{
 		using var temporary = new TemporaryDirectory();
