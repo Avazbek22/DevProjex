@@ -43,11 +43,12 @@ with the full 40-character commit SHA that will be tagged:
 
 ```shell
 candidate_sha=$(git rev-parse origin/v5.2)
-gh workflow run release-candidate.yml --ref "$candidate_sha" -f sha="$candidate_sha"
+gh workflow run release-candidate.yml --ref v5.2 -f sha="$candidate_sha"
 ```
 
-For a manual dispatch, the input SHA must equal `github.sha` for the selected
-workflow ref. This keeps the workflow definition and source tree on one commit;
+For a manual dispatch, `--ref` accepts only a branch or tag name, and the input SHA
+must equal `github.sha` for that ref, so dispatch it while the branch head is the
+commit that will be tagged. This keeps the workflow definition and source tree on one commit;
 both identities are printed in the summary. Pull requests do not run the RC
 aggregator: the ordinary `.NET CI` workflow runs a lightweight `actionlint` job
 instead, so edits to workflow composition are checked without duplicating every
