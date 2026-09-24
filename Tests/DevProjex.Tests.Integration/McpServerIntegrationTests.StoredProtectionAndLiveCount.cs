@@ -13,13 +13,14 @@ public sealed partial class McpServerIntegrationTests
 		const string markedValue = "manual-protection-value";
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
+		var physicalProject = McpRootRegistry.ResolvePhysicalExistingPath(project, requireDirectory: true);
 		var appData = Path.Combine(workspace.Path, "app-data");
 		var content = markedValue + " " + PrivateEmail + "\n" +
 			string.Join('\n', Enumerable.Range(1, 2_000).Select(static line =>
 				$"pack-line-{line:D4}-{new string('x', 24)}"));
 		File.WriteAllText(Path.Combine(project, "Large.txt"), content);
 		var store = new ProjectProfileStore(() => appData);
-		store.SaveProfile(project, new ProjectSelectionProfile([], [], []));
+		store.SaveProfile(physicalProject, new ProjectSelectionProfile([], [], []));
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path, hidePrivateData: hidePrivateData);
 
 		var stored = await server.CallAsync("pack_context", new Dictionary<string, object?>
@@ -29,9 +30,9 @@ public sealed partial class McpServerIntegrationTests
 			["view"] = "content",
 			["format"] = "text"
 		});
-		Assert.NotEqual(true, stored.IsError);
+		Assert.False(stored.IsError == true, AllText(stored));
 		var packId = ExtractPackId(AllText(stored));
-		await AddPersistentMarkAsync(store, appData, project, "Large.txt", 0, markedValue);
+		await AddPersistentMarkAsync(store, appData, physicalProject, "Large.txt", 0, markedValue);
 
 		var page = await server.CallAsync("read_pack", new Dictionary<string, object?> { ["pack_id"] = packId });
 		var text = AllText(page);
@@ -46,6 +47,7 @@ public sealed partial class McpServerIntegrationTests
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
+		var physicalProject = McpRootRegistry.ResolvePhysicalExistingPath(project, requireDirectory: true);
 		var appData = Path.Combine(workspace.Path, "app-data");
 		File.WriteAllText(Path.Combine(project, "tsconfig.json"),
 			"{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}\n");
@@ -59,7 +61,7 @@ public sealed partial class McpServerIntegrationTests
 		var source = imports.ToString();
 		File.WriteAllText(Path.Combine(project, "Main.ts"), source);
 		var store = new ProjectProfileStore(() => appData);
-		store.SaveProfile(project, new ProjectSelectionProfile([], [".ts"], []));
+		store.SaveProfile(physicalProject, new ProjectSelectionProfile([], [".ts"], []));
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
 
 		var stored = await server.CallAsync("related_files", new Dictionary<string, object?>
@@ -68,11 +70,11 @@ public sealed partial class McpServerIntegrationTests
 			["path"] = "Main.ts",
 			["direction"] = "dependencies"
 		});
-		Assert.NotEqual(true, stored.IsError);
+		Assert.False(stored.IsError == true, AllText(stored));
 		var match = Regex.Match(AllText(stored), "Related-files result stored as '([^']+)'", RegexOptions.CultureInvariant);
 		Assert.True(match.Success, AllText(stored));
 		var packId = match.Groups[1].Value;
-		await AddPersistentMarkAsync(store, appData, project, "Main.ts", source.IndexOf("target0000", StringComparison.Ordinal), "target0000");
+		await AddPersistentMarkAsync(store, appData, physicalProject, "Main.ts", source.IndexOf("target0000", StringComparison.Ordinal), "target0000");
 
 		var page = await server.CallAsync("read_pack", new Dictionary<string, object?> { ["pack_id"] = packId });
 		var text = AllText(page);
@@ -87,10 +89,11 @@ public sealed partial class McpServerIntegrationTests
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
+		var physicalProject = McpRootRegistry.ResolvePhysicalExistingPath(project, requireDirectory: true);
 		var appData = Path.Combine(workspace.Path, "app-data");
 		File.WriteAllText(Path.Combine(project, "Large.txt"), new string('x', 60_000));
 		var store = new ProjectProfileStore(() => appData);
-		store.SaveProfile(project, new ProjectSelectionProfile([], [], []));
+		store.SaveProfile(physicalProject, new ProjectSelectionProfile([], [], []));
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
 
 		var stored = await server.CallAsync("pack_context", new Dictionary<string, object?>
@@ -100,9 +103,9 @@ public sealed partial class McpServerIntegrationTests
 			["view"] = "content",
 			["format"] = "text"
 		});
-		Assert.NotEqual(true, stored.IsError);
+		Assert.False(stored.IsError == true, AllText(stored));
 		var packId = ExtractPackId(AllText(stored));
-		Assert.True(store.TryDeleteProfile(project));
+		Assert.True(store.TryDeleteProfile(physicalProject));
 
 		var page = await server.CallAsync("read_pack", new Dictionary<string, object?> { ["pack_id"] = packId });
 		var text = AllText(page);

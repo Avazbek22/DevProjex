@@ -16,7 +16,7 @@ public sealed class McpRemoteHostRedirectIntegrationTests
 	{
 		using var temporary = new TemporaryDirectory();
 		var localRoot = temporary.CreateDirectory("local-project");
-		await using var server = new RedirectingHttpsGitServer();
+		await using var server = CreateServerOrSkipUnavailableMacOsTls();
 		var caFile = Path.Combine(temporary.Path, "redirect-test-ca.pem");
 		await File.WriteAllTextAsync(
 			caFile,
@@ -63,6 +63,19 @@ public sealed class McpRemoteHostRedirectIntegrationTests
 		var startInfo = GitProcessStartInfoFactory.Create(null, operation);
 
 		Assert.DoesNotContain("http.followRedirects=false", startInfo.ArgumentList);
+	}
+
+	private static RedirectingHttpsGitServer CreateServerOrSkipUnavailableMacOsTls()
+	{
+		try
+		{
+			return new RedirectingHttpsGitServer();
+		}
+		catch (CryptographicException) when (OperatingSystem.IsMacOS())
+		{
+			Assert.Skip("The local HTTPS Git certificate fixture is unavailable on this macOS runner.");
+			throw;
+		}
 	}
 
 	private sealed class RedirectingHttpsGitServer : IAsyncDisposable
