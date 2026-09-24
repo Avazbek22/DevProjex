@@ -192,7 +192,6 @@
   "AgentActivity.Status.Calls.Many": "{0} lượt gọi",
   "AgentActivity.Status.Calls.Other": "{0} lượt gọi",
   "AgentActivity.Tree.ToolTip": "Tác nhân đã nhận {0} lần",
-  "SelectionPersistence.Saving": "Đang lưu lựa chọn…",
   "SelectionPersistence.Failed": "Chưa lưu lựa chọn; tác nhân dùng lựa chọn trước đó",
   "SelectionPersistence.Failed.Help": "Không thể lưu lựa chọn: {0}",
   "Menu.Help": "Trợ giúp",

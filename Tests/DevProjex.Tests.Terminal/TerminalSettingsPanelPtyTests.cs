@@ -7,24 +7,44 @@ namespace DevProjex.Tests.Terminal;
 public sealed class TerminalSettingsPanelPtyTests
 {
 	[Fact(Timeout = 90_000)]
-	public async Task SelectionStatusAppearsWhilePersistenceIsPendingAndClearsAfterSave()
+	public async Task SelectionStatusShowsOnlyFailureAfterSelectionChanges()
 	{
 		using var project = CreatePanelProject(initializeGit: false);
-		await using var terminal = await StartAsync(project.Path, columns: 160, rows: 50);
+		string? dataRoot = null;
+		await using var terminal = await StartAsync(
+			project.Path,
+			columns: 160,
+			rows: 50,
+			initializeDataRoot: path => dataRoot = path);
 		await WaitForStableScreenAsync(terminal, "> PROJECT TREE");
 
-		await terminal.SendSpaceAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenAsync(
-			"Saving selection…",
-			timeout: TimeSpan.FromSeconds(5),
-			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenWithoutAsync(
-			"Saving selection…",
-			timeout: TimeSpan.FromSeconds(10),
-			cancellationToken: TestContext.Current.CancellationToken);
+		var profileDirectory = Path.Combine(Assert.IsType<string>(dataRoot), "DevProjex");
+		Directory.CreateDirectory(profileDirectory);
+		var lockPath = Path.Combine(profileDirectory, "project-profiles.json.lock");
+		using (new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+		{
+			await terminal.SendSpaceAsync(TestContext.Current.CancellationToken);
+			var timeout = Stopwatch.StartNew();
+			while (timeout.Elapsed < TimeSpan.FromSeconds(30))
+			{
+				var status = StatusLine(terminal.CaptureScreen());
+				Assert.DoesNotContain("Saving selection…", status, StringComparison.Ordinal);
+				if (status.Contains("Selection not saved; agent uses previous selection", StringComparison.Ordinal))
+					break;
+				await Task.Delay(50, TestContext.Current.CancellationToken);
+			}
+			Assert.Contains(
+				"Selection not saved; agent uses previous selection",
+				StatusLine(terminal.CaptureScreen()),
+				StringComparison.Ordinal);
+		}
 
 		await ExitAsync(terminal);
 	}
+
+	private static string StatusLine(string screen) =>
+		Assert.Single(screen.Split('\n'), static line =>
+			line.StartsWith(" Files ", StringComparison.Ordinal));
 
 	[Fact(Timeout = 120_000)]
 	public async Task QuitRequiresExplicitChoiceWhenSelectionCannotBeSaved()

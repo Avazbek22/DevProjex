@@ -192,7 +192,6 @@
   "AgentActivity.Status.Calls.Many": "{0} calls",
   "AgentActivity.Status.Calls.Other": "{0} calls",
   "AgentActivity.Tree.ToolTip": "Agent received {0} times",
-  "SelectionPersistence.Saving": "Saving selection…",
   "SelectionPersistence.Failed": "Selection not saved; agent uses previous selection",
   "SelectionPersistence.Failed.Help": "Could not save selection: {0}",
   "Menu.Help": "Help",

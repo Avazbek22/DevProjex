@@ -1708,14 +1708,9 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	}
 
 	private string? BuildSelectionPersistenceIndicator() =>
-		_selectionProfilePersistence.State.Phase switch
-		{
-			TerminalSelectionPersistencePhase.Pending or TerminalSelectionPersistencePhase.Saving =>
-				L("SelectionPersistence.Saving"),
-			TerminalSelectionPersistencePhase.Deferred or TerminalSelectionPersistencePhase.Failed =>
-				L("SelectionPersistence.Failed"),
-			_ => null
-		};
+		_selectionProfilePersistence.State.Phase == TerminalSelectionPersistencePhase.Failed
+			? L("SelectionPersistence.Failed")
+			: null;
 
 	private void OnSelectionPersistenceStateChanged(object? sender, EventArgs args)
 	{

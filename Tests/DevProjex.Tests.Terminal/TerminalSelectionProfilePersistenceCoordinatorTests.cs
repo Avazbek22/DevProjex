@@ -11,7 +11,6 @@ public sealed class TerminalSelectionProfilePersistenceCoordinatorTests
 		"Terminal.Tui.ProfileSaveFailure.Stay",
 		"Terminal.Tui.ProfileSaveFailure.ExitWithoutSaving",
 		"Terminal.Tui.ProfileSaveFailure.ContinueWithoutSaving",
-		"SelectionPersistence.Saving",
 		"SelectionPersistence.Failed",
 		"SelectionPersistence.Failed.Help"
 	];

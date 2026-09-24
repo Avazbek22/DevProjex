@@ -192,7 +192,6 @@
   "AgentActivity.Status.Calls.Many": "{0} 次呼叫",
   "AgentActivity.Status.Calls.Other": "{0} 次呼叫",
   "AgentActivity.Tree.ToolTip": "代理程式已收到 {0} 次",
-  "SelectionPersistence.Saving": "正在儲存選取項目…",
   "SelectionPersistence.Failed": "選取項目未儲存；代理使用先前的選取項目",
   "SelectionPersistence.Failed.Help": "無法儲存選取項目：{0}",
   "Menu.Help": "幫助",
