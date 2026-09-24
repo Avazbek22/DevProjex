@@ -22,19 +22,26 @@ Perform these steps in order:
    for existing packages; it does not require an npm access token.
 4. On each of the seven npm packages, configure the GitHub Actions trusted publisher
    with repository `Avazbek22/DevProjex`, workflow filename
-   `publish-packages.yml`, and environment `npm`.
+   `publish-packages.yml`, and environment `npm`. In the same package settings,
+   confirm that publishing access allows the trusted publisher to publish; the
+   workflow runs `npm publish` under that identity and nothing else.
 5. In the NuGet account, configure trusted publishing for repository
    `Avazbek22/DevProjex`, workflow filename `publish-packages.yml`, environment
-   `nuget`, and package scope **new packages** with the glob `devprojex*`. This policy
-   creates the seven package IDs on their first workflow push; no separate reservation
-   is needed.
+   `nuget`, and the scope **push new packages and package versions** with the glob
+   `devprojex*`. This policy creates the seven package IDs on their first workflow
+   push, so no separate reservation is needed, and it keeps working for 5.2.1 and
+   later; a scope limited to new packages or to new versions only blocks one of the two.
 6. Add the GitHub repository variable `NUGET_USER` with the NuGet account username;
    do not add a long-lived NuGet API-key secret.
 7. Run **Publish Headless Packages** on the release branch with the intended
     `version`, `channels=both`, and `dry_run=true`. Confirm that build, static gate,
     mutation gate, and all three OS smoke jobs are green.
-8. Re-run the same workflow and version with `channels=both` and `dry_run=false`.
-    The workflow publishes six NuGet RID packages before the pointer, and six npm
+8. Re-run the same workflow and version with `dry_run=false`. For the first
+    publication use `channels=nuget`: the npm packages of this version were already
+    published by hand in step 3, and a rebuilt tarball is not guaranteed to be
+    byte-identical, so `channels=both` would fail closed on the npm `dist.integrity`
+    check after NuGet had already succeeded. From the next version on, both channels
+    run in one dispatch with `channels=both`. The workflow publishes six NuGet RID packages before the pointer, and six npm
     platform packages before the launcher. A retry verifies an existing NuGet
     payload receipt or npm `dist.integrity` and skips only identical content; a
     mismatch fails closed and no package is overwritten.
