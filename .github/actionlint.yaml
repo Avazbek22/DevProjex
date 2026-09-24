@@ -1,0 +1,10 @@
+# Configuration for actionlint, run by the "Workflow syntax" job in .github/workflows/dotnet.yml.
+# actionlint ships a fixed list of GitHub-hosted runner labels; the labels below are real
+# GitHub-hosted images that are newer than that list (actionlint v1.7.7), not self-hosted runners.
+# Without this file the linter reports them as unknown. Add a label here when a workflow starts
+# using a new hosted image; remove it when the image retires (see .github/workflows/README.md).
+self-hosted-runner:
+  labels:
+    - windows-11-arm
+    - macos-15-intel
+    - windows-2025-vs2026

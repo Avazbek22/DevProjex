@@ -56,17 +56,35 @@ internal static class JsonStorePersistence
         Func<TDocument, TDocument> normalize,
         out TDocument document,
         out bool requiresRewrite,
-        long maximumDocumentBytes = long.MaxValue)
+        long maximumDocumentBytes = long.MaxValue) =>
+        TryReadNormalized(
+            path,
+            serializerOptions,
+            createDefault,
+            normalize,
+            out document,
+            out requiresRewrite,
+            out _,
+            maximumDocumentBytes);
+
+    public static bool TryReadNormalized<TDocument>(
+        string path,
+        JsonSerializerOptions serializerOptions,
+        Func<TDocument> createDefault,
+        Func<TDocument, TDocument> normalize,
+        out TDocument document,
+        out bool requiresRewrite,
+        out bool temporarilyUnavailable,
+        long maximumDocumentBytes = long.MaxValue,
+        Func<string, bool>? validateJson = null)
     {
         document = createDefault();
         requiresRewrite = false;
+        temporarilyUnavailable = false;
 
-        if (!File.Exists(path))
-            return false;
-
-        TryEnsurePrivateUnixFileMode(path);
         try
         {
+            TryEnsurePrivateUnixFileMode(path);
             string json;
             if (maximumDocumentBytes == long.MaxValue)
             {
@@ -84,6 +102,9 @@ internal static class JsonStorePersistence
             {
                 return false;
             }
+            if (validateJson is not null && !validateJson(json))
+                return false;
+
             var deserialized = JsonSerializer.Deserialize<TDocument>(json, serializerOptions);
             if (deserialized is null)
                 return false;
@@ -97,6 +118,16 @@ internal static class JsonStorePersistence
             document = normalized;
             return true;
         }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return false;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                          System.Security.SecurityException)
+        {
+            temporarilyUnavailable = true;
+            return false;
+        }
         catch
         {
             return false;
@@ -106,72 +137,63 @@ internal static class JsonStorePersistence
     public static bool TryWriteAtomic<TDocument>(
         JsonStoreFileSet fileSet,
         TDocument document,
-        JsonSerializerOptions serializerOptions)
-		=> TryWriteAtomic(
-			fileSet,
-			document,
-			serializerOptions,
-			flushToDisk: false,
-			maximumPayloadBytes: long.MaxValue,
-			requireBackup: false,
-			JsonStoreWriteOperations.Default);
+        JsonSerializerOptions serializerOptions) =>
+		WriteAtomic(
+			fileSet, document, serializerOptions, flushToDisk: false,
+			maximumPayloadBytes: long.MaxValue, requireBackup: false,
+			JsonStoreWriteOperations.Default) == JsonStoreWriteResult.Committed;
 
 	public static bool TryWriteAtomic<TDocument>(
 		JsonStoreFileSet fileSet,
 		TDocument document,
 		JsonSerializerOptions serializerOptions,
-		long maximumPayloadBytes)
-		=> TryWriteAtomic(
-			fileSet,
-			document,
-			serializerOptions,
-			flushToDisk: false,
-			maximumPayloadBytes,
-			requireBackup: false,
-			JsonStoreWriteOperations.Default);
+		long maximumPayloadBytes) =>
+		WriteAtomic(
+			fileSet, document, serializerOptions, flushToDisk: false,
+			maximumPayloadBytes, requireBackup: false,
+			JsonStoreWriteOperations.Default) == JsonStoreWriteResult.Committed;
 
 	public static bool TryWriteAtomicDurable<TDocument>(
 		JsonStoreFileSet fileSet,
 		TDocument document,
-		JsonSerializerOptions serializerOptions)
-		=> TryWriteAtomic(
-			fileSet,
-			document,
-			serializerOptions,
-			flushToDisk: true,
-			maximumPayloadBytes: long.MaxValue,
-			requireBackup: true,
-			JsonStoreWriteOperations.Default);
+		JsonSerializerOptions serializerOptions) =>
+		WriteAtomic(
+			fileSet, document, serializerOptions, flushToDisk: true,
+			maximumPayloadBytes: long.MaxValue, requireBackup: true,
+			JsonStoreWriteOperations.Default) == JsonStoreWriteResult.Committed;
 
 	public static bool TryWriteAtomicDurable<TDocument>(
 		JsonStoreFileSet fileSet,
 		TDocument document,
 		JsonSerializerOptions serializerOptions,
-		long maximumPayloadBytes)
-		=> TryWriteAtomic(
-			fileSet,
-			document,
-			serializerOptions,
-			flushToDisk: true,
-			maximumPayloadBytes,
-			requireBackup: true,
-			JsonStoreWriteOperations.Default);
+		long maximumPayloadBytes) =>
+		WriteAtomic(
+			fileSet, document, serializerOptions, flushToDisk: true,
+			maximumPayloadBytes, requireBackup: true,
+			JsonStoreWriteOperations.Default) == JsonStoreWriteResult.Committed;
 
 	internal static bool TryWriteAtomicDurable<TDocument>(
 		JsonStoreFileSet fileSet,
 		TDocument document,
 		JsonSerializerOptions serializerOptions,
 		JsonStoreWriteOperations writeOperations) =>
-		TryWriteAtomic(
-			fileSet,
-			document,
-			serializerOptions,
-			flushToDisk: true,
-			maximumPayloadBytes: long.MaxValue,
-			requireBackup: true,
-			writeOperations);
+		WriteAtomic(
+			fileSet, document, serializerOptions, flushToDisk: true,
+			maximumPayloadBytes: long.MaxValue, requireBackup: true,
+			writeOperations) == JsonStoreWriteResult.Committed;
 
-	private static bool TryWriteAtomic<TDocument>(
+	internal static JsonStoreWriteResult WriteAtomicDurableWithResult<TDocument>(
+		JsonStoreFileSet fileSet,
+		TDocument document,
+		JsonSerializerOptions serializerOptions,
+		long maximumPayloadBytes,
+		JsonStoreWriteOperations? writeOperations = null) =>
+		WriteAtomic(
+			fileSet, document, serializerOptions, flushToDisk: true,
+			maximumPayloadBytes, requireBackup: true,
+			writeOperations ?? JsonStoreWriteOperations.Default);
+
+	private static JsonStoreWriteResult WriteAtomic<TDocument>(
 		JsonStoreFileSet fileSet,
 		TDocument document,
 		JsonSerializerOptions serializerOptions,
@@ -185,17 +207,21 @@ internal static class JsonStorePersistence
         try
         {
             if (string.IsNullOrWhiteSpace(fileSet.DirectoryPath))
-                return false;
+                return JsonStoreWriteResult.Failed;
 
             Directory.CreateDirectory(fileSet.DirectoryPath);
-
-			var payload = JsonSerializer.SerializeToUtf8Bytes(document, serializerOptions);
-			if (payload.LongLength > maximumPayloadBytes)
-				return false;
 			tempPath = Path.Combine(fileSet.DirectoryPath, $"{fileSet.FileName}.{Guid.NewGuid():N}.tmp");
 			using (var stream = new FileStream(tempPath, CreatePrivateWriteOptions(flushToDisk)))
 			{
-				stream.Write(payload);
+				using var bounded = new MaximumLengthWriteStream(stream, maximumPayloadBytes);
+				JsonSerializer.SerializeAsync(
+						bounded,
+					document,
+					serializerOptions,
+					CancellationToken.None)
+					.GetAwaiter()
+					.GetResult();
+				bounded.Flush();
 				stream.Flush(flushToDisk);
 			}
 
@@ -203,8 +229,10 @@ internal static class JsonStorePersistence
             {
 				try
 				{
-					// Replace keeps the primary update atomic and creates the rollback snapshot.
-					writeOperations.Replace(tempPath, fileSet.PrimaryPath, fileSet.BackupPath);
+					writeOperations.Replace(
+						tempPath,
+						fileSet.PrimaryPath,
+						File.Exists(fileSet.BackupPath) ? null : fileSet.BackupPath);
 				}
 				catch (NotSupportedException)
 				{
@@ -217,13 +245,18 @@ internal static class JsonStorePersistence
             }
 
 			EnsurePrivateUnixFileMode(fileSet.PrimaryPath);
-
 			var backupMirrored = TryMirrorPrimaryToBackup(fileSet, writeOperations);
-			return backupMirrored || !requireBackup;
+			return backupMirrored || !requireBackup
+				? JsonStoreWriteResult.Committed
+				: JsonStoreWriteResult.CommittedBackupFailed;
         }
+		catch (MaximumPayloadExceededException)
+		{
+			return JsonStoreWriteResult.Rejected;
+		}
         catch
         {
-            return false;
+            return JsonStoreWriteResult.Failed;
         }
 		finally
 		{
@@ -255,6 +288,66 @@ internal static class JsonStorePersistence
 			options.UnixCreateMode = PrivateUnixFileMode;
 		return options;
 	}
+
+	private sealed class MaximumLengthWriteStream(Stream destination, long maximumLength) : Stream
+	{
+		private long _written;
+
+		public override bool CanRead => false;
+		public override bool CanSeek => false;
+		public override bool CanWrite => true;
+		public override long Length => _written;
+		public override long Position
+		{
+			get => _written;
+			set => throw new NotSupportedException();
+		}
+
+		public override void Flush() => destination.Flush();
+		public override Task FlushAsync(CancellationToken cancellationToken) =>
+			destination.FlushAsync(cancellationToken);
+		public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+		public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+		public override void SetLength(long value) => throw new NotSupportedException();
+		public override void Write(byte[] buffer, int offset, int count) =>
+			Write(buffer.AsSpan(offset, count));
+
+		public override void Write(ReadOnlySpan<byte> buffer)
+		{
+			if (buffer.Length > maximumLength - _written)
+				throw new MaximumPayloadExceededException();
+			destination.Write(buffer);
+			_written += buffer.Length;
+		}
+
+		public override Task WriteAsync(
+			byte[] buffer,
+			int offset,
+			int count,
+			CancellationToken cancellationToken)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			Write(buffer, offset, count);
+			return Task.CompletedTask;
+		}
+
+		public override ValueTask WriteAsync(
+			ReadOnlyMemory<byte> buffer,
+			CancellationToken cancellationToken = default)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			Write(buffer.Span);
+			return ValueTask.CompletedTask;
+		}
+
+		protected override void Dispose(bool disposing)
+		{
+			// The containing writer owns the destination stream.
+			base.Dispose(disposing);
+		}
+	}
+
+	private sealed class MaximumPayloadExceededException : Exception;
 
 	private static void EnsurePrivateUnixFileMode(string path)
 	{
@@ -293,21 +386,55 @@ internal static class JsonStorePersistence
 		JsonStoreFileSet fileSet,
 		JsonStoreWriteOperations writeOperations)
     {
+		string? temporaryBackupPath = null;
         try
         {
             // The backup must mirror the final committed primary snapshot.
             // This keeps recovery deterministic across multiple processes.
             if (File.Exists(fileSet.PrimaryPath))
 			{
-				writeOperations.Copy(fileSet.PrimaryPath, fileSet.BackupPath, overwrite: true);
+				temporaryBackupPath = Path.Combine(
+					fileSet.DirectoryPath,
+					$"{fileSet.FileName}.{Guid.NewGuid():N}.bak.tmp");
+				writeOperations.Copy(fileSet.PrimaryPath, temporaryBackupPath, overwrite: false);
+				EnsurePrivateUnixFileMode(temporaryBackupPath);
+				if (File.Exists(fileSet.BackupPath))
+				{
+					try
+					{
+						File.Replace(temporaryBackupPath, fileSet.BackupPath, null);
+					}
+					catch (NotSupportedException)
+					{
+						File.Move(temporaryBackupPath, fileSet.BackupPath, overwrite: true);
+					}
+				}
+				else
+				{
+					File.Move(temporaryBackupPath, fileSet.BackupPath);
+				}
 				EnsurePrivateUnixFileMode(fileSet.BackupPath);
 			}
 			return true;
         }
         catch
-        {
+		{
 			return false;
         }
+		finally
+		{
+			if (temporaryBackupPath is not null)
+			{
+				try
+				{
+					File.Delete(temporaryBackupPath);
+				}
+				catch
+				{
+					// Best-effort cleanup must not change the committed write result.
+				}
+			}
+		}
     }
 
     internal static bool IsDocumentWithinSizeLimit(string path, long maximumDocumentBytes)
@@ -530,15 +657,23 @@ internal static class JsonStorePersistence
     }
 }
 
+internal enum JsonStoreWriteResult
+{
+	Committed = 0,
+	CommittedBackupFailed = 1,
+	Rejected = 2,
+	Failed = 3
+}
+
 internal sealed class JsonStoreWriteOperations(
-	Action<string, string, string> replace,
+	Action<string, string, string?> replace,
 	Action<string, string, bool> copy)
 {
 	internal static JsonStoreWriteOperations Default { get; } = new(
 		static (source, destination, backup) => File.Replace(source, destination, backup),
 		static (source, destination, overwrite) => File.Copy(source, destination, overwrite));
 
-	internal void Replace(string source, string destination, string backup) =>
+	internal void Replace(string source, string destination, string? backup) =>
 		replace(source, destination, backup);
 
 	internal void Copy(string source, string destination, bool overwrite) =>

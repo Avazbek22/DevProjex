@@ -30,7 +30,8 @@ internal static class DesktopOpenGitReadinessValidator
 			.Where(diagnostic => selection.GitMode == GitFilteringMode.TrackedFilesOnly
 				? diagnostic.Code is ProjectContextGitReadiness.UnavailableDiagnosticCode or
 					ProjectContextGitReadiness.PartialDiagnosticCode
-				: diagnostic.Code == GitScopeFilter.UnavailableDiagnosticCode)
+				: diagnostic.Code is GitScopeFilter.UnavailableDiagnosticCode or
+					GitScopeFilter.UnsafeFilterDiagnosticCode)
 			.ToArray();
 	}
 }

@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+
 namespace DevProjex.Tests.Integration;
 
 /// <summary>
@@ -26,7 +28,7 @@ public class GitEdgeCasesTests : IAsyncLifetime
 
     public GitEdgeCasesTests()
     {
-        _service = new GitRepositoryService();
+        _service = new GitRepositoryService(allowFileTransportForTests: true);
         var testCachePath = Path.Combine(Path.GetTempPath(), "DevProjex", "Tests", "GitIntegration");
         _cacheService = new RepoCacheService(testCachePath);
         _tempDir = new TemporaryDirectory();
@@ -43,6 +45,46 @@ public class GitEdgeCasesTests : IAsyncLifetime
     {
         _tempDir.Dispose();
         return ValueTask.CompletedTask;
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ServiceConstructionDefersGitVersionProbeUntilAvailabilityCheck(bool hideGit)
+    {
+        var resultPath = Path.Combine(_tempDir.Path, $"git-startup-probe-{hideGit}.txt");
+        var dotnetExecutable = GitExecutableLocator.Resolve(OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet");
+        var startInfo = new ProcessStartInfo(dotnetExecutable)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        startInfo.ArgumentList.Add(typeof(GitEdgeCasesTests).Assembly.Location);
+        startInfo.Environment[GitConstructorProbeHost.ResultPathVariable] = resultPath;
+        if (hideGit)
+            startInfo.Environment["PATH"] = _tempDir.Path;
+        using var process = Process.Start(startInfo);
+        Assert.NotNull(process);
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(20));
+        try
+        {
+            await process.WaitForExitAsync(timeout.Token);
+        }
+        finally
+        {
+            if (!process.HasExited)
+                process.Kill(entireProcessTree: true);
+        }
+
+        Assert.Equal(0, process.ExitCode);
+        var result = (await File.ReadAllTextAsync(resultPath, TestContext.Current.CancellationToken)).Split('|');
+        Assert.Equal(["False", "False", "True"], result[..3]);
+        if (hideGit)
+            Assert.Equal("False", result[3]);
+        else
+            Assert.Equal(_gitAvailable.ToString(), result[3]);
     }
 
     #region Repository State Edge Cases
@@ -117,7 +159,7 @@ public class GitEdgeCasesTests : IAsyncLifetime
 
         var repoPath = _tempDir.CreateDirectory("multi-pull");
         var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
-        Assert.True(cloneResult.Success);
+        Assert.True(cloneResult.Success, cloneResult.ErrorMessage);
 
         // Pull multiple times
         for (int i = 0; i < 3; i++)
@@ -529,5 +571,33 @@ public class GitEdgeCasesTests : IAsyncLifetime
     }
 
     #endregion
+}
+
+internal static class GitConstructorProbeHost
+{
+    internal const string ResultPathVariable = "DEVPROJEX_TEST_GIT_CONSTRUCTOR_PROBE_RESULT";
+
+    [ModuleInitializer]
+    internal static void Run()
+    {
+        var resultPath = Environment.GetEnvironmentVariable(ResultPathVariable);
+        if (string.IsNullOrEmpty(resultPath))
+            return;
+
+        var beforeConstruction = GitRuntime.IsVersionProbeComplete;
+        var constructionStart = Stopwatch.GetTimestamp();
+        using var service = new GitRepositoryService();
+        var constructionDuration = Stopwatch.GetElapsedTime(constructionStart);
+        var afterConstruction = GitRuntime.IsVersionProbeComplete;
+        var availabilityStart = Stopwatch.GetTimestamp();
+        var isGitAvailable = service.IsGitAvailableAsync().GetAwaiter().GetResult();
+        var availabilityDuration = Stopwatch.GetElapsedTime(availabilityStart);
+        var afterAvailabilityCheck = GitRuntime.IsVersionProbeComplete;
+        File.WriteAllText(
+            resultPath,
+            $"{beforeConstruction}|{afterConstruction}|{afterAvailabilityCheck}|{isGitAvailable}|" +
+            $"{constructionDuration.Ticks}|{availabilityDuration.Ticks}");
+        Environment.Exit(0);
+    }
 }
 

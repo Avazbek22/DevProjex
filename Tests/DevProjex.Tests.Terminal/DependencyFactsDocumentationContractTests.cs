@@ -1,0 +1,59 @@
+namespace DevProjex.Tests.Terminal;
+
+public sealed class DependencyFactsDocumentationContractTests
+{
+	[Fact]
+	public void DependencyFactsPublicSurfacesAndSafetyBoundariesStayDocumented()
+	{
+		var root = PublishedApplicationLocator.FindRepositoryRoot();
+		var dependencies = File.ReadAllText(Path.Combine(root, "Docs", "Dependencies.md"));
+		var mcp = File.ReadAllText(Path.Combine(root, "Docs", "McpServer.md"));
+		var commandLine = File.ReadAllText(Path.Combine(root, "Docs", "CommandLine.md"));
+		var version = File.ReadAllText(Path.Combine(root, "Docs", "CLI-V1-Contract.md"));
+		var output = File.ReadAllText(Path.Combine(root, "Docs", "CLI-Output-Contract.md"));
+
+		Assert.Contains("**ExplicitImport**", dependencies, StringComparison.Ordinal);
+		Assert.Contains("**TypeReference**", dependencies, StringComparison.Ordinal);
+		Assert.Contains("**Ambiguous**", dependencies, StringComparison.Ordinal);
+		Assert.Contains("### Bash", dependencies, StringComparison.Ordinal);
+		Assert.Contains("### Scala", dependencies, StringComparison.Ordinal);
+		Assert.Contains("the execution working directory, which the index does not know", dependencies, StringComparison.Ordinal);
+		Assert.Contains("reports up to 32 sorted possibilities without declaring any one of them a target", dependencies, StringComparison.Ordinal);
+		Assert.Contains("With no suffix match it remains `Unresolved`", dependencies, StringComparison.Ordinal);
+		Assert.Contains("depends on `PATH` and the `sourcepath` shell option", dependencies, StringComparison.Ordinal);
+		Assert.DoesNotContain("never from the process working directory", dependencies, StringComparison.Ordinal);
+		Assert.Contains("wildcard", dependencies, StringComparison.Ordinal);
+		Assert.Contains("build.sbt", commandLine, StringComparison.Ordinal);
+		Assert.Contains("Merely failing to find a name in the manifest never", dependencies, StringComparison.Ordinal);
+		Assert.Contains("2 Mi characters", dependencies, StringComparison.Ordinal);
+		Assert.Contains(
+			"Go has one narrow capability: a package is a directory",
+			dependencies,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"Java source files contribute classes, interfaces, enums, records, and annotation types",
+			dependencies,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"Rust source files contribute modules, structs, enums, unions, traits, type aliases",
+			dependencies,
+			StringComparison.Ordinal);
+		Assert.Contains("Import paths are not resolved", dependencies, StringComparison.Ordinal);
+		Assert.Contains("Coverage reports the number of dropped constructions", dependencies, StringComparison.Ordinal);
+		Assert.Contains("additional parse:", dependencies, StringComparison.Ordinal);
+		Assert.Contains("without choosing a symbol", dependencies, StringComparison.Ordinal);
+		Assert.Contains("Remaining damaged constructions still fail", dependencies, StringComparison.Ordinal);
+		Assert.Contains(
+			"Without an owning `tsconfig.json` or `jsconfig.json`, one narrow capability applies",
+			dependencies,
+			StringComparison.Ordinal);
+		Assert.Contains("exactly one of `index.ts`", dependencies, StringComparison.Ordinal);
+		Assert.Contains("related_files.path", mcp, StringComparison.Ordinal);
+		Assert.Contains("[Facts coverage]", mcp, StringComparison.Ordinal);
+		Assert.Contains("[Dependency partial parse]", mcp, StringComparison.Ordinal);
+		Assert.Contains("devprojex related <PATH>", commandLine, StringComparison.Ordinal);
+		Assert.Contains("v5.2 dependency-facts extension", version, StringComparison.Ordinal);
+		Assert.Contains("devprojex-related-files", output, StringComparison.Ordinal);
+		Assert.Contains("partialParseDiagnostics", output, StringComparison.Ordinal);
+	}
+}

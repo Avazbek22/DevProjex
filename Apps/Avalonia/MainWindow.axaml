@@ -203,6 +203,7 @@
                           ZoomOutRequested="OnZoomOut"
                           ZoomResetRequested="OnZoomReset"
                           ToggleCompactModeRequested="OnToggleCompactMode"
+                          ToggleAgentActivityRequested="OnToggleAgentActivity"
                           ToggleTreeExpansionAnimationRequested="OnToggleTreeExpansionAnimation"
                           ToggleStatusMetricsAnimationRequested="OnToggleStatusMetricsAnimation"
                           ToggleToolAnimationRequested="OnToggleToolAnimation"
@@ -218,6 +219,9 @@
                           UpdateOpenRepositoryRequested="OnUpdateOpenRepository"
                           AutomaticUpdateCheckChanged="OnAutomaticUpdateCheckChanged"
                           TerminalCommandSetupRequested="OnTerminalCommandSetup"
+                          McpConnectionRequested="OnMcpConnectionRequested"
+                          McpJournalRequested="OnMcpJournalRequested"
+                          McpDocumentationRequested="OnMcpDocumentationRequested"
                           HelpCloseRequested="OnHelpClose"
                           LanguageRuRequested="OnLangRu"
                           LanguageEnRequested="OnLangEn"
@@ -256,7 +260,7 @@
                           GitBranchSwitchRequested="OnGitBranchSwitch" />
 
     <Border DockPanel.Dock="Bottom" Classes="status-strip" IsVisible="{Binding IsProjectLoaded}">
-      <Grid ColumnDefinitions="Auto,*,Auto">
+      <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto">
         <!-- Left: Tree metrics -->
         <controls:StatusMetricWaveText Name="StatusTreeMetricsWave"
                                        Grid.Column="0"
@@ -272,8 +276,22 @@
                                        AutomationProperties.Name="{Binding StatusTreeLabel}"
                                        AutomationProperties.HelpText="{Binding StatusTreeStatsText}" />
 
+        <TextBlock Grid.Column="1"
+                   Name="SelectionPersistenceStatusText"
+                   Text="{Binding SelectionPersistenceStatusText}"
+                   IsVisible="{Binding SelectionPersistenceStatusVisible}"
+                   MaxWidth="420"
+                   Margin="14,0,0,0"
+                   TextTrimming="CharacterEllipsis"
+                   FontSize="12"
+                   Foreground="{DynamicResource AppTextBrush}"
+                   VerticalAlignment="Center"
+                   ToolTip.Tip="{Binding SelectionPersistenceStatusHelpText}"
+                   AutomationProperties.Name="{Binding SelectionPersistenceStatusText}"
+                   AutomationProperties.HelpText="{Binding SelectionPersistenceStatusHelpText}" />
+
         <!-- Center: Progress bar with operation text -->
-        <StackPanel Grid.Column="1"
+        <StackPanel Grid.Column="2"
                     Orientation="Horizontal"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center"
@@ -312,7 +330,7 @@
           </Button>
         </StackPanel>
 
-        <StackPanel Grid.Column="1"
+        <StackPanel Grid.Column="2"
                     Orientation="Horizontal"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center"
@@ -326,7 +344,7 @@
 
         <!-- Right: Content metrics -->
         <controls:StatusMetricWaveText Name="StatusContentMetricsWave"
-                                       Grid.Column="2"
+                                       Grid.Column="3"
                                        Label="{Binding StatusContentLabel}"
                                        Text="{Binding StatusContentStatsText}"
                                        TextFontSize="12"
@@ -338,6 +356,19 @@
                                        IsVisible="{Binding StatusMetricsVisible}"
                                        AutomationProperties.Name="{Binding StatusContentLabel}"
                                        AutomationProperties.HelpText="{Binding StatusContentStatsText}" />
+
+        <TextBlock Grid.Column="4"
+                   Name="AgentActivityStatusText"
+                   Text="{Binding AgentActivityText}"
+                   IsVisible="{Binding AgentActivityVisible}"
+                   MaxWidth="520"
+                   Margin="14,0,0,0"
+                   TextTrimming="CharacterEllipsis"
+                   FontSize="12"
+                   Foreground="{DynamicResource AppTextBrush}"
+                   VerticalAlignment="Center"
+                   AutomationProperties.Name="{Binding MenuViewAgentActivity}"
+                   AutomationProperties.HelpText="{Binding AgentActivityText}" />
       </Grid>
     </Border>
 
@@ -605,6 +636,14 @@
                                        VerticalAlignment="Center"
                                        Margin="{DynamicResource TreeTextMarginResource}"
                                        Foreground="{DynamicResource AppTextBrush}" />
+                            <TextBlock Text="✦"
+                                       IsVisible="{CompiledBinding HasAgentDelivery}"
+                                       Foreground="{DynamicResource AppAccentBrush}"
+                                       FontSize="11"
+                                       FontWeight="SemiBold"
+                                       VerticalAlignment="Center"
+                                       ToolTip.Tip="{CompiledBinding AgentDeliveryToolTip}"
+                                       AutomationProperties.Name="{CompiledBinding AgentDeliveryToolTip}" />
                           </StackPanel>
                         </Grid>
                       </TreeDataTemplate>
@@ -1003,6 +1042,7 @@
             <Border Grid.Column="1"
                     Classes="island-panel settings-island"
                     Name="SettingsIsland"
+                    MinWidth="285"
                     HorizontalAlignment="Left">
               <!-- Settings panel -->
               <views:SettingsPanelView Name="SettingsPanel"
@@ -1021,7 +1061,7 @@
       <ItemsControl Name="ToastHost"
                     ItemsSource="{Binding ToastItems}"
                     IsVisible="{Binding HasToastItems}"
-                    IsHitTestVisible="False"
+                    IsHitTestVisible="True"
                     HorizontalAlignment="Left"
                     VerticalAlignment="Bottom"
                     Margin="0,0,0,38">
@@ -1033,6 +1073,9 @@
         <ItemsControl.ItemTemplate>
           <DataTemplate x:DataType="vm:ToastMessageViewModel">
             <Border Background="{DynamicResource ToastSurfaceBrush}"
+                    PointerEntered="OnToastPointerEntered"
+                    PointerExited="OnToastPointerExited"
+                    PointerPressed="OnToastPointerPressed"
                     CornerRadius="8"
                     Padding="14,10"
                     Opacity="{Binding Opacity}"

@@ -506,50 +506,50 @@ public sealed class SecretRedactionCacheTests
 		var secondRoot = Directory.CreateDirectory(Path.Combine(workspace.Path, "second")).FullName;
 		var firstPath = workspace.CreateFile("first/config.env", $"token={Secret}\n");
 		var secondPath = workspace.CreateFile("second/config.env", $"token={Secret}\n");
-		var detector = new BlockingFirstDetector();
+		using var detector = new BlockingFirstDetector();
 		using var session = new SecretRedactionSession(detector);
 		var published = 0;
 		session.SnapshotPublished += (_, _) => Interlocked.Increment(ref published);
 		var staleScope = session.BeginOutput(firstRoot, [firstPath]);
 
-		var staleTask = Task.Run(
-			() => staleScope.Redact(
-				firstPath,
-				File.ReadAllText(firstPath),
-				TestContext.Current.CancellationToken),
+		var content = File.ReadAllText(firstPath);
+		await WithBlockedDetectionAsync(
+			detector,
+			token => staleScope.Redact(firstPath, content, token),
+			async staleTask =>
+			{
+				SecretRedactionScope? currentScope = null;
+				switch (invalidation)
+				{
+					case GenerationInvalidation.Disable:
+						session.Disable();
+						break;
+					case GenerationInvalidation.Reset:
+						session.Reset();
+						break;
+					case GenerationInvalidation.ProjectSwitch:
+						currentScope = session.BeginOutput(secondRoot, [secondPath]);
+						break;
+					default:
+						throw new ArgumentOutOfRangeException(nameof(invalidation), invalidation, null);
+				}
+				detector.Release.Set();
+
+				await Assert.ThrowsAnyAsync<OperationCanceledException>(() => staleTask);
+				Assert.Equal(0, published);
+				Assert.Equal(0, session.GetCacheDiagnostics().EntryCount);
+
+				currentScope ??= session.BeginOutput(firstRoot, [firstPath]);
+				var currentPath = invalidation == GenerationInvalidation.ProjectSwitch ? secondPath : firstPath;
+				var current = currentScope.Redact(
+					currentPath,
+					File.ReadAllText(currentPath),
+					TestContext.Current.CancellationToken);
+				Assert.Equal(1, current.RedactedCount);
+				_ = currentScope.Complete();
+				Assert.Equal(1, session.GetCacheDiagnostics().EntryCount);
+			},
 			TestContext.Current.CancellationToken);
-		Assert.True(detector.Entered.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
-
-		SecretRedactionScope? currentScope = null;
-		switch (invalidation)
-		{
-			case GenerationInvalidation.Disable:
-				session.Disable();
-				break;
-			case GenerationInvalidation.Reset:
-				session.Reset();
-				break;
-			case GenerationInvalidation.ProjectSwitch:
-				currentScope = session.BeginOutput(secondRoot, [secondPath]);
-				break;
-			default:
-				throw new ArgumentOutOfRangeException(nameof(invalidation), invalidation, null);
-		}
-		detector.Release.Set();
-
-		await Assert.ThrowsAnyAsync<OperationCanceledException>(() => staleTask);
-		Assert.Equal(0, published);
-		Assert.Equal(0, session.GetCacheDiagnostics().EntryCount);
-
-		currentScope ??= session.BeginOutput(firstRoot, [firstPath]);
-		var currentPath = invalidation == GenerationInvalidation.ProjectSwitch ? secondPath : firstPath;
-		var current = currentScope.Redact(
-			currentPath,
-			File.ReadAllText(currentPath),
-			TestContext.Current.CancellationToken);
-		Assert.Equal(1, current.RedactedCount);
-		_ = currentScope.Complete();
-		Assert.Equal(1, session.GetCacheDiagnostics().EntryCount);
 	}
 
 	[Fact]
@@ -571,28 +571,207 @@ public sealed class SecretRedactionCacheTests
 	}
 
 	[Fact]
+	public async Task BlockingDetectionWorker_DoesNotUseSharedThreadPool()
+	{
+		var pooled = await StartBlockingDetection(
+			_ => Thread.CurrentThread.IsThreadPoolThread,
+			TestContext.Current.CancellationToken);
+
+		Assert.False(pooled);
+	}
+
+	[Fact]
+	public async Task BlockingDetectionWorker_ReportsFailureBeforeDetectorEntry()
+	{
+		var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var failure = new IOException("Detection input failed before entry.");
+		var work = Task.FromException<int>(failure);
+
+		var actual = await Assert.ThrowsAsync<IOException>(() => WaitForDetectionEntryAsync(
+			entered.Task, work, TestContext.Current.CancellationToken));
+
+		Assert.Same(failure, actual);
+	}
+
+	[Fact]
+	public async Task BlockingDetectionWorker_ReleasesAndJoinsAfterAssertionFailure()
+	{
+		using var detector = new BlockingFirstDetector();
+		Task<int>? pending = null;
+		var failure = new InvalidOperationException("Assertion failed while detection was blocked.");
+		try
+		{
+			var actual = await Assert.ThrowsAsync<InvalidOperationException>(() => WithBlockedDetectionAsync(
+				detector,
+				token => { _ = detector.Detect("config.env", Secret, token); return 0; },
+				work => { pending = work; throw failure; },
+				TestContext.Current.CancellationToken));
+
+			Assert.Same(failure, actual);
+			Assert.True(detector.Release.IsSet);
+			Assert.True(pending!.IsCompleted);
+		}
+		finally
+		{
+			detector.Release.Set();
+			if (pending is not null)
+			{
+				try { await pending; }
+				catch (OperationCanceledException) when (pending.IsCanceled) { }
+			}
+		}
+	}
+
+	[Fact]
+	public async Task BlockingDetectionWorker_RejectsCompletionWithoutDetectorEntry()
+	{
+		var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var failure = await Assert.ThrowsAsync<InvalidOperationException>(() => WaitForDetectionEntryAsync(
+			entered.Task, Task.CompletedTask, TestContext.Current.CancellationToken));
+		Assert.Equal("Detection worker completed before entering the blocking detector.", failure.Message);
+	}
+
+	[Fact]
+	public async Task BlockingDetectionWorker_AcceptsEntryBeforeWorkerCompletion()
+	{
+		var pending = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		await WaitForDetectionEntryAsync(Task.CompletedTask, pending.Task, TestContext.Current.CancellationToken);
+		Assert.False(pending.Task.IsCompleted);
+	}
+
+	[Fact]
+	public async Task BlockingDetectionWorker_PropagatesInputFailureWithoutRunningAssertions()
+	{
+		using var detector = new BlockingFirstDetector();
+		var failure = new IOException("Detection input failed before entry.");
+		var asserted = false;
+		var actual = await Assert.ThrowsAsync<IOException>(() => WithBlockedDetectionAsync<int>(
+			detector, _ => throw failure,
+			_ => { asserted = true; return Task.CompletedTask; },
+			TestContext.Current.CancellationToken));
+		Assert.Same(failure, actual);
+		Assert.False(asserted);
+		Assert.False(detector.EnteredTask.IsCompleted);
+		Assert.True(detector.Release.IsSet);
+	}
+
+	[Fact]
+	public async Task BlockingDetectionWorker_CancellationBeforeEntryReleasesDetector()
+	{
+		using var detector = new BlockingFirstDetector();
+		using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+		cancellation.Cancel();
+		var asserted = false;
+		await Assert.ThrowsAnyAsync<OperationCanceledException>(() => WithBlockedDetectionAsync(
+			detector, _ => 0,
+			_ => { asserted = true; return Task.CompletedTask; }, cancellation.Token));
+		Assert.False(asserted);
+		Assert.False(detector.EnteredTask.IsCompleted);
+		Assert.True(detector.Release.IsSet);
+	}
+
+	[Fact]
+	public async Task BlockingDetectionWorker_TimeoutReportsWorkerAndEntryState()
+	{
+		var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var pending = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var failure = await Assert.ThrowsAsync<TimeoutException>(() => WaitForDetectionEntryAsync(
+			entered.Task, pending.Task, TestContext.Current.CancellationToken));
+		Assert.Contains("worker status=WaitingForActivation", failure.Message, StringComparison.Ordinal);
+		Assert.Contains("entry status=WaitingForActivation", failure.Message, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task BlockingDetectionWorker_DoesNotHideFailureAfterAssertionsComplete()
+	{
+		using var detector = new BlockingFirstDetector();
+		var failure = new IOException("Detection failed after entry.");
+		var actual = await Assert.ThrowsAsync<IOException>(() => WithBlockedDetectionAsync<int>(
+			detector,
+			_ =>
+			{
+				detector.Detect("config.env", Secret, TestContext.Current.CancellationToken);
+				throw failure;
+			},
+			_ => Task.CompletedTask,
+			TestContext.Current.CancellationToken));
+		Assert.Same(failure, actual);
+		Assert.True(detector.Release.IsSet);
+	}
+
+	private static Task<T> StartBlockingDetection<T>(Func<CancellationToken, T> detect, CancellationToken token) =>
+		Task.Factory.StartNew(() => detect(token), token,
+			TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach, TaskScheduler.Default);
+
+	private static async Task WaitForDetectionEntryAsync(Task entered, Task work, CancellationToken token)
+	{
+		try
+		{
+			await Task.WhenAny(entered, work).WaitAsync(TimeSpan.FromSeconds(5), token);
+		}
+		catch (TimeoutException exception)
+		{
+			throw new TimeoutException(
+				$"Detector entry timed out; worker status={work.Status}; entry status={entered.Status}.", exception);
+		}
+		if (!entered.IsCompleted)
+		{
+			await work;
+			throw new InvalidOperationException("Detection worker completed before entering the blocking detector.");
+		}
+		await entered;
+	}
+
+	private static async Task WithBlockedDetectionAsync<T>(
+		BlockingFirstDetector detector,
+		Func<CancellationToken, T> detect,
+		Func<Task<T>, Task> assertions,
+		CancellationToken token)
+	{
+		using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
+		var work = StartBlockingDetection(detect, cancellation.Token);
+		var assertionsCompleted = false;
+		try
+		{
+			await WaitForDetectionEntryAsync(detector.EnteredTask, work, token);
+			await assertions(work);
+			assertionsCompleted = true;
+		}
+		finally
+		{
+			detector.Release.Set();
+			cancellation.Cancel();
+			try { await work; }
+			catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+			catch when (!assertionsCompleted) { }
+		}
+	}
+
+	[Fact]
 	public async Task PublicRedact_RejectsConcurrentConsumersWithoutCorruptingScope()
 	{
 		using var workspace = new TemporaryDirectory();
 		var path = workspace.CreateFile("src/config.env", $"token={Secret}\n");
-		var detector = new BlockingFirstDetector();
+		using var detector = new BlockingFirstDetector();
 		using var session = new SecretRedactionSession(detector);
 		var scope = session.BeginOutput(workspace.Path, [path]);
 		var content = File.ReadAllText(path);
-		var first = Task.Run(
-			() => scope.Redact(path, content, TestContext.Current.CancellationToken),
+		await WithBlockedDetectionAsync(
+			detector,
+			token => scope.Redact(path, content, token),
+			async first =>
+			{
+				var exception = Assert.Throws<InvalidOperationException>(
+					() => scope.Redact(path, content, TestContext.Current.CancellationToken));
+				Assert.Contains("ordered consumer", exception.Message, StringComparison.Ordinal);
+				Assert.Throws<InvalidOperationException>(() => scope.Complete());
+
+				detector.Release.Set();
+				var result = await first;
+				Assert.Equal(1, result.RedactedCount);
+				Assert.Equal(1, scope.Complete().RedactedCount);
+			},
 			TestContext.Current.CancellationToken);
-		Assert.True(detector.Entered.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
-
-		var exception = Assert.Throws<InvalidOperationException>(
-			() => scope.Redact(path, content, TestContext.Current.CancellationToken));
-		Assert.Contains("ordered consumer", exception.Message, StringComparison.Ordinal);
-		Assert.Throws<InvalidOperationException>(() => scope.Complete());
-
-		detector.Release.Set();
-		var result = await first;
-		Assert.Equal(1, result.RedactedCount);
-		Assert.Equal(1, scope.Complete().RedactedCount);
 	}
 
 	[Fact]
@@ -871,12 +1050,15 @@ public sealed class SecretRedactionCacheTests
 		}
 	}
 
-	private sealed class BlockingFirstDetector : ISecretDetector
+	private sealed class BlockingFirstDetector : ISecretDetector, IDisposable
 	{
 		private int _calls;
+		private readonly TaskCompletionSource _entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-		public ManualResetEventSlim Entered { get; } = new();
 		public ManualResetEventSlim Release { get; } = new();
+		public Task EnteredTask => _entered.Task;
+
+		public void Dispose() => Release.Dispose();
 
 		public IReadOnlyList<DetectedSecret> Detect(
 			string repositoryRelativePath,
@@ -885,7 +1067,7 @@ public sealed class SecretRedactionCacheTests
 		{
 			if (Interlocked.Increment(ref _calls) == 1)
 			{
-				Entered.Set();
+				_entered.SetResult();
 				Release.Wait(cancellationToken);
 			}
 			var start = content.IndexOf(Secret, StringComparison.Ordinal);

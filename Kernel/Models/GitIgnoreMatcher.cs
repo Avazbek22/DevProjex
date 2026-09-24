@@ -17,6 +17,8 @@ public sealed class GitIgnoreMatcher
     private readonly bool _ignoreAsciiCase;
     private readonly bool _normalizeUnicode;
     private readonly bool _hasNegationRules;
+    private GitIgnoreMatcher? _lowerPrioritySource;
+    private GitIgnoreMatcher? _higherPrioritySource;
 
     // Pre-compiled search values for SIMD-optimized character lookup
     private static readonly SearchValues<char> GlobSpecialChars = SearchValues.Create("*?[");
@@ -45,6 +47,30 @@ public sealed class GitIgnoreMatcher
     }
 
     public bool HasNegationRules => _hasNegationRules;
+
+    public static GitIgnoreMatcher Combine(GitIgnoreMatcher lowerPriority, GitIgnoreMatcher higherPriority)
+    {
+        if (lowerPriority._rules.Count == 0)
+            return higherPriority;
+        if (ReferenceEquals(higherPriority, Empty))
+            return lowerPriority;
+        if (lowerPriority._normalizedRootPath != higherPriority._normalizedRootPath ||
+            lowerPriority._ignoreAsciiCase != higherPriority._ignoreAsciiCase ||
+            lowerPriority._normalizeUnicode != higherPriority._normalizeUnicode)
+            throw new ArgumentException("Rule sources must share a scope and comparison semantics.");
+        if (lowerPriority._rules.Count + higherPriority._rules.Count > MaximumEffectiveRuleCount)
+            throw new InvalidDataException("The combined ignore scope exceeds the rule limit.");
+
+        return new GitIgnoreMatcher(
+            higherPriority._normalizedRootPath,
+            [.. lowerPriority._rules, .. higherPriority._rules],
+            lowerPriority.HasNegationRules || higherPriority.HasNegationRules,
+            new GitPathComparisonSemantics(higherPriority._ignoreAsciiCase, higherPriority._normalizeUnicode))
+        {
+            _lowerPrioritySource = lowerPriority,
+            _higherPrioritySource = higherPriority
+        };
+    }
 
     public bool IsRootPath(string path)
     {
@@ -339,6 +365,11 @@ public sealed class GitIgnoreMatcher
 
     private IgnoreEvaluation EvaluateRelativeCore(ReadOnlySpan<char> relativePath, bool isDirectory, string name)
     {
+        if (_higherPrioritySource is { } higher && _lowerPrioritySource is { } lower)
+        {
+            var higherEvaluation = higher.EvaluateRelativeCore(relativePath, isDirectory, name);
+            return higherEvaluation.HasMatch ? higherEvaluation : lower.EvaluateRelativeCore(relativePath, isDirectory, name);
+        }
         var normalizedName = string.IsNullOrEmpty(name) ? Path.GetFileName(relativePath).ToString() : name;
         var evaluation = EvaluateRules(relativePath, isDirectory, normalizedName);
         var ignored = evaluation.IsIgnored;
@@ -384,6 +415,16 @@ public sealed class GitIgnoreMatcher
         bool isDirectory,
         string normalizedName)
     {
+        if (_higherPrioritySource is { } higher && _lowerPrioritySource is { } lower)
+        {
+            var higherEvaluation = higher.EvaluateRules(relativePath, isDirectory, normalizedName);
+            if (higherEvaluation.HasMatch)
+                return higherEvaluation;
+            // A root rule source can reopen descendants hidden only by info/exclude.
+            if (isDirectory && higher.ShouldTraverseIgnoredDirectoryRelativeCore(relativePath, normalizedName))
+                return default;
+            return lower.EvaluateRules(relativePath, isDirectory, normalizedName);
+        }
         normalizedName = GitPathTextNormalizer.NormalizeObservedPath(
             normalizedName,
             _normalizeUnicode,
@@ -595,6 +636,13 @@ public sealed class GitIgnoreMatcher
         bool matchByNameOnly,
         bool hasEscapes)
     {
+        if (matchByNameOnly && !hasEscapes && pattern.Length > 2 &&
+            pattern.StartsWith("*.", StringComparison.Ordinal) && IsAscii(pattern) &&
+            pattern.AsSpan(1).IndexOfAny(GlobSpecialChars) < 0)
+        {
+            return RuleMatchKind.NameSuffix;
+        }
+
         // Literal rules dominate real .gitignore files. Keeping them out of Regex
         // reduces allocations at build time and avoids a Regex call for every path.
         if (hasEscapes || pattern.AsSpan().IndexOfAny(GlobSpecialChars) >= 0)
@@ -1111,6 +1159,7 @@ public sealed class GitIgnoreMatcher
     {
         Regex,
         NameLiteral,
+        NameSuffix,
         AnchoredPathLiteral,
         UnanchoredPathLiteral,
         AnchoredDirectoryLiteral,
@@ -1137,6 +1186,7 @@ public sealed class GitIgnoreMatcher
             MatchKind switch
             {
                 RuleMatchKind.NameLiteral => string.Equals(normalizedName, LiteralPattern, comparison),
+                RuleMatchKind.NameSuffix => MatchesNameSuffix(normalizedName, LiteralPattern, comparison),
                 RuleMatchKind.AnchoredPathLiteral => relativePath.Equals(LiteralPattern.AsSpan(), comparison),
                 RuleMatchKind.UnanchoredPathLiteral => MatchesUnanchoredPathLiteral(relativePath, LiteralPattern, comparison),
                 RuleMatchKind.AnchoredDirectoryLiteral => MatchesAnchoredDirectoryLiteral(relativePath, LiteralPattern, isDirectory, comparison),
@@ -1148,6 +1198,18 @@ public sealed class GitIgnoreMatcher
                     projectedRelativePath,
                     projectedName)
             };
+
+        private static bool MatchesNameSuffix(
+            ReadOnlySpan<char> name,
+            string literalPattern,
+            StringComparison comparison)
+        {
+            var suffix = literalPattern.AsSpan(1);
+            // Preserve the regex end anchor's acceptance of one trailing line feed.
+            var matchesSuffix = name.EndsWith(suffix, comparison) ||
+                                !name.IsEmpty && name[^1] == '\n' && name[..^1].EndsWith(suffix, comparison);
+            return matchesSuffix && !name.Contains('/');
+        }
 
         private bool MatchesRegex(
             ReadOnlySpan<char> relativePath,

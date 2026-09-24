@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using DevProjex.Infrastructure.LiveContext;
+using DevProjex.Infrastructure.ResourceStore;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -11,6 +13,149 @@ public sealed class TerminalProcessCollection
 [Collection(TerminalProcessCollection.Name)]
 public sealed class TerminalPtyJourneyTests
 {
+	[Fact(Timeout = 60_000)]
+	public async Task LiveSessionStatusAndConnectionCommandAreVisible()
+	{
+		using var workspace = CreateProject();
+		var expectedMessage = new LocalizationService(
+			new JsonLocalizationCatalog(),
+			AppLanguage.En)["Mcp.Connect.ManualConfiguration"];
+		LiveSessionWriter? liveSession = null;
+		try
+		{
+			await using var terminal = await TerminalPtyHarness.StartAsync(
+				workspace.Path,
+				["tui", workspace.Path, "--profile", "standard", "--language", "en"],
+				cancellationToken: TestContext.Current.CancellationToken,
+				initializeDataRoot: root =>
+				{
+					liveSession = new LiveSessionRegistry(() => root).Start([workspace.Path]);
+					liveSession.UpdateClient("sample-client", "1.0");
+				});
+
+			await terminal.WaitForScreenAsync(
+				"Live context (sample-client)",
+				cancellationToken: TestContext.Current.CancellationToken);
+			await terminal.SendAsync(":mcp connect json\r", TestContext.Current.CancellationToken);
+			var fragment = await terminal.WaitForScreenAsync(
+				"mcpServers",
+				cancellationToken: TestContext.Current.CancellationToken);
+			Assert.Contains(expectedMessage, fragment, StringComparison.Ordinal);
+			Assert.Contains("--live", fragment, StringComparison.Ordinal);
+			Assert.Contains(workspace.Path, fragment, StringComparison.Ordinal);
+
+			await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+			await terminal.WaitForScreenWithoutAsync(
+				"mcpServers",
+				cancellationToken: TestContext.Current.CancellationToken);
+			await terminal.WaitForScreenAsync(
+				expectedMessage,
+				cancellationToken: TestContext.Current.CancellationToken);
+			await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
+			Assert.Equal(
+				CommandLineExitCodes.Success,
+				await terminal.WaitForExitAsync(
+					cancellationToken: TestContext.Current.CancellationToken));
+		}
+		finally
+		{
+			if (liveSession is not null)
+				await liveSession.DisposeAsync();
+		}
+	}
+
+	[Fact(Timeout = 60_000)]
+	public async Task StandardMcpSessionDoesNotAppearAsLiveContext()
+	{
+		using var workspace = CreateProject();
+		LiveSessionWriter? standardSession = null;
+		try
+		{
+			await using var terminal = await TerminalPtyHarness.StartAsync(
+				workspace.Path,
+				["tui", workspace.Path, "--profile", "standard", "--language", "en"],
+				cancellationToken: TestContext.Current.CancellationToken,
+				initializeDataRoot: root =>
+				{
+					standardSession = new LiveSessionRegistry(() => root).Start(
+						[workspace.Path],
+						AgentJournalMode.Standard);
+					standardSession.UpdateClient("sample-client", "1.0");
+				});
+
+			var screen = await terminal.WaitForStableScreenAsync(
+				"> PROJECT TREE",
+				cancellationToken: TestContext.Current.CancellationToken);
+			Assert.DoesNotContain("Live context", screen, StringComparison.Ordinal);
+
+			await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
+			Assert.Equal(
+				CommandLineExitCodes.Success,
+				await terminal.WaitForExitAsync(
+					cancellationToken: TestContext.Current.CancellationToken));
+		}
+		finally
+		{
+			if (standardSession is not null)
+				await standardSession.DisposeAsync();
+		}
+	}
+
+	[Fact(Timeout = 60_000)]
+	public async Task ConnectionCommandAlwaysUsesLiveMode()
+	{
+		using var workspace = CreateProject();
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			workspace.Path,
+			["tui", workspace.Path, "--profile", "standard", "--language", "en"],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.WaitForScreenAsync(
+			"> PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync(":mcp connect json\r", TestContext.Current.CancellationToken);
+		var fragment = await terminal.WaitForScreenAsync(
+			"mcpServers",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains("--live", fragment, StringComparison.Ordinal);
+		Assert.Contains(workspace.Path, fragment, StringComparison.Ordinal);
+
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(
+				cancellationToken: TestContext.Current.CancellationToken));
+	}
+
+	[Fact(Timeout = 60_000)]
+	public async Task PrintableMcpCommandKeepsAnExplicitStandardMode()
+	{
+		using var workspace = CreateProject();
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			workspace.Path,
+			["tui", workspace.Path, "--profile", "standard", "--language", "en"],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.WaitForScreenAsync(
+			"> PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync(":mcp json standard\r", TestContext.Current.CancellationToken);
+		var fragment = await terminal.WaitForScreenAsync(
+			"mcpServers",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.DoesNotContain("--live", fragment, StringComparison.Ordinal);
+		Assert.Contains(workspace.Path, fragment, StringComparison.Ordinal);
+
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(cancellationToken: TestContext.Current.CancellationToken));
+	}
+
 	[Fact(Timeout = 60_000)]
 	public async Task ImmediateExitFlushesThePendingWorkspaceSelection()
 	{
@@ -241,7 +386,8 @@ public sealed class TerminalPtyJourneyTests
 		await using var terminal = await TerminalPtyHarness.StartAsync(
 			welcomeDirectory.Path,
 			["--language", "en"],
-			cancellationToken: TestContext.Current.CancellationToken);
+			cancellationToken: TestContext.Current.CancellationToken,
+			allowFileGitTransport: true);
 
 		await terminal.WaitForScreenAsync(
 			"Choose a workspace action",
@@ -454,12 +600,30 @@ public sealed class TerminalPtyJourneyTests
 		Assert.Contains("CONTEXT PREVIEW", initialWorkspace, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 
+		await terminal.OpenCommandLineAsync(TestContext.Current.CancellationToken);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForStableScreenAsync(
+			required: "PROJECT TREE",
+			forbidden: ":set",
+			timeout: PtySafetyTimeout,
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendCtrlAAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForStableScreenAsync(
+			required: "[x] src",
+			timeout: PtySafetyTimeout,
+			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenAsync(
-			"v [x] src",
+		await terminal.WaitForStableScreenAsync(
+			readiness: screen =>
+				screen.Contains("v [x] src", StringComparison.Ordinal) &&
+				HasVisibleSelection(terminal, "src", "Feature"),
+			readinessDescription: "showing the expanded selected folder with settled focus",
+			timelineState: screen =>
+				$"expanded={screen.Contains("v [x] src", StringComparison.Ordinal)} " +
+				$"focused={HasVisibleSelection(terminal, "src", "Feature")}",
+			timeout: PtySafetyTimeout,
 			cancellationToken: TestContext.Current.CancellationToken);
-		await Task.Delay(150, TestContext.Current.CancellationToken);
 		AssertSelectionIsVisible(terminal, "src", "Feature");
 		await terminal.SendSpaceAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
@@ -698,28 +862,40 @@ public sealed class TerminalPtyJourneyTests
 		string selectedText,
 		string otherText)
 	{
-		var selectedRow = terminal.FindVisibleRow(selectedText);
-		var otherRow = terminal.FindVisibleRow(otherText);
-		Assert.True(selectedRow >= 0);
-		Assert.True(otherRow >= 0);
-		var selectedColumn = terminal.CaptureScreen()
-			.Split('\n')[selectedRow]
-			.IndexOf(selectedText, StringComparison.Ordinal);
-		var otherColumn = terminal.CaptureScreen()
-			.Split('\n')[otherRow]
-			.IndexOf(otherText, StringComparison.Ordinal);
-		var selectedStyle = terminal.CaptureCellStyle(selectedRow, selectedColumn);
-		var otherStyle = terminal.CaptureCellStyle(otherRow, otherColumn);
-		var otherVisual = (otherStyle.BackgroundMode, otherStyle.Background, otherStyle.Inverse);
-		var selectedVisual = (
-			selectedStyle.BackgroundMode,
-			selectedStyle.Background,
-			selectedStyle.Inverse);
 		Assert.True(
-			otherVisual != selectedVisual,
-			$"Selected row has no visible focus style. Selected={selectedVisual}, Other={otherVisual}.{Environment.NewLine}" +
+			HasVisibleSelection(terminal, selectedText, otherText),
+			"Selected row has no visible focus style." + Environment.NewLine +
 			terminal.CaptureScreen());
 	}
+
+	private static bool HasVisibleSelection(
+		TerminalPtyHarness terminal,
+		string selectedText,
+		string otherText)
+	{
+		var screen = terminal.CaptureScreen();
+		var lines = screen.Split('\n');
+		var selectedRow = Array.FindIndex(
+			lines,
+			line => line.Contains(selectedText, StringComparison.Ordinal));
+		var otherRow = Array.FindIndex(
+			lines,
+			line => line.Contains(otherText, StringComparison.Ordinal));
+		if (selectedRow < 0 || otherRow < 0)
+			return false;
+
+		var selectedColumn = lines[selectedRow].IndexOf(selectedText, StringComparison.Ordinal);
+		var otherColumn = lines[otherRow].IndexOf(otherText, StringComparison.Ordinal);
+		var selectedStyle = terminal.CaptureCellStyle(selectedRow, selectedColumn);
+		var otherStyle = terminal.CaptureCellStyle(otherRow, otherColumn);
+		return (otherStyle.BackgroundMode, otherStyle.Background, otherStyle.Inverse) !=
+			   (selectedStyle.BackgroundMode, selectedStyle.Background, selectedStyle.Inverse);
+	}
+
+	private static TimeSpan PtySafetyTimeout =>
+		string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase)
+			? TimeSpan.FromMinutes(2)
+			: TimeSpan.FromSeconds(30);
 
 	private static async Task SelectWelcomeActionAsync(
 		TerminalPtyHarness terminal,

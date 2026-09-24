@@ -7,6 +7,7 @@ internal enum TerminalWorkspaceCommandVerb
 	Set,
 	All,
 	Type,
+	Select,
 	View,
 	Format,
 	Search,
@@ -14,10 +15,13 @@ internal enum TerminalWorkspaceCommandVerb
 	Export,
 	Copy,
 	Analyze,
+	Related,
 	Branch,
 	Update,
 	Recent,
+	Open,
 	Profile,
+	Mcp,
 	Refresh,
 	Language,
 	Diagnostics,
@@ -54,13 +58,17 @@ internal enum TerminalWorkspaceCommandGrammar
 	ToggleOption,
 	ToggleGroup,
 	ToggleTypes,
+	Select,
 	View,
 	Format,
 	Text,
 	Export,
 	Copy,
 	OptionalText,
+	RequiredText,
 	Profile,
+	McpConnection,
+	Related,
 	Language,
 	Help,
 	None
@@ -75,7 +83,18 @@ internal sealed record TerminalWorkspaceCommand(
 	ProjectContextDocumentFormat? Format = null,
 	ProjectCopyExportFormat? ProjectExportFormat = null,
 	string? Text = null,
-	string? Destination = null);
+	string? Destination = null,
+	int? Depth = null,
+	TerminalWorkspaceMcpAction McpAction = TerminalWorkspaceMcpAction.Print);
+
+internal enum TerminalWorkspaceMcpAction
+{
+	Print,
+	Connect,
+	ShowLog,
+	ExportLog,
+	ClearLog
+}
 
 internal enum TerminalWorkspaceCommandErrorCode
 {
@@ -111,7 +130,10 @@ internal readonly record struct TerminalWorkspaceCommandParseResult(
 internal sealed record TerminalWorkspaceCommandParseContext(
 	IReadOnlyList<string> AvailableExtensions,
 	IReadOnlySet<TerminalWorkspaceCommandVerb>? AllowedVerbs = null,
-	string? WorkingDirectory = null)
+	string? WorkingDirectory = null,
+	string? ProfileDirectory = null,
+	IReadOnlyList<string>? KnownProjectPaths = null,
+	IReadOnlyList<string>? KnownProjectFiles = null)
 {
 	public static TerminalWorkspaceCommandParseContext Empty { get; } = new([]);
 	public IReadOnlyList<string> VerbTokens => AllowedVerbs is null
@@ -168,6 +190,13 @@ internal static class TerminalWorkspaceCommandCatalog
 			"type .cs on",
 			static (session, command) => session.ExecuteTypeCommand(command)),
 		Define(
+			TerminalWorkspaceCommandVerb.Select,
+			TerminalWorkspaceCommandGrammar.Select,
+			"select",
+			"select <path|glob> [<path|glob>...] <on|off>",
+			"select src/**/*.cs on",
+			static (session, command) => session.ExecuteSelectCommand(command)),
+		Define(
 			TerminalWorkspaceCommandVerb.View,
 			TerminalWorkspaceCommandGrammar.View,
 			"view",
@@ -217,6 +246,13 @@ internal static class TerminalWorkspaceCommandCatalog
 			"analyze",
 			static (session, command) => session.ExecuteAnalyzeCommand(command)),
 		Define(
+			TerminalWorkspaceCommandVerb.Related,
+			TerminalWorkspaceCommandGrammar.Related,
+			"related",
+			"related <path> [--direction <dependencies|dependents|both>] [--depth <1..10>]",
+			"related src/App.cs --direction dependencies --depth 2",
+			static (session, command) => session.ExecuteRelatedCommand(command)),
+		Define(
 			TerminalWorkspaceCommandVerb.Branch,
 			TerminalWorkspaceCommandGrammar.OptionalText,
 			"branch",
@@ -241,12 +277,28 @@ internal static class TerminalWorkspaceCommandCatalog
 			static (session, command) => session.ExecuteRecentCommand(command),
 			TerminalWorkspaceCommandAvailability.Always),
 		Define(
+			TerminalWorkspaceCommandVerb.Open,
+			TerminalWorkspaceCommandGrammar.RequiredText,
+			"open",
+			"open <path|url>",
+			"open \"../Sample Project\"",
+			static (session, command) => session.ExecuteOpenCommand(command),
+			TerminalWorkspaceCommandAvailability.Always),
+		Define(
 			TerminalWorkspaceCommandVerb.Profile,
 			TerminalWorkspaceCommandGrammar.Profile,
 			"profile",
-			"profile save [name]",
-			"profile save \"Review Settings\"",
+			"profile save [name] | profile load <name|path> | profile show | profile reset",
+			"profile show",
 			static (session, command) => session.ExecuteProfileCommand(command)),
+		Define(
+			TerminalWorkspaceCommandVerb.Mcp,
+			TerminalWorkspaceCommandGrammar.McpConnection,
+			"mcp",
+			"mcp [client] [live|standard] | mcp connect <client> | mcp log [session <id>|last] | " +
+			"mcp log export <path> [markdown|json] [session <id>|last] | mcp log clear",
+			"mcp codex live",
+			static (session, command) => session.ExecuteMcpCommand(command)),
 		Define(
 			TerminalWorkspaceCommandVerb.Refresh,
 			TerminalWorkspaceCommandGrammar.None,

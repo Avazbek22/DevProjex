@@ -125,7 +125,7 @@ public sealed class InfrastructureJsonPersistenceTests
 			.Single()
 			.Value;
 
-		Assert.Equal(3, document.RootElement.GetProperty("schemaVersion").GetInt32());
+		Assert.Equal(4, document.RootElement.GetProperty("schemaVersion").GetInt32());
 		Assert.Equal(JsonValueKind.Object, storedProfile.GetProperty("rootFolderStates").ValueKind);
 		Assert.Equal(JsonValueKind.Object, storedProfile.GetProperty("extensionStates").ValueKind);
 		Assert.Equal(JsonValueKind.Object, storedProfile.GetProperty("ignoreOptionStates").ValueKind);
@@ -164,7 +164,7 @@ public sealed class InfrastructureJsonPersistenceTests
 		Assert.True(loaded.IgnoreOptionStates[IgnoreOptionId.SmartIgnore]);
 
 		using var document = JsonDocument.Parse(File.ReadAllText(storePath));
-		Assert.Equal(3, document.RootElement.GetProperty("schemaVersion").GetInt32());
+		Assert.Equal(4, document.RootElement.GetProperty("schemaVersion").GetInt32());
 	}
 
 	[Fact]
@@ -559,7 +559,7 @@ public sealed class InfrastructureJsonPersistenceTests
 		File.WriteAllText(fileSet.PrimaryPath, payload);
 		File.WriteAllText(fileSet.BackupPath, payload);
 		const UnixFileMode legacyMode = UnixFileMode.UserRead | UnixFileMode.UserWrite |
-		                                UnixFileMode.GroupRead | UnixFileMode.OtherRead;
+										UnixFileMode.GroupRead | UnixFileMode.OtherRead;
 		File.SetUnixFileMode(fileSet.PrimaryPath, legacyMode);
 		File.SetUnixFileMode(fileSet.BackupPath, legacyMode);
 
@@ -605,6 +605,120 @@ public sealed class InfrastructureJsonPersistenceTests
 		Assert.False(result);
 		Assert.Contains("\"name\":\"committed\"", File.ReadAllText(fileSet.PrimaryPath));
 		Assert.False(File.Exists(fileSet.BackupPath));
+	}
+
+	[Fact]
+	public void JsonStorePersistence_DetailedResultReportsCommittedPrimaryWhenBackupFails()
+	{
+		using var temp = new TemporaryDirectory();
+		var fileSet = CreateFileSet(temp, "secret-marks.json");
+		Directory.CreateDirectory(fileSet.DirectoryPath);
+		File.WriteAllText(fileSet.PrimaryPath, "old");
+		var operations = new JsonStoreWriteOperations(
+			static (_, _, _) => throw new PlatformNotSupportedException("replace unavailable"),
+			static (_, _, _) => throw new IOException("backup unavailable"));
+
+		var result = JsonStorePersistence.WriteAtomicDurableWithResult(
+			fileSet,
+			new TestDocument("committed", 7),
+			JsonOptions,
+			maximumPayloadBytes: 1024,
+			operations);
+
+		Assert.Equal(JsonStoreWriteResult.CommittedBackupFailed, result);
+		Assert.Contains("\"name\":\"committed\"", File.ReadAllText(fileSet.PrimaryPath));
+		Assert.False(File.Exists(fileSet.BackupPath));
+		Assert.Empty(Directory.EnumerateFiles(fileSet.DirectoryPath, "*.tmp"));
+	}
+
+	[Fact]
+	public void JsonStorePersistence_PartialBackupCopyFailurePreservesLastValidSnapshot()
+	{
+		using var temp = new TemporaryDirectory();
+		var fileSet = CreateFileSet(temp, "secret-marks.json");
+		Assert.True(JsonStorePersistence.TryWriteAtomic(
+			fileSet,
+			new TestDocument("previous", 1),
+			JsonOptions));
+		var previousBackup = File.ReadAllBytes(fileSet.BackupPath);
+		var operations = new JsonStoreWriteOperations(
+			static (source, destination, backup) => File.Replace(source, destination, backup),
+			static (_, destination, _) =>
+			{
+				File.WriteAllText(destination, "{");
+				throw new IOException("backup copy interrupted");
+			});
+
+		var result = JsonStorePersistence.WriteAtomicDurableWithResult(
+			fileSet,
+			new TestDocument("current", 2),
+			JsonOptions,
+			maximumPayloadBytes: 1024,
+			operations);
+
+		Assert.Equal(JsonStoreWriteResult.CommittedBackupFailed, result);
+		Assert.Contains("\"name\":\"current\"", File.ReadAllText(fileSet.PrimaryPath));
+		Assert.Equal(previousBackup, File.ReadAllBytes(fileSet.BackupPath));
+		using var backup = JsonDocument.Parse(File.ReadAllText(fileSet.BackupPath));
+		Assert.Equal("previous", backup.RootElement.GetProperty("name").GetString());
+		Assert.Empty(Directory.EnumerateFiles(fileSet.DirectoryPath, "*.tmp"));
+	}
+
+	[Fact]
+	public void JsonStorePersistence_RecoveryCommitPreservesValidBackupWhenMirrorFails()
+	{
+		using var temp = new TemporaryDirectory();
+		var fileSet = CreateFileSet(temp, "secret-marks.json");
+		Directory.CreateDirectory(fileSet.DirectoryPath);
+		File.WriteAllText(fileSet.PrimaryPath, "{");
+		var previousBackup = JsonSerializer.Serialize(new TestDocument("last-good", 1), JsonOptions);
+		File.WriteAllText(fileSet.BackupPath, previousBackup);
+		var operations = new JsonStoreWriteOperations(
+			static (source, destination, backup) => File.Replace(source, destination, backup),
+			static (_, destination, _) =>
+			{
+				File.WriteAllText(destination, "{");
+				throw new IOException("backup copy interrupted");
+			});
+
+		var result = JsonStorePersistence.WriteAtomicDurableWithResult(
+			fileSet,
+			new TestDocument("recovered", 2),
+			JsonOptions,
+			maximumPayloadBytes: 1024,
+			operations);
+
+		Assert.Equal(JsonStoreWriteResult.CommittedBackupFailed, result);
+		Assert.Contains("\"name\":\"recovered\"", File.ReadAllText(fileSet.PrimaryPath));
+		Assert.Equal(previousBackup, File.ReadAllText(fileSet.BackupPath));
+		Assert.Empty(Directory.EnumerateFiles(fileSet.DirectoryPath, "*.tmp"));
+	}
+
+	[Fact]
+	public void JsonStorePersistence_OversizedStreamingWriteRejectsBeforePayloadSizedAllocation()
+	{
+		using var temp = new TemporaryDirectory();
+		var fileSet = CreateFileSet(temp, "bounded.json");
+		Directory.CreateDirectory(fileSet.DirectoryPath);
+		File.WriteAllText(fileSet.PrimaryPath, "primary-before");
+		File.WriteAllText(fileSet.BackupPath, "backup-before");
+		var document = Enumerable.Range(0, 1_000_000).ToArray();
+		var before = GC.GetAllocatedBytesForCurrentThread();
+
+		var result = JsonStorePersistence.WriteAtomicDurableWithResult(
+			fileSet,
+			document,
+			JsonOptions,
+			maximumPayloadBytes: 1024);
+		var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+		Assert.Equal(JsonStoreWriteResult.Rejected, result);
+		Assert.Equal("primary-before", File.ReadAllText(fileSet.PrimaryPath));
+		Assert.Equal("backup-before", File.ReadAllText(fileSet.BackupPath));
+		Assert.Empty(Directory.EnumerateFiles(fileSet.DirectoryPath, "*.tmp"));
+		Assert.True(
+			allocated < 256 * 1024,
+			$"Bounded serialization allocated {allocated:N0} bytes before rejecting the oversized sequence.");
 	}
 
 	[Fact]

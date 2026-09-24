@@ -1,91 +1,110 @@
+using DevProjex.Application.Context;
+
 namespace DevProjex.Avalonia.Coordinators;
 
 public sealed partial class SelectionSyncCoordinator
 {
-	internal bool ApplyHideSecretsOverride(bool? enabled) =>
-		ApplyContentTransformationOverride(IgnoreOptionId.HideSecrets, enabled);
+    internal bool ApplyHideSecretsOverride(bool? enabled) =>
+        ApplyContentTransformationOverride(IgnoreOptionId.HideSecrets, enabled);
 
-	internal bool ApplyHidePrivateDataOverride(bool? enabled) =>
-		ApplyContentTransformationOverride(IgnoreOptionId.HidePrivateData, enabled);
+    internal bool ApplyHidePrivateDataOverride(bool? enabled) =>
+        ApplyContentTransformationOverride(IgnoreOptionId.HidePrivateData, enabled);
 
-	internal bool ApplyCompressCodeOverride(bool? enabled) =>
-		ApplyContentTransformationOverride(IgnoreOptionId.CompressCode, enabled);
+    internal bool ApplyCompressCodeOverride(bool? enabled) =>
+        ApplyContentTransformationOverride(IgnoreOptionId.CompressCode, enabled);
 
-	internal bool ApplyStripCommentsOverride(bool? enabled) =>
-		ApplyContentTransformationOverride(IgnoreOptionId.StripComments, enabled);
+    internal bool ApplyStripCommentsOverride(bool? enabled) =>
+        ApplyContentTransformationOverride(IgnoreOptionId.StripComments, enabled);
 
-	internal bool ApplyStripBlankLinesOverride(bool? enabled) =>
-		ApplyContentTransformationOverride(IgnoreOptionId.StripBlankLines, enabled);
+    internal bool ApplyStripBlankLinesOverride(bool? enabled) =>
+        ApplyContentTransformationOverride(IgnoreOptionId.StripBlankLines, enabled);
 
-	private bool ApplyContentTransformationOverride(IgnoreOptionId optionId, bool? enabled)
-	{
-		if (enabled is null)
-			return false;
+    private bool ApplyContentTransformationOverride(IgnoreOptionId optionId, bool? enabled)
+    {
+        if (enabled is null)
+            return false;
 
-		var currentState = _session.IgnoreOptions.TryGetCachedState(
-			optionId,
-			out var cachedState)
-			? cachedState
-			: viewModel.IgnoreOptions.FirstOrDefault(
-				option => option.Id == optionId)?.IsChecked == true;
-		if (currentState == enabled.Value)
-			return false;
+        var currentState = _session.IgnoreOptions.TryGetCachedState(
+            optionId,
+            out var cachedState)
+            ? cachedState
+            : viewModel.IgnoreOptions.FirstOrDefault(
+                option => option.Id == optionId)?.IsChecked == true;
+        if (currentState == enabled.Value)
+            return false;
 
-		var stateCache = _session.IgnoreOptions.SnapshotStateCache();
-		stateCache[optionId] = enabled.Value;
-		_session.IgnoreOptions.ReplaceStateCache(stateCache);
-		_session.IgnoreOptions.IsInitialized = true;
+        var stateCache = _session.IgnoreOptions.SnapshotStateCache();
+        stateCache[optionId] = enabled.Value;
+        _session.IgnoreOptions.ReplaceStateCache(stateCache);
+        _session.IgnoreOptions.IsInitialized = true;
 
-		_suppressIgnoreItemCheck = true;
-		try
-		{
-			var option = viewModel.IgnoreOptions.FirstOrDefault(
-				candidate => candidate.Id == optionId);
-			if (option is not null)
-				option.IsChecked = enabled.Value;
-		}
-		finally
-		{
-			_suppressIgnoreItemCheck = false;
-		}
+        _suppressIgnoreItemCheck = true;
+        try
+        {
+            var option = viewModel.IgnoreOptions.FirstOrDefault(
+                candidate => candidate.Id == optionId);
+            if (option is not null)
+                option.IsChecked = enabled.Value;
+        }
+        finally
+        {
+            _suppressIgnoreItemCheck = false;
+        }
 
-		SynchronizeDerivedAggregateSelectionState();
+        SynchronizeDerivedAggregateSelectionState();
 
-		RequestPendingApplyEvaluation();
-		contentTransformationChanged?.Invoke(optionId);
-		return true;
-	}
+        RequestPendingApplyEvaluation();
+        contentTransformationChanged?.Invoke(optionId);
+        return true;
+    }
 
     internal bool ApplySelectionOverrides(
         string currentPath,
         IReadOnlyCollection<string>? selectedExtensions,
         IReadOnlySet<IgnoreOptionId>? selectedIgnoreOptions,
-		GitFilteringMode? gitModeOverride = null,
+        GitFilteringMode? gitModeOverride = null,
+        string? gitDiffRangeOverride = null,
         bool ignoreOptionStateIsComplete = false,
-		bool resetExtensionSelectionToDefaults = false)
+        bool resetExtensionSelectionToDefaults = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(currentPath);
         if (IsStalePathRequest(currentPath))
             return false;
 
         var extensionSelectionChanged = resetExtensionSelectionToDefaults
-			? ResetExtensionSelectionToDefaults()
-			: ApplyExtensionSelectionOverride(selectedExtensions);
-		var ignoreSelectionChanged = ApplyIgnoreSelectionOverrideCore(
+            ? ResetExtensionSelectionToDefaults()
+            : ApplyExtensionSelectionOverride(selectedExtensions);
+        var ignoreSelectionChanged = ApplyIgnoreSelectionOverrideCore(
             selectedIgnoreOptions,
             ignoreOptionStateIsComplete);
-		var gitModeChanged = false;
-		if (gitModeOverride is { } gitMode)
-		{
-			_preservePreferredGitModeForPersistence = false;
-			if (gitMode != _session.IgnoreOptions.ActiveGitFilteringMode)
-			{
-				_session.IgnoreOptions.SetActiveGitFilteringMode(gitMode);
-				gitModeChanged = true;
-				RefreshGitFilteringModePresentation();
-			}
-		}
-		if (!extensionSelectionChanged && !ignoreSelectionChanged && !gitModeChanged)
+        var gitSelectionChanged = false;
+        if (gitModeOverride is { } gitMode)
+        {
+            if (gitMode == GitFilteringMode.Diff &&
+                !GitScopeSelection.IsValidDiffRange(gitDiffRangeOverride))
+            {
+                throw new ArgumentException(
+                    "A diff Git scope requires a valid range.",
+                    nameof(gitDiffRangeOverride));
+            }
+
+            _preservePreferredGitModeForPersistence = false;
+            var nextDiffRange = gitMode == GitFilteringMode.Diff
+                ? gitDiffRangeOverride
+                : null;
+            if (!string.Equals(_activeGitDiffRange, nextDiffRange, StringComparison.Ordinal))
+            {
+                _activeGitDiffRange = nextDiffRange;
+                gitSelectionChanged = true;
+            }
+            if (gitMode != _session.IgnoreOptions.ActiveGitFilteringMode)
+            {
+                _session.IgnoreOptions.SetActiveGitFilteringMode(gitMode);
+                gitSelectionChanged = true;
+                RefreshGitFilteringModePresentation();
+            }
+        }
+        if (!extensionSelectionChanged && !ignoreSelectionChanged && !gitSelectionChanged)
             return false;
 
         _session.AdvanceRevision();
@@ -98,33 +117,33 @@ public sealed partial class SelectionSyncCoordinator
         else
             QueueLiveOptionsRefresh(currentPath, SelectionRefreshOrigin.Unknown);
 
-		return true;
+        return true;
     }
 
-	private bool ResetExtensionSelectionToDefaults()
-	{
-		var changed = _session.Extensions.IsInitialized ||
-		              _session.ExtensionSelectionIsExplicit ||
-		              viewModel.Extensions.Any(static option => !option.IsChecked);
-		if (!changed)
-			return false;
+    private bool ResetExtensionSelectionToDefaults()
+    {
+        var changed = _session.Extensions.IsInitialized ||
+                      _session.ExtensionSelectionIsExplicit ||
+                      viewModel.Extensions.Any(static option => !option.IsChecked);
+        if (!changed)
+            return false;
 
-		_session.Extensions.RestoreDefaults(trimExcess: false);
-		_session.ExtensionSelectionIsExplicit = false;
-		_suppressExtensionItemCheck = true;
-		try
-		{
-			foreach (var option in viewModel.Extensions)
-				option.IsChecked = true;
-		}
-		finally
-		{
-			_suppressExtensionItemCheck = false;
-		}
+        _session.Extensions.RestoreDefaults(trimExcess: false);
+        _session.ExtensionSelectionIsExplicit = false;
+        _suppressExtensionItemCheck = true;
+        try
+        {
+            foreach (var option in viewModel.Extensions)
+                option.IsChecked = true;
+        }
+        finally
+        {
+            _suppressExtensionItemCheck = false;
+        }
 
-		SynchronizeDerivedAggregateSelectionState();
-		return true;
-	}
+        SynchronizeDerivedAggregateSelectionState();
+        return true;
+    }
 
     private bool ApplyExtensionSelectionOverride(IReadOnlyCollection<string>? selectedExtensions)
     {

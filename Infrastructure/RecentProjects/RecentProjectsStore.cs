@@ -152,7 +152,8 @@ public sealed class RecentProjectsStore
 			}
 
 			using var _ = heldLock;
-			var state = SanitizeState(fileSet, MergeStates(LoadInternal(fileSet), db));
+			var state = SanitizeState(fileSet, MergeStates(
+				LoadInternal(fileSet, out var loadStatus), db));
 			if (!TryNormalizeFolderPath(path, out var normalizedPath))
 				return state;
 
@@ -173,7 +174,8 @@ public sealed class RecentProjectsStore
 				},
 				CreateFolderOpenedUtc(state, normalizedPath));
 
-			TrySave(fileSet, state);
+			if (loadStatus == RecentProjectsLoadStatus.Success)
+				TrySave(fileSet, state);
 			return state;
 		}
 	}
@@ -211,7 +213,8 @@ public sealed class RecentProjectsStore
 			}
 
 			using var _ = heldLock;
-			var state = SanitizeState(fileSet, MergeStates(LoadInternal(fileSet), db));
+			var state = SanitizeState(fileSet, MergeStates(
+				LoadInternal(fileSet, out var loadStatus), db));
 			if (!RepositoryUrlUtility.TryNormalize(repositoryUrl, out var normalizedUrl))
 				return state;
 			if (!RepositoryUrlUtility.IsNetworkCloneSource(normalizedUrl))
@@ -231,7 +234,8 @@ public sealed class RecentProjectsStore
 				},
 				CreateRepositoryOpenedUtc(state, normalizedUrl));
 
-			TrySave(fileSet, state);
+			if (loadStatus == RecentProjectsLoadStatus.Success)
+				TrySave(fileSet, state);
 			return state;
 		}
 	}
@@ -248,9 +252,11 @@ public sealed class RecentProjectsStore
 			}
 
 			using var _ = heldLock;
-			var state = SanitizeState(fileSet, MergeStates(LoadInternal(fileSet), db));
+			var state = SanitizeState(fileSet, MergeStates(
+				LoadInternal(fileSet, out var loadStatus), db));
 			state = ApplyFolderRemoval(fileSet, state, path);
-			TrySave(fileSet, state);
+			if (loadStatus == RecentProjectsLoadStatus.Success)
+				TrySave(fileSet, state);
 			return state;
 		}
 	}
@@ -264,7 +270,10 @@ public sealed class RecentProjectsStore
 				return false;
 
 			using var _ = heldLock;
-			var state = SanitizeState(fileSet, MergeStates(LoadInternal(fileSet), db));
+			var loaded = LoadInternal(fileSet, out var loadStatus);
+			if (loadStatus != RecentProjectsLoadStatus.Success)
+				return false;
+			var state = SanitizeState(fileSet, MergeStates(loaded, db));
 			return TrySave(fileSet, state);
 		}
 	}
@@ -291,18 +300,8 @@ public sealed class RecentProjectsStore
 			return CreateDefaultDb();
 		}
 
-		if (!File.Exists(fileSet.PrimaryPath) &&
-		    !File.Exists(fileSet.BackupPath) &&
-		    TryLoadLegacy(fileSet, out var legacyDb))
-		{
-			status = RecentProjectsLoadStatus.Success;
-			var sanitizedLegacyDb = SanitizeState(fileSet, legacyDb);
-			if (persistLegacyMigration)
-				TrySave(fileSet, sanitizedLegacyDb);
-			return sanitizedLegacyDb;
-		}
-
-		if (TryLoadFromPath(fileSet.PrimaryPath, out var primaryDb, out var primaryRequiresRewrite))
+		if (TryLoadFromPath(fileSet.PrimaryPath, out var primaryDb, out var primaryRequiresRewrite,
+			    out var primaryTemporarilyUnavailable))
 		{
 			status = RecentProjectsLoadStatus.Success;
 			var sanitizedPrimaryDb = SanitizeState(fileSet, primaryDb, out var primaryRequiresSanitizationRewrite);
@@ -311,15 +310,42 @@ public sealed class RecentProjectsStore
 
 			return sanitizedPrimaryDb;
 		}
+		if (primaryTemporarilyUnavailable)
+		{
+			status = RecentProjectsLoadStatus.TemporarilyUnavailable;
+			return CreateDefaultDb();
+		}
 
 		// Keep the last known-good snapshot as a recovery path.
 		// A partially written or externally corrupted primary file must not silently erase history.
-		if (TryLoadFromPath(fileSet.BackupPath, out var backupDb, out _))
+		if (TryLoadFromPath(fileSet.BackupPath, out var backupDb, out _,
+			    out var backupTemporarilyUnavailable))
 		{
 			status = RecentProjectsLoadStatus.Success;
 			var sanitizedBackupDb = SanitizeState(fileSet, backupDb);
 			TrySave(fileSet, sanitizedBackupDb);
 			return sanitizedBackupDb;
+		}
+		if (backupTemporarilyUnavailable)
+		{
+			status = RecentProjectsLoadStatus.TemporarilyUnavailable;
+			return CreateDefaultDb();
+		}
+		var legacyTemporarilyUnavailable = false;
+		if (!File.Exists(fileSet.PrimaryPath) &&
+		    !File.Exists(fileSet.BackupPath) &&
+		    TryLoadLegacy(fileSet, out var legacyDb, out legacyTemporarilyUnavailable))
+		{
+			status = RecentProjectsLoadStatus.Success;
+			var sanitizedLegacyDb = SanitizeState(fileSet, legacyDb);
+			if (persistLegacyMigration)
+				TrySave(fileSet, sanitizedLegacyDb);
+			return sanitizedLegacyDb;
+		}
+		if (legacyTemporarilyUnavailable)
+		{
+			status = RecentProjectsLoadStatus.TemporarilyUnavailable;
+			return CreateDefaultDb();
 		}
 
 		status = File.Exists(fileSet.PrimaryPath) || File.Exists(fileSet.BackupPath)
@@ -340,9 +366,11 @@ public sealed class RecentProjectsStore
 			}
 
 			using var _ = heldLock;
-			var state = SanitizeState(fileSet, MergeStates(LoadInternal(fileSet), db));
+			var state = SanitizeState(fileSet, MergeStates(
+				LoadInternal(fileSet, out var loadStatus), db));
 			state = ApplyRepositoryRemoval(fileSet, state, repositoryUrl);
-			TrySave(fileSet, state);
+			if (loadStatus == RecentProjectsLoadStatus.Success)
+				TrySave(fileSet, state);
 			return state;
 		}
 	}
@@ -352,14 +380,8 @@ public sealed class RecentProjectsStore
 		if (HasFutureSchema(fileSet))
 			return true;
 
-		if (!File.Exists(fileSet.PrimaryPath) &&
-		    !File.Exists(fileSet.BackupPath) &&
-		    TryLoadLegacy(fileSet, out var legacyDb))
-		{
-			return TrySave(fileSet, SanitizeState(fileSet, legacyDb));
-		}
-
-		if (TryLoadFromPath(fileSet.PrimaryPath, out var primaryDb, out var primaryRequiresRewrite))
+		if (TryLoadFromPath(fileSet.PrimaryPath, out var primaryDb, out var primaryRequiresRewrite,
+			    out var primaryTemporarilyUnavailable))
 		{
 			var sanitizedPrimaryDb = SanitizeState(fileSet, primaryDb, out var primaryRequiresSanitizationRewrite);
 			if (primaryRequiresRewrite || primaryRequiresSanitizationRewrite || !File.Exists(fileSet.BackupPath))
@@ -367,9 +389,23 @@ public sealed class RecentProjectsStore
 
 			return true;
 		}
+		if (primaryTemporarilyUnavailable)
+			return false;
 
-		if (TryLoadFromPath(fileSet.BackupPath, out var backupDb, out _))
+		if (TryLoadFromPath(fileSet.BackupPath, out var backupDb, out _,
+		    out var backupTemporarilyUnavailable))
 			return TrySave(fileSet, SanitizeState(fileSet, backupDb));
+		if (backupTemporarilyUnavailable)
+			return false;
+		var legacyTemporarilyUnavailable = false;
+		if (!File.Exists(fileSet.PrimaryPath) &&
+		    !File.Exists(fileSet.BackupPath) &&
+		    TryLoadLegacy(fileSet, out var legacyDb, out legacyTemporarilyUnavailable))
+		{
+			return TrySave(fileSet, SanitizeState(fileSet, legacyDb));
+		}
+		if (legacyTemporarilyUnavailable)
+			return false;
 
 		if (File.Exists(fileSet.PrimaryPath) || File.Exists(fileSet.BackupPath))
 			return false;
@@ -723,47 +759,50 @@ public sealed class RecentProjectsStore
 			CurrentSchemaVersion,
 			maximumDocumentBytes: JsonStorePersistence.SmallDocumentMaximumBytes);
 
-	private static bool TryLoadFromPath(string path, out RecentProjectsDb db, out bool requiresRewrite)
+	private static bool TryLoadFromPath(
+		string path,
+		out RecentProjectsDb db,
+		out bool requiresRewrite,
+		out bool temporarilyUnavailable) =>
+		JsonStorePersistence.TryReadNormalized(
+			path,
+			SerializerOptions,
+			CreateDefaultDb,
+			Normalize,
+			out db,
+			out requiresRewrite,
+			out temporarilyUnavailable,
+			JsonStorePersistence.SmallDocumentMaximumBytes,
+			IsValidCurrentSchemaDocument);
+
+	private static bool IsValidCurrentSchemaDocument(string json)
 	{
-		db = CreateDefaultDb();
-		requiresRewrite = false;
-
-		if (!File.Exists(path))
-			return false;
-
-		try
+		using var document = JsonDocument.Parse(json);
+		var root = document.RootElement;
+		if (root.ValueKind != JsonValueKind.Object ||
+		    !root.TryGetProperty("schemaVersion", out var schemaVersion) ||
+		    !schemaVersion.TryGetInt32(out var version) ||
+		    version != CurrentSchemaVersion)
 		{
-			if (!JsonStorePersistence.TryReadAllTextWithinSizeLimit(
-				    path,
-				    (int)JsonStorePersistence.SmallDocumentMaximumBytes,
-				    out var json))
-			{
-				return false;
-			}
-			var deserialized = JsonSerializer.Deserialize<RecentProjectsDb>(json, SerializerOptions);
-			if (deserialized is null)
-				return false;
-
-			// Normalize in-memory and rewrite only structurally valid payloads.
-			// Invalid payloads are left untouched so operators can inspect them and the backup can recover them.
-			var originalSnapshot = JsonSerializer.Serialize(deserialized, SerializerOptions);
-			var normalized = Normalize(deserialized);
-			var normalizedSnapshot = JsonSerializer.Serialize(normalized, SerializerOptions);
-			requiresRewrite = !string.Equals(originalSnapshot, normalizedSnapshot, StringComparison.Ordinal);
-			db = normalized;
 			return true;
 		}
-		catch
-		{
-			return false;
-		}
+
+		return HasArrayProperty(root, "recentFolders") &&
+		       HasArrayProperty(root, "recentFolderRemovals") &&
+		       HasArrayProperty(root, "recentRepositories") &&
+		       HasArrayProperty(root, "recentRepositoryRemovals");
 	}
+
+	private static bool HasArrayProperty(JsonElement root, string name) =>
+		root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Array;
 
 	private bool TryLoadLegacy(
 		JsonStoreFileSet currentFileSet,
-		out RecentProjectsDb database)
+		out RecentProjectsDb database,
+		out bool temporarilyUnavailable)
 	{
 		database = CreateDefaultDb();
+		temporarilyUnavailable = false;
 		if (_legacyAppDataPathProvider is null)
 			return false;
 
@@ -791,9 +830,13 @@ public sealed class RecentProjectsStore
 			    currentFileSet.PrimaryPath))
 			return false;
 
-		if (TryLoadFromPath(legacyFileSet.PrimaryPath, out database, out _))
+		if (TryLoadFromPath(legacyFileSet.PrimaryPath, out database, out _,
+		    out temporarilyUnavailable))
 			return true;
-		return TryLoadFromPath(legacyFileSet.BackupPath, out database, out _);
+		if (temporarilyUnavailable)
+			return false;
+		return TryLoadFromPath(legacyFileSet.BackupPath, out database, out _,
+			out temporarilyUnavailable);
 	}
 
 	private static bool TryNormalizeFolderPath(string path, out string normalizedPath)

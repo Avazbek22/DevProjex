@@ -25,6 +25,8 @@ public sealed class TreeNodeViewModel(
     private int _searchSelfMatchEpoch;
     private int _searchDescendantMatchEpoch;
     private bool _deferredChildCheckedState;
+    private int _agentDeliveryCount;
+    private string _agentDeliveryToolTip = string.Empty;
     private readonly ResettableObservableCollection<TreeNodeViewModel> _children =
         new(descriptor.Children.Count);
     private Func<TreeNodeViewModel, IReadOnlyList<TreeNodeViewModel>>? _childrenFactory = childrenFactory;
@@ -89,6 +91,27 @@ public sealed class TreeNodeViewModel(
     }
 
     public string FullPath => Descriptor.FullPath;
+
+    public bool HasAgentDelivery => _agentDeliveryCount > 0;
+    public int AgentDeliveryCount => _agentDeliveryCount;
+    public string AgentDeliveryToolTip => _agentDeliveryToolTip;
+
+    public void SetAgentDelivery(int count, string toolTip)
+    {
+        var normalized = Math.Max(0, count);
+        var normalizedToolTip = normalized == 0 ? string.Empty : toolTip;
+        if (_agentDeliveryCount == normalized &&
+            string.Equals(_agentDeliveryToolTip, normalizedToolTip, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _agentDeliveryCount = normalized;
+        _agentDeliveryToolTip = normalizedToolTip;
+        RaisePropertyChanged(nameof(AgentDeliveryCount));
+        RaisePropertyChanged(nameof(AgentDeliveryToolTip));
+        RaisePropertyChanged(nameof(HasAgentDelivery));
+    }
 
     public bool? IsChecked
     {
@@ -349,6 +372,8 @@ public sealed class TreeNodeViewModel(
             current._hasHighlightedDisplay = false;
             current._searchSelfMatchEpoch = 0;
             current._searchDescendantMatchEpoch = 0;
+            current._agentDeliveryCount = 0;
+            current._agentDeliveryToolTip = string.Empty;
             current.Icon = null;
             current.Parent = null;
             current.Descriptor = null!;
@@ -586,12 +611,11 @@ public sealed class TreeNodeViewModel(
         var preservedChildren = _children.Count == 0
             ? null
             : _children.ToArray();
+        var preservedByPath = BuildPreservedChildIndex(preservedChildren);
         var nextChildren = new List<TreeNodeViewModel>(builtChildren.Count);
         foreach (var builtChild in builtChildren)
         {
-            var preservedChild = FindPreservedChild(
-                preservedChildren,
-                builtChild.Descriptor);
+            var preservedChild = FindPreservedChild(preservedByPath, builtChild.Descriptor);
             if (preservedChild is not null)
             {
                 nextChildren.Add(preservedChild);
@@ -627,26 +651,28 @@ public sealed class TreeNodeViewModel(
             : null;
     }
 
+    private static IReadOnlyDictionary<string, TreeNodeViewModel>? BuildPreservedChildIndex(
+        IReadOnlyList<TreeNodeViewModel>? preservedChildren)
+    {
+        if (preservedChildren is null)
+            return null;
+
+        var result = new Dictionary<string, TreeNodeViewModel>(
+            preservedChildren.Count,
+            ProjectTreePathIdentity.CanonicalComparer);
+        for (var index = 0; index < preservedChildren.Count; index++)
+            result.TryAdd(preservedChildren[index].FullPath, preservedChildren[index]);
+        return result;
+    }
+
     private static TreeNodeViewModel? FindPreservedChild(
-        IReadOnlyList<TreeNodeViewModel>? preservedChildren,
+        IReadOnlyDictionary<string, TreeNodeViewModel>? preservedChildren,
         TreeNodeDescriptor descriptor)
     {
         if (preservedChildren is null)
             return null;
 
-        for (var index = 0; index < preservedChildren.Count; index++)
-        {
-            var candidate = preservedChildren[index];
-            if (ReferenceEquals(candidate.Descriptor, descriptor) ||
-                ProjectTreePathIdentity.CanonicalComparer.Equals(
-                    candidate.FullPath,
-                    descriptor.FullPath))
-            {
-                return candidate;
-            }
-        }
-
-        return null;
+        return preservedChildren.GetValueOrDefault(descriptor.FullPath);
     }
 
     private readonly struct DescendantExpansionStateScope : IDisposable

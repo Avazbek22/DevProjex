@@ -1,16 +1,131 @@
 using System.Collections.Concurrent;
+using System.Collections.Specialized;
 using System.Runtime.CompilerServices;
 using DevProjex.Application.Services;
 using DevProjex.Application.UseCases;
 using DevProjex.Infrastructure.FileSystem;
+using DevProjex.Infrastructure.LiveContext;
+using DevProjex.Infrastructure.ProjectProfiles;
 using DevProjex.Infrastructure.ResourceStore;
 using DevProjex.Kernel.Abstractions;
+using DevProjex.Terminal.DesktopControl;
 
 namespace DevProjex.Tests.UI;
 
 [Collection("AvaloniaUI")]
 public sealed class MainWindowApplySettingsSelectionUiTests
 {
+	[AvaloniaFact]
+	public async Task ClosingWindow_CancelsInFlightDesktopFilterTreeBuild()
+	{
+		using var project = UiTestProject.CreateWithDynamicIgnoreEntries();
+		var blockingTreeBuilder = new BlockingTreeBuilder();
+		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var paths = new DesktopControlPaths(() => appDataPath);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			appDataPathOverride: appDataPath,
+			configureServices: services => services with
+			{
+				BuildTreeUseCase = new BuildTreeUseCase(
+					blockingTreeBuilder,
+					new TreeNodePresentationService(
+						services.Localization,
+						new IconMapper())),
+				DesktopControlServerFactory = (handler, projectPath, cancellationToken) =>
+					DesktopControlServer.StartAsync(handler, projectPath, paths, cancellationToken)
+			});
+		Task<DesktopProtocolResponse>? pendingFilter = null;
+		var cancellationToken = TestContext.Current.CancellationToken;
+
+		try
+		{
+			var client = new DesktopControlClient(new DesktopInstanceRegistry(paths));
+			var registration = Assert.Single(await client.ListAsync(cancellationToken));
+			var initialFilter = await client.SendAsync(
+				registration,
+				"filter.set",
+				new { query = "src" },
+				TimeSpan.FromSeconds(10),
+				cancellationToken);
+			Assert.True(initialFilter.Ok);
+			await UiTestDriver.WaitForFilterAppliedAsync(window, "src");
+			await InvokePrivateTaskAsync(window, "ReloadCurrentProjectAsync");
+			var baseline = typeof(MainWindow).GetField(
+				"_filterBaseTree",
+				System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+			Assert.NotNull(baseline);
+			Assert.Null(baseline.GetValue(window));
+
+			blockingTreeBuilder.Arm();
+			pendingFilter = client.SendAsync(
+				registration,
+				"filter.set",
+				new { query = "project" },
+				TimeSpan.FromSeconds(15),
+				cancellationToken);
+			await blockingTreeBuilder.BuildStarted.Task.WaitAsync(
+				TimeSpan.FromSeconds(5),
+				cancellationToken);
+
+			window.Close();
+			await window.ShutdownCompletion.WaitAsync(TimeSpan.FromSeconds(2), cancellationToken);
+			Assert.False(window.IsVisible);
+		}
+		finally
+		{
+			blockingTreeBuilder.Release();
+			if (pendingFilter is not null)
+				_ = await Record.ExceptionAsync(() => pendingFilter.WaitAsync(TimeSpan.FromSeconds(5)));
+			if (window.IsVisible)
+				await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task CancelledReopenOfSameProjectDoesNotReportSuccess()
+	{
+		using var project = UiTestProject.CreateWithDynamicIgnoreEntries();
+		var blockingTreeBuilder = new BlockingTreeBuilder();
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			configureServices: services => services with
+			{
+				BuildTreeUseCase = new BuildTreeUseCase(
+					blockingTreeBuilder,
+					new TreeNodePresentationService(
+						services.Localization,
+						new IconMapper()))
+			});
+		try
+		{
+			await UiTestDriver.WaitForInitialMetricsBaselineAsync(window);
+			blockingTreeBuilder.Arm();
+			var opening = Assert.IsAssignableFrom<Task<bool>>(
+				await UiTestDriver.BeginOpenFolderAsync(
+					window,
+					project.RootPath,
+					fromDialog: false,
+					recordRecentFolder: false));
+			await blockingTreeBuilder.BuildStarted.Task.WaitAsync(
+				TimeSpan.FromSeconds(10),
+				TestContext.Current.CancellationToken);
+
+			await UiTestDriver.RaiseButtonClickAsync(
+				UiTestDriver.GetRequiredStatusCancelButton(window));
+			Assert.False(await opening.WaitAsync(
+				TimeSpan.FromSeconds(30),
+				TestContext.Current.CancellationToken));
+			Assert.True(UiTestDriver.GetViewModel(window).IsProjectLoaded);
+			Assert.NotEmpty(UiTestDriver.GetViewModel(window).TreeNodes);
+		}
+		finally
+		{
+			blockingTreeBuilder.Release();
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
     [AvaloniaFact]
     public async Task StructuralApply_PreservesManualSubsetWithoutRetainingOldTree()
     {
@@ -98,13 +213,15 @@ public sealed class MainWindowApplySettingsSelectionUiTests
     }
 
     [AvaloniaFact]
-    public async Task StructuralApply_EmptySelectionKeepsSelectAllSemantics()
+	public async Task StructuralApply_UncheckedTreeKeepsWholeTreeSemantics()
     {
         using var project = UiTestProject.CreateWithDynamicIgnoreEntries();
         var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
         try
         {
             await UiTestDriver.WaitForInitialMetricsBaselineAsync(window);
+            var root = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
+			Assert.False(root.IsChecked);
             Assert.Empty(UiTestDriver.GetCheckedTreePaths(window));
 
             await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.EmptyFiles);
@@ -257,6 +374,105 @@ public sealed class MainWindowApplySettingsSelectionUiTests
     }
 
     [AvaloniaFact]
+    public async Task FilteredSelectionPersistenceKeepsHiddenCheckedPathsAcrossReopen()
+    {
+        using var project = UiTestProject.CreateDefault();
+        var firstPath = Path.Combine(project.RootPath, "A.cs");
+        var addedPath = Path.Combine(project.RootPath, "B.cs");
+        var hiddenPath = Path.Combine(project.RootPath, "T.cs");
+        var uncheckedPath = Path.Combine(project.RootPath, "U.cs");
+        await File.WriteAllTextAsync(firstPath, "class A {}", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(addedPath, "class B {}", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(hiddenPath, "class T {}", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(uncheckedPath, "class U {}", TestContext.Current.CancellationToken);
+        var appDataPath = Path.Combine(project.AppDataPath, "filtered-selection-profile");
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+            project,
+            appDataPathOverride: appDataPath);
+        try
+        {
+            SelectOnlyPaths(window, firstPath, hiddenPath);
+            await UiTestDriver.OpenFilterAsync(window);
+            var filterBar = UiTestDriver.GetRequiredControl<FilterBarView>(window, "FilterBar");
+            await UiTestDriver.EnterTextAsync(
+                window,
+                Assert.IsType<TextBox>(filterBar.FilterBoxControl),
+                "B.cs");
+            await UiTestDriver.WaitForFilterAppliedAsync(window, "B.cs");
+            FindNodeByPath(window, addedPath)!.IsChecked = true;
+            await GetTreeSelectionPersistence(window)
+                .FlushAsync(TestContext.Current.CancellationToken);
+
+            var store = new DevProjex.Infrastructure.ProjectProfiles.ProjectProfileStore(() => appDataPath);
+            var persisted = store.LookupProfile(project.RootPath, TimeSpan.FromSeconds(1));
+            Assert.Equal(ProjectProfileLookupStatus.Found, persisted.Status);
+            Assert.Equal(["A.cs", "B.cs", "T.cs"], persisted.Profile!.SelectedPaths);
+
+            await UiTestDriver.PressKeyAsync(window, Key.Escape);
+            await GetSearchFilterController(window).CloseFilterAsync();
+            Assert.Equal(
+                [firstPath, addedPath, hiddenPath],
+                UiTestDriver.GetCheckedTreePaths(window));
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+        }
+
+        var reopened = await UiTestDriver.CreateLoadedMainWindowAsync(
+            project,
+            appDataPathOverride: appDataPath);
+        try
+        {
+            Assert.Equal(
+                [firstPath, addedPath, hiddenPath],
+                UiTestDriver.GetCheckedTreePaths(reopened));
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(reopened);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task StructuralApplyWhileFilteredPersistsHiddenCheckedPaths()
+    {
+        using var project = UiTestProject.CreateWithDynamicIgnoreEntries();
+        var visiblePath = Path.Combine(project.RootPath, "A.cs");
+        var hiddenPath = Path.Combine(project.RootPath, "T.cs");
+        await File.WriteAllTextAsync(visiblePath, "class A {}", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(hiddenPath, "class T {}", TestContext.Current.CancellationToken);
+        var appDataPath = Path.Combine(project.AppDataPath, "filtered-structural-apply-profile");
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+            project,
+            appDataPathOverride: appDataPath);
+        try
+        {
+            SelectOnlyPaths(window, visiblePath, hiddenPath);
+            await UiTestDriver.OpenFilterAsync(window);
+            var filterBar = UiTestDriver.GetRequiredControl<FilterBarView>(window, "FilterBar");
+            await UiTestDriver.EnterTextAsync(
+                window,
+                Assert.IsType<TextBox>(filterBar.FilterBoxControl),
+                "A.cs");
+            await UiTestDriver.WaitForFilterAppliedAsync(window, "A.cs");
+            Assert.Null(FindNodeByPath(window, hiddenPath));
+
+            await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.EmptyFolders);
+            await UiTestDriver.ClickApplySettingsAsync(window);
+
+            var store = new DevProjex.Infrastructure.ProjectProfiles.ProjectProfileStore(() => appDataPath);
+            var persisted = store.LookupProfile(project.RootPath, TimeSpan.FromSeconds(1));
+            Assert.Equal(ProjectProfileLookupStatus.Found, persisted.Status);
+            Assert.Equal(["A.cs", "T.cs"], persisted.Profile!.SelectedPaths);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task StructuralApply_RealTreeCheckboxSelectionSurvivesGraphReplacement()
     {
         using var project = UiTestProject.CreateWithDynamicIgnoreEntries();
@@ -265,6 +481,7 @@ public sealed class MainWindowApplySettingsSelectionUiTests
         {
             await UiTestDriver.WaitForInitialMetricsBaselineAsync(window);
             var oldRoot = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
+            oldRoot.IsChecked = false;
             oldRoot.IsExpanded = true;
             await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
             var sourcePath = Path.Combine(project.RootPath, "src");
@@ -294,12 +511,29 @@ public sealed class MainWindowApplySettingsSelectionUiTests
         {
             var sourcePath = Path.Combine(project.RootPath, "src");
             var oldRoot = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
+            oldRoot.IsChecked = false;
             var source = FindRequiredDirectChild(oldRoot, "src");
             source.IsChecked = true;
             source.IsExpanded = true;
             FindRequiredDirectChild(source, "AppCore").IsExpanded = true;
+            var treePublished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            NotifyCollectionChangedEventHandler observePublication = (_, _) =>
+            {
+                var roots = UiTestDriver.GetViewModel(window).TreeNodes;
+                if (roots.Count == 1 && !ReferenceEquals(oldRoot, roots[0]))
+                    treePublished.TrySetResult();
+            };
+            UiTestDriver.GetViewModel(window).TreeNodes.CollectionChanged += observePublication;
 
-            await UiTestDriver.RefreshProjectAsync(window);
+            try
+            {
+                await UiTestDriver.RefreshProjectAsync(window);
+                await treePublished.Task.WaitAsync(PublicationSafetyTimeout, TestContext.Current.CancellationToken);
+            }
+            finally
+            {
+                UiTestDriver.GetViewModel(window).TreeNodes.CollectionChanged -= observePublication;
+            }
 
             var refreshedRoot = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
             Assert.NotSame(oldRoot, refreshedRoot);
@@ -360,6 +594,130 @@ public sealed class MainWindowApplySettingsSelectionUiTests
             await UiTestDriver.CloseWindowAsync(window);
         }
     }
+
+	[AvaloniaFact]
+	public async Task RefreshProject_ProfileLookupFinishingAfterProjectSwitchCannotApplyOldProfile()
+	{
+		using var firstProject = UiTestProject.CreateDefault();
+		using var secondProject = UiTestProject.CreateDefault();
+		var appDataPath = Path.Combine(firstProject.AppDataPath, Guid.NewGuid().ToString("N"));
+		var durableStore = new ProjectProfileStore(() => appDataPath);
+		var firstProfile = new ProjectSelectionProfile(
+			SelectedRootFolders: [],
+			SelectedExtensions: [],
+			SelectedIgnoreOptions: [IgnoreOptionId.StripBlankLines],
+			IgnoreOptionStates: new Dictionary<IgnoreOptionId, bool>
+			{
+				[IgnoreOptionId.StripBlankLines] = true
+			});
+		var secondProfile = firstProfile with
+		{
+			SelectedIgnoreOptions = [],
+			IgnoreOptionStates = new Dictionary<IgnoreOptionId, bool>
+			{
+				[IgnoreOptionId.StripBlankLines] = false
+			}
+		};
+		Assert.True(durableStore.TrySaveProfile(firstProject.RootPath, firstProfile));
+		Assert.True(durableStore.TrySaveProfile(secondProject.RootPath, secondProfile));
+		var blockingStore = new BlockingProfileLookupStore(durableStore);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			firstProject,
+			appDataPathOverride: appDataPath,
+			configureServices: services => services with { ProjectProfileStore = blockingStore });
+
+		try
+		{
+			await UiTestDriver.WaitForIgnoreOptionStateAsync(
+				window,
+				IgnoreOptionId.StripBlankLines,
+				visible: true,
+				isChecked: true);
+			blockingStore.BlockNextLookup(firstProject.RootPath);
+			var refreshMethod = typeof(MainWindow).GetMethod(
+				"ReloadCurrentProjectAsync",
+				System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+			Assert.NotNull(refreshMethod);
+			var refreshTask = await window.Dispatcher.InvokeAsync<Task>(() =>
+				Assert.IsAssignableFrom<Task>(refreshMethod!.Invoke(window, [])));
+			await blockingStore.LookupStarted.Task.WaitAsync(
+				TimeSpan.FromSeconds(10),
+				TestContext.Current.CancellationToken);
+
+			await UiTestDriver.OpenFolderAsync(
+				window,
+				secondProject.RootPath,
+				recordRecentFolder: false);
+			await UiTestDriver.WaitForIgnoreOptionStateAsync(
+				window,
+				IgnoreOptionId.StripBlankLines,
+				visible: true,
+				isChecked: false);
+
+			blockingStore.ReleaseLookup();
+			await refreshTask.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+			await UiTestDriver.WaitForSelectionRefreshIdleAsync(window);
+			Assert.True(PathComparer.Default.Equals(
+				secondProject.RootPath,
+				Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes).FullPath));
+			await UiTestDriver.WaitForIgnoreOptionStateAsync(
+				window,
+				IgnoreOptionId.StripBlankLines,
+				visible: true,
+				isChecked: false);
+		}
+		finally
+		{
+			blockingStore.ReleaseLookup();
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task RefreshProject_ProfileLookupFinishingAfterSameProjectReopenCannotReplaceLatestTree()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var blockingStore = new BlockingProfileLookupStore(new ProjectProfileStore(() => appDataPath));
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			appDataPathOverride: appDataPath,
+			configureServices: services => services with { ProjectProfileStore = blockingStore });
+
+		try
+		{
+			blockingStore.BlockNextLookup(project.RootPath);
+			var refreshMethod = typeof(MainWindow).GetMethod(
+				"ReloadCurrentProjectAsync",
+				System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+			Assert.NotNull(refreshMethod);
+			var refreshTask = await window.Dispatcher.InvokeAsync<Task>(() =>
+				Assert.IsAssignableFrom<Task>(refreshMethod!.Invoke(window, [])));
+			await blockingStore.LookupStarted.Task.WaitAsync(
+				TimeSpan.FromSeconds(10),
+				TestContext.Current.CancellationToken);
+
+			var reopening = Assert.IsAssignableFrom<Task<bool>>(
+				await UiTestDriver.BeginOpenFolderAsync(
+					window,
+					project.RootPath,
+					fromDialog: false,
+					recordRecentFolder: false));
+			Assert.True(await reopening.WaitAsync(
+				TimeSpan.FromSeconds(30),
+				TestContext.Current.CancellationToken));
+			var latestRoot = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
+
+			blockingStore.ReleaseLookup();
+			await refreshTask.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+			Assert.Same(latestRoot, Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes));
+		}
+		finally
+		{
+			blockingStore.ReleaseLookup();
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
 
     [AvaloniaFact]
     public async Task GitPull_PreservesCheckedFolderExpansionAndSelectsNewFiles()
@@ -469,8 +827,8 @@ public sealed class MainWindowApplySettingsSelectionUiTests
 
             var secondRoot = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
             Assert.True(PathComparer.Default.Equals(secondProject.RootPath, secondRoot.FullPath));
-            Assert.False(secondRoot.IsChecked);
-            Assert.Empty(UiTestDriver.GetCheckedTreePaths(window));
+			Assert.False(secondRoot.IsChecked);
+			Assert.Empty(UiTestDriver.GetCheckedTreePaths(window));
             Assert.False(FindRequiredDirectChild(secondRoot, "src").IsExpanded);
         }
         finally
@@ -478,6 +836,40 @@ public sealed class MainWindowApplySettingsSelectionUiTests
             await UiTestDriver.CloseWindowAsync(window);
         }
     }
+
+	[AvaloniaFact(Timeout = 120_000)]
+	public async Task DisablingSecretProtectionWithLiveSessionAppliesWithoutConfirmation()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var registry = new LiveSessionRegistry(() => project.AppDataPath);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			configureServices: services => services with { LiveSessionRegistry = registry })
+			.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+		await using var liveSession = registry.Start([project.RootPath]);
+
+		try
+		{
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets)
+				.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+			await UiTestDriver.ClickApplySettingsAsync(window)
+				.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HideSecrets)
+				.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+
+			await UiTestDriver.ClickApplySettingsAsync(window)
+				.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+
+			Assert.False(UiTestDriver.GetViewModel(window).HideSecretsOption!.IsChecked);
+			Assert.Equal((false, false), UiTestDriver.GetAppliedContentRedactionState(window));
+			Assert.Empty(window.OwnedWindows);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window)
+				.WaitAsync(TimeSpan.FromSeconds(20), TestContext.Current.CancellationToken);
+		}
+	}
 
 	[AvaloniaFact]
 	public async Task GitPull_RestoresStoredAppliedRedactionInsteadOfCommittingDraft()
@@ -992,6 +1384,16 @@ public sealed class MainWindowApplySettingsSelectionUiTests
             : Assert.IsType<ProjectTreeSelectionSnapshot>(snapshot);
     }
 
+    private static DevProjex.Avalonia.Coordinators.TreeSelectionProfilePersistenceCoordinator
+        GetTreeSelectionPersistence(MainWindow window)
+    {
+        var field = typeof(MainWindow).GetField(
+            "_treeSelectionProfiles",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        return Assert.IsType<DevProjex.Avalonia.Coordinators.TreeSelectionProfilePersistenceCoordinator>(
+            field?.GetValue(window));
+    }
+
     private static async Task InvokePrivateTaskAsync(MainWindow window, string methodName)
     {
         var method = typeof(MainWindow).GetMethod(
@@ -1091,6 +1493,61 @@ public sealed class MainWindowApplySettingsSelectionUiTests
                 projectionRules,
                 cancellationToken);
     }
+
+	private sealed class BlockingProfileLookupStore(ProjectProfileStore inner) : IProjectProfileStore
+	{
+		private readonly ManualResetEventSlim _release = new(initialState: true);
+		private string? _blockedProjectPath;
+		private int _armed;
+
+		public TaskCompletionSource LookupStarted { get; } =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+		public void BlockNextLookup(string projectPath)
+		{
+			_blockedProjectPath = projectPath;
+			_release.Reset();
+			Volatile.Write(ref _armed, 1);
+		}
+
+		public void ReleaseLookup() => _release.Set();
+
+		public bool EnsureStorageExists() => inner.EnsureStorageExists();
+
+		public bool TryLoadProfile(string localProjectPath, out ProjectSelectionProfile profile) =>
+			inner.TryLoadProfile(localProjectPath, out profile);
+
+		public ProjectProfileLookupResult LookupProfile(string localProjectPath, TimeSpan lockTimeout)
+		{
+			if (PathComparer.Default.Equals(localProjectPath, _blockedProjectPath) &&
+				Interlocked.CompareExchange(ref _armed, 0, 1) == 1)
+			{
+				LookupStarted.TrySetResult();
+				_release.Wait(TestContext.Current.CancellationToken);
+			}
+
+			return inner.LookupProfile(localProjectPath, lockTimeout);
+		}
+
+		public bool TrySaveProfile(string localProjectPath, ProjectSelectionProfile profile) =>
+			inner.TrySaveProfile(localProjectPath, profile);
+
+		public bool TrySaveProfile(
+			string localProjectPath,
+			ProjectSelectionProfile profile,
+			DateTimeOffset updatedUtc) =>
+			inner.TrySaveProfile(localProjectPath, profile, updatedUtc);
+
+		public void SaveProfile(string localProjectPath, ProjectSelectionProfile profile) =>
+			inner.SaveProfile(localProjectPath, profile);
+
+		public ProjectProfileClearStatus ClearAllProfiles() => inner.ClearAllProfiles();
+	}
+
+    private static TimeSpan PublicationSafetyTimeout =>
+        string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase)
+            ? TimeSpan.FromMinutes(2)
+            : TimeSpan.FromSeconds(30);
 
     private sealed class MutatingGitRepositoryService(string repositoryPath) : IGitRepositoryService
     {

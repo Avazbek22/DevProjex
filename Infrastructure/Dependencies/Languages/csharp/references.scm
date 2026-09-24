@@ -1,0 +1,33 @@
+(field_declaration (variable_declaration type: (_) @reference.variable_type))
+(local_declaration_statement (variable_declaration type: (_) @reference.local_type))
+(foreach_statement type: (_) @reference.foreach_type)
+(catch_declaration type: (_) @reference.catch_type)
+(event_declaration type: (_) @reference.event_type)
+(event_field_declaration (variable_declaration type: (_) @reference.event_type))
+(indexer_declaration type: (_) @reference.indexer_type)
+(local_function_statement type: (_) @reference.local_function_return)
+(delegate_declaration type: (_) @reference.delegate_return)
+(property_declaration type: (_) @reference.property_type)
+(parameter type: (_) @reference.parameter_type)
+(method_declaration returns: (_) @reference.return_type)
+(base_list (_) @reference.base)
+(type_parameter_constraints_clause (type_parameter_constraint type: (_) @reference.constraint))
+(attribute name: (_) @reference.attribute)
+(object_creation_expression type: (_) @reference.object_creation)
+(object_creation_expression !type) @reference.target_typed_object_creation
+(invocation_expression
+  function: (generic_name
+    (type_argument_list) @reference.call_type_argument))
+(invocation_expression
+  function: (member_access_expression
+    name: (generic_name
+      (type_argument_list) @reference.call_type_argument)))
+(typeof_expression type: (_) @reference.typeof)
+(sizeof_expression type: (_) @reference.sizeof)
+(default_expression type: (_) @reference.default)
+(cast_expression type: (_) @reference.cast)
+(as_expression right: (_) @reference.as)
+(is_expression right: (_) @reference.is)
+(type_pattern type: (_) @reference.is)
+(declaration_pattern type: (_) @reference.pattern)
+(type_parameter_list) @context.type_parameters

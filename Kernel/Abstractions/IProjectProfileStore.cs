@@ -10,6 +10,11 @@ public interface IProjectProfileStore
 		string localProjectPath,
 		ProjectSelectionProfile profile) =>
 		new(TrySaveProfile(localProjectPath, profile), WasTruncated: false);
+	ProjectProfileSaveResult TrySaveProfileWithResult(
+		string localProjectPath,
+		ProjectSelectionProfile profile,
+		DateTimeOffset? expectedUpdatedUtc) =>
+		TrySaveProfileWithResult(localProjectPath, profile);
 	ProjectProfileBatchSaveResult TrySaveProfilesWithResult(
 		IReadOnlyList<ProjectProfileSaveRequest> requests,
 		TimeSpan lockTimeout)
@@ -32,6 +37,10 @@ public interface IProjectProfileStore
 			: new ProjectProfileLookupResult(ProjectProfileLookupStatus.Missing, null);
 	}
 	bool TryDeleteProfile(string localProjectPath) => false;
+	ProjectProfileDeleteStatus TryDeleteProfileWithResult(string localProjectPath) =>
+		TryDeleteProfile(localProjectPath)
+			? ProjectProfileDeleteStatus.Deleted
+			: ProjectProfileDeleteStatus.Failed;
 	void SaveProfile(string localProjectPath, ProjectSelectionProfile profile);
 	ProjectProfileClearStatus ClearAllProfiles();
 }

@@ -31,6 +31,7 @@ public sealed class PreviewDocumentBuilder(
     private const int InMemoryDocumentThresholdChars = 500_000;
     private const long MaximumParallelPreparationFileBytes = 1024 * 1024;
     private const int MaximumParallelPreparations = 8;
+	internal Func<string, long>? FileLengthProbe { get; init; }
 
     public IPreviewTextDocument CreateInMemory(
 		string? text,
@@ -329,12 +330,7 @@ public sealed class PreviewDocumentBuilder(
             var readResult = prepared.ReadResult;
             var content = readResult.Content;
 			if (redactionScope is not null &&
-			    readResult.Classification is not (
-				    FileContentClassification.Text or
-				    FileContentClassification.TooLarge or
-				    FileContentClassification.Unreadable or
-				    FileContentClassification.UnsupportedEncoding or
-				    FileContentClassification.Binary))
+			    !PreparedSecretFile.IsRedactionOutputSafeClassification(readResult.Classification))
 			{
 				throw new SecretDetectionException(
 					$"Hide Secrets could not inspect '{file}' ({readResult.Classification}).");
@@ -628,13 +624,16 @@ public sealed class PreviewDocumentBuilder(
 			? null
 			: ProjectSourcePathPolicy.ClassifyUnavailable(projectRoot, path);
 
-    private static bool IsSmallFile(string path)
+    private bool IsSmallFile(string path)
     {
         try
         {
-            return new FileInfo(path).Length <= MaximumParallelPreparationFileBytes;
+            return (FileLengthProbe?.Invoke(path) ?? new FileInfo(path).Length) <=
+                   MaximumParallelPreparationFileBytes;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException)
+        catch (Exception exception) when (exception is
+		       IOException or UnauthorizedAccessException or NotSupportedException or
+		       System.Security.SecurityException)
         {
             return false;
         }

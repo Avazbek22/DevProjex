@@ -205,7 +205,129 @@ public sealed class DirectCommandIntegrationTests
 			document.RootElement.GetProperty("topFiles").EnumerateArray());
 		Assert.Equal("src/Large.cs", topFile.GetProperty("path").GetString());
 		Assert.True(topFile.GetProperty("tokens").GetInt64() > 0);
+		Assert.False(topFile.GetProperty("estimated").GetBoolean());
 		Assert.Empty(environment.StandardError);
+	}
+
+	[Fact]
+	public async Task AnalyzeSeparatesContentFromPackDocumentMetrics()
+	{
+		using var workspace = new TemporaryDirectory();
+		var shortProject = workspace.CreateDirectory("p");
+		var longProject = workspace.CreateDirectory("project-with-a-much-longer-root-name");
+		foreach (var project in new[] { shortProject, longProject })
+		{
+			Directory.CreateDirectory(Path.Combine(project, "src"));
+			File.WriteAllText(Path.Combine(project, "src", "App.cs"), "class App {}\r\n");
+			File.WriteAllText(Path.Combine(project, "README.md"), "# App\n");
+		}
+
+		using var shortAnalysis = await RunAnalysisJsonAsync(workspace, shortProject);
+		using var longAnalysis = await RunAnalysisJsonAsync(workspace, longProject);
+		Assert.True(JsonElement.DeepEquals(
+			shortAnalysis.RootElement.GetProperty("metrics").GetProperty("contentOnly"),
+			longAnalysis.RootElement.GetProperty("metrics").GetProperty("contentOnly")));
+		var contentOnly = shortAnalysis.RootElement.GetProperty("metrics").GetProperty("contentOnly");
+		var measuredContent = contentOnly.GetProperty("measured");
+		var expectedCharacters = ExportOutputMetricsCalculator.FromText("class App {}\r\n").Chars +
+		                         ExportOutputMetricsCalculator.FromText("# App\n").Chars;
+		Assert.Equal(2, measuredContent.GetProperty("files").GetInt32());
+		Assert.Equal(4, measuredContent.GetProperty("lines").GetInt64());
+		Assert.Equal(expectedCharacters, measuredContent.GetProperty("chars").GetInt64());
+		Assert.Equal(0, contentOnly.GetProperty("estimated").GetProperty("files").GetInt32());
+		Assert.NotEqual(
+			shortAnalysis.RootElement.GetProperty("metrics").GetProperty("document").GetProperty("chars").GetInt64(),
+			longAnalysis.RootElement.GetProperty("metrics").GetProperty("document").GetProperty("chars").GetInt64());
+
+		var exportEnvironment = new TestTerminalEnvironment();
+		var exitCode = await new TerminalApplication(
+				exportEnvironment,
+				new TerminalServiceFactory(() => workspace.CreateDirectory("export-data")))
+			.RunAsync(
+				[
+					"export", "context", shortProject,
+					"--view", "content",
+					"--format", "text",
+					"--git-mode", "none",
+					"--exclude", "none",
+					"--plain",
+					"-o", "-"
+				],
+				TestContext.Current.CancellationToken);
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		var actualDocumentMetrics = ExportOutputMetricsCalculator.FromText(
+			exportEnvironment.StandardOutput.TrimEnd('\r', '\n'));
+		var reportedDocumentMetrics = shortAnalysis.RootElement.GetProperty("metrics").GetProperty("document");
+		Assert.Equal("content", reportedDocumentMetrics.GetProperty("view").GetString());
+		Assert.Equal("text", reportedDocumentMetrics.GetProperty("format").GetString());
+		Assert.False(reportedDocumentMetrics.GetProperty("estimated").GetBoolean());
+		Assert.Equal(actualDocumentMetrics.Lines, reportedDocumentMetrics.GetProperty("lines").GetInt64());
+		Assert.Equal(actualDocumentMetrics.Chars, reportedDocumentMetrics.GetProperty("chars").GetInt64());
+		Assert.Equal(actualDocumentMetrics.Tokens, reportedDocumentMetrics.GetProperty("tokens").GetInt64());
+	}
+
+	private static async Task<JsonDocument> RunAnalysisJsonAsync(
+		TemporaryDirectory workspace,
+		string project)
+	{
+		var environment = new TestTerminalEnvironment();
+		var exitCode = await new TerminalApplication(
+				environment,
+				new TerminalServiceFactory(() => workspace.CreateDirectory("analyze-data-" + Guid.NewGuid().ToString("N"))))
+			.RunAsync(
+				[
+					"analyze", project,
+					"--format", "json",
+					"--top-files", "2",
+					"--git-mode", "none",
+					"--exclude", "none",
+					"-o", "-"
+				],
+				TestContext.Current.CancellationToken);
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		return JsonDocument.Parse(environment.StandardOutput);
+	}
+
+	[Fact]
+	public async Task AnalyzeJsonMarksEstimatedTopFilesAndSeparatesTheirAggregate()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Small.txt"), "measured text\n");
+		File.WriteAllText(
+			Path.Combine(project, "Oversized.txt"),
+			new string('x', checked(16 * 1024 * 1024 + 1)));
+		var environment = new TestTerminalEnvironment();
+		var exitCode = await new TerminalApplication(
+				environment,
+				new TerminalServiceFactory(() => workspace.CreateDirectory("data")))
+			.RunAsync(
+				[
+					"analyze", project,
+					"--format", "json",
+					"--top-files", "2",
+					"--hide-secrets",
+					"--git-mode", "none",
+					"--exclude", "none",
+					"-o", "-"
+				],
+				TestContext.Current.CancellationToken);
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		using var document = JsonDocument.Parse(environment.StandardOutput);
+		var metrics = document.RootElement.GetProperty("metrics").GetProperty("contentOnly");
+		Assert.Equal(1, metrics.GetProperty("measured").GetProperty("files").GetInt32());
+		Assert.Equal(1, metrics.GetProperty("estimated").GetProperty("files").GetInt32());
+		Assert.True(metrics.GetProperty("estimated").GetProperty("chars").GetInt64() > 16 * 1024 * 1024);
+		var topFiles = document.RootElement.GetProperty("topFiles").EnumerateArray().ToArray();
+		var oversized = Assert.Single(
+			topFiles,
+			static file => file.GetProperty("path").GetString() == "Oversized.txt");
+		var measured = Assert.Single(
+			topFiles,
+			static file => file.GetProperty("path").GetString() == "Small.txt");
+		Assert.True(oversized.GetProperty("estimated").GetBoolean());
+		Assert.False(measured.GetProperty("estimated").GetBoolean());
+		Assert.True(document.RootElement.GetProperty("metrics").GetProperty("document").GetProperty("estimated").GetBoolean());
 	}
 
 	[Fact]
@@ -1135,6 +1257,40 @@ public sealed class DirectCommandIntegrationTests
 			StringComparison.Ordinal);
 		Assert.False(File.Exists(unsafeDestination));
 		Assert.Empty(unsafeEnvironment.StandardOutput);
+	}
+
+	[Fact]
+	public async Task ContextDryRunRejectsUnsafeDestinationBeforeRankingOrPreparation()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/app.cs", "public sealed class App { }\n");
+		var unsafeDestination = Path.Combine(project, "context.md");
+		var environment = new TestTerminalEnvironment();
+		using var measurement = DevProjex.Application.Diagnostics.ContentPipelineDiagnostics.BeginMeasurement();
+
+		var exitCode = await new TerminalApplication(
+				environment,
+				new TerminalServiceFactory(() => appData.Path))
+			.RunAsync(
+			[
+				"export", "context", project,
+				"--git-mode", "none",
+				"--exclude", "none",
+				"--rank", "importance",
+				"--compress-code",
+				"--dry-run",
+				"-o", unsafeDestination
+			],
+				TestContext.Current.CancellationToken);
+		var diagnostics = measurement.Capture();
+
+		Assert.Equal(CommandLineExitCodes.PolicyFailure, exitCode);
+		Assert.Contains("DPX-EXPORT-UNSAFE-DESTINATION", environment.StandardError, StringComparison.Ordinal);
+		Assert.Equal(0, diagnostics.SourceVersionHashPasses);
+		Assert.Equal(0, diagnostics.PreparedFilesMaterialized);
+		Assert.Equal(0, diagnostics.DocumentWriteBytes);
 	}
 
 	private static async Task<int> RunContextExportAsync(

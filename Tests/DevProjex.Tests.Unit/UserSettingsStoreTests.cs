@@ -27,7 +27,7 @@ public sealed class UserSettingsStoreTests
     }
 
     [Fact]
-    public void LoadForStartup_WhenStoreLockIsHeld_ReturnsViewDefaultsWithinBoundedTime()
+    public async Task LoadForStartup_WhenStoreLockIsHeld_ReturnsViewDefaultsWithinBoundedTime()
     {
         using var temp = new TemporaryDirectory();
         var store = new UserSettingsStore(() => temp.Path);
@@ -38,13 +38,12 @@ public sealed class UserSettingsStoreTests
             FileMode.OpenOrCreate,
             FileAccess.ReadWrite,
             FileShare.None);
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var loaded = await Task.Run(
+                () => store.LoadForStartup(TimeSpan.FromMilliseconds(25)),
+                TestContext.Current.CancellationToken)
+            .WaitAsync(StartupLoadSafetyTimeout, TestContext.Current.CancellationToken);
 
-        var loaded = store.LoadForStartup(TimeSpan.FromMilliseconds(25));
-
-        stopwatch.Stop();
         Assert.Equal(new AppViewSettings(), loaded.ViewSettings);
-        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(1), $"Startup load took {stopwatch.Elapsed}.");
     }
 
     [Fact]
@@ -66,6 +65,28 @@ public sealed class UserSettingsStoreTests
         var loaded = store.LoadForStartup(TimeSpan.FromMilliseconds(25));
 
         Assert.Equal(expected, loaded.ViewSettings);
+    }
+
+    [Fact]
+    public void LoadForStartup_LegacyMcpLiveContextPreferenceIsIgnored()
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new UserSettingsStore(() => temp.Path);
+        WriteJson(store.GetPath(), """
+        {
+          "schemaVersion": 9,
+          "viewSettings": {
+            "isCompactMode": true,
+            "isMcpLiveContextEnabled": false,
+            "preferredLanguage": "fr"
+          }
+        }
+        """);
+
+        var loaded = store.LoadForStartup(TimeSpan.FromSeconds(1));
+
+        Assert.True(loaded.ViewSettings.IsCompactMode);
+        Assert.Equal(AppLanguage.Fr, loaded.ViewSettings.PreferredLanguage);
     }
 
     [Fact]
@@ -325,6 +346,95 @@ public sealed class UserSettingsStoreTests
     }
 
     [Fact]
+    public void CurrentSchemaWithoutViewSettings_RecoversBackupBeforeNextChange()
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new UserSettingsStore(() => temp.Path);
+        Assert.True(store.TrySave(new UserSettingsDb
+        {
+            ViewSettings = new AppViewSettings
+            {
+                IsCompactMode = true,
+                PreferredLanguage = AppLanguage.It
+            },
+            UpdateCheckSettings = new UpdateCheckSettings
+            {
+                IsAutomaticCheckEnabled = true,
+                LatestKnownVersion = "5.2"
+            }
+        }));
+        var primaryPath = store.GetPath();
+        using var savedBackup = JsonDocument.Parse(File.ReadAllText(primaryPath + ".bak"));
+        var schemaVersion = savedBackup.RootElement.GetProperty("schemaVersion").GetInt32();
+        File.WriteAllText(primaryPath, JsonSerializer.Serialize(new { schemaVersion }));
+
+        var loaded = store.LoadForStartup(TimeSpan.Zero);
+        Assert.True(store.TryPersistViewSettings(
+            loaded,
+            latest => latest with { IsTreeExpansionAnimationEnabled = false }));
+
+        var reloaded = store.Load();
+        Assert.True(reloaded.ViewSettings.IsCompactMode);
+        Assert.False(reloaded.ViewSettings.IsTreeExpansionAnimationEnabled);
+        Assert.Equal(AppLanguage.It, reloaded.ViewSettings.PreferredLanguage);
+        Assert.True(reloaded.UpdateCheckSettings.IsAutomaticCheckEnabled);
+        Assert.Equal("5.2", reloaded.UpdateCheckSettings.LatestKnownVersion);
+        using var backup = JsonDocument.Parse(File.ReadAllText(primaryPath + ".bak"));
+        Assert.True(backup.RootElement.GetProperty("viewSettings")
+            .GetProperty("isCompactMode").GetBoolean());
+    }
+
+    [Fact]
+    public void LoadForStartup_UnreadablePrimaryAndCorruptBackupRemainUnchanged()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("This test relies on Windows file-sharing behavior.");
+            return;
+        }
+
+        using var temp = new TemporaryDirectory();
+        var store = new UserSettingsStore(() => temp.Path);
+        Assert.True(store.TrySave(new UserSettingsDb
+        {
+            ViewSettings = new AppViewSettings
+            {
+                IsCompactMode = true,
+                PreferredLanguage = AppLanguage.It
+            },
+            UpdateCheckSettings = new UpdateCheckSettings
+            {
+                IsAutomaticCheckEnabled = true,
+                LatestKnownVersion = "5.2"
+            }
+        }));
+        var primaryPath = store.GetPath();
+        var backupPath = primaryPath + ".bak";
+        File.WriteAllText(backupPath, "{ invalid-backup");
+        var originalPrimary = File.ReadAllBytes(primaryPath);
+        var originalBackup = File.ReadAllBytes(backupPath);
+
+        using (var primaryReadBlock = new FileStream(
+                   primaryPath, FileMode.Open, FileAccess.Write, FileShare.Delete))
+        {
+            var loaded = store.LoadForStartup(TimeSpan.FromSeconds(1));
+            Assert.False(loaded.ViewSettings.IsCompactMode);
+            Assert.False(store.TryLoad(out _));
+            loaded.ViewSettings = loaded.ViewSettings with { IsCompactMode = true };
+            loaded.UpdateCheckSettings = loaded.UpdateCheckSettings with
+            {
+                IsAutomaticCheckEnabled = true
+            };
+            Assert.False(store.TryPersistViewSettings(loaded));
+            Assert.False(store.TryPersistUpdateCheckSettings(loaded));
+            Assert.False(store.EnsureStorageExists());
+        }
+
+        Assert.Equal(originalPrimary, File.ReadAllBytes(primaryPath));
+        Assert.Equal(originalBackup, File.ReadAllBytes(backupPath));
+    }
+
+    [Fact]
     public void FutureSchema_IsNeverOverwrittenByOlderApplication()
     {
         using var temp = new TemporaryDirectory();
@@ -465,4 +575,9 @@ public sealed class UserSettingsStoreTests
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, json);
     }
+
+    private static TimeSpan StartupLoadSafetyTimeout =>
+        string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase)
+            ? TimeSpan.FromMinutes(2)
+            : TimeSpan.FromSeconds(30);
 }

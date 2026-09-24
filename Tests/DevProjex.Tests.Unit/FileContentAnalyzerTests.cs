@@ -35,17 +35,90 @@ public sealed class FileContentAnalyzerTests
 	[InlineData(ProbeOperation.StreamingMetrics)]
 	[InlineData(ProbeOperation.CompleteSnapshot)]
 	[InlineData(ProbeOperation.ReadFact)]
-	public async Task NullByteProbe_IoFailureIsUnreadableRatherThanBinary(ProbeOperation operation)
+	public async Task BomAndNullByteProbe_ReadsThePrefixOnce(ProbeOperation operation)
 	{
 		using var temp = new TemporaryDirectory();
 		var path = temp.CreateFile("probe.txt", "ordinary text");
+		ProbeCountingFileStream? observed = null;
 		var analyzer = new FileContentAnalyzer(
-			(filePath, _, _, _) => new ProbeFailureFileStream(filePath));
+			(filePath, _, _, _) => observed = new ProbeCountingFileStream(filePath));
 
 		var classification = await ClassifyAsync(analyzer, path, operation);
 
-		Assert.Equal(FileContentClassification.Unreadable, classification);
-		Assert.NotEqual(FileContentClassification.Binary, classification);
+		Assert.Equal(FileContentClassification.Text, classification);
+		Assert.NotNull(observed);
+		Assert.Equal(1, observed.SpanReads);
+	}
+
+	[Theory]
+	[InlineData("utf16-le", TextFileEncoding.Utf16LittleEndian)]
+	[InlineData("utf16-be", TextFileEncoding.Utf16BigEndian)]
+	[InlineData("utf32-le", TextFileEncoding.Utf32LittleEndian)]
+	[InlineData("utf32-be", TextFileEncoding.Utf32BigEndian)]
+	public async Task ShortPrefixReads_PreserveBomTextAndMetrics(
+		string encodingId,
+		TextFileEncoding expectedEncoding)
+	{
+		using var temp = new TemporaryDirectory();
+		const string content = "first\nβeta";
+		var encoding = CreateStrictEncoding(encodingId, emitBom: true);
+		var bytes = encoding.GetPreamble().Concat(encoding.GetBytes(content)).ToArray();
+		var path = temp.CreateBinaryFile("short-prefix.txt", bytes);
+		var analyzer = new FileContentAnalyzer(
+			(filePath, _, _, _) => new ShortPrefixFileStream(filePath));
+
+		var metrics = await analyzer.GetClassifiedMetricsAsync(path, TestContext.Current.CancellationToken);
+		Assert.Equal(FileContentClassification.Text, metrics.Classification);
+		Assert.Equal(content.Length, metrics.Metrics?.CharCount);
+		Assert.Equal(2, metrics.Metrics?.LineCount);
+
+		var fact = await analyzer.ReadFactAsync(path, 1024, TestContext.Current.CancellationToken);
+		Assert.Equal(FileContentClassification.Text, fact.Classification);
+		Assert.Equal(content, fact.Content);
+		Assert.Equal(expectedEncoding, fact.Encoding);
+
+		await using var buffer = await analyzer.OpenCompleteTextBufferAsync(
+			path, 1024, TestContext.Current.CancellationToken);
+		Assert.Equal(FileContentClassification.Text, buffer.Classification);
+		Assert.Equal(content, buffer.Content.ToString());
+
+		await using var snapshot = await analyzer.OpenCompleteSnapshotAsync(
+			path, TestContext.Current.CancellationToken);
+		Assert.Equal(FileContentClassification.Text, snapshot.Result.Classification);
+		Assert.Equal(content.Length, snapshot.Result.Metrics?.CharCount);
+	}
+
+	[Theory]
+	[InlineData(ProbeOperation.CompleteTextBuffer)]
+	[InlineData(ProbeOperation.StreamingMetrics)]
+	[InlineData(ProbeOperation.ReadFact)]
+	public async Task ShortPrefixReads_StillDetectNullBeforeLargeFileEstimate(ProbeOperation operation)
+	{
+		using var temp = new TemporaryDirectory();
+		var prefix = Enumerable.Repeat((byte)'a', 512).ToArray();
+		prefix[300] = 0;
+		var path = temp.CreateBinaryFile("late-null.txt", prefix);
+		using (var stream = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.Read))
+			stream.SetLength(11 * 1024 * 1024);
+		var analyzer = new FileContentAnalyzer(
+			(filePath, _, _, _) => new ShortPrefixFileStream(filePath));
+
+		var classification = await ClassifyAsync(analyzer, path, operation);
+
+		Assert.Equal(FileContentClassification.Binary, classification);
+	}
+
+	[Fact]
+	public async Task ShortPrefixReads_ObserveCancellationBeforeReturningEstimate()
+	{
+		using var temp = new TemporaryDirectory();
+		var path = temp.CreateFile("large.txt", new string('a', 2048));
+		using var cancellation = new CancellationTokenSource();
+		var analyzer = new FileContentAnalyzer(
+			(filePath, _, _, _) => new ShortPrefixFileStream(filePath, cancellation.Cancel));
+
+		await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+			await analyzer.ReadFactAsync(path, 1024, cancellation.Token));
 	}
 
 	[Theory]
@@ -1110,7 +1183,7 @@ public sealed class FileContentAnalyzerTests
 		ReadFact
 	}
 
-	private sealed class ProbeFailureFileStream(string path) : FileStream(
+	private sealed class ProbeCountingFileStream(string path) : FileStream(
 		path,
 		FileMode.Open,
 		FileAccess.Read,
@@ -1120,11 +1193,34 @@ public sealed class FileContentAnalyzerTests
 	{
 		private int _spanReads;
 
+		public int SpanReads => Volatile.Read(ref _spanReads);
+
 		public override int Read(Span<byte> buffer)
 		{
-			if (Interlocked.Increment(ref _spanReads) == 2)
-				throw new IOException("Injected null-byte probe failure.");
+			Interlocked.Increment(ref _spanReads);
 			return base.Read(buffer);
+		}
+	}
+
+	private sealed class ShortPrefixFileStream(string path, Action? afterFirstRead = null) : FileStream(
+		path,
+		FileMode.Open,
+		FileAccess.Read,
+		FileShare.ReadWrite | FileShare.Delete,
+		bufferSize: 1,
+		FileOptions.SequentialScan)
+	{
+		private bool _firstReadObserved;
+
+		public override int Read(Span<byte> buffer)
+		{
+			var read = base.Read(buffer[..Math.Min(buffer.Length, 1)]);
+			if (!_firstReadObserved)
+			{
+				_firstReadObserved = true;
+				afterFirstRead?.Invoke();
+			}
+			return read;
 		}
 	}
 

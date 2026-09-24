@@ -682,6 +682,58 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 	}
 
 	[AvaloniaFact]
+	public async Task CachedGitOpen_LateBranchCatalogCannotReplaceLocalProjectMenu()
+	{
+		var appDataPath = CreateAppDataPath();
+		var cache = new RepoCacheService(Path.Combine(appDataPath, "RepoCache"));
+		var repositoryPath = CreateCachedRepository(
+			cache,
+			"https://github.com/example/late-branches.git",
+			"main",
+			128,
+			git: true,
+			initializeGit: true);
+		var deferredBranches = new TaskCompletionSource<IReadOnlyList<GitBranch>>(
+			TaskCreationOptions.RunContinuationsAsynchronously);
+		var git = new BranchCatalogGitRepositoryService(
+			[new GitBranch("main", IsActive: true, IsRemote: false)],
+			deferredBranches);
+		var window = await CreateWindowAsync(appDataPath, cache, git);
+
+		try
+		{
+			await UiTestDriver.OpenFolderAsync(window, repositoryPath);
+			await git.BranchDiscoveryStarted.Task.WaitAsync(
+				TimeSpan.FromSeconds(5),
+				TestContext.Current.CancellationToken);
+			await UiTestDriver.OpenFolderAsync(window, workspace.Project.RootPath);
+			var viewModel = UiTestDriver.GetViewModel(window);
+			Assert.Equal(ProjectSourceType.LocalFolder, viewModel.ProjectSourceType);
+			Assert.Empty(viewModel.GitBranches);
+			var menu = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "GitBranchMenuItem");
+			var menuBranchesBefore = menu.Items
+				.OfType<MenuItem>()
+				.Select(static item => item.Tag)
+				.ToArray();
+
+			deferredBranches.SetResult(
+				[new GitBranch("late-from-previous-project", IsActive: true, IsRemote: false)]);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+
+			Assert.Equal(ProjectSourceType.LocalFolder, viewModel.ProjectSourceType);
+			Assert.Empty(viewModel.GitBranches);
+			Assert.Equal(menuBranchesBefore, menu.Items
+				.OfType<MenuItem>()
+				.Select(static item => item.Tag));
+		}
+		finally
+		{
+			deferredBranches.TrySetResult([]);
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task GitCloneWindow_EscapeInRepositoryDropDownClosesOnlyThePopup()
 	{
 		var appDataPath = CreateAppDataPath();
@@ -1239,7 +1291,7 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 
 		try
 		{
-			var loadCompletion = new TaskCompletionSource<RecentProjectsDb>(
+			var loadCompletion = new TaskCompletionSource<RecentProjectsLoadResult>(
 				TaskCreationOptions.RunContinuationsAsynchronously);
 			var loadedField = GetRequiredMainWindowField("_recentProjectsLoaded");
 			var loadTaskField = GetRequiredMainWindowField("_recentProjectsLoadTask");
@@ -1260,7 +1312,9 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
 			Assert.Empty(window.OwnedWindows.OfType<GitCloneWindow>());
 
-			loadCompletion.SetResult(database);
+			loadCompletion.SetResult(new RecentProjectsLoadResult(
+				database,
+				RecentProjectsLoadStatus.Success));
 			await UiTestDriver.WaitForConditionAsync(
 				window,
 				() => window.OwnedWindows.OfType<GitCloneWindow>().Count() == 1,
@@ -1389,9 +1443,24 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 
 	private static void RunGit(string repositoryPath, IReadOnlyList<string> arguments)
 	{
+		var startInfo = new ProcessStartInfo(GitRuntime.GitExecutable)
+		{
+			WorkingDirectory = repositoryPath,
+			UseShellExecute = false,
+			RedirectStandardInput = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true
+		};
+		if (OperatingSystem.IsWindows())
+		{
+			startInfo.ArgumentList.Add("-c");
+			startInfo.ArgumentList.Add("core.longpaths=true");
+		}
+		foreach (var argument in arguments)
+			startInfo.ArgumentList.Add(argument);
 		using var process = new Process
 		{
-			StartInfo = GitProcessStartInfoFactory.Create(repositoryPath, arguments)
+			StartInfo = startInfo
 		};
 		Assert.True(process.Start());
 		process.StandardInput.Close();
@@ -1634,16 +1703,21 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 		public Task<GitCloneResult> CloneAsync(string url, string targetDirectory, IProgress<string>? progress = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
 	}
 
-	private sealed class BranchCatalogGitRepositoryService(IReadOnlyList<GitBranch> branches) : IGitRepositoryService
+	private sealed class BranchCatalogGitRepositoryService(
+		IReadOnlyList<GitBranch> branches,
+		TaskCompletionSource<IReadOnlyList<GitBranch>>? deferredBranches = null) : IGitRepositoryService
 	{
 		public int BranchDiscoveryCount { get; private set; }
+		public TaskCompletionSource BranchDiscoveryStarted { get; } =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
 
 		public Task<IReadOnlyList<GitBranch>> GetBranchesAsync(
 			string repositoryPath,
 			CancellationToken cancellationToken = default)
 		{
 			BranchDiscoveryCount++;
-			return Task.FromResult(branches);
+			BranchDiscoveryStarted.TrySetResult();
+			return deferredBranches?.Task ?? Task.FromResult(branches);
 		}
 
 		public Task<bool> IsGitAvailableAsync(CancellationToken cancellationToken = default) => Task.FromResult(true);

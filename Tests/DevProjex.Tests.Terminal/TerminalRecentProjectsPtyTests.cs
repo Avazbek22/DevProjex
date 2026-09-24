@@ -7,6 +7,48 @@ namespace DevProjex.Tests.Terminal;
 public sealed class TerminalRecentProjectsPtyTests
 {
 	[Fact(Timeout = 90_000)]
+	public async Task WelcomePaletteOpensTheConcreteFilteredRecentProject()
+	{
+		using var firstProject = CreateProject("FirstPaletteProject", "FirstPaletteMarker.cs");
+		using var secondProject = CreateProject("ZZZSecondPaletteProjectZZZ", "SecondPaletteMarker.cs");
+		using var welcomeDirectory = new TemporaryDirectory();
+		welcomeDirectory.WriteFile("notes.txt", "not a project");
+
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			welcomeDirectory.Path,
+			["--language", "en"],
+			initializeDataRoot: dataRoot =>
+			{
+				var store = new RecentProjectsStore(() => dataRoot);
+				var snapshot = store.AddFolder(null, secondProject.Path);
+				store.AddFolder(snapshot, firstProject.Path);
+			},
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.WaitForScreenAsync(
+			"Choose a workspace action",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync("\u0010", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Filter actions:",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync("ZZZSecondPaletteProjectZZZ", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"ZZZSecondPaletteProjectZZZ",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		var workspace = await terminal.WaitForScreenAsync(
+			"SecondPaletteMarker.cs",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.DoesNotContain("FirstPaletteMarker.cs", workspace, StringComparison.Ordinal);
+		await ExitAsync(terminal);
+	}
+
+	[Fact(Timeout = 90_000)]
 	public async Task PopulatedRecentSelectionOpensWorkspaceAndMovesEntryToFront()
 	{
 		using var firstProject = CreateProject("FirstProject", "FirstMarker.cs");

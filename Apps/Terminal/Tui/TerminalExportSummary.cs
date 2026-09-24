@@ -31,6 +31,10 @@ public sealed record TerminalExportSummary(
 	bool PrivateDataRedacted = false,
 	string? GitDiffRange = null);
 
+internal readonly record struct TerminalExportCompletion(
+	string DestinationPath,
+	int SkippedUnscannableCount = 0);
+
 internal enum TerminalExportDecision
 {
 	Cancel = 0,

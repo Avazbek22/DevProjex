@@ -12,7 +12,37 @@ public sealed partial class TerminalLocalizationContractTests
 	[
 		"Terminal.Command.Root",
 		"Terminal.Command.Analyze",
+		"Terminal.Command.Search",
+		"Terminal.Argument.SearchPattern",
+		"Terminal.Option.SearchRegex",
+		"Terminal.Option.SearchSymbols",
+		"Terminal.Option.SearchMaximumResults",
+		"Terminal.Option.SearchBodyCharacters",
+		"Terminal.Option.McpLive",
+		"Terminal.Option.McpRemoteHosts",
+		"Terminal.Option.McpToolSet",
+		"Terminal.Option.McpSearchBodyCharacters",
 		"Terminal.Option.Language",
+		"Terminal.Option.Rank",
+		"Terminal.Validation.RankRequiresContent",
+		"Terminal.Ranking.Summary",
+		"Terminal.Ranking.GitUnavailableSuffix",
+		"Terminal.Ranking.RedistributedSuffix",
+		"Terminal.Ranking.Top",
+		"Terminal.Ranking.Unavailable",
+		"Terminal.Ranking.TestSourceSuffix",
+		"Terminal.Ranking.EntryPointSuffix",
+		"Terminal.Option.Focus",
+		"Terminal.Validation.FocusRequiresRank",
+		"Terminal.Validation.FocusLimit",
+		"Terminal.Validation.FocusEmpty",
+		"Terminal.Option.DetailFor",
+		"Terminal.Validation.DetailFor",
+		"Terminal.Validation.DetailForRequiresContent",
+		"Terminal.DryRun.Detail",
+		"Terminal.DryRun.DetailUnmatched",
+		"Terminal.TokenBudget.RankedSkipped",
+		"Terminal.TokenBudget.OversizedHint",
 		"Terminal.Error.Unexpected",
 		"Terminal.Error.ParserRejected",
 		"Terminal.Analysis.Size",
@@ -264,8 +294,8 @@ public sealed partial class TerminalLocalizationContractTests
 				{
 					var normalizedLine = NormalizeHelpLabel(line);
 					return legacyLabels.All(normalizedLine.Contains) &&
-					       (!normalizedLine.Contains("STAGED", StringComparison.Ordinal) ||
-					        !normalizedLine.Contains("CHANGES", StringComparison.Ordinal));
+						   (!normalizedLine.Contains("STAGED", StringComparison.Ordinal) ||
+							!normalizedLine.Contains("CHANGES", StringComparison.Ordinal));
 				});
 			foreach (var token in persistentAndMomentaryTokens)
 			{

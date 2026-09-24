@@ -10,6 +10,33 @@ internal enum UserDataDirectoryKind
 
 public static class UserDataPathResolver
 {
+	public const string InternalDataRootVariable = "DEVPROJEX_INTERNAL_DATA_ROOT";
+	private const string UnsafeServiceDirectoryMessage =
+		"Application service directories must be physical directories, not a symbolic link or junction.";
+
+	public static string? ResolveInternalDataRoot(string? candidate)
+	{
+		if (string.IsNullOrWhiteSpace(candidate))
+			return null;
+
+		try
+		{
+			if (!Path.IsPathFullyQualified(candidate))
+				return null;
+			var resolved = Path.GetFullPath(candidate);
+			return Directory.Exists(resolved) ? resolved : null;
+		}
+		catch (Exception exception) when (exception is
+			   ArgumentException or
+			   NotSupportedException or
+			   IOException or
+			   UnauthorizedAccessException or
+			   System.Security.SecurityException)
+		{
+			return null;
+		}
+	}
+
 	public static string GetConfigurationRoot() =>
 		Resolve(
 			UserDataDirectoryKind.Configuration,
@@ -37,6 +64,54 @@ public static class UserDataPathResolver
 			OperatingSystem.IsWindows(),
 			Environment.GetFolderPath,
 			Environment.GetEnvironmentVariable);
+
+	internal static string EnsurePhysicalServiceDirectory(string root, string name)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(root);
+		ArgumentException.ThrowIfNullOrWhiteSpace(name);
+		if (name.IndexOfAny([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]) >= 0 ||
+			name is "." or "..")
+		{
+			throw new ArgumentException("A service directory name must be one path segment.", nameof(name));
+		}
+
+		var normalizedRoot = Path.GetFullPath(root);
+		EnsurePhysicalDirectory(normalizedRoot, createIfMissing: true);
+		var directory = Path.Combine(normalizedRoot, name);
+		EnsurePhysicalDirectory(directory, createIfMissing: true);
+		return directory;
+	}
+
+	internal static string EnsurePhysicalDirectory(string path, bool createIfMissing)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(path);
+		var normalized = Path.GetFullPath(path);
+		if (!Directory.Exists(normalized))
+		{
+			if (!createIfMissing)
+				throw new DirectoryNotFoundException($"Directory '{normalized}' does not exist.");
+			Directory.CreateDirectory(normalized);
+		}
+
+		string? linkTarget;
+		try
+		{
+			linkTarget = new DirectoryInfo(normalized).LinkTarget;
+		}
+		catch (Exception exception) when (exception is
+			   IOException or
+			   UnauthorizedAccessException or
+			   System.Security.SecurityException or
+			   ArgumentException or
+			   NotSupportedException)
+		{
+			throw new IOException(UnsafeServiceDirectoryMessage, exception);
+		}
+
+		if (linkTarget is not null || !FileSystemRootEntryPolicy.IsPhysicalDirectory(normalized))
+			throw new IOException(UnsafeServiceDirectoryMessage);
+		return normalized;
+	}
 
 	internal static string GetLegacyLocalDataRoot() =>
 		ResolveLegacyLocalData(
@@ -74,7 +149,7 @@ public static class UserDataPathResolver
 		}
 
 		if (isWindows ||
-		    kind is UserDataDirectoryKind.Configuration or UserDataDirectoryKind.Data)
+			kind is UserDataDirectoryKind.Configuration or UserDataDirectoryKind.Data)
 		{
 			var platformFolder = kind == UserDataDirectoryKind.Configuration
 				? Environment.SpecialFolder.ApplicationData

@@ -1,3 +1,5 @@
+using System.Security;
+
 namespace DevProjex.Tests.Terminal;
 
 public sealed class TerminalSettingsStoreTests
@@ -82,6 +84,34 @@ public sealed class TerminalSettingsStoreTests
 	}
 
 	[Fact]
+	public async Task AgentActivityRoundTripsWithoutOverwritingOtherTerminalSettings()
+	{
+		using var workspace = new TemporaryDirectory();
+		var store = new TerminalSettingsStore(() => workspace.Path);
+		await store.SaveLanguageAsync(AppLanguage.Ja, TestContext.Current.CancellationToken);
+		await store.SaveCommandHistoryAsync(["mcp log"], TestContext.Current.CancellationToken);
+
+		await store.SaveAgentActivityEnabledAsync(true, TestContext.Current.CancellationToken);
+
+		var reloaded = new TerminalSettingsStore(() => workspace.Path);
+		Assert.True(reloaded.LoadAgentActivityEnabled());
+		Assert.Equal(AppLanguage.Ja, reloaded.LoadLanguage());
+		Assert.Equal(["mcp log"], reloaded.LoadCommandHistory());
+
+		await reloaded.SaveAgentActivityEnabledAsync(false, TestContext.Current.CancellationToken);
+		Assert.False(new TerminalSettingsStore(() => workspace.Path).LoadAgentActivityEnabled());
+	}
+
+	[Fact]
+	public void AgentActivityDefaultsToOffWhenTheSettingIsAbsent()
+	{
+		using var workspace = new TemporaryDirectory();
+		var store = new TerminalSettingsStore(() => workspace.Path);
+
+		Assert.False(store.LoadAgentActivityEnabled());
+	}
+
+	[Fact]
 	public async Task CommandStatePersistsHistoryAndLanguageInOneAtomicUpdate()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -121,6 +151,18 @@ public sealed class TerminalSettingsStoreTests
 		File.WriteAllText(store.GetPath(), "{ invalid json");
 
 		Assert.Equal(TerminalScreenMode.Auto, store.LoadScreenMode());
+	}
+
+	[Fact]
+	public void UnavailableConfigurationRootDoesNotPreventTerminalDefaults()
+	{
+		var store = new TerminalSettingsStore(
+			() => throw new SecurityException("Configuration root is unavailable."));
+
+		Assert.Equal(TerminalScreenMode.Auto, store.LoadScreenMode());
+		Assert.Empty(store.LoadCommandHistory());
+		Assert.Null(store.LoadLanguage());
+		Assert.False(store.LoadAgentActivityEnabled());
 	}
 
 	[Fact]
@@ -310,6 +352,40 @@ public sealed class TerminalSettingsStoreTests
 		Assert.Equal(
 			TerminalScreenMode.Inline,
 			new TerminalSettingsStore(() => workspace.Path).LoadScreenMode());
+	}
+
+	[Fact]
+	public async Task TemporaryReadFailurePreservesExistingSettingsUntilAnUpdateCanMerge()
+	{
+		using var workspace = new TemporaryDirectory();
+		var healthy = new TerminalSettingsStore(() => workspace.Path);
+		await healthy.SaveCommandStateAsync(
+			["view content"],
+			AppLanguage.Ja,
+			TestContext.Current.CancellationToken);
+		var original = File.ReadAllText(healthy.GetPath());
+		var denyRead = true;
+		var store = new TerminalSettingsStore(
+			() => workspace.Path,
+			afterReadOpened: () =>
+			{
+				if (denyRead)
+					throw new IOException("Terminal settings are temporarily unavailable.");
+			});
+
+		await store.SaveScreenModeAsync(
+			TerminalScreenMode.Inline,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(original, File.ReadAllText(healthy.GetPath()));
+		denyRead = false;
+		await store.SaveScreenModeAsync(
+			TerminalScreenMode.Inline,
+			TestContext.Current.CancellationToken);
+		var merged = new TerminalSettingsStore(() => workspace.Path);
+		Assert.Equal(TerminalScreenMode.Inline, merged.LoadScreenMode());
+		Assert.Equal(["view content"], merged.LoadCommandHistory());
+		Assert.Equal(AppLanguage.Ja, merged.LoadLanguage());
 	}
 
 	[Fact]

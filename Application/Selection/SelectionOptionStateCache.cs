@@ -69,7 +69,7 @@ public sealed class SelectionOptionStateCache
         Func<T, bool> isCheckedSelector)
     {
         IsInitialized = true;
-        HasFullState = true;
+        CompleteKnownStates();
 
         SelectedNames.Clear();
         foreach (var option in options)
@@ -93,13 +93,24 @@ public sealed class SelectionOptionStateCache
             return false;
 
         IsInitialized = true;
-        HasFullState = true;
+        CompleteKnownStates();
         OptionStates[name] = isChecked;
         if (isChecked)
             SelectedNames.Add(name);
         else
             SelectedNames.Remove(name);
         return true;
+    }
+
+    private void CompleteKnownStates()
+    {
+        if (HasFullState)
+            return;
+
+        // Legacy selected-only profiles keep hidden checked rows outside the state map.
+        foreach (var selectedName in SelectedNames)
+            OptionStates.TryAdd(selectedName, true);
+        HasFullState = true;
     }
 
     public void MarkIncomplete() => HasFullState = false;

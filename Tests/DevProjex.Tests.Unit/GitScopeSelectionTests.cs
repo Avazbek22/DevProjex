@@ -206,7 +206,7 @@ public sealed class GitScopeSelectionTests
 		var repositoryRoot = Path.GetFullPath("repository");
 		var startInfo = GitScopePathProvider.CreateStartInfo(
 			repositoryRoot,
-			GitScopePathProvider.CreateDiffArguments(cached: false, diffRange: null));
+			GitProcessOperation.ReadWorkingChanges());
 		var arguments = startInfo.ArgumentList.ToArray();
 		var quotePathIndex = Array.IndexOf(arguments, "core.quotepath=false");
 		var fsMonitorIndex = Array.IndexOf(arguments, "core.fsmonitor=false");
@@ -217,7 +217,7 @@ public sealed class GitScopeSelectionTests
 		Assert.True(fsMonitorIndex > quotePathIndex);
 		Assert.Equal("-c", arguments[fsMonitorIndex - 1]);
 		Assert.True(diffIndex > fsMonitorIndex);
-		Assert.Contains(repositoryRoot, arguments);
+		Assert.Equal(repositoryRoot, startInfo.WorkingDirectory);
 		Assert.Equal("0", startInfo.Environment["GIT_OPTIONAL_LOCKS"]);
 		Assert.Equal("1", startInfo.Environment["GIT_NO_LAZY_FETCH"]);
 	}

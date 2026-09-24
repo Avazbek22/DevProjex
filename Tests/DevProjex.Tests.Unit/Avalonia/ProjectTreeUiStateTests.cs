@@ -4,9 +4,63 @@ namespace DevProjex.Tests.Unit.Avalonia;
 
 public sealed class ProjectTreeUiStateTests
 {
-    [Fact]
-    public void CheckedRootAndEmptySelection_RoundTripRemainDistinct()
-    {
+	[Fact]
+	public void ProfileSelection_UsesUncheckedTreeForBroadAndEmptyFrontiers()
+	{
+		var descriptor = CreateProjectDescriptor();
+
+		var full = BuildTree(descriptor);
+		ProjectTreeUiState.RestoreProfileSelection(full, selectedPaths: null);
+		Assert.Null(ProjectTreeUiState.CaptureProfileSelection(full));
+		Assert.False(full.IsChecked);
+		Assert.All(full.Children, static node => Assert.False(node.IsChecked));
+
+		var empty = BuildTree(descriptor);
+		ProjectTreeUiState.RestoreProfileSelection(empty, []);
+		Assert.Null(ProjectTreeUiState.CaptureProfileSelection(empty));
+		Assert.False(empty.IsChecked);
+		Assert.All(empty.Children, static node => Assert.False(node.IsChecked));
+
+		var partial = BuildTree(descriptor);
+		var result = ProjectTreeUiState.RestoreProfileSelection(partial, ["src"]);
+		Assert.True(result.Applied);
+		Assert.Equal(["src"], ProjectTreeUiState.CaptureProfileSelection(partial));
+		Assert.True(partial.Children[0].IsChecked);
+		Assert.False(partial.Children[1].IsChecked);
+		Assert.Null(partial.IsChecked);
+	}
+
+	[Fact]
+	public void ProfileFolderSelection_IncludesNewDescendantsAndDropsMissingPaths()
+	{
+		var descriptor = CreateProjectDescriptor();
+		var sourceDescriptor = descriptor.Children[0];
+		var addedFile = CreateFile(sourceDescriptor.FullPath, "new.cs");
+		var refreshedDescriptor = descriptor with
+		{
+			Children =
+			[
+				sourceDescriptor with { Children = [.. sourceDescriptor.Children, addedFile] },
+				descriptor.Children[1]
+			]
+		};
+		var restored = BuildTree(refreshedDescriptor);
+
+		var result = ProjectTreeUiState.RestoreProfileSelection(
+			restored,
+			["src", "removed/file.cs"]);
+
+		Assert.Equal(1, result.MissingCheckedPathCount);
+		var source = restored.Children[0];
+		Assert.False(source.AreChildrenRealized);
+		source.IsExpanded = true;
+		Assert.All(source.Children, static child => Assert.True(child.IsChecked));
+		Assert.Equal(["src"], ProjectTreeUiState.CaptureProfileSelection(restored));
+	}
+
+	[Fact]
+	public void CheckedRootAndEmptySelection_RoundTripRemainDistinct()
+	{
         var descriptor = CreateProjectDescriptor();
         var checkedTree = BuildTree(descriptor);
         var emptyTree = BuildTree(descriptor);
@@ -120,6 +174,35 @@ public sealed class ProjectTreeUiStateTests
 			descriptor,
 			ensureExists: false);
 		Assert.Equal([upper.FullPath, lower.FullPath], bothFiles);
+	}
+
+	[Fact]
+	public void FilterSnapshotProfileSelectionKeepsHiddenPathsAndVisibleOverrides()
+	{
+		var rootPath = Path.Combine(Path.GetTempPath(), "DevProjex-TreeState", "FilteredProfile");
+		var first = CreateFile(rootPath, "A.cs");
+		var added = CreateFile(rootPath, "B.cs");
+		var hidden = CreateFile(rootPath, "T.cs");
+		var hiddenUnchecked = CreateFile(rootPath, "U.cs");
+		var descriptor = CreateFolder(
+			rootPath,
+			"FilteredProfile",
+			first,
+			added,
+			hidden,
+			hiddenUnchecked);
+		var source = BuildTree(descriptor);
+		source.Children[0].IsChecked = true;
+		source.Children[2].IsChecked = true;
+		var snapshot = ProjectTreeSelectionSnapshot.Capture(
+			rootPath,
+			[source],
+			new TreeSelectionSnapshotCache());
+		snapshot!.RecordOverride(added.FullPath, isChecked: true);
+
+		var selected = snapshot.CaptureProfileSelection(descriptor);
+
+		Assert.Equal(["A.cs", "B.cs", "T.cs"], selected);
 	}
 
     [Fact]

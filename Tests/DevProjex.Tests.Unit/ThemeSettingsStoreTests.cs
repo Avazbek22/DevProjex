@@ -96,6 +96,39 @@ public sealed class ThemeSettingsStoreTests
     }
 
     [Fact]
+    public void LoadForStartup_UnreadablePrimaryAndCorruptBackupRemainUnchanged()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("This test relies on Windows file-sharing behavior.");
+            return;
+        }
+
+        using var temp = new TemporaryDirectory();
+        var store = new ThemeSettingsStore(() => temp.Path);
+        var document = store.Load();
+        document.SelectedPreset = "Light.Mica";
+        Assert.True(store.TrySave(document));
+        var primaryPath = store.GetPath();
+        var backupPath = primaryPath + ".bak";
+        File.WriteAllText(backupPath, "{ invalid-backup");
+        var originalPrimary = File.ReadAllBytes(primaryPath);
+        var originalBackup = File.ReadAllBytes(backupPath);
+
+        using (var primaryReadBlock = new FileStream(
+                   primaryPath, FileMode.Open, FileAccess.Write, FileShare.Delete))
+        {
+            var loaded = store.LoadForStartup(TimeSpan.FromSeconds(1));
+            Assert.Equal("Dark.Acrylic", loaded.SelectedPreset);
+            Assert.False(store.TryPersistChanges(loaded, [], "Light.Mica"));
+            Assert.False(store.EnsureStorageExists());
+        }
+
+        Assert.Equal(originalPrimary, File.ReadAllBytes(primaryPath));
+        Assert.Equal(originalBackup, File.ReadAllBytes(backupPath));
+    }
+
+    [Fact]
     public void LoadForStartup_WhenStoreLockIsHeld_ReturnsFactoryDefaultsWithinBoundedTime()
     {
         using var temp = new TemporaryDirectory();
@@ -376,6 +409,68 @@ public sealed class ThemeSettingsStoreTests
         Assert.Equal(edited, recovered.Presets["Light.Mica"]);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ObsoletePrimary_RecoversCurrentBackupBeforeResettingPresets(bool ensureStorageExists)
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new ThemeSettingsStore(() => temp.Path);
+        var customized = store.Load();
+        var edited = CreatePreset(47);
+        store.SetPreset(customized, ThemeVariant.Light, ThemeEffectMode.Mica, edited);
+        customized.SelectedPreset = "Light.Mica";
+        Assert.True(store.TrySave(customized));
+
+        var primaryPath = store.GetPath();
+        WriteDocument(primaryPath, new ThemeSettingsDocument
+        {
+            SchemaVersion = ThemeSettingsStore.CurrentSchemaVersion,
+            DefaultsRevision = ThemeSettingsStore.CurrentDefaultsRevision - 1,
+            SelectedPreset = "Dark.Acrylic",
+            Presets = new Dictionary<string, ThemePreset>()
+        });
+
+        if (ensureStorageExists)
+            Assert.True(store.EnsureStorageExists());
+
+        var recovered = store.LoadForStartup(TimeSpan.FromSeconds(1));
+
+        Assert.Equal("Light.Mica", recovered.SelectedPreset);
+        Assert.Equal(edited, recovered.Presets["Light.Mica"]);
+        Assert.Equal(File.ReadAllText(primaryPath), File.ReadAllText(primaryPath + ".bak"));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CurrentSchemaWithoutPresetsObject_RecoversBackupBeforeRewriting(bool includeNullPresets)
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new ThemeSettingsStore(() => temp.Path);
+        var customized = store.Load();
+        var edited = CreatePreset(37);
+        store.SetPreset(customized, ThemeVariant.Light, ThemeEffectMode.Mica, edited);
+        customized.SelectedPreset = "Light.Mica";
+        Assert.True(store.TrySave(customized));
+        var primaryPath = store.GetPath();
+        using var savedBackup = JsonDocument.Parse(File.ReadAllText(primaryPath + ".bak"));
+        var schemaVersion = savedBackup.RootElement.GetProperty("schemaVersion").GetInt32();
+        var defaultsRevision = savedBackup.RootElement.GetProperty("defaultsRevision").GetInt32();
+        var incomplete = includeNullPresets
+            ? JsonSerializer.Serialize(new { schemaVersion, defaultsRevision, presets = (object?)null })
+            : JsonSerializer.Serialize(new { schemaVersion, defaultsRevision });
+        File.WriteAllText(primaryPath, incomplete);
+
+        var recovered = store.LoadForStartup(TimeSpan.Zero);
+
+        Assert.Equal("Light.Mica", recovered.SelectedPreset);
+        Assert.Equal(edited, recovered.Presets["Light.Mica"]);
+        using var backup = JsonDocument.Parse(File.ReadAllText(primaryPath + ".bak"));
+        Assert.Equal(edited.BackgroundTransparency, backup.RootElement.GetProperty("presets")
+            .GetProperty("Light.Mica").GetProperty("backgroundTransparency").GetDouble());
+    }
+
     [Fact]
     public void EnsureStorageExists_CorruptPrimaryRestoresCurrentBackupBeforeCreatingDefaults()
     {
@@ -418,6 +513,51 @@ public sealed class ThemeSettingsStoreTests
         foreach (var expected in reset.Presets)
             Assert.Equal(expected.Value, reloaded.Presets[expected.Key]);
         Assert.DoesNotContain(reloaded.Presets.Values, preset => preset == CreatePreset(1));
+    }
+
+    [Fact]
+    public void TryResetToDefaults_WhenStoreLockIsHeld_LeavesPersistedThemeUnchanged()
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new ThemeSettingsStore(() => temp.Path);
+        var customized = store.Load();
+        customized.SelectedThemeMode = ThemeSelectionMode.Light;
+        customized.SelectedPreset = "Light.Solid";
+        Assert.True(store.TrySave(customized));
+        var originalPrimary = File.ReadAllBytes(store.GetPath());
+        var lockPath = store.GetPath() + ".lock";
+
+        using (var heldLock = new FileStream(
+                   lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+        {
+            Assert.False(store.TryResetToDefaults(out var defaults));
+            Assert.Equal(ThemeSelectionMode.System, defaults.SelectedThemeMode);
+            Assert.Equal(originalPrimary, File.ReadAllBytes(store.GetPath()));
+        }
+
+        var reloaded = store.Load();
+        Assert.Equal(ThemeSelectionMode.Light, reloaded.SelectedThemeMode);
+        Assert.Equal("Light.Solid", reloaded.SelectedPreset);
+    }
+
+    [Fact]
+    public void TryResetToDefaults_WhenStorageIsAvailable_PersistsFactoryDefaults()
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new ThemeSettingsStore(() => temp.Path);
+        var customized = store.Load();
+        customized.SelectedThemeMode = ThemeSelectionMode.Light;
+        customized.SelectedPreset = "Light.Solid";
+        Assert.True(store.TrySave(customized));
+
+        Assert.True(store.TryResetToDefaults(out var defaults));
+
+        var reloaded = store.Load();
+        Assert.Equal(ThemeSelectionMode.System, defaults.SelectedThemeMode);
+        Assert.Equal("Dark.Acrylic", defaults.SelectedPreset);
+        Assert.Equal(defaults.SelectedThemeMode, reloaded.SelectedThemeMode);
+        Assert.Equal(defaults.SelectedPreset, reloaded.SelectedPreset);
+        Assert.Equal(defaults.Presets, reloaded.Presets);
     }
 
     [Fact]

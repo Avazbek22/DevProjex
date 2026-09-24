@@ -5,11 +5,16 @@ using DevProjex.Terminal.Execution;
 using DevProjex.Terminal.Rendering;
 using DevProjex.Terminal.Tui;
 using DevProjex.Mcp;
+using DevProjex.Infrastructure.AgentJournal;
+using DevProjex.Infrastructure.Persistence;
 
 namespace DevProjex.Terminal.CommandLine;
 
 public sealed class DevProjexCommandTree
 {
+	private static readonly string[] McpConnectionClients =
+		["claude-code", "codex", "cursor", "vscode", "json"];
+	private static readonly string[] McpConnectionModes = ["live", "standard"];
 	private static readonly TimeSpan MaximumRequestTimeout = TimeSpan.FromTicks(
 		(uint.MaxValue - 1L) * TimeSpan.TicksPerMillisecond);
 	private readonly ITerminalEnvironment environment;
@@ -73,6 +78,8 @@ public sealed class DevProjexCommandTree
 		root.Subcommands.Add(BuildMcpCommand());
 		root.Subcommands.Add(BuildOpenCommand());
 		root.Subcommands.Add(BuildAnalyzeCommand());
+		root.Subcommands.Add(BuildSearchCommand());
+		root.Subcommands.Add(BuildRelatedCommand());
 		root.Subcommands.Add(BuildTreeCommand());
 		root.Subcommands.Add(BuildExportCommand());
 		root.Subcommands.Add(BuildProfileCommand());
@@ -95,6 +102,8 @@ public sealed class DevProjexCommandTree
 	private Command BuildMcpCommand()
 	{
 		var command = new Command("mcp", L("Terminal.Command.Mcp"));
+		command.Subcommands.Add(BuildMcpConnectCommand());
+		command.Subcommands.Add(BuildMcpLogCommand());
 		var roots = new Option<string[]>("--root")
 		{
 			Description = L("Terminal.Option.McpRoot"),
@@ -110,7 +119,59 @@ public sealed class DevProjexCommandTree
 		{
 			Description = L("Terminal.Option.McpAllowRemote")
 		};
+		var live = new Option<bool>("--live")
+		{
+			Description = L("Terminal.Option.McpLive")
+		};
+		var remoteHosts = new Option<string[]>("--remote-hosts")
+		{
+			Description = L("Terminal.Option.McpRemoteHosts"),
+			HelpName = "HOST[,HOST...]",
+			Arity = ArgumentArity.OneOrMore,
+			AllowMultipleArgumentsPerToken = false
+		};
 		var gitMode = CreateMcpGitModeOption();
+		var toolSet = new Option<string>("--tool-set")
+		{
+			Description = L("Terminal.Option.McpToolSet"),
+			HelpName = "full|reduced",
+			DefaultValueFactory = _ => "full"
+		};
+		toolSet.Validators.Add(result =>
+		{
+			if (result.GetValueOrDefault<string>() is not ("full" or "reduced"))
+				result.AddError(L("Terminal.Validation.McpToolSet"));
+		});
+		var exclude = CreateMcpExcludeOption();
+		var searchBodyCharacters = new Option<string>("--search-body-chars")
+		{
+			Description = L("Terminal.Option.McpSearchBodyCharacters"),
+			HelpName = "off|N",
+			DefaultValueFactory = _ => "1800"
+		};
+		searchBodyCharacters.Validators.Add(result =>
+		{
+			try
+			{
+				_ = McpServerHost.ParseSearchBodyCharacters(result.GetValueOrDefault<string>());
+			}
+			catch (ArgumentException exception)
+			{
+				result.AddError(LocalizedParseError.Create(exception.Message));
+			}
+		});
+		// Arity is pinned to zero: command validators run before arity validation in
+		// System.CommandLine, and GetValue on an over-arity result throws instead of
+		// reporting a parse error. A value-less switch keeps every spelling graceful.
+		var unrestricted = new Option<bool>("--unrestricted")
+		{
+			Description = L("Terminal.Option.McpUnrestricted"),
+			Arity = ArgumentArity.Zero
+		};
+		var allowAgentExclusions = new Option<bool>("--allow-agent-exclusions")
+		{
+			Description = L("Terminal.Option.McpAgentExclusions")
+		};
 		roots.CompletionSources.Add(context => FileSystemCompletionSource.Complete(
 			context,
 			FileSystemCompletionKind.Directories,
@@ -118,13 +179,32 @@ public sealed class DevProjexCommandTree
 		command.Options.Add(roots);
 		command.Options.Add(hidePrivateData);
 		command.Options.Add(allowRemote);
+		command.Options.Add(live);
+		command.Options.Add(remoteHosts);
 		command.Options.Add(gitMode);
+		command.Options.Add(toolSet);
+		command.Options.Add(searchBodyCharacters);
+		command.Options.Add(exclude);
+		command.Options.Add(unrestricted);
+		command.Options.Add(allowAgentExclusions);
+		CompletionConflictRegistry.RegisterMutual(unrestricted, exclude);
+		CompletionConflictRegistry.RegisterMutual(unrestricted, gitMode);
+		command.Validators.Add(result =>
+		{
+			if (result.GetValue(unrestricted) &&
+				(result.GetResult(exclude) is not null || result.GetResult(gitMode) is not null))
+				result.AddError(LocalizedParseError.Create(L("Terminal.Validation.UnrestrictedConflict")));
+		});
 		CliExamplesRegistry.Set(
 			command,
 			"devprojex mcp",
 			"devprojex mcp --root . --root ../shared",
 			"devprojex mcp --root . --hide-private-data",
-			"devprojex mcp --root . --git-mode tracked");
+			"devprojex mcp --root . --git-mode tracked",
+			"devprojex mcp --root . --exclude default --exclude dot-folders",
+			"devprojex mcp --root . --unrestricted",
+			"devprojex mcp --root . --allow-agent-exclusions",
+			"devprojex mcp --root . --unrestricted --allow-agent-exclusions");
 		command.SetAction(async (parseResult, cancellationToken) =>
 		{
 			var explicitRoots = parseResult.GetValue(roots) ?? [];
@@ -132,17 +212,47 @@ public sealed class DevProjexCommandTree
 				explicitRoots,
 				environment.Variables,
 				Directory.GetCurrentDirectory());
+			var excludeValues = parseResult.GetValue(exclude);
+			IReadOnlyCollection<ProjectExclusion>? baselineExclusions;
+			GitFilteringMode? gitModeValue;
+			if (parseResult.GetValue(unrestricted))
+			{
+				baselineExclusions = [];
+				gitModeValue = GitFilteringMode.None;
+			}
+			else
+			{
+				baselineExclusions = excludeValues is { Length: > 0 }
+					? SelectionOptions.ParseExclusions(excludeValues)
+					: null;
+				gitModeValue = parseResult.GetValue(gitMode);
+			}
+
 			try
 			{
 				await McpServerHost.RunWithStandardStreamsAsync(
 						resolvedRoots,
 						parseResult.GetValue(hidePrivateData),
 						parseResult.GetValue(allowRemote),
-						parseResult.GetValue(gitMode),
+						gitModeValue,
+						baselineExclusions,
+						parseResult.GetValue(allowAgentExclusions),
 						_serviceFactory.AppDataPathProvider,
-						cancellationToken)
+						cancellationToken,
+						parseResult.GetResult(remoteHosts) is null
+							? null
+							: parseResult.GetValue(remoteHosts) ?? [],
+						parseResult.GetValue(toolSet) == "reduced" ? McpToolSet.Reduced : McpToolSet.Full,
+						McpServerHost.ParseSearchBodyCharacters(parseResult.GetValue(searchBodyCharacters)),
+						parseResult.GetValue(live))
 					.ConfigureAwait(false);
 				return CommandLineExitCodes.Success;
+			}
+			catch (StoreUserDataMigrationUnavailableException)
+			{
+				environment.Error.WriteLine(
+					$"error[DPX-STORE-MIGRATION-UNAVAILABLE]: {_localization["Terminal.Error.StoreMigrationUnavailable"]}");
+				return CommandLineExitCodes.RuntimeError;
 			}
 			catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException)
 			{
@@ -152,6 +262,345 @@ public sealed class DevProjexCommandTree
 			}
 		});
 		return command;
+	}
+
+	private Command BuildMcpLogCommand()
+	{
+		var command = new Command("log", "Inspect or clear the local MCP agent journal.");
+		var project = ProjectArgument();
+		var session = new Option<string?>("--session")
+		{
+			Description = "Show one session by ID.",
+			HelpName = "ID"
+		};
+		var last = new Option<bool>("--last")
+		{
+			Description = "Show the newest matching session."
+		};
+		var format = new Option<string>("--format", "-f")
+		{
+			Description = "Write text, JSON, or a Markdown context receipt.",
+			HelpName = "text|json|markdown",
+			DefaultValueFactory = _ => "text"
+		};
+		var outputPath = new Option<string?>("--output", "-o")
+		{
+			Description = "Write output to a new file.",
+			HelpName = "PATH"
+		};
+		var clear = new Option<bool>("--clear")
+		{
+			Description = "Delete matching journal sessions."
+		};
+		var yes = new Option<bool>("--yes", "-y")
+		{
+			Description = "Confirm journal deletion."
+		};
+		format.CompletionSources.Add(["text", "json", "markdown"]);
+		format.Validators.Add(result =>
+		{
+			if (result.GetValueOrDefault<string>() is not ("text" or "json" or "markdown"))
+				result.AddError("--format must be text, json, or markdown.");
+		});
+		outputPath.CompletionSources.Add(context => FileSystemCompletionSource.Complete(
+			context,
+			FileSystemCompletionKind.FilesAndDirectories));
+		command.Arguments.Add(project);
+		command.Options.Add(session);
+		command.Options.Add(last);
+		command.Options.Add(format);
+		command.Options.Add(outputPath);
+		command.Options.Add(clear);
+		command.Options.Add(yes);
+		command.Validators.Add(result =>
+		{
+			if (result.GetValue(session) is not null && result.GetValue(last))
+				result.AddError("--session and --last cannot be combined.");
+			if (result.GetValue(clear) && !result.GetValue(yes))
+				result.AddError("--clear requires --yes.");
+			if (result.GetValue(clear) &&
+				(result.GetValue(session) is not null || result.GetValue(last)))
+			{
+				result.AddError("--clear cannot be combined with --session or --last.");
+			}
+			if (result.GetValue(clear) && result.GetValue(outputPath) is not null)
+				result.AddError("--clear cannot be combined with --output.");
+			if (result.GetResult(format) is { Tokens.Count: 1 } formatResult &&
+				formatResult.Tokens[0].Value == "markdown" &&
+				result.GetValue(session) is null &&
+				!result.GetValue(last))
+			{
+				result.AddError("markdown output requires --session or --last.");
+			}
+		});
+		CliExamplesRegistry.Set(
+			command,
+			"devprojex mcp log .",
+			"devprojex mcp log . --last",
+			"devprojex mcp log . --session 20260920-010203-42 --format markdown",
+			"devprojex mcp log . --format json --output journal.json",
+			"devprojex mcp log . --clear --yes");
+		command.SetAction((parseResult, cancellationToken) =>
+			CommandExecution.RunAsync(
+				environment,
+				_output.Get(parseResult),
+				async () =>
+				{
+					_serviceFactory.EnsureMigrationAdmission();
+					using var store = new AgentJournalStore(_serviceFactory.AppDataPathProvider);
+					return await new AgentJournalCommandHandler(
+							store,
+							new AgentJournalReceiptFormatter(),
+							environment)
+						.RunAsync(
+							parseResult.GetValue(project),
+							parseResult.GetValue(session),
+							parseResult.GetValue(last),
+							ParseAgentJournalFormat(parseResult.GetValue(format)),
+							parseResult.GetValue(outputPath),
+							parseResult.GetValue(clear),
+							cancellationToken)
+						.ConfigureAwait(false);
+				},
+				_localization));
+		return command;
+	}
+
+	private static AgentJournalOutputFormat ParseAgentJournalFormat(string? value) => value switch
+	{
+		"text" => AgentJournalOutputFormat.Text,
+		"json" => AgentJournalOutputFormat.Json,
+		"markdown" => AgentJournalOutputFormat.Markdown,
+		_ => throw new ArgumentOutOfRangeException(nameof(value), value, null)
+	};
+
+	private Command BuildMcpConnectCommand()
+	{
+		var command = new Command("connect", L("Terminal.Command.McpConnect"));
+		var project = ProjectArgument();
+		var client = new Option<string>("--client")
+		{
+			Description = L("Terminal.Option.McpClient"),
+			HelpName = "CLIENT",
+			DefaultValueFactory = _ => "claude-code"
+		};
+		var mode = new Option<string>("--mode")
+		{
+			Description = L("Terminal.Option.McpConnectionMode"),
+			HelpName = "live|standard",
+			DefaultValueFactory = _ => "live"
+		};
+		var print = new Option<bool>("--print")
+		{
+			Description = L("Terminal.Option.McpPrint")
+		};
+		var open = new Option<bool>("--open")
+		{
+			Description = L("Terminal.Option.McpOpen")
+		};
+		var replace = new Option<bool>("--replace")
+		{
+			Description = L("Terminal.Option.McpReplace")
+		};
+		client.CompletionSources.Add(McpConnectionClients);
+		mode.CompletionSources.Add(McpConnectionModes);
+		client.Validators.Add(result =>
+		{
+			if (!McpConnectionClients.Contains(
+					result.GetValueOrDefault<string>(),
+					StringComparer.OrdinalIgnoreCase))
+			{
+				result.AddError(L("Terminal.Validation.McpClient"));
+			}
+		});
+		mode.Validators.Add(result =>
+		{
+			if (!McpConnectionModes.Contains(
+					result.GetValueOrDefault<string>(),
+					StringComparer.OrdinalIgnoreCase))
+				result.AddError(L("Terminal.Validation.McpConnectionMode"));
+		});
+		command.Arguments.Add(project);
+		command.Options.Add(client);
+		command.Options.Add(mode);
+		command.Options.Add(print);
+		command.Options.Add(open);
+		command.Options.Add(replace);
+		command.Validators.Add(result =>
+		{
+			if (result.GetValue(print) && result.GetValue(open))
+				result.AddError(LocalizedParseError.Create(L("Terminal.Validation.McpPrintOpenConflict")));
+			if (result.GetValue(open) &&
+				string.Equals(result.GetValue(client), "json", StringComparison.OrdinalIgnoreCase))
+				result.AddError(LocalizedParseError.Create(L("Terminal.Validation.McpOpenJson")));
+		});
+		CliExamplesRegistry.Set(
+			command,
+			"devprojex mcp connect . --client claude-code --mode live",
+			"devprojex mcp connect . --client cursor --mode standard",
+			"devprojex mcp connect . --client vscode --print",
+			"devprojex mcp connect . --client codex --open");
+		command.SetAction((parseResult, cancellationToken) =>
+			CommandExecution.RunAsync(
+				environment,
+				_output.Get(parseResult),
+				() => RunWithServicesAsync(
+					parseResult,
+					async services =>
+					{
+						var executablePath = McpConnectionExecutablePathResolver.Resolve(
+							services.TerminalCommandSetupService.Probe(),
+							Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+						var connectionClient = ParseConnectionClient(parseResult.GetValue(client));
+						var request = new McpConnectionRequest(
+							connectionClient,
+							string.Equals(parseResult.GetValue(mode), "live", StringComparison.OrdinalIgnoreCase)
+								? McpConnectionMode.Live
+								: McpConnectionMode.Standard,
+							executablePath,
+							Path.GetFullPath(parseResult.GetValue(project) ?? Directory.GetCurrentDirectory()),
+							ReplaceExistingFields: parseResult.GetValue(replace));
+						if (parseResult.GetValue(print))
+						{
+							environment.Output.WriteLine(
+								services.McpConnectionService.CreatePrintableConfiguration(request));
+							return CommandLineExitCodes.Success;
+						}
+
+						var result = await services.McpConnectionService
+							.ConnectAsync(request, cancellationToken)
+							.ConfigureAwait(false);
+						var openClient = parseResult.GetValue(open);
+						if (!openClient || !result.Succeeded)
+							return WriteMcpConnectionResult(result, includeNextCommand: !openClient);
+
+						var launchResult = await services.McpClientLaunchService
+							.OpenAsync(new McpClientLaunchRequest(connectionClient, request.ProjectRoot), cancellationToken)
+							.ConfigureAwait(false);
+						if (launchResult.Succeeded)
+						{
+							WriteMcpConnectionResult(result, includeNextCommand: false);
+							TerminalTextEscaping.WriteSingleLine(
+								environment.Output,
+								_localization.Format("Mcp.Open.Succeeded", DisplayConnectionClient(connectionClient)));
+							return CommandLineExitCodes.Success;
+						}
+
+						TerminalTextEscaping.WriteSingleLine(
+							environment.Error,
+							_localization.Format(
+								"Mcp.Open.FailedAfterConnection",
+								DisplayConnectionClient(connectionClient),
+								launchResult.ErrorMessage ?? L("Mcp.Connect.UnknownError")));
+						if (!string.IsNullOrWhiteSpace(launchResult.ManualCommand))
+							TerminalTextEscaping.WriteSingleLine(environment.Error, launchResult.ManualCommand);
+						return CommandLineExitCodes.RuntimeError;
+					}),
+				_localization));
+		return command;
+	}
+
+	private int WriteMcpConnectionResult(McpConnectionResult result, bool includeNextCommand)
+	{
+		var successfulOutput = result.Status is
+			McpConnectionStatus.Connected or
+			McpConnectionStatus.Updated or
+			McpConnectionStatus.ManualConfiguration;
+		var writer = successfulOutput ? environment.Output : environment.Error;
+		TerminalTextEscaping.WriteSingleLine(writer, result.UserMessage);
+		if (includeNextCommand && result.Succeeded && !string.IsNullOrWhiteSpace(result.NextCommand))
+		{
+			TerminalTextEscaping.WriteSingleLine(
+				writer,
+				_localization.Format("Mcp.Connect.RunInProject", result.NextCommand));
+		}
+		if (!string.IsNullOrWhiteSpace(result.CommandOutput))
+			System.Diagnostics.Trace.WriteLine($"MCP client command output: {result.CommandOutput}");
+		if (result.SuggestedConfigPaths is not null)
+		{
+			foreach (var path in result.SuggestedConfigPaths)
+				TerminalTextEscaping.WriteSingleLine(writer, path);
+		}
+		if (!string.IsNullOrWhiteSpace(result.ManualConfiguration))
+			writer.WriteLine(result.ManualConfiguration);
+
+		return result.Status is
+			McpConnectionStatus.Connected or
+			McpConnectionStatus.Updated or
+			McpConnectionStatus.ManualConfiguration
+			? CommandLineExitCodes.Success
+			: CommandLineExitCodes.RuntimeError;
+	}
+
+	private static McpConnectionClient ParseConnectionClient(string? value) => value?.ToLowerInvariant() switch
+	{
+		"claude-code" => McpConnectionClient.ClaudeCode,
+		"codex" => McpConnectionClient.Codex,
+		"cursor" => McpConnectionClient.Cursor,
+		"vscode" => McpConnectionClient.VsCode,
+		"json" => McpConnectionClient.Json,
+		_ => throw new ArgumentException("Unsupported MCP connection client.", nameof(value))
+	};
+
+	private static string DisplayConnectionClient(McpConnectionClient client) => client switch
+	{
+		McpConnectionClient.ClaudeCode => "Claude Code",
+		McpConnectionClient.Codex => "Codex",
+		McpConnectionClient.Cursor => "Cursor",
+		McpConnectionClient.VsCode => "VS Code",
+		McpConnectionClient.Json => "JSON",
+		_ => throw new ArgumentOutOfRangeException(nameof(client), client, null)
+	};
+
+	private Option<CliExclusionValue[]> CreateMcpExcludeOption()
+	{
+		var option = new Option<CliExclusionValue[]>("--exclude")
+		{
+			Description = L("Terminal.Option.McpExclude"),
+			HelpName = "NAME",
+			Arity = ArgumentArity.OneOrMore,
+			AllowMultipleArgumentsPerToken = false,
+			CustomParser = result =>
+			{
+				var values = new List<CliExclusionValue>(result.Tokens.Count);
+				foreach (var token in result.Tokens)
+				{
+					// 'default' expands to the server default set, so a startup line extends it
+					// ("--exclude default --exclude dot-folders") instead of re-listing it. Any
+					// other name list replaces the default set — the CLI --exclude rule.
+					if (string.Equals(token.Value, McpServerBaseline.DefaultExclusionsToken, StringComparison.OrdinalIgnoreCase))
+					{
+						foreach (var exclusion in McpServerBaseline.DefaultExclusions)
+							values.Add(new CliExclusionValue(exclusion));
+						continue;
+					}
+
+					// The hidden legacy hide-secrets alias stays out of the server baseline:
+					// redaction is not an exclusion the MCP surface may reason about.
+					if (CliChoiceSets.Exclusion.TryParse(token.Value, out var value) &&
+						value.Exclusion is not ProjectExclusion.HideSecrets)
+					{
+						values.Add(value);
+						continue;
+					}
+
+					result.AddError(LocalizedParseError.Create(_localization.Format(
+						"Terminal.Validation.UnknownExclusion",
+						token.Value)));
+				}
+
+				if (values.Any(static value => value.IsNone) &&
+					values.Any(static value => !value.IsNone))
+				{
+					result.AddError(LocalizedParseError.Create(
+						_localization["Terminal.Validation.ExcludeNone"]));
+				}
+
+				return values.ToArray();
+			}
+		};
+		option.CompletionSources.Add([.. CliChoiceSets.Exclusion.Tokens, McpServerBaseline.DefaultExclusionsToken]);
+		return option;
 	}
 
 	private Option<GitFilteringMode?> CreateMcpGitModeOption()
@@ -386,6 +835,259 @@ public sealed class DevProjexCommandTree
 		return command;
 	}
 
+	private Command BuildSearchCommand()
+	{
+		var command = new Command(
+			"search",
+			L("Terminal.Command.Search"));
+		CliExamplesRegistry.Set(
+			command,
+			"devprojex search Configure .",
+			"devprojex search \"class\\s+Widget\" . --regex --format json",
+			"devprojex search Widget . --symbols --search-body-chars 900");
+		var pattern = RequiredArgument("PATTERN");
+		pattern.Description = L("Terminal.Argument.SearchPattern");
+		var project = ProjectSourceArgument();
+		var regex = new Option<bool>("--regex")
+		{
+			Description = L("Terminal.Option.SearchRegex")
+		};
+		var symbols = new Option<bool>("--symbols")
+		{
+			Description = L("Terminal.Option.SearchSymbols")
+		};
+		var maximumResults = new Option<int>("--max")
+		{
+			Description = L("Terminal.Option.SearchMaximumResults"),
+			HelpName = "N",
+			DefaultValueFactory = _ => 50
+		};
+		var searchBodyCharacters = new Option<string>("--search-body-chars")
+		{
+			Description = L("Terminal.Option.SearchBodyCharacters"),
+			HelpName = "off|N",
+			DefaultValueFactory = _ => "1800"
+		};
+		var format = CliChoiceSymbols.Option(
+			"--format",
+			L("Terminal.Option.Format"),
+			CliSearchOutputFormat.Text,
+			CliChoiceSets.SearchOutputFormat,
+			_localization);
+		format.Aliases.Add("-f");
+		var outputPath = OutputPathOption();
+		var branch = BranchOption();
+		var selection = new SelectionOptions(
+			_localization,
+			environment,
+			includeHidePrivateData: false,
+			includeCodeTransformations: false);
+		command.Arguments.Add(pattern);
+		command.Arguments.Add(project);
+		command.Options.Add(regex);
+		command.Options.Add(symbols);
+		command.Options.Add(maximumResults);
+		command.Options.Add(searchBodyCharacters);
+		command.Options.Add(format);
+		command.Options.Add(outputPath);
+		command.Options.Add(branch);
+		selection.AddTo(command);
+		_output.AddProgressTo(command);
+		command.Validators.Add(result =>
+		{
+			if (result.GetValue(regex) && result.GetValue(symbols))
+			{
+				result.AddError(LocalizedParseError.Create(
+					L("Terminal.Validation.SearchModeConflict")));
+			}
+			if (CliParseValue.TryGet(result, maximumResults, out var maximum) && maximum is < 1 or > 200)
+			{
+				result.AddError(LocalizedParseError.Create(
+					L("Terminal.Validation.SearchMaximumResults")));
+			}
+			try
+			{
+				_ = McpServerHost.ParseSearchBodyCharacters(
+					result.GetResult(searchBodyCharacters) is null
+						? "1800"
+						: result.GetValue(searchBodyCharacters));
+			}
+			catch (ArgumentException exception)
+			{
+				result.AddError(LocalizedParseError.Create(exception.Message));
+			}
+		});
+		command.SetAction(async (parseResult, cancellationToken) =>
+		{
+			var outputOptions = _output.Get(parseResult);
+			return await CommandExecution.RunAsync(
+				environment,
+				outputOptions,
+				async () =>
+				{
+					using var serviceScope = CreateServiceScope(parseResult);
+					var services = serviceScope.Services;
+					var selectedPaths = await selection.ReadSelectedPathsAsync(
+						parseResult,
+						cancellationToken).ConfigureAwait(false);
+					var projectSource = parseResult.GetValue(project) ?? Directory.GetCurrentDirectory();
+					await using var resolvedSource = await new TerminalProjectSourceResolver(
+							services,
+							environment,
+							outputOptions)
+						.ResolveAsync(projectSource, parseResult.GetValue(branch), cancellationToken)
+						.ConfigureAwait(false);
+					var spec = await selection.ResolveAsync(
+						parseResult,
+						resolvedSource.ProjectPath,
+						services,
+						selectedPaths,
+						cancellationToken).ConfigureAwait(false);
+					return await new SearchCommandHandler(services, environment).ExecuteAsync(
+						new SearchCommandRequest(
+							resolvedSource.ProjectPath,
+							parseResult.GetValue(pattern) ??
+								throw new InvalidOperationException("The required search pattern was not parsed."),
+							spec,
+							parseResult.GetValue(regex)
+								? SearchMode.Regex
+								: parseResult.GetValue(symbols) ? SearchMode.Symbols : SearchMode.Text,
+							parseResult.GetValue(maximumResults),
+							McpServerHost.ParseSearchBodyCharacters(
+								parseResult.GetValue(searchBodyCharacters) ?? "1800"),
+							parseResult.GetValue(format) switch
+							{
+								CliSearchOutputFormat.Text => SearchOutputFormat.Text,
+								CliSearchOutputFormat.Json => SearchOutputFormat.Json,
+								CliSearchOutputFormat.Markdown => SearchOutputFormat.Markdown,
+								_ => throw new ArgumentOutOfRangeException()
+							},
+							parseResult.GetValue(outputPath),
+							outputOptions,
+							resolvedSource.RepositorySourceUrl,
+							parseResult.GetValue(branch)),
+						cancellationToken).ConfigureAwait(false);
+				},
+				_localization).ConfigureAwait(false);
+		});
+		return command;
+	}
+
+	private Command BuildRelatedCommand()
+	{
+		var command = new Command("related", L("Terminal.Command.Related"));
+		CliExamplesRegistry.Set(
+			command,
+			"devprojex related Application/Services/ProjectAnalysisService.cs",
+			"devprojex related src/main.ts --direction dependencies --format json");
+		var seed = RequiredArgument("PATH");
+		seed.Description = L("Terminal.Argument.RelatedPath");
+		seed.CompletionSources.Add(context => FileSystemCompletionSource.Complete(
+			context,
+			FileSystemCompletionKind.FilesAndDirectories,
+			FileSystemCompletionSource.ResolveProjectDirectory(context)));
+		var project = new Option<string?>("--project")
+		{
+			Description = L("Terminal.Option.RelatedProject"),
+			HelpName = "PROJECT",
+			DefaultValueFactory = _ => Directory.GetCurrentDirectory()
+		};
+		project.CompletionSources.Add(context => FileSystemCompletionSource.Complete(
+			context,
+			FileSystemCompletionKind.Directories));
+		var direction = CliChoiceSymbols.Option(
+			"--direction",
+			L("Terminal.Option.RelatedDirection"),
+			CliDependencyDirection.Both,
+			CliChoiceSets.DependencyDirection,
+			_localization);
+		var depth = new Option<int>("--depth")
+		{
+			Description = L("Terminal.Option.RelatedDepth"),
+			HelpName = "N",
+			DefaultValueFactory = _ => RelatedQueryRunner.MinimumDepth
+		};
+		var format = CliChoiceSymbols.Option(
+			"--format",
+			L("Terminal.Option.Format"),
+			CliTextJsonFormat.Text,
+			CliChoiceSets.TextJson,
+			_localization);
+		format.Aliases.Add("-f");
+		var branch = BranchOption();
+		var selection = new SelectionOptions(
+			_localization,
+			environment,
+			includeContentTransformations: false,
+			includeMaxFileBytes: true);
+		command.Arguments.Add(seed);
+		command.Options.Add(project);
+		command.Options.Add(direction);
+		command.Options.Add(depth);
+		command.Options.Add(format);
+		command.Options.Add(branch);
+		selection.AddTo(command);
+		_output.AddProgressTo(command);
+		command.Validators.Add(result =>
+		{
+			if (CliParseValue.TryGet(result, depth, out var value) &&
+				value is < RelatedQueryRunner.MinimumDepth or > RelatedQueryRunner.MaximumDepth)
+			{
+				result.AddError(LocalizedParseError.Create(L("Terminal.Validation.RelatedDepth")));
+			}
+		});
+		command.SetAction(async (parseResult, cancellationToken) =>
+		{
+			var output = _output.Get(parseResult);
+			return await CommandExecution.RunAsync(
+				environment,
+				output,
+				async () =>
+				{
+					using var serviceScope = CreateServiceScope(parseResult);
+					var services = serviceScope.Services;
+					var projectSource = parseResult.GetValue(project) ?? Directory.GetCurrentDirectory();
+					await using var resolvedSource = await new TerminalProjectSourceResolver(
+							services,
+							environment,
+							output)
+						.ResolveAsync(projectSource, parseResult.GetValue(branch), cancellationToken)
+						.ConfigureAwait(false);
+					var selectedPaths = await selection.ReadSelectedPathsAsync(parseResult, cancellationToken)
+						.ConfigureAwait(false);
+					var spec = await selection.ResolveAsync(
+						parseResult,
+						resolvedSource.ProjectPath,
+						services,
+						selectedPaths,
+						cancellationToken).ConfigureAwait(false);
+					return await new RelatedCommandHandler(services, environment).ExecuteAsync(
+						new RelatedCommandRequest(
+							resolvedSource.ProjectPath,
+							parseResult.GetValue(seed) ??
+								throw new InvalidOperationException("The required related seed was not parsed."),
+							spec,
+							parseResult.GetValue(direction) switch
+							{
+								CliDependencyDirection.Dependencies => DependencyDirection.Dependencies,
+								CliDependencyDirection.Dependents => DependencyDirection.Dependents,
+								CliDependencyDirection.Both => DependencyDirection.Both,
+								_ => throw new ArgumentOutOfRangeException()
+							},
+							parseResult.GetValue(format) == CliTextJsonFormat.Json
+								? AnalysisOutputFormat.Json
+								: AnalysisOutputFormat.Text,
+							output,
+							selection.GetMaxFileBytes(parseResult),
+							resolvedSource.RepositorySourceUrl,
+							parseResult.GetValue(depth)),
+						cancellationToken).ConfigureAwait(false);
+				},
+				_localization).ConfigureAwait(false);
+		});
+		return command;
+	}
+
 	private Command BuildExportCommand()
 	{
 		var command = new Command("export", L("Terminal.Command.Export"));
@@ -430,6 +1132,29 @@ public sealed class DevProjexCommandTree
 			Description = L("Terminal.Option.MaxTokens"),
 			HelpName = "N"
 		};
+		var rank = CliChoiceSymbols.NullableOption(
+			"--rank",
+			L("Terminal.Option.Rank"),
+			CliChoiceSets.ContextRank,
+			_localization);
+		var focus = new Option<string[]>("--focus")
+		{
+			Description = L("Terminal.Option.Focus"),
+			HelpName = "PATH",
+			Arity = ArgumentArity.OneOrMore,
+			AllowMultipleArgumentsPerToken = false
+		};
+		focus.CompletionSources.Add(context => FileSystemCompletionSource.Complete(
+			context,
+			FileSystemCompletionKind.FilesAndDirectories,
+			FileSystemCompletionSource.ResolveProjectDirectory(context)));
+		var detailFor = new Option<string[]>("--detail-for")
+		{
+			Description = L("Terminal.Option.DetailFor"),
+			HelpName = "GLOB=LEVEL",
+			Arity = ArgumentArity.OneOrMore,
+			AllowMultipleArgumentsPerToken = false
+		};
 		var branch = BranchOption();
 		var selection = new SelectionOptions(
 			_localization,
@@ -442,6 +1167,9 @@ public sealed class DevProjexCommandTree
 		command.Options.Add(force);
 		command.Options.Add(dryRun);
 		command.Options.Add(maximumEstimatedTokens);
+		command.Options.Add(rank);
+		command.Options.Add(focus);
+		command.Options.Add(detailFor);
 		command.Options.Add(branch);
 		selection.AddTo(command);
 		_output.AddProgressTo(command);
@@ -464,10 +1192,54 @@ public sealed class DevProjexCommandTree
 					L("Terminal.Validation.ForceRequiresFileOutput")));
 			}
 			if (CliParseValue.TryGet(result, maximumEstimatedTokens, out var maximumTokens) &&
-			    maximumTokens is < 1)
+				maximumTokens is < 1)
 			{
 				result.AddError(LocalizedParseError.Create(
 					L("Terminal.Validation.MaxTokens")));
+			}
+			if (CliParseValue.TryGet(result, rank, out var rankValue) &&
+				rankValue is not null &&
+				CliParseValue.TryGet(result, view, out var viewValue) &&
+				viewValue == ProjectContextView.Tree)
+			{
+				result.AddError(LocalizedParseError.Create(
+					L("Terminal.Validation.RankRequiresContent")));
+			}
+			var focusValues = result.GetResult(focus) is null
+				? null
+				: result.GetValue(focus) ?? [];
+			if (focusValues is not null && result.GetValue(rank) is null)
+			{
+				result.AddError(LocalizedParseError.Create(
+					L("Terminal.Validation.FocusRequiresRank")));
+			}
+			if (focusValues is { Length: > 16 })
+			{
+				result.AddError(LocalizedParseError.Create(
+					L("Terminal.Validation.FocusLimit")));
+			}
+			if (focusValues?.Any(string.IsNullOrWhiteSpace) == true)
+			{
+				result.AddError(LocalizedParseError.Create(
+					L("Terminal.Validation.FocusEmpty")));
+			}
+			if (result.GetResult(detailFor) is not null)
+			{
+				if (CliParseValue.TryGet(result, view, out var detailView) &&
+					detailView == ProjectContextView.Tree)
+				{
+					result.AddError(LocalizedParseError.Create(
+						L("Terminal.Validation.DetailForRequiresContent")));
+				}
+				try
+				{
+					DetailForOption.Parse(result.GetValue(detailFor) ?? []);
+				}
+				catch (DetailForOptionException failure)
+				{
+					result.AddError(LocalizedParseError.Create(
+						_localization.Format("Terminal.Validation.DetailFor", failure.Message)));
+				}
 			}
 		});
 		command.SetAction(async (parseResult, cancellationToken) =>
@@ -497,11 +1269,15 @@ public sealed class DevProjexCommandTree
 						services,
 						selectedPaths,
 						cancellationToken).ConfigureAwait(false);
+					var detailOverrides = DetailForOption.Parse(
+						parseResult.GetResult(detailFor) is null ? null : parseResult.GetValue(detailFor));
 					return await new ExportContextCommandHandler(services, environment)
 						.ExecuteAsync(
 							new ExportContextCommandRequest(
 								projectPath,
-								spec,
+								detailOverrides is null
+									? spec
+									: spec with { ContentDetailOverrides = detailOverrides },
 								parseResult.GetValue(view),
 								parseResult.GetValue(format),
 								parseResult.GetValue(outputPath),
@@ -509,6 +1285,10 @@ public sealed class DevProjexCommandTree
 								parseResult.GetValue(dryRun),
 								parseResult.GetValue(maximumEstimatedTokens),
 								outputOptions,
+								Rank: parseResult.GetValue(rank),
+								Focus: parseResult.GetResult(focus) is null
+									? null
+									: parseResult.GetValue(focus) ?? [],
 								MaxFileBytes: selection.GetMaxFileBytes(parseResult),
 								RepositorySourceUrl: resolvedSource.RepositorySourceUrl),
 							cancellationToken)
@@ -572,25 +1352,25 @@ public sealed class DevProjexCommandTree
 					L("Terminal.Error.ForceNotSupported")));
 			}
 			if (outputKind == ProjectCopyExportFormat.Folder &&
-			    CliParseValue.TryGet(result, outputPath, out var folderDestination) &&
-			    folderDestination == "-")
+				CliParseValue.TryGet(result, outputPath, out var folderDestination) &&
+				folderDestination == "-")
 			{
 				result.AddError(LocalizedParseError.Create(
 					"DPX-CLI-FOLDER-STDOUT-NOT-SUPPORTED",
 					L("Terminal.Error.FolderStdoutNotSupported")));
 			}
 			if (result.GetValue(force) &&
-			    CliParseValue.TryGet(result, outputPath, out var forcedDestination) &&
-			    forcedDestination == "-")
+				CliParseValue.TryGet(result, outputPath, out var forcedDestination) &&
+				forcedDestination == "-")
 			{
 				result.AddError(LocalizedParseError.Create(
 					L("Terminal.Validation.ForceRequiresFileOutput")));
 			}
 			if (outputKind == ProjectCopyExportFormat.Zip &&
-			    CliParseValue.TryGet(result, outputPath, out var destination) &&
-			    destination is not null &&
-			    destination != "-" &&
-			    !destination.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+				CliParseValue.TryGet(result, outputPath, out var destination) &&
+				destination is not null &&
+				destination != "-" &&
+				!destination.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
 			{
 				result.AddError(LocalizedParseError.Create(
 					"DPX-CLI-ZIP-EXTENSION-REQUIRED",
@@ -701,25 +1481,25 @@ public sealed class DevProjexCommandTree
 			if (result.GetValue(last) && result.GetResult(project) is not null)
 				result.AddError(LocalizedParseError.Create(L("Terminal.Validation.LastProjectConflict")));
 			if (result.GetValue(last) &&
-			    HasExplicitSelectionOverride(result, selection))
+				HasExplicitSelectionOverride(result, selection))
 			{
 				result.AddError(LocalizedParseError.Create(
 					L("Terminal.Validation.LastSelectionConflict")));
 			}
 			if (result.GetValue(last) &&
-			    result.GetResult(branch) is { Implicit: false })
+				result.GetResult(branch) is { Implicit: false })
 			{
 				result.AddError(LocalizedParseError.Create(
 					L("Terminal.Validation.LastBranchConflict")));
 			}
 			if (CliParseValue.TryGet(result, filter, out var filterValue) &&
-			    filterValue is not null &&
-			    CliParseValue.TryGet(result, search, out var searchValue) &&
-			    searchValue is not null)
+				filterValue is not null &&
+				CliParseValue.TryGet(result, search, out var searchValue) &&
+				searchValue is not null)
 				result.AddError(LocalizedParseError.Create(L("Terminal.Validation.FilterSearchConflict")));
 			if (result.GetResult(selection.GitMode) is { Implicit: false } &&
-			    CliParseValue.TryGet(result, selection.GitMode, out var desktopGitMode) &&
-			    desktopGitMode is { Mode: GitFilteringMode.Diff })
+				CliParseValue.TryGet(result, selection.GitMode, out var desktopGitMode) &&
+				desktopGitMode is { Mode: GitFilteringMode.Diff })
 			{
 				result.AddError(LocalizedParseError.Create(
 					L("Terminal.Validation.DesktopGitMode")));
@@ -777,7 +1557,9 @@ public sealed class DevProjexCommandTree
 					TreeTextFormat? treeFormatValue = parseResult.GetValue(format) is { } requestedTreeFormat
 						? ParseTreeFormat(requestedTreeFormat)
 						: null;
-					return await new DesktopCommandHandler(environment)
+					return await new DesktopCommandHandler(
+							environment,
+							launcher: new DesktopProcessLauncher(_serviceFactory.HostCapabilities))
 						.OpenAsync(
 							DesktopOpenRequestFactory.Create(
 								projectPath,
@@ -1746,19 +2528,19 @@ public sealed class DevProjexCommandTree
 			var completionCommandLine =
 				parseResult.GetValue(commandLine) ?? string.Empty;
 			if (useBase64Transport &&
-			    !CompletionCommandLineTransport.TryDecodeBase64(
-				    completionCommandLine,
-				    out completionCommandLine))
+				!CompletionCommandLineTransport.TryDecodeBase64(
+					completionCommandLine,
+					out completionCommandLine))
 			{
 				environment.Error.WriteLine("error[DPX-CLI-INVALID-SYNTAX]:");
 				environment.Error.WriteLine(L("Terminal.Error.ParserRejected"));
 				return CommandLineExitCodes.UsageError;
 			}
 			if (!CompletionCursorPositionNormalizer.TryNormalize(
-				    completionCommandLine,
-				    parseResult.GetValue(position),
-				    parseResult.GetValue(positionUnit),
-				    out var completionPosition))
+					completionCommandLine,
+					parseResult.GetValue(position),
+					parseResult.GetValue(positionUnit),
+					out var completionPosition))
 			{
 				environment.Error.WriteLine("error[DPX-CLI-INVALID-SYNTAX]:");
 				environment.Error.WriteLine(L("Terminal.Error.ParserRejected"));
@@ -1768,9 +2550,9 @@ public sealed class DevProjexCommandTree
 			string? completionWorkingDirectory = null;
 			var encodedWorkingDirectory = parseResult.GetValue(workingDirectoryBase64);
 			if (encodedWorkingDirectory is not null &&
-			    !CompletionCommandLineTransport.TryDecodeBase64(
-				    encodedWorkingDirectory,
-				    out completionWorkingDirectory))
+				!CompletionCommandLineTransport.TryDecodeBase64(
+					encodedWorkingDirectory,
+					out completionWorkingDirectory))
 			{
 				environment.Error.WriteLine("error[DPX-CLI-INVALID-SYNTAX]:");
 				environment.Error.WriteLine(L("Terminal.Error.ParserRejected"));
@@ -1778,12 +2560,12 @@ public sealed class DevProjexCommandTree
 			}
 
 			foreach (var candidate in ContextAwareCompletionEngine.Complete(
-				         root,
-				         completionCommandLine,
-				         completionPosition,
-				         completionWorkingDirectory,
-				         parseResult.GetValue(bashCurrentWord),
-				         parseResult.GetResult(bashCurrentWord) is not null))
+						 root,
+						 completionCommandLine,
+						 completionPosition,
+						 completionWorkingDirectory,
+						 parseResult.GetValue(bashCurrentWord),
+						 parseResult.GetResult(bashCurrentWord) is not null))
 			{
 				if (useBase64Transport)
 				{
@@ -2058,8 +2840,8 @@ public sealed class DevProjexCommandTree
 		var requestedPath = context.ParseResult.GetValue(commandPath)?.ToList() ?? [];
 		var word = context.WordToComplete ?? string.Empty;
 		if (word.Length > 0 &&
-		    requestedPath.Count > 0 &&
-		    string.Equals(requestedPath[^1], word, StringComparison.Ordinal))
+			requestedPath.Count > 0 &&
+			string.Equals(requestedPath[^1], word, StringComparison.Ordinal))
 		{
 			requestedPath.RemoveAt(requestedPath.Count - 1);
 		}
@@ -2117,7 +2899,7 @@ public sealed class DevProjexCommandTree
 		LocalizationService localization)
 	{
 		if (result.Tokens.Count == 1 &&
-		    TryParseDurationToken(result.Tokens[0].Value, out var duration))
+			TryParseDurationToken(result.Tokens[0].Value, out var duration))
 		{
 			return duration;
 		}
@@ -2129,21 +2911,21 @@ public sealed class DevProjexCommandTree
 	private static bool TryParseDurationToken(string value, out TimeSpan duration)
 	{
 		if (TimeSpan.TryParse(
-			    value,
-			    System.Globalization.CultureInfo.InvariantCulture,
-			    out duration))
+				value,
+				System.Globalization.CultureInfo.InvariantCulture,
+				out duration))
 		{
 			return IsSupportedRequestTimeout(duration);
 		}
 		if (value.EndsWith('s') &&
-		    double.TryParse(value[..^1], System.Globalization.NumberStyles.Number,
-			    System.Globalization.CultureInfo.InvariantCulture, out var seconds))
+			double.TryParse(value[..^1], System.Globalization.NumberStyles.Number,
+				System.Globalization.CultureInfo.InvariantCulture, out var seconds))
 		{
 			return TryCreateDuration(seconds, out duration);
 		}
 		if (value.EndsWith('m') &&
-		    double.TryParse(value[..^1], System.Globalization.NumberStyles.Number,
-			    System.Globalization.CultureInfo.InvariantCulture, out var minutes))
+			double.TryParse(value[..^1], System.Globalization.NumberStyles.Number,
+				System.Globalization.CultureInfo.InvariantCulture, out var minutes))
 		{
 			return TryCreateDuration(minutes * 60d, out duration);
 		}
@@ -2154,8 +2936,8 @@ public sealed class DevProjexCommandTree
 	{
 		duration = default;
 		if (!double.IsFinite(seconds) ||
-		    seconds <= 0 ||
-		    seconds > TimeSpan.MaxValue.TotalSeconds)
+			seconds <= 0 ||
+			seconds > TimeSpan.MaxValue.TotalSeconds)
 		{
 			return false;
 		}

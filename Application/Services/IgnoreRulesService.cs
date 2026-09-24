@@ -26,9 +26,16 @@ public sealed class IgnoreRulesService(
 
 	public void InvalidateCaches(string rootPath)
 	{
+		RefreshDiscoveryCaches(rootPath);
+		InvalidateGitIgnoreMatchers(rootPath);
+	}
+
+	public void RefreshDiscoveryCaches(string rootPath)
+	{
 		_projectScopeDiscovery.Invalidate(rootPath);
 		_pathComparisonSemanticsResolver.Invalidate(rootPath);
-		InvalidateGitIgnoreMatchers(rootPath);
+		// Matcher reuse independently validates a fresh content hash and comparison semantics.
+		// Reloading discovery must not discard unchanged, expensive compiled rule programs.
 	}
 
 	public bool RevalidateCaches(string rootPath, CancellationToken cancellationToken = default)

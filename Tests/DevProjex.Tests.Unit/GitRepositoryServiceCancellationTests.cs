@@ -23,6 +23,92 @@ public sealed class GitRepositoryServiceCancellationTests
     }
 
     [Fact]
+    public async Task FetchedResetFinishesWhenCallerCancelsDuringMaterialization()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var resetStarted = false;
+
+        var succeeded = await GitRepositoryService.ApplyFetchedResetAsync(
+            async resetToken =>
+            {
+                resetStarted = true;
+                cancellation.Cancel();
+                await Task.Yield();
+                resetToken.ThrowIfCancellationRequested();
+                return true;
+            },
+            cancellation.Token);
+
+        Assert.True(resetStarted);
+        Assert.True(succeeded);
+    }
+
+    [Fact]
+    public async Task FetchedResetHonorsCancellationBeforeMaterialization()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var resetStarted = false;
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            GitRepositoryService.ApplyFetchedResetAsync(
+                _ =>
+                {
+                    resetStarted = true;
+                    return Task.FromResult(true);
+                },
+                cancellation.Token));
+
+        Assert.False(resetStarted);
+    }
+
+    [Fact]
+    public async Task ManagedBranchSwitchFinishesCheckoutAndBranchRecordingAfterCancellation()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var branchRecorded = false;
+
+        var succeeded = await GitRepositoryService.FinishManagedBranchSwitchAsync(
+            async checkoutToken =>
+            {
+                cancellation.Cancel();
+                await Task.Yield();
+                checkoutToken.ThrowIfCancellationRequested();
+                return true;
+            },
+            configToken =>
+            {
+                configToken.ThrowIfCancellationRequested();
+                branchRecorded = true;
+                return Task.FromResult(true);
+            },
+            cancellation.Token);
+
+        Assert.True(succeeded);
+        Assert.True(branchRecorded);
+    }
+
+    [Fact]
+    public async Task ManagedBranchSwitchHonorsCancellationBeforeCheckout()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var checkoutStarted = false;
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            GitRepositoryService.FinishManagedBranchSwitchAsync(
+                _ =>
+                {
+                    checkoutStarted = true;
+                    return Task.FromResult(true);
+                },
+                _ => Task.FromResult(true),
+                cancellation.Token));
+
+        Assert.False(checkoutStarted);
+    }
+
+    [Fact]
     public async Task WaitForExitOrTerminateAsync_CancellationWaitsForProcessTreeAndReleasesFileHandle()
     {
         using var temp = new TemporaryDirectory();
@@ -58,10 +144,10 @@ public sealed class GitRepositoryServiceCancellationTests
         {
             await childReady.Task
                 .WaitAsync(ProcessTreeStartupTimeout, TestContext.Current.CancellationToken);
-            childProcessId = int.Parse(
-                await File.ReadAllTextAsync(readyPath, TestContext.Current.CancellationToken),
-                NumberStyles.None,
-                CultureInfo.InvariantCulture);
+            childProcessId = await ReadProcessIdAsync(
+                readyPath,
+                process,
+                TestContext.Current.CancellationToken);
             Assert.Throws<IOException>(() =>
             {
                 using var _ = new FileStream(
@@ -98,6 +184,40 @@ public sealed class GitRepositoryServiceCancellationTests
             if (childProcessId is { } processId)
                 await TerminateTestProcessAsync(processId, entireProcessTree: false);
         }
+    }
+
+    private static async Task<int> ReadProcessIdAsync(
+        string path,
+        Process process,
+        CancellationToken cancellationToken)
+    {
+        var started = Stopwatch.StartNew();
+        while (started.Elapsed < ProcessTreeStartupTimeout)
+        {
+            try
+            {
+                var text = await File.ReadAllTextAsync(path, cancellationToken);
+                if (int.TryParse(
+                        text,
+                        NumberStyles.None,
+                        CultureInfo.InvariantCulture,
+                        out var processId))
+                {
+                    return processId;
+                }
+            }
+            catch (IOException) when (!process.HasExited)
+            {
+                // Windows can publish the rename notification before releasing the destination handle.
+            }
+
+            if (process.HasExited)
+                throw new InvalidOperationException("The Git cancellation process exited before publishing its child process ID.");
+
+            await Task.Delay(TimeSpan.FromMilliseconds(10), cancellationToken);
+        }
+
+        throw new TimeoutException($"The Git cancellation process ID could not be read: {path}");
     }
 
     private static int? TryReadProcessId(string path)

@@ -23,6 +23,7 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 	private const int MaximumPortablePathComponentBytes = 255;
 	private const int MaximumRepositoryNameUtf8Bytes =
 		MaximumPortablePathComponentBytes - UniquePathSuffixLength - 1;
+	private const int MaximumSynchronousPublicationFileCount = 1024;
 	private const UnixFileMode PrivateUnixDirectoryMode =
 		UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
 	internal const long MaximumCacheIndexBytes = 64L * 1024 * 1024;
@@ -186,8 +187,11 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 	{
 		EnsurePrivateCacheDirectory(CacheRootPath);
 		var stagingRoot = Path.Combine(CacheRootPath, RepositoryCacheLayout.StagingDirectoryName);
+		EnsurePrivateCacheDirectory(stagingRoot);
 		var path = CreateUniqueRepositoryPath(stagingRoot, repositoryUrl);
 		Directory.CreateDirectory(path);
+		if (IsLinkedCacheRoot(path))
+			throw new IOException("Repository staging path must not be a symbolic link or junction.");
 		return path;
 	}
 
@@ -197,6 +201,9 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 		var stagingRoot = Path.Combine(CacheRootPath, RepositoryCacheLayout.StagingDirectoryName);
 		var normalizedStagingPath = PathUtility.Normalize(stagingPath);
 		if (!PathUtility.IsPathInside(normalizedStagingPath, stagingRoot) ||
+		    !PathComparer.Default.Equals(Path.GetDirectoryName(normalizedStagingPath), PathUtility.Normalize(stagingRoot)) ||
+		    IsLinkedCacheRoot(stagingRoot) ||
+		    IsLinkedCacheRoot(normalizedStagingPath) ||
 		    !Directory.Exists(normalizedStagingPath))
 		{
 			throw new InvalidOperationException("Repository staging path is invalid.");
@@ -230,14 +237,22 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 					Path.Combine(container, RepositoryCacheLayout.MarkerFileName),
 					contentKind == RepositoryCacheContentKind.Git ? "git" : "zip");
 				Directory.Move(normalizedStagingPath, destination);
+				if (IsLinkedCacheRoot(destination))
+					throw new InvalidOperationException("Repository staging path is invalid.");
+				var approximateSize = CalculateDirectorySizeBounded(
+					container,
+					MaximumSynchronousPublicationFileCount,
+					out var sizeIsComplete);
 				RecordIndexedRepositoryCore(
 					repositoryUrl,
 					destination,
 					branch: null,
 					commitHash: null,
 					RepositoryCacheEntryState.Ready,
-					CalculateDirectorySize(container),
+					approximateSize,
 					contentKind);
+				if (!sizeIsComplete)
+					ScheduleRepositorySizeRefresh(destination);
 			}
 			return destination;
 		}
@@ -250,7 +265,7 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 
 	public RepositoryCacheIndexEntry? FindIndexedRepository(string repositoryUrl)
 	{
-		var identity = RepositoryUrlUtility.GetComparisonKey(repositoryUrl);
+		var identity = RepositoryUrlUtility.GetSourceCacheKey(repositoryUrl);
 		if (identity.Length == 0)
 			return null;
 
@@ -316,7 +331,8 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 				if (HasUnsupportedIndexDocument(fileSet))
 					continue;
 
-				var document = LoadIndex(fileSet);
+				if (!TryLoadIndex(fileSet, out var document))
+					continue;
 				List<RepositoryCacheIndexEntry>? retained = null;
 				for (var index = 0; index < document.Entries.Count; index++)
 				{
@@ -401,7 +417,11 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 					continue;
 				}
 
-				var document = LoadIndex(fileSet);
+				if (!TryLoadIndex(fileSet, out var document))
+				{
+					unavailableRootCount++;
+					continue;
+				}
 				List<RepositoryCacheIndexEntry>? retained = null;
 				for (var index = 0; index < document.Entries.Count; index++)
 				{
@@ -459,7 +479,7 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 		string? branch = null,
 		CancellationToken cancellationToken = default)
 	{
-		var identity = RepositoryUrlUtility.GetComparisonKey(repositoryUrl);
+		var identity = RepositoryUrlUtility.GetSourceCacheKey(repositoryUrl);
 		if (identity.Length == 0)
 			return null;
 
@@ -519,7 +539,7 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 		string repositoryUrl,
 		CancellationToken cancellationToken = default)
 	{
-		var identity = RepositoryUrlUtility.GetComparisonKey(repositoryUrl);
+		var identity = RepositoryUrlUtility.GetSourceCacheKey(repositoryUrl);
 		if (identity.Length == 0)
 			throw new ArgumentException("Repository URL is invalid.", nameof(repositoryUrl));
 
@@ -579,7 +599,8 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 			if (HasUnsupportedIndexDocument(fileSet))
 				return;
 
-			var document = LoadIndex(fileSet);
+			if (!TryLoadIndex(fileSet, out var document))
+				return;
 			var entry = FindByPath(document, normalizedPath);
 			if (entry is null)
 			{
@@ -636,7 +657,7 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 		string identity;
 		try
 		{
-			identity = RepositoryUrlUtility.GetComparisonKey(repositoryUrl);
+			identity = RepositoryUrlUtility.GetSourceCacheKey(repositoryUrl);
 		}
 		catch
 		{
@@ -672,7 +693,8 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 			if (HasUnsupportedIndexDocument(fileSet))
 				return CacheRootFailure(cacheRoot);
 
-			var document = LoadIndex(fileSet);
+			if (!TryLoadIndex(fileSet, out var document, allowCorruptExisting: identity is null))
+				return CacheRootFailure(cacheRoot);
 			var indexedEntries = new List<CacheRemovalEntry>(document.Entries.Count);
 			var indexedContainers = new HashSet<string>(PathComparer.Default);
 			var containersWithNonTargets = new HashSet<string>(PathComparer.Default);
@@ -752,9 +774,11 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 				}
 			}
 
-			if (indexedRemoved > 0 && !WriteIndex(fileSet, retainedEntries))
+			var resetExistingIndex = identity is null &&
+			                         (File.Exists(fileSet.PrimaryPath) || File.Exists(fileSet.BackupPath));
+			if ((indexedRemoved > 0 || resetExistingIndex) && !WriteIndex(fileSet, retainedEntries))
 			{
-				failed = checked(failed + indexedRemoved);
+				failed = checked(failed + Math.Max(indexedRemoved, 1));
 				indexedRemoved = 0;
 			}
 			result = new CacheClearResult(
@@ -810,7 +834,10 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 
 		try
 		{
-			var trashRoot = RepositoryCacheLayout.GetTrashRoot(GetOwningCacheRoot(path));
+			var cacheRoot = GetOwningCacheRoot(path);
+			if (HasLinkedTrashPathComponent(cacheRoot))
+				return false;
+			var trashRoot = RepositoryCacheLayout.GetTrashRoot(cacheRoot);
 			Directory.CreateDirectory(trashRoot);
 			var destination = Path.Combine(trashRoot, $"trash-{Guid.NewGuid():N}");
 			Directory.Move(path, destination);
@@ -895,7 +922,8 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 			if (HasUnsupportedIndexDocument(fileSet))
 				return;
 
-			var document = LoadIndex(fileSet);
+			if (!TryLoadIndex(fileSet, out var document, allowCorruptExisting: true))
+				return;
 			var retained = new List<RepositoryCacheIndexEntry>();
 			foreach (var entry in document.Entries)
 			{
@@ -1079,7 +1107,8 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 			if (HasUnsupportedIndexDocument(fileSet))
 				return;
 
-			var document = LoadIndex(fileSet);
+			if (!TryLoadIndex(fileSet, out var document))
+				return;
 			var entries = document.Entries.ToList();
 			var totalSize = CalculateIndexedSize(entries);
 			var expiration = _timeProvider.GetUtcNow() - _policy.MaximumUnusedAge;
@@ -1145,7 +1174,8 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 			if (HasUnsupportedIndexDocument(fileSet))
 				return;
 
-			var document = LoadIndex(fileSet);
+			if (!TryLoadIndex(fileSet, out var document))
+				return;
 			var entry = FindByPath(document, localPath);
 			if (entry is null)
 				return;
@@ -1200,7 +1230,8 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 			if (HasUnsupportedIndexDocument(fileSet))
 				return;
 
-			var document = LoadIndex(fileSet);
+			if (!TryLoadIndex(fileSet, out var document))
+				return;
 			var entries = document.Entries
 				.Where(entry => !ArePathsInSameRepository(entry.LocalPath, normalizedPath))
 				.ToList();
@@ -1253,6 +1284,10 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 				return null;
 
 			kind = ResolveContentKind(entry);
+			var validatedRequestedBranch = kind == RepositoryCacheContentKind.Git &&
+			                               !string.IsNullOrWhiteSpace(requestedBranch)
+				? GitBranchNameValidator.ValidateAndNormalize(requestedBranch.Trim())
+				: null;
 			if (kind == RepositoryCacheContentKind.Zip)
 			{
 				selectedPath = entry.LocalPath;
@@ -1308,10 +1343,7 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 			}
 
 			entry = verified;
-			effectiveBranch = kind == RepositoryCacheContentKind.Git &&
-			                  !string.IsNullOrWhiteSpace(requestedBranch)
-				? GitBranchNameValidator.ValidateAndNormalize(requestedBranch.Trim())
-				: verified.Branch;
+			effectiveBranch = validatedRequestedBranch ?? verified.Branch;
 		}
 
 		try
@@ -1340,6 +1372,7 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 					{
 						if (!await TryRestoreRemoteBranchAsync(
 								entry.LocalPath,
+								entry.RepositoryUrl,
 								effectiveBranch,
 								cancellationToken)
 							.ConfigureAwait(false))
@@ -1424,7 +1457,8 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 			if (HasUnsupportedIndexDocument(fileSet))
 				return null;
 
-			var document = LoadIndex(fileSet);
+			if (!TryLoadIndex(fileSet, out var document))
+				return null;
 			var current = FindByIdentity(document, identity);
 			if (current is null ||
 			    !PathComparer.Default.Equals(current.LocalPath, expectedLocalPath) ||
@@ -1475,13 +1509,24 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 
 	private static async Task<bool> TryRestoreRemoteBranchAsync(
 		string repositoryPath,
+		string repositoryUrl,
 		string branch,
 		CancellationToken cancellationToken)
 	{
 		var normalizedBranch = GitBranchNameValidator.ValidateAndNormalize(branch);
+		if (!GitRemoteIdentityStore.Matches(repositoryPath, repositoryUrl))
+			return false;
+		var networkOverrides = await RunGitForOutputAsync(
+			repositoryPath,
+			GitProcessOperation.ReadConfigValue(GitConfigReadKind.NetworkOverrides),
+			cancellationToken).ConfigureAwait(false);
+		if (!string.IsNullOrWhiteSpace(networkOverrides))
+			return false;
 		if (await RunGitForOutputAsync(
 			    repositoryPath,
-			    ["remote", "set-branches", "--add", "origin", normalizedBranch],
+			    GitProcessOperation.ManagedConfigWrite(
+				    GitManagedConfigWriteKind.AddTrackedBranch,
+				    normalizedBranch),
 			    cancellationToken).ConfigureAwait(false) is null)
 		{
 			return false;
@@ -1489,7 +1534,10 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 
 		return await RunGitForOutputAsync(
 			       repositoryPath,
-			       ["fetch", "origin", normalizedBranch, "--depth", "1"],
+			       GitProcessOperation.FetchBranch(
+				       repositoryUrl,
+				       normalizedBranch,
+				       allowFileTransport: RepositoryTransportPolicy.AllowsLocalFileTransport),
 			       cancellationToken).ConfigureAwait(false) is not null;
 	}
 
@@ -1516,42 +1564,45 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 	{
 		var current = await RunGitForOutputAsync(
 			repositoryPath,
-			["rev-parse", "--abbrev-ref", "HEAD"],
+			GitProcessOperation.ListBranches(GitBranchListKind.Current),
 			cancellationToken).ConfigureAwait(false);
 		if (!string.IsNullOrWhiteSpace(current) && !string.Equals(current.Trim(), "HEAD", StringComparison.Ordinal))
 			return current.Trim();
 
 		var configured = await RunGitForOutputAsync(
 			repositoryPath,
-			["config", "--worktree", "--get", "devprojex.branch"],
+			GitProcessOperation.ReadConfigValue(GitConfigReadKind.WorktreeBranch),
 			cancellationToken).ConfigureAwait(false);
 		return string.IsNullOrWhiteSpace(configured) ? null : configured.Trim();
 	}
 
 	private static async Task<string?> RunGitForOutputAsync(
 		string workingDirectory,
-		IReadOnlyList<string> arguments,
+		GitProcessOperation operation,
 		CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
+		using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+		deadline.CancelAfter(operation.Deadline);
+		var operationToken = deadline.Token;
 		using var process = new Process
 		{
-			StartInfo = GitProcessStartInfoFactory.Create(workingDirectory, arguments)
+			StartInfo = GitProcessStartInfoFactory.Create(workingDirectory, operation)
 		};
 		process.Start();
 		process.StandardInput.Close();
 		var output = GitProcessOutputReader.ReadAsync(
 			process.StandardOutput,
 			GitProcessOutputReader.MaximumOutputCharacters,
-			cancellationToken);
+			operationToken);
 		var error = GitProcessOutputReader.ReadAsync(
 			process.StandardError,
 			GitProcessOutputReader.MaximumOutputCharacters,
-			cancellationToken);
+			operationToken);
 		try
 		{
 			await GitRepositoryService
-				.WaitForExitOrTerminateAsync(process, cancellationToken)
+				.WaitForExitOrTerminateAsync(process, operationToken)
 				.ConfigureAwait(false);
 			if (!await GitProcessOutputReader
 				    .WaitForCompletionAfterExitAsync(process, output, error)
@@ -1572,7 +1623,9 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 			await GitProcessOutputReader
 				.ObserveAfterTerminationAsync(process, output, error)
 				.ConfigureAwait(false);
-			throw;
+			if (cancellationToken.IsCancellationRequested)
+				throw;
+			return null;
 		}
 	}
 
@@ -1851,8 +1904,7 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 		RepositoryCacheContentKind contentKind)
 	{
 		var safeUrl = RepositoryUrlUtility.ToSafeDisplay(repositoryUrl);
-		var identity = RepositoryUrlUtility.GetComparisonKey(safeUrl);
-		if (identity.Length == 0 || string.IsNullOrWhiteSpace(localPath))
+		if (string.IsNullOrWhiteSpace(localPath))
 			return;
 
 		string normalizedPath;
@@ -1867,6 +1919,14 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 
 		if (!IsInCache(normalizedPath))
 			return;
+		var identitySource = GitRemoteIdentityStore.TryReadSourceIdentity(
+			normalizedPath,
+			out var storedSourceIdentity)
+			? storedSourceIdentity
+			: safeUrl;
+		var identity = RepositoryUrlUtility.GetSourceCacheKey(identitySource);
+		if (identity.Length == 0)
+			return;
 
 		var fileSet = GetIndexFileSet();
 		if (!CrossProcessFileLock.TryAcquire(fileSet, IndexLockTimeout, out var heldLock))
@@ -1877,7 +1937,8 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 			if (HasUnsupportedIndexDocument(fileSet))
 				return;
 
-			var document = LoadIndex(fileSet);
+			if (!TryLoadIndex(fileSet, out var document))
+				return;
 			var previous = FindByIdentity(document, identity) ?? FindByPath(document, normalizedPath);
 			var resolvedKind = contentKind != RepositoryCacheContentKind.Unknown
 				? contentKind
@@ -1895,11 +1956,30 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 			var entries = document.Entries
 				.Where(candidate =>
 					!string.Equals(candidate.Identity, identity, StringComparison.Ordinal) &&
-					!ArePathsInSameRepository(candidate.LocalPath, normalizedPath))
+					!ArePathsInSameRepository(candidate.LocalPath, normalizedPath) &&
+					!IsLegacySafeUrlIdentity(candidate, safeUrl, identity))
 				.ToList();
 			entries.Add(entry);
 			WriteIndex(fileSet, entries);
 		}
+	}
+
+	private static bool IsLegacySafeUrlIdentity(
+		RepositoryCacheIndexEntry candidate,
+		string safeUrl,
+		string replacementIdentity)
+	{
+		if (!string.Equals(
+				RepositoryUrlUtility.ToSafeDisplay(candidate.RepositoryUrl),
+				safeUrl,
+				StringComparison.Ordinal))
+		{
+			return false;
+		}
+
+		var anonymousIdentity = RepositoryUrlUtility.GetSourceCacheKey(candidate.RepositoryUrl);
+		return !string.Equals(anonymousIdentity, replacementIdentity, StringComparison.Ordinal) &&
+		       string.Equals(candidate.Identity, anonymousIdentity, StringComparison.Ordinal);
 	}
 
 	private RepositoryCacheIndexEntry? FindIndexedRepositoryByIdentity(string identity)
@@ -1922,7 +2002,8 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 			if (HasUnsupportedIndexDocument(fileSet))
 				return null;
 
-			var document = LoadIndex(fileSet);
+			if (!TryLoadIndex(fileSet, out var document))
+				return null;
 			var entry = FindByIdentity(document, identity);
 			if (entry is null ||
 			    ResolveContentKind(entry) != RepositoryCacheContentKind.Git ||
@@ -2124,9 +2205,12 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 		if (!Directory.Exists(path) || !IsInCache(path))
 			return;
 
-		var trashRoot = RepositoryCacheLayout.GetTrashRoot(GetOwningCacheRoot(path));
+		var cacheRoot = GetOwningCacheRoot(path);
 		try
 		{
+			if (HasLinkedTrashPathComponent(cacheRoot))
+				throw new IOException("Repository cache trash path must not be a symbolic link or junction.");
+			var trashRoot = RepositoryCacheLayout.GetTrashRoot(cacheRoot);
 			Directory.CreateDirectory(trashRoot);
 			string destination;
 			for (var index = 1; ; index++)
@@ -2171,7 +2255,7 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 		CancellationToken cancellationToken = default)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
-		if (IsLinkedCacheRoot(cacheRoot))
+		if (HasLinkedTrashPathComponent(cacheRoot))
 			return;
 		var trashRoot = RepositoryCacheLayout.GetTrashRoot(cacheRoot);
 		if (!Directory.Exists(trashRoot))
@@ -2214,7 +2298,9 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 		var trashPaths = new List<string>();
 		using (heldLock)
 		{
-			var indexedContainers = LoadIndex(fileSet).Entries
+			if (HasUnsupportedIndexDocument(fileSet) || !TryLoadIndex(fileSet, out var document))
+				return;
+			var indexedContainers = document.Entries
 				.Select(entry => RepositoryCacheLayout.GetContainer(entry.LocalPath))
 				.ToHashSet(PathComparer.Default);
 			foreach (var directory in EnumerateRepositoryRootDirectories(cacheRoot))
@@ -2439,6 +2525,39 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 		return total;
 	}
 
+	private static long CalculateDirectorySizeBounded(
+		string path,
+		int maximumFileCount,
+		out bool complete)
+	{
+		long total = 0;
+		var fileCount = 0;
+		complete = true;
+		try
+		{
+			foreach (var file in Directory.EnumerateFiles(path, "*", RecursiveCacheEnumeration))
+			{
+				if (++fileCount > maximumFileCount)
+				{
+					complete = false;
+					return 0;
+				}
+
+				try
+				{
+					total = checked(total + new FileInfo(file).Length);
+				}
+				catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or OverflowException)
+				{
+				}
+			}
+		}
+		catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+		{
+		}
+		return total;
+	}
+
 	private static long CalculateIndexedSize(IEnumerable<RepositoryCacheIndexEntry> entries)
 	{
 		long total = 0;
@@ -2608,6 +2727,11 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 		}
 	}
 
+	private static bool HasLinkedTrashPathComponent(string cacheRoot) =>
+		IsLinkedCacheRoot(cacheRoot) ||
+		IsLinkedCacheRoot(Path.Combine(cacheRoot, RepositoryCacheLayout.StagingDirectoryName)) ||
+		IsLinkedCacheRoot(RepositoryCacheLayout.GetTrashRoot(cacheRoot));
+
 	private static IReadOnlyList<string> BuildCacheSearchRoots(
 		string currentCacheRoot,
 		Func<string>? legacyDataRootProvider)
@@ -2633,16 +2757,30 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 		return roots.AsReadOnly();
 	}
 
-	private RepositoryCacheIndexDocument LoadIndex(JsonStoreFileSet fileSet)
+	private RepositoryCacheIndexDocument LoadIndex(JsonStoreFileSet fileSet) =>
+		TryLoadIndex(fileSet, out var document) ? document : RepositoryCacheIndexDocument.Empty;
+
+	private bool TryLoadIndex(
+		JsonStoreFileSet fileSet,
+		out RepositoryCacheIndexDocument document,
+		bool allowCorruptExisting = false)
 	{
-		if (TryLoadIndex(fileSet.PrimaryPath, out var primary))
-			return primary;
-		if (TryLoadIndex(fileSet.BackupPath, out var backup))
-			return backup;
-		return RepositoryCacheIndexDocument.Empty;
+		if (TryLoadIndex(fileSet.PrimaryPath, out document, out var primaryUnavailable))
+			return true;
+		if (primaryUnavailable)
+			return false;
+		if (TryLoadIndex(fileSet.BackupPath, out document, out var backupUnavailable))
+			return true;
+		document = RepositoryCacheIndexDocument.Empty;
+		return !backupUnavailable &&
+		       (allowCorruptExisting ||
+		        (!File.Exists(fileSet.PrimaryPath) && !File.Exists(fileSet.BackupPath)));
 	}
 
-	private bool TryLoadIndex(string path, out RepositoryCacheIndexDocument document)
+	private bool TryLoadIndex(
+		string path,
+		out RepositoryCacheIndexDocument document,
+		out bool temporarilyUnavailable)
 	{
 		if (!JsonStorePersistence.TryReadNormalized(
 			    path,
@@ -2651,6 +2789,7 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 			    NormalizeIndex,
 			    out document,
 			    out _,
+			    out temporarilyUnavailable,
 			    MaximumCacheIndexBytes))
 		{
 			document = RepositoryCacheIndexDocument.Empty;
@@ -2661,11 +2800,14 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 
 	private RepositoryCacheIndexDocument NormalizeIndex(RepositoryCacheIndexDocument document)
 	{
+		if (document.SchemaVersion is not (1 or CacheIndexSchemaVersion) || document.Entries is null)
+			throw new JsonException("The repository cache index is incomplete or has an unsupported schema.");
+
 		var utcNow = _timeProvider.GetUtcNow();
 		var maximumAcceptedTimestamp = utcNow <= DateTimeOffset.MaxValue - MaximumPersistedClockSkew
 			? utcNow + MaximumPersistedClockSkew
 			: DateTimeOffset.MaxValue;
-		var entries = (document.Entries ?? [])
+		var entries = document.Entries
 			.Where(entry => entry is not null &&
 			                !string.IsNullOrWhiteSpace(entry.Identity) &&
 			                !string.IsNullOrWhiteSpace(entry.RepositoryUrl) &&
@@ -2681,7 +2823,7 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 		return new RepositoryCacheIndexDocument(CacheIndexSchemaVersion, entries);
 	}
 
-	private static RepositoryCacheIndexEntry? NormalizeIndexEntryOrNull(
+	private RepositoryCacheIndexEntry? NormalizeIndexEntryOrNull(
 		RepositoryCacheIndexEntry entry,
 		DateTimeOffset maximumAcceptedTimestamp)
 	{
@@ -2690,8 +2832,21 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 			var safeUrl = RepositoryUrlUtility.ToSafeDisplay(entry.RepositoryUrl);
 			if (safeUrl.Length == 0)
 				return null;
+			var identity = entry.Identity;
+			if (!RepositoryUrlUtility.IsCurrentSourceCacheKey(identity))
+			{
+				var identitySource = GitRemoteIdentityStore.TryReadSourceIdentity(
+					entry.LocalPath,
+					out var storedSourceIdentity)
+					? storedSourceIdentity
+					: safeUrl;
+				identity = RepositoryUrlUtility.GetSourceCacheKey(identitySource);
+				if (identity.Length == 0)
+					return null;
+			}
 			return entry with
 			{
+				Identity = identity,
 				RepositoryUrl = safeUrl,
 				LastUsedUtc = entry.LastUsedUtc <= DateTimeOffset.UnixEpoch ||
 				              entry.LastUsedUtc > maximumAcceptedTimestamp

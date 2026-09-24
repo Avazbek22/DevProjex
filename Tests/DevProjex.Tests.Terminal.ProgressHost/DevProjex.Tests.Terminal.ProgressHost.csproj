@@ -15,5 +15,6 @@
 
   <ItemGroup>
     <Compile Include="..\Shared\TerminalProgress\**\*.cs" LinkBase="TerminalProgress" />
+    <Compile Include="..\Shared\TerminalHost\**\*.cs" LinkBase="TerminalHost" />
   </ItemGroup>
 </Project>

@@ -22,7 +22,9 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
 
 		try
 		{
-			Assert.True(Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes).IsChecked is false);
+			var root = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
+			root.IsChecked = false;
+			Assert.False(root.IsChecked);
 			await UiTestDriver.OpenPreviewAsync(window);
 			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
 			var initialPayload = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);

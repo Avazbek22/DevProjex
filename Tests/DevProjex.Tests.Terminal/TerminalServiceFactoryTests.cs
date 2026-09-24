@@ -1,11 +1,173 @@
 using DevProjex.Infrastructure.Git;
 using DevProjex.Infrastructure.Persistence;
+using DevProjex.Infrastructure.ProjectProfiles;
 using DevProjex.Infrastructure.RecentProjects;
+using DevProjex.Infrastructure.TerminalCommands;
 
 namespace DevProjex.Tests.Terminal;
 
 public sealed class TerminalServiceFactoryTests
 {
+	[Fact]
+	public void RecentScopeFailsClosedAfterThreeUnavailableMigrationAttempts()
+	{
+		var probes = 0;
+		var factory = new TerminalServiceFactory(
+			() =>
+			{
+				probes++;
+				return StoreUserDataMigrationStatus.TemporarilyUnavailable;
+			},
+			_ => { });
+
+		var error = Assert.Throws<StoreUserDataMigrationUnavailableException>(
+			() => factory.CreateRecentScope(AppLanguage.En));
+
+		Assert.Equal(StoreUserDataMigrationStatus.TemporarilyUnavailable, error.Status);
+		Assert.Equal(3, probes);
+	}
+
+	[Fact]
+	public void MigrationAdmissionIsReusedAcrossFactoryScopes()
+	{
+		var probes = 0;
+		var factory = new TerminalServiceFactory(
+			() =>
+			{
+				probes++;
+				return probes < 3
+					? StoreUserDataMigrationStatus.TemporarilyUnavailable
+					: StoreUserDataMigrationStatus.Migrated;
+			},
+			_ => { });
+
+		using var first = factory.CreateRecentScope(AppLanguage.En);
+		using var second = factory.CreateRecentScope(AppLanguage.En);
+
+		Assert.Equal(3, probes);
+	}
+
+	[Fact]
+	public async Task RecentCommandReportsLocalizedMigrationFailureWithoutCreatingServices()
+	{
+		var probes = 0;
+		var factory = new TerminalServiceFactory(
+			() =>
+			{
+				probes++;
+				return StoreUserDataMigrationStatus.TemporarilyUnavailable;
+			},
+			_ => { });
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(environment, factory)
+			.RunAsync(["recent", "--language", "ru"], TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.RuntimeError, exitCode);
+		Assert.Equal(3, probes);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("DPX-STORE-MIGRATION-UNAVAILABLE", environment.StandardError);
+		Assert.Contains("Не удалось подготовить данные", environment.StandardError);
+	}
+
+	[Fact]
+	public async Task McpLogDoesNotOpenJournalWhenMigrationIsUnavailable()
+	{
+		using var workspace = new TemporaryDirectory();
+		var journalDirectory = Path.Combine(UserDataPathResolver.GetStateRoot(), "agent-journal");
+		var journalExistedBefore = Directory.Exists(journalDirectory);
+		var probes = 0;
+		var factory = new TerminalServiceFactory(
+			() =>
+			{
+				probes++;
+				return StoreUserDataMigrationStatus.TemporarilyUnavailable;
+			},
+			_ => { });
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(environment, factory)
+			.RunAsync(["mcp", "log", workspace.Path, "--language", "ru"],
+				TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.RuntimeError, exitCode);
+		Assert.Equal(3, probes);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("DPX-STORE-MIGRATION-UNAVAILABLE", environment.StandardError);
+		Assert.Contains("Не удалось подготовить данные", environment.StandardError);
+		Assert.Equal(journalExistedBefore, Directory.Exists(journalDirectory));
+	}
+
+	[Theory]
+	[InlineData(null)]
+	[InlineData("")]
+	[InlineData("relative-data")]
+	public void UnsafeEnvironmentDataRootFallsBackToPlatformLocations(string? value)
+	{
+		var variables = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+		{
+			[InvocationEnvironment.InternalDataRootVariable] = value
+		};
+
+		var factory = TerminalServiceFactory.FromEnvironment(
+			variables,
+			TerminalHostCapabilities.Headless);
+
+		Assert.Null(factory.AppDataPathProvider);
+	}
+
+	[Fact]
+	public void EnvironmentDataRootRejectsMissingDirectoriesAndFiles()
+	{
+		using var workspace = new TemporaryDirectory();
+		var file = workspace.WriteFile("data-file", "content");
+		foreach (var value in new[] { Path.Combine(workspace.Path, "missing"), file })
+		{
+			var variables = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+			{
+				[InvocationEnvironment.InternalDataRootVariable] = value
+			};
+
+			var factory = TerminalServiceFactory.FromEnvironment(
+				variables,
+				TerminalHostCapabilities.Headless);
+
+			Assert.Null(factory.AppDataPathProvider);
+		}
+	}
+
+	[Fact]
+	public void EnvironmentDataRootConfiguresHeadlessServices()
+	{
+		using var workspace = new TemporaryDirectory();
+		var dataRoot = workspace.CreateDirectory("isolated-data");
+		var variables = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+		{
+			[InvocationEnvironment.InternalDataRootVariable] = dataRoot
+		};
+
+		var factory = TerminalServiceFactory.FromEnvironment(
+			variables,
+			TerminalHostCapabilities.Headless);
+		using var services = factory.Create(AppLanguage.En);
+
+		Assert.False(factory.HostCapabilities.HasDesktopApplication);
+		Assert.Equal(
+			Path.Combine(dataRoot, "live-sessions"),
+			services.LiveSessionRegistry.DirectoryPath,
+			PathComparer.Default);
+		Assert.Equal(
+			Path.Combine(dataRoot, "DevProjex", "project-profiles.json"),
+			Assert.IsType<ProjectProfileStore>(services.LocalProfileStore).GetPath(),
+			PathComparer.Default);
+		Assert.Equal(
+			Path.Combine(dataRoot, "DevProjex", "user-settings.json"),
+			services.UserSettingsStore.GetPath(),
+			PathComparer.Default);
+		Assert.IsType<McpConnectionService>(services.McpConnectionService);
+		Assert.IsType<McpClientLaunchService>(services.McpClientLaunchService);
+	}
+
 	[Fact]
 	public void DefaultServicesSeparateConfigurationStateAndCacheRoots()
 	{

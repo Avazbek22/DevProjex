@@ -1,6 +1,7 @@
 using DevProjex.Application.Presentation;
 using System.Text.RegularExpressions;
 using DevProjex.Application.Services;
+using DevProjex.Infrastructure.ProjectProfiles;
 using DevProjex.Kernel.Abstractions;
 
 namespace DevProjex.Tests.UI;
@@ -646,9 +647,19 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
         UiTestProject project,
         BlockingFileContentAnalyzer analyzer)
     {
+        var appDataPath = Path.Combine(
+            project.AppDataPath,
+            "project-load-workflow",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(appDataPath);
+        new ProjectProfileStore(() => appDataPath).SaveProfile(
+            project.RootPath,
+            new ProjectSelectionProfile([], [], [], SelectedPaths: []));
+
         var window = await UiTestDriver.CreateLoadedMainWindowAsync(
             project,
             waitForInitialSettingsPane: false,
+            appDataPathOverride: appDataPath,
             configureServices: services => ReplaceFileContentServices(services, analyzer),
             waitForStatusIdle: false);
 

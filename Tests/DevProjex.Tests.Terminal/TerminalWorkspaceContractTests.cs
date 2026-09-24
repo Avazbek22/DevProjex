@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Xml.Linq;
 using DevProjex.Application.Preview;
 using DevProjex.Infrastructure.Git;
+using DevProjex.Infrastructure.Processes;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -600,9 +601,12 @@ public sealed class TerminalWorkspaceContractTests
 			format,
 			TestContext.Current.CancellationToken);
 		await SetPreviewDocumentAsync(state, preview);
+		var exportPlan = format is ProjectContextDocumentFormat.Json or ProjectContextDocumentFormat.Xml
+			? await controller.BuildCurrentPlanAsync(state, TestContext.Current.CancellationToken)
+			: state.Plan;
 		var exported = await CompleteContextDocumentTestHelper.BuildAsync(
 			services.ContextDocumentService,
-			state.Plan,
+			exportPlan,
 			ProjectContextView.TreeContent,
 			format,
 			TestContext.Current.CancellationToken);
@@ -980,9 +984,12 @@ public sealed class TerminalWorkspaceContractTests
 			view,
 			format,
 			TestContext.Current.CancellationToken);
+		var currentPlan = await controller.BuildCurrentPlanAsync(
+			state,
+			TestContext.Current.CancellationToken);
 		var expected = await CompleteContextDocumentTestHelper.BuildAsync(
 			services.ContextDocumentService,
-			state.Plan,
+			currentPlan,
 			view,
 			format,
 			TestContext.Current.CancellationToken);
@@ -991,6 +998,158 @@ public sealed class TerminalWorkspaceContractTests
 		Assert.Equal(
 			PreviewClipboardPayloadBuilder.BuildFullDocumentPayload(expectedDocument),
 			payload);
+	}
+
+	[Fact]
+	public async Task DelayedSettingsBarrierBuildsCopyPayloadFromThePublishedRedactedPlan()
+	{
+		const string secret = "ghp_a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL";
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("src/Secrets.cs", secret);
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+		var baseline = state.Plan;
+		var selection = state.BuildSelection() with { HideSecrets = true };
+		var releaseRefresh = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var stateChanged = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var hasDraft = true;
+		var outcome = TerminalWorkspaceSession.SettingsRefreshOutcome.Pending;
+		Task? pendingRefresh = null;
+		var payloadBuilderCalls = 0;
+		string? clipboard = null;
+
+		async Task RefreshAsync()
+		{
+			await releaseRefresh.Task;
+			try
+			{
+				var result = await controller.BuildSettingsPlanAsync(
+					baseline,
+					selection,
+					state.ExtensionOptionStates,
+					state.BuildSelectedItemRelativePaths(),
+					state.PathOptionStates,
+					TestContext.Current.CancellationToken);
+				controller.ApplySettingsPlan(state, result);
+				outcome = TerminalWorkspaceSession.SettingsRefreshOutcome.Applied;
+			}
+			catch
+			{
+				outcome = TerminalWorkspaceSession.SettingsRefreshOutcome.Failed;
+				throw;
+			}
+			finally
+			{
+				hasDraft = false;
+				pendingRefresh = null;
+				stateChanged.SetResult();
+			}
+		}
+
+		async Task CopyAsync()
+		{
+			await TerminalWorkspaceSession.AwaitLatestSettingsRefreshAsync(
+				() => (pendingRefresh, hasDraft, stateChanged.Task, 1, outcome),
+				TestContext.Current.CancellationToken);
+			payloadBuilderCalls++;
+			clipboard = await controller.BuildCopyPayloadAsync(
+				state,
+				ProjectContextView.Content,
+				ProjectContextDocumentFormat.Text,
+				TestContext.Current.CancellationToken);
+		}
+
+		var refresh = RefreshAsync();
+		pendingRefresh = refresh;
+		var copy = CopyAsync();
+		await Task.Yield();
+		Assert.Equal(0, payloadBuilderCalls);
+		Assert.Null(clipboard);
+
+		releaseRefresh.SetResult();
+		await Task.WhenAll(refresh, copy);
+
+		Assert.Equal(1, payloadBuilderCalls);
+		Assert.NotNull(clipboard);
+		Assert.DoesNotContain(secret, clipboard, StringComparison.Ordinal);
+		Assert.Contains("DEVPROJEX_REDACTED[github-pat#1]", clipboard, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task DelayedSettingsBarrierSavesThePublishedSelectionInThePortableProfile()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var output = new TemporaryDirectory();
+		workspace.WriteFile("src/App.cs", "class App {}");
+		var destination = Path.Combine(output.Path, "selection.json");
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+		var baseline = state.Plan;
+		var selection = state.BuildSelection() with { HideSecrets = true };
+		var releaseRefresh = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var stateChanged = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var hasDraft = true;
+		var outcome = TerminalWorkspaceSession.SettingsRefreshOutcome.Pending;
+		Task? pendingRefresh = null;
+
+		async Task RefreshAsync()
+		{
+			await releaseRefresh.Task;
+			try
+			{
+				var result = await controller.BuildSettingsPlanAsync(
+					baseline,
+					selection,
+					state.ExtensionOptionStates,
+					state.BuildSelectedItemRelativePaths(),
+					state.PathOptionStates,
+					TestContext.Current.CancellationToken);
+				controller.ApplySettingsPlan(state, result);
+				outcome = TerminalWorkspaceSession.SettingsRefreshOutcome.Applied;
+			}
+			finally
+			{
+				hasDraft = false;
+				pendingRefresh = null;
+				stateChanged.SetResult();
+			}
+		}
+
+		async Task SaveAsync()
+		{
+			await TerminalWorkspaceSession.AwaitLatestSettingsRefreshAsync(
+				() => (pendingRefresh, hasDraft, stateChanged.Task, 1, outcome),
+				TestContext.Current.CancellationToken);
+			await controller.SavePortableProfileAsync(
+				state,
+				destination,
+				overwrite: false,
+				TestContext.Current.CancellationToken);
+		}
+
+		var refresh = RefreshAsync();
+		pendingRefresh = refresh;
+		var save = SaveAsync();
+		await Task.Yield();
+		Assert.False(File.Exists(destination));
+
+		releaseRefresh.SetResult();
+		await Task.WhenAll(refresh, save);
+
+		var portableProfile = await File.ReadAllTextAsync(
+			destination,
+			TestContext.Current.CancellationToken);
+		Assert.Contains("\"hideSecrets\": true", portableProfile, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -1005,7 +1164,7 @@ public sealed class TerminalWorkspaceContractTests
 	}
 
 	[Fact]
-	public async Task BuildCurrentPlanPublishesTheReprojectedPlanToWorkspaceState()
+	public async Task BuildCurrentPlanReturnsAReprojectedPlanWithoutPublishingIt()
 	{
 		using var workspace = new TemporaryDirectory();
 		workspace.WriteFile("kept.cs", "class Kept {}");
@@ -1017,6 +1176,7 @@ public sealed class TerminalWorkspaceContractTests
 			workspace.Path,
 			ProjectProfileReference.Standard,
 			TestContext.Current.CancellationToken);
+		state.SelectAll();
 		var clearedIndex = state.VisibleRows
 			.Select((row, index) => (row, index))
 			.Single(item => Path.GetFileName(item.row.Node.FullPath) == "cleared.cs")
@@ -1027,8 +1187,11 @@ public sealed class TerminalWorkspaceContractTests
 			state,
 			TestContext.Current.CancellationToken);
 
-		Assert.Same(rebuilt, state.Plan);
+		Assert.NotSame(rebuilt, state.Plan);
 		Assert.DoesNotContain(
+			rebuilt.IncludedFiles,
+			path => Path.GetFileName(path) == "cleared.cs");
+		Assert.Contains(
 			state.Plan.IncludedFiles,
 			path => Path.GetFileName(path) == "cleared.cs");
 	}
@@ -1046,6 +1209,7 @@ public sealed class TerminalWorkspaceContractTests
 			workspace.Path,
 			ProjectProfileReference.Standard,
 			TestContext.Current.CancellationToken);
+		state.SelectAll();
 		var sourceIndex = state.VisibleRows
 			.Select((row, index) => (row, index))
 			.Single(item => Path.GetFileName(item.row.Node.FullPath) == "src")
@@ -1063,6 +1227,144 @@ public sealed class TerminalWorkspaceContractTests
 		Assert.Contains(state.Plan.IncludedFiles, path => Path.GetFileName(path) == "kept.cs");
 		Assert.Contains(state.Plan.IncludedFiles, path => Path.GetFileName(path) == "new.cs");
 		Assert.DoesNotContain(state.Plan.IncludedFiles, path => Path.GetFileName(path) == "cleared.cs");
+	}
+
+	[Fact]
+	public async Task LocalWorkspaceWithoutAProfileStartsUncheckedWithWholeTreeSemantics()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		workspace.WriteFile("src/App.cs", "class App {}\n");
+		var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(TerminalTreeCheckState.Unchecked, state.VisibleRows[0].CheckState);
+		Assert.Null(state.BuildSelection().SelectedPaths);
+		Assert.Single(state.Plan.IncludedFiles);
+		Assert.False(services.LocalProfileStore.TryLoadProfile(workspace.Path, out _));
+	}
+
+	[Fact]
+	public async Task ExplicitEmptyLocalProfileStaysEmptyUntilTheTreeChanges()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		workspace.WriteFile("src/App.cs", "class App {}\n");
+		var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		services.LocalProfileStore.SaveProfile(
+			workspace.Path,
+			new ProjectSelectionProfile([], [], [], SelectedPaths: []));
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Local,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(TerminalTreeCheckState.Unchecked, state.VisibleRows[0].CheckState);
+		Assert.Empty(state.BuildSelection().SelectedPaths!);
+		Assert.True(services.LocalProfileStore.TryLoadProfile(workspace.Path, out var restored));
+		Assert.Empty(restored.SelectedPaths!);
+
+		state.ToggleSelection(0);
+		state.ToggleSelection(0);
+
+		Assert.Equal(TerminalTreeCheckState.Unchecked, state.VisibleRows[0].CheckState);
+		Assert.Null(state.BuildSelection().SelectedPaths);
+	}
+
+	[Fact]
+	public async Task RefreshDropsDisappearingProfilePathsWithoutSelectingTheirReplacement()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		workspace.WriteFile("src/first.cs", "class First {}");
+		workspace.WriteFile("src/second.cs", "class Second {}");
+		var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		services.LocalProfileStore.SaveProfile(
+			workspace.Path,
+			new ProjectSelectionProfile(
+				[],
+				[],
+				[],
+				SelectedPaths: ["src/first.cs", "src/second.cs"]));
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Local,
+			TestContext.Current.CancellationToken);
+		Assert.Equal(2, state.Plan.IncludedFiles.Count);
+
+		File.Delete(Path.Combine(workspace.Path, "src", "second.cs"));
+		workspace.WriteFile("src/replacement.cs", "class Replacement {}");
+		await controller.RefreshProjectAsync(state, TestContext.Current.CancellationToken);
+
+		Assert.Equal(["src/first.cs"], state.BuildSelectedPathFrontier());
+		Assert.Equal(["src/first.cs"], state.BuildSelection().SelectedPaths);
+		Assert.Equal("first.cs", Path.GetFileName(Assert.Single(state.Plan.IncludedFiles)));
+		Assert.True(services.LocalProfileStore.TryLoadProfile(workspace.Path, out var stored));
+		Assert.Equal(
+			["src/first.cs", "src/second.cs"],
+			stored.SelectedPaths);
+
+		File.Delete(Path.Combine(workspace.Path, "src", "first.cs"));
+		await controller.RefreshProjectAsync(state, TestContext.Current.CancellationToken);
+
+		Assert.Empty(state.BuildSelectedPathFrontier()!);
+		Assert.Empty(state.BuildSelection().SelectedPaths!);
+		Assert.Empty(state.Plan.IncludedFiles);
+
+		workspace.WriteFile("src/first.cs", "class FirstAgain {}");
+		workspace.WriteFile("src/second.cs", "class SecondAgain {}");
+		var refreshRequest = controller.CaptureStructuralRefresh(
+			state,
+			state.BuildSelection());
+		Assert.Empty(refreshRequest.SelectedPathFrontier!);
+		var refreshResult = await controller.BuildStructuralRefreshAsync(
+			refreshRequest,
+			TestContext.Current.CancellationToken);
+		Assert.Empty(refreshResult.Plan.IncludedFiles);
+		TerminalWorkspaceController.ApplyStructuralRefresh(state, refreshResult);
+
+		Assert.Empty(state.Plan.IncludedFiles);
+		Assert.Empty(state.BuildSelection().SelectedPaths!);
+	}
+
+	[Fact]
+	public async Task RefreshDropsADisappearingFolderFrontierBeforeTheFolderReturns()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		workspace.WriteFile("selected/first.cs", "class First {}");
+		workspace.WriteFile("outside/keep.cs", "class Keep {}");
+		var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		services.LocalProfileStore.SaveProfile(
+			workspace.Path,
+			new ProjectSelectionProfile([], [], [], SelectedPaths: ["selected"]));
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Local,
+			TestContext.Current.CancellationToken);
+
+		Directory.Delete(Path.Combine(workspace.Path, "selected"), recursive: true);
+		await controller.RefreshProjectAsync(state, TestContext.Current.CancellationToken);
+
+		Assert.Empty(state.BuildSelectedPathFrontier()!);
+		Assert.Empty(state.Plan.IncludedFiles);
+
+		workspace.WriteFile("selected/returned.cs", "class Returned {}");
+		await controller.RefreshProjectAsync(state, TestContext.Current.CancellationToken);
+
+		Assert.Empty(state.Plan.IncludedFiles);
+		Assert.Empty(state.BuildSelection().SelectedPaths!);
+		Assert.True(services.LocalProfileStore.TryLoadProfile(workspace.Path, out var stored));
+		Assert.Equal(["selected"], stored.SelectedPaths);
 	}
 
 	[Fact]
@@ -1131,7 +1433,7 @@ public sealed class TerminalWorkspaceContractTests
 			TestContext.Current.CancellationToken);
 		Assert.Single(state.Plan.IncludedFiles);
 
-		state.SelectNone();
+		state.RestoreSelectedRelativePaths([]);
 		await controller.ReprojectSelectionAsync(state, TestContext.Current.CancellationToken);
 		Assert.Empty(services.ContextPlanner.GetSelectedRelativePathFrontier(state.Plan)!);
 		workspace.WriteFile("Second.cs", "class Second {}\n");
@@ -1188,6 +1490,55 @@ public sealed class TerminalWorkspaceContractTests
 			controller.CaptureStructuralRefresh(state, state.BuildSelection()),
 			TestContext.Current.CancellationToken);
 		Assert.Equal(1, partialSelection.PlanBuildCount);
+	}
+
+	[Fact]
+	public async Task StructuralRefreshDoesNotOverwriteSelectionChangedAfterCapture()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		workspace.WriteFile("src/First.cs", "class First {}\n");
+		workspace.WriteFile("src/Second.cs", "class Second {}\n");
+		using var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+		state.SelectAll();
+		var request = controller.CaptureStructuralRefresh(state, state.BuildSelection());
+		var result = await controller.BuildStructuralRefreshAsync(
+			request,
+			TestContext.Current.CancellationToken);
+
+		var sourceRow = state.VisibleRows
+			.Select((row, index) => (row, index))
+			.Single(item => item.row.Node.DisplayName == "src")
+			.index;
+		state.Expand(sourceRow);
+		var secondRow = state.VisibleRows
+			.Select((row, index) => (row, index))
+			.Single(item => item.row.Node.DisplayName == "Second.cs")
+			.index;
+		state.ToggleSelection(secondRow);
+		var revision = state.Revision;
+		var plan = state.Plan;
+
+		Assert.False(TerminalWorkspaceController.ApplyStructuralRefresh(state, result));
+
+		Assert.Equal(revision, state.Revision);
+		Assert.Same(plan, state.Plan);
+		Assert.DoesNotContain(
+			state.BuildSelectedRelativePaths(),
+			path => path.EndsWith("Second.cs", StringComparison.Ordinal));
+
+		var currentResult = await controller.BuildStructuralRefreshAsync(
+			controller.CaptureStructuralRefresh(state, state.BuildSelection()),
+			TestContext.Current.CancellationToken);
+		Assert.True(TerminalWorkspaceController.ApplyStructuralRefresh(state, currentResult));
+		Assert.Equal(revision + 1, state.Revision);
+		Assert.Single(state.Plan.IncludedFiles);
+		Assert.EndsWith("First.cs", state.Plan.IncludedFiles[0], StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -1418,6 +1769,7 @@ public sealed class TerminalWorkspaceContractTests
 			workspace.Path,
 			ProjectProfileReference.Standard,
 			TestContext.Current.CancellationToken);
+		state.SelectAll();
 		var outerIndex = state.VisibleRows
 			.Select((row, index) => (row, index))
 			.Single(item => item.row.Node.DisplayName == "Outer.txt")
@@ -1463,7 +1815,7 @@ public sealed class TerminalWorkspaceContractTests
 			workspace.Path,
 			ProjectProfileReference.Standard,
 			TestContext.Current.CancellationToken);
-		state.SelectNone();
+		state.RestoreSelectedRelativePaths([]);
 		var candidate = GitScopeSelection.WithMode(
 			state.BuildSelection(),
 			GitFilteringMode.Staged);
@@ -1505,15 +1857,20 @@ public sealed class TerminalWorkspaceContractTests
 		var bare = Path.Combine(workspace.Path, "origin.git");
 		Assert.True(TryRunGit(workspace.Path, "clone", "--quiet", "--bare", source, bare));
 		var repositoryUrl = new Uri(bare + Path.DirectorySeparatorChar).AbsoluteUri;
-		var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		using var fileTransportPolicy = RepositoryTransportPolicy.AllowLocalFileTransport();
+		var services = new TerminalServiceFactory(
+			() => appData.Path,
+			new GitRepositoryService(
+				allowFileTransportForTests: true,
+				retainTestManagedMarker: false)).Create(AppLanguage.En);
 		await using var resolvedSource = await new TerminalProjectSourceResolver(
 				services,
 				new TestTerminalEnvironment(),
 				new TerminalOutputOptions { Progress = TerminalProgressMode.Never })
 			.ResolveAsync(repositoryUrl, "main", TestContext.Current.CancellationToken);
 		var checkout = resolvedSource.ProjectPath;
-		var headBefore = ReadGit(checkout, "rev-parse", "HEAD");
-		var statusBefore = ReadGit(checkout, "status", "--porcelain=v1");
+		var headBefore = await ReadGit(checkout, "rev-parse", "HEAD");
+		var statusBefore = await ReadGit(checkout, "status", "--porcelain=v1");
 		var contentBefore = File.ReadAllBytes(Path.Combine(checkout, "Last.txt"));
 		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
 		using var state = await controller.OpenAsync(
@@ -1536,8 +1893,8 @@ public sealed class TerminalWorkspaceContractTests
 
 		Assert.False(result.Plan.HasErrors);
 		Assert.Equal("Last.txt", Path.GetFileName(Assert.Single(result.Plan.IncludedFiles)));
-		Assert.Equal(headBefore, ReadGit(checkout, "rev-parse", "HEAD"));
-		Assert.Equal(statusBefore, ReadGit(checkout, "status", "--porcelain=v1"));
+		Assert.Equal(headBefore, await ReadGit(checkout, "rev-parse", "HEAD"));
+		Assert.Equal(statusBefore, await ReadGit(checkout, "status", "--porcelain=v1"));
 		Assert.Equal(contentBefore, File.ReadAllBytes(Path.Combine(checkout, "Last.txt")));
 		var diffResolver = new GitRemoteDiffRangeResolver();
 		var repeated = await Task.WhenAll(
@@ -1747,8 +2104,12 @@ public sealed class TerminalWorkspaceContractTests
 		public void Report(T value) => report(value);
 	}
 
-	private static bool TryRunGit(string workingDirectory, params string[] arguments)
+	private static bool TryRunGit(string workingDirectory, params string[] arguments) =>
+		TryRunGitAsync(workingDirectory, arguments).GetAwaiter().GetResult();
+
+	private static async Task<bool> TryRunGitAsync(string workingDirectory, string[] arguments)
 	{
+		var command = $"git {string.Join(" ", arguments)}";
 		try
 		{
 			var startInfo = new ProcessStartInfo("git")
@@ -1763,22 +2124,39 @@ public sealed class TerminalWorkspaceContractTests
 				startInfo.ArgumentList.Add(argument);
 			using var process = Process.Start(startInfo);
 			if (process is null)
-				return false;
-			if (!process.WaitForExit(10_000))
 			{
-				process.Kill(entireProcessTree: true);
+				TestContext.Current.TestOutputHelper?.WriteLine($"{command} did not start.");
 				return false;
 			}
-			return process.ExitCode == 0;
+			using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+			timeout.CancelAfter(ProcessSafetyTimeout);
+			var outputTask = process.StandardOutput.ReadToEndAsync(timeout.Token);
+			var errorTask = process.StandardError.ReadToEndAsync(timeout.Token);
+			await ExternalProcessLifetime.WaitForExitOrTerminateAsync(process, timeout.Token).ConfigureAwait(false);
+			var output = await outputTask.WaitAsync(timeout.Token).ConfigureAwait(false);
+			var error = await errorTask.WaitAsync(timeout.Token).ConfigureAwait(false);
+			if (process.ExitCode != 0)
+			{
+				TestContext.Current.TestOutputHelper?.WriteLine(
+					$"{command} exited with code {process.ExitCode}. stdout: {output} stderr: {error}");
+				return false;
+			}
+			return true;
 		}
 		catch (Exception exception) when (
-			exception is InvalidOperationException or IOException or UnauthorizedAccessException)
+			exception is System.ComponentModel.Win32Exception or
+				InvalidOperationException or
+				IOException or
+				UnauthorizedAccessException or
+				OperationCanceledException)
 		{
+			TestContext.Current.TestOutputHelper?.WriteLine(
+				$"{command} failed or timed out after {ProcessSafetyTimeout}: {exception.Message}");
 			return false;
 		}
 	}
 
-	private static string ReadGit(string workingDirectory, params string[] arguments)
+	private static async Task<string> ReadGit(string workingDirectory, params string[] arguments)
 	{
 		var startInfo = new ProcessStartInfo("git")
 		{
@@ -1791,12 +2169,22 @@ public sealed class TerminalWorkspaceContractTests
 		foreach (var argument in arguments)
 			startInfo.ArgumentList.Add(argument);
 		using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Could not start git.");
-		var output = process.StandardOutput.ReadToEnd();
-		var error = process.StandardError.ReadToEnd();
-		Assert.True(process.WaitForExit(10_000));
+		using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+		timeout.CancelAfter(ProcessSafetyTimeout);
+		// Drain both pipes without blocking the process-exit continuation that invoked the test.
+		var outputTask = process.StandardOutput.ReadToEndAsync(timeout.Token);
+		var errorTask = process.StandardError.ReadToEndAsync(timeout.Token);
+		await ExternalProcessLifetime.WaitForExitOrTerminateAsync(process, timeout.Token);
+		var output = await outputTask.WaitAsync(timeout.Token);
+		var error = await errorTask.WaitAsync(timeout.Token);
 		Assert.True(process.ExitCode == 0, error);
 		return output.Trim();
 	}
+
+	private static TimeSpan ProcessSafetyTimeout =>
+		string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase)
+			? TimeSpan.FromMinutes(2)
+			: TimeSpan.FromSeconds(30);
 
 	private static async Task SetPreviewDocumentAsync(
 		TerminalWorkspaceState state,

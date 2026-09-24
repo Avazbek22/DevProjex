@@ -1,7 +1,76 @@
+using DevProjex.Infrastructure.ProjectProfiles;
+
 namespace DevProjex.Tests.Terminal;
 
 public sealed class ProfileCommandContractTests
 {
+	[Fact]
+	public async Task ProfileSaveRejectsAConcurrentUpdateObservedBeforePlanning()
+	{
+		using var workspace = CreateWorkspace();
+		var project = workspace.Path;
+		var dataRoot = workspace.CreateDirectory("conflict-data");
+		var store = new ProjectProfileStore(() => dataRoot);
+		store.SaveProfile(project, new ProjectSelectionProfile([], [".cs"], []));
+		ProfileCommandTestHooks.AfterVersionObserved.Value = (path, observed) =>
+		{
+			Assert.Equal(project, path);
+			Assert.NotNull(observed);
+			Assert.True(new ProjectProfileStore(() => dataRoot).TrySaveProfile(
+				project,
+				new ProjectSelectionProfile([], [".json"], []),
+				observed.Value.AddMinutes(1)));
+		};
+		try
+		{
+			var environment = new TestTerminalEnvironment();
+			var exitCode = await new TerminalApplication(
+					environment,
+					new TerminalServiceFactory(() => dataRoot))
+				.RunAsync(
+					["profile", "save", project, "--extension", ".md", "--language", "en"],
+					TestContext.Current.CancellationToken);
+
+			Assert.Equal(CommandLineExitCodes.PolicyFailure, exitCode);
+			Assert.Empty(environment.StandardOutput);
+			Assert.Contains("DPX-CLI-PROFILE-CONFLICT", environment.StandardError, StringComparison.Ordinal);
+			Assert.Contains("Repeat the command", environment.StandardError, StringComparison.Ordinal);
+			Assert.True(store.TryLoadProfile(project, out var current));
+			Assert.Equal([".json"], current.SelectedExtensions);
+		}
+		finally
+		{
+			ProfileCommandTestHooks.AfterVersionObserved.Value = null;
+		}
+	}
+
+	[Fact]
+	public async Task ProfileSaveDoesNotReportSuccessWhenClockMovesBehindStoredRevision()
+	{
+		using var workspace = CreateWorkspace();
+		var project = workspace.Path;
+		var dataRoot = workspace.CreateDirectory("clock-skew-data");
+		var store = new ProjectProfileStore(() => dataRoot);
+		Assert.True(store.TrySaveProfile(
+			project,
+			new ProjectSelectionProfile([], [".cs"], []),
+			DateTimeOffset.UtcNow.AddMinutes(1)));
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(
+				environment,
+				new TerminalServiceFactory(() => dataRoot))
+			.RunAsync(
+				["profile", "save", project, "--extension", ".md", "--language", "en"],
+				TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.PolicyFailure, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("DPX-CLI-PROFILE-CONFLICT", environment.StandardError, StringComparison.Ordinal);
+		Assert.True(store.TryLoadProfile(project, out var current));
+		Assert.Equal([".cs"], current.SelectedExtensions);
+	}
+
 	[Fact]
 	public void TextProfileEscapesControlCharactersInSelectionValues()
 	{
@@ -27,7 +96,7 @@ public sealed class ProfileCommandContractTests
 	}
 
 	[Fact]
-	public void TextProfileUsesLocalizedAllForEmptySelections()
+	public void TextProfileDistinguishesEmptyCollectionsFromUnrestrictedCollections()
 	{
 		using var workspace = new TemporaryDirectory();
 		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
@@ -39,20 +108,44 @@ public sealed class ProfileCommandContractTests
 			SelectedPaths: []);
 
 		var text = handler.BuildText(selection);
-		var all = services.Localization["Terminal.Profile.All"];
+		Assert.Contains(
+			$"{services.Localization["Terminal.Analysis.Roots"]}: none",
+			text,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			$"{services.Localization["Terminal.Analysis.Extensions"]}: none",
+			text,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			$"{services.Localization["Terminal.Profile.SelectedPaths"]}: none",
+			text,
+			StringComparison.Ordinal);
+	}
 
-		Assert.Contains(
-			$"{services.Localization["Terminal.Analysis.Roots"]}: {all}",
-			text,
-			StringComparison.Ordinal);
-		Assert.Contains(
-			$"{services.Localization["Terminal.Analysis.Extensions"]}: {all}",
-			text,
-			StringComparison.Ordinal);
-		Assert.Contains(
-			$"{services.Localization["Terminal.Profile.SelectedPaths"]}: {all}",
-			text,
-			StringComparison.Ordinal);
+	[Fact]
+	public void TextProfileDistinguishesUnrestrictedCollectionsFromExplicitValues()
+	{
+		using var workspace = new TemporaryDirectory();
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var handler = new ProfileCommandHandler(services, new TestTerminalEnvironment());
+
+		var unrestricted = handler.BuildText(new ProjectSelectionSpec(
+			Roots: null,
+			Extensions: null,
+			SelectedPaths: null));
+		var explicitValues = handler.BuildText(new ProjectSelectionSpec(
+			Roots: ["src"],
+			Extensions: [".cs"],
+			SelectedPaths: ["src/App.cs"]));
+
+		var all = services.Localization["Terminal.Profile.All"];
+		Assert.Contains($"{services.Localization["Terminal.Analysis.Roots"]}: {all}", unrestricted);
+		Assert.Contains($"{services.Localization["Terminal.Analysis.Extensions"]}: {all}", unrestricted);
+		Assert.Contains($"{services.Localization["Terminal.Profile.SelectedPaths"]}: {all}", unrestricted);
+		Assert.Contains($"{services.Localization["Terminal.Analysis.Roots"]}: src", explicitValues);
+		Assert.Contains($"{services.Localization["Terminal.Analysis.Extensions"]}: .cs", explicitValues);
+		Assert.Contains($"{services.Localization["Terminal.Profile.SelectedPaths"]}: src/App.cs", explicitValues);
 	}
 
 	[Fact]
@@ -68,7 +161,7 @@ public sealed class ProfileCommandContractTests
 
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
 		using var document = JsonDocument.Parse(environment.StandardOutput);
-		Assert.Equal(1, document.RootElement.GetProperty("schemaVersion").GetInt32());
+		Assert.Equal(2, document.RootElement.GetProperty("schemaVersion").GetInt32());
 		Assert.Equal("devprojex-profile", document.RootElement.GetProperty("kind").GetString());
 		var selection = document.RootElement.GetProperty("selection");
 		Assert.Equal("gitignore", selection.GetProperty("gitMode").GetString());
@@ -112,7 +205,7 @@ public sealed class ProfileCommandContractTests
 			workspace,
 			"""
 			{
-			  "schemaVersion": 1,
+			  "schemaVersion": 2,
 			  "futureDocumentField": { "enabled": true },
 			  "selection": {
 			    "roots": null,
@@ -134,6 +227,93 @@ public sealed class ProfileCommandContractTests
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
 		Assert.Equal("valid" + Environment.NewLine, environment.StandardOutput);
 		Assert.Empty(environment.StandardError);
+	}
+
+	[Fact]
+	public async Task ProfileValidateReportsLegacySchemaUpgradeInText()
+	{
+		using var workspace = CreateWorkspace();
+		var profile = WriteProfile(
+			workspace,
+			"""
+			{
+			  "schemaVersion": 1,
+			  "selection": {
+			    "selectedPaths": [],
+			    "gitMode": "none",
+			    "exclusions": []
+			  }
+			}
+			""");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(workspace, environment, "profile", "validate", profile);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Equal(
+			"valid" + Environment.NewLine +
+			"Portable profile uses legacy schema version 1 and will be rewritten as version 2 when saved." +
+			Environment.NewLine,
+			environment.StandardOutput);
+		Assert.Empty(environment.StandardError);
+	}
+
+	[Theory]
+	[InlineData("hideSecret")]
+	[InlineData("HideSecrets")]
+	public async Task ProfileValidateRejectsMisspelledSecuritySettings(string propertyName)
+	{
+		using var workspace = CreateWorkspace();
+		var profile = WriteProfile(
+			workspace,
+			$$"""
+			{
+			  "schemaVersion": 2,
+			  "selection": {
+			    "gitMode": "none",
+			    "exclusions": [],
+			    "{{propertyName}}": true
+			  }
+			}
+			""");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(workspace, environment, "profile", "validate", profile);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Contains("DPX-CLI-PROFILE-INVALID", environment.StandardError, StringComparison.Ordinal);
+		Assert.Empty(environment.StandardOutput);
+	}
+
+	[Fact]
+	public async Task PortableProfileExplicitEmptySelectedPathsProducesAnEmptySelection()
+	{
+		using var workspace = CreateWorkspace();
+		var profile = WriteProfile(
+			workspace,
+			"""
+			{
+			  "schemaVersion": 2,
+			  "selection": {
+			    "roots": null,
+			    "extensions": null,
+			    "selectedPaths": [],
+			    "gitMode": "none",
+			    "exclusions": []
+			  }
+			}
+			""");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			"analyze", workspace.Path, "--profile", profile, "--format", "json", "--plain");
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		using var document = JsonDocument.Parse(environment.StandardOutput);
+		Assert.Equal(0, document.RootElement.GetProperty("inventory").GetProperty("files").GetInt32());
+		Assert.Empty(document.RootElement.GetProperty("selection").GetProperty("selectedPaths").EnumerateArray());
 	}
 
 	[Fact]
@@ -289,7 +469,7 @@ public sealed class ProfileCommandContractTests
 			  "selection": {
 			    "roots": null,
 			    "extensions": [".cs"],
-			    "selectedPaths": [],
+			    "selectedPaths": null,
 			    "gitMode": "gitignore",
 			    "exclusions": ["smart-ignore", "hidden-files"]
 			  }
@@ -343,6 +523,10 @@ public sealed class ProfileCommandContractTests
 				workspace,
 				importEnvironment,
 				"profile", "import", profile, workspace.Path, "--apply"));
+		Assert.Contains(
+			"Portable profile uses legacy schema version 1 and will be rewritten as version 2 when saved.",
+			importEnvironment.StandardError,
+			StringComparison.Ordinal);
 
 		var showEnvironment = new TestTerminalEnvironment();
 		Assert.Equal(
@@ -531,6 +715,54 @@ public sealed class ProfileCommandContractTests
 	}
 
 	[Fact]
+	public async Task ExportImportExportPreservesExplicitEmptySelection()
+	{
+		using var workspace = CreateWorkspace();
+		using var output = new TemporaryDirectory();
+		var source = WriteProfile(
+			workspace,
+			"""
+			{
+			  "schemaVersion": 2,
+			  "kind": "devprojex-profile",
+			  "selection": {
+			    "roots": null,
+			    "extensions": null,
+			    "selectedPaths": [],
+			    "gitMode": "none",
+			    "exclusions": [],
+			    "hideSecrets": false,
+			    "hidePrivateData": false,
+			    "compressCode": false,
+			    "stripComments": false,
+			    "stripBlankLines": false
+			  }
+			}
+			""");
+		var exported = Path.Combine(output.Path, "explicit-empty.json");
+
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(
+				workspace,
+				new TestTerminalEnvironment(),
+				"profile", "import", source, workspace.Path, "--apply"));
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(
+				workspace,
+				new TestTerminalEnvironment(),
+				"profile", "export", workspace.Path,
+				"--profile", "local",
+				"-o", exported));
+
+		using var document = JsonDocument.Parse(await File.ReadAllTextAsync(
+			exported,
+			TestContext.Current.CancellationToken));
+		Assert.Empty(document.RootElement.GetProperty("selection").GetProperty("selectedPaths").EnumerateArray());
+	}
+
+	[Fact]
 	public async Task LocalProfilePersistenceFailuresReturnRuntimeErrorAtCommandBoundary()
 	{
 		using var workspace = CreateWorkspace();
@@ -615,7 +847,7 @@ public sealed class ProfileCommandContractTests
 			"--force");
 		Assert.Equal(CommandLineExitCodes.Success, success);
 		using var document = JsonDocument.Parse(File.ReadAllText(destination));
-		Assert.Equal(1, document.RootElement.GetProperty("schemaVersion").GetInt32());
+		Assert.Equal(2, document.RootElement.GetProperty("schemaVersion").GetInt32());
 		Assert.Equal("devprojex-profile", document.RootElement.GetProperty("kind").GetString());
 		Assert.Equal(Path.GetFullPath(destination) + Environment.NewLine, forceEnvironment.StandardOutput);
 	}

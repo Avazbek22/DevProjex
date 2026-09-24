@@ -1,0 +1,27 @@
+{
+  "selectedBeforeRanking": true,
+  "selectionRule": "One entry point, central service, public contract, test, and routine DTO or utility per repository.",
+  "repositories": {
+    "DevProjex": [
+      { "role": "entry", "path": "Apps/TerminalHost/Program.cs" },
+      { "role": "central-service", "path": "Application/Services/ProjectContentMetricsCalculator.cs" },
+      { "role": "contract", "path": "Application/Compression/ICodeCompressor.cs" },
+      { "role": "test", "path": "Tests/DevProjex.Tests.Unit/TreeSitterCodeCompressorTests.cs" },
+      { "role": "dto", "path": "Kernel/Contracts/TreeNodeDescriptor.cs" }
+    ],
+    "repomix": [
+      { "role": "entry", "path": "src/index.ts" },
+      { "role": "central-service", "path": "src/core/packager.ts" },
+      { "role": "contract", "path": "src/shared/types.ts" },
+      { "role": "test", "path": "tests/core/file/fileProcess.test.ts" },
+      { "role": "utility", "path": "src/shared/patternUtils.ts" }
+    ],
+    "flask": [
+      { "role": "entry", "path": "src/flask/__main__.py" },
+      { "role": "central-service", "path": "src/flask/app.py" },
+      { "role": "contract", "path": "src/flask/typing.py" },
+      { "role": "test", "path": "tests/test_basic.py" },
+      { "role": "utility", "path": "src/flask/helpers.py" }
+    ]
+  }
+}

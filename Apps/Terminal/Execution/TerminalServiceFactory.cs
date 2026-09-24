@@ -1,22 +1,57 @@
 using DevProjex.Terminal.Tui;
+using DevProjex.Terminal.CommandLine;
+using DevProjex.Infrastructure.LiveContext;
 using DevProjex.Infrastructure.Persistence;
 using DevProjex.Infrastructure.Secrets;
+using DevProjex.Infrastructure.ThemePresets;
 using DevProjex.Application.Secrets;
 
 namespace DevProjex.Terminal.Execution;
 
 public sealed class TerminalServiceFactory(
-	Func<string>? appDataPathProvider = null)
+	Func<string>? appDataPathProvider = null,
+	TerminalHostCapabilities? hostCapabilities = null)
 {
+	public static TerminalServiceFactory FromEnvironment(
+		IReadOnlyDictionary<string, string?> variables,
+		TerminalHostCapabilities hostCapabilities)
+	{
+		ArgumentNullException.ThrowIfNull(variables);
+		ArgumentNullException.ThrowIfNull(hostCapabilities);
+		variables.TryGetValue(InvocationEnvironment.InternalDataRootVariable, out var value);
+		var dataRoot = UserDataPathResolver.ResolveInternalDataRoot(value);
+		if (dataRoot is null)
+			return new TerminalServiceFactory(hostCapabilities: hostCapabilities);
+
+		return new TerminalServiceFactory(() => dataRoot, hostCapabilities);
+	}
+
 	private readonly Func<AppLanguage, TerminalServices>? _servicesProvider;
 	private readonly Action? _fullServiceCreationObserver;
+	private readonly IGitRepositoryService? _gitRepositoryService;
+	private readonly Func<StoreUserDataMigrationStatus> _migrationProbe =
+		StoreUserDataMigration.TryMigrateCurrentWindowsPackage;
+	private readonly Action<TimeSpan> _migrationWait = Thread.Sleep;
+	private readonly object _migrationGate = new();
+	private bool _migrationAdmitted;
 	internal Func<string>? AppDataPathProvider => appDataPathProvider;
+	internal TerminalHostCapabilities HostCapabilities { get; } =
+		hostCapabilities ?? TerminalHostCapabilities.Desktop;
 
 	internal TerminalServiceFactory(Func<AppLanguage, TerminalServices> servicesProvider)
 		: this()
 	{
 		_servicesProvider = servicesProvider ??
 			throw new ArgumentNullException(nameof(servicesProvider));
+	}
+
+	internal TerminalServiceFactory(
+		Func<StoreUserDataMigrationStatus> migrationProbe,
+		Action<TimeSpan> migrationWait)
+		: this()
+	{
+		_migrationProbe = migrationProbe ?? throw new ArgumentNullException(nameof(migrationProbe));
+		_migrationWait = migrationWait ?? throw new ArgumentNullException(nameof(migrationWait));
 	}
 
 	internal TerminalServiceFactory(
@@ -28,8 +63,18 @@ public sealed class TerminalServiceFactory(
 			throw new ArgumentNullException(nameof(fullServiceCreationObserver));
 	}
 
+	internal TerminalServiceFactory(
+		Func<string> appDataPathProvider,
+		IGitRepositoryService gitRepositoryService)
+		: this(appDataPathProvider)
+	{
+		_gitRepositoryService = gitRepositoryService ??
+			throw new ArgumentNullException(nameof(gitRepositoryService));
+	}
+
 	public TerminalServices Create(AppLanguage language)
 	{
+		EnsureMigrationAdmission();
 		if (_servicesProvider is not null)
 			return _servicesProvider(language);
 		_fullServiceCreationObserver?.Invoke();
@@ -83,7 +128,7 @@ public sealed class TerminalServiceFactory(
 			portableProfiles.LoadAsync);
 		var repoCache = CreateRepositoryCache(resolvedAppDataPathProvider);
 		var recentProjects = CreateRecentProjectsStore(resolvedAppDataPathProvider);
-		var gitRepository = new GitRepositoryService();
+		var gitRepository = _gitRepositoryService ?? new GitRepositoryService();
 		var sourceIdentityResolver = new ProjectSourceIdentityResolver(gitRepository, repoCache);
 		var repositoryCacheCatalog = new RepositoryCacheCatalog(gitRepository, repoCache);
 		var persistentSecretIdentity = new PersistentSecretIdentityProvider(resolvedAppDataPathProvider);
@@ -112,6 +157,19 @@ public sealed class TerminalServiceFactory(
 			secretRedactionSession.Dispose();
 			throw;
 		}
+		DependencyFactsEngine dependencyFactsEngine;
+		try
+		{
+			dependencyFactsEngine = new DependencyFactsEngine(
+				new TreeSitterDependencyFactExtractor(),
+				new FileDependencyConfigurationProvider());
+		}
+		catch
+		{
+			codeCompressionSession.Dispose();
+			secretRedactionSession.Dispose();
+			throw;
+		}
 
 		try
 		{
@@ -134,6 +192,7 @@ public sealed class TerminalServiceFactory(
 				new GitRemoteDiffRangeResolver());
 
 			return new TerminalServices(
+				HostCapabilities: HostCapabilities,
 				Localization: localization,
 				AnalysisService: analysis,
 				IgnoreRulesService: ignoreRules,
@@ -153,7 +212,10 @@ public sealed class TerminalServiceFactory(
 				PortableProfileService: portableProfiles,
 				SelectionResolver: selectionResolver,
 				TerminalSettingsStore: new TerminalSettingsStore(resolvedAppDataPathProvider),
+				UserSettingsStore: new UserSettingsStore(resolvedAppDataPathProvider),
 				TerminalCommandSetupService: new TerminalCommandSetupService(),
+				McpConnectionService: new McpConnectionService(localization),
+				McpClientLaunchService: new McpClientLaunchService(localization),
 				GitTrackedModeReadinessProbe: new GitTrackedModeReadinessProbe(),
 				RecentWorkspacesService: new RecentWorkspacesService(),
 				RecentProjectsStore: recentProjects,
@@ -161,11 +223,16 @@ public sealed class TerminalServiceFactory(
 				RepoCacheService: repoCache,
 				SecretRedactionSession: secretRedactionSession,
 				CodeCompressionSession: codeCompressionSession,
-				SecretRedactionOutputPreparer: new SecretRedactionOutputPreparer(contentAnalyzer))
+				DependencyFactsEngine: dependencyFactsEngine,
+				SecretRedactionOutputPreparer: new SecretRedactionOutputPreparer(contentAnalyzer),
+				LiveSessionRegistry: appDataPathProvider is null
+					? new LiveSessionRegistry()
+					: new LiveSessionRegistry(resolvedAppDataPathProvider))
 				.AttachOwnedLifetime();
 		}
 		catch
 		{
+			dependencyFactsEngine.Dispose();
 			codeCompressionSession.Dispose();
 			secretRedactionSession.Dispose();
 			throw;
@@ -177,6 +244,7 @@ public sealed class TerminalServiceFactory(
 
 	internal TerminalCacheServiceScope CreateCacheScope(AppLanguage language)
 	{
+		EnsureMigrationAdmission();
 		if (_servicesProvider is not null)
 		{
 			var fullScope = CreateScope(language);
@@ -196,12 +264,13 @@ public sealed class TerminalServiceFactory(
 			new TerminalCacheServices(
 				localization,
 				repositoryCache,
-				new GitRepositoryService()),
+				_gitRepositoryService ?? new GitRepositoryService()),
 			repositoryCache);
 	}
 
 	internal TerminalRecentServiceScope CreateRecentScope(AppLanguage language)
 	{
+		EnsureMigrationAdmission();
 		if (_servicesProvider is not null)
 		{
 			var fullScope = CreateScope(language);
@@ -231,6 +300,23 @@ public sealed class TerminalServiceFactory(
 		appDataPathProvider is null
 			? new RecentProjectsStore()
 			: new RecentProjectsStore(resolvedAppDataPathProvider);
+
+	internal void EnsureMigrationAdmission()
+	{
+		if (appDataPathProvider is not null || _servicesProvider is not null)
+			return;
+
+		lock (_migrationGate)
+		{
+			if (_migrationAdmitted)
+				return;
+
+			var status = StoreUserDataMigrationAdmission.Run(_migrationProbe, _migrationWait);
+			if (!StoreUserDataMigrationAdmission.IsReady(status))
+				throw new StoreUserDataMigrationUnavailableException(status);
+			_migrationAdmitted = true;
+		}
+	}
 }
 
 internal sealed record TerminalCacheServices(

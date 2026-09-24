@@ -2,6 +2,28 @@ namespace DevProjex.Avalonia.Services;
 
 public static class MessageDialog
 {
+    public static async Task<int> ShowChoiceAsync(
+        Window owner,
+        string title,
+        string message,
+        params string[] choices)
+    {
+        ArgumentNullException.ThrowIfNull(choices);
+        ArgumentOutOfRangeException.ThrowIfLessThan(choices.Length, 2);
+        var completion = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var themeVariant = DialogSurfaceFactory.ResolveThemeVariant(owner);
+        var brushes = DialogSurfaceFactory.ResolveBrushes(owner, themeVariant);
+        var dialog = DialogSurfaceFactory.CreateWindow(
+            title,
+            themeVariant,
+            brushes,
+            BuildChoiceContent(message, choices, completion),
+            width: 560,
+            height: 280);
+        dialog.Closed += (_, _) => completion.TrySetResult(0);
+        _ = dialog.ShowDialog(owner);
+        return await completion.Task.ConfigureAwait(false);
+    }
     public static async Task ShowAsync(
         Window owner,
         string title,
@@ -25,25 +47,81 @@ public static class MessageDialog
             dialog.Show();
     }
 
-    public static async Task<bool> ShowConfirmationAsync(
+    public static Task<bool> ShowConfirmationAsync(
         Window owner,
         string title,
         string message,
         string confirmButtonText,
         string cancelButtonText,
         double width = 520,
-        double height = 260)
+        double height = 260) =>
+        ShowConfirmationCoreAsync(
+            owner,
+            title,
+            message,
+            confirmButtonText,
+            cancelButtonText,
+            width,
+            height,
+            fitContentHeight: false);
+
+    internal static Task<bool> ShowContentSizedConfirmationAsync(
+        Window owner,
+        string title,
+        string message,
+        string confirmButtonText,
+        string cancelButtonText,
+        double width = 520) =>
+        ShowConfirmationCoreAsync(
+            owner,
+            title,
+            message,
+            confirmButtonText,
+            cancelButtonText,
+            width,
+            height: 0,
+            fitContentHeight: true);
+
+    internal static Task<bool> ShowScrollableConfirmationAsync(
+        Window owner,
+        string title,
+        string message,
+        string confirmButtonText,
+        string cancelButtonText) =>
+        ShowConfirmationCoreAsync(
+            owner,
+            title,
+            message,
+            confirmButtonText,
+            cancelButtonText,
+            width: 560,
+            height: 340,
+            fitContentHeight: false,
+            scrollMessage: true);
+
+    private static async Task<bool> ShowConfirmationCoreAsync(
+        Window owner,
+        string title,
+        string message,
+        string confirmButtonText,
+        string cancelButtonText,
+        double width,
+        double height,
+        bool fitContentHeight,
+        bool scrollMessage = false)
     {
         var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var themeVariant = DialogSurfaceFactory.ResolveThemeVariant(owner);
-        var brushes = DialogSurfaceFactory.ResolveBrushes(owner, themeVariant);
-        var dialog = DialogSurfaceFactory.CreateWindow(
+        var dialog = CreateConfirmationWindow(
+            owner,
             title,
-            themeVariant,
-            brushes,
-            BuildConfirmationContent(message, confirmButtonText, cancelButtonText, completion),
-            width: width,
-            height: height);
+            message,
+            confirmButtonText,
+            cancelButtonText,
+            width,
+            height,
+            fitContentHeight,
+            completion,
+            scrollMessage);
 
         dialog.Closed += (_, _) => completion.TrySetResult(false);
 
@@ -53,6 +131,30 @@ public static class MessageDialog
             dialog.Show();
 
         return await completion.Task.ConfigureAwait(false);
+    }
+
+    internal static Window CreateConfirmationWindow(
+        Window? owner,
+        string title,
+        string message,
+        string confirmButtonText,
+        string cancelButtonText,
+        double width,
+        double height,
+        bool fitContentHeight,
+        TaskCompletionSource<bool> completion,
+        bool scrollMessage = false)
+    {
+        ArgumentNullException.ThrowIfNull(completion);
+        var themeVariant = DialogSurfaceFactory.ResolveThemeVariant(owner);
+        var brushes = DialogSurfaceFactory.ResolveBrushes(owner, themeVariant);
+        return DialogSurfaceFactory.CreateWindow(
+            title,
+            themeVariant,
+            brushes,
+            BuildConfirmationContent(message, confirmButtonText, cancelButtonText, completion, scrollMessage),
+            width,
+            fitContentHeight ? null : height);
     }
 
     private static Control BuildContent(string message, string closeButtonText)
@@ -89,7 +191,8 @@ public static class MessageDialog
         string message,
         string confirmButtonText,
         string cancelButtonText,
-        TaskCompletionSource<bool> completion)
+        TaskCompletionSource<bool> completion,
+        bool scrollMessage)
     {
         var text = new TextBlock
         {
@@ -132,7 +235,14 @@ public static class MessageDialog
         DockPanel.SetDock(buttonPanel, Dock.Bottom);
 
         panel.Children.Add(buttonPanel);
-        panel.Children.Add(text);
+        panel.Children.Add(scrollMessage
+            ? new ScrollViewer
+            {
+                Content = text,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
+            }
+            : text);
 
         confirmButton.Click += (_, _) =>
         {
@@ -146,6 +256,52 @@ public static class MessageDialog
             (TopLevel.GetTopLevel(panel) as Window)?.Close();
         };
 
+        return panel;
+    }
+
+    private static Control BuildChoiceContent(
+        string message,
+        IReadOnlyList<string> choices,
+        TaskCompletionSource<int> completion)
+    {
+        var text = new TextBlock
+        {
+            Text = message,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(12),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        var buttonPanel = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(6)
+        };
+        for (var index = 0; index < choices.Count; index++)
+        {
+            var choiceIndex = index;
+            var button = new Button
+            {
+                Content = choices[index],
+                MinWidth = 110,
+                Margin = new Thickness(6),
+                HorizontalContentAlignment = HorizontalAlignment.Center,
+                VerticalContentAlignment = VerticalAlignment.Center
+            };
+            if (index == choices.Count - 1)
+                button.Classes.Add("primary-action");
+            button.Click += (_, _) =>
+            {
+                completion.TrySetResult(choiceIndex);
+                (TopLevel.GetTopLevel(buttonPanel) as Window)?.Close();
+            };
+            buttonPanel.Children.Add(button);
+        }
+
+        var panel = new DockPanel();
+        DockPanel.SetDock(buttonPanel, Dock.Bottom);
+        panel.Children.Add(buttonPanel);
+        panel.Children.Add(text);
         return panel;
     }
 }

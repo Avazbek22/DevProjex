@@ -127,7 +127,7 @@ Nella finestra Git Clone può comparire sotto il campo URL un elenco «Repositor
 
 Regole:
 * l’elenco appare solo se nella cronologia esistono già repository clonati di recente;
-* vengono aggiunte all’elenco solo le origini di repository di rete (`https://`, `http://`, `ssh://`, `git://` e la sintassi SCP);
+* vengono aggiunte all’elenco solo le origini di repository di rete (`https://`, `ssh://` e la sintassi SCP);
 * i percorsi locali e le origini `file://` non vengono aggiunti a questo elenco;
 * non vengono creati duplicati — clonare di nuovo lo stesso repository lo sposta in cima;
 * vengono conservati fino a 16 repository recenti;

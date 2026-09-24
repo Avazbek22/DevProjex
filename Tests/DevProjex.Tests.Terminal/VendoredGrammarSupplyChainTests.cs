@@ -1,13 +1,23 @@
 using System.Buffers.Binary;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Text;
 using System.Xml.Linq;
+using DevProjex.Application.Compression;
+using DevProjex.Infrastructure.Compression;
 using TreeSitter;
 
 namespace DevProjex.Tests.Terminal;
 
 public sealed class VendoredGrammarSupplyChainTests
 {
+	private const string YamlPatchPath =
+		"tools/grammars/patches/tree-sitter-yaml-v0.7.2-serialization-boundary.patch";
+	private const string YamlPatchSha256 =
+		"e2843a09a8c9aadd229dfb6e3d24628c00f13eb60a2034a8bb127d8e650ca5b5";
+	private const string YamlPatchedScannerSha256 =
+		"74884f44fb927ca63a9c37e375f2cd316f524eb680d71a1b6915bf7fddaa1234";
+
 	private static readonly IReadOnlyDictionary<string, GrammarContract> ExpectedGrammars =
 		new Dictionary<string, GrammarContract>(StringComparer.Ordinal)
 		{
@@ -142,12 +152,11 @@ public sealed class VendoredGrammarSupplyChainTests
 			}
 			else if (name.Equals("tree-sitter-yaml", StringComparison.Ordinal))
 			{
-				var patch = Assert.Single(grammar.GetProperty("sourcePatches").EnumerateArray());
-				Assert.Equal("src/scanner.c", patch.GetProperty("path").GetString());
-				Assert.Contains(
-					"size + 2 * sizeof(int16_t) <= TREE_SITTER_SERIALIZATION_BUFFER_SIZE",
-					patch.GetProperty("newText").GetString(),
-					StringComparison.Ordinal);
+				Assert.False(grammar.TryGetProperty("sourcePatches", out _));
+				var patch = Assert.Single(grammar.GetProperty("sourcePatchArtifacts").EnumerateArray());
+				Assert.Equal(YamlPatchPath, patch.GetProperty("artifactPath").GetString());
+				Assert.Equal("src/scanner.c", patch.GetProperty("targetPath").GetString());
+				Assert.Equal(YamlPatchedScannerSha256, patch.GetProperty("resultSha256").GetString());
 			}
 			else
 			{
@@ -188,6 +197,69 @@ public sealed class VendoredGrammarSupplyChainTests
 					$"{name}/{rid}: stripped grammar still contains debug sections.");
 			}
 		}
+	}
+
+	[Fact]
+	public void YamlScannerPatchIsPinnedAndRejectsAPartialSerializationRecord()
+	{
+		var rootPath = PublishedApplicationLocator.FindRepositoryRoot();
+		using var manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(
+			rootPath,
+			"Infrastructure",
+			"Grammars",
+			"vendored",
+			"vendored-grammars.lock.json")));
+		var yaml = Assert.Single(
+			manifest.RootElement.GetProperty("grammars").EnumerateArray(),
+			static grammar => grammar.GetProperty("name").GetString() == "tree-sitter-yaml");
+		var patch = Assert.Single(yaml.GetProperty("sourcePatchArtifacts").EnumerateArray());
+		Assert.Equal(YamlPatchSha256, patch.GetProperty("sha256").GetString());
+		var patchPath = Path.Combine(
+			rootPath,
+			patch.GetProperty("artifactPath").GetString()!.Replace('/', Path.DirectorySeparatorChar));
+		var patchBytes = File.ReadAllBytes(patchPath);
+		Assert.Equal(
+			patch.GetProperty("sha256").GetString(),
+			Convert.ToHexStringLower(SHA256.HashData(patchBytes)));
+		Assert.Contains(
+			"*.patch text eol=lf",
+			File.ReadAllText(Path.Combine(Path.GetDirectoryName(patchPath)!, ".gitattributes")),
+			StringComparison.Ordinal);
+
+		var patchText = Encoding.UTF8.GetString(patchBytes);
+		Assert.Contains(
+			"-    for (; typ_itr != typ_end && size < TREE_SITTER_SERIALIZATION_BUFFER_SIZE;",
+			patchText,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"+    for (; typ_itr != typ_end && size + 2 * sizeof(int16_t) <= " +
+			"TREE_SITTER_SERIALIZATION_BUFFER_SIZE;",
+			patchText,
+			StringComparison.Ordinal);
+
+		const int bufferSize = 1024;
+		const int serializedHeaderSize = 5 * sizeof(short);
+		const int serializedEntrySize = 2 * sizeof(short);
+		var sizeWithTwoBytesFree = serializedHeaderSize + (253 * serializedEntrySize);
+		Assert.Equal(2, bufferSize - sizeWithTwoBytesFree);
+		Assert.False(sizeWithTwoBytesFree + serializedEntrySize <= bufferSize);
+		Assert.True(sizeWithTwoBytesFree - serializedEntrySize + serializedEntrySize <= bufferSize);
+
+		var buildScript = File.ReadAllText(Path.Combine(
+			rootPath,
+			"tools",
+			"grammars",
+			"build-vendored-grammars.ps1"));
+		Assert.Contains("Assert-FileHash $artifactPath $patch.sha256", buildScript, StringComparison.Ordinal);
+		Assert.Contains(
+			"git -c core.autocrlf=false -C $SourceDirectory apply",
+			buildScript,
+			StringComparison.Ordinal);
+		Assert.Contains("Assert-FileHash $targetPath $patch.resultSha256", buildScript, StringComparison.Ordinal);
+		Assert.Contains(
+			"Apply-SourcePatchArtifacts $grammar $sourceDirectory",
+			buildScript,
+			StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -322,6 +394,27 @@ public sealed class VendoredGrammarSupplyChainTests
 		}
 	}
 
+	[Theory]
+	[InlineData(200)]
+	[InlineData(300)]
+	[InlineData(600)]
+	public void VendoredYamlSafelyTransformsDeeplyNestedDocuments(int levels)
+	{
+		var source = CreateNestedYaml(levels, includeComments: true);
+		using var compressor = new TreeSitterCodeCompressor(CodeCompressionFactory.CreateLocator());
+		using var scope = compressor.CreateScope(Path.GetTempPath(), CodeTransformKinds.Comments);
+
+		var analysis = scope.Analyze(
+			"deep.yaml",
+			"deep.yaml",
+			source,
+			TestContext.Current.CancellationToken);
+		var result = analysis.GetResult(source);
+
+		Assert.Equal(CodeCompressionOutcome.Compressed, analysis.Plan.Outcome);
+		Assert.Equal(CreateNestedYaml(levels, includeComments: false), result.Text);
+	}
+
 	[Fact]
 	public void VendoredGrammarsUseTheSameDeliveryAndExclusionContractAsPackageGrammars()
 	{
@@ -368,6 +461,23 @@ public sealed class VendoredGrammarSupplyChainTests
 			? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".nuget", "packages")
 			: configuredRoot;
 		return Path.Combine(packagesRoot, "treesitter.dotnet", version);
+	}
+
+	private static string CreateNestedYaml(int levels, bool includeComments)
+	{
+		var source = new StringBuilder("---\n");
+		for (var depth = 0; depth < levels; depth++)
+		{
+			source.Append(' ', depth)
+				.Append("level_")
+				.Append(depth)
+				.Append(':');
+			if (includeComments)
+				source.Append(" # nested mapping");
+			source.Append('\n');
+		}
+
+		return source.Append(' ', levels).Append("value: safe\n").ToString();
 	}
 
 	private static void AssertBinaryShape(ReadOnlySpan<byte> bytes, string format, ushort architecture)

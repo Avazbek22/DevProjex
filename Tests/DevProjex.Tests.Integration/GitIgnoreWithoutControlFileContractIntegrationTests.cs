@@ -38,9 +38,8 @@ public sealed class GitIgnoreWithoutControlFileContractIntegrationTests
 		{
 			".git-owned/keep.txt",
 			".github/workflows/build.yml",
-			"src/App.cs",
-			"src/nested/Feature.cs",
-			"worktree/Tracked.cs"
+			// Embedded repository boundaries now hide their files even without ignore patterns.
+			"src/App.cs"
 		};
 		AssertFileSet(expected, workspace.Path, analysis.Tree.Root, "analysis");
 		Assert.Equal(expected, Normalize(workspace.Path, context.IncludedFiles));

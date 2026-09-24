@@ -1,18 +1,35 @@
 namespace DevProjex.Infrastructure.ThemePresets;
 
+[Flags]
+public enum ThemePresetFields
+{
+    None = 0,
+    BackgroundTransparency = 1,
+    PanelContrast = 2,
+    MenuTransparency = 4,
+    BorderVisibility = 8,
+    All = BackgroundTransparency | PanelContrast | MenuTransparency | BorderVisibility
+}
+
 public sealed class ThemePresetSession
 {
     private readonly ThemeSettingsStore _store;
     private readonly HashSet<string> _changedPresetKeys = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, ThemePresetFields> _changedPresetFields =
+        new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<ThemeVariant> _changedEffectThemes = [];
+    private readonly bool _startupStoreTemporarilyUnavailable;
     private bool _selectionModeChanged;
+    private bool _selectionChanged;
 
     public ThemePresetSession(
         ThemeSettingsStore store,
         ThemeSettingsDocument database,
-        ThemeVariant? systemTheme = null)
+        ThemeVariant? systemTheme = null,
+        bool startupStoreTemporarilyUnavailable = false)
     {
         _store = store;
+        _startupStoreTemporarilyUnavailable = startupStoreTemporarilyUnavailable;
         Database = database;
 
         CurrentMode = Enum.IsDefined(database.SelectedThemeMode)
@@ -38,7 +55,9 @@ public sealed class ThemePresetSession
             ThemeSelectionPolicy.GetExplicitMode(theme),
             theme,
             effect,
-            currentValues);
+            currentValues,
+            explicitModeSelection: true,
+            explicitEffectSelection: true);
     }
 
     public ThemePreset SelectMode(
@@ -47,11 +66,26 @@ public sealed class ThemePresetSession
         ThemePreset currentValues)
     {
         var theme = ThemeSelectionPolicy.ResolveEffectiveTheme(mode, systemTheme);
-        return SelectModeAndEffect(mode, theme, GetPreferredEffect(theme), currentValues);
+        return SelectModeAndEffect(
+            mode,
+            theme,
+            GetPreferredEffect(theme),
+            currentValues,
+            explicitModeSelection: true,
+            explicitEffectSelection: false);
     }
 
-    public ThemePreset SelectEffect(ThemeEffectMode effect, ThemePreset currentValues)
-        => SelectModeAndEffect(CurrentMode, CurrentTheme, effect, currentValues);
+    public ThemePreset SelectEffect(
+        ThemeEffectMode effect,
+        ThemePreset currentValues,
+        bool explicitSelection = true)
+        => SelectModeAndEffect(
+            CurrentMode,
+            CurrentTheme,
+            effect,
+            currentValues,
+            explicitModeSelection: false,
+            explicitEffectSelection: explicitSelection);
 
     public ThemePreset SynchronizeSystemTheme(
         ThemeVariant? systemTheme,
@@ -79,9 +113,16 @@ public sealed class ThemePresetSession
         IsDirty = true;
     }
 
-    public void MarkDirty()
+    public void MarkDirty() => MarkDirty(ThemePresetFields.All);
+
+    public void MarkDirty(ThemePresetFields fields)
     {
-        _changedPresetKeys.Add(GetSelectionKey(CurrentTheme, CurrentEffect));
+        if (fields == ThemePresetFields.None)
+            return;
+
+        var key = GetSelectionKey(CurrentTheme, CurrentEffect);
+        _changedPresetKeys.Add(key);
+        AddChangedFields(key, fields);
         IsDirty = true;
     }
 
@@ -96,14 +137,19 @@ public sealed class ThemePresetSession
                 _changedPresetKeys,
                 Database.SelectedPreset,
                 _selectionModeChanged,
-                _changedEffectThemes))
+                _changedEffectThemes,
+                _startupStoreTemporarilyUnavailable ? _changedPresetFields : null,
+                updateSelectedPreset: !_startupStoreTemporarilyUnavailable || _selectionChanged,
+                refreshDocumentAfterPersist: !_startupStoreTemporarilyUnavailable))
         {
             return false;
         }
 
         _changedPresetKeys.Clear();
+        _changedPresetFields.Clear();
         _changedEffectThemes.Clear();
         _selectionModeChanged = false;
+        _selectionChanged = false;
         IsDirty = false;
         return true;
     }
@@ -123,6 +169,9 @@ public sealed class ThemePresetSession
         if (forceChanged || previous != current)
         {
             _changedPresetKeys.Add(key);
+            AddChangedFields(
+                key,
+                forceChanged ? ThemePresetFields.All : GetChangedFields(previous, current));
             IsDirty = true;
         }
     }
@@ -131,7 +180,9 @@ public sealed class ThemePresetSession
         ThemeSelectionMode mode,
         ThemeVariant theme,
         ThemeEffectMode effect,
-        ThemePreset currentValues)
+        ThemePreset currentValues,
+        bool explicitModeSelection,
+        bool explicitEffectSelection)
     {
         var previousMode = CurrentMode;
         var previousEffect = GetPreferredEffect(theme);
@@ -143,12 +194,36 @@ public sealed class ThemePresetSession
         Database.SelectedThemeMode = mode;
         SetPreferredEffect(theme, effect);
         Database.SelectedPreset = GetSelectionKey(theme, effect);
-        if (previousMode != mode)
+        _selectionChanged |= explicitModeSelection || explicitEffectSelection;
+        if (_startupStoreTemporarilyUnavailable ? explicitModeSelection : previousMode != mode)
             _selectionModeChanged = true;
-        if (previousEffect != effect)
+        if (_startupStoreTemporarilyUnavailable ? explicitEffectSelection : previousEffect != effect)
             _changedEffectThemes.Add(theme);
-        IsDirty = true;
+        if (!_startupStoreTemporarilyUnavailable || explicitModeSelection || explicitEffectSelection)
+            IsDirty = true;
         return CurrentPreset;
+    }
+
+    private void AddChangedFields(string key, ThemePresetFields fields)
+    {
+        if (!_startupStoreTemporarilyUnavailable || fields == ThemePresetFields.None)
+            return;
+
+        _changedPresetFields[key] = _changedPresetFields.GetValueOrDefault(key) | fields;
+    }
+
+    private static ThemePresetFields GetChangedFields(ThemePreset previous, ThemePreset current)
+    {
+        var fields = ThemePresetFields.None;
+        if (previous.BackgroundTransparency != current.BackgroundTransparency)
+            fields |= ThemePresetFields.BackgroundTransparency;
+        if (previous.PanelContrast != current.PanelContrast)
+            fields |= ThemePresetFields.PanelContrast;
+        if (previous.MenuTransparency != current.MenuTransparency)
+            fields |= ThemePresetFields.MenuTransparency;
+        if (previous.BorderVisibility != current.BorderVisibility)
+            fields |= ThemePresetFields.BorderVisibility;
+        return fields;
     }
 
     private ThemeEffectMode GetPreferredEffect(ThemeVariant theme)

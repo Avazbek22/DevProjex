@@ -1,0 +1,146 @@
+using System.Diagnostics;
+using System.Text;
+using System.Text.Json;
+using DevProjex.Infrastructure.Git;
+
+namespace DevProjex.Tests.Terminal;
+
+[Collection(TerminalProcessCollection.Name)]
+public sealed class SelectionPathGitProcessTests
+{
+	[Fact]
+	public async Task GitQuotePathFalsePipelineSelectsUnicodeAndLiteralQuoteNames()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var unicodePath = Path.Combine(project, "Пример.cs");
+		const string quoteName = "literal'quote.cs";
+		var quotePath = Path.Combine(project, quoteName);
+		var globalConfig = workspace.WriteFile("gitconfig", string.Empty);
+		var emptyTemplate = workspace.CreateDirectory("git-template");
+		await File.WriteAllTextAsync(unicodePath, "class Пример {}\n", TestContext.Current.CancellationToken);
+		await File.WriteAllTextAsync(quotePath, "class Quote {}\n", TestContext.Current.CancellationToken);
+		await RunGitAsync(project, globalConfig, emptyTemplate, "init", $"--template={emptyTemplate}");
+		await RunGitAsync(project, globalConfig, emptyTemplate, "add", "--", ".");
+		await File.AppendAllTextAsync(unicodePath, "// changed\n", TestContext.Current.CancellationToken);
+		await File.AppendAllTextAsync(quotePath, "// changed\n", TestContext.Current.CancellationToken);
+		var selected = await RunGitAsync(
+			project,
+			globalConfig,
+			emptyTemplate,
+			"-c", "core.quotepath=false", "diff", "--name-only");
+
+		var applicationAssembly = PublishedApplicationLocator.FindApplicationAssembly();
+		using var process = new Process
+		{
+			StartInfo = new ProcessStartInfo
+			{
+				FileName = "dotnet",
+				UseShellExecute = false,
+				CreateNoWindow = true,
+				RedirectStandardInput = true,
+				RedirectStandardOutput = true,
+				RedirectStandardError = true,
+				StandardInputEncoding = new UTF8Encoding(false),
+				StandardOutputEncoding = new UTF8Encoding(false),
+				StandardErrorEncoding = new UTF8Encoding(false)
+			}
+		};
+		foreach (var argument in new[]
+		         {
+			         applicationAssembly, "export", "context", project,
+			         "--view", "content", "--format", "json", "--git-mode", "none",
+			         "--exclude", "none", "--select-from", "-", "--plain", "-o", "-"
+		         })
+			process.StartInfo.ArgumentList.Add(argument);
+		process.StartInfo.Environment[InvocationEnvironment.TerminalHostVariable] = "1";
+		process.StartInfo.Environment[InvocationEnvironment.InternalDataRootVariable] =
+			workspace.CreateDirectory("app-data");
+		Assert.True(process.Start());
+		using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+		timeout.CancelAfter(TimeSpan.FromSeconds(45));
+		var outputTask = process.StandardOutput.ReadToEndAsync(timeout.Token);
+		var errorTask = process.StandardError.ReadToEndAsync(timeout.Token);
+		try
+		{
+			await process.StandardInput.WriteAsync(selected.AsMemory(), timeout.Token);
+			process.StandardInput.Close();
+			await process.WaitForExitAsync(timeout.Token);
+
+			Assert.Equal(CommandLineExitCodes.Success, process.ExitCode);
+			Assert.Empty(await errorTask);
+			using var document = JsonDocument.Parse(await outputTask);
+			var paths = document.RootElement.GetProperty("files")
+				.EnumerateArray().Select(file => file.GetProperty("path").GetString()!).ToArray();
+			Assert.Equal(2, paths.Length);
+			Assert.Contains(paths, path => path.EndsWith('/' + quoteName, StringComparison.Ordinal));
+			Assert.Contains(paths, path => path.EndsWith("/Пример.cs", StringComparison.Ordinal));
+		}
+		finally
+		{
+			if (!process.HasExited)
+			{
+				process.Kill(entireProcessTree: true);
+				await process.WaitForExitAsync(CancellationToken.None);
+			}
+		}
+	}
+
+	private static async Task<string> RunGitAsync(
+		string workingDirectory,
+		string globalConfig,
+		string templateDirectory,
+		params string[] arguments)
+	{
+		using var process = new Process
+		{
+			StartInfo = new ProcessStartInfo
+			{
+				FileName = GitRuntime.GitExecutable,
+				WorkingDirectory = workingDirectory,
+				UseShellExecute = false,
+				CreateNoWindow = true,
+				RedirectStandardInput = true,
+				RedirectStandardOutput = true,
+				RedirectStandardError = true,
+				StandardOutputEncoding = new UTF8Encoding(false),
+				StandardErrorEncoding = new UTF8Encoding(false)
+			}
+		};
+		foreach (var argument in arguments)
+			process.StartInfo.ArgumentList.Add(argument);
+		process.StartInfo.Environment["GIT_CONFIG_NOSYSTEM"] = "1";
+		process.StartInfo.Environment["GIT_CONFIG_GLOBAL"] = globalConfig;
+		process.StartInfo.Environment["GIT_TEMPLATE_DIR"] = templateDirectory;
+		process.StartInfo.Environment["GIT_TERMINAL_PROMPT"] = "0";
+		process.StartInfo.Environment["GCM_INTERACTIVE"] = "Never";
+		try
+		{
+			Assert.True(process.Start());
+			process.StandardInput.Close();
+		}
+		catch (Exception exception) when (exception is System.ComponentModel.Win32Exception)
+		{
+			Assert.Skip("Git is unavailable for the process contract.");
+			return string.Empty;
+		}
+		using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+		timeout.CancelAfter(TimeSpan.FromSeconds(30));
+		var outputTask = process.StandardOutput.ReadToEndAsync(timeout.Token);
+		var errorTask = process.StandardError.ReadToEndAsync(timeout.Token);
+		try
+		{
+			await process.WaitForExitAsync(timeout.Token);
+			Assert.True(process.ExitCode == 0, await errorTask);
+			return await outputTask;
+		}
+		finally
+		{
+			if (!process.HasExited)
+			{
+				process.Kill(entireProcessTree: true);
+				await process.WaitForExitAsync(CancellationToken.None);
+			}
+		}
+	}
+}

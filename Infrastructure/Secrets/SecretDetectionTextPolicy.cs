@@ -47,7 +47,7 @@ internal static class SecretDetectionTextPolicy
 		value = value.Trim();
 		if (value.IsEmpty)
 			return true;
-		if (IsWrapped(value, "${", "}") ||
+		if (IsPureDollarBraceReference(value) ||
 		    IsWrapped(value, "$(", ")") ||
 		    IsWrapped(value, "{{", "}}") ||
 		    IsWrapped(value, "<", ">") ||
@@ -67,6 +67,21 @@ internal static class SecretDetectionTextPolicy
 		for (var index = 1; index < value.Length; index++)
 		{
 			if (value[index] != value[0])
+				return false;
+		}
+		return true;
+	}
+
+	private static bool IsPureDollarBraceReference(ReadOnlySpan<char> value)
+	{
+		if (!IsWrapped(value, "${", "}"))
+			return false;
+		var name = value[2..^1];
+		if (name.IsEmpty || !(char.IsLetter(name[0]) || name[0] == '_'))
+			return false;
+		for (var index = 1; index < name.Length; index++)
+		{
+			if (!char.IsLetterOrDigit(name[index]) && name[index] is not '_' and not '.' and not '-')
 				return false;
 		}
 		return true;

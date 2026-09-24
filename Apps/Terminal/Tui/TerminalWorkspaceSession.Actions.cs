@@ -447,7 +447,7 @@ internal sealed partial class TerminalWorkspaceSession
 			for (var index = 0; index < rows.Count; index++)
 			{
 				if (rows[index].IsEnabled &&
-				    string.Equals(rows[index].Key, selectedKey, StringComparison.Ordinal))
+					string.Equals(rows[index].Key, selectedKey, StringComparison.Ordinal))
 				{
 					return index;
 				}
@@ -703,7 +703,7 @@ internal sealed partial class TerminalWorkspaceSession
 			ApplyWorkspaceLayout();
 		}
 		var target = (View?)GetAggregateControlSection(section).List ??
-		             GetControlSection(section).List;
+					 GetControlSection(section).List;
 		_activeAggregateControlSection = GetAggregateControlSection(section).List is null
 			? null
 			: section;
@@ -813,6 +813,8 @@ internal sealed partial class TerminalWorkspaceSession
 				string.Empty,
 				commandSyntax: TerminalWorkspaceCommandCatalog.Get(
 					TerminalWorkspaceCommandVerb.Copy).Syntax,
+				isAvailable: () => IsRepositoryExportAllowed(
+					Volatile.Read(ref _repositoryStateInconsistent) != 0),
 				execute: () => CopyCurrentContext(new TerminalWorkspaceCommand(
 					TerminalWorkspaceCommandCatalog.Get(TerminalWorkspaceCommandVerb.Copy)))),
 			CreateAction(
@@ -842,7 +844,8 @@ internal sealed partial class TerminalWorkspaceSession
 				"Terminal.Command.ExportContext",
 				"E",
 				commandSyntax: "export context [format] [path]",
-				isAvailable: () => !HasActiveOperation,
+				isAvailable: () => !HasActiveOperation && IsRepositoryExportAllowed(
+					Volatile.Read(ref _repositoryStateInconsistent) != 0),
 				execute: () => ExportContext()),
 			CreateAction(
 				TerminalWorkspaceActionKind.ExportFolder,
@@ -851,7 +854,8 @@ internal sealed partial class TerminalWorkspaceSession
 				"Menu.File.ExportProjectCopy.Folder.Help",
 				"Z",
 				commandSyntax: "export folder <path>",
-				isAvailable: () => !HasActiveOperation,
+				isAvailable: () => !HasActiveOperation && IsRepositoryExportAllowed(
+					Volatile.Read(ref _repositoryStateInconsistent) != 0),
 				execute: () => ExportProject(ProjectCopyExportFormat.Folder)),
 			CreateAction(
 				TerminalWorkspaceActionKind.ExportZip,
@@ -860,7 +864,8 @@ internal sealed partial class TerminalWorkspaceSession
 				"Menu.File.ExportProjectCopy.Zip.Help",
 				"Shift+Z",
 				commandSyntax: "export zip <path>",
-				isAvailable: () => !HasActiveOperation,
+				isAvailable: () => !HasActiveOperation && IsRepositoryExportAllowed(
+					Volatile.Read(ref _repositoryStateInconsistent) != 0),
 				execute: () => ExportProject(ProjectCopyExportFormat.Zip)),
 			CreateAction(
 				TerminalWorkspaceActionKind.SaveProfile,
@@ -868,8 +873,7 @@ internal sealed partial class TerminalWorkspaceSession
 				"Terminal.Tui.SaveProfile",
 				"Terminal.Command.ProfileExport",
 				"P",
-				commandSyntax: TerminalWorkspaceCommandCatalog.Get(
-					TerminalWorkspaceCommandVerb.Profile).Syntax,
+				commandSyntax: "profile save [name]",
 				execute: () => SaveProfile()),
 			CreateAction(
 				TerminalWorkspaceActionKind.OpenDesktop,
@@ -1059,13 +1063,13 @@ internal sealed partial class TerminalWorkspaceSession
 				ApplyContentTransformation(transformation, row.IsSelected != true);
 				return;
 			case TerminalParameterRowKind.Exclusion when row.Exclusion is { } exclusion:
-				{
-					var values = (GetDisplayedSettingsSelection().Exclusions ?? []).ToHashSet();
-					if (!values.Add(exclusion))
-						values.Remove(exclusion);
-					ApplyExclusions(values);
-					return;
-				}
+			{
+				var values = (GetDisplayedSettingsSelection().Exclusions ?? []).ToHashSet();
+				if (!values.Add(exclusion))
+					values.Remove(exclusion);
+				ApplyExclusions(values);
+				return;
+			}
 			case TerminalParameterRowKind.ToggleAllExtensions:
 				ApplyExtensions(
 					row.IsSelected == true
@@ -1073,15 +1077,15 @@ internal sealed partial class TerminalWorkspaceSession
 						: _state?.Plan.AvailableExtensions ?? []);
 				return;
 			case TerminalParameterRowKind.Extension when row.Value is { } extension:
-				{
-					var values = (GetDisplayedSettingsSelection().Extensions ??
-					              _state?.Plan.SelectedExtensions ?? [])
-						.ToHashSet(StringComparer.OrdinalIgnoreCase);
-					if (!values.Add(extension))
-						values.Remove(extension);
-					ApplyExtensions(values);
-					return;
-				}
+			{
+				var values = (GetDisplayedSettingsSelection().Extensions ??
+							  _state?.Plan.SelectedExtensions ?? [])
+					.ToHashSet(StringComparer.OrdinalIgnoreCase);
+				if (!values.Add(extension))
+					values.Remove(extension);
+				ApplyExtensions(values);
+				return;
+			}
 		}
 	}
 
@@ -1150,6 +1154,8 @@ internal sealed partial class TerminalWorkspaceSession
 			return;
 		if (!originatedFromCommandLine)
 			PreserveControlFocusForOperation(TerminalControlSection.Content);
+		if (optionId == IgnoreOptionId.CompressCode)
+			_compressionUnavailableNotified = false;
 		var selection = SetContentTransformation(EnsureSettingsDraft(), optionId, enabled);
 		PublishOptimisticSettings(selection, originatedFromCommandLine);
 	}
@@ -1162,6 +1168,7 @@ internal sealed partial class TerminalWorkspaceSession
 			return;
 		if (!originatedFromCommandLine)
 			PreserveControlFocusForOperation(TerminalControlSection.Content);
+		_compressionUnavailableNotified = false;
 		var selection = EnsureSettingsDraft() with
 		{
 			HideSecrets = enabled,
@@ -1221,6 +1228,7 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		_settingsDraftSelection = selection;
 		_settingsDraftOriginatedFromCommandLine = originatedFromCommandLine;
+		SignalSettingsRefreshStateChanged();
 		RefreshContextControls();
 		_controlsFrame?.SetNeedsDraw();
 		_application.LayoutAndDraw();
@@ -1233,6 +1241,7 @@ internal sealed partial class TerminalWorkspaceSession
 		_settingsDraftExtensionStates = null;
 		_settingsDraftPreferredGitMode = null;
 		_settingsDraftOriginatedFromCommandLine = false;
+		SignalSettingsRefreshStateChanged();
 	}
 
 	private static ProjectSelectionSpec SetContentTransformation(
@@ -1274,7 +1283,7 @@ internal sealed partial class TerminalWorkspaceSession
 			_ => GitFilteringMode.None
 		};
 		if (!HasGitRepository() && next is GitFilteringMode.TrackedFilesOnly or
-		    GitFilteringMode.Staged or GitFilteringMode.Changes)
+			GitFilteringMode.Staged or GitFilteringMode.Changes)
 		{
 			next = GitFilteringMode.None;
 		}
@@ -1483,12 +1492,7 @@ internal sealed partial class TerminalWorkspaceSession
 			"Terminal.Tui.Action.ClearSearch.Description",
 			"Esc",
 			isAvailable: () => _preview?.SearchQuery.Length > 0,
-			execute: () =>
-			{
-				CancelPreviewSearch(clearQuery: true);
-				_preview?.ClearSearch();
-				UpdatePanelTitles();
-			}));
+			execute: () => ClearPreviewSearch()));
 		actions.Add(CreateAction(
 			TerminalWorkspaceActionKind.Quit,
 			"Terminal.Tui.Source",
@@ -1535,7 +1539,7 @@ internal sealed partial class TerminalWorkspaceSession
 			return [];
 		return BuildWelcomeActions(_welcomeContext)
 			.Select(action => new TerminalPaletteItem(
-				$"welcome.palette.{action.Kind}",
+				BuildWelcomePaletteItemId(action),
 				L("Terminal.Tui.Actions"),
 				action.Title,
 				action.Description,
@@ -1544,7 +1548,7 @@ internal sealed partial class TerminalWorkspaceSession
 				null,
 				null,
 				static () => true,
-				() => ActivateWelcomeAction(action.Kind)))
+				() => ActivateWelcomeAction(action)))
 			.Append(new TerminalPaletteItem(
 				"welcome.palette.open-profile",
 				L("Terminal.Tui.Actions"),
@@ -1557,6 +1561,20 @@ internal sealed partial class TerminalWorkspaceSession
 				static () => true,
 				OpenPortableProfile))
 			.ToArray();
+	}
+
+	private static string BuildWelcomePaletteItemId(TerminalWelcomeAction action)
+	{
+		if (action.Kind != TerminalWelcomeActionKind.RecentProject)
+			return $"welcome.palette.{action.Kind}";
+
+		var canonicalIdentity = action.Value is { Length: > 0 } path
+			? PathUtility.NormalizeForCacheKey(path)
+			: action.Title;
+		var digest = Convert.ToHexString(
+			System.Security.Cryptography.SHA256.HashData(
+				System.Text.Encoding.UTF8.GetBytes(canonicalIdentity)));
+		return $"welcome.palette.{action.Kind}.{digest}";
 	}
 
 	private static string? ResolvePaletteCommandId(string? syntax)
@@ -1605,13 +1623,13 @@ internal sealed partial class TerminalWorkspaceSession
 		return true;
 	}
 
-	private void ActivateWelcomeAction(TerminalWelcomeActionKind kind)
+	private void ActivateWelcomeAction(TerminalWelcomeAction action)
 	{
 		if (_welcomeRows is null || _welcomeList is null)
 			return;
 		for (var index = 0; index < _welcomeRows.Count; index++)
 		{
-			if (_welcomeRows[index].Action.Kind != kind)
+			if (_welcomeRows[index].Action != action)
 				continue;
 			_welcomeList.SelectedItem = index;
 			ActivateWelcomeSelection();
@@ -1663,6 +1681,7 @@ internal sealed partial class TerminalWorkspaceSession
 			L("Terminal.Tui.Analyze"),
 			async token =>
 			{
+				await AwaitLatestSettingsRefreshAsync(token).ConfigureAwait(false);
 				var plan = await _controller.BuildCurrentPlanAsync(_state, token)
 					.ConfigureAwait(false);
 				var warnings = plan.Diagnostics.Count(static diagnostic =>
@@ -1683,12 +1702,15 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		if (_state is null)
 			return;
+		if (!EnsureRepositoryExportAllowed(originatedFromCommandLine: true))
+			return;
 		var view = command.View ?? _previewView;
 		var format = command.Format ?? _format;
 		TrackActiveOperation(RunOperationAsync(
 			L("Terminal.Tui.Command.Copy.Title"),
 			async token =>
 			{
+				await AwaitLatestSettingsRefreshAsync(token).ConfigureAwait(false);
 				var payload = await _controller.BuildCopyPayloadAsync(
 						_state,
 						view,
@@ -1744,6 +1766,13 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		if (_state is null)
 			return;
+		if (!_services.HostCapabilities.HasDesktopApplication)
+		{
+			ShowError(
+				"DPX-DESKTOP-NOT-INCLUDED",
+				L("Terminal.Error.DesktopNotIncluded"));
+			return;
+		}
 		TrackActiveOperation(RunOperationAsync(
 			L("Terminal.Tui.Welcome.OpenDesktop"),
 			async token =>
@@ -1789,13 +1818,19 @@ internal sealed partial class TerminalWorkspaceSession
 			L("Terminal.Tui.Action.GetUpdates"),
 			async token =>
 			{
-				var updated = await _services.GitRepositoryService
-					.PullUpdatesAsync(state.Plan.SourceRoot, cancellationToken: token)
+				var updated = await RunPostRepositoryMutationRefreshAsync(
+					cancellationToken => _services.GitRepositoryService.PullUpdatesAsync(
+						state.Plan.SourceRoot,
+						cancellationToken: cancellationToken),
+					cancellationToken => BuildAndApplyStructuralRefreshAsync(
+						state,
+						refreshRequest,
+						cancellationToken),
+					SetRepositoryStateInconsistent,
+					token)
 					.ConfigureAwait(false);
 				if (!updated)
 					throw new TerminalWorkspaceOperationException("DPX-TUI-GIT-UPDATE-FAILED");
-				await BuildAndApplyStructuralRefreshAsync(state, refreshRequest, token)
-					.ConfigureAwait(false);
 				return L("Terminal.Tui.RepositoryUpdated");
 			},
 			modalProgress: true,
@@ -1837,20 +1872,42 @@ internal sealed partial class TerminalWorkspaceSession
 						throw new TerminalWorkspaceOperationException("DPX-TUI-GIT-BRANCH-NOT-FOUND");
 					return null;
 				}
-				var switched = await _services.GitRepositoryService
-					.SwitchBranchAsync(
-						state.Plan.SourceRoot,
-						selected,
-						cancellationToken: token)
+				var switched = await RunPostRepositoryMutationRefreshAsync(
+						cancellationToken => _services.GitRepositoryService.SwitchBranchAsync(
+							state.Plan.SourceRoot,
+							selected,
+							cancellationToken: cancellationToken),
+						cancellationToken => BuildAndApplyStructuralRefreshAsync(
+							state,
+							refreshRequest,
+							cancellationToken),
+						SetRepositoryStateInconsistent,
+						token)
 					.ConfigureAwait(false);
 				if (!switched)
 					throw new TerminalWorkspaceOperationException("DPX-TUI-GIT-BRANCH-FAILED");
-				await BuildAndApplyStructuralRefreshAsync(state, refreshRequest, token)
-					.ConfigureAwait(false);
 				return $"{L("Terminal.Tui.RecentRepositories.Branch")}: {selected}";
 			},
 			modalProgress: true,
 			originatedFromCommandLine: originatedFromCommandLine));
+	}
+
+	internal static async Task<bool> RunPostRepositoryMutationRefreshAsync(
+		Func<CancellationToken, Task<bool>> checkout,
+		Func<CancellationToken, Task> refresh,
+		Action<bool> setRepositoryStateInconsistent,
+		CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(checkout);
+		ArgumentNullException.ThrowIfNull(refresh);
+		ArgumentNullException.ThrowIfNull(setRepositoryStateInconsistent);
+
+		var switched = await checkout(cancellationToken).ConfigureAwait(false);
+		// A failed reset or checkout may have already changed part of the cached worktree.
+		setRepositoryStateInconsistent(true);
+		await refresh(CancellationToken.None).ConfigureAwait(false);
+		setRepositoryStateInconsistent(false);
+		return switched;
 	}
 
 	private async Task BuildAndApplyStructuralRefreshAsync(
@@ -1858,21 +1915,47 @@ internal sealed partial class TerminalWorkspaceSession
 		TerminalStructuralRefreshRequest request,
 		CancellationToken cancellationToken)
 	{
-		var result = await _controller
-			.BuildStructuralRefreshAsync(request, cancellationToken)
-			.ConfigureAwait(false);
-		var gitCliAvailable = await ResolveGitCliAvailabilityAsync(result.Plan, cancellationToken)
-			.ConfigureAwait(false);
-		cancellationToken.ThrowIfCancellationRequested();
-		await InvokeAsync(() =>
+		while (true)
 		{
-			if (_stopping || !ReferenceEquals(_state, state))
-				return false;
+			cancellationToken.ThrowIfCancellationRequested();
+			var result = await _controller
+				.BuildStructuralRefreshAsync(request, cancellationToken)
+				.ConfigureAwait(false);
+			var gitCliAvailable = await ResolveGitCliAvailabilityAsync(result.Plan, cancellationToken)
+				.ConfigureAwait(false);
+			cancellationToken.ThrowIfCancellationRequested();
+			TerminalStructuralRefreshRequest? retryRequest = null;
+			var applied = await InvokeAsync(() =>
+			{
+				if (_stopping ||
+					cancellationToken.IsCancellationRequested ||
+					!ReferenceEquals(_state, state))
+				{
+					return false;
+				}
 
-			_gitCliAvailable = gitCliAvailable;
-			TerminalWorkspaceController.ApplyStructuralRefresh(state, result);
-			return true;
-		}).ConfigureAwait(false);
+				if (!TerminalWorkspaceController.ApplyStructuralRefresh(state, result))
+				{
+					retryRequest = _controller.CaptureStructuralRefresh(
+						state,
+						state.BuildSelection(),
+						_preferredGitMode);
+					return false;
+				}
+
+				_gitCliAvailable = gitCliAvailable;
+				return true;
+			}).ConfigureAwait(false);
+			if (retryRequest is not null)
+			{
+				request = retryRequest;
+				continue;
+			}
+			if (!applied)
+				throw new OperationCanceledException();
+			SetRepositoryStateInconsistent(false);
+			return;
+		}
 	}
 
 	private async Task<bool> ResolveGitCliAvailabilityAsync(
@@ -1880,7 +1963,7 @@ internal sealed partial class TerminalWorkspaceSession
 		CancellationToken cancellationToken)
 	{
 		if (!plan.GitReadiness.HasRepositoryBoundary &&
-		    !GitRepositoryBoundaryProbe.ExistsAtOrAbove(plan.SourceRoot))
+			!GitRepositoryBoundaryProbe.ExistsAtOrAbove(plan.SourceRoot))
 		{
 			return false;
 		}
@@ -1904,8 +1987,8 @@ internal sealed partial class TerminalWorkspaceSession
 	private void FocusPane(TerminalWorkspacePane pane)
 	{
 		var redrawMovedFrames = _layoutMode == TerminalWorkspaceLayoutMode.Split &&
-		                        (_activePane == TerminalWorkspacePane.Controls) !=
-		                        (pane == TerminalWorkspacePane.Controls);
+								(_activePane == TerminalWorkspacePane.Controls) !=
+								(pane == TerminalWorkspacePane.Controls);
 		_activePane = pane;
 		ApplyWorkspaceLayout();
 		var view = pane switch

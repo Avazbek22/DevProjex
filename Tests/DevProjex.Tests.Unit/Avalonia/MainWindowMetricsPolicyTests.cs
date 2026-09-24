@@ -24,31 +24,6 @@ public sealed class MainWindowMetricsPolicyTests
     }
 
     [Theory]
-    [InlineData(false, false, false)]
-    [InlineData(false, true, true)]
-    [InlineData(true, false, true)]
-    [InlineData(true, true, true)]
-    public void ShouldProceedWithMetricsCalculation_ReturnsExpectedDecision(
-        bool hasAnyCheckedNodes,
-        bool hasCompleteMetricsBaseline,
-        bool expected)
-    {
-        var result = MetricsCalculationPolicy.ShouldProceedWithMetricsCalculation(
-            hasAnyCheckedNodes,
-            hasCompleteMetricsBaseline);
-
-        Assert.Equal(expected, result);
-    }
-
-    [Fact]
-    public void ZeroCheckedPathsKeepPublishingTheCompleteWholeTreeBaseline()
-    {
-        Assert.True(MetricsCalculationPolicy.ShouldProceedWithMetricsCalculation(
-            hasAnyCheckedNodes: false,
-            hasCompleteMetricsBaseline: true));
-    }
-
-    [Theory]
     [InlineData(1, 1)]
     [InlineData(2, 4)]
     [InlineData(4, 4)]

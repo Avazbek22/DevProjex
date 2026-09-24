@@ -164,7 +164,7 @@ public sealed class FileBackedPreviewTextDocument(
 			var buffer = ArrayPool<byte>.Shared.Rent(byteCount);
 			try
 			{
-				var bytesRead = ReadBytes(startOffset, buffer, byteCount);
+				var bytesRead = ReadBytes(startOffset, buffer, byteCount, cancellationToken);
 				var characters = ArrayPool<char>.Shared.Rent(Math.Max(1, bytesRead));
 				try
 				{
@@ -224,9 +224,13 @@ public sealed class FileBackedPreviewTextDocument(
         }
     }
 
-    private int ReadBytes(long startOffset, byte[] buffer, int byteCount)
+    private int ReadBytes(
+        long startOffset,
+        byte[] buffer,
+        int byteCount,
+        CancellationToken cancellationToken = default)
     {
-		_streamGate.Wait();
+		_streamGate.Wait(cancellationToken);
 		try
         {
             ThrowIfDisposed();
@@ -237,6 +241,7 @@ public sealed class FileBackedPreviewTextDocument(
             var totalBytesRead = 0;
             while (totalBytesRead < byteCount)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var bytesRead = stream.Read(buffer, totalBytesRead, byteCount - totalBytesRead);
                 if (bytesRead == 0)
                     break;

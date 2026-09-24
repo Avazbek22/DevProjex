@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Interactivity;
 using DevProjex.Avalonia.Services;
 
@@ -57,18 +58,87 @@ public sealed class MessageDialogBehaviorTests
         Assert.False(result);
     }
 
+    [AvaloniaFact]
+    public void BuildConfirmationContent_ScrollableMessageUsesScrollViewer()
+    {
+        var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var content = InvokeBuildConfirmationContent("Long message", "Confirm", "Cancel", completion, scrollMessage: true);
+
+        var panel = Assert.IsType<DockPanel>(content);
+        var scrollViewer = Assert.Single(panel.Children.OfType<ScrollViewer>());
+        Assert.Equal("Long message", Assert.IsType<TextBlock>(scrollViewer.Content).Text);
+        Assert.Equal(ScrollBarVisibility.Auto, scrollViewer.VerticalScrollBarVisibility);
+        Assert.Equal(ScrollBarVisibility.Disabled, scrollViewer.HorizontalScrollBarVisibility);
+    }
+
+    [AvaloniaFact]
+    public void CreateConfirmationWindow_LiveContextVariant_SizesToLongLocalizedContent()
+    {
+        var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var window = MessageDialog.CreateConfirmationWindow(
+            owner: null,
+            title: "Schutz geheimer Daten deaktivieren?",
+            message: "Die verbundene Sitzung folgt diesem Fenster. Nach dem Anwenden kann sie geheime Daten in ausgewählten Dateien sehen.",
+            confirmButtonText: "Anwenden",
+            cancelButtonText: "Abbrechen",
+            width: 520,
+            height: 230,
+            fitContentHeight: true,
+            completion: completion);
+
+        try
+        {
+            Assert.Equal(SizeToContent.Height, window.SizeToContent);
+            Assert.True(double.IsNaN(window.Height));
+            var panel = Assert.IsType<DockPanel>(window.Content);
+            panel.Measure(new Size(520, double.PositiveInfinity));
+            Assert.True(panel.DesiredSize.Height > 0);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void CreateConfirmationWindow_ExistingDialogsKeepFixedHeight()
+    {
+        var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var window = MessageDialog.CreateConfirmationWindow(
+            owner: null,
+            title: "Confirm",
+            message: "Continue?",
+            confirmButtonText: "Continue",
+            cancelButtonText: "Cancel",
+            width: 520,
+            height: 260,
+            fitContentHeight: false,
+            completion: completion);
+
+        try
+        {
+            Assert.Equal(SizeToContent.Manual, window.SizeToContent);
+            Assert.Equal(260, window.Height);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
     private static Control InvokeBuildConfirmationContent(
         string message,
         string confirmButtonText,
         string cancelButtonText,
-        TaskCompletionSource<bool> completion)
+        TaskCompletionSource<bool> completion,
+        bool scrollMessage = false)
     {
         var method = typeof(MessageDialog).GetMethod(
             "BuildConfirmationContent",
             BindingFlags.NonPublic | BindingFlags.Static);
 
         Assert.NotNull(method);
-        var content = (Control?)method!.Invoke(null, [message, confirmButtonText, cancelButtonText, completion]);
+        var content = (Control?)method!.Invoke(null, [message, confirmButtonText, cancelButtonText, completion, scrollMessage]);
         Assert.NotNull(content);
         return content!;
     }

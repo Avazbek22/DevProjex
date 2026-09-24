@@ -3,6 +3,7 @@ using System.IO.Compression;
 using DevProjex.Avalonia.Controls;
 using DevProjex.Application.Context;
 using DevProjex.Application.Presentation;
+using DevProjex.Application.Preview;
 using DevProjex.Application.Diagnostics;
 using DevProjex.Application.Secrets;
 using DevProjex.Application.Services;
@@ -2607,10 +2608,43 @@ public sealed class MainWindowIgnoreOptionsUiTests
 	}
 
     [AvaloniaFact]
+    public async Task RepositoryBoundaries_GitIgnoreControllerCountsEmbeddedDirectoryAndNoneRestoresItsFiles()
+    {
+        EnsureGitAvailable();
+        using var project = UiTestProject.CreateDefault();
+        RunGit(project.RootPath, "init", "--quiet");
+        var embedded = Path.Combine(project.RootPath, "libs", "SomeLib");
+        Directory.CreateDirectory(embedded);
+        File.WriteAllText(Path.Combine(embedded, "Embedded.cs"), "class Embedded {}\n");
+        RunGit(embedded, "init", "--quiet");
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+        try
+        {
+            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.UseGitIgnore, visible: true, isChecked: true);
+            await WaitForProjectTreePathStateAsync(window, false, "libs", "SomeLib", "Embedded.cs");
+            var coordinator = typeof(MainWindow).GetField("_selectionCoordinator",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(window)!;
+            var counts = (IgnoreControllerImpactCounts)coordinator.GetType().GetField("_ignoreControllerImpactCounts",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(coordinator)!;
+            Assert.True(counts.GitIgnore >= 1);
+            await UiTestDriver.SelectGitFilteringModeAsync(window, GitFilteringMode.None);
+            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+            await WaitForProjectTreePathStateAsync(window, true, "libs", "SomeLib", "Embedded.cs");
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task SwitchingToTrackedOnlyRescansGitIgnoredContainerForNestedRepository()
     {
         EnsureGitAvailable();
         using var project = UiTestProject.CreateWithIgnoredNestedGitRepositoryWorkspace();
+        // Only declared submodules contribute nested indexes inside an owning repository.
+        File.WriteAllText(Path.Combine(project.RootPath, ".gitmodules"),
+            "[submodule \"nested\"]\n path = ignored-container/nested\n");
         RunGit(project.RootPath, "init", "--quiet");
         RunGit(
             project.RootPath,
@@ -2904,6 +2938,38 @@ public sealed class MainWindowIgnoreOptionsUiTests
             await UiTestDriver.CloseWindowAsync(window);
         }
     }
+
+	[AvaloniaFact]
+	public async Task RefreshProject_ChangedGitCaseSemantics_RebuildsSelectionRules()
+	{
+		EnsureGitAvailable();
+		using var project = UiTestProject.CreateDefault();
+		WriteTextFile(project.RootPath, ".gitignore", "CASEFILE.cs\n");
+		WriteTextFile(project.RootPath, Path.Combine("src", "casefile.cs"), "class CaseFile {}\n");
+		RunGit(project.RootPath, "init", "--quiet");
+		RunGit(project.RootPath, "config", "core.ignoreCase", "false");
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+		try
+		{
+			await UiTestDriver.WaitForIgnoreOptionStateAsync(
+				window,
+				IgnoreOptionId.UseGitIgnore,
+				visible: true,
+				isChecked: true);
+			await WaitForProjectTreePathStateAsync(window, exists: true, "src", "casefile.cs");
+
+			RunGit(project.RootPath, "config", "core.ignoreCase", "true");
+			await UiTestDriver.RefreshProjectAsync(window);
+
+			await WaitForProjectTreePathStateAsync(window, exists: false, "src", "casefile.cs");
+			await WaitForProjectTreePathStateAsync(window, exists: true, "src", "AppHost", "Program.cs");
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
 
     [AvaloniaFact]
     public async Task SuccessfulCloneCommit_LoadsManagedIgnoreBoundaryThroughProductionPath()
@@ -3832,6 +3898,31 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			if (border.Background is ISolidColorBrush background)
 				yield return background;
 		}
+	}
+
+	[AvaloniaFact]
+	public void ManualMarkMatchingDetector_DoesNotOfferDetectorBulkActions()
+	{
+		const string placeholder = "DEVPROJEX_REDACTED[manual-secret#1]";
+		using var document = new InMemoryPreviewTextDocument(
+			placeholder,
+			redactions:
+			[
+				new PreviewRedactionSpan(
+					"manual-over-detector",
+					"manual-secret",
+					1,
+					0,
+					placeholder.Length,
+					SecretPreviewSpanState.Redacted,
+					Source: SecretFindingSource.PersistentMark | SecretFindingSource.Detector,
+					PersistentMarkHash: "manual-hash",
+					RelativePath: "src/Secrets.cs")
+			]);
+		var control = new VirtualizedPreviewTextControl { Document = document };
+		Assert.Equal(
+			(false, false),
+			UiTestDriver.GetBulkRedactionMenuVisibility(control, "manual-over-detector"));
 	}
 
 	[AvaloniaFact]
@@ -4949,16 +5040,16 @@ public sealed class MainWindowIgnoreOptionsUiTests
 				"the real compression prewarm to finish before injecting status states");
 			await UiTestDriver.WaitForInitialMetricsBaselineAsync(window);
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 3);
+			var completedCompressionNotice = viewModel.SettingsCompressionNotice;
+			Assert.Contains(
+				Environment.NewLine + "≈Tokens: ",
+				completedCompressionNotice,
+				StringComparison.Ordinal);
 			viewModel.SetCompressionPreparationStatus(isActive: true);
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
 			Assert.Equal("Compressing code…", option.StatusText);
 			Assert.True(GetContentProcessingStatusIndicator(window, IgnoreOptionId.CompressCode).IsVisible);
 
-			viewModel.SetCompressionStatus(
-				compressedFiles: 98,
-				totalFiles: 123,
-				sourceCharacters: 400,
-				transformedCharacters: 100);
 			Assert.Equal("Compressing code…", option.StatusText);
 			viewModel.SetCompressionPreparationStatus(isActive: false);
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 3);
@@ -4967,9 +5058,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			Assert.Equal("Compress code", option.Label);
 			var compressionIndicator = GetContentProcessingStatusIndicator(window, IgnoreOptionId.CompressCode);
 			Assert.True(compressionIndicator.IsVisible);
-			Assert.Equal(
-				$"Compressed 98 of 123 files.{Environment.NewLine}≈Tokens: 100 → 25.",
-				option.StatusText);
+			Assert.Equal(completedCompressionNotice, option.StatusText);
 			var processingBorder = UiTestDriver.GetRequiredControl<Border>(window, "ContentProcessingOptionsBorder");
 			var compressionCheckBox = UiTestDriver.GetRequiredIgnoreOptionCheckBox(window, IgnoreOptionId.CompressCode);
 			var checkBoxPosition = Assert.IsType<Point>(compressionCheckBox.TranslatePoint(default, processingBorder));
@@ -5209,7 +5298,9 @@ public sealed class MainWindowIgnoreOptionsUiTests
 				"Click to run the check again.",
 				viewModel.SettingsSecretsNotice);
 
-			Assert.Single(viewModel.TreeNodes).IsExpanded = true;
+			var root = Assert.Single(viewModel.TreeNodes);
+			root.IsChecked = false;
+			root.IsExpanded = true;
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 3);
 			var srcCheckBox = await UiTestDriver.WaitForTreeNodeCheckBoxAsync(window, "src");
 			await UiTestDriver.ClickAsync(window, srcCheckBox);

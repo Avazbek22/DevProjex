@@ -1,0 +1,10 @@
+{
+  "compilerOptions": {
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "paths": {
+      "@exact": ["src/exact.ts"],
+      "@lib/*": ["src/lib/*"]
+    }
+  }
+}

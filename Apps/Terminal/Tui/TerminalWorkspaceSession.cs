@@ -3,8 +3,11 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
 using DevProjex.Terminal.CommandLine;
+using DevProjex.Terminal.DesktopControl;
 using DevProjex.Terminal.Execution;
 using DevProjex.Terminal.Rendering;
+using DevProjex.Infrastructure.LiveContext;
+using DevProjex.Infrastructure.AgentJournal;
 using Terminal.Gui.App;
 using Terminal.Gui.Drawing;
 using Terminal.Gui.Input;
@@ -45,9 +48,17 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private readonly CancellationTokenSource _settingsPersistenceCts = new();
 	private readonly SemaphoreSlim _operationGate = new(1, 1);
 	private readonly TerminalBackgroundTaskTracker _backgroundTasks = new();
+	private TaskCompletionSource _settingsRefreshStateChanged = CreateSettingsRefreshSignal();
+	private SettingsRefreshPublication _settingsRefreshPublication = SettingsRefreshPublication.None;
 	private readonly WorkspaceFocusModel _focus = new();
 	private readonly AsyncOperationCoordinator _operations;
+	private readonly TerminalSelectionProfilePersistenceCoordinator _selectionProfilePersistence;
+	private readonly object _localProfileBaselineSync = new();
+	private ProjectSelectionProfile? _localProfileBaseline;
+	private readonly LiveSessionRegistry _liveSessionRegistry;
 	private readonly TerminalExportDestinationHistory _exportDestinations = new();
+	private readonly Lazy<AgentJournalStore> _agentJournalStore;
+	private readonly AgentJournalReceiptFormatter _agentJournalReceiptFormatter = new();
 
 	private TerminalWorkspaceScreen _screen;
 	private TerminalWorkspaceLayoutMode _layoutMode;
@@ -66,7 +77,14 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private long _treePreviewSyncRequestId;
 	private long _workspacePersistenceRequestId;
 	private int _workspacePersistencePending;
+	private bool _discardSelectionProfilePersistenceOnExit;
 	private bool _previewSearchInProgress;
+	private bool _compressionUnavailableNotified;
+	private int _repositoryStateInconsistent;
+	private bool _agentActivityEnabled;
+	private int _agentJournalRefreshInProgress;
+	private IReadOnlyList<LiveSessionRecord> _liveSessions = [];
+	private TerminalAgentJournalSnapshot? _agentJournalSnapshot;
 
 	private TerminalWelcomeContext? _welcomeContext;
 	private RecentProjectsDb? _recentProjectsSnapshot;
@@ -137,6 +155,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_application = application;
 		_root = root;
 		_services = services;
+		_liveSessionRegistry = services.LiveSessionRegistry;
 		_environment = environment;
 		_options = options;
 		_workspace = workspace;
@@ -167,11 +186,27 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			environment);
 		_commandHistory = new TerminalCommandHistory(
 			services.TerminalSettingsStore.LoadCommandHistory());
+		_agentActivityEnabled = services.TerminalSettingsStore.LoadAgentActivityEnabled();
+		_agentJournalStore = new Lazy<AgentJournalStore>(() => new AgentJournalStore(
+			() => Path.GetDirectoryName(services.LiveSessionRegistry.DirectoryPath)!,
+			activeSessionProvider: () => services.LiveSessionRegistry.ReadActive()));
 		_commandHistoryPersistence = new TerminalCommandHistoryPersistenceQueue(
 			services.TerminalSettingsStore.SaveCommandStateAsync,
 			_settingsPersistenceCts.Token);
 		_sessionCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 		_operations = new AsyncOperationCoordinator(_sessionCts.Token);
+		_selectionProfilePersistence = new TerminalSelectionProfilePersistenceCoordinator(
+			PersistLocalProfileAsync,
+			exception => _application.Invoke(() =>
+			{
+				if (!_stopping && !_disposed)
+				{
+					ShowError(
+						"DPX-TUI-PROFILE-SAVE-FAILED",
+						L("Terminal.Tui.Error.ProfilePersistence"));
+				}
+			}));
+		_selectionProfilePersistence.StateChanged += OnSelectionPersistenceStateChanged;
 		var initialScreen = _application.Driver?.Screen ?? _application.Screen;
 		_terminalWidth = Math.Max(_environment.Width, initialScreen.Width);
 		_terminalHeight = Math.Max(_environment.Height, initialScreen.Height);
@@ -185,6 +220,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			_driverSizeChangedHandler = OnDriverSizeChanged;
 			driver.SizeChanged += _driverSizeChangedHandler;
 		}
+		_application.AddTimeout(LiveSessionRegistry.HeartbeatInterval, PollLiveSessions);
 	}
 
 	private void OnLanguageChanged(object? sender, EventArgs args)
@@ -227,7 +263,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			return;
 
 		var selectedKind = _welcomeList.SelectedItem is { } selected &&
-		                   selected >= 0 && selected < _welcomeRows.Count
+						   selected >= 0 && selected < _welcomeRows.Count
 			? _welcomeRows[selected].Action.Kind
 			: (TerminalWelcomeActionKind?)null;
 		var actions = BuildWelcomeActions(_welcomeContext);
@@ -342,6 +378,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	public async Task CompleteAsync()
 	{
 		await FlushPendingWorkspacePersistenceAsync().ConfigureAwait(false);
+		if (!_discardSelectionProfilePersistenceOnExit)
+			_ = await _selectionProfilePersistence.FlushAsync().ConfigureAwait(false);
 		_stopping = true;
 		await _commandHistoryPersistence.CompleteAsync().ConfigureAwait(false);
 		_settingsPersistenceCts.CancelAfter(SettingsPersistenceShutdownBudget);
@@ -527,8 +565,15 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		};
 		var commandLine = new TerminalWorkspaceCommandLineView(
 			_application,
-			(text, cursor) => _commandParser.GetCompletion(text, cursor, BuildCommandParseContext()),
-			(text, cursor) => _commandParser.GetGhostCompletion(text, cursor, BuildCommandParseContext()),
+			(text, cursor, cancellationToken) => _commandParser.GetCompletionAsync(
+				text,
+				cursor,
+				BuildCommandParseContext(),
+				cancellationToken),
+			(text, cursor) => _commandParser.GetGhostCompletion(
+				text,
+				cursor,
+				BuildCommandParseContext(includeKnownProjectPaths: false)),
 			L,
 			_commandHistory,
 			_options.Plain,
@@ -836,7 +881,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					await InvokeAsync(() =>
 					{
 						if (_operations.IsCurrent(WorkspaceOperationKind.Active, operationCts) &&
-						    _screen == TerminalWorkspaceScreen.Workspace)
+							_screen == TerminalWorkspaceScreen.Workspace)
 						{
 							SetOperationStatus(
 								L("Toast.Git.CachedUpdateFailed"),
@@ -936,13 +981,24 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 
 	private void BeginOpenDesktopFromWelcome()
 	{
+		if (!_services.HostCapabilities.HasDesktopApplication)
+		{
+			ShowError(
+				"DPX-DESKTOP-NOT-INCLUDED",
+				L("Terminal.Error.DesktopNotIncluded"));
+			return;
+		}
+
 		ShowWelcomeStatus(L("Terminal.Tui.OpeningDesktop"), TerminalWorkspaceTheme.Accent);
 		var operationCts = ReplaceActiveOperation();
 		TrackActiveOperation(Task.Run(async () =>
 		{
 			try
 			{
-				var exitCode = await new DesktopCommandHandler(_environment, writeOutput: false)
+				var exitCode = await new DesktopCommandHandler(
+						_environment,
+						launcher: new DesktopProcessLauncher(_services.HostCapabilities),
+						writeOutput: false)
 					.OpenAsync(new DesktopOpenRequest(), operationCts.Token)
 					.ConfigureAwait(false);
 				if (exitCode != CommandLineExitCodes.Success)
@@ -1209,13 +1265,13 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 
 	private void ShowWorkspace(TerminalWorkspaceState state)
 	{
+		var previousProjectRoot = _state?.Plan.SourceRoot;
 		CancelWorkspaceRefreshes();
 		ClearRoot();
 		_screen = TerminalWorkspaceScreen.Workspace;
 		var persisted = _services.TerminalSettingsStore.LoadProjectSettings(state.Plan.SourceRoot);
 		if (persisted is not null)
 		{
-			state.RestoreSelectedRelativePaths(persisted.SelectedPaths);
 			state.RestoreExpandedRelativePaths(persisted.ExpandedPaths);
 			_previewView = Enum.IsDefined(persisted.PreviewView)
 				? persisted.PreviewView
@@ -1223,15 +1279,17 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			_format = Enum.IsDefined(persisted.Format)
 				? persisted.Format
 				: ProjectContextDocumentFormat.Text;
-			if (!string.IsNullOrWhiteSpace(persisted.FocusedPath))
+			if (state.TryResolvePersistedPath(persisted.FocusedPath, out var focusedPath) &&
+				state.Reveal(focusedPath) >= 0)
 			{
-				_selectedTreePath = Path.GetFullPath(Path.Combine(
-					state.Plan.SourceRoot,
-					persisted.FocusedPath.Replace('/', Path.DirectorySeparatorChar)));
-				state.Reveal(_selectedTreePath);
+				_selectedTreePath = focusedPath;
 			}
 		}
+		_services.ContextFactory.ApplyMarkedSecrets(state.Plan.SourceRoot, state.Plan.Selection);
 		_state = state;
+		SetRepositoryStateInconsistent(false);
+		lock (_localProfileBaselineSync)
+			_localProfileBaseline = CaptureLocalProfile(state);
 		if (state.Plan.GitReadiness.Mode is { } mode && GitScopeSelection.IsPersistent(mode))
 			_preferredGitMode = mode;
 		_layoutMode = ResolveLayout();
@@ -1370,14 +1428,15 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		};
 		var commandLine = new TerminalWorkspaceCommandLineView(
 			_application,
-			(text, cursor) => _commandParser.GetCompletion(
+			(text, cursor, cancellationToken) => _commandParser.GetCompletionAsync(
 				text,
 				cursor,
-				BuildCommandParseContext()),
+				BuildCommandParseContext(),
+				cancellationToken),
 			(text, cursor) => _commandParser.GetGhostCompletion(
 				text,
 				cursor,
-				BuildCommandParseContext()),
+				BuildCommandParseContext(includeKnownProjectPaths: false)),
 			L,
 			_commandHistory,
 			_options.Plain,
@@ -1412,12 +1471,15 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		RefreshContextControls();
 		tree.SetFocus();
 		RefreshWorkspace();
+		RefreshLiveSessions(
+			force: true,
+			resetOpeningBaseline: ShouldResetAgentJournalOpeningBaseline(
+				previousProjectRoot,
+				state.Plan.SourceRoot));
 		ApplyWorkspaceLayout();
 		UpdateWorkspaceFocus();
 		CompleteRootTransition();
 		SchedulePreviewRefresh();
-		if (persisted is not null)
-			ScheduleSelectionProjection();
 	}
 
 	private void RefreshWorkspace()
@@ -1547,6 +1609,11 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		}
 
 		_selectedTreePath = _state.VisibleRows[selected].Node.FullPath;
+		if (_agentActivityEnabled && _status is not null &&
+			!_operations.IsRunning(WorkspaceOperationKind.TransientStatus))
+		{
+			_status.Text = BuildStatus(_state, _application.Screen.Width);
+		}
 		ScheduleSelectedFilePreviewSync(_selectedTreePath);
 	}
 
@@ -1603,22 +1670,89 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			diagnostic.Severity == ContextDiagnosticSeverity.Error);
 		var tokens = ResolveDisplayedTokenCount(state);
 		var folders = state.HasVisibleTreeItems ? state.SelectedFolderCount : 0;
+		var compressionUnavailable = GetCurrentCompressionAvailability(state)?.IsUnavailable == true;
 		if (width < 80)
 		{
+			var compactActivity = BuildAgentActivityIndicator(compact: true);
+			var compactSelectionPersistence = BuildSelectionPersistenceIndicator();
 			return $"{state.SelectedFileCount:N0} F  {folders:N0} D  " +
 				   $"~{tokens:N0} tok  " +
-				   $"{warningCount:N0} W  {errorCount:N0} E";
+				   $"{warningCount:N0} W  {errorCount:N0} E" +
+				   (compressionUnavailable ? "  C!" : string.Empty) +
+				   (_liveSessions.Count > 0 ? "  Live context" : string.Empty) +
+				   (compactSelectionPersistence is null ? string.Empty : $"  {compactSelectionPersistence}") +
+				   (compactActivity is null ? string.Empty : $"  {compactActivity}");
 		}
 
 		var separator = _environment.SupportsUnicode ? PanelSeparator : " | ";
-		return string.Join(
-			separator,
+		var parts = new List<string>
+		{
 			$"{L("Terminal.Analysis.Files")} {state.SelectedFileCount:N0}",
 			$"{L("Terminal.Analysis.Folders")} {folders:N0}",
 			TerminalWorkspace.FormatBytes(state.Plan.IncludedBytes),
 			$"~{tokens:N0} {L("Terminal.Tui.TokensShort")}",
 			$"{L("Terminal.Tui.Warnings")} {warningCount:N0}",
-			$"{L("Terminal.Tui.Errors")} {errorCount:N0}");
+			$"{L("Terminal.Tui.Errors")} {errorCount:N0}"
+		};
+		if (compressionUnavailable)
+			parts.Add(L("Compression.Metrics.Unavailable"));
+		if (_liveSessions.Count > 0)
+			parts.Add(BuildLiveSessionIndicator(_liveSessions));
+		if (BuildSelectionPersistenceIndicator() is { } selectionPersistence)
+			parts.Add(selectionPersistence);
+		if (BuildAgentActivityIndicator(compact: false) is { } activity)
+			parts.Add(activity);
+		return string.Join(
+			separator,
+			parts);
+	}
+
+	private string? BuildSelectionPersistenceIndicator() =>
+		_selectionProfilePersistence.State.Phase == TerminalSelectionPersistencePhase.Failed
+			? L("SelectionPersistence.Failed")
+			: null;
+
+	private void OnSelectionPersistenceStateChanged(object? sender, EventArgs args)
+	{
+		_application.Invoke(() =>
+		{
+			if (_stopping || _disposed || _status is null || _state is null ||
+				_operations.IsRunning(WorkspaceOperationKind.TransientStatus))
+			{
+				return;
+			}
+
+			_status.Text = BuildStatus(_state, _application.Screen.Width);
+		});
+	}
+
+	private string? BuildAgentActivityIndicator(bool compact)
+	{
+		if (!_agentActivityEnabled || _agentJournalSnapshot is not { } snapshot ||
+			snapshot.LatestCall is not { } latest)
+		{
+			return null;
+		}
+
+		var focusedTreePath = CaptureCurrentTreePath();
+		return TerminalAgentJournalPresentation.BuildActivityIndicator(
+			snapshot,
+			focusedTreePath,
+			compact,
+			AgentJournalText);
+	}
+
+	private CodeCompressionAvailabilitySnapshot? GetCurrentCompressionAvailability(
+		TerminalWorkspaceState state)
+	{
+		if (state.Plan.Selection.CompressCode != true)
+			return null;
+		var snapshot = _services.CodeCompressionSession.Snapshot;
+		return snapshot.SelectionKey == CodeCompressionSession.BuildSelectionKey(
+			state.Plan.SourceRoot,
+			state.Plan.IncludedFiles)
+			? snapshot.Availability
+			: null;
 	}
 
 	internal static long ResolveDisplayedTokenCount(TerminalWorkspaceState state)
@@ -1873,10 +2007,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			var list = GetControlSection(section).List;
 			var aggregate = GetAggregateControlSection(section).List;
 			var sectionIsActive = _activePane == TerminalWorkspacePane.Controls &&
-			                      section == _activeControlSection;
+								  section == _activeControlSection;
 			var aggregateIsActive = sectionIsActive && aggregate is not null &&
-			                        (aggregate.HasFocus ||
-			                         _activeAggregateControlSection == section);
+									(aggregate.HasFocus ||
+									 _activeAggregateControlSection == section);
 			if (list is not null)
 			{
 				list.SchemeName = sectionIsActive && !aggregateIsActive
@@ -2119,19 +2253,19 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				_commandLine.RestoreInputFocus();
 			}
 			else switch (requestedFocus.Pane)
-			{
-				case TerminalWorkspacePane.Tree:
-					_tree?.SetFocus();
-					break;
-				case TerminalWorkspacePane.Preview:
-					_preview?.SetFocus();
-					break;
-				case TerminalWorkspacePane.Controls:
-					ActiveControlView?.SetFocus();
-					break;
-				default:
-					throw new ArgumentOutOfRangeException();
-			}
+				{
+					case TerminalWorkspacePane.Tree:
+						_tree?.SetFocus();
+						break;
+					case TerminalWorkspacePane.Preview:
+						_preview?.SetFocus();
+						break;
+					case TerminalWorkspacePane.Controls:
+						ActiveControlView?.SetFocus();
+						break;
+					default:
+						throw new ArgumentOutOfRangeException();
+				}
 			_focus.Restore(requestedFocus);
 		}
 		finally
@@ -2349,11 +2483,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			if (_activePane == TerminalWorkspacePane.Preview &&
 				_preview.SearchQuery.Length > 0)
 			{
-				CancelPreviewSearch(clearQuery: true);
-				_preview.ClearSearch();
-				_previewSearchQuery = null;
-				UpdatePanelTitles();
-				UpdateFooter();
+				ClearPreviewSearch(updateFooter: true);
 				return;
 			}
 			TryLeaveWorkspace(() => ShowWelcome());
@@ -2467,6 +2597,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			_state.SelectAll();
 			RefreshWorkspace();
 			ScheduleSelectionProjection();
+			ScheduleLocalProfilePersistence();
 			return;
 		}
 		if (_tree.HasFocus && key == Key.U.WithCtrl)
@@ -2475,6 +2606,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			_state.SelectNone();
 			RefreshWorkspace();
 			ScheduleSelectionProjection();
+			ScheduleLocalProfilePersistence();
 			return;
 		}
 		if (_tree.HasFocus && key.NoShift == Key.R)
@@ -2716,16 +2848,12 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_previewSearchQuery = query;
 		if (string.IsNullOrWhiteSpace(query))
 		{
-			_preview.ClearSearch();
-			UpdatePanelTitles();
+			ClearPreviewSearch();
 			return;
 		}
 		if (!PreviewTextDocumentSearch.CanSearch(query.Trim()))
 		{
-			_previewSearchQuery = null;
-			CancelPreviewSearch(clearQuery: true);
-			_preview.ClearSearch();
-			UpdatePanelTitles();
+			ClearPreviewSearch();
 			ShowNotice(
 				L("Terminal.Tui.Search"),
 				L("Terminal.Tui.Preview.SearchTooShort"),
@@ -2746,16 +2874,12 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var normalizedQuery = query.Trim();
 		if (normalizedQuery.Length == 0)
 		{
-			CancelPreviewSearch(clearQuery: true);
-			_preview.ClearSearch();
-			UpdatePanelTitles();
+			ClearPreviewSearch();
 			return;
 		}
 		if (!PreviewTextDocumentSearch.CanSearch(normalizedQuery))
 		{
-			CancelPreviewSearch(clearQuery: true);
-			_preview.ClearSearch();
-			UpdatePanelTitles();
+			ClearPreviewSearch();
 			return;
 		}
 
@@ -2867,6 +2991,15 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			_previewSearchQuery = null;
 	}
 
+	private void ClearPreviewSearch(bool updateFooter = false)
+	{
+		CancelPreviewSearch(clearQuery: true);
+		_preview?.ClearSearch();
+		UpdatePanelTitles();
+		if (updateFooter)
+			UpdateFooter();
+	}
+
 	private void MovePreviewSearch(bool reverse)
 	{
 		if (_preview is null || _preview.SearchQuery.Length == 0)
@@ -2927,6 +3060,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			_selectedTreePath = selectedPath;
 			RefreshWorkspace();
 			ScheduleSelectionProjection();
+			ScheduleLocalProfilePersistence();
 		}
 	}
 
@@ -2961,6 +3095,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	{
 		if (_state is null)
 			return;
+		if (!EnsureRepositoryExportAllowed(originatedFromCommandLine))
+			return;
 		var selectedFormat = requestedFormat ?? _format;
 		var defaultPath = BuildDefaultExportPath(
 			_state.Plan.SourceRoot,
@@ -2983,13 +3119,11 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			return;
 		}
 		_exportDestinations.Remember(TerminalExportKind.Context, destination);
-		var pendingSettingsRefresh = _operations.GetTask(WorkspaceOperationKind.SettingsRefresh);
-
 		TrackActiveOperation(RunExportWorkflowAsync(
 			L("Terminal.Tui.ExportContext"),
 			async token =>
 			{
-				await AwaitPendingSettingsRefreshAsync(pendingSettingsRefresh, token).ConfigureAwait(false);
+				await AwaitLatestSettingsRefreshAsync(token).ConfigureAwait(false);
 				return await _controller.PrepareContextExportAsync(
 					_state,
 					_previewView,
@@ -2999,14 +3133,15 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					token,
 					plain: _options.Plain).ConfigureAwait(false);
 			},
-			async (_, overwrite, token) => await _controller.ExportContextAsync(
-				_state,
-				_previewView,
-				selectedFormat,
-				destination,
-				overwrite,
-				token,
-				plain: _options.Plain).ConfigureAwait(false),
+			async (_, overwrite, token) => new TerminalExportCompletion(
+				await _controller.ExportContextAsync(
+					_state,
+					_previewView,
+					selectedFormat,
+					destination,
+					overwrite,
+					token,
+					plain: _options.Plain).ConfigureAwait(false)),
 			(exactDestination, dryRun) =>
 				TerminalWorkspaceController.BuildEquivalentContextCommand(
 					_state,
@@ -3023,6 +3158,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		bool originatedFromCommandLine = false)
 	{
 		if (_state is null)
+			return;
+		if (!EnsureRepositoryExportAllowed(originatedFromCommandLine))
 			return;
 		var selectedKind = requestedFormat ?? ProjectCopyExportFormat.Folder;
 		var exportKind = selectedKind == ProjectCopyExportFormat.Zip
@@ -3044,26 +3181,30 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			return;
 		}
 		_exportDestinations.Remember(exportKind, destination);
-		var pendingSettingsRefresh = _operations.GetTask(WorkspaceOperationKind.SettingsRefresh);
-
 		TrackActiveOperation(RunExportWorkflowAsync(
 			L("Terminal.Tui.ExportProject"),
 			async token =>
 			{
-				await AwaitPendingSettingsRefreshAsync(pendingSettingsRefresh, token).ConfigureAwait(false);
+				await AwaitLatestSettingsRefreshAsync(token).ConfigureAwait(false);
 				return await _controller.PrepareProjectExportAsync(
 					_state,
 					selectedKind,
 					destination,
 					token).ConfigureAwait(false);
 			},
-			async (progress, overwrite, token) => await _controller.ExportProjectAsync(
-				_state,
-				selectedKind,
-				destination,
-				overwrite,
-				token,
-				progress).ConfigureAwait(false),
+			async (progress, overwrite, token) =>
+			{
+				var result = await _controller.ExportProjectResultAsync(
+					_state,
+					selectedKind,
+					destination,
+					overwrite,
+					token,
+					progress).ConfigureAwait(false);
+				return new TerminalExportCompletion(
+					result.DestinationPath,
+					result.UnscannableFiles?.Count ?? 0);
+			},
 			(exactDestination, dryRun) => TerminalWorkspaceController.BuildEquivalentProjectCommand(
 				_state,
 				selectedKind,
@@ -3072,13 +3213,109 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			originatedFromCommandLine));
 	}
 
-	private static async Task AwaitPendingSettingsRefreshAsync(
-		Task? pendingSettingsRefresh,
+	private Task AwaitLatestSettingsRefreshAsync(CancellationToken cancellationToken) =>
+		AwaitLatestSettingsRefreshAsync(
+			() =>
+			{
+				var stateChanged = Volatile.Read(ref _settingsRefreshStateChanged).Task;
+				var publication = Volatile.Read(ref _settingsRefreshPublication);
+				return (
+					_operations.GetTask(WorkspaceOperationKind.SettingsRefresh),
+					_settingsDraftSelection is not null,
+					stateChanged,
+					publication.RequestId,
+					publication.Outcome);
+			},
+			cancellationToken);
+
+	internal static async Task AwaitLatestSettingsRefreshAsync(
+		Func<(
+			Task? PendingRefresh,
+			bool HasDraft,
+			Task StateChanged,
+			long RequestId,
+			SettingsRefreshOutcome Outcome)> capture,
 		CancellationToken cancellationToken)
 	{
-		if (pendingSettingsRefresh is not null)
-			await pendingSettingsRefresh.WaitAsync(cancellationToken).ConfigureAwait(false);
+		ArgumentNullException.ThrowIfNull(capture);
+		var observed = capture();
+		if (!observed.HasDraft && observed.PendingRefresh is null)
+			return;
+
+		var relevantRequestId = observed.RequestId;
+		while (true)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			observed = capture();
+			if (observed.RequestId > relevantRequestId)
+				relevantRequestId = observed.RequestId;
+
+			if (!observed.HasDraft && observed.PendingRefresh is null)
+			{
+				if (observed.RequestId == relevantRequestId)
+				{
+					switch (observed.Outcome)
+					{
+						case SettingsRefreshOutcome.Applied:
+							return;
+						case SettingsRefreshOutcome.Failed:
+							throw new TerminalWorkspaceOperationException(
+								"DPX-TUI-SETTINGS-REFRESH-FAILED");
+					}
+				}
+			}
+
+			var nextTransition = observed.PendingRefresh is { IsCompleted: false } pendingRefresh
+				? Task.WhenAny(pendingRefresh, observed.StateChanged)
+				: observed.StateChanged;
+			await nextTransition.WaitAsync(cancellationToken).ConfigureAwait(false);
+		}
 	}
+
+	private static TaskCompletionSource CreateSettingsRefreshSignal() =>
+		new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+	private void SignalSettingsRefreshStateChanged()
+	{
+		var next = CreateSettingsRefreshSignal();
+		var previous = Interlocked.Exchange(ref _settingsRefreshStateChanged, next);
+		previous.TrySetResult();
+	}
+
+	private void SetSettingsRefreshOutcome(
+		long requestId,
+		SettingsRefreshOutcome outcome)
+	{
+		var current = Volatile.Read(ref _settingsRefreshPublication);
+		if (current.RequestId > requestId)
+			return;
+
+		Volatile.Write(
+			ref _settingsRefreshPublication,
+			new SettingsRefreshPublication(requestId, outcome));
+		SignalSettingsRefreshStateChanged();
+	}
+
+	private bool EnsureRepositoryExportAllowed(bool originatedFromCommandLine)
+	{
+		var inconsistent = Volatile.Read(ref _repositoryStateInconsistent) != 0;
+		if (IsRepositoryExportAllowed(inconsistent))
+			return true;
+
+		const string code = "DPX-TUI-REPOSITORY-STATE-INCONSISTENT";
+		var message = L("Terminal.Tui.Error.OperationFailed");
+		if (originatedFromCommandLine)
+			ShowCommandResult($"{message} ({code})", success: false);
+		else
+			ShowError(code, message);
+		return false;
+	}
+
+	internal static bool IsRepositoryExportAllowed(bool repositoryStateInconsistent) =>
+		!repositoryStateInconsistent;
+
+	private void SetRepositoryStateInconsistent(bool value) =>
+		Volatile.Write(ref _repositoryStateInconsistent, value ? 1 : 0);
 
 	internal static string BuildDefaultExportPath(
 		string sourceRoot,
@@ -3150,11 +3387,15 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			return;
 		TrackActiveOperation(RunOperationAsync(
 			L("Terminal.Tui.SaveProfile"),
-			async token => await _controller.SavePortableProfileAsync(
-				_state,
-				destination,
-				overwrite: false,
-				token).ConfigureAwait(false),
+			async token =>
+			{
+				await AwaitLatestSettingsRefreshAsync(token).ConfigureAwait(false);
+				return await _controller.SavePortableProfileAsync(
+					_state,
+					destination,
+					overwrite: false,
+					token).ConfigureAwait(false);
+			},
 			originatedFromCommandLine: originatedFromCommandLine));
 	}
 
@@ -3290,7 +3531,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			};
 			await ShowOperationFailureAsync(
 				exception.Code,
-				L(messageKey),
+				exception.Detail ?? L(messageKey),
 				originatedFromCommandLine).ConfigureAwait(false);
 		}
 		catch
@@ -3357,7 +3598,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private async Task RunExportWorkflowAsync(
 		string operationName,
 		Func<CancellationToken, Task<TerminalExportSummary>> prepare,
-		Func<IProgress<ProjectCopyExportProgress>, bool, CancellationToken, Task<string>> export,
+		Func<IProgress<ProjectCopyExportProgress>, bool, CancellationToken, Task<TerminalExportCompletion>> export,
 		Func<string, bool, string> equivalentCommand,
 		bool originatedFromCommandLine = false)
 	{
@@ -3463,7 +3704,14 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				var completed = string.Format(
 					CultureInfo.CurrentCulture,
 					L("Terminal.Tui.ExportCompletedStatus"),
-					result);
+					result.DestinationPath);
+				if (result.SkippedUnscannableCount > 0)
+				{
+					completed = string.Format(
+						CultureInfo.CurrentCulture,
+						L("Content.Redaction.UnscannableFiles"),
+						result.SkippedUnscannableCount) + " " + completed;
+				}
 				if (originatedFromCommandLine)
 					ShowCommandResult(completed, success: true);
 				else
@@ -3539,10 +3787,16 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				L("Terminal.Diagnostic.TrackedIndexUnavailable"),
 			GitScopeFilter.UnavailableDiagnosticCode =>
 				L("Terminal.Diagnostic.GitStateUnavailable"),
+			GitScopeFilter.UnsafeFilterDiagnosticCode =>
+				L("Terminal.Diagnostic.GitUnsafeFilter"),
 			GitScopeFilter.DeletedDiagnosticCode =>
 				L("Terminal.Diagnostic.GitStateDeleted"),
 			"DPX-PROJECT-NOT-FOUND" or "DPX-PROJECT-PATH-INVALID" =>
 				L("Terminal.Tui.Error.ProjectUnavailable"),
+			"DPX-SELECTION-PATH-MISSING" =>
+				L("Terminal.Diagnostic.SelectedPathMissing"),
+			"DPX-SELECTION-PATH-INVALID" =>
+				L("Terminal.Error.SelectionPathInvalid"),
 			_ => L("Terminal.Tui.Error.InvalidOperation")
 		};
 
@@ -3759,7 +4013,9 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var selectedPathFrontier = state.BuildSelectedPathFrontier();
 		var preferredGitMode = _settingsDraftPreferredGitMode ?? _preferredGitMode;
 		var originatedFromCommandLine = _settingsDraftOriginatedFromCommandLine;
+		var expectedRevision = state.Revision;
 		var requestId = Interlocked.Increment(ref _settingsRefreshRequestId);
+		SetSettingsRefreshOutcome(requestId, SettingsRefreshOutcome.Pending);
 		var operationCts = _operations.Start(WorkspaceOperationKind.SettingsRefresh);
 		var cancellationToken = operationCts.Token;
 		var cornerProgressId = BeginCornerProgress(L("Terminal.Tui.Progress.UpdatingOptions"));
@@ -3774,11 +4030,13 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				selectedPathFrontier,
 				preferredGitMode,
 				originatedFromCommandLine,
+				expectedRevision,
 				requestId,
 				operationCts,
 				cancellationToken,
 				cornerProgressId),
 			CancellationToken.None));
+		SignalSettingsRefreshStateChanged();
 	}
 
 	private async Task RunSettingsRefreshAsync(
@@ -3791,11 +4049,13 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		IReadOnlyCollection<string>? selectedPathFrontier,
 		GitFilteringMode preferredGitMode,
 		bool originatedFromCommandLine,
+		long expectedRevision,
 		long requestId,
 		CancellationTokenSource operationCts,
 		CancellationToken cancellationToken,
 		long cornerProgressId)
 	{
+		var retryAfterSelectionProjection = false;
 		try
 		{
 			var requiresStructuralRefresh = TerminalWorkspaceController.RequiresStructuralRefresh(
@@ -3839,12 +4099,20 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			{
 				if (!IsCurrentSettingsRefresh(state, operationCts, requestId))
 					return false;
+				if (!CanPublishSettingsRefresh(state, expectedRevision))
+				{
+					retryAfterSelectionProjection = true;
+					return false;
+				}
 
 				_controller.ApplySettingsPlan(state, result);
 				_gitCliAvailable = gitCliAvailable;
 				_preferredGitMode = preferredGitMode;
+				SetSettingsRefreshOutcome(requestId, SettingsRefreshOutcome.Applied);
 				ClearSettingsDraft();
 				RefreshWorkspace();
+				ScheduleLocalProfilePersistence();
+				TrackBackgroundTask(_selectionProfilePersistence.FlushAsync());
 				if (originatedFromCommandLine)
 					RefreshAppliedCommandResult();
 				SchedulePreviewRefresh();
@@ -3857,6 +4125,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			{
 				await InvokeAsync(() =>
 				{
+					SetSettingsRefreshOutcome(requestId, SettingsRefreshOutcome.Failed);
 					ClearSettingsDraft();
 					RefreshWorkspace();
 					return true;
@@ -3869,7 +4138,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			{
 				await CompleteCornerProgressAsync(cornerProgressId).ConfigureAwait(false);
 				cornerProgressId = 0;
-				await RollbackFailedSettingsRefreshAsync().ConfigureAwait(false);
+				await RollbackFailedSettingsRefreshAsync(requestId).ConfigureAwait(false);
 				await ShowSettingsFailureAsync(
 					exception.Code,
 					ResolveValidationErrorMessage(exception.Code),
@@ -3882,7 +4151,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			{
 				await CompleteCornerProgressAsync(cornerProgressId).ConfigureAwait(false);
 				cornerProgressId = 0;
-				await RollbackFailedSettingsRefreshAsync().ConfigureAwait(false);
+				await RollbackFailedSettingsRefreshAsync(requestId).ConfigureAwait(false);
 				await ShowSettingsFailureAsync(
 					"DPX-TUI-OPERATION-FAILED",
 					L("Terminal.Tui.Error.OperationFailed"),
@@ -3893,6 +4162,71 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		{
 			await CompleteCornerProgressAsync(cornerProgressId).ConfigureAwait(false);
 			_operations.Complete(WorkspaceOperationKind.SettingsRefresh, operationCts);
+			SignalSettingsRefreshStateChanged();
+		}
+
+		if (retryAfterSelectionProjection)
+			await RescheduleSettingsRefreshAfterProjectionAsync(state, requestId).ConfigureAwait(false);
+	}
+
+	internal static bool CanPublishSettingsRefresh(
+		TerminalWorkspaceState state,
+		long expectedRevision)
+	{
+		ArgumentNullException.ThrowIfNull(state);
+		return state.Revision == expectedRevision;
+	}
+
+	private async Task RescheduleSettingsRefreshAfterProjectionAsync(
+		TerminalWorkspaceState state,
+		long requestId)
+	{
+		try
+		{
+			await AwaitLatestSelectionProjectionAsync(_sessionCts.Token).ConfigureAwait(false);
+			await InvokeAsync(() =>
+			{
+				if (_stopping ||
+					!ReferenceEquals(_state, state) ||
+					Volatile.Read(ref _settingsRefreshRequestId) != requestId ||
+					_settingsDraftSelection is null)
+				{
+					return false;
+				}
+
+				ScheduleSettingsRefresh();
+				return true;
+			}).ConfigureAwait(false);
+		}
+		catch (OperationCanceledException) when (_sessionCts.IsCancellationRequested)
+		{
+		}
+	}
+
+	private async Task AwaitLatestSelectionProjectionAsync(CancellationToken cancellationToken)
+	{
+		while (true)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var requestId = Volatile.Read(ref _projectionRequestId);
+			var pendingProjection = _operations.GetTask(WorkspaceOperationKind.Projection);
+			if (pendingProjection is null)
+				return;
+
+			try
+			{
+				await pendingProjection.WaitAsync(cancellationToken).ConfigureAwait(false);
+			}
+			catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+			{
+				// A newer selection projection owns the workspace state.
+			}
+
+			if (Volatile.Read(ref _projectionRequestId) == requestId &&
+				_operations.GetTask(WorkspaceOperationKind.Projection) is null)
+			{
+				return;
+			}
 		}
 	}
 
@@ -3904,10 +4238,11 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			? ShowCommandFailureAsync(code, message)
 			: ShowFailureAsync(code, message);
 
-	private async Task RollbackFailedSettingsRefreshAsync()
+	private async Task RollbackFailedSettingsRefreshAsync(long requestId)
 	{
 		await InvokeAsync(() =>
 		{
+			SetSettingsRefreshOutcome(requestId, SettingsRefreshOutcome.Failed);
 			ClearSettingsDraft();
 			RefreshWorkspace();
 			return true;
@@ -4051,6 +4386,16 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 
 					RefreshWorkspace();
 					RefreshAppliedCommandResult();
+					var compressionAvailability = GetCurrentCompressionAvailability(state);
+					if (!_compressionUnavailableNotified &&
+						compressionAvailability is { IsUnavailable: true, PrimaryReason: { Length: > 0 } reason })
+					{
+						_compressionUnavailableNotified = true;
+						ShowTransientStatus(NormalizeLocalizedText(
+							_services.Localization.Format("Compression.Status.Unavailable", reason),
+							_options.Plain,
+							_environment.SupportsUnicode));
+					}
 					return true;
 				}).ConfigureAwait(false);
 				if (applied)
@@ -4128,11 +4473,13 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		FocusPane(panes[nextIndex]);
 	}
 
-	private void ShowTransientStatus(string text)
+	private void ShowTransientStatus(
+		string text,
+		string schemeName = TerminalWorkspaceTheme.Success)
 	{
 		CancelTransientStatus();
 		var statusCts = _operations.Start(WorkspaceOperationKind.TransientStatus);
-		SetOperationStatus(text, TerminalWorkspaceTheme.Success);
+		SetOperationStatus(text, schemeName);
 		TrackOperation(
 			WorkspaceOperationKind.TransientStatus,
 			statusCts,
@@ -4684,18 +5031,27 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			SchemeName = TerminalWorkspaceTheme.Base
 		};
 		dialog.Add(body);
-		dialog.AddButton(CreateDialogButton(L("Terminal.Tui.Cancel")));
-		dialog.AddButton(CreateDialogButton(L("Terminal.Tui.DryRun")));
-		var export = CreateDialogButton(summary.DestinationState == TerminalExportDestinationState.Conflict
-			? L("Terminal.Tui.Overwrite")
-			: L("Terminal.Tui.Export"));
-		export.IsDefault = true;
-		dialog.AddButton(export);
-		RunOverlay(dialog, export);
+		var cancel = CreateDialogButton(L("Terminal.Tui.Cancel"));
+		dialog.AddButton(cancel);
+		var dryRun = CreateDialogButton(L("Terminal.Tui.DryRun"));
+		dialog.AddButton(dryRun);
+		var canExport = summary.Kind != TerminalExportKind.Folder ||
+						summary.DestinationState != TerminalExportDestinationState.Conflict;
+		var focusedButton = cancel;
+		if (canExport)
+		{
+			var export = CreateDialogButton(summary.DestinationState == TerminalExportDestinationState.Conflict
+				? L("Terminal.Tui.Overwrite")
+				: L("Terminal.Tui.Export"));
+			export.IsDefault = true;
+			dialog.AddButton(export);
+			focusedButton = export;
+		}
+		RunOverlay(dialog, focusedButton);
 		return dialog.Result switch
 		{
 			1 => TerminalExportDecision.DryRun,
-			2 => summary.DestinationState == TerminalExportDestinationState.Conflict
+			2 when canExport => summary.DestinationState == TerminalExportDestinationState.Conflict
 				? TerminalExportDecision.Overwrite
 				: TerminalExportDecision.Export,
 			_ => TerminalExportDecision.Cancel
@@ -5284,6 +5640,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_sessionCts.Dispose();
 		_settingsPersistenceCts.Cancel();
 		_settingsPersistenceCts.Dispose();
+		_selectionProfilePersistence.StateChanged -= OnSelectionPersistenceStateChanged;
+		_selectionProfilePersistence.Dispose();
+		if (_agentJournalStore.IsValueCreated)
+			_agentJournalStore.Value.Dispose();
 		_operationGate.Dispose();
 	}
 
@@ -5294,22 +5654,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var diagnostics = _state.Plan.Diagnostics;
 		var body = diagnostics.Count == 0
 			? L("Terminal.Tui.Diagnostics.None")
-			: string.Join("\n\n", diagnostics.Select(diagnostic =>
-			{
-				var severity = diagnostic.Severity switch
-				{
-					ContextDiagnosticSeverity.Error => L("Terminal.Label.Error"),
-					ContextDiagnosticSeverity.Warning => L("Terminal.Label.Warning"),
-					_ => L("Terminal.Label.Info")
-				};
-				var message = ContextDiagnosticRenderer.ResolveMessage(
-					_services.Localization,
-					diagnostic);
-				var path = string.IsNullOrWhiteSpace(diagnostic.Path)
-					? string.Empty
-					: $"\n{L("Terminal.Label.Path")}: {TerminalTextEscaping.EscapeSingleLine(diagnostic.Path)}";
-				return $"{severity} [{diagnostic.Code}]\n{message}{path}";
-			}));
+			: FormatContextDiagnostics(diagnostics);
 		ShowScrollableOverlay(
 			L("Terminal.Tui.Command.Diagnostics.Title"),
 			body,
@@ -5317,6 +5662,32 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			preferredWidth: 92,
 			preferredHeight: 27);
 	}
+
+	private string FormatContextDiagnostics(IReadOnlyList<ContextDiagnostic> diagnostics) =>
+		FormatContextDiagnostics(_services.Localization, diagnostics);
+
+	internal static string FormatContextDiagnostics(
+		LocalizationService localization,
+		IReadOnlyList<ContextDiagnostic> diagnostics) =>
+		string.Join("\n\n", diagnostics.Select(diagnostic =>
+			{
+				var severity = diagnostic.Severity switch
+				{
+					ContextDiagnosticSeverity.Error => localization["Terminal.Label.Error"],
+					ContextDiagnosticSeverity.Warning => localization["Terminal.Label.Warning"],
+					_ => localization["Terminal.Label.Info"]
+				};
+				var message = ContextDiagnosticRenderer.ResolveMessage(
+				localization,
+					diagnostic);
+				var pathLabel = diagnostic.Code == "DPX-PROJECT-SELECTION-WARNING"
+					? localization["Terminal.Label.Value"]
+					: localization["Terminal.Label.Path"];
+				var path = string.IsNullOrWhiteSpace(diagnostic.Path)
+					? string.Empty
+				: $"\n{pathLabel}: {TerminalTextEscaping.EscapeSingleLine(diagnostic.Path)}";
+				return $"{severity} [{diagnostic.Code}]\n{message}{path}";
+			}));
 
 	private bool TryLeaveWorkspace(Action leave)
 	{
@@ -5326,9 +5697,14 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		{
 			return false;
 		}
-		FlushPendingWorkspacePersistence();
-		leave();
-		return true;
+		return RunOrDeferWorkspaceTransition(() =>
+		{
+			FlushPendingWorkspacePersistence();
+			if (!TryFlushLocalProfilePersistence(exiting: false))
+				return false;
+			leave();
+			return true;
+		});
 	}
 
 	private bool TryExitWorkspace()
@@ -5341,8 +5717,84 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		}
 		if (!Confirm(L("Terminal.Tui.Exit"), L("Terminal.Tui.ConfirmExit")))
 			return false;
-		FlushPendingWorkspacePersistence();
-		RequestExit();
+		return RunOrDeferWorkspaceTransition(() =>
+		{
+			FlushPendingWorkspacePersistence();
+			if (!TryFlushLocalProfilePersistence(exiting: true))
+				return false;
+			RequestExit();
+			return true;
+		});
+	}
+
+	private bool RunOrDeferWorkspaceTransition(Func<bool> transition)
+	{
+		ArgumentNullException.ThrowIfNull(transition);
+		if (_settingsDraftSelection is null &&
+			_operations.GetTask(WorkspaceOperationKind.SettingsRefresh) is null)
+		{
+			return transition();
+		}
+
+		var operationCts = ReplaceActiveOperation();
+		TrackActiveOperation(RunWorkspaceTransitionAfterSettingsRefreshAsync(
+			operationCts,
+			transition));
+		return true;
+	}
+
+	private async Task RunWorkspaceTransitionAfterSettingsRefreshAsync(
+		CancellationTokenSource operationCts,
+		Func<bool> transition)
+	{
+		try
+		{
+			await AwaitLatestSettingsRefreshAsync(operationCts.Token).ConfigureAwait(false);
+			await InvokeAsync(transition).ConfigureAwait(false);
+		}
+		catch (OperationCanceledException) when (
+			operationCts.IsCancellationRequested || _sessionCts.IsCancellationRequested)
+		{
+		}
+		catch
+		{
+			if (!_stopping)
+			{
+				await ShowFailureAsync(
+					"DPX-TUI-OPERATION-FAILED",
+					L("Terminal.Tui.Error.OperationFailed")).ConfigureAwait(false);
+			}
+		}
+		finally
+		{
+			ReleaseActiveOperation(operationCts);
+		}
+	}
+
+	private bool TryFlushLocalProfilePersistence(bool exiting)
+	{
+		while (!_selectionProfilePersistence.FlushAsync(reportFailure: false).GetAwaiter().GetResult())
+		{
+			var decision = ShowChoice(
+				L("Terminal.Tui.ProfileSaveFailure.Title"),
+				L("Terminal.Tui.ProfileSaveFailure.Message"),
+				L("Terminal.Tui.ProfileSaveFailure.Stay"),
+				L("Terminal.Tui.Retry"),
+				exiting
+					? L("Terminal.Tui.ProfileSaveFailure.ExitWithoutSaving")
+					: L("Terminal.Tui.ProfileSaveFailure.ContinueWithoutSaving"));
+			switch (decision)
+			{
+				case 1:
+					continue;
+				case 2:
+					_selectionProfilePersistence.DiscardPending();
+					_discardSelectionProfilePersistenceOnExit = exiting;
+					return true;
+				default:
+					return false;
+			}
+		}
 		return true;
 	}
 
@@ -5389,9 +5841,29 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		public void Report(T value) => report(value);
 	}
 
-	private sealed class TerminalWorkspaceOperationException(string code) : Exception
+	private sealed class TerminalWorkspaceOperationException(
+		string code,
+		string? detail = null) : Exception
 	{
 		public string Code { get; } = code;
+		public string? Detail { get; } = detail;
+	}
+
+	internal enum SettingsRefreshOutcome
+	{
+		None,
+		Pending,
+		Applied,
+		Failed
+	}
+
+	private sealed record SettingsRefreshPublication(
+		long RequestId,
+		SettingsRefreshOutcome Outcome)
+	{
+		public static SettingsRefreshPublication None { get; } = new(
+			RequestId: 0,
+			Outcome: SettingsRefreshOutcome.None);
 	}
 }
 

@@ -87,13 +87,21 @@ public sealed class ProfileCommandHandler(
 		bool apply,
 		CancellationToken cancellationToken)
 	{
-		var selection = await services.PortableProfileService
-			.LoadAsync(profilePath, cancellationToken)
+		var loaded = await services.PortableProfileService
+			.LoadWithMetadataAsync(profilePath, cancellationToken)
 			.ConfigureAwait(false);
+		var selection = loaded.Selection;
+		if (loaded.SourceSchemaVersion == PortableProjectProfileService.LegacySchemaVersion)
+			environment.Error.WriteLine(PortableProjectProfileService.LegacySchemaNotice);
 		if (apply)
 		{
+			var expectedUpdatedUtc = ObserveExpectedProfileVersion(projectPath);
 			var plan = await services.ContextFactory
-				.BuildAsync(projectPath, selection, cancellationToken: cancellationToken)
+				.BuildAsync(
+					projectPath,
+					selection,
+					includeOutputMetrics: false,
+					cancellationToken: cancellationToken)
 				.ConfigureAwait(false);
 			if (plan.HasErrors)
 			{
@@ -105,7 +113,10 @@ public sealed class ProfileCommandHandler(
 				return CommandLineExitCodes.PolicyFailure;
 			}
 			var legacy = ToLegacyProfile(plan, selection);
-			var saveResult = services.LocalProfileStore.TrySaveProfileWithResult(projectPath, legacy);
+			var saveResult = services.LocalProfileStore.TrySaveProfileWithResult(
+				projectPath,
+				legacy,
+				expectedUpdatedUtc);
 			if (saveResult.WasTruncated)
 			{
 				throw new PortableProjectProfileException(
@@ -114,6 +125,8 @@ public sealed class ProfileCommandHandler(
 			}
 			if (!saveResult.Succeeded)
 			{
+				if (saveResult.Status == ProjectProfileSaveStatus.Conflict)
+					throw ProfileConflict();
 				throw new PortableProjectProfileException(
 					"DPX-CLI-PROFILE-WRITE-FAILED",
 					"The local project profile could not be saved.");
@@ -158,6 +171,8 @@ public sealed class ProfileCommandHandler(
 		if (result.IsValid)
 		{
 			environment.Output.WriteLine(services.Localization["Terminal.Profile.Valid"]);
+			if (result.SourceSchemaVersion == PortableProjectProfileService.LegacySchemaVersion)
+				environment.Output.WriteLine(PortableProjectProfileService.LegacySchemaNotice);
 			return CommandLineExitCodes.Success;
 		}
 
@@ -178,8 +193,13 @@ public sealed class ProfileCommandHandler(
 				services.Localization["Terminal.Error.ProfileTransientGitMode"]);
 		}
 
+		var expectedUpdatedUtc = ObserveExpectedProfileVersion(projectPath);
 		var plan = await services.ContextFactory
-			.BuildAsync(projectPath, selection, cancellationToken: cancellationToken)
+			.BuildAsync(
+				projectPath,
+				selection,
+				includeOutputMetrics: false,
+				cancellationToken: cancellationToken)
 			.ConfigureAwait(false);
 		if (plan.HasErrors)
 		{
@@ -188,14 +208,21 @@ public sealed class ProfileCommandHandler(
 			return CommandLineExitCodes.PolicyFailure;
 		}
 
-		SaveLocalProfile(projectPath, plan, selection);
+		SaveLocalProfile(projectPath, plan, selection, expectedUpdatedUtc);
 		TerminalTextEscaping.WriteSingleLine(environment.Output, PathUtility.Normalize(projectPath));
 		return CommandLineExitCodes.Success;
 	}
 
 	public int Reset(string projectPath)
 	{
-		if (!services.LocalProfileStore.TryDeleteProfile(projectPath))
+		var result = services.LocalProfileStore.TryDeleteProfileWithResult(projectPath);
+		if (result == ProjectProfileDeleteStatus.Partial)
+		{
+			throw new PortableProjectProfileException(
+				"DPX-CLI-PROFILE-PARTIAL",
+				"The local profile reset completed only partially. Repeat the command to finish cleanup.");
+		}
+		if (result != ProjectProfileDeleteStatus.Deleted)
 		{
 			throw new PortableProjectProfileException(
 				"DPX-CLI-PROFILE-WRITE-FAILED",
@@ -211,10 +238,14 @@ public sealed class ProfileCommandHandler(
 	private void SaveLocalProfile(
 		string projectPath,
 		ProjectContextPlan plan,
-		ProjectSelectionSpec selection)
+		ProjectSelectionSpec selection,
+		DateTimeOffset? expectedUpdatedUtc)
 	{
 		var legacy = ToLegacyProfile(plan, selection);
-		var saveResult = services.LocalProfileStore.TrySaveProfileWithResult(projectPath, legacy);
+		var saveResult = services.LocalProfileStore.TrySaveProfileWithResult(
+			projectPath,
+			legacy,
+			expectedUpdatedUtc);
 		if (saveResult.WasTruncated)
 		{
 			throw new PortableProjectProfileException(
@@ -223,11 +254,36 @@ public sealed class ProfileCommandHandler(
 		}
 		if (!saveResult.Succeeded)
 		{
+			if (saveResult.Status == ProjectProfileSaveStatus.Conflict)
+				throw ProfileConflict();
 			throw new PortableProjectProfileException(
 				"DPX-CLI-PROFILE-WRITE-FAILED",
 				"The local project profile could not be saved.");
 		}
 	}
+
+	private DateTimeOffset? ObserveExpectedProfileVersion(string projectPath)
+	{
+		var lookup = services.LocalProfileStore.LookupProfile(projectPath, TimeSpan.FromSeconds(5));
+		var version = lookup.Status switch
+		{
+			ProjectProfileLookupStatus.Found => lookup.UpdatedUtc,
+			ProjectProfileLookupStatus.Missing => null,
+			ProjectProfileLookupStatus.TemporarilyUnavailable => throw new PortableProjectProfileException(
+				"DPX-CLI-PROFILE-WRITE-FAILED",
+				"The local profile store is temporarily unavailable."),
+			_ => throw new PortableProjectProfileException(
+				"DPX-CLI-PROFILE-WRITE-FAILED",
+				"The local profile store cannot be updated safely.")
+		};
+		ProfileCommandTestHooks.AfterVersionObserved.Value?.Invoke(projectPath, version);
+		return version;
+	}
+
+	private static PortableProjectProfileException ProfileConflict() =>
+		new(
+			"DPX-CLI-PROFILE-CONFLICT",
+			"The local profile changed while this command was preparing its update. Repeat the command.");
 
 	private static ProjectSelectionProfile ToLegacyProfile(
 		ProjectContextPlan plan,
@@ -265,7 +321,7 @@ public sealed class ProfileCommandHandler(
 			rootStates,
 			extensionStates,
 			ignoreStates,
-			plan.Selection.SelectedPaths?.ToArray() ?? []);
+			plan.Selection.SelectedPaths?.ToArray());
 	}
 
 	internal string BuildText(ProjectSelectionSpec selection)
@@ -277,13 +333,11 @@ public sealed class ProfileCommandHandler(
 		output.Append(services.Localization["Terminal.Analysis.GitMode"]).Append(": ")
 			.AppendLine(ProjectSelectionTokens.ToToken(selection));
 		output.Append(services.Localization["Terminal.Analysis.Roots"]).Append(": ")
-			.AppendLine(selection.Roots is { Count: > 0 } roots ? JoinEscaped(roots) : all);
+			.AppendLine(FormatSet(selection.Roots, all));
 		output.Append(services.Localization["Terminal.Analysis.Extensions"]).Append(": ")
-			.AppendLine(selection.Extensions is { Count: > 0 } extensions ? JoinEscaped(extensions) : all);
+			.AppendLine(FormatSet(selection.Extensions, all));
 		output.Append(services.Localization["Terminal.Profile.SelectedPaths"]).Append(": ")
-			.AppendLine(selection.SelectedPaths is { Count: > 0 } selectedPaths
-				? JoinEscaped(selectedPaths)
-				: all);
+			.AppendLine(FormatSet(selection.SelectedPaths, all));
 		if (selection.Exclusions is { Count: > 0 } exclusions)
 		{
 			output.Append(services.Localization["Terminal.Analysis.Exclusions"]).Append(": ")
@@ -308,6 +362,13 @@ public sealed class ProfileCommandHandler(
 	private static string JoinEscaped(IEnumerable<string> values) =>
 		string.Join(", ", values.Select(TerminalTextEscaping.EscapeSingleLine));
 
+	private static string FormatSet(IReadOnlyCollection<string>? values, string all) => values switch
+	{
+		null => all,
+		{ Count: 0 } => "none",
+		_ => JoinEscaped(values)
+	};
+
 	private static string FormatProfile(ProjectProfileReference? profile) =>
 		profile?.Kind switch
 		{
@@ -322,7 +383,7 @@ public sealed class ProfileCommandHandler(
 		JsonSerializer.Serialize(
 			new
 			{
-				schemaVersion = 1,
+				schemaVersion = PortableProjectProfileService.CurrentSchemaVersion,
 				kind = PortableProjectProfileService.DocumentKind,
 				selection = new
 				{
@@ -332,7 +393,7 @@ public sealed class ProfileCommandHandler(
 					extensions = selection.Extensions?
 						.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase)
 						.ToArray(),
-					selectedPaths = (selection.SelectedPaths ?? [])
+					selectedPaths = selection.SelectedPaths?
 						.OrderBy(static value => value, ProjectTreePathIdentity.CanonicalComparer)
 						.ToArray(),
 					gitMode = selection.GitMode is { } gitMode
@@ -353,4 +414,9 @@ public sealed class ProfileCommandHandler(
 				WriteIndented = true,
 				PropertyNamingPolicy = JsonNamingPolicy.CamelCase
 			});
+}
+
+internal static class ProfileCommandTestHooks
+{
+	internal static AsyncLocal<Action<string, DateTimeOffset?>?> AfterVersionObserved { get; } = new();
 }

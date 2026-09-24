@@ -1,0 +1,192 @@
+name: Release Candidate
+
+# CI tier 3, `workflow_dispatch` only. Policy: .github/workflows/README.md
+# This aggregator calls every read-only gate for ONE pinned commit and fails if any gate is
+# skipped. Never add pull_request or push triggers: they would duplicate the whole matrix on
+# every push (tried in September 2026 and reverted). Composition changes are covered by the
+# actionlint job in dotnet.yml; a real dispatch on the candidate SHA is the acceptance test.
+# Keep `contents: read` here and call only workflows without write permissions: GitHub rejects
+# nested jobs that request more than the caller grants, `if:` guards do not help.
+# Adding a channel: one reusable read-only workflow, one job below, one row in the report, one
+# entry in the contract test (HeadlessWorkflowsCoverMasterCoreChangesAndReleaseCandidatePinsOneSha).
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Full commit SHA; must equal the selected ref SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  checks: read
+
+jobs:
+  validate-sha:
+    name: Pin release candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      candidate_sha: ${{ steps.pin.outputs.candidate_sha }}
+      display_version: ${{ steps.pin.outputs.display_version }}
+      package_version: ${{ steps.pin.outputs.package_version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.sha }}
+          fetch-depth: 1
+
+      - name: Verify the pinned commit
+        id: pin
+        shell: bash
+        env:
+          REQUESTED_SHA: ${{ inputs.sha }}
+          WORKFLOW_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [[ ! "${REQUESTED_SHA}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::Release candidate must be a full 40-character commit SHA."
+            exit 1
+          fi
+          if [[ "${REQUESTED_SHA,,}" != "${WORKFLOW_SHA,,}" ]]; then
+            echo "::error::Release candidate input ${REQUESTED_SHA} must equal workflow ref SHA ${WORKFLOW_SHA}."
+            exit 1
+          fi
+          actual_sha="$(git rev-parse HEAD)"
+          if [[ "${actual_sha}" != "${REQUESTED_SHA,,}" ]]; then
+            echo "::error::Release candidate checkout mismatch: requested ${REQUESTED_SHA}, got ${actual_sha}."
+            exit 1
+          fi
+          display_version="$(sed -n 's:.*<DevProjexVersion[^>]*>\([^<]*\)</DevProjexVersion>.*:\1:p' Directory.Build.props)"
+          package_version="${display_version}"
+          if [[ "${package_version}" =~ ^[0-9]+\.[0-9]+$ ]]; then
+            package_version="${package_version}.0"
+          fi
+          if [[ -z "${display_version}" || ! "${package_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-].+)?$ ]]; then
+            echo "::error::Could not resolve a valid package version from Directory.Build.props."
+            exit 1
+          fi
+          echo "candidate_sha=${actual_sha}" >> "${GITHUB_OUTPUT}"
+          echo "display_version=${display_version}" >> "${GITHUB_OUTPUT}"
+          echo "package_version=${package_version}" >> "${GITHUB_OUTPUT}"
+          printf 'Workflow ref SHA: `%s`.\n' "${WORKFLOW_SHA}" >> "${GITHUB_STEP_SUMMARY}"
+          printf 'Requested candidate SHA: `%s`.\n' "${REQUESTED_SHA}" >> "${GITHUB_STEP_SUMMARY}"
+          printf 'Validated release candidate `%s`.\n' "${actual_sha}" >> "${GITHUB_STEP_SUMMARY}"
+
+  dotnet-ci:
+    name: .NET CI
+    needs: validate-sha
+    uses: ./.github/workflows/dotnet.yml
+    with:
+      checkout_ref: ${{ needs.validate-sha.outputs.candidate_sha }}
+      force_full: true
+
+  release-validation:
+    name: Release Validation
+    needs: validate-sha
+    uses: ./.github/workflows/release-validate.yml
+    with:
+      checkout_ref: ${{ needs.validate-sha.outputs.candidate_sha }}
+      force_full: true
+
+  headless-archives:
+    name: Headless archives
+    needs: validate-sha
+    uses: ./.github/workflows/headless-build.yml
+    with:
+      checkout_ref: ${{ needs.validate-sha.outputs.candidate_sha }}
+      version: ${{ needs.validate-sha.outputs.display_version }}
+
+  container:
+    name: Container dry-run
+    needs: validate-sha
+    uses: ./.github/workflows/container-build.yml
+    with:
+      checkout_ref: ${{ needs.validate-sha.outputs.candidate_sha }}
+      version: ${{ needs.validate-sha.outputs.display_version }}
+
+  packages:
+    name: Package dry-run
+    needs: validate-sha
+    uses: ./.github/workflows/packages-build.yml
+    with:
+      checkout_ref: ${{ needs.validate-sha.outputs.candidate_sha }}
+      display_version: ${{ needs.validate-sha.outputs.display_version }}
+      package_version: ${{ needs.validate-sha.outputs.package_version }}
+
+  appimage:
+    name: AppImage dry-run
+    needs: validate-sha
+    uses: ./.github/workflows/appimage-build.yml
+    with:
+      checkout_ref: ${{ needs.validate-sha.outputs.candidate_sha }}
+      version: ${{ needs.validate-sha.outputs.display_version }}
+
+  grammar-delivery:
+    name: Grammar Delivery
+    needs: validate-sha
+    uses: ./.github/workflows/grammar-delivery.yml
+    with:
+      checkout_ref: ${{ needs.validate-sha.outputs.candidate_sha }}
+
+  store-smoke:
+    name: Store Package Smoke
+    needs: validate-sha
+    uses: ./.github/workflows/store-package-smoke.yml
+    with:
+      checkout_ref: ${{ needs.validate-sha.outputs.candidate_sha }}
+      force_full: true
+
+  report:
+    name: Release candidate report
+    if: ${{ always() }}
+    needs:
+      - validate-sha
+      - dotnet-ci
+      - release-validation
+      - headless-archives
+      - container
+      - packages
+      - appimage
+      - grammar-delivery
+      - store-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Summarize all release gates
+        shell: pwsh
+        env:
+          CANDIDATE_SHA: ${{ needs.validate-sha.outputs.candidate_sha }}
+          PIN_RESULT: ${{ needs.validate-sha.result }}
+          DOTNET_RESULT: ${{ needs.dotnet-ci.result }}
+          RELEASE_RESULT: ${{ needs.release-validation.result }}
+          ARCHIVES_RESULT: ${{ needs.headless-archives.result }}
+          CONTAINER_RESULT: ${{ needs.container.result }}
+          PACKAGES_RESULT: ${{ needs.packages.result }}
+          APPIMAGE_RESULT: ${{ needs.appimage.result }}
+          GRAMMAR_RESULT: ${{ needs.grammar-delivery.result }}
+          STORE_RESULT: ${{ needs.store-smoke.result }}
+        run: |
+          $results = [ordered]@{
+            'Pinned SHA' = $env:PIN_RESULT
+            '.NET CI' = $env:DOTNET_RESULT
+            'Release Validation' = $env:RELEASE_RESULT
+            'Headless archives' = $env:ARCHIVES_RESULT
+            'Container dry-run' = $env:CONTAINER_RESULT
+            'Package dry-run' = $env:PACKAGES_RESULT
+            'AppImage dry-run' = $env:APPIMAGE_RESULT
+            'Grammar Delivery' = $env:GRAMMAR_RESULT
+            'Store Package Smoke' = $env:STORE_RESULT
+          }
+          "## Release candidate ``$env:CANDIDATE_SHA``" >> $env:GITHUB_STEP_SUMMARY
+          '' >> $env:GITHUB_STEP_SUMMARY
+          '| Gate | Result |' >> $env:GITHUB_STEP_SUMMARY
+          '| --- | --- |' >> $env:GITHUB_STEP_SUMMARY
+          foreach ($entry in $results.GetEnumerator()) {
+            "| $($entry.Key) | $($entry.Value) |" >> $env:GITHUB_STEP_SUMMARY
+          }
+          $failed = @($results.Values | Where-Object { $_ -cne 'success' })
+          if ($failed.Count -ne 0) {
+            throw 'At least one release-candidate gate did not succeed.'
+          }

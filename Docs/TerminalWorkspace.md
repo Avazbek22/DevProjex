@@ -179,6 +179,27 @@ Apply command. Rapid changes are coalesced into the latest requested state;
 batch-oriented workflows belong to direct CLI commands rather than a second
 commit model inside the TUI.
 
+The checked-tree frontier is also the local project profile used by Desktop and
+MCP Live Context. TUI restores it when the project opens, writes the latest
+frontier after two seconds of selection inactivity, and flushes it before leaving
+the workspace or exiting. A missing or null frontier starts with no check marks but
+still means the full effective tree. An explicit empty array also appears unchecked
+and remains empty until a tree action; after the user changes the tree, no checked
+nodes is saved as null, while a mixed tree is saved as its minimal checked frontier.
+Parameter changes are written after their successful immediate refresh. Expansion,
+focus, Preview view, and format remain TUI presentation state and do not alter the
+shared focus.
+When an MCP live session exists for the open root and the terminal is at least
+80 columns wide, the status line shows `Live context (<client>)`, or a localized
+session count when more than one is active. Below 80 columns the compact status
+shows only `Live context`.
+
+`set activity on|off` controls the persisted **Agent activity** projection. When it
+is on, the status line adds the latest MCP tool and the live session's call count.
+Files delivered by that session carry `A` in a dedicated tree marker column; focusing
+one adds its delivery count to the status line. Turning the setting off removes the
+projection without changing or deleting the journal.
+
 When filtering changes which options are available, a newly discovered option is
 selected by default. An option already seen during the session keeps its explicit
 checked or unchecked state if it disappears and later returns. This is the same
@@ -213,7 +234,7 @@ strict: only a complete token executes. Tab accepts or cycles completion, while 
 invalid token reports its position and up to three similar candidates. Arguments
 containing whitespace can use single or double quotes; path completion inserts
 and preserves the required quotes automatically.
-Welcome exposes the focused subset `recent`, `language`, `help`, and `quit`.
+Welcome exposes the focused subset `open`, `recent`, `language`, `help`, and `quit`.
 
 The input line exposes the active argument schema before execution and renders an
 inline ghost suffix as soon as a token can be completed:
@@ -225,9 +246,11 @@ inline ghost suffix as soon as a token can be completed:
 | Syntax | Session action |
 |---|---|
 | `set <option> on\|off` | toggle one content or exclusion option; legacy `set gitignore` and `set tracked` remain supported |
+| `set activity on\|off` | show or hide the persisted live agent-activity status and tree markers |
 | `set git off\|gitignore\|tracked\|staged\|changes\|diff:<ref>..<ref>` | select the Git axis without changing profiles |
 | `all types\|exclusions\|content on\|off` | apply the framed **All** action |
 | `type <.ext> [<.ext>...] on\|off` | toggle available file extensions |
+| `select <path\|glob> [<path\|glob>...] on\|off` | check or uncheck matching tree nodes; a directory applies to its subtree, and `all` names the complete tree |
 | `view tree\|content\|tree-content` | select Preview mode |
 | `format text\|markdown\|json\|xml` | select tree format |
 | `search [text]` | search Preview, or clear it with no text |
@@ -236,10 +259,20 @@ inline ghost suffix as soon as a token can be completed:
 | `export zip <path>` / `export folder <path>` | open the existing project-export confirmation |
 | `copy [tree\|content\|tree-content] [text\|markdown\|json\|xml]` | copy an exact context document without changing the current view or format |
 | `analyze` | analyze the current context |
+| `related <path> [--direction <dependencies\|dependents\|both>] [--depth <1..10>]` | show dependency relations in the output panel using the current workspace selection |
 | `branch [name]` | switch the cloned repository branch, or open branch selection |
 | `update` | get updates for the cloned repository |
 | `recent` | open recent projects and repositories |
+| `open <path\|url>` | open a local folder or clone and open a repository through the existing source workflow |
 | `profile save [name]` | save the current settings as a portable profile |
+| `profile load <name\|path>` | load a portable profile and apply it immediately |
+| `profile show` | show the effective settings and tree selection |
+| `profile reset` | reset the current project to default settings after confirmation |
+| `mcp [claude-code\|codex\|cursor\|vscode\|json] [live\|standard]` | print a connection fragment without changing client configuration |
+| `mcp connect <claude-code\|codex\|cursor\|vscode\|json> [live\|standard]` | connect the selected MCP client to the open project; mode defaults to `live`, and `json` shows the manual configuration |
+| `mcp log [session <id>\|last]` | open the project journal; choose a session to inspect its calls and totals |
+| `mcp log export <path> [markdown\|json] [session <id>\|last]` | write a context receipt with the shared receipt formatter; format defaults to Markdown and session defaults to `last` |
+| `mcp log clear` | clear completed journal sessions for the project after confirmation |
 | `refresh` | rescan the working copy from disk without network access |
 | `language [code]` | show available language codes or switch the workspace language immediately |
 | `diagnostics` | show every diagnostic in a scrollable overlay |
@@ -249,6 +282,20 @@ inline ghost suffix as soon as a token can be completed:
 `set git none` is accepted as a synonym for `set git off`; command help and
 completion continue to advertise the shorter `off` form.
 
+`select` uses the same project-relative glob syntax as the other selection filters. Exact
+directory paths apply to their complete subtree, `select all ...` targets the whole tree,
+and selectors that are absent from the effective tree are counted and reported with the
+existing `DPX-SELECTION-PATH-MISSING` warning. The resulting check-state change follows the
+same projection and local-profile persistence path as a manual checkbox, so Live Context
+consumers observe the updated selection.
+
+`open` uses the same local-folder and repository-source workflow as startup and `recent`.
+Repository URLs show the existing clone confirmation and progress before the cloned project
+opens. `profile load` resolves a simple name in the same portable-profile directory used by
+`profile save`; an explicit path can be quoted. Loading applies the profile immediately,
+`profile show` renders the effective CLI profile report, and `profile reset` confirms before
+restoring the default settings and selection.
+
 Examples:
 
 ```text
@@ -257,11 +304,21 @@ Examples:
 :set git diff:main..feature
 :all types off
 :type .cs .md on
+:select "source files/**/*.cs" docs on
+:select all off
 :view content
 :search "connection string"
 :copy content markdown
+:related src/App.cs --direction dependencies --depth 2
+:mcp codex standard
+:mcp connect codex standard
+:mcp log last
+:mcp log export "../agent receipt.md" markdown last
+:set activity on
 :refresh
 :language ja
+:open "../sample project"
+:profile load "Team Settings"
 :export context markdown "../review context.md"
 ```
 
@@ -271,6 +328,24 @@ Oversized OSC 52 payloads are never truncated; the command reports an error and
 directs the user to `export` instead. A view or format supplied to `copy` applies
 only to that operation.
 
+`mcp connect` defaults to live mode and accepts `live` or `standard`; it never opens
+another terminal or editor, because Terminal Workspace is already interactive. Its localized result
+appears both in the workspace status line and in a scrollable output panel. A
+missing command-line client or another failure shows the same reason together with
+the manual fallback configuration. Cursor and VS Code update their project files;
+the other client behaviors match `devprojex mcp connect`. The older `mcp` form
+continues to print a fragment and accepts an explicit live or standard mode.
+Because Codex uses one shared `devprojex` registration, replacing a registration
+that points at another project requires confirmation showing both roots. Claude Code
+uses a project-local registration and does not need that cross-project confirmation.
+If replacement fails or is canceled after removal, the previous registration is
+restored before the operation completes.
+
+`related` uses the same dependency engine and text renderer as the direct CLI.
+Depth `1` shows direct relations; larger values walk only resolved edges and emit
+one section per visited file. Ambiguous and unresolved evidence is never followed.
+The same 256-seed limit fails honestly before the panel shows a partial graph.
+
 Left/Right, Home/End, Backspace, and Delete edit the line. Esc cancels it,
 Enter executes it, and Up/Down traverses command history. The newest 50 commands
 are persisted in terminal settings across launches; adjacent duplicates are stored
@@ -279,7 +354,12 @@ renders that hint in brackets instead of relying on dim color.
 
 Debounced tree selection, expansion, focus, view, and format state is flushed
 before leaving a workspace or exiting, so an immediate exit cannot discard the
-last accepted interaction.
+last accepted interaction. A workspace that made no profile change does not write
+a new profile revision. When Desktop and Terminal Workspace are open together,
+each save reapplies only the fields changed in that window to the latest stored
+revision; a transient write failure keeps the newest selection pending for a
+bounded retry and is reported in the Terminal Workspace error panel if flushing
+still cannot commit it.
 
 `language` without an argument shows the current language and all supported codes.
 A mistyped code reports only the nearest candidates and points back to the
