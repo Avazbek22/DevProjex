@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Interactivity;
 using DevProjex.Avalonia.Services;
 
@@ -55,6 +56,19 @@ public sealed class MessageDialogBehaviorTests
 
         var result = await completion.Task.WaitAsync(TimeSpan.FromSeconds(1));
         Assert.False(result);
+    }
+
+    [AvaloniaFact]
+    public void BuildConfirmationContent_ScrollableMessageUsesScrollViewer()
+    {
+        var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var content = InvokeBuildConfirmationContent("Long message", "Confirm", "Cancel", completion, scrollMessage: true);
+
+        var panel = Assert.IsType<DockPanel>(content);
+        var scrollViewer = Assert.Single(panel.Children.OfType<ScrollViewer>());
+        Assert.Equal("Long message", Assert.IsType<TextBlock>(scrollViewer.Content).Text);
+        Assert.Equal(ScrollBarVisibility.Auto, scrollViewer.VerticalScrollBarVisibility);
+        Assert.Equal(ScrollBarVisibility.Disabled, scrollViewer.HorizontalScrollBarVisibility);
     }
 
     [AvaloniaFact]
@@ -116,14 +130,15 @@ public sealed class MessageDialogBehaviorTests
         string message,
         string confirmButtonText,
         string cancelButtonText,
-        TaskCompletionSource<bool> completion)
+        TaskCompletionSource<bool> completion,
+        bool scrollMessage = false)
     {
         var method = typeof(MessageDialog).GetMethod(
             "BuildConfirmationContent",
             BindingFlags.NonPublic | BindingFlags.Static);
 
         Assert.NotNull(method);
-        var content = (Control?)method!.Invoke(null, [message, confirmButtonText, cancelButtonText, completion]);
+        var content = (Control?)method!.Invoke(null, [message, confirmButtonText, cancelButtonText, completion, scrollMessage]);
         Assert.NotNull(content);
         return content!;
     }
