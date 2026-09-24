@@ -192,7 +192,6 @@
   "AgentActivity.Status.Calls.Many": "{0} 呼び出し",
   "AgentActivity.Status.Calls.Other": "{0} 呼び出し",
   "AgentActivity.Tree.ToolTip": "エージェントが {0} 回受信",
-  "SelectionPersistence.Saving": "選択内容を保存しています…",
   "SelectionPersistence.Failed": "選択内容は保存されていません。エージェントは前の選択を使用します",
   "SelectionPersistence.Failed.Help": "選択内容を保存できませんでした: {0}",
   "Menu.Help": "ヘルプ",

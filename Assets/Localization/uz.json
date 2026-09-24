@@ -192,7 +192,6 @@
   "AgentActivity.Status.Calls.Many": "{0} chaqiruv",
   "AgentActivity.Status.Calls.Other": "{0} chaqiruv",
   "AgentActivity.Tree.ToolTip": "Agent {0} marta oldi",
-  "SelectionPersistence.Saving": "Tanlov saqlanmoqda…",
   "SelectionPersistence.Failed": "Tanlov saqlanmadi; agent oldingi tanlovdan foydalanadi",
   "SelectionPersistence.Failed.Help": "Tanlovni saqlab bo‘lmadi: {0}",
   "Menu.Help": "Yordam",

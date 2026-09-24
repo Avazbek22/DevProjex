@@ -192,7 +192,6 @@
   "AgentActivity.Status.Calls.Many": "{0} викликів",
   "AgentActivity.Status.Calls.Other": "{0} викликів",
   "AgentActivity.Tree.ToolTip": "Агент отримав {0} разів",
-  "SelectionPersistence.Saving": "Зберігаємо вибір…",
   "SelectionPersistence.Failed": "Вибір не збережено; агент використовує попередній",
   "SelectionPersistence.Failed.Help": "Не вдалося зберегти вибір: {0}",
   "Menu.Help": "Довідка",

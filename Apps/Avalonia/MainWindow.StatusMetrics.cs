@@ -19,19 +19,14 @@ public partial class MainWindow
     private void RefreshTreeSelectionPersistenceStatus()
     {
         var state = _treeSelectionProfiles.State;
-        var text = state.Phase switch
-        {
-            SelectionPersistencePhase.Pending or SelectionPersistencePhase.Saving =>
-                _localization["SelectionPersistence.Saving"],
-            SelectionPersistencePhase.Deferred or SelectionPersistencePhase.Failed =>
-                _localization["SelectionPersistence.Failed"],
-            _ => string.Empty
-        };
-        var helpText = state.Phase is SelectionPersistencePhase.Deferred or SelectionPersistencePhase.Failed
+        var text = state.Phase == SelectionPersistencePhase.Failed
+            ? _localization["SelectionPersistence.Failed"]
+            : string.Empty;
+        var helpText = state.Phase == SelectionPersistencePhase.Failed
             ? _localization.Format(
                 "SelectionPersistence.Failed.Help",
                 state.FailureReason ?? _localization["SelectionPersistence.Failed"])
-            : text;
+            : string.Empty;
         _viewModel.SetSelectionPersistenceStatus(text, helpText);
     }
 

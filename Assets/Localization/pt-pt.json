@@ -192,7 +192,6 @@
   "AgentActivity.Status.Calls.Many": "{0} chamadas",
   "AgentActivity.Status.Calls.Other": "{0} chamadas",
   "AgentActivity.Tree.ToolTip": "O agente recebeu o ficheiro {0} vezes",
-  "SelectionPersistence.Saving": "A guardar a seleção…",
   "SelectionPersistence.Failed": "Seleção não guardada; o agente utiliza a seleção anterior",
   "SelectionPersistence.Failed.Help": "Não foi possível guardar a seleção: {0}",
     "Menu.Help":  "Ajuda",

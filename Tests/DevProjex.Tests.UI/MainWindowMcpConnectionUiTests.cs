@@ -2,6 +2,7 @@ using Avalonia.Automation;
 using Avalonia.Media.Imaging;
 using Avalonia.VisualTree;
 using System.Reflection;
+using DevProjex.Avalonia.Coordinators;
 using DevProjex.Application.Services;
 using DevProjex.Infrastructure.TerminalCommands;
 using DevProjex.Kernel.Abstractions;
@@ -35,19 +36,20 @@ public sealed class MainWindowMcpConnectionUiTests(UiWorkspaceFixture workspace)
 			profileStore.BlockWrites = true;
 			var root = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
 			root.IsChecked = root.IsChecked != true;
-			await UiTestDriver.WaitForConditionAsync(
-				window,
-				() => UiTestDriver.GetViewModel(window).SelectionPersistenceStatusVisible,
-				"the pending selection persistence status");
-			Assert.Equal(
-				"Saving selection…",
-				UiTestDriver.GetViewModel(window).SelectionPersistenceStatusText);
+			var persistence = Assert.IsType<TreeSelectionProfilePersistenceCoordinator>(
+				typeof(MainWindow).GetField("_treeSelectionProfiles", BindingFlags.Instance | BindingFlags.NonPublic)!
+					.GetValue(window));
+			Assert.Equal(SelectionPersistencePhase.Pending, persistence.State.Phase);
+			AssertSelectionPersistenceStatusHidden(window);
+			await CaptureStatusBarIfRequestedAsync(window, "selection-status-after-checkbox.png");
 
 			var cursor = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(
 				window,
 				"McpConnectCursorMenuItem");
 			await UiTestDriver.RaiseMenuItemClickAsync(cursor);
 			await profileStore.WriteStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+			Assert.Equal(SelectionPersistencePhase.Saving, persistence.State.Phase);
+			AssertSelectionPersistenceStatusHidden(window);
 			Assert.Empty(service.Requests);
 
 			profileStore.ReleaseWrite();
@@ -103,10 +105,24 @@ public sealed class MainWindowMcpConnectionUiTests(UiWorkspaceFixture workspace)
 
 			var viewModel = UiTestDriver.GetViewModel(window);
 			Assert.True(viewModel.SelectionPersistenceStatusVisible);
+			var statusText = GetSelectionPersistenceStatusText(window);
+			var agentActivityText = Assert.Single(
+				window.GetVisualDescendants().OfType<TextBlock>(),
+				static text => text.Name == "AgentActivityStatusText");
+			Assert.True(statusText.IsVisible);
+			Assert.Equal(1, Grid.GetColumn(statusText));
+			Assert.Equal(agentActivityText.Margin, statusText.Margin);
+			Assert.Equal(agentActivityText.VerticalAlignment, statusText.VerticalAlignment);
 			Assert.Contains(
 				"storage unavailable",
 				viewModel.SelectionPersistenceStatusHelpText,
 				StringComparison.Ordinal);
+			viewModel.IsCompactMode = true;
+			Assert.False(viewModel.SelectionPersistenceStatusVisible);
+			Assert.False(statusText.IsVisible);
+			viewModel.IsCompactMode = false;
+			Assert.True(viewModel.SelectionPersistenceStatusVisible);
+			Assert.True(statusText.IsVisible);
 			Assert.Empty(service.Requests);
 			await CaptureIfRequestedAsync(window, "selection-not-saved.png");
 			var dialog = Assert.Single(window.OwnedWindows);
@@ -198,7 +214,31 @@ public sealed class MainWindowMcpConnectionUiTests(UiWorkspaceFixture workspace)
 		Assert.False(window.IsVisible);
 	}
 
-	private static async Task CaptureIfRequestedAsync(TopLevel topLevel, string fileName)
+	private static void AssertSelectionPersistenceStatusHidden(MainWindow window)
+	{
+		var viewModel = UiTestDriver.GetViewModel(window);
+		Assert.Empty(viewModel.SelectionPersistenceStatusText);
+		Assert.Empty(viewModel.SelectionPersistenceStatusHelpText);
+		Assert.False(viewModel.SelectionPersistenceStatusVisible);
+		var statusText = GetSelectionPersistenceStatusText(window);
+		Assert.Empty(statusText.Text ?? string.Empty);
+		Assert.False(statusText.IsVisible);
+	}
+
+	private static TextBlock GetSelectionPersistenceStatusText(MainWindow window) =>
+		Assert.Single(
+			window.GetVisualDescendants().OfType<TextBlock>(),
+			static text => text.Name == "SelectionPersistenceStatusText");
+
+	private static async Task CaptureStatusBarIfRequestedAsync(MainWindow window, string fileName)
+	{
+		var statusBar = Assert.Single(
+			window.GetVisualDescendants().OfType<Border>(),
+			static border => border.Classes.Contains("status-strip"));
+		await CaptureIfRequestedAsync(statusBar, fileName);
+	}
+
+	private static async Task CaptureIfRequestedAsync(Control control, string fileName)
 	{
 		var outputDirectory = Environment.GetEnvironmentVariable("DEVPROJEX_UI_CAPTURE_DIRECTORY");
 		if (string.IsNullOrWhiteSpace(outputDirectory))
@@ -207,13 +247,13 @@ public sealed class MainWindowMcpConnectionUiTests(UiWorkspaceFixture workspace)
 		Directory.CreateDirectory(outputDirectory);
 		var path = Path.Combine(outputDirectory, fileName);
 		await UiTestDriver.WaitForSettledFramesAsync(frameCount: 8);
-		await topLevel.Dispatcher.InvokeAsync(() =>
+		await control.Dispatcher.InvokeAsync(() =>
 		{
 			var size = new PixelSize(
-				Math.Max(1, (int)Math.Ceiling(topLevel.Bounds.Width)),
-				Math.Max(1, (int)Math.Ceiling(topLevel.Bounds.Height)));
+				Math.Max(1, (int)Math.Ceiling(control.Bounds.Width)),
+				Math.Max(1, (int)Math.Ceiling(control.Bounds.Height)));
 			using var frame = new RenderTargetBitmap(size);
-			frame.Render(topLevel);
+			frame.Render(control);
 			using var output = File.Create(path);
 			frame.Save(output, PngBitmapEncoderOptions.Default);
 		}, DispatcherPriority.Render);
