@@ -1746,21 +1746,21 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var tokens = ResolveDisplayedTokenCount(state);
 		var folders = state.HasVisibleTreeItems ? state.SelectedFolderCount : 0;
 		var compressionUnavailable = GetCurrentCompressionAvailability(state)?.IsUnavailable == true;
+		var compactMetrics = $"{state.SelectedFileCount:N0} F  {folders:N0} D  " +
+							 $"~{tokens:N0} tok  " +
+							 $"{warningCount:N0} W  {errorCount:N0} E";
+		var selectionPersistence = BuildSelectionPersistenceIndicator();
+		var compactActivity = BuildAgentActivityIndicator(compact: true);
 		if (width < 80)
 		{
-			var compactActivity = BuildAgentActivityIndicator(compact: true);
-			var compactSelectionPersistence = BuildSelectionPersistenceIndicator();
-			return $"{state.SelectedFileCount:N0} F  {folders:N0} D  " +
-				   $"~{tokens:N0} tok  " +
-				   $"{warningCount:N0} W  {errorCount:N0} E" +
+			return compactMetrics +
 				   (compressionUnavailable ? "  C!" : string.Empty) +
 				   (_liveSessions.Count > 0 ? "  Live context" : string.Empty) +
-				   (compactSelectionPersistence is null ? string.Empty : $"  {compactSelectionPersistence}") +
+				   (selectionPersistence is null ? string.Empty : $"  {selectionPersistence}") +
 				   (compactActivity is null ? string.Empty : $"  {compactActivity}");
 		}
 
-		var separator = _environment.SupportsUnicode ? PanelSeparator : " | ";
-		var parts = new List<string>
+		var metrics = new[]
 		{
 			$"{L("Terminal.Analysis.Files")} {state.SelectedFileCount:N0}",
 			$"{L("Terminal.Analysis.Folders")} {folders:N0}",
@@ -1769,17 +1769,59 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			$"{L("Terminal.Tui.Warnings")} {warningCount:N0}",
 			$"{L("Terminal.Tui.Errors")} {errorCount:N0}"
 		};
+		var indicators = new List<string>();
+		var compactIndicators = new List<string>();
 		if (compressionUnavailable)
-			parts.Add(L("Compression.Metrics.Unavailable"));
+		{
+			indicators.Add(L("Compression.Metrics.Unavailable"));
+			compactIndicators.Add("C!");
+		}
 		if (_liveSessions.Count > 0)
-			parts.Add(BuildLiveSessionIndicator(_liveSessions));
-		if (BuildSelectionPersistenceIndicator() is { } selectionPersistence)
-			parts.Add(selectionPersistence);
-		if (BuildAgentActivityIndicator(compact: false) is { } activity)
-			parts.Add(activity);
-		return string.Join(
-			separator,
-			parts);
+		{
+			var liveSessions = BuildLiveSessionIndicator(_liveSessions);
+			indicators.Add(liveSessions);
+			compactIndicators.Add(liveSessions);
+		}
+		if (selectionPersistence is not null)
+		{
+			indicators.Add(selectionPersistence);
+			compactIndicators.Add(selectionPersistence);
+		}
+		if (BuildAgentActivityIndicator(compact: false) is { } activity && compactActivity is not null)
+		{
+			indicators.Add(activity);
+			compactIndicators.Add(compactActivity);
+		}
+		return FitStatusLine(
+			metrics,
+			compactMetrics,
+			indicators,
+			compactIndicators,
+			_environment.SupportsUnicode ? PanelSeparator : " | ",
+			width - 2);
+	}
+
+	// The full metrics come first when everything fits. Otherwise the metrics shrink to their
+	// compact form so the error count and the indicators stay visible; the Live context
+	// indicator keeps its client name at this width, the activity text shortens, and whatever
+	// still does not fit is cut at the end with an ellipsis.
+	internal static string FitStatusLine(
+		IReadOnlyList<string> metrics,
+		string compactMetrics,
+		IReadOnlyList<string> indicators,
+		IReadOnlyList<string> compactIndicators,
+		string separator,
+		int availableColumns)
+	{
+		var full = string.Join(separator, metrics.Concat(indicators));
+		if (full.GetColumns() <= availableColumns)
+			return full;
+		var withCompactMetrics = string.Join(separator, indicators.Prepend(compactMetrics));
+		return withCompactMetrics.GetColumns() <= availableColumns
+			? withCompactMetrics
+			: FitEndToWidth(
+				string.Join(separator, compactIndicators.Prepend(compactMetrics)),
+				availableColumns);
 	}
 
 	private string? BuildSelectionPersistenceIndicator() =>
