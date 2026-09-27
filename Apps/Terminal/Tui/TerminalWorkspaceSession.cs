@@ -24,6 +24,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private const int WelcomeHorizontalMargin = 2;
 	private const int WelcomeWideActionsWidth = 42;
 	private const int SettingsRefreshDebounceMilliseconds = 200;
+	private const int ChoiceDialogChromeHeight = 9;
 	private static readonly TimeSpan SettingsPersistenceShutdownBudget = TimeSpan.FromSeconds(1);
 
 	private readonly IApplication _application;
@@ -4854,7 +4855,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	{
 		if (values.Count == 0)
 			return null;
-		var height = Math.Clamp(values.Count + 9, 12, Math.Max(12, _application.Screen.Height - 4));
+		var height = Math.Clamp(values.Count + ChoiceDialogChromeHeight, 12, Math.Max(12, _application.Screen.Height - 4));
 		using var dialog = CreateDialog(title, preferredWidth, height);
 		var label = new TextView
 		{
@@ -4875,7 +4876,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			Y = 2,
 			Width = Dim.Fill(1),
 			// Dialog button layout can collapse Dim.Fill() to one row in Terminal.Gui v2.
-			Height = values.Count,
+			Height = Dim.Func(_ => ResolveChoiceListHeight(values.Count, ResolveDialogHeight(height))),
 			SchemeName = TerminalWorkspaceTheme.List
 		};
 		list.SetSource(source);
@@ -4894,6 +4895,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		RunOverlay(dialog, list);
 		return selected;
 	}
+
+	// The list keeps its rows inside the dialog so a long list scrolls instead of running under the frame.
+	internal static int ResolveChoiceListHeight(int itemCount, int dialogHeight)
+		=> Math.Max(1, Math.Min(itemCount, dialogHeight - ChoiceDialogChromeHeight));
 
 	private string? SelectPath(
 		string title,
@@ -5415,11 +5420,6 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		return Math.Clamp(preferredWidth, minimumWidth, maximumWidth);
 	}
 
-	private void RunOverlay(IRunnable overlay, View? initialFocus = null)
-	{
-		var previousFocus = _root.MostFocused;
-		// Focused lists and dialog buttons may consume Esc before it reaches the
-		// runnable. The application-level lease keeps Back behavior consistent.
 	private int ResolveDialogHeight(int preferredHeight)
 	{
 		var maximumHeight = Math.Max(5, _application.Screen.Height - 2);
@@ -5427,6 +5427,11 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		return Math.Clamp(preferredHeight, minimumHeight, maximumHeight);
 	}
 
+	private void RunOverlay(IRunnable overlay, View? initialFocus = null)
+	{
+		var previousFocus = _root.MostFocused;
+		// Focused lists and dialog buttons may consume Esc before it reaches the
+		// runnable. The application-level lease keeps Back behavior consistent.
 		void CloseOverlayOnEscape(object? _, Key key)
 		{
 			if (key == Key.Esc && ReferenceEquals(_application.TopRunnableView, overlay))
