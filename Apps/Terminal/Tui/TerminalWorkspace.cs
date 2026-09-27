@@ -271,7 +271,16 @@ public sealed class TerminalWorkspace
 			_ => null
 		};
 		if (redactionKey is not null)
+		{
 			rows.Add((L("Terminal.Tui.Redaction"), L(redactionKey), TerminalCellWidth.Wrap));
+			if (summary.Kind != TerminalExportKind.Context)
+			{
+				rows.Add((
+					string.Empty,
+					L("Terminal.DryRun.ProjectCopy.RedactionWarning"),
+					TerminalCellWidth.Wrap));
+			}
+		}
 
 		// Values get the width left after the widest localized label, so no row wraps back
 		// under the label column; messages continue on their own aligned lines instead.

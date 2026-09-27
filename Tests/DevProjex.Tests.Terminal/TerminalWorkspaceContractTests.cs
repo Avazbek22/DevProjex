@@ -2053,6 +2053,48 @@ public sealed class TerminalWorkspaceContractTests
 				.Count(static line => line.StartsWith("Redaction", StringComparison.Ordinal)));
 	}
 
+	[Theory]
+	[InlineData(TerminalExportKind.Folder, true, false, true)]
+	[InlineData(TerminalExportKind.Zip, false, true, true)]
+	[InlineData(TerminalExportKind.Zip, false, false, false)]
+	[InlineData(TerminalExportKind.Context, true, true, false)]
+	public void ExportSummaryWarnsThatARedactedProjectCopyMayNotBuild(
+		TerminalExportKind kind,
+		bool secretsRedacted,
+		bool privateDataRedacted,
+		bool expectedWarning)
+	{
+		using var workspace = new TemporaryDirectory();
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var summary = new TerminalExportSummary(
+			kind,
+			View: null,
+			DocumentFormat: null,
+			"export",
+			TerminalExportDestinationState.Ready,
+			FileCount: 1,
+			FolderCount: 1,
+			Bytes: 1,
+			Characters: 1,
+			EstimatedTokens: 1,
+			GitFilteringMode.None,
+			Exclusions: [],
+			DiagnosticCount: 0,
+			SecretsRedacted: secretsRedacted,
+			PrivateDataRedacted: privateDataRedacted);
+
+		var text = new TerminalWorkspace(
+			services,
+			new TestTerminalEnvironment()).BuildExportSummaryText(summary);
+
+		Assert.Equal(
+			expectedWarning,
+			text.Contains(
+				services.Localization["Terminal.DryRun.ProjectCopy.RedactionWarning"],
+				StringComparison.Ordinal));
+	}
+
 	[Fact]
 	public void BoundedExportSummaryKeepsTheDestinationFileNameAndTheLabelColumn()
 	{
