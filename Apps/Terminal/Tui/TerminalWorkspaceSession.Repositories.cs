@@ -65,6 +65,7 @@ internal sealed partial class TerminalWorkspaceSession
 						_recentProjectsSnapshot,
 						workspace.Source);
 				_recentWorkspaceSelectionKey = null;
+				RefreshWelcomeRecentProjects();
 				continue;
 			}
 
@@ -84,6 +85,7 @@ internal sealed partial class TerminalWorkspaceSession
 							_recentProjectsSnapshot,
 							workspace.Source);
 						_recentWorkspaceSelectionKey = null;
+						RefreshWelcomeRecentProjects();
 					}
 					continue;
 				}

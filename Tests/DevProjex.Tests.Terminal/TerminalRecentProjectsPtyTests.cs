@@ -446,6 +446,11 @@ public sealed class TerminalRecentProjectsPtyTests
 		await terminal.WaitForScreenWithoutAsync(
 			"(none available)",
 			cancellationToken: TestContext.Current.CancellationToken);
+		var welcome = await terminal.WaitForStableScreenAsync(
+			"Choose a workspace action",
+			"[1]",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.DoesNotContain("Deleted Project", welcome, StringComparison.Ordinal);
 		await ExitAsync(terminal);
 	}
 

@@ -266,23 +266,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		if (_welcomeContext is null || _welcomeRows is null || _welcomeList is null)
 			return;
 
-		var selectedKind = _welcomeList.SelectedItem is { } selected &&
-						   selected >= 0 && selected < _welcomeRows.Count
-			? _welcomeRows[selected].Action.Kind
-			: (TerminalWelcomeActionKind?)null;
-		var actions = BuildWelcomeActions(_welcomeContext);
-		_welcomeRows.Clear();
-		foreach (var action in actions)
-			_welcomeRows.Add(new TerminalWelcomeActionRow(action));
-		var selectedIndex = selectedKind is null
-			? 0
-			: actions
-				.Select((action, index) => (action, index))
-				.FirstOrDefault(pair => pair.action.Kind == selectedKind)
-				.index;
-		if (_welcomeRows.Count > 0)
-			_welcomeList.SelectedItem = Math.Clamp(selectedIndex, 0, _welcomeRows.Count - 1);
-
+		RebuildWelcomeRows();
 		if (_welcomeTagline is not null)
 			_welcomeTagline.Text = L("Terminal.Tui.Welcome.Description");
 		if (_welcomeCurrentTitle is not null)
@@ -306,6 +290,54 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		if (_welcomeFooter is not null)
 			_welcomeFooter.Text = L("Terminal.Tui.Footer.Welcome");
 		UpdateWelcomeSelection();
+	}
+
+	private void RefreshWelcomeRecentProjects()
+	{
+		if (_screen != TerminalWorkspaceScreen.Welcome || _recentProjectsSnapshot is null)
+			return;
+
+		_welcomeContext = CreateWelcomeContext(_recentProjectsSnapshot);
+		RebuildWelcomeRows();
+		UpdateWelcomeSelection();
+		ApplyWelcomeLayout();
+	}
+
+	private void RebuildWelcomeRows()
+	{
+		if (_welcomeContext is null || _welcomeRows is null || _welcomeList is null)
+			return;
+
+		var selectedAction = _welcomeList.SelectedItem is { } selected &&
+							 selected >= 0 && selected < _welcomeRows.Count
+			? _welcomeRows[selected].Action
+			: null;
+		var actions = BuildWelcomeActions(_welcomeContext);
+		_welcomeRows.Clear();
+		foreach (var action in actions)
+			_welcomeRows.Add(new TerminalWelcomeActionRow(action));
+		if (_welcomeRows.Count > 0)
+			_welcomeList.SelectedItem = FindWelcomeActionIndex(actions, selectedAction);
+	}
+
+	// Keeps the same recent project selected when its number changes, otherwise the same kind of row.
+	private static int FindWelcomeActionIndex(
+		IReadOnlyList<TerminalWelcomeAction> actions,
+		TerminalWelcomeAction? selected)
+	{
+		if (selected is null)
+			return 0;
+		var firstOfKind = -1;
+		for (var index = 0; index < actions.Count; index++)
+		{
+			if (actions[index].Kind != selected.Kind)
+				continue;
+			if (string.Equals(actions[index].Value, selected.Value, StringComparison.Ordinal))
+				return index;
+			if (firstOfKind < 0)
+				firstOfKind = index;
+		}
+		return Math.Max(0, firstOfKind);
 	}
 
 	private void OnApplicationScreenChanged(
@@ -627,10 +659,13 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var loadResult = _services.RecentProjectsStore.LoadForStartupWithStatus(
 			TimeSpan.FromMilliseconds(200));
 		_recentProjectsSnapshot = loadResult.Database;
-		var recent = loadResult.Database.RecentFolders
-			.Select(static entry => entry.Path);
-		return TerminalWelcomePolicy.Create(_options.ProjectPath, recent);
+		return CreateWelcomeContext(loadResult.Database);
 	}
+
+	private TerminalWelcomeContext CreateWelcomeContext(RecentProjectsDb database) =>
+		TerminalWelcomePolicy.Create(
+			_options.ProjectPath,
+			database.RecentFolders.Select(static entry => entry.Path));
 
 	private IReadOnlyList<TerminalWelcomeAction> BuildWelcomeActions(TerminalWelcomeContext context)
 	{
