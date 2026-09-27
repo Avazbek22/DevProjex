@@ -65,11 +65,15 @@ public sealed class TerminalWorkspaceCommandParserTests
 	{
 		var git = _parser.GetCompletion("set git ", 8, Context);
 		var legacy = _parser.GetCompletion("set tracked ", 12, Context);
+		var diff = _parser.GetCompletion("set git d", 9, Context);
 
 		Assert.Equal(
-			["off", "gitignore", "tracked", "staged", "changes", "diff:<ref>..<ref>"],
+			["off", "gitignore", "tracked", "staged", "changes", "diff:"],
 			git.Candidates.Select(static candidate => candidate.Token));
 		Assert.Equal(["on", "off"], legacy.Candidates.Select(static candidate => candidate.Token));
+		var diffCandidate = Assert.Single(diff.Candidates);
+		Assert.Equal("set git diff:", diffCandidate.CompletedText);
+		Assert.Equal("set git diff:".Length, diffCandidate.CursorPosition);
 	}
 
 	[Fact]
@@ -99,6 +103,10 @@ public sealed class TerminalWorkspaceCommandParserTests
 	[InlineData("search hello world", "hello world")]
 	[InlineData("search \"hello world\"", "hello world")]
 	[InlineData("filter 'generated files'", "generated files")]
+	[InlineData("search don't panic", "don't panic")]
+	[InlineData("filter it's", "it's")]
+	[InlineData("search say\"hi\"", "say\"hi\"")]
+	[InlineData("search \"it's done\"", "it's done")]
 	internal void Parse_SearchAndFilterAcceptQuotedOrUnquotedText(string text, string expected)
 	{
 		var result = _parser.Parse(text, Context);

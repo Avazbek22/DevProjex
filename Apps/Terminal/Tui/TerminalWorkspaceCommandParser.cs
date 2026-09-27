@@ -13,6 +13,10 @@ internal sealed class TerminalWorkspaceCommandParser
 	private static readonly string[] ToggleValues = ["on", "off"];
 	private static readonly string[] GitModeValues =
 		["off", "gitignore", "tracked", "staged", "changes", "diff:<ref>..<ref>"];
+	// Completion inserts text into the command, so the diff form stops at its prefix
+	// instead of inserting the <ref> placeholders shown in hints.
+	private static readonly string[] GitModeCompletions =
+		["off", "gitignore", "tracked", "staged", "changes", "diff:"];
 	private static readonly string[] AggregateTargets = ["types", "exclusions", "content"];
 	private static readonly string[] ExportTargets = ["context", "zip", "folder"];
 	private static readonly string[] ProfileTargets = ["save", "load", "show", "reset"];
@@ -829,7 +833,7 @@ internal sealed class TerminalWorkspaceCommandParser
 			0 => new CompletionCandidateSource(SetTargets),
 			1 when tokens.Count > 1 &&
 				   string.Equals(tokens[1].Value, "git", StringComparison.OrdinalIgnoreCase) =>
-				new CompletionCandidateSource(GitModeValues),
+				new CompletionCandidateSource(GitModeCompletions),
 			1 => new CompletionCandidateSource(ToggleValues),
 			_ => default
 		};
@@ -1464,11 +1468,12 @@ internal sealed class TerminalWorkspaceCommandParser
 			while (index < text.Length && (quote is not null || !char.IsWhiteSpace(text[index])))
 			{
 				var character = text[index];
-				if (quote is null && character is '\'' or '"')
+				// Only a quote that starts a token opens a quoted value, so apostrophes inside
+				// words such as don't or O'Brien stay literal.
+				if (quote is null && index == start && character is '\'' or '"')
 				{
 					quote = character;
-					if (index == start)
-						openingQuote = character;
+					openingQuote = character;
 					quoteStart = index++;
 					continue;
 				}
