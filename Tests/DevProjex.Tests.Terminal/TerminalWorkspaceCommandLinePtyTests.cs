@@ -296,6 +296,29 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 		await QuitAsync(terminal);
 	}
 
+	[Fact(Timeout = 120_000)]
+	public async Task SearchCommandKeepsFocusOnThePreviewMatchAfterTheResultHides()
+	{
+		using var project = CreateProject();
+		await using var terminal = await StartAsync(project.Path, columns: 160, rows: 40);
+		await terminal.WaitForScreenAsync(
+			"┤> PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.SendAsync(":search readme\r", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"┤> CONTEXT PREVIEW",
+			cancellationToken: TestContext.Current.CancellationToken);
+		var settled = await terminal.WaitForStableScreenAsync(
+			"┤> CONTEXT PREVIEW",
+			forbidden: "Preview search: readme",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.DoesNotContain("┤> PROJECT TREE", settled, StringComparison.Ordinal);
+		Assert.False(terminal.HasExited);
+		await QuitAsync(terminal);
+	}
+
 	[Theory(Timeout = 120_000)]
 	[InlineData(160, 40, false)]
 	[InlineData(100, 30, false)]

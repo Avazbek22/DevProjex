@@ -3146,6 +3146,9 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					if (match is not null && (userInitiated || _preview.HasFocus))
 					{
 						ScrollPreviewToMatch(match.Value);
+						// Closing the command result must not take focus back from the match.
+						if (originatedFromCommandLine)
+							_commandReturnPane = TerminalWorkspacePane.Preview;
 						_preview.SetFocus();
 						UpdateWorkspaceFocus();
 					}
