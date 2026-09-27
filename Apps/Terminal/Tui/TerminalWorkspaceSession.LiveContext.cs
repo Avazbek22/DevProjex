@@ -56,6 +56,16 @@ internal sealed partial class TerminalWorkspaceSession
 		_agentJournalSnapshot = null;
 	}
 
+	// Sessions arrive newest first; an idle newer session must not hide an older one the agent uses.
+	internal static AgentJournalSession? SelectActivitySession(IReadOnlyList<AgentJournalSession> sessions)
+	{
+		ArgumentNullException.ThrowIfNull(sessions);
+		var live = sessions
+			.Where(static candidate => candidate.IsLive && candidate.Mode == AgentJournalMode.Live)
+			.ToArray();
+		return live.FirstOrDefault(static candidate => candidate.Totals.Calls > 0) ?? live.FirstOrDefault();
+	}
+
 	private void ScheduleAgentJournalRefresh()
 	{
 		if (!_agentActivityEnabled || _state is null || _stopping ||
@@ -77,8 +87,7 @@ internal sealed partial class TerminalWorkspaceSession
 			var sessions = await _agentJournalStore.Value
 				.ListSessionsAsync(projectRoot, limit: 10, _sessionCts.Token)
 				.ConfigureAwait(false);
-			var session = sessions.FirstOrDefault(static candidate =>
-				candidate.IsLive && candidate.Mode == AgentJournalMode.Live);
+			var session = SelectActivitySession(sessions);
 			AgentJournalActivitySnapshot? activity = null;
 			if (session is not null)
 			{
