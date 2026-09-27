@@ -1,3 +1,7 @@
+using System.Drawing;
+using Terminal.Gui.Text;
+using Terminal.Gui.ViewBase;
+
 namespace DevProjex.Tests.Terminal;
 
 public sealed class TerminalWorkspaceTextFittingTests
@@ -39,5 +43,31 @@ public sealed class TerminalWorkspaceTextFittingTests
 		Assert.EndsWith(@"\DevProjex", result, StringComparison.Ordinal);
 		Assert.DoesNotContain("file:///", result, StringComparison.Ordinal);
 		Assert.Equal(32, result.Length);
+	}
+
+	[Theory]
+	[InlineData(40, 10)]
+	[InlineData(45, 12)]
+	[InlineData(66, 15)]
+	[InlineData(120, 12)]
+	public void TooSmallHintStaysInsideTheScreenWithTheRequiredSize(int columns, int rows)
+	{
+		const string hint =
+			"O terminal é demasiado pequeno. Redimensione-o para, pelo menos, 60 × 20.";
+		using var screen = new View { Frame = new Rectangle(0, 0, columns, rows) };
+		var label = TerminalWorkspaceSession.CreateTooSmallLabel(hint);
+		label.Visible = true;
+		screen.Add(label);
+
+		screen.Layout();
+
+		var lines = label.TextFormatter.GetLines();
+		Assert.InRange(label.Frame.X, 0, columns);
+		Assert.InRange(label.Frame.Right, 0, columns);
+		Assert.InRange(label.Frame.Y, 0, rows);
+		Assert.InRange(label.Frame.Bottom, 0, rows);
+		Assert.InRange(lines.Count, 1, label.Frame.Height);
+		Assert.All(lines, line => Assert.True(line.GetColumns() <= label.Frame.Width, line));
+		Assert.Equal(hint, string.Join(' ', lines));
 	}
 }

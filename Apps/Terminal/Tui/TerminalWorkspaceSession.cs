@@ -401,14 +401,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	{
 		ClearRoot();
 		_screen = TerminalWorkspaceScreen.TooSmall;
-		var tooSmall = new TerminalLiteralLabel
-		{
-			X = Pos.Center(),
-			Y = Pos.Center(),
-			Width = Dim.Auto(),
-			Text = L("Terminal.Tui.Error.Resize"),
-			SchemeName = TerminalWorkspaceTheme.Warning
-		};
+		var tooSmall = CreateTooSmallLabel();
+		tooSmall.Visible = true;
 		_loadingViews = new LoadingViewGraph(tooSmall);
 		_root.Add(tooSmall);
 	}
@@ -2341,12 +2335,20 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	}
 
 	private Label CreateTooSmallLabel() =>
-		new()
+		CreateTooSmallLabel(L("Terminal.Tui.Error.Resize"));
+
+	// The hint fills the screen and wraps inside it: a single centered line would clip both of
+	// its ends, including the required size, on exactly the screens that need it.
+	internal static Label CreateTooSmallLabel(string text) =>
+		new TerminalLiteralLabel
 		{
-			X = Pos.Center(),
-			Y = Pos.Center(),
-			Width = Dim.Auto(),
-			Text = L("Terminal.Tui.Error.Resize"),
+			X = 1,
+			Y = 0,
+			Width = Dim.Fill(1),
+			Height = Dim.Fill(),
+			TextAlignment = Alignment.Center,
+			VerticalTextAlignment = Alignment.Center,
+			Text = text,
 			SchemeName = TerminalWorkspaceTheme.Warning,
 			Visible = false
 		};
