@@ -285,6 +285,45 @@ public sealed class TerminalPtyLifecycleTests
 				cancellationToken: TestContext.Current.CancellationToken));
 	}
 
+	[Theory(Timeout = 60_000)]
+	[InlineData(60, 20)]
+	[InlineData(120, 20)]
+	public async Task WelcomeWithManyRecentProjectsKeepsItsFramesAboveTheFooter(
+		int columns,
+		int rows)
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("notes.txt", "markerless directory");
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			workspace.Path,
+			["--language", "en"],
+			columns,
+			rows,
+			initializeDataRoot: dataRoot =>
+			{
+				var store = new RecentProjectsStore(() => dataRoot);
+				RecentProjectsDb? snapshot = null;
+				for (var index = 1; index <= 12; index++)
+					snapshot = store.AddFolder(snapshot, workspace.CreateDirectory($"recent-{index:00}"));
+			},
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var screen = await terminal.WaitForStableScreenAsync(
+			"[1]",
+			cancellationToken: TestContext.Current.CancellationToken);
+		var lines = screen.Split('\n');
+		Assert.Equal(rows, lines.Length);
+		Assert.StartsWith("  1-9 Recent", lines[^1], StringComparison.Ordinal);
+		Assert.StartsWith("  └", lines[^2], StringComparison.Ordinal);
+		Assert.Contains("Details", screen, StringComparison.Ordinal);
+		Assert.Contains("Open the current folder", screen, StringComparison.Ordinal);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(
+				cancellationToken: TestContext.Current.CancellationToken));
+	}
+
 	[Fact(Timeout = 60_000)]
 	public async Task TooSmallTerminalRecoversAfterResizeWithoutRestarting()
 	{

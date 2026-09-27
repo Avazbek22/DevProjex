@@ -2168,7 +2168,11 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		if (tooSmall)
 			return;
 
-		var actionHeight = Math.Min((_welcomeRows?.Count ?? 6) + 2, 13);
+		var wideLayout = _layoutMode is TerminalWorkspaceLayoutMode.Split or TerminalWorkspaceLayoutMode.Wide;
+		// Both frames end above the footer, and the stacked layout keeps a line of Details visible.
+		var actionHeight = Math.Min(
+			Math.Min((_welcomeRows?.Count ?? 6) + 2, 13),
+			_terminalHeight - (wideLayout ? 8 : 11));
 		var contentWidth = Math.Max(1, _terminalWidth - 4);
 		_welcomeCurrentPath.Text = FitPathToWidth(
 			_welcomeContext?.CurrentDirectory ?? string.Empty,
@@ -2183,7 +2187,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_welcomeCurrentStatus.X = Pos.AnchorEnd(statusWidth + 2);
 		_welcomeCurrentStatus.Text = FitEndToWidth(currentStatus, statusWidth);
 		_welcomeCurrentStatus.Visible = statusWidth >= currentStatus.GetColumns();
-		if (_layoutMode is TerminalWorkspaceLayoutMode.Split or TerminalWorkspaceLayoutMode.Wide)
+		if (wideLayout)
 		{
 			_welcomeActionsFrame.X = WelcomeHorizontalMargin;
 			_welcomeActionsFrame.Y = 7;
