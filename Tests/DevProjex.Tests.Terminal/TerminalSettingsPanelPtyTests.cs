@@ -345,9 +345,8 @@ public sealed class TerminalSettingsPanelPtyTests
 		Assert.DoesNotContain('▼', fileTypes);
 
 		await terminal.ResizeAsync(160, 30, TestContext.Current.CancellationToken);
-		var wide = await WaitForStableScreenAsync(terminal, ContentProcessingTitle);
+		var wide = await WaitForStableScreenAsync(terminal, "┤Content processi…├");
 		Assert.DoesNotContain("Saved settings", wide, StringComparison.Ordinal);
-		Assert.Contains("┤Content processi…├", wide, StringComparison.Ordinal);
 		await ExitAsync(terminal);
 	}
 
