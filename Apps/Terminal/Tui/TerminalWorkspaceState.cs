@@ -235,8 +235,10 @@ public sealed class TerminalWorkspaceState : IDisposable
 		HashSet<string>? unavailablePaths = null;
 		foreach (var selectedPath in selectedPathFrontier)
 		{
+			// Filters and Git scopes hide paths reversibly, so only a path that no longer
+			// exists leaves the frontier; a hidden one returns checked with its filter.
 			if (TryResolvePersistedPath(selectedPath, out var fullPath) &&
-				_nodesByPath.ContainsKey(fullPath))
+				(_nodesByPath.ContainsKey(fullPath) || Path.Exists(fullPath)))
 			{
 				survivingPaths.Add(selectedPath);
 				continue;
