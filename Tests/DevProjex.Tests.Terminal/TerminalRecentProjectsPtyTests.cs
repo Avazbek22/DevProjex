@@ -83,6 +83,57 @@ public sealed class TerminalRecentProjectsPtyTests
 	}
 
 	[Fact(Timeout = 90_000)]
+	public async Task InlineRecentRowsAndDetailsShowFolderNamesUnderALongSharedParent()
+	{
+		using var projects = new TemporaryDirectory();
+		var sharedParent = projects.CreateDirectory(
+			Path.Combine("customer-workspaces-with-long-names", "backend-services-and-tools"));
+		var firstProject = Directory.CreateDirectory(
+			Path.Combine(sharedParent, "AlphaSharedProject")).FullName;
+		var secondProject = Directory.CreateDirectory(
+			Path.Combine(sharedParent, "BetaSharedProject")).FullName;
+		using var welcomeDirectory = new TemporaryDirectory();
+		welcomeDirectory.WriteFile("notes.txt", "not a project");
+
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			welcomeDirectory.Path,
+			["--language", "en"],
+			initializeDataRoot: dataRoot =>
+			{
+				var store = new RecentProjectsStore(() => dataRoot);
+				var snapshot = store.AddFolder(null, firstProject);
+				store.AddFolder(snapshot, secondProject);
+			},
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var welcome = await terminal.WaitForStableScreenAsync(
+			"[2]",
+			cancellationToken: TestContext.Current.CancellationToken);
+		var lines = welcome.Split('\n');
+		Assert.Contains(lines, line => line.Contains("[1] ...", StringComparison.Ordinal) &&
+			line.Contains("BetaSharedProject", StringComparison.Ordinal));
+		Assert.Contains(lines, line => line.Contains("[2] ...", StringComparison.Ordinal) &&
+			line.Contains("AlphaSharedProject", StringComparison.Ordinal));
+
+		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
+		var selected = await terminal.WaitForStableScreenAsync(
+			"Open this recent project.",
+			cancellationToken: TestContext.Current.CancellationToken);
+		lines = selected.Split('\n');
+		var descriptionRow = Array.FindIndex(
+			lines,
+			line => line.Contains("Open this recent project.", StringComparison.Ordinal));
+		var detailsColumn = lines[descriptionRow].IndexOf(
+			"Open this recent project.",
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"BetaSharedProject",
+			lines[descriptionRow + 1][detailsColumn..],
+			StringComparison.Ordinal);
+		await ExitAsync(terminal);
+	}
+
+	[Fact(Timeout = 90_000)]
 	public async Task PopulatedRecentSelectionOpensWorkspaceAndMovesEntryToFront()
 	{
 		using var firstProject = CreateProject("FirstProject", "FirstMarker.cs");
@@ -109,6 +160,9 @@ public sealed class TerminalRecentProjectsPtyTests
 			"Recent workspaces",
 			TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"┤Recent workspaces├",
+			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"FirstProject",
 			cancellationToken: TestContext.Current.CancellationToken);
@@ -159,6 +213,9 @@ public sealed class TerminalRecentProjectsPtyTests
 			"Recent workspaces",
 			TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"┤Recent workspaces├",
+			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"Second Project",
 			cancellationToken: TestContext.Current.CancellationToken);
@@ -694,6 +751,10 @@ public sealed class TerminalRecentProjectsPtyTests
 			cancellationToken: cancellationToken);
 		await SelectWelcomeActionAsync(terminal, "Recent workspaces", cancellationToken);
 		await terminal.SendEnterAsync(cancellationToken);
+		// Welcome rows show recent project names too, so wait for the overlay itself.
+		await terminal.WaitForScreenAsync(
+			"┤Recent workspaces├",
+			cancellationToken: cancellationToken);
 	}
 
 	private static async Task ExitAsync(TerminalPtyHarness terminal)

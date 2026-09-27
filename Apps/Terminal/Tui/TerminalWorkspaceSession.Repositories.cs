@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
 using DevProjex.Terminal.Execution;
+using Terminal.Gui.Text;
 using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
 
@@ -149,9 +150,12 @@ internal sealed partial class TerminalWorkspaceSession
 				return L("Terminal.Tui.Recent.Yesterday");
 			return openedUtc.ToLocalTime().ToString("d", CultureInfo.CurrentCulture);
 		}
+		var nameWidth = TerminalRecentWorkspaceRow.ResolveNameWidth(
+			dialogWidth - 8,
+			workspaces.Max(workspace => OpenedLabel(workspace.OpenedUtc).GetColumns()));
 		var rows = new ObservableCollection<TerminalRecentWorkspaceRow>(
 			workspaces.Select(workspace =>
-				new TerminalRecentWorkspaceRow(workspace, KindLabel, OpenedLabel)));
+				new TerminalRecentWorkspaceRow(workspace, KindLabel, OpenedLabel, nameWidth)));
 		var list = new ListView
 		{
 			X = 1,

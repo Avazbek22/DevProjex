@@ -90,6 +90,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 
 	private TerminalWelcomeContext? _welcomeContext;
 	private RecentProjectsDb? _recentProjectsSnapshot;
+	private int _welcomeDetailPathWidth;
 	private string? _recentWorkspaceSelectionKey;
 	private WelcomeViewGraph? _welcomeViews;
 	private LoadingViewGraph? _loadingViews;
@@ -737,7 +738,9 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_welcomeList.SetNeedsDraw();
 
 		var action = _welcomeRows[selected].Action;
-		_welcomeDetail.Text = action.Description;
+		_welcomeDetail.Text = action is { Kind: TerminalWelcomeActionKind.RecentProject, Value: { } path }
+			? $"{action.Description}\n{FitPathToWidth(path, _welcomeDetailPathWidth)}"
+			: action.Description;
 	}
 
 	private void ActivateWelcomeSelection()
@@ -2191,6 +2194,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_welcomeCurrentStatus.X = Pos.AnchorEnd(statusWidth + 2);
 		_welcomeCurrentStatus.Text = FitEndToWidth(currentStatus, statusWidth);
 		_welcomeCurrentStatus.Visible = statusWidth >= currentStatus.GetColumns();
+		var actionsWidth = wideLayout ? WelcomeWideActionsWidth : contentWidth;
+		FitWelcomeRecentPaths(
+			actionsWidth,
+			wideLayout ? contentWidth - actionsWidth - 2 : contentWidth);
 		if (wideLayout)
 		{
 			_welcomeActionsFrame.X = WelcomeHorizontalMargin;
@@ -2217,6 +2224,19 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_welcomeDetailFrame.Height = Math.Max(3, _application.Screen.Height - (9 + actionHeight));
 		_welcomeQuickStart.Visible = false;
 		_welcomeCurrentPath.Width = Dim.Fill(2);
+	}
+
+	private void FitWelcomeRecentPaths(int actionsFrameWidth, int detailFrameWidth)
+	{
+		if (_welcomeRows is null)
+			return;
+
+		var borderWidth = _presentation.BorderStyle == LineStyle.None ? 0 : 2;
+		foreach (var row in _welcomeRows)
+			row.Width = actionsFrameWidth - borderWidth;
+		// The details text is inset by one column on each side of the frame.
+		_welcomeDetailPathWidth = detailFrameWidth - borderWidth - 2;
+		UpdateWelcomeSelection();
 	}
 
 	private void ApplyLoadingLayout()
