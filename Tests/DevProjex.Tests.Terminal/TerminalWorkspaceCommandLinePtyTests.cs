@@ -1044,6 +1044,33 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 	}
 
 	[Fact(Timeout = 90_000)]
+	public async Task BracketedPasteLandsInTheCommandLineWithoutExecutingIt()
+	{
+		using var project = CreateProject();
+		await using var terminal = await StartAsync(project.Path, columns: 120, rows: 30);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.OpenCommandLineAsync(TestContext.Current.CancellationToken);
+		await terminal.SendAsync(
+			"\u001b[200~view content\r\n\u001b[201~",
+			TestContext.Current.CancellationToken);
+		var pasted = await terminal.WaitForScreenAsync(
+			":view content",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.DoesNotContain("CONTEXT PREVIEW: Content", pasted, StringComparison.Ordinal);
+		Assert.DoesNotContain(@"\r\n", pasted, StringComparison.Ordinal);
+
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"CONTEXT PREVIEW: Content",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.False(terminal.HasExited);
+		await QuitAsync(terminal);
+	}
+
+	[Fact(Timeout = 90_000)]
 	public async Task CommandLineExecutesSettingsAndReportsStrictTokenErrors()
 	{
 		using var project = CreateProject();

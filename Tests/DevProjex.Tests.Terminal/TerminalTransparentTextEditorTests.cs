@@ -1,4 +1,5 @@
 using System.Drawing;
+using System.Reflection;
 using Terminal.Gui.Input;
 
 namespace DevProjex.Tests.Terminal;
@@ -34,6 +35,23 @@ public sealed class TerminalTransparentTextEditorTests
 	}
 
 	[Fact]
+	public void PasteInsertsTheCopiedLineAtTheCursor()
+	{
+		var editor = new TerminalTransparentTextEditor { Value = "open  --profile x" };
+		editor.InsertionPoint = 5;
+
+		var sanitized = Assert.IsType<string>(InvokeProtected(
+			editor,
+			"OnSanitizingPaste",
+			"C:\\work\\my repo\r\n"));
+		var consumed = Assert.IsType<bool>(InvokeProtected(editor, "OnPaste", sanitized));
+
+		Assert.True(consumed);
+		Assert.Equal("open C:\\work\\my repo --profile x", editor.Value);
+		Assert.Equal(20, editor.InsertionPoint);
+	}
+
+	[Fact]
 	public void KeysThatResolveToControlCharactersDoNotEditTheCommand()
 	{
 		var editor = new TerminalTransparentTextEditor { Value = "vi" };
@@ -65,5 +83,18 @@ public sealed class TerminalTransparentTextEditorTests
 		editor.MoveEnd();
 
 		Assert.Equal(expectedOffset, editor.ScrollOffset);
+	}
+
+	private static object? InvokeProtected(
+		TerminalTransparentTextEditor editor,
+		string methodName,
+		string argument)
+	{
+		var method = typeof(TerminalTransparentTextEditor).GetMethod(
+			methodName,
+			BindingFlags.Instance | BindingFlags.NonPublic,
+			[typeof(string)]);
+		Assert.NotNull(method);
+		return method.Invoke(editor, [argument]);
 	}
 }
