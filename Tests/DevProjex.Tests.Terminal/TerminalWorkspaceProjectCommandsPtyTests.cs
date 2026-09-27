@@ -155,6 +155,27 @@ public sealed class TerminalWorkspaceProjectCommandsPtyTests
 		await QuitAsync(terminal);
 	}
 
+	[Fact(Timeout = 120_000)]
+	public async Task RecentCommandDeclinedAtConfirmationKeepsTheWorkspaceWithoutAnError()
+	{
+		using var project = new TemporaryDirectory();
+		project.WriteFile("src/App.cs", "class App { }");
+		await using var terminal = await StartWorkspaceAsync(project.Path);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await ExecuteAsync(terminal, "recent", "Close this project and return to Welcome?");
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		var workspace = await terminal.WaitForStableScreenAsync(
+			"PROJECT TREE",
+			"Close this project and return to Welcome?",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.DoesNotContain("command is unavailable", workspace, StringComparison.Ordinal);
+		await QuitAsync(terminal);
+	}
+
 	[Fact(Timeout = 150_000)]
 	public async Task ProfileCommandsLoadShowAndResetTheCurrentWorkspace()
 	{

@@ -423,13 +423,13 @@ internal sealed partial class TerminalWorkspaceSession
 	internal TerminalWorkspaceCommandExecutionResult ExecuteRecentCommand(
 		TerminalWorkspaceCommand command)
 	{
-		return TryLeaveWorkspace(() =>
-			{
-				ShowWelcome();
-				_application.Invoke(OpenRecentWorkspaces);
-			})
-			? TerminalWorkspaceCommandExecutionResult.Deferred()
-			: TerminalWorkspaceCommandExecutionResult.Unavailable();
+		// Declining the confirmation, or staying after a failed save, is not a command error.
+		TryLeaveWorkspace(() =>
+		{
+			ShowWelcome();
+			_application.Invoke(OpenRecentWorkspaces);
+		});
+		return TerminalWorkspaceCommandExecutionResult.Deferred();
 	}
 
 	internal TerminalWorkspaceCommandExecutionResult ExecuteOpenCommand(
