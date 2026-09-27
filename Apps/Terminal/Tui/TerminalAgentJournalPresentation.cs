@@ -168,7 +168,7 @@ internal static class TerminalAgentJournalPresentation
 	}
 	public static string BuildSessionHeader(Func<string, string, string>? localize = null) => string.Join(
 		" | ",
-		"Session",
+		Text(localize, "AgentJournal.Column.Session", "Session"),
 		Text(localize, "AgentJournal.Column.Time", "Started"),
 		Text(localize, "AgentJournal.Column.Client", "Client"),
 		Text(localize, "AgentJournal.Column.Mode", "Mode"),
@@ -200,7 +200,8 @@ internal static class TerminalAgentJournalPresentation
 		TerminalAgentJournalSnapshot snapshot,
 		string? focusedTreePath,
 		bool compact,
-		Func<string, string, string>? localize = null)
+		Func<string, string, string>? localize = null,
+		AppLanguage language = AppLanguage.En)
 	{
 		ArgumentNullException.ThrowIfNull(snapshot);
 		ArgumentNullException.ThrowIfNull(snapshot.LatestCall);
@@ -220,12 +221,12 @@ internal static class TerminalAgentJournalPresentation
 			return compact
 				? $"A F:{deliveredCalls:N0} {tool} ({snapshot.TotalCalls:N0})"
 				: $"{Text(localize, "Menu.View.AgentActivity", "Agent activity")}: {fileHint}; " +
-				  $"{tool} ({FormatCalls(snapshot.TotalCalls, localize)})";
+				  $"{tool} ({FormatCalls(snapshot.TotalCalls, localize, language)})";
 		}
 		return compact
 			? $"A {tool} ({snapshot.TotalCalls:N0})"
 			: $"{Text(localize, "Menu.View.AgentActivity", "Agent activity")}: " +
-			  $"{tool} ({FormatCalls(snapshot.TotalCalls, localize)})";
+			  $"{tool} ({FormatCalls(snapshot.TotalCalls, localize, language)})";
 	}
 
 	public static string BuildCallDetails(
@@ -236,14 +237,33 @@ internal static class TerminalAgentJournalPresentation
 		ArgumentNullException.ThrowIfNull(session);
 		ArgumentNullException.ThrowIfNull(calls);
 		var output = new StringBuilder();
-		output.Append("Session ")
-			.AppendLine(TerminalTextEscaping.EscapeSingleLine(session.Id));
-		output.Append("Client ")
-			.Append(TerminalTextEscaping.EscapeSingleLine(session.ClientName))
-			.Append(" | Mode ")
-			.Append(session.Mode.ToString().ToLowerInvariant())
+		string Field(string key, string fallback, string value) => string.Format(
+			CultureInfo.CurrentCulture,
+			Text(localize, "Terminal.Tui.Command.Result.Value", "{0}: {1}"),
+			Text(localize, key, fallback),
+			value);
+		output.AppendLine(Field(
+			"AgentJournal.Column.Session",
+			"Session",
+			TerminalTextEscaping.EscapeSingleLine(session.Id)));
+		output.Append(Field(
+				"AgentJournal.Column.Client",
+				"Client",
+				TerminalTextEscaping.EscapeSingleLine(session.ClientName)))
 			.Append(" | ")
-			.AppendLine(session.IsLive ? "live" : "ended");
+			.Append(Field(
+				"AgentJournal.Column.Mode",
+				"Mode",
+				session.Mode == AgentJournalMode.Live
+					? Text(localize, "AgentJournal.Mode.Live", "live")
+					: Text(localize, "AgentJournal.Mode.Standard", "standard")))
+			.Append(" | ")
+			.AppendLine(Field(
+				"AgentJournal.Live",
+				"Live",
+				session.IsLive
+					? Text(localize, "Terminal.Value.Yes", "yes")
+					: Text(localize, "Terminal.Value.No", "no")));
 		var lostEvents = LostEventCount(calls);
 		if (lostEvents > 0)
 		{
@@ -308,9 +328,13 @@ internal static class TerminalAgentJournalPresentation
 
 	private static string FormatCalls(
 		long calls,
-		Func<string, string, string>? localize) => string.Format(
+		Func<string, string, string>? localize,
+		AppLanguage language) => string.Format(
 		CultureInfo.CurrentCulture,
-		Text(localize, "AgentActivity.Status.Calls", calls == 1 ? "{0} call" : "{0} calls"),
+		Text(
+			localize,
+			$"AgentActivity.Status.Calls.{LocalizationPluralRules.ResolveCategory(language, calls)}",
+			calls == 1 ? "{0} call" : "{0} calls"),
 		calls);
 
 	private static string Text(

@@ -39,7 +39,7 @@ public sealed class TerminalAgentJournalPtyTests
 			$":mcp log export \"{destination}\" markdown last\r",
 			TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"Agent journal exported",
+			"Export completed",
 			timeout: TimeSpan.FromSeconds(30),
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Equal(expectedReceipt, await File.ReadAllTextAsync(

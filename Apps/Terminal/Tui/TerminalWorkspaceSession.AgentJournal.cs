@@ -5,6 +5,7 @@ using DevProjex.Terminal.Execution;
 using DevProjex.Terminal.Rendering;
 using Terminal.Gui.App;
 using Terminal.Gui.Drawing;
+using Terminal.Gui.Text;
 using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
 
@@ -15,6 +16,10 @@ namespace DevProjex.Terminal.Tui;
 internal sealed partial class TerminalWorkspaceSession
 {
 	private string AgentJournalTitle => AgentJournalText("AgentJournal.Title", "Agent journal");
+
+	private string AgentJournalSessionNotFound => AgentJournalText(
+		"AgentJournal.SessionNotFound",
+		"No matching journal session was found.");
 
 	private TerminalWorkspaceCommandExecutionResult ExecuteAgentJournalCommand(
 		TerminalWorkspaceCommand command)
@@ -71,7 +76,12 @@ internal sealed partial class TerminalWorkspaceSession
 					await InvokeAsync(() =>
 					{
 						ShowTransientStatus(
-							$"Completed journal sessions cleared ({removed:N0}); active sessions preserved.",
+							string.Format(
+								CultureInfo.CurrentCulture,
+								AgentJournalText(
+									"AgentJournal.Clear.Completed",
+									"Completed journal sessions cleared ({0}); active sessions preserved."),
+								removed),
 							TerminalWorkspaceTheme.Success);
 						return true;
 					}).ConfigureAwait(false);
@@ -103,13 +113,13 @@ internal sealed partial class TerminalWorkspaceSession
 		{
 			OutputDestinationConflictException => new TerminalError(
 				"DPX-TUI-JOURNAL-DESTINATION-EXISTS",
-				"The receipt destination already exists."),
+				localization["Terminal.Tui.Error.DestinationExists"]),
 			ProjectCopyExportException copyException =>
 				ProjectCopyTerminalErrorMapper.Map(copyException, localization),
 			IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException =>
 				new TerminalError(
 					"DPX-TUI-JOURNAL-UNAVAILABLE",
-					"The agent journal is unavailable."),
+					localization["AgentJournal.Unavailable"]),
 			_ => new TerminalError(
 				"DPX-TUI-OPERATION-FAILED",
 				localization["Terminal.Tui.Error.OperationFailed"])
@@ -127,7 +137,7 @@ internal sealed partial class TerminalWorkspaceSession
 		{
 			await ShowAgentJournalErrorAsync(
 				"DPX-TUI-JOURNAL-NOT-FOUND",
-				"No matching journal session was found.").ConfigureAwait(false);
+				AgentJournalSessionNotFound).ConfigureAwait(false);
 			return;
 		}
 
@@ -177,7 +187,7 @@ internal sealed partial class TerminalWorkspaceSession
 		{
 			await ShowAgentJournalErrorAsync(
 				"DPX-TUI-JOURNAL-NOT-FOUND",
-				"No matching journal session was found.").ConfigureAwait(false);
+				AgentJournalSessionNotFound).ConfigureAwait(false);
 			return;
 		}
 
@@ -188,7 +198,7 @@ internal sealed partial class TerminalWorkspaceSession
 		{
 			await ShowAgentJournalErrorAsync(
 				"DPX-TUI-JOURNAL-NOT-FOUND",
-				"No matching journal session was found.").ConfigureAwait(false);
+				AgentJournalSessionNotFound).ConfigureAwait(false);
 			return;
 		}
 		var content = command.Format == ProjectContextDocumentFormat.Json
@@ -209,8 +219,9 @@ internal sealed partial class TerminalWorkspaceSession
 
 		await InvokeAsync(() =>
 		{
+			var completed = L("Terminal.Tui.ExportCompletedStatus");
 			ShowTransientStatus(
-				FormatStatusPath("Agent journal exported: {0}", destination, _terminalWidth - 2),
+				FormatStatusPath(completed, destination, _terminalWidth - 2),
 				TerminalWorkspaceTheme.Success);
 			return true;
 		}).ConfigureAwait(false);

@@ -101,7 +101,7 @@ internal sealed partial class TerminalWorkspaceSession
 				_settingsPersistenceCts.Token));
 			RefreshWorkspace();
 			ScheduleAgentJournalRefresh();
-			return ToggleCommandResult("Agent activity", enabled);
+			return ToggleCommandResult(L("Menu.View.AgentActivity"), enabled);
 		}
 
 		var content = ProjectPresentationCatalog.ContentTransformations.FirstOrDefault(

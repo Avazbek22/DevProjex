@@ -1,5 +1,6 @@
 using DevProjex.Infrastructure.AgentJournal;
 using DevProjex.Infrastructure.LiveContext;
+using DevProjex.Infrastructure.ResourceStore;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -376,7 +377,59 @@ public sealed class TerminalAgentJournalPresentationTests
 		Assert.Contains("AgentJournal.Footer", keys);
 		Assert.Contains("Menu.View.AgentActivity", keys);
 		Assert.Contains("AgentActivity.Tree.ToolTip", keys);
-		Assert.Contains("AgentActivity.Status.Calls", keys);
+		Assert.Contains("AgentActivity.Status.Calls.Other", keys);
+		Assert.Contains("AgentJournal.Column.Session", keys);
+		Assert.Contains("AgentJournal.Column.Client", keys);
+	}
+
+	[Theory]
+	[InlineData(1, "get_file (1 вызов)")]
+	[InlineData(3, "get_file (3 вызова)")]
+	[InlineData(5, "get_file (5 вызовов)")]
+	[InlineData(21, "get_file (21 вызов)")]
+	public void ActivityIndicatorUsesTheLanguagePluralForm(long calls, string expectedSuffix)
+	{
+		using var workspace = new TemporaryDirectory();
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.Ru);
+		var session = CreateSession() with
+		{
+			Totals = CreateSession().Totals with { Calls = calls },
+			Roots = [new AgentJournalRoot(workspace.Path, "project")]
+		};
+		var call = CreateCall(1, "get_file", ["README.md"]);
+		var snapshot = TerminalAgentJournalSnapshot.Create(
+			workspace.Path,
+			new AgentJournalReceipt(session, session.Totals, [], [call]));
+
+		var indicator = TerminalAgentJournalPresentation.BuildActivityIndicator(
+			snapshot,
+			focusedTreePath: null,
+			compact: false,
+			(key, _) => localization[key],
+			AppLanguage.Ru);
+
+		Assert.Equal($"{localization["Menu.View.AgentActivity"]}: {expectedSuffix}", indicator);
+	}
+
+	[Fact]
+	public void JournalSessionLabelsFollowTheWorkspaceLanguage()
+	{
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.Ru);
+		string Localize(string key, string _) => localization[key];
+
+		var header = TerminalAgentJournalPresentation.BuildSessionHeader(Localize);
+		var details = TerminalAgentJournalPresentation.BuildCallDetails(CreateSession(), [], Localize);
+
+		Assert.StartsWith($"{localization["AgentJournal.Column.Session"]} | ", header, StringComparison.Ordinal);
+		Assert.Contains($"{localization["AgentJournal.Column.Session"]}: session-42", details, StringComparison.Ordinal);
+		Assert.Contains(
+			$"{localization["AgentJournal.Column.Client"]}: client | " +
+			$"{localization["AgentJournal.Column.Mode"]}: {localization["AgentJournal.Mode.Live"]} | " +
+			$"{localization["AgentJournal.Live"]}: {localization["Terminal.Value.Yes"]}",
+			details,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain("Session ", details, StringComparison.Ordinal);
+		Assert.DoesNotContain("Client ", details, StringComparison.Ordinal);
 	}
 
 	[Fact]

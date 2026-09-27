@@ -1814,7 +1814,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			snapshot,
 			focusedTreePath,
 			compact,
-			AgentJournalText);
+			AgentJournalText,
+			_services.Localization.CurrentLanguage);
 	}
 
 	private CodeCompressionAvailabilitySnapshot? GetCurrentCompressionAvailability(
