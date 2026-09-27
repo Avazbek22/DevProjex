@@ -1,7 +1,7 @@
  DevProjex Terminal · <ID>                                                                                      <SPINNER> Building preview…
  <PROJECT_ROOT>
 ┌┤  PROJECT TREE├─────────────────────────┐┌┤  CONTEXT PREVIEW · Tree · ASCII├───────────────────────────────────────────┐┌┤> PARAMETERS├──────────────────────┐
-│v [x] <ID>   ││+ <ID>                                           ││┌┤Content processing [ ] All (5) ──┐│
+│v [x] <ID>   ││+ <ID>                                           ││┌┤Content processi…├ [ ] All (5) ──┐│
 │  > [x] docs                             ││  + docs                                                                     │││[ ] Hide secrets                  ││
 │  > [x] src                              ││    <SPINNER> readme.md                                                              │││[ ] Hide private data             ││
 │    [x] global.json                      ││  + src                                                                      │││[ ] Compress code                 ││

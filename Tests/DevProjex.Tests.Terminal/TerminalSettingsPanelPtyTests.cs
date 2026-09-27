@@ -6,6 +6,9 @@ namespace DevProjex.Tests.Terminal;
 [Collection(TerminalProcessCollection.Name)]
 public sealed class TerminalSettingsPanelPtyTests
 {
+	// The 38-column wide panel shortens the title to "Content processi…"; other layouts show it whole.
+	private const string ContentProcessingTitle = "Content processi";
+
 	[Fact(Timeout = 90_000)]
 	public async Task SelectionStatusShowsOnlyFailureAfterSelectionChanges()
 	{
@@ -342,9 +345,9 @@ public sealed class TerminalSettingsPanelPtyTests
 		Assert.DoesNotContain('▼', fileTypes);
 
 		await terminal.ResizeAsync(160, 30, TestContext.Current.CancellationToken);
-		var wide = await WaitForStableScreenAsync(terminal, "Content processing");
+		var wide = await WaitForStableScreenAsync(terminal, ContentProcessingTitle);
 		Assert.DoesNotContain("Saved settings", wide, StringComparison.Ordinal);
-		Assert.Contains("Content processing", wide, StringComparison.Ordinal);
+		Assert.Contains("┤Content processi…├", wide, StringComparison.Ordinal);
 		await ExitAsync(terminal);
 	}
 
@@ -360,7 +363,7 @@ public sealed class TerminalSettingsPanelPtyTests
 		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
 		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
 		var contentFocused = await WaitForStableScreenAsync(terminal, "> PARAMETERS");
-		AssertFrameAggregate(contentFocused, "Content processing", expectedCount: 5);
+		AssertFrameAggregate(contentFocused, ContentProcessingTitle, expectedCount: 5);
 		AssertFrameAggregate(contentFocused, "Exclusions", expectedCount: 0);
 		AssertFrameAggregate(contentFocused, "File types", expectedCount: 3);
 		Assert.DoesNotContain("Content processing:", contentFocused, StringComparison.Ordinal);
@@ -1042,7 +1045,7 @@ public sealed class TerminalSettingsPanelPtyTests
 		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
 		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
 		var screen = await WaitForStableScreenAsync(terminal, "> PARAMETERS");
-		AssertFrameAggregate(screen, "Content processing", expectedCount: 5);
+		AssertFrameAggregate(screen, ContentProcessingTitle, expectedCount: 5);
 		AssertFrameAggregate(screen, "Exclusions", expectedCount: 0);
 		AssertFrameAggregate(screen, "File types", expectedCount: 3);
 
@@ -1327,8 +1330,8 @@ public sealed class TerminalSettingsPanelPtyTests
 	}
 
 	[Theory(Timeout = 90_000)]
-	[InlineData("ru", "Обработка содержи…", "Исключения")]
-	[InlineData("uz", "Kontentni qa…", "Istisnolar")]
+	[InlineData("ru", "Обработка содерж…", "Исключения")]
+	[InlineData("uz", "Kontentni q…", "Istisnolar")]
 	public async Task LocalizedRedactionLabelsKeepTheirCountersWhenEllipsized(
 		string language,
 		string contentTitle,
@@ -1487,7 +1490,7 @@ public sealed class TerminalSettingsPanelPtyTests
 	{
 		var screen = await WaitForStableScreenAsync(
 			terminal,
-			"Content processing",
+			ContentProcessingTitle,
 			value => IsCompletedSettingsLayout(value, expectWide));
 		Assert.True(screen.Contains("Exclusions", StringComparison.Ordinal), screen);
 		Assert.True(screen.Contains("File types", StringComparison.Ordinal), screen);
@@ -1495,7 +1498,7 @@ public sealed class TerminalSettingsPanelPtyTests
 		Assert.True(screen.Contains("Strip blank lines", StringComparison.Ordinal), screen);
 		Assert.DoesNotContain("Content processing:", screen, StringComparison.Ordinal);
 		Assert.DoesNotContain("Saved settings", screen, StringComparison.Ordinal);
-		AssertFrameAggregate(screen, "Content processing", expectedCount: 5);
+		AssertFrameAggregate(screen, ContentProcessingTitle, expectedCount: 5);
 		AssertFrameAggregate(screen, "Exclusions", expectedCount: 0);
 		AssertFrameAggregate(screen, "File types", expectedCount: 3);
 		Assert.DoesNotContain("ROOT FOLDERS", screen, StringComparison.Ordinal);
@@ -1511,7 +1514,7 @@ public sealed class TerminalSettingsPanelPtyTests
 		string title,
 		int? expectedCount = null)
 	{
-		var marker = title == "Content processing" || expectedCount == 0 ? "[ ]" : "[x]";
+		var marker = title == ContentProcessingTitle || expectedCount == 0 ? "[ ]" : "[x]";
 		var suffix = expectedCount switch
 		{
 			0 => string.Empty,
@@ -1525,6 +1528,11 @@ public sealed class TerminalSettingsPanelPtyTests
 			titleLine is not null,
 			$"Expected frame aggregate '{marker} All{suffix}' for '{title}'.{Environment.NewLine}{screen}");
 		Assert.Contains($"{marker} All{suffix}", titleLine, StringComparison.Ordinal);
+		var titleEnd = titleLine.IndexOf(title, StringComparison.Ordinal) + title.Length;
+		var aggregateStart = titleLine.IndexOf($"{marker} All{suffix}", titleEnd, StringComparison.Ordinal);
+		Assert.True(
+			titleLine[titleEnd..aggregateStart].Contains('├', StringComparison.Ordinal),
+			$"The aggregate covers the closing cap of the '{title}' frame title.{Environment.NewLine}{titleLine}");
 	}
 
 	private static (int Row, int Column) FindFrameAggregate(

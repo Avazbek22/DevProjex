@@ -53,7 +53,6 @@ internal sealed partial class TerminalWorkspaceSession
 	private const int ContentControlsFrameHeight = 7;
 	// Terminal.Gui hides a vertical scrollbar whose viewport is a single row.
 	private const int MinimumVisibleFilterRows = 2;
-	private const int AggregateFramePaddingColumns = 3;
 	private const int AggregateTrailingBorderColumns = 3;
 
 	private WorkspaceControlViewGraph? ControlViews => _workspaceViews?.Controls;
@@ -617,13 +616,13 @@ internal sealed partial class TerminalWorkspaceSession
 			ResolveControlLabelWidth(markerColumns: 4),
 			_environment.SupportsUnicode && !_options.Plain);
 
-	private int ResolveControlLabelWidth(int markerColumns)
-	{
-		var panelWidth = _layoutMode == TerminalWorkspaceLayoutMode.Wide
+	private int ResolveControlLabelWidth(int markerColumns) =>
+		Math.Max(4, ResolveControlsPanelWidth() - markerColumns - 4);
+
+	private int ResolveControlsPanelWidth() =>
+		_layoutMode == TerminalWorkspaceLayoutMode.Wide
 			? WideControlsWidth
 			: Math.Max(1, _terminalWidth);
-		return Math.Max(4, panelWidth - markerColumns - 4);
-	}
 
 	private void TrackSelectedControl(TerminalControlSection section)
 	{
@@ -697,9 +696,12 @@ internal sealed partial class TerminalWorkspaceSession
 		TerminalAggregateControl? aggregate)
 	{
 		var aggregateColumns = aggregate?.Text.GetColumns() ?? 0;
+		// A mini-panel spans the controls panel inside its border. Its title needs the corner
+		// and both title caps ("┌┤" and "├") to the left of the aggregate anchored on the right.
+		var sectionWidth = ResolveControlsPanelWidth() - 2;
 		var maxColumns = Math.Max(
 			4,
-			WideControlsWidth - aggregateColumns - AggregateFramePaddingColumns - 4);
+			sectionWidth - aggregateColumns - AggregateTrailingBorderColumns - 3);
 		return TerminalFrameTitle.Fit(
 			value,
 			maxColumns,

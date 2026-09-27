@@ -6,6 +6,9 @@ namespace DevProjex.Tests.Terminal;
 [Collection(TerminalProcessCollection.Name)]
 public sealed class TerminalWorkspaceCommandLinePtyTests
 {
+	// The wide Parameters panel shortens the title to "Content processi…".
+	private const string WideContentProcessingTitle = "Content processi";
+
 	[Fact(Timeout = 120_000)]
 	public async Task CopyCommandPublishesAnInlineSuccessResult()
 	{
@@ -719,7 +722,7 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 		var destination = Path.Combine(output.Path, "command context.md");
 		await using var terminal = await StartAsync(project.Path, columns: 160, rows: 40);
 		await terminal.WaitForScreenAsync(
-			"Content processing",
+			WideContentProcessingTitle,
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		await ExecuteAsync(terminal, "set hide-secrets on", "Hide secrets: enabled");
@@ -796,7 +799,7 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 		var destination = Path.Combine(output.Path, "redacted context.md");
 		await using var terminal = await StartAsync(project.Path, columns: 160, rows: 40);
 		await terminal.WaitForScreenAsync(
-			"Content processing",
+			WideContentProcessingTitle,
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		await ExecuteAsync(terminal, "set hide-secrets on", "Hide secrets: enabled");
@@ -1171,7 +1174,7 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 		using var project = CreateGitProject();
 		await using var terminal = await StartAsync(project.Path, columns: 160, rows: 40);
 		await terminal.WaitForScreenAsync(
-			"Content processing",
+			WideContentProcessingTitle,
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		var contentOptions = new (string Token, string Label)[]

@@ -2050,8 +2050,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var previewTitleWidth = Math.Max(8, _previewFrame.Viewport.Width - 2);
 		var renderedPreviewTitle = previewTitle.GetColumns() <= previewTitleWidth
 			? previewTitle
-			: $"{previewMarker}{L("Terminal.Tui.Preview")}{PanelSeparator}" +
-			  $"{_workspace.LocalizeView(_previewView)}{PanelSeparator}{GetFormatToken()}";
+			: FitEndToWidth(
+				$"{previewMarker}{L("Terminal.Tui.Preview")}{PanelSeparator}" +
+				$"{_workspace.LocalizeView(_previewView)}{PanelSeparator}{GetFormatToken()}",
+				previewTitleWidth);
 		_previewFrame.Title = _options.Plain ? string.Empty : renderedPreviewTitle;
 		if (_previewPanelHeading is not null)
 			_previewPanelHeading.Text = renderedPreviewTitle;

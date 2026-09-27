@@ -8,6 +8,55 @@ namespace DevProjex.Tests.Terminal;
 public sealed partial class TerminalPreviewNavigationPtyTests
 {
 	[Fact(Timeout = 90_000)]
+	public async Task NarrowPreviewTitleEndsWithAnEllipsisInsteadOfACutFormat()
+	{
+		using var project = CreateScrollableProject();
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			project.Path,
+			[
+				"tui",
+				project.Path,
+				"--profile",
+				"standard",
+				"--screen",
+				"inline",
+				"--no-mouse",
+				"--language",
+				"ru"
+			],
+			columns: 60,
+			rows: 20,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.WaitForScreenAsync(
+			"ДЕРЕВО ПРОЕКТА",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"> ПРЕДПРОСМОТР КОНТЕКСТА",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync("3", TestContext.Current.CancellationToken);
+		await terminal.SendAsync(":format markdown\r", TestContext.Current.CancellationToken);
+
+		var screen = await terminal.WaitForScreenAsync(
+			"Mark...├┐",
+			cancellationToken: TestContext.Current.CancellationToken);
+		var title = screen.Split('\n').Single(static line =>
+			line.Contains("ПРЕДПРОСМОТР КОНТЕКСТА", StringComparison.Ordinal));
+		Assert.Contains("Дерево + содержимое", title, StringComparison.Ordinal);
+		Assert.EndsWith("...├┐", title.TrimEnd(), StringComparison.Ordinal);
+		await terminal.SendAsync(":quit\r", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Выйти из DevProjex Terminal?",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(
+				cancellationToken: TestContext.Current.CancellationToken));
+	}
+
+	[Fact(Timeout = 90_000)]
 	public async Task PreviewViewportAndFocusSurviveKeyboardNavigationOverlaysAndResize()
 	{
 		using var project = CreateScrollableProject();
