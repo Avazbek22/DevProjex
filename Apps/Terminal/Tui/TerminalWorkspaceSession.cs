@@ -1603,8 +1603,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var controlToRestore = GetControlFocusTarget(
 			focusedControlSection,
 			aggregateControlWasActive);
+		// An open command line owns the focus; Parameters regains it when the line closes.
 		if (controlsHadFocus ||
-			(controlsWereActive && !HasActiveOperation && controlToRestore?.Enabled == true))
+			(controlsWereActive && _commandLine?.IsEditing != true &&
+			 !HasActiveOperation && controlToRestore?.Enabled == true))
 		{
 			_activeControlSection = focusedControlSection;
 			_activeAggregateControlSection = aggregateControlWasActive
