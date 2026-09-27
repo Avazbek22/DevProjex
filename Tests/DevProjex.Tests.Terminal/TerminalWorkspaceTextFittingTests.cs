@@ -105,15 +105,18 @@ public sealed class TerminalWorkspaceTextFittingTests
 	public void FormatStatusPath_KeepsTheWrittenFileNameInsideOneStatusRow(string format)
 	{
 		const int columns = 78;
-		var path = Path.Combine(
-			@"C:\Users\developer\AppData\Local\Temp",
-			string.Join('\\', Enumerable.Repeat("deeply-nested-export-folder", 4)),
-			"r one.md");
+		string[] segments =
+		[
+			Path.GetTempPath(),
+			.. Enumerable.Repeat("deeply-nested-export-folder", 4),
+			"r one.md"
+		];
+		var path = Path.Combine(segments);
 
 		var result = TerminalWorkspaceSession.FormatStatusPath(format, path, columns);
 
 		Assert.StartsWith(format.Replace("{0}", "...", StringComparison.Ordinal), result, StringComparison.Ordinal);
-		Assert.EndsWith(@"\r one.md", result, StringComparison.Ordinal);
+		Assert.EndsWith(Path.DirectorySeparatorChar + "r one.md", result, StringComparison.Ordinal);
 		Assert.Equal(columns, result.Length);
 	}
 }
