@@ -54,6 +54,9 @@ internal sealed class TerminalParameterListView : ListView
 			return base.OnMouseEvent(mouse);
 		}
 
+		if (TerminalPointerEventDeduplicator.IsMotion(mouse.Flags))
+			return true;
+
 		var pressed = mouse.Flags.HasFlag(MouseFlags.LeftButtonPressed);
 		if (!IsPrimaryActivation(mouse.Flags) || mouse.Position is not { } position)
 			return base.OnMouseEvent(mouse);
@@ -72,7 +75,7 @@ internal sealed class TerminalParameterListView : ListView
 			return true;
 		SelectedItem = row;
 		EnsureSelectedItemVisible();
-		if (!_pointerEvents.ShouldHandle(pressed, position.X, position.Y))
+		if (!_pointerEvents.ShouldHandle(pressed))
 		{
 			return true;
 		}
@@ -92,8 +95,9 @@ internal sealed class TerminalParameterListView : ListView
 		_rows is null || row >= 0 && row < _rows.Count && _rows[row].IsEnabled;
 
 	internal static bool IsPrimaryActivation(MouseFlags flags) =>
-		flags.HasFlag(MouseFlags.LeftButtonPressed) ||
-		flags.HasFlag(MouseFlags.LeftButtonClicked);
+		!TerminalPointerEventDeduplicator.IsMotion(flags) &&
+		(flags.HasFlag(MouseFlags.LeftButtonPressed) ||
+		 flags.HasFlag(MouseFlags.LeftButtonClicked));
 
 	internal static bool TryResolveSelectionIndex(
 		int viewportTop,

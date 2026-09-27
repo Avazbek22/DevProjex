@@ -63,6 +63,9 @@ internal sealed class TerminalAggregateControl : Label
 
 	protected override bool OnMouseEvent(Mouse mouse)
 	{
+		if (TerminalPointerEventDeduplicator.IsMotion(mouse.Flags))
+			return true;
+
 		var pressed = mouse.Flags.HasFlag(MouseFlags.LeftButtonPressed);
 		var clicked = mouse.Flags.HasFlag(MouseFlags.LeftButtonClicked);
 		if (!pressed && !clicked)
@@ -70,7 +73,7 @@ internal sealed class TerminalAggregateControl : Label
 
 		SetFocus();
 		InteractionStarted?.Invoke(this, EventArgs.Empty);
-		if (_pointerEvents.ShouldHandle(pressed, 0, 0) && IsMarkerColumn(mouse.Position?.X))
+		if (_pointerEvents.ShouldHandle(pressed) && IsMarkerColumn(mouse.Position?.X))
 			SelectionToggleRequested?.Invoke(this, EventArgs.Empty);
 		return true;
 	}

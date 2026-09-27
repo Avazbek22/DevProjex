@@ -53,6 +53,19 @@ public sealed class TerminalParameterPointerTests
 	}
 
 	[Fact]
+	public void PointerDriftInsideTheMarkerTogglesOnce()
+	{
+		using var list = CreateList(out var toggles);
+
+		Send(list, 0, CheckBoxRow, MouseFlags.LeftButtonPressed);
+		Send(list, 1, CheckBoxRow, MouseFlags.LeftButtonPressed | MouseFlags.PositionReport);
+		Send(list, 1, CheckBoxRow, MouseFlags.LeftButtonReleased);
+		Send(list, 1, CheckBoxRow, MouseFlags.LeftButtonClicked);
+
+		Assert.Equal(1, toggles.Count);
+	}
+
+	[Fact]
 	public void ReleaseAloneDoesNothing()
 	{
 		using var list = CreateList(out var toggles);
@@ -93,6 +106,27 @@ public sealed class TerminalParameterPointerTests
 
 		Assert.Equal(toggles ? 1 : 0, count);
 		Assert.Equal("[ ]", control.Text.Substring(isOnBorder ? 1 : 2, 3));
+	}
+
+	[Fact]
+	public void AggregateControlIgnoresPointerDriftWhileTheButtonIsHeld()
+	{
+		using var control = new TerminalAggregateControl(isOnBorder: false);
+		control.SetRow(new TerminalParameterRow(
+			"extensions:all",
+			TerminalParameterRowKind.ToggleAllExtensions,
+			"All",
+			IsSelected: false));
+		control.Frame = new Rectangle(0, 0, control.Text.GetColumns(), 1);
+		var count = 0;
+		control.SelectionToggleRequested += (_, _) => count++;
+
+		control.NewMouseEvent(new Mouse { Position = new Point(2, 0), Flags = MouseFlags.LeftButtonPressed });
+		control.NewMouseEvent(new Mouse { Position = new Point(3, 0), Flags = MouseFlags.LeftButtonPressed | MouseFlags.PositionReport });
+		control.NewMouseEvent(new Mouse { Position = new Point(3, 0), Flags = MouseFlags.LeftButtonReleased });
+		control.NewMouseEvent(new Mouse { Position = new Point(3, 0), Flags = MouseFlags.LeftButtonClicked });
+
+		Assert.Equal(1, count);
 	}
 
 	private static TerminalParameterListView CreateList(out List<int> toggles)

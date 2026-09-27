@@ -75,6 +75,80 @@ public sealed class TerminalProjectTreeViewPointerTests
 	}
 
 	[Fact]
+	public void PointerDriftWhileTheButtonIsHeldDoesNotToggleTheCheckBoxAgain()
+	{
+		using var tree = CreateTree(out var toggles, out _);
+
+		Send(tree, column: 2, FileRow, MouseFlags.LeftButtonPressed);
+		Send(tree, column: 3, FileRow, MouseFlags.LeftButtonPressed | MouseFlags.PositionReport);
+		Send(tree, column: 3, FileRow, MouseFlags.LeftButtonReleased);
+		Send(tree, column: 3, FileRow, MouseFlags.LeftButtonClicked);
+
+		Assert.Equal(["pointer"], toggles);
+	}
+
+	[Fact]
+	public void PointerDriftOffAndBackOntoTheFolderMarkerTogglesExpansionOnce()
+	{
+		using var tree = CreateTree(out var toggles, out var expansions);
+
+		Send(tree, column: 0, FolderRow, MouseFlags.LeftButtonPressed);
+		Send(tree, column: 1, FolderRow, MouseFlags.LeftButtonPressed | MouseFlags.PositionReport);
+		Send(tree, column: 0, FolderRow, MouseFlags.LeftButtonPressed | MouseFlags.PositionReport);
+		Send(tree, column: 0, FolderRow, MouseFlags.LeftButtonReleased);
+		Send(tree, column: 0, FolderRow, MouseFlags.LeftButtonClicked);
+
+		Assert.Empty(toggles);
+		Assert.Equal(1, expansions.Count);
+	}
+
+	[Fact]
+	public void DoubleClickOnTheFolderMarkerTogglesExpansionOnce()
+	{
+		using var tree = CreateTree(out var toggles, out var expansions);
+
+		DoubleClick(tree, column: 0, FolderRow);
+
+		Assert.Empty(toggles);
+		Assert.Equal(1, expansions.Count);
+	}
+
+	[Fact]
+	public void DoubleClickOnAFolderNameThatDriftsBeforeTheSecondReleaseTogglesExpansionOnce()
+	{
+		using var tree = CreateTree(out var toggles, out var expansions);
+
+		Click(tree, column: 7, FolderRow);
+		Send(tree, column: 7, FolderRow, MouseFlags.LeftButtonPressed);
+		Send(tree, column: 8, FolderRow, MouseFlags.LeftButtonPressed | MouseFlags.PositionReport);
+		Send(tree, column: 8, FolderRow, MouseFlags.LeftButtonReleased);
+		Send(tree, column: 8, FolderRow, MouseFlags.LeftButtonDoubleClicked);
+
+		Assert.Empty(toggles);
+		Assert.Equal(1, expansions.Count);
+	}
+
+	[Fact]
+	public void MotionEventsAreNotPrimaryActivations()
+	{
+		Assert.False(TerminalProjectTreeView.IsPrimaryActivation(
+			MouseFlags.LeftButtonPressed | MouseFlags.PositionReport));
+		Assert.False(TerminalParameterListView.IsPrimaryActivation(
+			MouseFlags.LeftButtonPressed | MouseFlags.PositionReport));
+		Assert.True(TerminalProjectTreeView.IsPrimaryActivation(MouseFlags.LeftButtonPressed));
+	}
+
+	[Fact]
+	public void ClickedCompletesThePendingPressAndStandsAloneOtherwise()
+	{
+		var pointer = new TerminalPointerEventDeduplicator();
+
+		Assert.True(pointer.ShouldHandle(pressed: true));
+		Assert.False(pointer.ShouldHandle(pressed: false));
+		Assert.True(pointer.ShouldHandle(pressed: false));
+	}
+
+	[Fact]
 	public void ReleaseWithoutAHandledPressDoesNotToggleSelection()
 	{
 		using var tree = CreateTree(out var toggles, out _);

@@ -14,23 +14,27 @@ internal static class TerminalInteractiveView
 	}
 }
 
-internal sealed class TerminalPointerEventDeduplicator(long windowMilliseconds = 1_000)
+// Terminal.Gui reports one click twice: the press and, after the release, a synthesized
+// Clicked event. The Clicked event completes the press that started it however long the
+// button was held and even when the pointer moved a cell in between. A Clicked event with no
+// press before it is handled on its own.
+internal sealed class TerminalPointerEventDeduplicator
 {
-	private int _column = -1;
-	private int _row = -1;
-	private long _pressedAt;
+	private bool _pressPending;
 
-	public bool ShouldHandle(bool pressed, int column, int row)
+	public bool ShouldHandle(bool pressed)
 	{
-		var now = Environment.TickCount64;
-		if (!pressed && _column == column && _row == row && now - _pressedAt <= windowMilliseconds)
-			return false;
 		if (pressed)
 		{
-			_column = column;
-			_row = row;
-			_pressedAt = now;
+			_pressPending = true;
+			return true;
 		}
-		return true;
+		var completesPress = _pressPending;
+		_pressPending = false;
+		return !completesPress;
 	}
+
+	// Pointer movement, including movement with a button held, arrives with PositionReport and
+	// may still carry the pressed flag; it continues a gesture and never starts a new one.
+	public static bool IsMotion(MouseFlags flags) => flags.HasFlag(MouseFlags.PositionReport);
 }
