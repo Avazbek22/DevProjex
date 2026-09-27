@@ -9,6 +9,7 @@ namespace DevProjex.Terminal.Tui;
 internal sealed class TerminalAggregateControl : Label
 {
 	private bool _isActive;
+	private bool _isEnabled = true;
 
 	public TerminalAggregateControl(bool isOnBorder)
 	{
@@ -33,6 +34,7 @@ internal sealed class TerminalAggregateControl : Label
 		var marker = row.IsSelected == true ? "[x]" : "[ ]";
 		var trailing = IsOnBorder ? " " : string.Empty;
 		var text = $"{Leading}{marker} {row.Label}{trailing}";
+		_isEnabled = row.IsEnabled;
 		Text = text;
 		Width = text.GetColumns();
 		SetNeedsDraw();
@@ -55,7 +57,9 @@ internal sealed class TerminalAggregateControl : Label
 
 	protected override bool OnDrawingContent(DrawContext? context)
 	{
-		SetAttributeForRole(_isActive ? VisualRole.Focus : VisualRole.ReadOnly);
+		SetAttributeForRole(!_isEnabled
+			? VisualRole.Disabled
+			: _isActive ? VisualRole.Focus : VisualRole.ReadOnly);
 		AddStr(0, 0, Text);
 		return true;
 	}

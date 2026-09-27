@@ -823,7 +823,7 @@ internal sealed partial class TerminalWorkspaceSession
 				"Terminal.Tui.Exclusions",
 				"Terminal.Tui.Action.FocusExclusions.Description",
 				"X",
-				FormatExclusions(selection.Exclusions ?? []),
+				FormatExclusions(),
 				TerminalWorkspaceCommandCatalog.Get(TerminalWorkspaceCommandVerb.Set).Syntax,
 				execute: () => FocusControlSection(TerminalControlSection.Exclusions)),
 			CreateAction(
@@ -999,11 +999,13 @@ internal sealed partial class TerminalWorkspaceSession
 			? GitScopeSelection.ToToken(mode, GetDisplayedSettingsSelection().GitDiffRange)
 			: L(ProjectPresentationCatalog.Get(mode).LabelKey);
 
-	private string FormatExclusions(IReadOnlyCollection<ProjectExclusion> exclusions)
+	// Counts the rows the Exclusions panel shows, as its collapsed summary does.
+	private string FormatExclusions()
 	{
-		var pathExclusionCount = ProjectPresentationCatalog.Exclusions.Count(
-			descriptor => exclusions.Contains(descriptor.RequireId()));
-		return pathExclusionCount.ToString("N0", CultureInfo.CurrentCulture);
+		var counts = _exclusionControlRows is { } rows ? CountExclusionAxis(rows) : (Selected: 0, Total: 0);
+		return counts.Total == 0
+			? 0.ToString("N0", CultureInfo.CurrentCulture)
+			: FormatSelectionCount(counts.Selected, counts.Total);
 	}
 
 	private string FormatSelectionCount(int selected, int available) =>
