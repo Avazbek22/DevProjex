@@ -79,6 +79,29 @@ public sealed class TerminalParameterPointerTests
 	}
 
 	[Fact]
+	public void ClickOnADisabledRowKeepsTheCursorOnTheEnabledRow()
+	{
+		var rows = new ObservableCollection<TerminalParameterRow>
+		{
+			new("git:gitignore", TerminalParameterRowKind.GitMode, "Use .gitignore", IsSelected: true, GitMode: GitFilteringMode.RespectGitIgnore),
+			new("git:tracked", TerminalParameterRowKind.GitMode, "Tracked", IsSelected: false, IsEnabled: false, GitMode: GitFilteringMode.TrackedFilesOnly)
+		};
+		using var list = new TerminalParameterListView
+		{
+			Frame = new Rectangle(0, 0, 30, 5)
+		};
+		list.SetParameterSource(rows);
+		list.SelectedItem = 0;
+		var toggles = 0;
+		list.SelectionToggleRequested += (_, _) => toggles++;
+
+		Click(list, 1, 1);
+
+		Assert.Equal(0, list.SelectedItem);
+		Assert.Equal(0, toggles);
+	}
+
+	[Fact]
 	public void ReleaseAloneDoesNothing()
 	{
 		using var list = CreateList(out var toggles);
