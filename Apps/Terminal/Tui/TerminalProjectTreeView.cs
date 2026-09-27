@@ -22,6 +22,10 @@ internal sealed class TerminalProjectTreeView : ListView
 		bool showScrollBars = true)
 	{
 		_rowResolver = rowResolver;
+		// OnMouseEvent owns every pointer gesture. The list's default bindings would turn the
+		// release that ends a click into a second activation and undo the toggle.
+		MouseBindings.Clear(Command.Activate);
+		MouseBindings.Clear(Command.Accept);
 		if (showScrollBars)
 			TerminalScrollBarStyle.Apply(this, useUnicode, vertical: true, horizontal: true);
 	}
