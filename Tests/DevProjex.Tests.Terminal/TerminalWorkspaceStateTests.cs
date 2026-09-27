@@ -288,6 +288,48 @@ public sealed class TerminalWorkspaceStateTests
 	}
 
 	[Fact]
+	public void CommandSelectionAndRevealAcceptAnotherCaseOnlyOnWindows()
+	{
+		using var state = new TerminalWorkspaceState(CreatePlan());
+		state.CollapseAll();
+
+		var result = state.SetSelection(["SRC/A.cs"], selected: true);
+		var revealed = state.Reveal("Src/B.CS");
+
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Equal(0, result.MissingSelectors);
+			Assert.Equal(["src/a.cs"], state.BuildSelectedRelativePaths());
+			Assert.Equal("b.cs", state.VisibleRows[revealed].Node.DisplayName);
+		}
+		else
+		{
+			Assert.Equal(1, result.MissingSelectors);
+			Assert.Empty(state.BuildSelectedRelativePaths());
+			Assert.Equal(-1, revealed);
+		}
+	}
+
+	[Fact]
+	public void CommandSelectionPrefersTheExactCaseAndRejectsAnAmbiguousOne()
+	{
+		var root = CreateSyntheticRoot("case-distinct-selection");
+		var lower = Node(root, "src/x.cs", isDirectory: false);
+		var upper = Node(root, "src/X.cs", isDirectory: false);
+		var src = Node(root, "src", isDirectory: true, lower, upper);
+		var tree = new TreeNodeDescriptor("project", root, true, false, "folder", [src]);
+		using var state = new TerminalWorkspaceState(
+			CreatePlan(tree, [lower.FullPath, upper.FullPath], [root, src.FullPath]));
+
+		var exact = state.SetSelection(["src/X.cs"], selected: true);
+		var ambiguous = state.SetSelection(["SRC/X.CS"], selected: true);
+
+		Assert.Equal(0, exact.MissingSelectors);
+		Assert.Equal(1, ambiguous.MissingSelectors);
+		Assert.Equal(["src/X.cs"], state.BuildSelectedRelativePaths());
+	}
+
+	[Fact]
 	public void RedundantCommandSelectionDoesNotRejectPendingReprojection()
 	{
 		var sourcePlan = CreatePlan();

@@ -545,7 +545,8 @@ public sealed class TerminalWorkspaceState : IDisposable
 		{
 			return false;
 		}
-		return _nodesByPath.ContainsKey(fullPath);
+		return _nodesByPath.ContainsKey(fullPath) ||
+			ProjectTreePathIdentity.TryResolveAvailableName(_orderedPaths, fullPath, out fullPath);
 	}
 
 	public IReadOnlyList<string> BuildExpandedRelativePaths() =>
@@ -679,11 +680,13 @@ public sealed class TerminalWorkspaceState : IDisposable
 		if (selector.IndexOfAny(['*', '?', '{', '}']) < 0)
 		{
 			var normalized = ProjectSelectionPath.NormalizeRelative(selector);
-			return _nodesByPath.Values
-				.Where(node => ProjectTreePathIdentity.CanonicalComparer.Equals(
-					ToRelativePath(node.FullPath),
-					normalized.Length == 0 ? "." : normalized))
-				.ToArray();
+			return ProjectTreePathIdentity.TryResolveAvailableEntry(
+				_orderedPaths,
+				normalized.Length == 0 ? "." : normalized,
+				ToRelativePath,
+				out var fullPath)
+				? [_nodesByPath[fullPath]]
+				: [];
 		}
 
 		ProjectRelativeGlob.Validate(selector);
