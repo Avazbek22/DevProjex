@@ -521,8 +521,10 @@ sequence at all. The upstream behavior is documented in the
 The export summary asks whether to export and presents a compact aligned
 table containing destination, file and folder counts, size, estimated tokens,
 filters, diagnostics, and an inline redaction warning when applicable. Export is
-the default action. A destination conflict offers **Overwrite** directly in the
-summary. Successful exports do
+the default action. When the destination is an existing file or ZIP, the summary
+offers **Overwrite** directly. An existing folder, or a folder where a file is
+expected, cannot be replaced: the summary says so and offers no export action.
+Successful exports do
 not open another dialog; the result path appears transiently in the status bar.
 
 When redaction is enabled, the project-copy summary states that matching text

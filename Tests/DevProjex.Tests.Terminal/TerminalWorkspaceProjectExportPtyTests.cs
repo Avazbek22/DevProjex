@@ -25,6 +25,10 @@ public sealed class TerminalWorkspaceProjectExportPtyTests
 
 		Assert.Contains("Dry run", confirmation, StringComparison.Ordinal);
 		Assert.DoesNotContain("Overwrite", confirmation, StringComparison.Ordinal);
+		Assert.Contains(
+			"The destination already exists. Choose another path.",
+			confirmation,
+			StringComparison.Ordinal);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		var canceled = await terminal.WaitForScreenWithoutAsync(
 			"Export?",

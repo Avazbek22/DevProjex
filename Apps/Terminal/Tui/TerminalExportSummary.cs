@@ -10,7 +10,11 @@ public enum TerminalExportKind
 public enum TerminalExportDestinationState
 {
 	Ready = 0,
-	Conflict = 1
+	// The destination exists and Overwrite may replace it.
+	Conflict = 1,
+	// The destination exists and cannot be replaced: a folder export target, or a
+	// directory where a file is expected.
+	Blocked = 2
 }
 
 public sealed record TerminalExportSummary(

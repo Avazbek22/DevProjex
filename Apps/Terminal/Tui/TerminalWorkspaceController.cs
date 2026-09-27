@@ -978,10 +978,10 @@ public sealed class TerminalWorkspaceController(
 		var (exactDestination, destinationState) = ResolveDestination(
 			plan.SourceRoot,
 			destination,
-			path => ExactOutputDestinationValidator.ValidateContext(
+			(path, replace) => ExactOutputDestinationValidator.ValidateContext(
 				plan.SourceRoot,
 				path,
-				overwrite));
+				overwrite || replace));
 		var outputMetrics = await ExportOutputMetricsCalculator
 			.FromUtf8WriterAsync(
 				(stream, token) => services.ContextDocumentService.WriteCompleteAsync(
@@ -1094,11 +1094,11 @@ public sealed class TerminalWorkspaceController(
 		var (exactDestination, destinationState) = ResolveDestination(
 			plan.SourceRoot,
 			destination,
-			path => ExactOutputDestinationValidator.ValidateProject(
+			(path, replace) => ExactOutputDestinationValidator.ValidateProject(
 				plan.SourceRoot,
 				path,
 				format,
-				overwrite: false));
+				replace));
 		return CreateSummary(
 			plan,
 			MapExportKind(format),
@@ -1207,17 +1207,32 @@ public sealed class TerminalWorkspaceController(
 	private static (string Destination, TerminalExportDestinationState State) ResolveDestination(
 		string workingDirectory,
 		string destination,
-		Func<string, string> validate)
+		Func<string, bool, string> validate)
 	{
 		var exactDestination = TerminalWorkspacePathResolver.Resolve(destination, workingDirectory);
 		try
 		{
-			_ = validate(exactDestination);
+			_ = validate(exactDestination, false);
 			return (exactDestination, TerminalExportDestinationState.Ready);
 		}
 		catch (OutputDestinationConflictException exception)
 		{
-			return (exception.Path, TerminalExportDestinationState.Conflict);
+			return (exception.Path, CanReplace(exactDestination, validate)
+				? TerminalExportDestinationState.Conflict
+				: TerminalExportDestinationState.Blocked);
+		}
+	}
+
+	private static bool CanReplace(string destination, Func<string, bool, string> validate)
+	{
+		try
+		{
+			_ = validate(destination, true);
+			return true;
+		}
+		catch (OutputDestinationConflictException)
+		{
+			return false;
 		}
 	}
 

@@ -257,6 +257,12 @@ public sealed class TerminalWorkspace
 			(L("Terminal.Tui.Filters"), $"{gitMode}; {exclusions}", FitSummaryLine),
 			(L("Terminal.Tui.Diagnostics"), summary.DiagnosticCount.ToString("N0", CultureInfo.CurrentCulture), FitSummaryLine)
 		};
+		if (summary.DestinationState == TerminalExportDestinationState.Blocked)
+		{
+			rows.Insert(
+				1,
+				(L("Terminal.Tui.DestinationState"), L("Terminal.Tui.Error.DestinationExists"), TerminalCellWidth.Wrap));
+		}
 		var redactionKey = (summary.SecretsRedacted, summary.PrivateDataRedacted) switch
 		{
 			(true, true) => "Terminal.Tui.Export.RedactionInline",

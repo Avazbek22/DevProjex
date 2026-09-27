@@ -2121,6 +2121,59 @@ public sealed class TerminalWorkspaceContractTests
 	}
 
 	[Fact]
+	public async Task PreparedExportBlocksDestinationsThatOverwriteCannotReplace()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/app.cs", "class App {}");
+		var existingFolder = workspace.CreateDirectory("output/existing");
+		var folderNamedAsZip = workspace.CreateDirectory("output/folder.zip");
+		var existingZip = workspace.WriteFile("output/existing.zip", "zip");
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var environment = new TestTerminalEnvironment();
+		var controller = new TerminalWorkspaceController(services, environment);
+		using var state = await controller.OpenAsync(
+			project,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+
+		var context = await controller.PrepareContextExportAsync(
+			state,
+			ProjectContextView.Tree,
+			ProjectContextDocumentFormat.Markdown,
+			existingFolder,
+			overwrite: false,
+			TestContext.Current.CancellationToken);
+		var folder = await controller.PrepareProjectExportAsync(
+			state,
+			ProjectCopyExportFormat.Folder,
+			existingFolder,
+			TestContext.Current.CancellationToken);
+		var zipOverFolder = await controller.PrepareProjectExportAsync(
+			state,
+			ProjectCopyExportFormat.Zip,
+			folderNamedAsZip,
+			TestContext.Current.CancellationToken);
+		var zipOverFile = await controller.PrepareProjectExportAsync(
+			state,
+			ProjectCopyExportFormat.Zip,
+			existingZip,
+			TestContext.Current.CancellationToken);
+		var text = new TerminalWorkspace(services, environment).BuildExportSummaryText(folder);
+
+		Assert.Equal(TerminalExportDestinationState.Blocked, context.DestinationState);
+		Assert.Equal(TerminalExportDestinationState.Blocked, folder.DestinationState);
+		Assert.Equal(TerminalExportDestinationState.Blocked, zipOverFolder.DestinationState);
+		Assert.Equal(TerminalExportDestinationState.Conflict, zipOverFile.DestinationState);
+		Assert.Contains(
+			$"{services.Localization["Terminal.Tui.DestinationState"]}  " +
+			services.Localization["Terminal.Tui.Error.DestinationExists"],
+			text,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task PreparedExportReportsConflictAndLocalizedSummaryWithoutOverwriting()
 	{
 		using var workspace = new TemporaryDirectory();
