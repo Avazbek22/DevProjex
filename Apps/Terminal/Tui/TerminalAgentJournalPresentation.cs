@@ -79,8 +79,16 @@ internal sealed record TerminalAgentJournalSnapshot(
 			paths);
 	}
 
-	internal static long ResolveOpeningBaseline(bool sessionExistedAtWorkspaceOpen, long latestSequence) =>
-		sessionExistedAtWorkspaceOpen ? Math.Max(0, latestSequence) : 0;
+	// The trace starts with the first call made after the project opened, however late the
+	// activity projection first reads the session.
+	internal static long ResolveOpeningBaseline(
+		IEnumerable<AgentJournalCall> calls,
+		DateTimeOffset workspaceOpenedUtc) =>
+		calls
+			.Where(call => call.Utc <= workspaceOpenedUtc)
+			.Select(static call => call.Sequence)
+			.DefaultIfEmpty(0)
+			.Max();
 
 	internal static long ResolveReadCursor(AgentJournalActivitySnapshot activity) =>
 		Math.Max(0, activity.LatestCall?.Sequence ?? 0);

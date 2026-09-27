@@ -249,12 +249,50 @@ public sealed class TerminalAgentJournalPresentationTests
 	[Fact]
 	public void SessionOpeningBaselineDistinguishesAnExistingSessionFromANewSession()
 	{
+		var calls = new[] { CreateCall(6, "get_tree", []), CreateCall(7, "get_file", []) };
+
 		Assert.Equal(7, TerminalAgentJournalSnapshot.ResolveOpeningBaseline(
-			sessionExistedAtWorkspaceOpen: true,
-			latestSequence: 7));
+			calls,
+			workspaceOpenedUtc: calls[^1].Utc.AddSeconds(1)));
 		Assert.Equal(0, TerminalAgentJournalSnapshot.ResolveOpeningBaseline(
-			sessionExistedAtWorkspaceOpen: false,
-			latestSequence: 7));
+			calls,
+			workspaceOpenedUtc: calls[0].Utc.AddSeconds(-1)));
+	}
+
+	[Fact]
+	public void CallsMadeAfterTheProjectOpenedStayInTheTraceWhenActivityIsEnabledLater()
+	{
+		using var workspace = new TemporaryDirectory();
+		var session = CreateSession() with
+		{
+			Totals = CreateSession().Totals with { Calls = 3 },
+			Roots = [new AgentJournalRoot(workspace.Path, "project")]
+		};
+		var beforeOpen = CreateCall(1, "get_tree", ["src/Old.cs"]);
+		var afterOpen = new[]
+		{
+			CreateCall(2, "get_file", ["README.md"]),
+			CreateCall(3, "get_file", ["src/New.cs"])
+		};
+		var openedUtc = beforeOpen.Utc.AddMilliseconds(500);
+		var activity = new AgentJournalActivitySnapshot(
+			session,
+			afterOpen[^1],
+			[beforeOpen, .. afterOpen],
+			RequiresReset: false,
+			LastEventUtc: afterOpen[^1].Utc);
+
+		var snapshot = TerminalAgentJournalSnapshot.Create(
+			workspace.Path,
+			activity,
+			previous: null,
+			TerminalAgentJournalSnapshot.ResolveOpeningBaseline(activity.AppendedCalls, openedUtc));
+
+		Assert.Equal("get_file", snapshot.LatestCall?.Tool);
+		Assert.Equal(3, snapshot.LatestCall?.Sequence);
+		Assert.Contains(Path.Combine(workspace.Path, "README.md"), snapshot.DeliveredPathCalls.Keys);
+		Assert.Contains(Path.Combine(workspace.Path, "src", "New.cs"), snapshot.DeliveredPathCalls.Keys);
+		Assert.DoesNotContain(Path.Combine(workspace.Path, "src", "Old.cs"), snapshot.DeliveredPathCalls.Keys);
 	}
 
 	[Fact]

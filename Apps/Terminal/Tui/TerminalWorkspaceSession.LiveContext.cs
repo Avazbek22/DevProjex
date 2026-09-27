@@ -27,10 +27,7 @@ internal sealed partial class TerminalWorkspaceSession
 		{
 			_agentJournalWorkspaceOpenedUtc = DateTimeOffset.UtcNow;
 			_agentJournalOpeningRoot = state.Plan.SourceRoot;
-			_agentJournalOpeningSessionId = null;
-			_agentJournalOpeningSequence = 0;
-			_agentJournalReadSequence = 0;
-			_agentJournalSnapshot = null;
+			ResetAgentJournalProjection();
 		}
 		var sessions = _state is null
 			? Array.Empty<LiveSessionRecord>()
@@ -47,6 +44,16 @@ internal sealed partial class TerminalWorkspaceSession
 		{
 			_status.Text = BuildStatus(_state, _application.Screen.Width);
 		}
+	}
+
+	// Dropping the projection also forgets the read cursor, so the next refresh rebuilds the
+	// trace from the journal instead of reading only calls appended after the old cursor.
+	private void ResetAgentJournalProjection()
+	{
+		_agentJournalOpeningSessionId = null;
+		_agentJournalOpeningSequence = 0;
+		_agentJournalReadSequence = 0;
+		_agentJournalSnapshot = null;
 	}
 
 	private void ScheduleAgentJournalRefresh()
@@ -104,8 +111,8 @@ internal sealed partial class TerminalWorkspaceSession
 			if (activity is not null && sessionChanged)
 			{
 				openingSequence = TerminalAgentJournalSnapshot.ResolveOpeningBaseline(
-					activity.Session.StartedUtc <= _agentJournalWorkspaceOpenedUtc,
-					activity.LatestCall?.Sequence ?? 0);
+					activity.AppendedCalls,
+					_agentJournalWorkspaceOpenedUtc);
 				previousSnapshot = null;
 			}
 			var snapshot = activity is null

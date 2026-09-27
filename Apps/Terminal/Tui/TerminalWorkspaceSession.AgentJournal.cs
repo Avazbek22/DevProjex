@@ -67,10 +67,9 @@ internal sealed partial class TerminalWorkspaceSession
 					var removed = await _agentJournalStore.Value
 						.ClearAsync(projectRoot, operationCts.Token)
 						.ConfigureAwait(false);
+					// Clearing keeps active sessions, so the live activity projection stays valid.
 					await InvokeAsync(() =>
 					{
-						_agentJournalSnapshot = null;
-						_state?.SetAgentActivity(_agentActivityEnabled, null);
 						ShowTransientStatus(
 							$"Completed journal sessions cleared ({removed:N0}); active sessions preserved.",
 							TerminalWorkspaceTheme.Success);

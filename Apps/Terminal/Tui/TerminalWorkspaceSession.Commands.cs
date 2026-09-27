@@ -92,7 +92,7 @@ internal sealed partial class TerminalWorkspaceSession
 		{
 			_agentActivityEnabled = enabled;
 			if (!enabled)
-				_agentJournalSnapshot = null;
+				ResetAgentJournalProjection();
 			_state.SetAgentActivity(
 				enabled,
 				enabled ? _agentJournalSnapshot?.DeliveredPathCalls.Keys : null);
@@ -100,6 +100,7 @@ internal sealed partial class TerminalWorkspaceSession
 				enabled,
 				_settingsPersistenceCts.Token));
 			RefreshWorkspace();
+			ScheduleAgentJournalRefresh();
 			return ToggleCommandResult("Agent activity", enabled);
 		}
 
