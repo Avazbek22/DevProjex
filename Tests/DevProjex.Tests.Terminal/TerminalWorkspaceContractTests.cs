@@ -11,13 +11,42 @@ public sealed class TerminalWorkspaceContractTests
 	[Fact]
 	public void ExportDestinationHistoryIsIndependentForContextFolderAndZip()
 	{
+		const string project = "project";
 		var history = new TerminalExportDestinationHistory();
-		history.Remember(TerminalExportKind.Context, "context.md");
-		history.Remember(TerminalExportKind.Folder, "project-folder");
+		history.Remember(project, TerminalExportKind.Context, "context.md");
+		history.Remember(project, TerminalExportKind.Folder, "project-folder");
 
-		Assert.Equal("context.md", history.Resolve(TerminalExportKind.Context, "default.md"));
-		Assert.Equal("project-folder", history.Resolve(TerminalExportKind.Folder, "default-folder"));
-		Assert.Equal("default.zip", history.Resolve(TerminalExportKind.Zip, "default.zip"));
+		Assert.Equal("context.md", history.Resolve(project, TerminalExportKind.Context, "default.md"));
+		Assert.Equal("project-folder", history.Resolve(project, TerminalExportKind.Folder, "default-folder"));
+		Assert.Equal("default.zip", history.Resolve(project, TerminalExportKind.Zip, "default.zip"));
+	}
+
+	[Fact]
+	public void ExportDestinationHistoryBelongsToOneProjectAndFollowsTheContextFormat()
+	{
+		var projectC = Path.Combine(Path.GetTempPath(), "projC");
+		var projectB = Path.Combine(Path.GetTempPath(), "projB");
+		var history = new TerminalExportDestinationHistory();
+		history.Remember(projectC, TerminalExportKind.Context, Path.Combine("out", "projC-context.txt"));
+		history.Remember(projectC, TerminalExportKind.Zip, Path.Combine("out", "projC.zip"));
+
+		Assert.Equal(
+			Path.Combine("out", "projB-context.md"),
+			history.ResolveContext(projectB, ".md", Path.Combine("out", "projB-context.md")));
+		Assert.Equal(
+			Path.Combine("out", "projB.zip"),
+			history.Resolve(projectB, TerminalExportKind.Zip, Path.Combine("out", "projB.zip")));
+		Assert.Equal(
+			Path.Combine("out", "projC-context.json"),
+			history.ResolveContext(projectC, ".json", "unused.json"));
+		Assert.Equal(
+			Path.Combine("out", "projC-context.txt"),
+			history.ResolveContext(projectC, ".txt", "unused.txt"));
+
+		history.Remember(projectC, TerminalExportKind.Context, Path.Combine("out", "notes"));
+		Assert.Equal(
+			Path.Combine("out", "notes"),
+			history.ResolveContext(projectC, ".json", "unused.json"));
 	}
 	[Fact]
 	public void CancellationSourceCleanupIsIdempotentAcrossBackgroundCompletion()

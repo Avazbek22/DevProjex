@@ -3178,27 +3178,28 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		if (!EnsureRepositoryExportAllowed(originatedFromCommandLine))
 			return;
 		var selectedFormat = requestedFormat ?? _format;
+		var sourceRoot = _state.Plan.SourceRoot;
+		var extension = selectedFormat switch
+		{
+			ProjectContextDocumentFormat.Json => ".json",
+			ProjectContextDocumentFormat.Xml => ".xml",
+			ProjectContextDocumentFormat.Text => ".txt",
+			_ => ".md"
+		};
 		var defaultPath = BuildDefaultExportPath(
-			_state.Plan.SourceRoot,
+			sourceRoot,
 			Directory.GetCurrentDirectory(),
-			$"{GetProjectDisplayName(_state.Plan)}-context" +
-			(selectedFormat switch
-			{
-				ProjectContextDocumentFormat.Json => ".json",
-				ProjectContextDocumentFormat.Xml => ".xml",
-				ProjectContextDocumentFormat.Text => ".txt",
-				_ => ".md"
-			}));
+			$"{GetProjectDisplayName(_state.Plan)}-context{extension}");
 		var destination = requestedDestination ?? Prompt(
 			L("Terminal.Tui.ExportContext"),
 			L("Terminal.Tui.Destination"),
-			_exportDestinations.Resolve(TerminalExportKind.Context, defaultPath));
+			_exportDestinations.ResolveContext(sourceRoot, extension, defaultPath));
 		if (string.IsNullOrWhiteSpace(destination))
 		{
 			ShowTransientStatus(L("Terminal.Tui.Export.DestinationRequired"));
 			return;
 		}
-		_exportDestinations.Remember(TerminalExportKind.Context, destination);
+		_exportDestinations.Remember(sourceRoot, TerminalExportKind.Context, destination);
 		TrackActiveOperation(RunExportWorkflowAsync(
 			L("Terminal.Tui.ExportContext"),
 			async token =>
@@ -3254,13 +3255,13 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var destination = requestedDestination ?? Prompt(
 			L("Terminal.Tui.ExportProject"),
 			L("Terminal.Tui.ExactDestination"),
-			_exportDestinations.Resolve(exportKind, defaultPath));
+			_exportDestinations.Resolve(_state.Plan.SourceRoot, exportKind, defaultPath));
 		if (string.IsNullOrWhiteSpace(destination))
 		{
 			ShowTransientStatus(L("Terminal.Tui.Export.DestinationRequired"));
 			return;
 		}
-		_exportDestinations.Remember(exportKind, destination);
+		_exportDestinations.Remember(_state.Plan.SourceRoot, exportKind, destination);
 		TrackActiveOperation(RunExportWorkflowAsync(
 			L("Terminal.Tui.ExportProject"),
 			async token =>

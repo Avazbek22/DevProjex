@@ -49,14 +49,33 @@ internal enum TerminalExportDecision
 
 internal sealed class TerminalExportDestinationHistory
 {
-	private readonly Dictionary<TerminalExportKind, string> _destinations = [];
+	private static readonly string[] ContextExtensions = [".md", ".txt", ".json", ".xml"];
 
-	public string Resolve(TerminalExportKind kind, string fallback) =>
-		_destinations.GetValueOrDefault(kind) ?? fallback;
+	private readonly Dictionary<string, Dictionary<TerminalExportKind, string>> _destinations =
+		new(PathComparer.Default);
 
-	public void Remember(TerminalExportKind kind, string destination)
+	public string Resolve(string sourceRoot, TerminalExportKind kind, string fallback) =>
+		_destinations.GetValueOrDefault(sourceRoot)?.GetValueOrDefault(kind) ?? fallback;
+
+	// A remembered context destination follows the selected format, so a JSON export is
+	// never proposed under the name of an earlier text export.
+	public string ResolveContext(string sourceRoot, string extension, string fallback)
 	{
-		if (!string.IsNullOrWhiteSpace(destination))
-			_destinations[kind] = destination;
+		var destination = Resolve(sourceRoot, TerminalExportKind.Context, fallback);
+		return ContextExtensions.Contains(Path.GetExtension(destination), StringComparer.OrdinalIgnoreCase)
+			? Path.ChangeExtension(destination, extension)
+			: destination;
+	}
+
+	public void Remember(string sourceRoot, TerminalExportKind kind, string destination)
+	{
+		if (string.IsNullOrWhiteSpace(destination))
+			return;
+		if (!_destinations.TryGetValue(sourceRoot, out var destinations))
+		{
+			destinations = [];
+			_destinations[sourceRoot] = destinations;
+		}
+		destinations[kind] = destination;
 	}
 }
