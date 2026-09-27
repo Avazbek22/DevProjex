@@ -105,7 +105,8 @@ internal sealed class TerminalTransparentTextEditor : View
 		}
 
 		var text = key.GetPrintableText();
-		if (string.IsNullOrEmpty(text))
+		// Keys such as Shift+Tab or Shift+Enter resolve to control characters, not typed text.
+		if (string.IsNullOrEmpty(text) || text.Any(char.IsControl))
 			return base.OnKeyDown(key);
 		InsertText(text);
 		return true;

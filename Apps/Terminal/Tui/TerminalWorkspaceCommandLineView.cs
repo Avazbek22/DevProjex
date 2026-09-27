@@ -314,7 +314,7 @@ internal sealed class TerminalWorkspaceCommandLineView : View
 			CycleCompletion();
 			return;
 		}
-		if (key == Key.F6 || key == Key.F6.WithShift)
+		if (key == Key.F6 || key == Key.F6.WithShift || key == Key.Tab.WithShift)
 		{
 			// Pane navigation would leave the line open without keyboard focus.
 			key.Handled = true;

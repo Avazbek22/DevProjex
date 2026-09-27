@@ -1,4 +1,5 @@
 using System.Drawing;
+using Terminal.Gui.Input;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -30,6 +31,19 @@ public sealed class TerminalTransparentTextEditorTests
 
 		Assert.Equal(@"search first\nsecond\t\u001B", editor.Value);
 		Assert.DoesNotContain(editor.Value, char.IsControl);
+	}
+
+	[Fact]
+	public void KeysThatResolveToControlCharactersDoNotEditTheCommand()
+	{
+		var editor = new TerminalTransparentTextEditor { Value = "vi" };
+		editor.MoveEnd();
+
+		editor.NewKeyDownEvent(Key.Tab.WithShift);
+		editor.NewKeyDownEvent(Key.Enter.WithShift);
+		editor.NewKeyDownEvent(new Key('w'));
+
+		Assert.Equal("viw", editor.Value);
 	}
 
 	[Theory]

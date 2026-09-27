@@ -327,6 +327,7 @@ public sealed class TerminalWorkspaceCommandLineViewTests
 
 		Assert.True(input.NewKeyDownEvent(Key.F6));
 		Assert.True(input.NewKeyDownEvent(Key.F6.WithShift));
+		Assert.True(input.NewKeyDownEvent(Key.Tab.WithShift));
 
 		Assert.True(view.IsEditing);
 		Assert.Equal("view con", view.InputText);
