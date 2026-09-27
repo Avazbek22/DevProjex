@@ -715,6 +715,50 @@ public sealed class TerminalWorkspaceStateTests
 	}
 
 	[Fact]
+	public void FilteredTreeFoldsItsOwnFoldersWithoutChangingTheUnfilteredLayout()
+	{
+		using var state = new TerminalWorkspaceState(CreatePlan());
+		var unfiltered = state.BuildExpandedRelativePaths();
+		state.ApplyTreeFilter("a.cs");
+		Assert.True(state.VisibleRows[FindRow(state, "src")].IsExpanded);
+
+		state.Collapse(FindRow(state, "src"));
+
+		Assert.False(state.VisibleRows[FindRow(state, "src")].IsExpanded);
+		Assert.DoesNotContain(state.VisibleRows, row => row.Node.DisplayName == "a.cs");
+
+		state.ToggleExpansion(FindRow(state, "src"));
+		Assert.Contains(state.VisibleRows, row => row.Node.DisplayName == "a.cs");
+		state.CollapseAll();
+		Assert.Single(state.VisibleRows);
+		state.ExpandAll();
+		Assert.Contains(state.VisibleRows, row => row.Node.DisplayName == "a.cs");
+
+		state.ApplyTreeFilter(null);
+		Assert.Equal(unfiltered, state.BuildExpandedRelativePaths());
+	}
+
+	[Fact]
+	public void RevealAcceptsTrailingSeparatorsAndKnowsPathsHiddenByTheFilter()
+	{
+		using var state = new TerminalWorkspaceState(CreatePlan());
+
+		Assert.Equal("src", state.VisibleRows[state.Reveal("src/")].Node.DisplayName);
+		Assert.Equal(
+			"src",
+			state.VisibleRows[state.Reveal("src" + System.IO.Path.DirectorySeparatorChar)].Node.DisplayName);
+
+		state.ApplyTreeFilter("a.cs");
+		Assert.Equal(-1, state.Reveal("empty"));
+		Assert.True(state.TryResolveTreePath("empty", out _));
+		Assert.False(state.TryResolveTreePath("missing", out _));
+
+		state.Collapse(FindRow(state, "src"));
+		var revealed = state.Reveal("src/a.cs");
+		Assert.Equal("a.cs", state.VisibleRows[revealed].Node.DisplayName);
+	}
+
+	[Fact]
 	public async Task CorruptedPersistedPathsAreSkippedPerElement()
 	{
 		using var data = new TemporaryDirectory();

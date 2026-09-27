@@ -279,12 +279,17 @@ internal sealed partial class TerminalWorkspaceSession
 			return InvalidCommandExecution();
 		var query = command.Text?.Trim() ?? string.Empty;
 		_searchQuery = query.Length == 0 ? null : query;
-		_selectedTreePath = CaptureCurrentTreePath();
+		var selectedPath = CaptureCurrentTreePath();
 		_state.ApplyTreeFilter(query);
+		if (query.Length == 0)
+			RevealTreeSelection(selectedPath);
+		else
+			_selectedTreePath = selectedPath;
 		RefreshWorkspace();
-		if (_state.VisibleRows.Count > 0)
+		if (query.Length > 0 && !IsTreePathVisible(selectedPath) &&
+			_state.FindNext(query, -1) is var match and >= 0)
 		{
-			_tree.SelectedItem = 0;
+			_tree.SelectedItem = match;
 			TrackTreeSelection();
 		}
 		return TerminalWorkspaceCommandExecutionResult.Success(

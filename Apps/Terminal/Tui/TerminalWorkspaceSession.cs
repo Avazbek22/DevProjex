@@ -1642,6 +1642,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		});
 	}
 
+	private bool IsTreePathVisible(string? path) =>
+		_state is not null && !string.IsNullOrWhiteSpace(path) &&
+		_state.VisibleRows.Any(row => ProjectTreePathIdentity.CanonicalComparer.Equals(row.Node.FullPath, path));
+
 	private int FindSelectedTreeRow()
 	{
 		if (_state is null || _state.VisibleRows.Count == 0)
@@ -2742,6 +2746,13 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		if (path is null)
 			return;
 		var row = _state.Reveal(path);
+		if (row < 0 && _state.HasTreeFilter && _state.TryResolveTreePath(path, out _))
+		{
+			// The path exists but the active filter hides it; revealing it means leaving the filter.
+			_state.ApplyTreeFilter(null);
+			_searchQuery = null;
+			row = _state.Reveal(path);
+		}
 		if (row < 0)
 		{
 			ShowTransientStatus(L("Terminal.Tui.Tree.RevealNotFound"));
@@ -2814,7 +2825,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_searchQuery = query;
 		var selectedPath = CaptureCurrentTreePath();
 		_state.ApplyTreeFilter(query);
-		_selectedTreePath = selectedPath;
+		if (string.IsNullOrWhiteSpace(query))
+			RevealTreeSelection(selectedPath);
+		else
+			_selectedTreePath = selectedPath;
 		RefreshWorkspace();
 		if (string.IsNullOrWhiteSpace(query))
 		{
@@ -3044,9 +3058,18 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var selectedPath = CaptureCurrentTreePath();
 		_state.ApplyTreeFilter(null);
 		_searchQuery = null;
-		_selectedTreePath = selectedPath;
+		RevealTreeSelection(selectedPath);
 		RefreshWorkspace();
 		_tree.SetFocus();
+	}
+
+	// Keeps the cursor on the same node after the visible projection changes, expanding its
+	// folders when the node would otherwise be hidden.
+	private void RevealTreeSelection(string? path)
+	{
+		_selectedTreePath = path;
+		if (_state is not null && !string.IsNullOrWhiteSpace(path))
+			_state.Reveal(path);
 	}
 
 	private void ToggleCurrentTreeSelection()
