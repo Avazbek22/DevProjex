@@ -96,33 +96,46 @@ internal sealed class TerminalProjectTreeView : ListView
 		SelectedItem = rowIndex;
 		EnsureSelectedItemVisible();
 
+		switch (ResolvePointerTarget(row, Viewport.X + position.X))
+		{
+			case TerminalTreePointerTarget.CheckBox:
+				ForgetNamePress();
+				if (!isDoubleClicked)
+					SelectionToggleRequested?.Invoke(this, EventArgs.Empty);
+				return true;
+			case TerminalTreePointerTarget.Disclosure:
+				ForgetNamePress();
+				if (!isDoubleClicked)
+					ExpansionToggleRequested?.Invoke(this, EventArgs.Empty);
+				return true;
+		}
+
+		// A click elsewhere on the row only moves the cursor; a double-click on a folder
+		// expands or collapses it.
+		if (!row.Node.IsDirectory)
+		{
+			ForgetNamePress();
+			return true;
+		}
 		if (isDoubleClicked ||
-			isPressed && row.Node.IsDirectory &&
+			isPressed &&
 			_lastNamePressedRow == rowIndex &&
 			_lastNamePressedColumn == position.X &&
 			now - _lastNamePressedAt <= DoubleClickWindowMilliseconds)
 		{
-			if (row.Node.IsDirectory)
+			ExpansionToggleRequested?.Invoke(this, EventArgs.Empty);
+			if (!isDoubleClicked)
 			{
-				// The first click already toggled the whole row. Balance the second
-				// click so a double-click changes expansion without changing selection.
-				SelectionToggleRequested?.Invoke(this, EventArgs.Empty);
-				ExpansionToggleRequested?.Invoke(this, EventArgs.Empty);
-				if (!isDoubleClicked)
-				{
-					_lastManualDoubleClickRow = rowIndex;
-					_lastManualDoubleClickColumn = position.X;
-					_lastManualDoubleClickAt = now;
-				}
+				_lastManualDoubleClickRow = rowIndex;
+				_lastManualDoubleClickColumn = position.X;
+				_lastManualDoubleClickAt = now;
 			}
-			_lastNamePressedRow = -1;
-			_lastNamePressedColumn = -1;
+			ForgetNamePress();
 			return true;
 		}
-		_lastNamePressedRow = row.Node.IsDirectory ? rowIndex : -1;
-		_lastNamePressedColumn = row.Node.IsDirectory ? position.X : -1;
+		_lastNamePressedRow = rowIndex;
+		_lastNamePressedColumn = position.X;
 		_lastNamePressedAt = now;
-		SelectionToggleRequested?.Invoke(this, EventArgs.Empty);
 		return true;
 	}
 
@@ -130,4 +143,29 @@ internal sealed class TerminalProjectTreeView : ListView
 		flags.HasFlag(MouseFlags.LeftButtonPressed) ||
 		flags.HasFlag(MouseFlags.LeftButtonClicked) ||
 		flags.HasFlag(MouseFlags.LeftButtonDoubleClicked);
+
+	// Mirrors the row layout built by TerminalTreeRow: "<indent><disclosure> [x] <name>".
+	internal static TerminalTreePointerTarget ResolvePointerTarget(TerminalTreeRow row, int column)
+	{
+		var disclosureColumn = row.Depth * 2;
+		var checkBoxStart = disclosureColumn + 2;
+		if (column == disclosureColumn && row.Node.IsDirectory)
+			return TerminalTreePointerTarget.Disclosure;
+		return column >= checkBoxStart && column < checkBoxStart + 3
+			? TerminalTreePointerTarget.CheckBox
+			: TerminalTreePointerTarget.Row;
+	}
+
+	private void ForgetNamePress()
+	{
+		_lastNamePressedRow = -1;
+		_lastNamePressedColumn = -1;
+	}
+}
+
+internal enum TerminalTreePointerTarget
+{
+	Row,
+	Disclosure,
+	CheckBox
 }

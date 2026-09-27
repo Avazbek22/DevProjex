@@ -14,6 +14,9 @@ internal sealed class TerminalParameterListView : ListView
 		bool showVerticalScrollBar = false,
 		bool useUnicode = true)
 	{
+		// OnMouseEvent owns pointer input; the list's default bindings would activate on release.
+		MouseBindings.Clear(Command.Activate);
+		MouseBindings.Clear(Command.Accept);
 		if (showVerticalScrollBar)
 			TerminalScrollBarStyle.Apply(this, useUnicode, vertical: true, horizontal: false);
 	}
@@ -73,9 +76,17 @@ internal sealed class TerminalParameterListView : ListView
 		{
 			return true;
 		}
-		SelectionToggleRequested?.Invoke(this, EventArgs.Empty);
+		if (TogglesOnPointer(row, Viewport.X + position.X))
+			SelectionToggleRequested?.Invoke(this, EventArgs.Empty);
 		return true;
 	}
+
+	// A checkbox changes only when its "[x]" marker is clicked; a click on the label moves the
+	// cursor. Git mode rows are radio buttons and select from anywhere on the row.
+	internal bool TogglesOnPointer(int row, int column) =>
+		column is >= 0 and < TerminalParameterRow.MarkerColumns ||
+		_rows is not null && row >= 0 && row < _rows.Count &&
+		_rows[row].Kind == TerminalParameterRowKind.GitMode;
 
 	internal bool IsRowEnabled(int row) =>
 		_rows is null || row >= 0 && row < _rows.Count && _rows[row].IsEnabled;

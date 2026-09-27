@@ -433,8 +433,10 @@ destinations use filesystem completion from the active project directory. A
 nonempty typed path that does not exist remains in the open picker with a
 localized error; it is never replaced by the current folder or highlighted file.
 
-Clicking anywhere on a tree or parameter row toggles its checkbox; double-clicking
-a folder expands or collapses it.
+Clicking a checkbox marker (`[ ]`) toggles it; a click elsewhere on a tree or
+parameter row only moves the cursor to that row. Git mode rows are radio buttons
+and are selected by a click anywhere on the row. Clicking a folder's `>`/`v`
+marker or double-clicking its name expands or collapses it.
 
 Within Parameters, Up/Down and `j`/`k` move through the active mini-list. At a
 list boundary focus crosses to the adjacent mini-panel. Enter or Space toggles

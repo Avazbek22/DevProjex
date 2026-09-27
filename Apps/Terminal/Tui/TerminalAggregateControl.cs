@@ -18,20 +18,22 @@ internal sealed class TerminalAggregateControl : Label
 		Height = 1;
 		HotKeySpecifier = new Rune('\uffff');
 		PreserveTrailingSpaces = true;
+		// OnMouseEvent owns pointer input; the label's default binding would activate on release.
+		MouseBindings.Clear(Command.Activate);
 	}
 
 	public event EventHandler? SelectionToggleRequested;
 	public event EventHandler? InteractionStarted;
 	public event EventHandler? CommandLineRequested;
 	public bool IsOnBorder { get; }
+	private string Leading => IsOnBorder ? " " : "  ";
 
 	public void SetRow(TerminalParameterRow row)
 	{
 		ArgumentNullException.ThrowIfNull(row);
 		var marker = row.IsSelected == true ? "[x]" : "[ ]";
-		var leading = IsOnBorder ? " " : "  ";
 		var trailing = IsOnBorder ? " " : string.Empty;
-		var text = $"{leading}{marker} {row.Label}{trailing}";
+		var text = $"{Leading}{marker} {row.Label}{trailing}";
 		Text = text;
 		Width = text.GetColumns();
 		SetNeedsDraw();
@@ -68,8 +70,14 @@ internal sealed class TerminalAggregateControl : Label
 
 		SetFocus();
 		InteractionStarted?.Invoke(this, EventArgs.Empty);
-		if (_pointerEvents.ShouldHandle(pressed, 0, 0))
+		if (_pointerEvents.ShouldHandle(pressed, 0, 0) && IsMarkerColumn(mouse.Position?.X))
 			SelectionToggleRequested?.Invoke(this, EventArgs.Empty);
 		return true;
 	}
+
+	// Only the "[x]" marker toggles; a click on the label just focuses the control.
+	internal bool IsMarkerColumn(int? column) =>
+		column is { } value &&
+		value >= Leading.Length &&
+		value < Leading.Length + TerminalParameterRow.MarkerColumns;
 }
