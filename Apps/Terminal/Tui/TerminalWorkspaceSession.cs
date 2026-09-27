@@ -1423,6 +1423,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			X = 1,
 			Y = Pos.AnchorEnd(2),
 			Width = Dim.Fill(1),
+			Height = 1,
 			SchemeName = TerminalWorkspaceTheme.Secondary
 		};
 		var footer = new TerminalLiteralLabel
@@ -3780,17 +3781,18 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				SetWorkspaceBusy(null);
 				RefreshWorkspace();
 				SchedulePreviewRefresh();
-				var completed = string.Format(
-					CultureInfo.CurrentCulture,
-					L("Terminal.Tui.ExportCompletedStatus"),
-					result.DestinationPath);
-				if (result.SkippedUnscannableCount > 0)
-				{
-					completed = string.Format(
+				var skippedNotice = result.SkippedUnscannableCount > 0
+					? string.Format(
 						CultureInfo.CurrentCulture,
 						L("Content.Redaction.UnscannableFiles"),
-						result.SkippedUnscannableCount) + " " + completed;
-				}
+						result.SkippedUnscannableCount) + " "
+					: string.Empty;
+				// The command result row starts with a two-column success marker.
+				var availableColumns = _terminalWidth - 2 - (originatedFromCommandLine ? 2 : 0);
+				var completed = skippedNotice + FormatStatusPath(
+					L("Terminal.Tui.ExportCompletedStatus"),
+					result.DestinationPath,
+					availableColumns - skippedNotice.GetColumns());
 				if (originatedFromCommandLine)
 					ShowCommandResult(completed, success: true);
 				else
@@ -5308,6 +5310,17 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		foreach (var line in message.Split('\n'))
 			lineCount += Math.Max(1, (line.GetColumns() + width - 1) / width);
 		return lineCount;
+	}
+
+	// Status and command-result rows hold a single line, so the path keeps its tail and
+	// the written file name stays visible.
+	internal static string FormatStatusPath(string format, string path, int columns)
+	{
+		var fixedColumns = string.Format(CultureInfo.CurrentCulture, format, string.Empty).GetColumns();
+		return string.Format(
+			CultureInfo.CurrentCulture,
+			format,
+			FitPathToWidth(path, Math.Max(12, columns - fixedColumns)));
 	}
 
 	internal static string FitPathToWidth(string value, int width)

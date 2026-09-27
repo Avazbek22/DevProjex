@@ -70,4 +70,23 @@ public sealed class TerminalWorkspaceTextFittingTests
 		Assert.All(lines, line => Assert.True(line.GetColumns() <= label.Frame.Width, line));
 		Assert.Equal(hint, string.Join(' ', lines));
 	}
+
+	[Theory]
+	[InlineData("Export completed: {0}")]
+	[InlineData("Экспорт завершён: {0}")]
+	[InlineData("Agent journal exported: {0}")]
+	public void FormatStatusPath_KeepsTheWrittenFileNameInsideOneStatusRow(string format)
+	{
+		const int columns = 78;
+		var path = Path.Combine(
+			@"C:\Users\developer\AppData\Local\Temp",
+			string.Join('\\', Enumerable.Repeat("deeply-nested-export-folder", 4)),
+			"r one.md");
+
+		var result = TerminalWorkspaceSession.FormatStatusPath(format, path, columns);
+
+		Assert.StartsWith(format.Replace("{0}", "...", StringComparison.Ordinal), result, StringComparison.Ordinal);
+		Assert.EndsWith(@"\r one.md", result, StringComparison.Ordinal);
+		Assert.Equal(columns, result.Length);
+	}
 }

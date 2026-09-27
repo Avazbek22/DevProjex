@@ -185,7 +185,7 @@ internal sealed partial class TerminalWorkspaceSession
 		await InvokeAsync(() =>
 		{
 			ShowTransientStatus(
-				$"Agent journal exported: {FitPathToWidth(destination, Math.Max(12, _terminalWidth - 24))}",
+				FormatStatusPath("Agent journal exported: {0}", destination, _terminalWidth - 2),
 				TerminalWorkspaceTheme.Success);
 			return true;
 		}).ConfigureAwait(false);
