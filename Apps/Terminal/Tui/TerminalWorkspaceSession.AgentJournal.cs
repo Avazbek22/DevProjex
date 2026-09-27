@@ -276,6 +276,8 @@ internal sealed partial class TerminalWorkspaceSession
 		}
 
 		list.ValueChanged += (_, _) => UpdateDetails();
+		// Choosing a session only shows its calls; Enter or a double-click must not close the journal.
+		list.Accepting += static (_, args) => args.Handled = true;
 		dialog.Add(sessionHeader, list, details);
 		dialog.AddButton(CreateDialogButton(L("Terminal.Tui.Close")));
 		UpdateDetails();

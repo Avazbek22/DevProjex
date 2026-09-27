@@ -329,6 +329,48 @@ public sealed class TerminalRecentProjectsPtyTests
 	}
 
 	[Fact(Timeout = 90_000)]
+	public async Task RemoveEntryButtonAsksFirstAndRemovesOnlyTheChosenEntry()
+	{
+		var cancellationToken = TestContext.Current.CancellationToken;
+		using var removedProject = CreateProject("RemovedProject", "RemovedMarker.cs");
+		using var keptProject = CreateProject("KeptProject", "KeptMarker.cs");
+		using var welcomeDirectory = new TemporaryDirectory();
+		welcomeDirectory.WriteFile("notes.txt", "not a project");
+		string? dataRoot = null;
+
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			welcomeDirectory.Path,
+			["--language", "en"],
+			initializeDataRoot: root =>
+			{
+				dataRoot = root;
+				var store = new RecentProjectsStore(() => root);
+				var snapshot = store.AddFolder(null, keptProject.Path);
+				store.AddFolder(snapshot, removedProject.Path);
+			},
+			cancellationToken: cancellationToken);
+
+		await OpenRecentOverlayAsync(terminal, cancellationToken);
+		await terminal.WaitForScreenAsync("Folder · RemovedProject", cancellationToken: cancellationToken);
+		await terminal.ClickLabelOnRowAsync("Remove entry", "Remove entry", cancellationToken: cancellationToken);
+		await terminal.WaitForScreenAsync("from recent history", cancellationToken: cancellationToken);
+		Assert.NotNull(dataRoot);
+		Assert.Equal(2, new RecentProjectsStore(() => dataRoot).Load().RecentFolders.Count);
+
+		await terminal.SendEnterAsync(cancellationToken);
+		await terminal.WaitForScreenAsync("Folder · KeptProject", cancellationToken: cancellationToken);
+		var remaining = new RecentProjectsStore(() => dataRoot).Load().RecentFolders;
+		Assert.Equal(
+			[Path.GetFullPath(keptProject.Path)],
+			remaining.Select(static folder => Path.GetFullPath(folder.Path)));
+
+		await terminal.ClickLabelOnRowAsync("Remove entry", "Open", cancellationToken: cancellationToken);
+		await terminal.WaitForScreenAsync("PROJECT TREE", cancellationToken: cancellationToken);
+		await terminal.WaitForScreenAsync("KeptMarker.cs", cancellationToken: cancellationToken);
+		await ExitAsync(terminal);
+	}
+
+	[Fact(Timeout = 90_000)]
 	public async Task CorruptPrimaryRecentDatabaseRecoversEntryFromBackup()
 	{
 		using var project = CreateProject("BackupProject", "BackupMarker.cs");

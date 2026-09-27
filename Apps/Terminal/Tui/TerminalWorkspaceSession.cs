@@ -4886,14 +4886,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			_application.RequestStop(dialog);
 		}
 
-		list.Accepted += (_, _) => AcceptSelection();
-		list.KeyDown += (_, key) =>
-		{
-			if (key != Key.Enter)
-				return;
-			key.Handled = true;
-			AcceptSelection();
-		};
+		TerminalInteractiveView.OnAccept(list, AcceptSelection);
 		dialog.Add(label, list);
 		dialog.AddButton(CreateDialogButton(L("Terminal.Tui.Back")));
 		RunOverlay(dialog, list);

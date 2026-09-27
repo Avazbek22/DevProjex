@@ -1435,11 +1435,11 @@ internal sealed partial class TerminalWorkspaceSession
 			}
 		};
 		list.ValueChanged += (_, _) => UpdateDetail();
-		list.Accepted += (_, _) => Accept();
+		TerminalInteractiveView.OnAccept(list, Accept);
 		dialog.Add(prompt, input, list, detail);
 		dialog.AddButton(CreateDialogButton(L("Terminal.Tui.Back")));
 		var execute = CreateDialogButton(L("Terminal.Tui.ActionPalette.Run"));
-		execute.Accepted += (_, _) => Accept();
+		TerminalInteractiveView.OnAccept(execute, Accept);
 		dialog.AddButton(execute);
 		Refresh();
 		RunOverlay(dialog, input);

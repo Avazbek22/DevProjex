@@ -66,6 +66,45 @@ public sealed class TerminalAgentJournalPtyTests
 				cancellationToken: TestContext.Current.CancellationToken));
 	}
 
+	[Fact(Timeout = 90_000)]
+	public async Task EnterOnASessionKeepsTheJournalOpen()
+	{
+		var cancellationToken = TestContext.Current.CancellationToken;
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/global.json", "{}");
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			project,
+			["tui", project, "--profile", "standard", "--screen", "inline", "--no-mouse", "--language", "en"],
+			columns: 160,
+			rows: 42,
+			cancellationToken: cancellationToken,
+			initializeDataRoot: dataRoot => WriteJournalFixture(dataRoot, project));
+		await terminal.WaitForStableScreenAsync("PROJECT TREE", cancellationToken: cancellationToken);
+
+		await terminal.SendAsync(":mcp log\r", cancellationToken);
+		await terminal.WaitForScreenAsync(
+			"1 calls · 80 characters",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: cancellationToken);
+		await terminal.SendEnterAsync(cancellationToken);
+		// Nothing changes on screen when Enter is consumed; give a wrongful close time to show.
+		await Task.Delay(600, cancellationToken);
+		var journal = await terminal.WaitForStableScreenAsync(
+			"1 calls · 80 characters",
+			cancellationToken: cancellationToken);
+		Assert.Contains("get_file", journal, StringComparison.Ordinal);
+
+		await terminal.SendEscapeAsync(cancellationToken);
+		await terminal.WaitForScreenWithoutAsync("1 calls · 80 characters", cancellationToken: cancellationToken);
+		await terminal.SendQuitAndConfirmAsync(cancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(
+				timeout: TimeSpan.FromSeconds(30),
+				cancellationToken: cancellationToken));
+	}
+
 	private static string WriteJournalFixture(string dataRoot, string projectRoot)
 	{
 		var started = new DateTimeOffset(2026, 9, 20, 8, 0, 0, TimeSpan.Zero);

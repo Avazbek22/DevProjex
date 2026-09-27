@@ -206,14 +206,14 @@ internal sealed partial class TerminalWorkspaceSession
 		}
 
 		list.ValueChanged += (_, _) => UpdateSelection();
-		list.Accepted += (_, _) => SelectCurrent(TerminalRecentWorkspaceDecisionKind.Open);
+		TerminalInteractiveView.OnAccept(list, () => SelectCurrent(TerminalRecentWorkspaceDecisionKind.Open));
 		dialog.Add(description, list, details);
 		dialog.AddButton(CreateDialogButton(L("Terminal.Tui.Back")));
 		var remove = CreateDialogButton(L("Terminal.Tui.Recent.Remove"));
-		remove.Accepted += (_, _) => SelectCurrent(TerminalRecentWorkspaceDecisionKind.Remove);
+		TerminalInteractiveView.OnAccept(remove, () => SelectCurrent(TerminalRecentWorkspaceDecisionKind.Remove));
 		dialog.AddButton(remove);
 		var open = CreateDialogButton(L("Terminal.Tui.Open"));
-		open.Accepted += (_, _) => SelectCurrent(TerminalRecentWorkspaceDecisionKind.Open);
+		TerminalInteractiveView.OnAccept(open, () => SelectCurrent(TerminalRecentWorkspaceDecisionKind.Open));
 		dialog.AddButton(open);
 		UpdateSelection();
 		RunOverlay(dialog, list);
