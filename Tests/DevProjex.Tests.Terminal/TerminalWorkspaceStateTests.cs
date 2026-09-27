@@ -330,6 +330,24 @@ public sealed class TerminalWorkspaceStateTests
 	}
 
 	[Fact]
+	public void PlanReplacementPreviewStaysProvisionalUntilARenderedDocumentArrives()
+	{
+		var plan = CreatePlan();
+		using var state = new TerminalWorkspaceState(plan);
+		Assert.False(state.IsPreviewProvisional);
+
+		state.ReplacePlan(plan);
+
+		Assert.True(state.IsPreviewProvisional);
+		const string rendered = "rendered";
+		Assert.True(state.TrySetPreviewDocument(
+			new InMemoryPreviewTextDocument(rendered),
+			ExportOutputMetricsCalculator.FromText(rendered),
+			state.Revision));
+		Assert.False(state.IsPreviewProvisional);
+	}
+
+	[Fact]
 	public void RedundantCommandSelectionDoesNotRejectPendingReprojection()
 	{
 		var sourcePlan = CreatePlan();

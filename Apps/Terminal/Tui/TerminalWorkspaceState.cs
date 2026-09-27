@@ -171,6 +171,12 @@ public sealed class TerminalWorkspaceState : IDisposable
 	public long Revision => Volatile.Read(ref _revision);
 	public IPreviewTextDocument PreviewDocument { get; private set; }
 	public ExportOutputMetrics PreviewOutputMetrics { get; private set; }
+
+	/// <summary>
+	/// True while Preview holds the quick tree listing published by a plan replacement, until
+	/// the rendered document for the new plan replaces it.
+	/// </summary>
+	internal bool IsPreviewProvisional { get; private set; }
 	public string PreviewText => PreviewDocument.GetFullText();
 
 	public void ReplacePlan(
@@ -224,6 +230,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 		UpdatePathOptionStates(plan);
 		RebuildVisibleRows();
 		SetPreviewText(BuildTreePreview());
+		IsPreviewProvisional = true;
 	}
 
 	private void DropUnavailablePathsFromSelectionFrontier()
@@ -377,6 +384,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 			_retiredPreviewDocuments.Add(PreviewDocument);
 			PreviewDocument = document;
 			PreviewOutputMetrics = outputMetrics;
+			IsPreviewProvisional = false;
 		}
 	}
 
@@ -394,6 +402,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 			_retiredPreviewDocuments.Add(PreviewDocument);
 			PreviewDocument = document;
 			PreviewOutputMetrics = outputMetrics;
+			IsPreviewProvisional = false;
 			return true;
 		}
 	}

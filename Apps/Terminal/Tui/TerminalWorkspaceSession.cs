@@ -136,6 +136,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private string? _searchQuery;
 	private string? _previewSearchQuery;
 	private string? _selectedTreePath;
+	private (int Row, int Column)? _provisionalPreviewViewport;
 	private bool _suppressTreeSelectionTracking;
 	private bool _suppressWorkspaceFocusTracking;
 	private TerminalWorkspaceActionRegistry? _workspaceActionRegistry;
@@ -1270,6 +1271,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		CancelWorkspaceRefreshes();
 		ClearRoot();
 		_screen = TerminalWorkspaceScreen.Workspace;
+		_provisionalPreviewViewport = null;
 		var persisted = _services.TerminalSettingsStore.LoadProjectSettings(state.Plan.SourceRoot);
 		if (persisted is not null)
 		{
@@ -1495,13 +1497,18 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var controlsHadFocus = ControlsHaveFocus;
 		var focusedControlSection = _activeControlSection;
 		var aggregateControlWasActive = _activeAggregateControlSection == focusedControlSection;
-		var previewRow = _preview.FirstVisibleLine;
-		var previewColumn = _preview.HorizontalOffset;
+		var (previewRow, previewColumn) = _provisionalPreviewViewport ??
+			(_preview.FirstVisibleLine, _preview.HorizontalOffset);
 		if (_state.VisibleRows.Count > 0)
 			_tree.SelectedItem = Math.Clamp(selected, 0, _state.VisibleRows.Count - 1);
 		var previewDocumentChanged = _preview.SetDocument(
 			_state.PreviewDocument,
 			preserveViewport: true);
+		// The short tree listing shown between a plan change and its rendered document would
+		// clamp the viewport, so the position is carried over to the rendered document.
+		_provisionalPreviewViewport = _state.IsPreviewProvisional
+			? (previewRow, previewColumn)
+			: null;
 		RestorePreviewViewport(previewRow, previewColumn);
 		_state.ReleaseRetiredPreviewDocuments();
 		if (treeHadFocus)
