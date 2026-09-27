@@ -1164,7 +1164,7 @@
   "Terminal.Tui.Command.Profile.ResetFailed": "Proje profili sıfırlanamadı.",
   "Terminal.Tui.Command.Mcp.Title": "MCP bağlantısı",
   "Terminal.Tui.Command.Mcp.Description": "Bir MCP bağlantı parçası yazdırın veya istemciyi açık projeye bağlayın.",
-  "Terminal.Tui.Command.Mcp.Schema": "[client] [live|standard] | connect <claude-code|codex|cursor|vscode|json> [live|standard]",
+  "Terminal.Tui.Command.Mcp.Schema": "[client] [live|standard] | connect <claude-code|codex|cursor|vscode|json> [live|standard] | log [session <id>|last] | log export <path> [markdown|json] [session <id>|last] | log clear",
   "Terminal.Tui.Command.Related.Title": "İlişkili dosyalar",
   "Terminal.Tui.Command.Related.Description": "Statik kanıtlara göre ilişkili dosyaları bul.",
   "Terminal.Tui.Command.Related.Schema": "<yol> [--direction dependencies|dependents|both] [--depth N]",

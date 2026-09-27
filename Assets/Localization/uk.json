@@ -1164,7 +1164,7 @@
   "Terminal.Tui.Command.Profile.ResetFailed": "Не вдалося скинути профіль проєкту.",
   "Terminal.Tui.Command.Mcp.Title": "Підключення MCP",
   "Terminal.Tui.Command.Mcp.Description": "Вивести фрагмент підключення MCP або підключити клієнт до відкритого проєкту.",
-  "Terminal.Tui.Command.Mcp.Schema": "[client] [live|standard] | connect <claude-code|codex|cursor|vscode|json> [live|standard]",
+  "Terminal.Tui.Command.Mcp.Schema": "[client] [live|standard] | connect <claude-code|codex|cursor|vscode|json> [live|standard] | log [session <id>|last] | log export <path> [markdown|json] [session <id>|last] | log clear",
   "Terminal.Tui.Command.Related.Title": "Пов’язані файли",
   "Terminal.Tui.Command.Related.Description": "Знайти пов’язані файли за статичними свідченнями.",
   "Terminal.Tui.Command.Related.Schema": "<шлях> [--direction dependencies|dependents|both] [--depth N]",

@@ -655,7 +655,7 @@ internal sealed class TerminalWorkspaceCommandParser
 					McpAction: TerminalWorkspaceMcpAction.ShowLog));
 			case "session":
 				if (tokens.Count < 4)
-					return Missing(tokens, ["id"]);
+					return Missing(tokens, []);
 				if (tokens.Count > 4)
 					return Unexpected(tokens[4]);
 				return TerminalWorkspaceCommandParseResult.Success(new TerminalWorkspaceCommand(
@@ -680,7 +680,7 @@ internal sealed class TerminalWorkspaceCommandParser
 		IReadOnlyList<ParsedToken> tokens)
 	{
 		if (tokens.Count < 4)
-			return Missing(tokens, ["path"]);
+			return Missing(tokens, []);
 
 		var index = 4;
 		var format = ProjectContextDocumentFormat.Markdown;
@@ -703,7 +703,7 @@ internal sealed class TerminalWorkspaceCommandParser
 			{
 				index++;
 				if (tokens.Count <= index)
-					return Missing(tokens, ["id"]);
+					return Missing(tokens, []);
 				session = tokens[index].Value;
 				index++;
 			}
@@ -728,7 +728,7 @@ internal sealed class TerminalWorkspaceCommandParser
 		IReadOnlyList<ParsedToken> tokens)
 	{
 		if (tokens.Count < 2)
-			return Missing(tokens, ["path"]);
+			return Missing(tokens, []);
 
 		var direction = "both";
 		var depth = 1;

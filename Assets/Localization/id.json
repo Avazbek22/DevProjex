@@ -1164,7 +1164,7 @@
   "Terminal.Tui.Command.Profile.ResetFailed": "Profil proyek tidak dapat diatur ulang.",
   "Terminal.Tui.Command.Mcp.Title": "Koneksi MCP",
   "Terminal.Tui.Command.Mcp.Description": "Cetak fragmen koneksi MCP atau hubungkan klien ke proyek yang terbuka.",
-  "Terminal.Tui.Command.Mcp.Schema": "[client] [live|standard] | connect <claude-code|codex|cursor|vscode|json> [live|standard]",
+  "Terminal.Tui.Command.Mcp.Schema": "[client] [live|standard] | connect <claude-code|codex|cursor|vscode|json> [live|standard] | log [session <id>|last] | log export <path> [markdown|json] [session <id>|last] | log clear",
   "Terminal.Tui.Command.Related.Title": "File terkait",
   "Terminal.Tui.Command.Related.Description": "Temukan file terkait berdasarkan bukti statis.",
   "Terminal.Tui.Command.Related.Schema": "<jalur> [--direction dependencies|dependents|both] [--depth N]",

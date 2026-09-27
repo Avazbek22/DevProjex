@@ -1164,7 +1164,7 @@
   "Terminal.Tui.Command.Profile.ResetFailed": "プロジェクト プロファイルをリセットできませんでした。",
   "Terminal.Tui.Command.Mcp.Title": "MCP 接続",
   "Terminal.Tui.Command.Mcp.Description": "MCP 接続フラグメントを出力するか、クライアントを開いているプロジェクトに接続します。",
-  "Terminal.Tui.Command.Mcp.Schema": "[client] [live|standard] | connect <claude-code|codex|cursor|vscode|json> [live|standard]",
+  "Terminal.Tui.Command.Mcp.Schema": "[client] [live|standard] | connect <claude-code|codex|cursor|vscode|json> [live|standard] | log [session <id>|last] | log export <path> [markdown|json] [session <id>|last] | log clear",
   "Terminal.Tui.Command.Related.Title": "関連ファイル",
   "Terminal.Tui.Command.Related.Description": "静的な根拠に基づいて関連ファイルを検索します。",
   "Terminal.Tui.Command.Related.Schema": "<パス> [--direction dependencies|dependents|both] [--depth N]",

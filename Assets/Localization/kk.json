@@ -1170,7 +1170,7 @@
   "Terminal.Tui.Command.Profile.ResetFailed": "Жоба профилін қалпына келтіру мүмкін болмады.",
   "Terminal.Tui.Command.Mcp.Title": "MCP қосылымы",
   "Terminal.Tui.Command.Mcp.Description": "MCP қосылым фрагментін шығару немесе клиентті ашық жобаға қосу.",
-  "Terminal.Tui.Command.Mcp.Schema": "[client] [live|standard] | connect <claude-code|codex|cursor|vscode|json> [live|standard]",
+  "Terminal.Tui.Command.Mcp.Schema": "[client] [live|standard] | connect <claude-code|codex|cursor|vscode|json> [live|standard] | log [session <id>|last] | log export <path> [markdown|json] [session <id>|last] | log clear",
   "Terminal.Tui.Command.Related.Title": "Байланысты файлдар",
   "Terminal.Tui.Command.Related.Description": "Статикалық дәлелдер бойынша байланысты файлдарды табу.",
   "Terminal.Tui.Command.Related.Schema": "<жол> [--direction dependencies|dependents|both] [--depth N]",

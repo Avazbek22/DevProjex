@@ -668,6 +668,19 @@ public sealed class TerminalWorkspaceCommandParserTests
 			Assert.Contains(expectedCandidate, result.Error.Candidates);
 	}
 
+	[Theory]
+	[InlineData("related")]
+	[InlineData("mcp log session")]
+	[InlineData("mcp log export")]
+	public void Parse_MissingFreeFormArgumentOffersNoPlaceholderCandidates(string text)
+	{
+		var result = _parser.Parse(text, Context);
+
+		Assert.False(result.IsSuccess);
+		Assert.Equal(TerminalWorkspaceCommandErrorCode.MissingArgument, result.Error!.Code);
+		Assert.Empty(result.Error.Candidates);
+	}
+
 	[Fact]
 	public void CatalogExamplesRoundTripToTheirOwningDefinitions()
 	{
@@ -845,7 +858,9 @@ public sealed class TerminalWorkspaceCommandParserTests
 		["mcp connect codex unknown", TerminalWorkspaceCommandErrorCode.UnknownToken, 18, "standard"],
 		["mcp connect codex live extra", TerminalWorkspaceCommandErrorCode.UnexpectedArgument, 23, (string?)null],
 		["mcp codex unknown", TerminalWorkspaceCommandErrorCode.UnknownToken, 10, "standard"],
-		["related", TerminalWorkspaceCommandErrorCode.MissingArgument, 7, "path"],
+		["mcp log session", TerminalWorkspaceCommandErrorCode.MissingArgument, 15, (string?)null],
+		["mcp log export", TerminalWorkspaceCommandErrorCode.MissingArgument, 14, (string?)null],
+		["related", TerminalWorkspaceCommandErrorCode.MissingArgument, 7, (string?)null],
 		["related src/App.cs --side both", TerminalWorkspaceCommandErrorCode.UnknownToken, 19, "--direction"],
 		["related src/App.cs --depth 0", TerminalWorkspaceCommandErrorCode.InvalidValue, 27, "1"],
 		["related src/App.cs --depth 11", TerminalWorkspaceCommandErrorCode.InvalidValue, 27, "10"],

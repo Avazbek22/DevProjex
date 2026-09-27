@@ -1170,7 +1170,7 @@
   "Terminal.Tui.Command.Profile.ResetFailed": "Impossible de réinitialiser le profil du projet.",
   "Terminal.Tui.Command.Mcp.Title": "Connexion MCP",
   "Terminal.Tui.Command.Mcp.Description": "Afficher un fragment de connexion MCP ou connecter un client au projet ouvert.",
-  "Terminal.Tui.Command.Mcp.Schema": "[client] [live|standard] | connect <claude-code|codex|cursor|vscode|json> [live|standard]",
+  "Terminal.Tui.Command.Mcp.Schema": "[client] [live|standard] | connect <claude-code|codex|cursor|vscode|json> [live|standard] | log [session <id>|last] | log export <path> [markdown|json] [session <id>|last] | log clear",
   "Terminal.Tui.Command.Related.Title": "Fichiers liés",
   "Terminal.Tui.Command.Related.Description": "Rechercher les fichiers liés par des preuves statiques.",
   "Terminal.Tui.Command.Related.Schema": "<chemin> [--direction dependencies|dependents|both] [--depth N]",

@@ -1170,7 +1170,7 @@
   "Terminal.Tui.Command.Profile.ResetFailed": "Loyiha profilini tiklab bo‘lmadi.",
   "Terminal.Tui.Command.Mcp.Title": "MCP ulanishi",
   "Terminal.Tui.Command.Mcp.Description": "MCP ulanish qismini chiqarish yoki mijozni ochiq loyihaga ulash.",
-  "Terminal.Tui.Command.Mcp.Schema": "[client] [live|standard] | connect <claude-code|codex|cursor|vscode|json> [live|standard]",
+  "Terminal.Tui.Command.Mcp.Schema": "[client] [live|standard] | connect <claude-code|codex|cursor|vscode|json> [live|standard] | log [session <id>|last] | log export <path> [markdown|json] [session <id>|last] | log clear",
   "Terminal.Tui.Command.Related.Title": "Bog‘liq fayllar",
   "Terminal.Tui.Command.Related.Description": "Statik dalillar asosida bog‘liq fayllarni topish.",
   "Terminal.Tui.Command.Related.Schema": "<yo‘l> [--direction dependencies|dependents|both] [--depth N]",

@@ -1164,7 +1164,7 @@
   "Terminal.Tui.Command.Profile.ResetFailed": "无法重置项目配置文件。",
   "Terminal.Tui.Command.Mcp.Title": "MCP 连接",
   "Terminal.Tui.Command.Mcp.Description": "打印 MCP 连接片段，或将客户端连接到已打开的项目。",
-  "Terminal.Tui.Command.Mcp.Schema": "[client] [live|standard] | connect <claude-code|codex|cursor|vscode|json> [live|standard]",
+  "Terminal.Tui.Command.Mcp.Schema": "[client] [live|standard] | connect <claude-code|codex|cursor|vscode|json> [live|standard] | log [session <id>|last] | log export <path> [markdown|json] [session <id>|last] | log clear",
   "Terminal.Tui.Command.Related.Title": "相关文件",
   "Terminal.Tui.Command.Related.Description": "根据静态证据查找相关文件。",
   "Terminal.Tui.Command.Related.Schema": "<路径> [--direction dependencies|dependents|both] [--depth N]",

@@ -1170,7 +1170,7 @@
   "Terminal.Tui.Command.Profile.ResetFailed": "Das Projektprofil konnte nicht zurückgesetzt werden.",
   "Terminal.Tui.Command.Mcp.Title": "MCP-Verbindung",
   "Terminal.Tui.Command.Mcp.Description": "Ein MCP-Verbindungsfragment ausgeben oder einen Client mit dem geöffneten Projekt verbinden.",
-  "Terminal.Tui.Command.Mcp.Schema": "[client] [live|standard] | connect <claude-code|codex|cursor|vscode|json> [live|standard]",
+  "Terminal.Tui.Command.Mcp.Schema": "[client] [live|standard] | connect <claude-code|codex|cursor|vscode|json> [live|standard] | log [session <id>|last] | log export <path> [markdown|json] [session <id>|last] | log clear",
   "Terminal.Tui.Command.Related.Title": "Zugehörige Dateien",
   "Terminal.Tui.Command.Related.Description": "Statisch belegte zusammenhängende Dateien finden.",
   "Terminal.Tui.Command.Related.Schema": "<pfad> [--direction dependencies|dependents|both] [--depth N]",

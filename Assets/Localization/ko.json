@@ -1164,7 +1164,7 @@
   "Terminal.Tui.Command.Profile.ResetFailed": "프로젝트 프로필을 초기화할 수 없습니다.",
   "Terminal.Tui.Command.Mcp.Title": "MCP 연결",
   "Terminal.Tui.Command.Mcp.Description": "MCP 연결 조각을 출력하거나 클라이언트를 열린 프로젝트에 연결합니다.",
-  "Terminal.Tui.Command.Mcp.Schema": "[client] [live|standard] | connect <claude-code|codex|cursor|vscode|json> [live|standard]",
+  "Terminal.Tui.Command.Mcp.Schema": "[client] [live|standard] | connect <claude-code|codex|cursor|vscode|json> [live|standard] | log [session <id>|last] | log export <path> [markdown|json] [session <id>|last] | log clear",
   "Terminal.Tui.Command.Related.Title": "관련 파일",
   "Terminal.Tui.Command.Related.Description": "정적 근거를 바탕으로 관련 파일을 찾습니다.",
   "Terminal.Tui.Command.Related.Schema": "<경로> [--direction dependencies|dependents|both] [--depth N]",

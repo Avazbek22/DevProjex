@@ -1164,7 +1164,7 @@
   "Terminal.Tui.Command.Profile.ResetFailed": "Không thể đặt lại hồ sơ dự án.",
   "Terminal.Tui.Command.Mcp.Title": "Kết nối MCP",
   "Terminal.Tui.Command.Mcp.Description": "In đoạn cấu hình kết nối MCP hoặc kết nối ứng dụng với dự án đang mở.",
-  "Terminal.Tui.Command.Mcp.Schema": "[client] [live|standard] | connect <claude-code|codex|cursor|vscode|json> [live|standard]",
+  "Terminal.Tui.Command.Mcp.Schema": "[client] [live|standard] | connect <claude-code|codex|cursor|vscode|json> [live|standard] | log [session <id>|last] | log export <path> [markdown|json] [session <id>|last] | log clear",
   "Terminal.Tui.Command.Related.Title": "Tệp liên quan",
   "Terminal.Tui.Command.Related.Description": "Tìm các tệp liên quan dựa trên bằng chứng tĩnh.",
   "Terminal.Tui.Command.Related.Schema": "<đường-dẫn> [--direction dependencies|dependents|both] [--depth N]",

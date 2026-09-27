@@ -1164,7 +1164,7 @@
   "Terminal.Tui.Command.Profile.ResetFailed": "無法重設專案設定檔。",
   "Terminal.Tui.Command.Mcp.Title": "MCP 連線",
   "Terminal.Tui.Command.Mcp.Description": "列印 MCP 連線片段，或將用戶端連接到已開啟的專案。",
-  "Terminal.Tui.Command.Mcp.Schema": "[client] [live|standard] | connect <claude-code|codex|cursor|vscode|json> [live|standard]",
+  "Terminal.Tui.Command.Mcp.Schema": "[client] [live|standard] | connect <claude-code|codex|cursor|vscode|json> [live|standard] | log [session <id>|last] | log export <path> [markdown|json] [session <id>|last] | log clear",
   "Terminal.Tui.Command.Related.Title": "相關檔案",
   "Terminal.Tui.Command.Related.Description": "根據靜態證據尋找相關檔案。",
   "Terminal.Tui.Command.Related.Schema": "<路徑> [--direction dependencies|dependents|both] [--depth N]",
