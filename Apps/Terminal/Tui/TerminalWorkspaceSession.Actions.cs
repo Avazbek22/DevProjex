@@ -1432,7 +1432,10 @@ internal sealed partial class TerminalWorkspaceSession
 			var filter = input.Text?.ToString() ?? string.Empty;
 			var filtered = items
 				.Where(item => item.IsAvailable())
-				.Where(item => MatchesPaletteFilter(item, filter))
+				.Select(item => (Item: item, Rank: RankPaletteMatch(item, filter)))
+				.Where(static match => match.Rank is not null)
+				.OrderBy(static match => match.Rank)
+				.Select(static match => match.Item)
 				.ToArray();
 			var rowWidth = Math.Max(20, width - 6);
 			var titleWidth = Math.Clamp(
@@ -1656,27 +1659,35 @@ internal sealed partial class TerminalWorkspaceSession
 		return $"{item.Category}{PanelSeparator}{item.Title}{value}{syntax}\n{item.Description}";
 	}
 
-	private static bool MatchesPaletteFilter(TerminalPaletteItem item, string filter)
+	// Whole-word matches rank ahead of scattered letters, so a word typed in full finds the
+	// action that names it before an action whose long syntax contains the same letters in order.
+	// Returns null when the filter does not match at all; equal ranks keep the catalog order.
+	internal static int? RankPaletteMatch(TerminalPaletteItem item, string filter)
 	{
-		if (string.IsNullOrWhiteSpace(filter))
-			return true;
+		var query = filter.Trim();
+		if (query.Length == 0)
+			return 0;
+		if (item.Title.Contains(query, StringComparison.CurrentCultureIgnoreCase))
+			return 0;
 		var searchable = string.Join(
 			' ',
 			item.Title,
 			item.Description,
 			item.CommandSyntax ?? string.Empty);
+		if (searchable.Contains(query, StringComparison.CurrentCultureIgnoreCase))
+			return 1;
 		var candidateIndex = 0;
-		foreach (var character in filter.Where(static character => !char.IsWhiteSpace(character)))
+		foreach (var character in query.Where(static character => !char.IsWhiteSpace(character)))
 		{
 			candidateIndex = searchable.IndexOf(
 				character.ToString(),
 				candidateIndex,
 				StringComparison.CurrentCultureIgnoreCase);
 			if (candidateIndex < 0)
-				return false;
+				return null;
 			candidateIndex++;
 		}
-		return true;
+		return 2;
 	}
 
 	private void ActivateWelcomeAction(TerminalWelcomeAction action)

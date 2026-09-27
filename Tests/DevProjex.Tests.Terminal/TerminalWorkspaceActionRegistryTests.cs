@@ -107,6 +107,35 @@ public sealed class TerminalWorkspaceActionRegistryTests
 	}
 
 	[Fact]
+	public void PaletteFilterRanksWholeWordsAheadOfScatteredLetters()
+	{
+		var copy = new TerminalPaletteItem(
+			"copy",
+			"Preview",
+			"Copy preview",
+			"Move every tab and data table to the clipboard.",
+			string.Empty,
+			null,
+			"copy [text|markdown|json|xml] [--max-tokens <N>] [--rank importance]",
+			null,
+			static () => true,
+			static () => { });
+		var details = copy with
+		{
+			Id = "details",
+			Title = "Details",
+			Description = "Inspect project source and repository metadata.",
+			CommandSyntax = null
+		};
+
+		Assert.Equal(0, TerminalWorkspaceSession.RankPaletteMatch(details, "details"));
+		Assert.Equal(1, TerminalWorkspaceSession.RankPaletteMatch(details, "metadata"));
+		Assert.Equal(2, TerminalWorkspaceSession.RankPaletteMatch(copy, "metadata"));
+		Assert.Equal(0, TerminalWorkspaceSession.RankPaletteMatch(copy, "  "));
+		Assert.Null(TerminalWorkspaceSession.RankPaletteMatch(details, "zzz"));
+	}
+
+	[Fact]
 	public void RegistryRejectsPaletteItemsWithoutStableUniqueIds()
 	{
 		var item = new TerminalPaletteItem(
