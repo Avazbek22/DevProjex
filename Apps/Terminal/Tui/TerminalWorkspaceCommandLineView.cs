@@ -164,6 +164,7 @@ internal sealed class TerminalWorkspaceCommandLineView : View
 
 	public bool IsEditing { get; private set; }
 	public bool IsShowingResult => Visible && _result.Visible;
+	public bool IsShowingError => IsShowingResult && !_resultSuccess;
 	public string InputText => _input.Value;
 	internal int CompletionCacheCount
 	{

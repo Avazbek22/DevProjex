@@ -263,6 +263,39 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 				cancellationToken: TestContext.Current.CancellationToken));
 	}
 
+	[Fact(Timeout = 120_000)]
+	public async Task KeyPressedDuringASuccessResultStillActs()
+	{
+		using var project = CreateProject();
+		await using var terminal = await StartAsync(project.Path, columns: 120, rows: 30);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		// "CONTEXT PREVIEW: Content" is the success result; the pane title uses " · ".
+		await terminal.SendAsync(":view content\r", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"CONTEXT PREVIEW: Content",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync("1", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"CONTEXT PREVIEW · Tree",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.SendAsync(":view content\r", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"CONTEXT PREVIEW: Content",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		var dismissed = await terminal.WaitForStableScreenAsync(
+			"CONTEXT PREVIEW · Content",
+			forbidden: "Close this project and return to Welcome?",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.DoesNotContain("Close this project", dismissed, StringComparison.Ordinal);
+		Assert.False(terminal.HasExited);
+		await QuitAsync(terminal);
+	}
+
 	[Theory(Timeout = 120_000)]
 	[InlineData(160, 40, false)]
 	[InlineData(100, 30, false)]

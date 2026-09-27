@@ -2526,12 +2526,18 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		}
 		if (_commandLine?.IsShowingResult == true)
 		{
-			key.Handled = true;
+			var dismissedError = _commandLine.IsShowingError;
 			CancelCommandResult();
 			_commandLine.Close();
 			RestoreCommandFooterAndFocus();
-			if (!TerminalWorkspaceCommandKey.IsActivation(key))
+			// An error waits for a key that only dismisses it. A success hides on its own,
+			// so a key pressed before that still performs its action; Esc only dismisses.
+			if (key == Key.Esc ||
+				dismissedError && !TerminalWorkspaceCommandKey.IsActivation(key))
+			{
+				key.Handled = true;
 				return;
+			}
 		}
 		if (_operationProgress is not null && IsOverlayActivationKey(key))
 		{
