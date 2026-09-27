@@ -31,6 +31,33 @@ public sealed class TerminalWorkspaceTextFittingTests
 		Assert.Equal(width, result.Length);
 	}
 
+	[Theory]
+	[InlineData(
+		"j/k Scroll  {/} Section  : Commands",
+		58,
+		"j/k Scroll  {/} Section  : Commands")]
+	[InlineData(
+		"j/k Прокрутка  {/} Секция  Ctrl+G Строка  W Перенос  : Команды",
+		58,
+		"j/k Прокрутка  {/} Секция  Ctrl+G Строка  : Команды")]
+	[InlineData(
+		"1-9 Недавние  Enter Открыть  : Команды  Ctrl+P Действия  ? Помощь  q Выход",
+		56,
+		"1-9 Недавние  Enter Открыть  : Команды  ? Помощь")]
+	[InlineData(
+		"j/k Deslocar   {/} Secção  Ctrl+G Linha  W Quebrar  : Comandos",
+		40,
+		"j/k Deslocar   {/} Secção  : Comandos")]
+	public void FitFooterToWidth_DropsTrailingShortcutsAndKeepsEntryPoints(
+		string footer,
+		int width,
+		string expected)
+	{
+		var result = TerminalWorkspaceSession.FitFooterToWidth(footer, width);
+
+		Assert.Equal(expected, result);
+	}
+
 	[Fact]
 	public void FitPathToWidth_DoesNotPresentLocalWindowsPathAsFileUri()
 	{

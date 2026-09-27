@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
+using System.Text.RegularExpressions;
 using DevProjex.Terminal.CommandLine;
 using DevProjex.Terminal.DesktopControl;
 using DevProjex.Terminal.Execution;
@@ -288,8 +289,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			_welcomeDetailHeading.Text = L("Terminal.Tui.Details");
 		if (_welcomeQuickStart is not null)
 			_welcomeQuickStart.Text = L("Terminal.Tui.Welcome.QuickStart");
-		if (_welcomeFooter is not null)
-			_welcomeFooter.Text = L("Terminal.Tui.Footer.Welcome");
+		UpdateWelcomeFooter();
 		UpdateWelcomeSelection();
 		// Translated texts differ in width, so the status line is fitted to the new language.
 		ApplyWelcomeLayout();
@@ -341,6 +341,17 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				firstOfKind = index;
 		}
 		return Math.Max(0, firstOfKind);
+	}
+
+	private void UpdateWelcomeFooter()
+	{
+		// The Welcome footer leaves two columns on each side of the screen.
+		if (_welcomeFooter is not null)
+		{
+			_welcomeFooter.Text = FitFooterToWidth(
+				L("Terminal.Tui.Footer.Welcome"),
+				Math.Max(1, _terminalWidth - 4));
+		}
 	}
 
 	private void OnApplicationScreenChanged(
@@ -2056,8 +2067,16 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	{
 		if (_footer is null || _commandLine?.Visible == true)
 			return;
-		var wide = _application.Screen.Width >= 110;
-		_footer.Text = _activePane switch
+		// The footer label leaves one column on each side of the screen.
+		var width = Math.Max(1, _application.Screen.Width - 2);
+		var footer = _application.Screen.Width >= 110 ? BuildFooterText(wide: true) : null;
+		if (footer is null || footer.GetColumns() > width)
+			footer = BuildFooterText(wide: false);
+		_footer.Text = FitFooterToWidth(footer, width);
+	}
+
+	private string BuildFooterText(bool wide) =>
+		_activePane switch
 		{
 			TerminalWorkspacePane.Tree =>
 				L(wide ? "Terminal.Tui.Footer.Tree.Wide" : "Terminal.Tui.Footer.Tree"),
@@ -2065,7 +2084,30 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				L(wide ? "Terminal.Tui.Footer.Preview.Wide" : "Terminal.Tui.Footer.Preview"),
 			_ => BuildControlsFooterText(wide)
 		};
+
+	// Drops shortcut groups from the end until the footer fits. The leading group and the
+	// ':' and '?' entry points stay: every dropped shortcut remains reachable through them.
+	internal static string FitFooterToWidth(string footer, int width)
+	{
+		ArgumentNullException.ThrowIfNull(footer);
+		// Even entries are shortcut groups; odd entries are the separators between them.
+		var parts = FooterGroupSeparatorRegex().Split(footer).ToList();
+		for (var index = parts.Count - 1;
+			 index > 0 && string.Concat(parts).GetColumns() > width;
+			 index -= 2)
+		{
+			if (!IsFooterEntryPoint(parts[index]))
+				parts.RemoveRange(index - 1, 2);
+		}
+		return FitEndToWidth(string.Concat(parts), width);
 	}
+
+	private static bool IsFooterEntryPoint(string group) =>
+		group.StartsWith(": ", StringComparison.Ordinal) ||
+		group.StartsWith("? ", StringComparison.Ordinal);
+
+	[GeneratedRegex("( {2,})", RegexOptions.CultureInvariant)]
+	private static partial Regex FooterGroupSeparatorRegex();
 
 	private string BuildControlsFooterText(bool wide)
 	{
@@ -2235,6 +2277,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		if (tooSmall)
 			return;
 
+		UpdateWelcomeFooter();
 		var wideLayout = _layoutMode is TerminalWorkspaceLayoutMode.Split or TerminalWorkspaceLayoutMode.Wide;
 		// Both frames end above the footer, and the stacked layout keeps a line of Details visible.
 		var actionHeight = Math.Min(

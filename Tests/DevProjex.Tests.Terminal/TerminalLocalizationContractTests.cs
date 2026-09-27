@@ -382,6 +382,58 @@ public sealed partial class TerminalLocalizationContractTests
 	}
 
 	[Fact]
+	public void FittedFooters_KeepCommandAndHelpEntryPointsAtTheMinimumViewport()
+	{
+		const int minimumColumns = 60;
+		var workspaceFooterKeys = new[]
+		{
+			"Terminal.Tui.Footer.Tree",
+			"Terminal.Tui.Footer.Preview",
+			"Terminal.Tui.Footer.Controls"
+		};
+
+		foreach (var (locale, catalog) in ReadCatalogs())
+		{
+			foreach (var plain in new[] { false, true })
+			{
+				foreach (var key in workspaceFooterKeys)
+				{
+					var footer = TerminalWorkspaceSession.NormalizeLocalizedText(
+						catalog[key],
+						plain,
+						supportsUnicode: true);
+					var fitted = TerminalWorkspaceSession.FitFooterToWidth(footer, minimumColumns - 2);
+					var commandGroup = WelcomeFooterSegmentSeparatorRegex().Split(footer)[^1];
+
+					Assert.True(
+						fitted.GetColumns() <= minimumColumns - 2,
+						$"{key} overflows {minimumColumns} columns in {locale} (plain: {plain}): {fitted}");
+					Assert.True(
+						fitted.EndsWith(commandGroup, StringComparison.Ordinal),
+						$"{key} loses its command hint in {locale} (plain: {plain}): {fitted}");
+				}
+
+				var welcome = TerminalWorkspaceSession.NormalizeLocalizedText(
+					catalog["Terminal.Tui.Footer.Welcome"],
+					plain,
+					supportsUnicode: true);
+				var fittedWelcome = TerminalWorkspaceSession.FitFooterToWidth(welcome, minimumColumns - 4);
+				var entryPoints = WelcomeFooterSegmentSeparatorRegex()
+					.Split(welcome)
+					.Where(static group => group.StartsWith(": ", StringComparison.Ordinal) ||
+										   group.StartsWith("? ", StringComparison.Ordinal))
+					.ToArray();
+
+				Assert.Equal(2, entryPoints.Length);
+				Assert.True(
+					fittedWelcome.GetColumns() <= minimumColumns - 4,
+					$"The Welcome footer overflows {minimumColumns} columns in {locale}: {fittedWelcome}");
+				Assert.All(entryPoints, group => Assert.Contains(group, fittedWelcome, StringComparison.Ordinal));
+			}
+		}
+	}
+
+	[Fact]
 	public void OrdinaryTuiCatalogUsesDesktopTerminologyWithoutPresentationOrProfileJargon()
 	{
 		var catalogs = ReadCatalogs();
