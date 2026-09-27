@@ -66,6 +66,49 @@ public sealed class TerminalWorkspacePresentationPolicyTests
 		Assert.Equal(ShadowStyles.None, button.ShadowStyle);
 	}
 
+	[Theory]
+	[InlineData("Cancel", "Dry run", "Export", false, false)]
+	[InlineData("Отмена", "Проверить без записи", "Экспортировать", true, false)]
+	[InlineData("Bekor qilish", "Yozmasdan tekshirish", "Eksport qilish", true, true)]
+	public void OverlayButtonRowSheddingDecorationsKeepsEveryButtonInsideANarrowDialog(
+		string cancel,
+		string dryRun,
+		string export,
+		bool expectedCompact,
+		bool expectedUndecorated)
+	{
+		const int availableColumns = 54;
+		var buttons = new[]
+		{
+			new Button { Text = cancel },
+			new Button { Text = dryRun },
+			new Button { Text = export, IsDefault = true }
+		};
+
+		TerminalWorkspacePresentationPolicy.FitOverlayButtonRow(buttons, availableColumns);
+
+		Assert.True(TerminalWorkspacePresentationPolicy.MeasureButtonRow(buttons) <= availableColumns);
+		Assert.All(buttons, button =>
+		{
+			Assert.Equal(expectedCompact, button.NoPadding);
+			Assert.Equal(expectedCompact, button.ShadowStyle == ShadowStyles.None);
+			Assert.Equal(expectedUndecorated, button.NoDecorations);
+		});
+	}
+
+	[Fact]
+	public void OverlayButtonRowMeasureMatchesTheDecoratedButtonText()
+	{
+		var buttons = new[]
+		{
+			new Button { Text = "Cancel" },
+			new Button { Text = "Export", IsDefault = true }
+		};
+
+		// "⟦ Cancel ⟧" plus its shadow, one separator, "⟦► Export ◄⟧" plus its shadow.
+		Assert.Equal(11 + 1 + 13, TerminalWorkspacePresentationPolicy.MeasureButtonRow(buttons));
+	}
+
 	[Fact]
 	public void PlainPreviewDoesNotCreateUnicodeScrollBars()
 	{

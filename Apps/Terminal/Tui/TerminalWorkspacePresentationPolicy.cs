@@ -39,6 +39,38 @@ public static class TerminalWorkspacePresentationPolicy
 		button.NoPadding = true;
 		button.ShadowStyle = ShadowStyles.None;
 	}
+
+	// Terminal.Gui keeps dialog buttons on one row and clips whatever does not fit.
+	// Narrow terminals drop shadows and padding first, and brackets only when still needed.
+	internal static void FitOverlayButtonRow(IReadOnlyList<Button> buttons, int availableColumns)
+	{
+		if (MeasureButtonRow(buttons) <= availableColumns)
+			return;
+		foreach (var button in buttons)
+		{
+			button.ShadowStyle = ShadowStyles.None;
+			button.NoPadding = true;
+		}
+		if (MeasureButtonRow(buttons) <= availableColumns)
+			return;
+		foreach (var button in buttons)
+			button.NoDecorations = true;
+	}
+
+	internal static int MeasureButtonRow(IReadOnlyList<Button> buttons) =>
+		buttons.Sum(MeasureButton) + Math.Max(0, buttons.Count - 1);
+
+	private static int MeasureButton(Button button)
+	{
+		var textColumns = TerminalCellWidth.Measure(button.Text);
+		if (button.NoDecorations)
+			return textColumns;
+		var interiorColumns = button.IsDefault
+			? textColumns + 4
+			: button.NoPadding ? textColumns : textColumns + 2;
+		var shadowColumns = button.ShadowStyle == ShadowStyles.None ? 0 : 1;
+		return interiorColumns + 2 + shadowColumns;
+	}
 }
 
 internal static class TerminalPlainText

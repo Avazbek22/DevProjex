@@ -5096,10 +5096,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	{
 		var title = L("Terminal.Tui.ExportConfirmTitle");
 		var dialogWidth = ResolveDialogWidth(86);
-		var text = _workspace.BuildExportSummaryText(summary, Math.Max(12, dialogWidth - 26));
+		var bodyWidth = Math.Max(20, dialogWidth - 6);
+		var text = _workspace.BuildExportSummaryText(summary, bodyWidth);
 		if (_options.Plain)
 			text = $"{title}\n\n{text}";
-		var bodyWidth = Math.Max(20, dialogWidth - 6);
 		var dialogHeight = EstimateWrappedLineCount(text, bodyWidth) + 8;
 		using var dialog = CreateDialog(title, dialogWidth, dialogHeight);
 		var body = new TextView
@@ -5122,6 +5122,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var canExport = summary.Kind != TerminalExportKind.Folder ||
 						summary.DestinationState != TerminalExportDestinationState.Conflict;
 		var focusedButton = cancel;
+		var buttons = new List<Button> { cancel, dryRun };
 		if (canExport)
 		{
 			var export = CreateDialogButton(summary.DestinationState == TerminalExportDestinationState.Conflict
@@ -5129,8 +5130,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				: L("Terminal.Tui.Export"));
 			export.IsDefault = true;
 			dialog.AddButton(export);
+			buttons.Add(export);
 			focusedButton = export;
 		}
+		TerminalWorkspacePresentationPolicy.FitOverlayButtonRow(buttons, dialogWidth - 2);
 		RunOverlay(dialog, focusedButton);
 		return dialog.Result switch
 		{

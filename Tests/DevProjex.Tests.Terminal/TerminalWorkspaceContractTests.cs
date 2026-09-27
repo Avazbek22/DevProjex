@@ -2054,6 +2054,73 @@ public sealed class TerminalWorkspaceContractTests
 	}
 
 	[Fact]
+	public void BoundedExportSummaryKeepsTheDestinationFileNameAndTheLabelColumn()
+	{
+		using var workspace = new TemporaryDirectory();
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.Ru);
+		var destination = Path.Combine(
+			Path.GetTempPath(),
+			string.Join(Path.DirectorySeparatorChar, Enumerable.Repeat("deeply-nested-export-folder", 5)),
+			"final context.md");
+		var summary = new TerminalExportSummary(
+			TerminalExportKind.Context,
+			ProjectContextView.Tree,
+			ProjectContextDocumentFormat.Markdown,
+			destination,
+			TerminalExportDestinationState.Ready,
+			FileCount: 3,
+			FolderCount: 2,
+			Bytes: 75,
+			Characters: 200,
+			EstimatedTokens: 52,
+			GitFilteringMode.RespectGitIgnore,
+			Exclusions:
+			[
+				ProjectExclusion.SmartIgnore,
+				ProjectExclusion.HiddenFolders,
+				ProjectExclusion.HiddenFiles,
+				ProjectExclusion.DotFolders,
+				ProjectExclusion.DotFiles,
+				ProjectExclusion.EmptyFolders
+			],
+			DiagnosticCount: 0,
+			SecretsRedacted: true);
+		const int maximumColumns = 60;
+
+		var lines = new TerminalWorkspace(services, new TestTerminalEnvironment())
+			.BuildExportSummaryText(summary, maximumColumns)
+			.Split(Environment.NewLine);
+
+		var labels = new[]
+			{
+				"Terminal.Tui.Destination",
+				"Terminal.Analysis.Files",
+				"Terminal.Analysis.Folders",
+				"Terminal.Analysis.Size",
+				"Terminal.Analysis.Tokens",
+				"Terminal.Tui.Filters",
+				"Terminal.Tui.Diagnostics",
+				"Terminal.Tui.Redaction"
+			}
+			.Select(key => services.Localization[key].TrimEnd(':'))
+			.ToArray();
+		var labelColumns = labels.Max(static label => label.Length);
+		Assert.All(lines, line => Assert.True(line.Length <= maximumColumns, line));
+		Assert.All(lines, line => Assert.True(
+			labels.Any(label => line.StartsWith(label, StringComparison.Ordinal)) ||
+			line.StartsWith(new string(' ', labelColumns + 2), StringComparison.Ordinal),
+			line));
+		var destinationLine = Assert.Single(lines, line => line.StartsWith(labels[0], StringComparison.Ordinal));
+		Assert.EndsWith(Path.DirectorySeparatorChar + "final context.md", destinationLine, StringComparison.Ordinal);
+		Assert.Contains(
+			"...",
+			destinationLine,
+			StringComparison.Ordinal);
+		Assert.Single(lines, line => line.StartsWith(labels[5], StringComparison.Ordinal));
+	}
+
+	[Fact]
 	public async Task PreparedExportReportsConflictAndLocalizedSummaryWithoutOverwriting()
 	{
 		using var workspace = new TemporaryDirectory();
