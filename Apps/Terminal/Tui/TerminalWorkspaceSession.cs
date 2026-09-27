@@ -5953,7 +5953,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private void ReleaseOwnedRepositorySession() =>
 		Interlocked.Exchange(ref _ownedRepositorySession, null)?.Dispose();
 
-	private string PanelSeparator => _options.Plain ? " | " : " · ";
+	private string PanelSeparator =>
+		_options.Plain || !_environment.SupportsUnicode ? " | " : " · ";
 
 	private string L(string key)
 	{

@@ -73,6 +73,7 @@ public sealed class TerminalWorkspace
 
 		var mouseEnabled = ResolveMouseEnabled(options.MouseMode, environment);
 		using var mousePolicy = new TerminalGuiMousePolicy(mouseEnabled);
+		using var lineGlyphs = environment.SupportsUnicode ? null : new TerminalAsciiLineGlyphs();
 		// Terminal.Gui can leave the cursor hidden on either side of application
 		// disposal, so bracket its teardown with idempotent visibility restoration.
 		using var postApplicationCursorRestoration =

@@ -73,6 +73,41 @@ public static class TerminalWorkspacePresentationPolicy
 	}
 }
 
+// Terminal.Gui draws every frame from process-wide line glyphs. A terminal without Unicode
+// gets ASCII frames while the workspace runs; the previous glyphs are restored afterwards.
+internal sealed class TerminalAsciiLineGlyphs : IDisposable
+{
+	private static readonly (Func<Rune> Get, Action<Rune> Set, char Ascii)[] LineGlyphs =
+	[
+		(static () => Glyphs.HLine, static value => Glyphs.HLine = value, '-'),
+		(static () => Glyphs.VLine, static value => Glyphs.VLine = value, '|'),
+		(static () => Glyphs.ULCorner, static value => Glyphs.ULCorner = value, '+'),
+		(static () => Glyphs.URCorner, static value => Glyphs.URCorner = value, '+'),
+		(static () => Glyphs.LLCorner, static value => Glyphs.LLCorner = value, '+'),
+		(static () => Glyphs.LRCorner, static value => Glyphs.LRCorner = value, '+'),
+		(static () => Glyphs.LeftTee, static value => Glyphs.LeftTee = value, '+'),
+		(static () => Glyphs.RightTee, static value => Glyphs.RightTee = value, '+'),
+		(static () => Glyphs.TopTee, static value => Glyphs.TopTee = value, '+'),
+		(static () => Glyphs.BottomTee, static value => Glyphs.BottomTee = value, '+'),
+		(static () => Glyphs.Cross, static value => Glyphs.Cross = value, '+')
+	];
+
+	private readonly Rune[] _previous;
+
+	public TerminalAsciiLineGlyphs()
+	{
+		_previous = LineGlyphs.Select(static glyph => glyph.Get()).ToArray();
+		foreach (var glyph in LineGlyphs)
+			glyph.Set(new Rune(glyph.Ascii));
+	}
+
+	public void Dispose()
+	{
+		for (var index = 0; index < LineGlyphs.Length; index++)
+			LineGlyphs[index].Set(_previous[index]);
+	}
+}
+
 internal static class TerminalPlainText
 {
 	// Arrow glyphs name the arrow keys themselves. Spelling the key out keeps every hint
