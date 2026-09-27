@@ -852,7 +852,7 @@ internal sealed partial class TerminalWorkspaceSession
 				"Terminal.Tui.Export",
 				"Menu.File.ExportProjectCopy.Folder",
 				"Menu.File.ExportProjectCopy.Folder.Help",
-				"Z",
+				"z",
 				commandSyntax: "export folder <path>",
 				isAvailable: () => !HasActiveOperation && IsRepositoryExportAllowed(
 					Volatile.Read(ref _repositoryStateInconsistent) != 0),

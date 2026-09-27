@@ -361,6 +361,38 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 	}
 
 	[Fact(Timeout = 90_000)]
+	public async Task ActionPaletteLabelsFolderExportWithTheLowercaseKeyThatRunsIt()
+	{
+		using var project = CreateProject();
+		await using var terminal = await StartAsync(project.Path, columns: 120, rows: 30);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.SendAsync("\u0010", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Filter actions:",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync("export folder", TestContext.Current.CancellationToken);
+		var palette = await terminal.WaitForScreenAsync(
+			"export folder <path>",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.True(
+			palette.Split('\n').Any(static line =>
+				line.Contains("export folder <path>", StringComparison.Ordinal) &&
+				line.Contains("[z]", StringComparison.Ordinal)),
+			$"The folder export palette row did not show the z shortcut.\n{palette}");
+		Assert.DoesNotContain("[Z]", palette, StringComparison.Ordinal);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForStableScreenAsync(
+			required: "PROJECT TREE",
+			forbidden: "Building preview…",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await QuitAsync(terminal);
+	}
+
+	[Fact(Timeout = 90_000)]
 	public async Task CompletionEditingEscapeAndHistoryRemainResponsive()
 	{
 		using var project = CreateProject();
