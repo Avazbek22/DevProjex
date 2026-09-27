@@ -672,6 +672,25 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		}
 	}
 
+	// Clicks a label on the first row containing rowText; a dialog's buttons are found by a
+	// label that appears only on their row, because the same words often appear behind it.
+	public async Task ClickLabelOnRowAsync(
+		string rowText,
+		string label,
+		int clickCount = 1,
+		CancellationToken cancellationToken = default)
+	{
+		var lines = CaptureScreen().Split('\n');
+		var row = Array.FindIndex(lines, line => line.Contains(rowText, StringComparison.Ordinal));
+		var column = row < 0 ? -1 : lines[row].IndexOf(label, StringComparison.Ordinal);
+		if (column < 0)
+		{
+			throw new Xunit.Sdk.XunitException(
+				$"'{label}' was not found on the row containing '{rowText}'.\n{CaptureScreen()}");
+		}
+		await SendMouseClickAsync(column + 1, row, clickCount, cancellationToken).ConfigureAwait(false);
+	}
+
 	public Task SendMouseWheelDownAsync(
 		int column,
 		int row,

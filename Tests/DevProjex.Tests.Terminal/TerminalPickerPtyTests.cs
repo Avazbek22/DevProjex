@@ -82,4 +82,94 @@ public sealed class TerminalPickerPtyTests
 				cancellationToken: TestContext.Current.CancellationToken));
 	}
 
+	[Fact(Timeout = 90_000)]
+	public async Task FolderPickerEntersFoldersGoesBackAndOpensTheChosenFolder()
+	{
+		var cancellationToken = TestContext.Current.CancellationToken;
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("notes.txt", "not a project marker");
+		workspace.CreateDirectory("OtherFolder");
+		workspace.WriteFile(Path.Combine("PickedProject", "src", "PickedMarker.cs"), "class Picked {}");
+		await using var terminal = await StartOnWelcomeAsync(workspace.Path, cancellationToken);
+
+		await OpenWelcomeActionAsync(terminal, "Browse folder", cancellationToken);
+		await terminal.WaitForScreenAsync("[D]  PickedProject", cancellationToken: cancellationToken);
+		// Rows: [..], OtherFolder, PickedProject.
+		await terminal.SendDownAsync(cancellationToken);
+		await terminal.SendDownAsync(cancellationToken);
+		await terminal.SendEnterAsync(cancellationToken);
+		var inside = await terminal.WaitForScreenAsync("[D]  src", cancellationToken: cancellationToken);
+		Assert.Contains("Current folder", inside, StringComparison.Ordinal);
+
+		await terminal.ClickLabelOnRowAsync("Cancel", "Back", cancellationToken: cancellationToken);
+		await terminal.WaitForScreenAsync("[D]  OtherFolder", cancellationToken: cancellationToken);
+
+		await terminal.ClickLabelOnRowAsync(
+			"[D]  PickedProject",
+			"PickedProject",
+			clickCount: 2,
+			cancellationToken: cancellationToken);
+		await terminal.WaitForScreenAsync("[D]  src", cancellationToken: cancellationToken);
+
+		await terminal.ClickLabelOnRowAsync("Cancel", "Open", cancellationToken: cancellationToken);
+		await terminal.WaitForScreenAsync("PROJECT TREE", cancellationToken: cancellationToken);
+		await terminal.WaitForScreenAsync("PickedMarker.cs", cancellationToken: cancellationToken);
+		await ExitAsync(terminal, cancellationToken);
+	}
+
+	[Fact(Timeout = 90_000)]
+	public async Task SettingsFilePickerEntersFoldersAndPicksTheFileUnderTheCursor()
+	{
+		var cancellationToken = TestContext.Current.CancellationToken;
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("notes.txt", "not a project marker");
+		workspace.WriteFile(Path.Combine("settings", "team.json"), "{}");
+		await using var terminal = await StartOnWelcomeAsync(workspace.Path, cancellationToken);
+
+		await OpenWelcomeActionAsync(terminal, "Open project with settings file", cancellationToken);
+		await terminal.WaitForScreenAsync("[D]  settings", cancellationToken: cancellationToken);
+		// Rows: [..], settings.
+		await terminal.SendDownAsync(cancellationToken);
+		await terminal.SendEnterAsync(cancellationToken);
+		await terminal.WaitForScreenAsync("[F]  team.json", cancellationToken: cancellationToken);
+		// Rows: [..], team.json.
+		await terminal.SendDownAsync(cancellationToken);
+		await terminal.SendEnterAsync(cancellationToken);
+
+		var projectPicker = await terminal.WaitForScreenAsync(
+			"Project directory:",
+			cancellationToken: cancellationToken);
+		Assert.Contains("[D]  settings", projectPicker, StringComparison.Ordinal);
+		await terminal.SendEscapeAsync(cancellationToken);
+		await terminal.WaitForScreenWithoutAsync("Project directory:", cancellationToken: cancellationToken);
+		await ExitAsync(terminal, cancellationToken);
+	}
+
+	private static Task<TerminalPtyHarness> StartOnWelcomeAsync(
+		string workingDirectory,
+		CancellationToken cancellationToken) =>
+		TerminalPtyHarness.StartAsync(
+			workingDirectory,
+			["--language", "en"],
+			columns: 120,
+			rows: 30,
+			cancellationToken: cancellationToken);
+
+	private static async Task OpenWelcomeActionAsync(
+		TerminalPtyHarness terminal,
+		string action,
+		CancellationToken cancellationToken)
+	{
+		await terminal.WaitForScreenAsync(action, cancellationToken: cancellationToken);
+		await terminal.ClickLabelOnRowAsync(action, action, clickCount: 2, cancellationToken: cancellationToken);
+		await terminal.WaitForScreenAsync("Current folder", cancellationToken: cancellationToken);
+	}
+
+	private static async Task ExitAsync(TerminalPtyHarness terminal, CancellationToken cancellationToken)
+	{
+		await terminal.SendQuitAndConfirmAsync(cancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(cancellationToken: cancellationToken));
+	}
 }

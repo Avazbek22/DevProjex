@@ -5019,11 +5019,19 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				_application.RequestStop(dialog);
 				return;
 			}
+			if (selection.DirectoryToBrowse is { } directory)
+			{
+				model.Open(directory);
+				Refresh();
+				pathInput.Text = model.CurrentDirectory;
+				list.SetFocus();
+				return;
+			}
 
 			ActivateCurrent();
 		}
 
-		list.Accepted += (_, _) => ActivateCurrent();
+		TerminalInteractiveView.OnAccept(list, ActivateCurrent);
 		pathInput.KeyDown += (_, key) =>
 		{
 			if (key == Key.Tab)
@@ -5057,7 +5065,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		};
 		dialog.Add(locationTitle, location, pathTitle, pathInput, list, status);
 		var back = CreateDialogButton(L("Terminal.Tui.Back"));
-		back.Accepted += (_, _) =>
+		TerminalInteractiveView.OnAccept(back, () =>
 		{
 			var parent = model.Entries.FirstOrDefault(static entry => entry.IsParent);
 			if (parent is null)
@@ -5066,11 +5074,11 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			Refresh();
 			pathInput.Text = model.CurrentDirectory;
 			list.SetFocus();
-		};
+		});
 		dialog.AddButton(back);
 		dialog.AddButton(CreateDialogButton(L("Terminal.Tui.Cancel")));
 		var open = CreateDialogButton(L("Terminal.Tui.Open"));
-		open.Accepted += (_, _) => OpenSelection();
+		TerminalInteractiveView.OnAccept(open, OpenSelection);
 		dialog.AddButton(open);
 		dialog.KeyDown += (_, key) =>
 		{

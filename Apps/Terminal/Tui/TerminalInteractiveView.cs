@@ -1,4 +1,5 @@
 using Terminal.Gui.Input;
+using Terminal.Gui.ViewBase;
 
 namespace DevProjex.Terminal.Tui;
 
@@ -11,6 +12,20 @@ internal static class TerminalInteractiveView
 			return false;
 		activate();
 		return true;
+	}
+
+	// A Dialog treats every Accept raised inside it as a press of its default button: it closes
+	// before the originating list or button raises Accepted. Views whose Enter, double-click or
+	// press has its own meaning in a dialog therefore act on Accepting and keep the command there.
+	public static void OnAccept(View view, Action accept)
+	{
+		ArgumentNullException.ThrowIfNull(view);
+		ArgumentNullException.ThrowIfNull(accept);
+		view.Accepting += (_, args) =>
+		{
+			args.Handled = true;
+			accept();
+		};
 	}
 }
 
