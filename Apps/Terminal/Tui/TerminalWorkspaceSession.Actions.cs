@@ -134,7 +134,7 @@ internal sealed partial class TerminalWorkspaceSession
 		var collapsedControls = new TerminalLiteralLabel
 		{
 			X = 1,
-			Y = 0,
+			Y = _options.Plain ? 1 : 0,
 			Width = Dim.Fill(1),
 			Height = 1,
 			Visible = false,
@@ -318,9 +318,23 @@ internal sealed partial class TerminalWorkspaceSession
 		aggregate.HasFocusChanged += (_, _) => UpdateWorkspaceFocus();
 		aggregate.CommandLineRequested += (_, _) => OpenCommandLine();
 		if (onBorder)
+		{
 			frame.Border.View!.Add(aggregate);
-		else
-			frame.Add(aggregate);
+			return aggregate;
+		}
+
+		// A borderless frame draws no title, so the title leads the aggregate row instead.
+		var title = new TerminalLiteralLabel
+		{
+			X = 0,
+			Y = 0,
+			Height = 1,
+			Text = frame.Title,
+			SchemeName = TerminalWorkspaceTheme.Secondary
+		};
+		frame.TitleChanged += (_, _) => title.Text = frame.Title;
+		aggregate.X = Pos.Right(title);
+		frame.Add(title, aggregate);
 		return aggregate;
 	}
 
@@ -696,15 +710,16 @@ internal sealed partial class TerminalWorkspaceSession
 		TerminalAggregateControl? aggregate)
 	{
 		var aggregateColumns = aggregate?.Text.GetColumns() ?? 0;
+		var panelWidth = ResolveControlsPanelWidth();
 		// A mini-panel spans the controls panel inside its border. Its title needs the corner
 		// and both title caps ("┌┤" and "├") to the left of the aggregate anchored on the right.
-		var sectionWidth = ResolveControlsPanelWidth() - 2;
-		var maxColumns = Math.Max(
-			4,
-			sectionWidth - aggregateColumns - AggregateTrailingBorderColumns - 3);
+		// Plain mode has no frames and prints the title and the aggregate side by side.
+		var maxColumns = aggregate?.IsOnBorder == false
+			? panelWidth - aggregateColumns
+			: panelWidth - 2 - aggregateColumns - AggregateTrailingBorderColumns - 3;
 		return TerminalFrameTitle.Fit(
 			value,
-			maxColumns,
+			Math.Max(4, maxColumns),
 			_environment.SupportsUnicode && !_options.Plain);
 	}
 
@@ -1371,18 +1386,20 @@ internal sealed partial class TerminalWorkspaceSession
 			preferredHeight,
 			14,
 			Math.Max(14, _application.Screen.Height - 2));
-		using var dialog = CreateDialog(L("Terminal.Tui.ActionPalette"), width, height);
+		var title = L("Terminal.Tui.ActionPalette");
+		using var dialog = CreateDialog(title, width, height);
+		var top = AddPlainDialogTitle(dialog, title);
 		var prompt = new TerminalLiteralLabel
 		{
 			X = 1,
-			Y = 0,
+			Y = top,
 			Text = L("Terminal.Tui.ActionPalette.Search"),
 			SchemeName = TerminalWorkspaceTheme.Secondary
 		};
 		var input = new TextField
 		{
 			X = 1,
-			Y = 1,
+			Y = top + 1,
 			Width = Dim.Fill(1),
 			SchemeName = TerminalWorkspaceTheme.List
 		};
@@ -1390,7 +1407,7 @@ internal sealed partial class TerminalWorkspaceSession
 		var list = new ListView
 		{
 			X = 1,
-			Y = 3,
+			Y = top + 3,
 			Width = Dim.Fill(1),
 			Height = Dim.Fill(6),
 			SchemeName = TerminalWorkspaceTheme.List

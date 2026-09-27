@@ -5035,10 +5035,11 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private string? Prompt(string title, string label, string? initialValue)
 	{
 		using var dialog = CreateDialog(title, 74, 9);
+		var top = AddPlainDialogTitle(dialog, title);
 		var prompt = new TextView
 		{
 			X = 1,
-			Y = 0,
+			Y = top,
 			Width = Dim.Fill(1),
 			Height = 2,
 			ReadOnly = true,
@@ -5050,7 +5051,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var input = new TextField
 		{
 			X = 1,
-			Y = 2,
+			Y = top + 2,
 			Width = Dim.Fill(1),
 			Text = initialValue ?? string.Empty,
 			SchemeName = TerminalWorkspaceTheme.List
@@ -5072,10 +5073,11 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			return null;
 		var height = Math.Clamp(values.Count + ChoiceDialogChromeHeight, 12, Math.Max(12, _application.Screen.Height - 4));
 		using var dialog = CreateDialog(title, preferredWidth, height);
+		var top = AddPlainDialogTitle(dialog, title);
 		var label = new TextView
 		{
 			X = 1,
-			Y = 0,
+			Y = top,
 			Width = Dim.Fill(1),
 			Height = 2,
 			ReadOnly = true,
@@ -5088,7 +5090,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var list = new ListView
 		{
 			X = 1,
-			Y = 2,
+			Y = top + 2,
 			Width = Dim.Fill(1),
 			// Dialog button layout can collapse Dim.Fill() to one row in Terminal.Gui v2.
 			Height = Dim.Func(_ => ResolveChoiceListHeight(values.Count, ResolveDialogHeight(height))),
@@ -5127,31 +5129,32 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			16,
 			Math.Max(16, _terminalHeight - 2));
 		using var dialog = CreateDialog(title, dialogWidth, dialogHeight);
+		var top = AddPlainDialogTitle(dialog, title);
 		var locationTitle = new TerminalLiteralLabel
 		{
 			X = 1,
-			Y = 0,
+			Y = top,
 			Text = L("Terminal.Tui.Picker.CurrentFolder"),
 			SchemeName = TerminalWorkspaceTheme.Secondary
 		};
 		var location = new TerminalLiteralLabel
 		{
 			X = 1,
-			Y = 1,
+			Y = top + 1,
 			Width = Dim.Fill(1),
 			SchemeName = TerminalWorkspaceTheme.Base
 		};
 		var pathTitle = new TerminalLiteralLabel
 		{
 			X = 1,
-			Y = 3,
+			Y = top + 3,
 			Text = L("Terminal.Tui.Picker.Path"),
 			SchemeName = TerminalWorkspaceTheme.Secondary
 		};
 		var pathInput = new TextField
 		{
 			X = 1,
-			Y = 4,
+			Y = top + 4,
 			Width = Dim.Fill(1),
 			Text = initialPath ?? string.Empty,
 			SchemeName = TerminalWorkspaceTheme.List
@@ -5160,7 +5163,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var list = new ListView
 		{
 			X = 1,
-			Y = 6,
+			Y = top + 6,
 			Width = Dim.Fill(1),
 			Height = Dim.Fill(3),
 			SchemeName = TerminalWorkspaceTheme.List
@@ -5619,6 +5622,24 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			dialog.ShadowStyle = ShadowStyles.None;
 		dialog.KeyBindings.Add(Key.Esc, Command.Quit);
 		return dialog;
+	}
+
+	// A plain dialog has no frame title, so its title becomes the first content row.
+	// Returns the number of rows the title occupies.
+	private int AddPlainDialogTitle(Dialog dialog, string title)
+	{
+		if (!_options.Plain)
+			return 0;
+		dialog.Add(new TerminalLiteralLabel
+		{
+			X = 1,
+			Y = 0,
+			Width = Dim.Fill(1),
+			Height = 1,
+			Text = title,
+			SchemeName = TerminalWorkspaceTheme.Secondary
+		});
+		return 1;
 	}
 
 	private void AlignWelcomeDialogAfterActions(

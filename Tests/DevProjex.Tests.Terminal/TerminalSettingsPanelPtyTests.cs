@@ -1012,6 +1012,9 @@ public sealed class TerminalSettingsPanelPtyTests
 			.Select(static pair => pair.index)
 			.ToArray();
 		Assert.Equal(3, aggregateRows.Length);
+		Assert.StartsWith("Content processing  [ ] All (5)", lines[aggregateRows[0]], StringComparison.Ordinal);
+		Assert.StartsWith("Exclusions  [ ] All", lines[aggregateRows[1]], StringComparison.Ordinal);
+		Assert.StartsWith("File types  [x] All (3)", lines[aggregateRows[2]], StringComparison.Ordinal);
 		Assert.True(aggregateRows[0] < Array.FindIndex(
 			lines,
 			line => line.Contains("Hide secrets", StringComparison.Ordinal)));
