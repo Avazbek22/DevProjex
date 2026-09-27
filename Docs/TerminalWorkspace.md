@@ -31,7 +31,8 @@ The welcome screen offers:
 - open the current directory when it is a reasonable project candidate;
 - open Recent Workspaces, combining local folders and Git repositories;
 - browse for a folder;
-- clone through the existing DevProjex Git service;
+- clone through the existing DevProjex Git service; a local folder path opens
+  in place, as with `open`;
 - open DevProjex Desktop;
 - help and exit.
 

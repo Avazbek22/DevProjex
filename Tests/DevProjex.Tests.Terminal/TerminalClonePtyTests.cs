@@ -50,6 +50,38 @@ public sealed class TerminalClonePtyTests
 	}
 
 	[Fact(Timeout = 120_000)]
+	public async Task ClonePromptOpensALocalFolderInPlace()
+	{
+		using var welcomeDirectory = new TemporaryDirectory();
+		welcomeDirectory.WriteFile("notes.txt", "local folder in the clone prompt");
+		var folder = welcomeDirectory.CreateDirectory("LocalSource");
+		welcomeDirectory.WriteFile("LocalSource/LocalSourceMarker.cs", "class LocalSourceMarker { }");
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			welcomeDirectory.Path,
+			["--language", "en"],
+			columns: 120,
+			rows: 30,
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Choose a workspace action",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await StartCloneAsync(terminal, folder, TestContext.Current.CancellationToken);
+		var workspace = await terminal.WaitForScreenAsync(
+			"LocalSourceMarker.cs",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.DoesNotContain("DPX-TUI-CLONE-FAILED", workspace, StringComparison.Ordinal);
+		Assert.DoesNotContain("file:///", workspace, StringComparison.Ordinal);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(
+				cancellationToken: TestContext.Current.CancellationToken));
+	}
+
+	[Fact(Timeout = 120_000)]
 	public async Task SshCloneCannotPromptThroughTheParentPty()
 	{
 		if (OperatingSystem.IsWindows())

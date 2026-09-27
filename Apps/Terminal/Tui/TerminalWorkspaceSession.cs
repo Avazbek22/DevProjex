@@ -816,6 +816,13 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		if (string.IsNullOrWhiteSpace(url))
 			return;
 
+		// Shipped builds never clone over the local transport, so a folder opens in place, as with :open.
+		if (TryResolveDirectory(url, out var localProject))
+		{
+			BeginOpenFolder(localProject);
+			return;
+		}
+
 		if (!RepositoryUrlUtility.IsSupportedCloneSource(url))
 		{
 			ShowError("DPX-TUI-GIT-URL-INVALID", L("Git.Error.InvalidUrl"));
