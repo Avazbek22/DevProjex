@@ -47,7 +47,7 @@ public sealed class TerminalWorkspacePresentationPolicyTests
 	{
 		var value = TerminalPlainText.Normalize("↑↓ ←/→ Action · Value… — ready");
 
-		Assert.Equal("j/k h/l Action | Value... - ready", value);
+		Assert.Equal("Up/Down Left/Right Action | Value... - ready", value);
 		Assert.DoesNotContain(value, static character =>
 			"↑↓←→·…—".Contains(character));
 	}
@@ -290,7 +290,17 @@ public sealed class TerminalWorkspacePresentationPolicyTests
 			plain,
 			supportsUnicode);
 
-		Assert.Equal("k/j Action...", value);
+		Assert.Equal("Up/Down Action...", value);
+	}
+
+	[Theory]
+	[InlineData("Space Toggle  Shift+←/→ All  : Commands", "Space Toggle  Shift+Left/Right All  : Commands")]
+	[InlineData("↑/↓ or j/k moves", "Up/Down or j/k moves")]
+	public void PlainTextNamesArrowKeysInsteadOfUnboundLetterKeys(
+		string value,
+		string expected)
+	{
+		Assert.Equal(expected, TerminalPlainText.Normalize(value));
 	}
 
 	[Fact]

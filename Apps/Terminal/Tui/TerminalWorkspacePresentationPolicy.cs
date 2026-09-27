@@ -75,14 +75,15 @@ public static class TerminalWorkspacePresentationPolicy
 
 internal static class TerminalPlainText
 {
+	// Arrow glyphs name the arrow keys themselves. Spelling the key out keeps every hint
+	// truthful; substituting letter keys would advertise bindings that do not exist everywhere.
 	public static string Normalize(string value) =>
 		value
-			.Replace("↑↓", "j/k", StringComparison.Ordinal)
-			.Replace("←/→", "h/l", StringComparison.Ordinal)
-			.Replace('↑', 'k')
-			.Replace('↓', 'j')
-			.Replace('←', 'h')
-			.Replace('→', 'l')
+			.Replace("↑↓", "Up/Down", StringComparison.Ordinal)
+			.Replace("↑", "Up", StringComparison.Ordinal)
+			.Replace("↓", "Down", StringComparison.Ordinal)
+			.Replace("←", "Left", StringComparison.Ordinal)
+			.Replace("→", "Right", StringComparison.Ordinal)
 			.Replace(" · ", " | ", StringComparison.Ordinal)
 			.Replace("…", "...", StringComparison.Ordinal)
 			.Replace('—', '-')
