@@ -2,6 +2,7 @@ using System.Drawing;
 using DevProjex.Application.Preview;
 using DevProjex.Application.Secrets;
 using Terminal.Gui.Drawing;
+using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
 
@@ -111,6 +112,44 @@ public sealed class TerminalWorkspacePresentationPolicyTests
 		Assert.True(view.TryToggleActiveRedaction());
 
 		Assert.Equal([firstOccurrence, secondOccurrence], toggled);
+	}
+
+	[Fact]
+	public void PreviewSecretTogglesOnlyOnAPressInsideThePreview()
+	{
+		const string occurrence = "occurrence-a";
+		using var document = new InMemoryPreviewTextDocument(
+			"DEVPROJEX_REDACTED[github-pat#1]",
+			redactions:
+			[
+				new PreviewRedactionSpan(
+					occurrence,
+					"github-pat",
+					1,
+					0,
+					35,
+					SecretPreviewSpanState.Redacted)
+			]);
+		using var view = new TerminalVirtualizedPreviewView(showScrollBars: false)
+		{
+			Frame = new Rectangle(0, 0, 60, 5)
+		};
+		var toggled = new List<string>();
+		view.RedactionToggleRequested += (_, eventArgs) => toggled.Add(eventArgs.OccurrenceId);
+		view.SetDocument(document, preserveViewport: false);
+
+		void Send(MouseFlags flags) =>
+			view.NewMouseEvent(new Mouse { Position = new Point(3, 0), Flags = flags });
+
+		Send(MouseFlags.LeftButtonReleased);
+		Send(MouseFlags.LeftButtonClicked);
+		Send(MouseFlags.LeftButtonPressed | MouseFlags.PositionReport);
+		Assert.Empty(toggled);
+
+		Send(MouseFlags.LeftButtonPressed);
+		Send(MouseFlags.LeftButtonReleased);
+		Send(MouseFlags.LeftButtonClicked);
+		Assert.Equal([occurrence], toggled);
 	}
 
 	[Theory]

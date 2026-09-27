@@ -331,7 +331,14 @@ internal sealed class TerminalVirtualizedPreviewView : View
 
 	protected override bool OnMouseEvent(Mouse mouse)
 	{
-		if (mouse.Flags.HasFlag(MouseFlags.LeftButtonClicked))
+		// A secret changes state only on a press inside the preview. The Clicked event that
+		// Terminal.Gui reports under the release may belong to a drag that started elsewhere.
+		if (mouse.Flags.HasFlag(MouseFlags.LeftButtonClicked) ||
+			mouse.Flags.HasFlag(MouseFlags.LeftButtonDoubleClicked))
+		{
+			return true;
+		}
+		if (TerminalPointerInput.IsPress(mouse.Flags))
 		{
 			SetFocus();
 			var occurrenceId = mouse.Position is { } position
@@ -346,11 +353,8 @@ internal sealed class TerminalVirtualizedPreviewView : View
 			}
 			return true;
 		}
-		if (mouse.Flags.HasFlag(MouseFlags.LeftButtonPressed))
-		{
-			SetFocus();
+		if (TerminalPointerInput.IsMotion(mouse.Flags))
 			return true;
-		}
 		if (mouse.Flags.HasFlag(MouseFlags.WheeledUp))
 		{
 			ScrollToContentRow(FirstVisibleContentRow - 3, HorizontalOffset);
