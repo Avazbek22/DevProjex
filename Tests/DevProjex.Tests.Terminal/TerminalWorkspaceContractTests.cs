@@ -872,6 +872,45 @@ public sealed class TerminalWorkspaceContractTests
 	}
 
 	[Fact]
+	public async Task PlainTuiCopyPayloadMatchesThePlainContextExport()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/src/app.cs", "class App {}");
+		var destination = Path.Combine(workspace.Path, "context.txt");
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			project,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+
+		var payload = await controller.BuildCopyPayloadAsync(
+			state,
+			ProjectContextView.Tree,
+			ProjectContextDocumentFormat.Text,
+			TestContext.Current.CancellationToken,
+			plain: true);
+		await controller.ExportContextAsync(
+			state,
+			ProjectContextView.Tree,
+			ProjectContextDocumentFormat.Text,
+			destination,
+			overwrite: false,
+			TestContext.Current.CancellationToken,
+			plain: true);
+		var exported = await File.ReadAllTextAsync(
+			destination,
+			TestContext.Current.CancellationToken);
+
+		Assert.NotNull(payload);
+		Assert.Contains("`-- src", payload, StringComparison.Ordinal);
+		Assert.DoesNotContain("└", payload, StringComparison.Ordinal);
+		Assert.Equal(exported.ReplaceLineEndings(), payload.ReplaceLineEndings());
+	}
+
+	[Fact]
 	public async Task PreparedContextExportSummarizesCurrentSelectionWithoutWriting()
 	{
 		using var workspace = new TemporaryDirectory();

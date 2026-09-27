@@ -791,14 +791,16 @@ public sealed class TerminalWorkspaceController(
 		TerminalWorkspaceState state,
 		ProjectContextView view,
 		ProjectContextDocumentFormat format,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		bool plain = false)
 	{
 		var plan = await BuildCurrentPlanAsync(state, cancellationToken).ConfigureAwait(false);
 		using var document = await BuildExactExportDocumentAsync(
 				plan,
 				view,
 				format,
-				cancellationToken)
+				cancellationToken,
+				plain)
 			.ConfigureAwait(false);
 		return MaterializeCopyPayload(document);
 	}

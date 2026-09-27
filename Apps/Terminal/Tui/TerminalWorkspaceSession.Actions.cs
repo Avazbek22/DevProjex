@@ -1717,7 +1717,8 @@ internal sealed partial class TerminalWorkspaceSession
 						_state,
 						view,
 						format,
-						token)
+						token,
+						plain: _options.Plain)
 					.ConfigureAwait(false);
 				if (payload is null)
 				{
