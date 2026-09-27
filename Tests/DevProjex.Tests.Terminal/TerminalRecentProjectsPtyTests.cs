@@ -208,6 +208,93 @@ public sealed class TerminalRecentProjectsPtyTests
 	}
 
 	[Fact(Timeout = 90_000)]
+	public async Task InlineRecentNumberAppliesTheSavedSettingsOfThatProject()
+	{
+		using var project = CreateProject("InlineSavedProject", "InlineSavedMarker.cs");
+		using var welcomeDirectory = new TemporaryDirectory();
+		welcomeDirectory.WriteFile("notes.txt", "not a project");
+
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			welcomeDirectory.Path,
+			["--language", "en"],
+			initializeDataRoot: dataRoot =>
+			{
+				new RecentProjectsStore(() => dataRoot).AddFolder(null, project.Path);
+				new ProjectProfileStore(() => dataRoot).SaveProfile(
+					project.Path,
+					new ProjectSelectionProfile(
+						SelectedRootFolders: ["src"],
+						SelectedExtensions: [".cs"],
+						SelectedIgnoreOptions: [],
+						RootFolderStates: new Dictionary<string, bool>(PathComparer.Default)
+						{
+							["src"] = true
+						},
+						ExtensionStates: new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+						{
+							[".cs"] = true,
+							[".json"] = false
+						},
+						IgnoreOptionStates: new Dictionary<IgnoreOptionId, bool>()));
+			},
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.WaitForScreenAsync(
+			"[1]",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync("1", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		var workspace = await terminal.WaitForScreenAsync(
+			"InlineSavedMarker.cs",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.DoesNotContain("global.json", workspace, StringComparison.Ordinal);
+		Assert.False(terminal.HasExited);
+		await ExitAsync(terminal);
+	}
+
+	[Fact(Timeout = 90_000)]
+	public async Task InlineRecentNumberOpensProjectWithoutSavedSettingsFromFolderThatHasThem()
+	{
+		using var project = CreateProject("InlineDefaultProject", "InlineDefaultMarker.cs");
+		using var welcomeDirectory = new TemporaryDirectory();
+		welcomeDirectory.WriteFile("notes.txt", "saved settings belong to this folder");
+
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			welcomeDirectory.Path,
+			["--language", "en"],
+			initializeDataRoot: dataRoot =>
+			{
+				new RecentProjectsStore(() => dataRoot).AddFolder(null, project.Path);
+				new ProjectProfileStore(() => dataRoot).SaveProfile(
+					welcomeDirectory.Path,
+					new ProjectSelectionProfile(
+						SelectedRootFolders: [],
+						SelectedExtensions: [".txt"],
+						SelectedIgnoreOptions: []));
+			},
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.WaitForScreenAsync(
+			"[1]",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync("1", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		var workspace = await terminal.WaitForScreenAsync(
+			"InlineDefaultMarker.cs",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains("global.json", workspace, StringComparison.Ordinal);
+		Assert.DoesNotContain("DPX-CLI-PROFILE-NOT-FOUND", workspace, StringComparison.Ordinal);
+		Assert.False(terminal.HasExited);
+		await ExitAsync(terminal);
+	}
+
+	[Fact(Timeout = 90_000)]
 	public async Task LocalProfileWithUnavailableSelectionsOpensWithDiagnostics()
 	{
 		using var project = CreateProject("StaleSelectionProject", "AvailableMarker.cs");

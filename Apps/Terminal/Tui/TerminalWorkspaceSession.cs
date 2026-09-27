@@ -714,14 +714,14 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		{
 			case TerminalWelcomeActionKind.OpenCurrent:
 				if (_welcomeContext is not null)
-					BeginOpenProject(_welcomeContext.CurrentDirectory, _options.Profile);
+					BeginOpenFolder(_welcomeContext.CurrentDirectory);
 				break;
 			case TerminalWelcomeActionKind.RecentWorkspaces:
 				OpenRecentWorkspaces();
 				break;
 			case TerminalWelcomeActionKind.RecentProject:
 				if (action.Value is { } recentProject)
-					BeginOpenProject(recentProject, _options.Profile, TerminalProjectOpenSource.Recent);
+					BeginOpenFolder(recentProject, TerminalProjectOpenSource.Recent);
 				break;
 			case TerminalWelcomeActionKind.BrowseFolder:
 				BrowseForProject();
@@ -760,8 +760,16 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			return;
 		}
 
+		BeginOpenFolder(project);
+	}
+
+	// Saved settings are resolved for the folder being opened, not for the startup directory.
+	private void BeginOpenFolder(
+		string project,
+		TerminalProjectOpenSource source = TerminalProjectOpenSource.Other)
+	{
 		if (TryResolveAutomaticProfileInteractively(project, out var profile))
-			BeginOpenProject(project, profile);
+			BeginOpenProject(project, profile, source);
 	}
 
 	private void OpenPortableProfile()
