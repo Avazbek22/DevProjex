@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.RegularExpressions;
 using DevProjex.Infrastructure.RecentProjects;
 
@@ -595,6 +596,70 @@ public sealed class TerminalPtyLifecycleTests
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(cancellationToken: TestContext.Current.CancellationToken));
+	}
+
+	[Fact(Timeout = 90_000)]
+	public async Task EscDuringProjectLoadingReturnsToWelcomeAndKeepsTheSessionUsable()
+	{
+		using var project = CreateProject();
+		string? dataRoot = null;
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			project.Path,
+			[
+				"tui",
+				project.Path,
+				"--profile",
+				"standard",
+				"--screen",
+				"inline",
+				"--no-mouse",
+				"--language",
+				"en"
+			],
+			environment: new Dictionary<string, string>
+			{
+				[TerminalProgressCheckpointProtocol.PhasesVariable] = "project-loading"
+			},
+			initializeDataRoot: root => dataRoot = root,
+			useProgressCheckpointHost: true,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.NotNull(dataRoot);
+		await WaitForFileAsync(Path.Combine(
+			dataRoot,
+			TerminalProgressCheckpointProtocol.DirectoryName,
+			TerminalProgressCheckpointProtocol.GetReachedFileName("project-loading")));
+		await terminal.WaitForScreenAsync(
+			"Loading project",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+
+		var welcome = await terminal.WaitForStableScreenAsync(
+			"Operation canceled",
+			forbidden: "Loading project",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains("Choose a workspace action", welcome, StringComparison.Ordinal);
+		Assert.False(terminal.HasExited);
+
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(cancellationToken: TestContext.Current.CancellationToken));
+	}
+
+	private static async Task WaitForFileAsync(string path)
+	{
+		var timeout = Stopwatch.StartNew();
+		while (!File.Exists(path))
+		{
+			if (timeout.Elapsed > TimeSpan.FromSeconds(45))
+				throw new TimeoutException($"Timed out waiting for {path}");
+			await Task.Delay(25, TestContext.Current.CancellationToken);
+		}
 	}
 
 	private static TemporaryDirectory CreateProject()

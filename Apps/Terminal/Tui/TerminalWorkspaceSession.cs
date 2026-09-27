@@ -1082,11 +1082,14 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					state.Plan,
 					operationCts.Token)
 				.ConfigureAwait(false);
-			if (_stopping || operationCts.IsCancellationRequested)
+			if (_stopping)
 				return;
+			// Esc is handled on the UI thread, so checking cancellation there as well lets a
+			// cancel that arrives just before publishing still return to Welcome.
 			sessionAccepted = await InvokeAsync(() =>
 				TerminalRepositorySessionOwnership.TryPublishAndReplace(
-					_operations.IsCurrent(WorkspaceOperationKind.Active, operationCts),
+					_operations.IsCurrent(WorkspaceOperationKind.Active, operationCts) &&
+					!operationCts.IsCancellationRequested,
 					() =>
 					{
 						_gitCliAvailable = gitCliAvailable;
@@ -1095,7 +1098,11 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					ref _ownedRepositorySession,
 					preparedRepositorySession)).ConfigureAwait(false);
 			if (!sessionAccepted)
+			{
+				if (operationCts.IsCancellationRequested)
+					throw new OperationCanceledException();
 				return;
+			}
 
 			if (state.Plan.SourceIdentity?.RepositoryUrl is { Length: > 0 } repositoryUrl)
 			{
@@ -5446,7 +5453,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			dispose: false);
 
 	private void CancelActiveOperation()
-		=> _operations.Cancel(WorkspaceOperationKind.Active);
+		=> _operations.RequestCancel(WorkspaceOperationKind.Active);
 
 	private bool HasActiveOperation =>
 		_operations.IsRunning(WorkspaceOperationKind.Active);
@@ -5486,7 +5493,9 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		ExitRequested = true;
 		_prepareForShutdown();
 		_sessionCts.Cancel();
-		CancelActiveOperation();
+		// Unregister instead of requesting cancellation: an operation that is still unwinding
+		// must not navigate back to Welcome while the session exits.
+		_operations.Cancel(WorkspaceOperationKind.Active);
 		CancelWorkspaceRefreshes();
 		_application.RequestStop(_root);
 	}
