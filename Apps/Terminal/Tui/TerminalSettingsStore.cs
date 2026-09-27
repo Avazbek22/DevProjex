@@ -69,15 +69,54 @@ public sealed class TerminalSettingsStore
 		};
 		await UpdateAsync(current =>
 		{
-			var projects = (current.Projects ?? [])
+			var others = (current.Projects ?? [])
 				.Where(project => !PathComparer.Default.Equals(project.Root, normalized.Root))
-				.Append(normalized)
 				.OrderByDescending(static project => project.LastUsedUtc)
-				.Take(MaximumProjectSettings)
-				.ToArray();
-			return current with { Projects = projects };
+				.Take(MaximumProjectSettings - 1)
+				.ToList();
+			return FitProjectsWithinLimit(current, normalized, others);
 		}, cancellationToken).ConfigureAwait(false);
 	}
+
+	// The saved project always keeps its entry: older projects give way first, and an entry
+	// that is too large on its own keeps its shallowest expanded folders. Refusing the whole
+	// write would silently freeze every project's settings once the document is full.
+	private static TerminalSettingsDocument FitProjectsWithinLimit(
+		TerminalSettingsDocument current,
+		TerminalProjectSettings saved,
+		List<TerminalProjectSettings> others)
+	{
+		TerminalSettingsDocument Compose(TerminalProjectSettings entry) =>
+			current with { Projects = [entry, .. others] };
+
+		var document = Compose(saved);
+		while (others.Count > 0 && MeasureBytes(document) > MaximumDocumentBytes)
+		{
+			others.RemoveAt(others.Count - 1);
+			document = Compose(saved);
+		}
+		if (MeasureBytes(document) <= MaximumDocumentBytes)
+			return document;
+
+		var expanded = saved.ExpandedPaths
+			.OrderBy(static path => path == "." ? -1 : path.Count(static character => character == '/'))
+			.ThenBy(static path => path, StringComparer.Ordinal)
+			.ToArray();
+		var kept = 0;
+		var excluded = expanded.Length;
+		while (kept < excluded)
+		{
+			var count = (kept + excluded + 1) / 2;
+			if (MeasureBytes(Compose(saved with { ExpandedPaths = expanded[..count] })) <= MaximumDocumentBytes)
+				kept = count;
+			else
+				excluded = count - 1;
+		}
+		return Compose(saved with { ExpandedPaths = expanded[..kept] });
+	}
+
+	private static int MeasureBytes(TerminalSettingsDocument document) =>
+		JsonSerializer.SerializeToUtf8Bytes(document).Length;
 
 	public async Task SaveScreenModeAsync(
 		TerminalScreenMode screenMode,

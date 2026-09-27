@@ -1564,9 +1564,11 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var focusedPath = string.IsNullOrWhiteSpace(_selectedTreePath)
 			? null
 			: PathUtility.NormalizeSeparators(Path.GetRelativePath(state.Plan.SourceRoot, _selectedTreePath));
+		// The tree selection lives in the local project profile; repeating a large frontier here
+		// would only crowd presentation state out of the size-limited settings document.
 		return new TerminalProjectSettings(
 			state.Plan.SourceRoot,
-			state.BuildPersistedSelectedRelativePaths(),
+			[],
 			state.BuildExpandedRelativePaths(),
 			focusedPath,
 			_previewView,
