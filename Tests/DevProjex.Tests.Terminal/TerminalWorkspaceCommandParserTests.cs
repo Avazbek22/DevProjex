@@ -522,41 +522,66 @@ public sealed class TerminalWorkspaceCommandParserTests
 	public void CompletionOffersAPathForContextExportWithoutAnExplicitFormat()
 	{
 		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
 		workspace.WriteFile("review.md", "context");
 		var context = new TerminalWorkspaceCommandParseContext(
 			[".md"],
-			WorkingDirectory: workspace.Path);
+			WorkingDirectory: project);
 
-		var completion = _parser.GetCompletion("export context re", 17, context);
+		var completion = _parser.GetCompletion("export context ../re", 20, context);
 
-		Assert.Contains(completion.Candidates, candidate => candidate.Token == "review.md");
+		Assert.Contains(completion.Candidates, candidate => candidate.Token == "../review.md");
+	}
+
+	[Fact]
+	public void ExportDestinationCompletionNeverOffersPathsInsideTheProject()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/README.md", "# Project");
+		workspace.CreateDirectory("exports");
+		var context = new TerminalWorkspaceCommandParseContext(
+			[".md"],
+			WorkingDirectory: project);
+
+		var zip = _parser.GetCompletion("export zip ", "export zip ".Length, context);
+		var journal = _parser.GetCompletion("mcp log export ", "mcp log export ".Length, context);
+		var parent = _parser.GetCompletion("export folder ../", "export folder ../".Length, context);
+		var open = _parser.GetCompletion("open ", "open ".Length, context);
+
+		Assert.DoesNotContain(zip.Candidates, static item => item.Token == "README.md");
+		Assert.DoesNotContain(journal.Candidates, static item => item.Token == "README.md");
+		Assert.Contains(parent.Candidates, static item => item.Token == "../exports");
+		Assert.DoesNotContain(parent.Candidates, static item => item.Token == "../project");
+		Assert.Contains(open.Candidates, static item => item.Token == "README.md");
 	}
 
 	[Fact]
 	public void CompletionQuotesPathsWithSpacesAndPreservesAnOpeningQuote()
 	{
 		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
 		workspace.WriteFile("review notes.md", "context");
 		var context = new TerminalWorkspaceCommandParseContext(
 			[".md"],
-			WorkingDirectory: workspace.Path);
+			WorkingDirectory: project);
 
-		var unquoted = _parser.GetCompletion("export context rev", 18, context);
-		var quoted = _parser.GetCompletion("export context \"rev", 19, context);
+		var unquoted = _parser.GetCompletion("export context ../rev", 21, context);
+		var quoted = _parser.GetCompletion("export context \"../rev", 22, context);
 		var quotedWithSuffix = _parser.GetCompletion(
-			"export context \"rev stale.md\" trailing",
-			19,
+			"export context \"../rev stale.md\" trailing",
+			22,
 			context);
 
 		Assert.Equal(
-			"export context \"review notes.md\"",
-			Assert.Single(unquoted.Candidates, static item => item.Token == "review notes.md").CompletedText);
+			"export context \"../review notes.md\"",
+			Assert.Single(unquoted.Candidates, static item => item.Token == "../review notes.md").CompletedText);
 		Assert.Equal(
-			"export context \"review notes.md\"",
-			Assert.Single(quoted.Candidates, static item => item.Token == "review notes.md").CompletedText);
+			"export context \"../review notes.md\"",
+			Assert.Single(quoted.Candidates, static item => item.Token == "../review notes.md").CompletedText);
 		Assert.Equal(
-			"export context \"review notes.md\" trailing",
-			Assert.Single(quotedWithSuffix.Candidates, static item => item.Token == "review notes.md").CompletedText);
+			"export context \"../review notes.md\" trailing",
+			Assert.Single(quotedWithSuffix.Candidates, static item => item.Token == "../review notes.md").CompletedText);
 	}
 
 	[Theory]

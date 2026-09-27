@@ -896,10 +896,10 @@ internal sealed class TerminalWorkspaceCommandParser
 		{
 			return new CompletionCandidateSource(
 				CliChoiceSets.ContextDocumentFormat.Tokens,
-				ResolvePathCompletions(current, context.WorkingDirectory, cancellationToken));
+				ResolveExportPathCompletions(current, context.WorkingDirectory, cancellationToken));
 		}
 		if (argumentIndex == 2 && isContext || argumentIndex == 1 && tokens.Count > 1)
-			return new CompletionCandidateSource(ResolvePathCompletions(
+			return new CompletionCandidateSource(ResolveExportPathCompletions(
 				current,
 				context.WorkingDirectory,
 				cancellationToken));
@@ -974,7 +974,7 @@ internal sealed class TerminalWorkspaceCommandParser
 				new CompletionCandidateSource(McpLogTargets),
 			2 when tokens.Count > 2 && string.Equals(tokens[1].Value, "log", StringComparison.OrdinalIgnoreCase) &&
 								string.Equals(tokens[2].Value, "export", StringComparison.OrdinalIgnoreCase) =>
-				new CompletionCandidateSource(ResolvePathCompletions(
+				new CompletionCandidateSource(ResolveExportPathCompletions(
 					current,
 					context.WorkingDirectory,
 					cancellationToken)),
@@ -1048,10 +1048,23 @@ internal sealed class TerminalWorkspaceCommandParser
 		TerminalWorkspaceCommandParseContext context,
 		CancellationToken cancellationToken) => default;
 
+	// Export destinations resolve from the project directory but are always rejected inside it,
+	// so their completion offers only paths that lead out of the project.
+	private static IReadOnlyList<string> ResolveExportPathCompletions(
+		string current,
+		string? workingDirectory,
+		CancellationToken cancellationToken) =>
+		ResolvePathCompletions(
+			current,
+			workingDirectory,
+			cancellationToken,
+			outsideWorkingDirectoryOnly: true);
+
 	private static IReadOnlyList<string> ResolvePathCompletions(
 		string current,
 		string? workingDirectory,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		bool outsideWorkingDirectoryOnly = false)
 	{
 		if (string.IsNullOrWhiteSpace(workingDirectory))
 			return [];
@@ -1074,6 +1087,8 @@ internal sealed class TerminalWorkspaceCommandParser
 			{
 				cancellationToken.ThrowIfCancellationRequested();
 				if (!Path.GetFileName(path).StartsWith(prefix, StringComparison.CurrentCultureIgnoreCase))
+					continue;
+				if (outsideWorkingDirectoryOnly && PathUtility.IsPathInside(path, baseDirectory))
 					continue;
 				AddBoundedCompletionCandidate(
 					matches,

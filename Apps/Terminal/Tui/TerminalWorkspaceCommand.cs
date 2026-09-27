@@ -229,7 +229,7 @@ internal static class TerminalWorkspaceCommandCatalog
 			TerminalWorkspaceCommandGrammar.Export,
 			"export",
 			"export <context|zip|folder> ...",
-			"export context markdown context.md",
+			"export context markdown ../context.md",
 			static (session, command) => session.ExecuteExportCommand(command)),
 		Define(
 			TerminalWorkspaceCommandVerb.Copy,
