@@ -290,6 +290,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		if (_welcomeFooter is not null)
 			_welcomeFooter.Text = L("Terminal.Tui.Footer.Welcome");
 		UpdateWelcomeSelection();
+		// Translated texts differ in width, so the status line is fitted to the new language.
+		ApplyWelcomeLayout();
 	}
 
 	private void RefreshWelcomeRecentProjects()
@@ -484,6 +486,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			X = 2,
 			Y = 2,
 			Width = Dim.Fill(2),
+			// A fixed height lets the tagline wrap into the free row below it from the first layout.
+			Height = 2,
 			Text = L("Terminal.Tui.Welcome.Description"),
 			SchemeName = TerminalWorkspaceTheme.Base
 		};

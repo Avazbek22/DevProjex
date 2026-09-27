@@ -285,6 +285,36 @@ public sealed class TerminalPtyLifecycleTests
 				cancellationToken: TestContext.Current.CancellationToken));
 	}
 
+	[Fact(Timeout = 60_000)]
+	public async Task MinimumSizeWelcomeWrapsTheTaglineAndRefitsStatusAfterLanguageChange()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("notes.txt", "markerless directory");
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			workspace.Path,
+			["--language", "ru"],
+			columns: 60,
+			rows: 20,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var russian = await terminal.WaitForStableScreenAsync(
+			"Выберите действие",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains("откроете.", russian, StringComparison.Ordinal);
+
+		await terminal.SendAsync(":language en\r", TestContext.Current.CancellationToken);
+		var english = await terminal.WaitForStableScreenAsync(
+			"Choose a workspace action",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains("Current folder is ready", english, StringComparison.Ordinal);
+		Assert.Contains("you open it.", english, StringComparison.Ordinal);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(
+				cancellationToken: TestContext.Current.CancellationToken));
+	}
+
 	[Theory(Timeout = 60_000)]
 	[InlineData(60, 20)]
 	[InlineData(120, 20)]
