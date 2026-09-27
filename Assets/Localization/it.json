@@ -854,6 +854,7 @@
   "Terminal.Tui.Open": "Apri",
   "Terminal.Tui.Retry": "Riprova",
   "Terminal.Tui.Recent.Remove": "Rimuovi voce",
+  "Terminal.Tui.Recent.RemoveFolderHistoryOnly": "Rimuovere questa cartella dalla cronologia? La cartella stessa non verrà eliminata.",
   "Terminal.Tui.Recent.Status": "Stato",
   "Terminal.Tui.Recent.Available": "Disponibile",
   "Terminal.Tui.Recent.Unavailable": "Non disponibile",

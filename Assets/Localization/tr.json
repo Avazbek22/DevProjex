@@ -848,6 +848,7 @@
   "Terminal.Tui.Open": "Aç",
   "Terminal.Tui.Retry": "Yeniden dene",
   "Terminal.Tui.Recent.Remove": "Girişi kaldır",
+  "Terminal.Tui.Recent.RemoveFolderHistoryOnly": "Bu klasör yakın geçmişten kaldırılsın mı? Klasörün kendisi silinmez.",
   "Terminal.Tui.Recent.Status": "Durum",
   "Terminal.Tui.Recent.Available": "Mevcut",
   "Terminal.Tui.Recent.Unavailable": "Kullanılamıyor",

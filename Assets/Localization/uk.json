@@ -848,6 +848,7 @@
   "Terminal.Tui.Open": "Відкрити",
   "Terminal.Tui.Retry": "Повторіть спробу",
   "Terminal.Tui.Recent.Remove": "Видалити запис",
+  "Terminal.Tui.Recent.RemoveFolderHistoryOnly": "Видалити цю папку з нещодавньої історії? Саму папку не буде видалено.",
   "Terminal.Tui.Recent.Status": "Статус",
   "Terminal.Tui.Recent.Available": "в наявності",
   "Terminal.Tui.Recent.Unavailable": "Недоступний",

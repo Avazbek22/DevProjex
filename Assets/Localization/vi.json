@@ -848,6 +848,7 @@
   "Terminal.Tui.Open": "Mở",
   "Terminal.Tui.Retry": "Thử lại",
   "Terminal.Tui.Recent.Remove": "Xóa mục nhập",
+  "Terminal.Tui.Recent.RemoveFolderHistoryOnly": "Xóa thư mục này khỏi lịch sử gần đây? Bản thân thư mục không bị xóa.",
   "Terminal.Tui.Recent.Status": "Trạng thái",
   "Terminal.Tui.Recent.Available": "Có sẵn",
   "Terminal.Tui.Recent.Unavailable": "Không có sẵn",

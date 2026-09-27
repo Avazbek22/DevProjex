@@ -830,6 +830,7 @@
     "Terminal.Tui.Open": "Abrir",
     "Terminal.Tui.Retry": "Tentar novamente",
     "Terminal.Tui.Recent.Remove": "Remover entrada",
+    "Terminal.Tui.Recent.RemoveFolderHistoryOnly": "Remover esta pasta do histórico? A pasta em si não será eliminada.",
     "Terminal.Tui.Recent.Status": "Estado",
     "Terminal.Tui.Recent.Available": "Disponível",
     "Terminal.Tui.Recent.Unavailable": "Indisponível",

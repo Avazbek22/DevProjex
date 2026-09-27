@@ -848,6 +848,7 @@
   "Terminal.Tui.Open": "打开",
   "Terminal.Tui.Retry": "重试",
   "Terminal.Tui.Recent.Remove": "删除条目",
+  "Terminal.Tui.Recent.RemoveFolderHistoryOnly": "从最近历史记录中删除此文件夹吗？文件夹本身不会被删除。",
   "Terminal.Tui.Recent.Status": "状态",
   "Terminal.Tui.Recent.Available": "可用的",
   "Terminal.Tui.Recent.Unavailable": "不可用",

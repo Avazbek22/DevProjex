@@ -854,6 +854,7 @@
   "Terminal.Tui.Open": "Öffnen",
   "Terminal.Tui.Retry": "Erneut versuchen",
   "Terminal.Tui.Recent.Remove": "Eintrag entfernen",
+  "Terminal.Tui.Recent.RemoveFolderHistoryOnly": "Diesen Ordner aus dem Verlauf entfernen? Der Ordner selbst wird nicht gelöscht.",
   "Terminal.Tui.Recent.Status": "Status",
   "Terminal.Tui.Recent.Available": "Verfügbar",
   "Terminal.Tui.Recent.Unavailable": "Nicht verfügbar",

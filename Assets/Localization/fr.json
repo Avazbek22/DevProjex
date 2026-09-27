@@ -854,6 +854,7 @@
   "Terminal.Tui.Open": "Ouvrir",
   "Terminal.Tui.Retry": "Réessayer",
   "Terminal.Tui.Recent.Remove": "Supprimer l’entrée",
+  "Terminal.Tui.Recent.RemoveFolderHistoryOnly": "Retirer ce dossier de l’historique ? Le dossier lui-même ne sera pas supprimé.",
   "Terminal.Tui.Recent.Status": "État",
   "Terminal.Tui.Recent.Available": "Disponible",
   "Terminal.Tui.Recent.Unavailable": "Indisponible",

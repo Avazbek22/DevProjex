@@ -848,6 +848,7 @@
   "Terminal.Tui.Open": "Buka",
   "Terminal.Tui.Retry": "Coba lagi",
   "Terminal.Tui.Recent.Remove": "Hapus entri",
+  "Terminal.Tui.Recent.RemoveFolderHistoryOnly": "Hapus folder ini dari riwayat terkini? Folder itu sendiri tidak dihapus.",
   "Terminal.Tui.Recent.Status": "Status",
   "Terminal.Tui.Recent.Available": "Tersedia",
   "Terminal.Tui.Recent.Unavailable": "Tidak tersedia",

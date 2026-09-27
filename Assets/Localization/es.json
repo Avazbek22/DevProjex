@@ -848,6 +848,7 @@
     "Terminal.Tui.Open": "Abrir",
     "Terminal.Tui.Retry": "Reintentar",
     "Terminal.Tui.Recent.Remove": "Quitar entrada",
+    "Terminal.Tui.Recent.RemoveFolderHistoryOnly": "¿Quitar esta carpeta del historial? La carpeta en sí no se eliminará.",
     "Terminal.Tui.Recent.Status": "Estado",
     "Terminal.Tui.Recent.Available": "Disponible",
     "Terminal.Tui.Recent.Unavailable": "No disponible",

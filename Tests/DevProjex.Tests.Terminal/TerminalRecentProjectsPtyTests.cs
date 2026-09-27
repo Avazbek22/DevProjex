@@ -353,7 +353,10 @@ public sealed class TerminalRecentProjectsPtyTests
 		await OpenRecentOverlayAsync(terminal, cancellationToken);
 		await terminal.WaitForScreenAsync("Folder · RemovedProject", cancellationToken: cancellationToken);
 		await terminal.ClickLabelOnRowAsync("Remove entry", "Remove entry", cancellationToken: cancellationToken);
-		await terminal.WaitForScreenAsync("from recent history", cancellationToken: cancellationToken);
+		var prompt = await terminal.WaitForScreenAsync(
+			"Remove this folder from recent history?",
+			cancellationToken: cancellationToken);
+		Assert.DoesNotContain("URL", prompt, StringComparison.Ordinal);
 		Assert.NotNull(dataRoot);
 		Assert.Equal(2, new RecentProjectsStore(() => dataRoot).Load().RecentFolders.Count);
 

@@ -836,6 +836,7 @@
   "Terminal.Tui.Open": "Кушодан",
   "Terminal.Tui.Retry": "Такрор",
   "Terminal.Tui.Recent.Remove": "Ҳазфи сабт",
+  "Terminal.Tui.Recent.RemoveFolderHistoryOnly": "Ин ҷузвдон аз таърих тоза шавад? Худи ҷузвдон нест намешавад.",
   "Terminal.Tui.Recent.Status": "Ҳолат",
   "Terminal.Tui.Recent.Available": "Дастрас",
   "Terminal.Tui.Recent.Unavailable": "Дастнорас",

@@ -854,6 +854,7 @@
   "Terminal.Tui.Open": "Open",
   "Terminal.Tui.Retry": "Retry",
   "Terminal.Tui.Recent.Remove": "Remove entry",
+  "Terminal.Tui.Recent.RemoveFolderHistoryOnly": "Remove this folder from recent history? The folder itself is not deleted.",
   "Terminal.Tui.Recent.Status": "Status",
   "Terminal.Tui.Recent.Available": "Available",
   "Terminal.Tui.Recent.Unavailable": "Unavailable",

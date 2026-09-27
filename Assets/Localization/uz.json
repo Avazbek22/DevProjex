@@ -836,6 +836,7 @@
   "Terminal.Tui.Open": "Ochish",
   "Terminal.Tui.Retry": "Qayta urinish",
   "Terminal.Tui.Recent.Remove": "Yozuvni o‘chirish",
+  "Terminal.Tui.Recent.RemoveFolderHistoryOnly": "Bu papka tarixdan olib tashlansinmi? Papkaning o‘zi o‘chirilmaydi.",
   "Terminal.Tui.Recent.Status": "Holat",
   "Terminal.Tui.Recent.Available": "Mavjud",
   "Terminal.Tui.Recent.Unavailable": "Mavjud emas",

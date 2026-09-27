@@ -52,7 +52,9 @@ internal sealed partial class TerminalWorkspaceSession
 			{
 				var confirmed = Confirm(
 					L("Terminal.Tui.Recent.Remove"),
-					L("Terminal.Tui.RecentRepositories.RemoveHistoryOnly"));
+					workspace.Kind == RecentWorkspaceKind.Repository
+						? L("Terminal.Tui.RecentRepositories.RemoveHistoryOnly")
+						: L("Terminal.Tui.Recent.RemoveFolderHistoryOnly"));
 				if (!confirmed)
 					continue;
 				_recentProjectsSnapshot = workspace.Kind == RecentWorkspaceKind.Repository

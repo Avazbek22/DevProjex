@@ -848,6 +848,7 @@
   "Terminal.Tui.Open": "開く",
   "Terminal.Tui.Retry": "リトライ",
   "Terminal.Tui.Recent.Remove": "エントリを削除",
+  "Terminal.Tui.Recent.RemoveFolderHistoryOnly": "このフォルダを最近の履歴から削除しますか?フォルダ自体は削除されません。",
   "Terminal.Tui.Recent.Status": "状態",
   "Terminal.Tui.Recent.Available": "利用可能",
   "Terminal.Tui.Recent.Unavailable": "利用不可",

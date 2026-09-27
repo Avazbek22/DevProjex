@@ -836,6 +836,7 @@
   "Terminal.Tui.Open": "Ашу",
   "Terminal.Tui.Retry": "Қайталау",
   "Terminal.Tui.Recent.Remove": "Жазбаны жою",
+  "Terminal.Tui.Recent.RemoveFolderHistoryOnly": "Бұл қалта тарихтан жойылсын ба? Қалтаның өзі жойылмайды.",
   "Terminal.Tui.Recent.Status": "Күй",
   "Terminal.Tui.Recent.Available": "Қолжетімді",
   "Terminal.Tui.Recent.Unavailable": "Қолжетімсіз",

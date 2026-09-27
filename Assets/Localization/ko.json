@@ -848,6 +848,7 @@
   "Terminal.Tui.Open": "열기",
   "Terminal.Tui.Retry": "다시 시도",
   "Terminal.Tui.Recent.Remove": "항목 삭제",
+  "Terminal.Tui.Recent.RemoveFolderHistoryOnly": "최근 기록에서 이 폴더를 삭제하시겠습니까? 폴더 자체는 삭제되지 않습니다.",
   "Terminal.Tui.Recent.Status": "상태",
   "Terminal.Tui.Recent.Available": "사용 가능",
   "Terminal.Tui.Recent.Unavailable": "없는",

@@ -848,6 +848,7 @@
   "Terminal.Tui.Open": "Otwórz",
   "Terminal.Tui.Retry": "Spróbować ponownie",
   "Terminal.Tui.Recent.Remove": "Usuń wpis",
+  "Terminal.Tui.Recent.RemoveFolderHistoryOnly": "Usunąć ten folder z najnowszej historii? Sam folder nie jest usuwany.",
   "Terminal.Tui.Recent.Status": "Status",
   "Terminal.Tui.Recent.Available": "Dostępny",
   "Terminal.Tui.Recent.Unavailable": "Nie płynny",

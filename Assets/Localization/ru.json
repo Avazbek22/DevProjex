@@ -854,6 +854,7 @@
   "Terminal.Tui.Open": "Открыть",
   "Terminal.Tui.Retry": "Повторить",
   "Terminal.Tui.Recent.Remove": "Удалить запись",
+  "Terminal.Tui.Recent.RemoveFolderHistoryOnly": "Удалить эту папку из истории? Сама папка удалена не будет.",
   "Terminal.Tui.Recent.Status": "Состояние",
   "Terminal.Tui.Recent.Available": "Доступен",
   "Terminal.Tui.Recent.Unavailable": "Недоступен",
