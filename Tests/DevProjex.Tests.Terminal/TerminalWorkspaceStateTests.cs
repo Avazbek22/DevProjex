@@ -271,6 +271,23 @@ public sealed class TerminalWorkspaceStateTests
 	}
 
 	[Fact]
+	public void TargetedCommandSelectionWithoutChangedNodesKeepsAnExplicitlyEmptySelection()
+	{
+		using var state = new TerminalWorkspaceState(CreatePlan());
+		state.RestoreSelectedRelativePaths([]);
+		var revision = state.Revision;
+
+		var result = state.SetSelection(["src"], selected: false);
+
+		Assert.Equal(0, result.ChangedNodes);
+		Assert.False(result.SelectionChanged);
+		Assert.Equal(revision, state.Revision);
+		Assert.Empty(state.BuildSelection().SelectedPaths!);
+		Assert.True(state.IsEffectiveRootUnchecked);
+		Assert.Equal(0, state.SelectedFileCount);
+	}
+
+	[Fact]
 	public void RedundantCommandSelectionDoesNotRejectPendingReprojection()
 	{
 		var sourcePlan = CreatePlan();

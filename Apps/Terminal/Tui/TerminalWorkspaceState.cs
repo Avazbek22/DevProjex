@@ -638,16 +638,21 @@ public sealed class TerminalWorkspaceState : IDisposable
 		foreach (var target in targets.Order(ProjectTreePathIdentity.CanonicalComparer))
 			SetSubtreeSelection(_nodesByPath[target], selected);
 		RecomputeCheckStates();
-		_selectedPathFrontier = ResolveUpdatedSelectedPathFrontier(
-			previousFrontier,
-			previousRootState);
-		_usesUncheckedWholeTreePresentation =
-			GetCheckState(Plan.EffectiveTree) == TerminalTreeCheckState.Unchecked;
+		var changed = _checkStates.Count(pair =>
+			previousStates.GetValueOrDefault(pair.Key) != pair.Value);
+		// A whole-tree command states selection intent even when no mark changes, like
+		// Select None. A targeted command that changes no mark leaves the selection as it was.
+		if (changed > 0 || targets.Contains(Plan.EffectiveTree.FullPath))
+		{
+			_selectedPathFrontier = ResolveUpdatedSelectedPathFrontier(
+				previousFrontier,
+				previousRootState);
+			_usesUncheckedWholeTreePresentation =
+				GetCheckState(Plan.EffectiveTree) == TerminalTreeCheckState.Unchecked;
+		}
 		UpdatePathOptionStates(Plan);
 		RebuildVisibleRows();
 
-		var changed = _checkStates.Count(pair =>
-			previousStates.GetValueOrDefault(pair.Key) != pair.Value);
 		var selectionChanged = changed > 0 || !SelectedPathsEqual(
 			previousSelectedPaths,
 			BuildSelection().SelectedPaths);
