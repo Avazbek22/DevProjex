@@ -51,6 +51,8 @@ internal sealed partial class TerminalWorkspaceSession
 {
 	private const int WideControlsWidth = 38;
 	private const int ContentControlsFrameHeight = 7;
+	// Terminal.Gui hides a vertical scrollbar whose viewport is a single row.
+	private const int MinimumVisibleFilterRows = 2;
 	private const int AggregateFramePaddingColumns = 3;
 	private const int AggregateTrailingBorderColumns = 3;
 
@@ -139,23 +141,33 @@ internal sealed partial class TerminalWorkspaceSession
 			Visible = false,
 			SchemeName = TerminalWorkspaceTheme.Secondary
 		};
+		controlsFrame.MouseEvent += (_, mouse) => HandleCollapsedControlsPointer(collapsedControls, mouse);
+		if (controlsFrame.Border.View is { } controlsBorder)
+			controlsBorder.MouseEvent += (_, mouse) => HandleCollapsedControlsPointer(collapsedControls, mouse);
 		var (contentControlsFrame, contentControls) = CreateControlSection(
 			NormalizeControlTitle(L("Settings.Secrets.Title")),
 			TerminalControlSection.Content,
-			showVerticalScrollBar: false);
+			showVerticalScrollBar: true);
 		var contentAllControl = AddAggregateControl(
 			contentControlsFrame,
 			contentControls,
 			TerminalControlSection.Content);
-		contentControlsFrame.Y = _options.Plain ? 1 : 0;
-		contentControlsFrame.Height = ContentControlsFrameHeight;
+		var contentTop = _options.Plain ? 1 : 0;
+		var minimumFilterFrameHeight = (_options.Plain ? 1 : 2) + MinimumVisibleFilterRows;
+		contentControlsFrame.Y = contentTop;
+		contentControlsFrame.Height = Dim.Func(_ => ResolveContentControlsFrameHeight(
+			controlsFrame.Viewport.Height - contentTop,
+			minimumFilterFrameHeight));
 
+		// Terminal.Gui refuses focus to a view whose SuperView cannot take focus, so the
+		// Exclusions and File Types lists are reachable only through a focusable host.
 		var filterControlsHost = new View
 		{
 			X = 0,
 			Y = Pos.Bottom(contentControlsFrame),
 			Width = Dim.Fill(),
-			Height = Dim.Fill()
+			Height = Dim.Fill(),
+			CanFocus = true
 		};
 		var (exclusionControlsFrame, exclusionControls) = CreateControlSection(
 			NormalizeControlTitle(L("Terminal.Tui.Exclusions")),
@@ -196,6 +208,33 @@ internal sealed partial class TerminalWorkspaceSession
 			exclusionControls,
 			extensionAllControl,
 			extensionControls);
+	}
+
+	// Content Processing gives up rows on very low terminals so Exclusions and File Types
+	// keep enough rows to show their overflow scrollbars.
+	internal static int ResolveContentControlsFrameHeight(
+		int availableHeight,
+		int minimumFilterFrameHeight) =>
+		Math.Clamp(
+			availableHeight - 2 * minimumFilterFrameHeight,
+			minimumFilterFrameHeight,
+			ContentControlsFrameHeight);
+
+	private void HandleCollapsedControlsPointer(View collapsedControls, Mouse mouse)
+	{
+		if (!collapsedControls.Visible)
+			return;
+		if (TerminalPointerInput.IsPress(mouse.Flags))
+		{
+			mouse.Handled = true;
+			_application.Invoke(() => FocusPane(TerminalWorkspacePane.Controls));
+		}
+		else if (mouse.Flags.HasFlag(MouseFlags.LeftButtonReleased))
+		{
+			// The frame's default release binding would move focus onto the collapsed
+			// frame, which has no visible control to receive keys.
+			mouse.Handled = true;
+		}
 	}
 
 	private (FrameView Frame, TerminalParameterListView List) CreateControlSection(
@@ -274,6 +313,7 @@ internal sealed partial class TerminalWorkspaceSession
 			_activePane = TerminalWorkspacePane.Controls;
 			_activeControlSection = section;
 			_activeAggregateControlSection = section;
+			GetControlFocusTarget(section, aggregateIsActive: true)?.SetFocus();
 			UpdateWorkspaceFocus();
 		};
 		aggregate.HasFocusChanged += (_, _) => UpdateWorkspaceFocus();
@@ -686,10 +726,19 @@ internal sealed partial class TerminalWorkspaceSession
 		GetControlSection(_activeControlSection).List;
 
 	private View? ActiveControlView =>
-		IsAggregateControlFocused(_activeControlSection) ||
-		_activeAggregateControlSection == _activeControlSection
-			? (View?)GetAggregateControlSection(_activeControlSection).List ?? ActiveControlList
-			: ActiveControlList;
+		GetControlFocusTarget(
+			_activeControlSection,
+			IsAggregateControlFocused(_activeControlSection) ||
+			_activeAggregateControlSection == _activeControlSection);
+
+	// An "All" control drawn on a frame border belongs to the border adornment, which
+	// Terminal.Gui never focuses. Its section list then holds keyboard focus while the
+	// aggregate remains the active row, so the Parameters pane really owns the keyboard.
+	private View? GetControlFocusTarget(TerminalControlSection section, bool aggregateIsActive) =>
+		aggregateIsActive &&
+		GetAggregateControlSection(section).List is { IsOnBorder: false } aggregate
+			? aggregate
+			: GetControlSection(section).List;
 
 	private bool IsAggregateControlFocused(TerminalControlSection section) =>
 		GetAggregateControlSection(section).List?.HasFocus == true;
@@ -702,12 +751,9 @@ internal sealed partial class TerminalWorkspaceSession
 			_activePane = TerminalWorkspacePane.Controls;
 			ApplyWorkspaceLayout();
 		}
-		var target = (View?)GetAggregateControlSection(section).List ??
-					 GetControlSection(section).List;
-		_activeAggregateControlSection = GetAggregateControlSection(section).List is null
-			? null
-			: section;
-		target?.SetFocus();
+		var hasAggregate = GetAggregateControlSection(section).List is not null;
+		_activeAggregateControlSection = hasAggregate ? section : null;
+		GetControlFocusTarget(section, hasAggregate)?.SetFocus();
 		// Layout and focus notifications can report the previously focused list while a
 		// single-pane transition is being completed. The requested section is authoritative.
 		_activePane = TerminalWorkspacePane.Controls;
@@ -1267,7 +1313,6 @@ internal sealed partial class TerminalWorkspaceSession
 			_activeAggregateControlSection == section
 			? section
 			: null;
-		_focus.SaveBeforeBusy();
 	}
 
 	private void CycleGitMode()

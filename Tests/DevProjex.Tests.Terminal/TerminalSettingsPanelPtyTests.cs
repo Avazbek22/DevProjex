@@ -218,6 +218,38 @@ public sealed class TerminalSettingsPanelPtyTests
 	}
 
 	[Fact(Timeout = 90_000)]
+	public async Task ClickOnTheCollapsedParametersStripOpensParameters()
+	{
+		using var project = CreatePanelProject();
+		await using var terminal = await StartAsync(project.Path, columns: 130, rows: 40, mouse: true);
+
+		var tree = await WaitForStableScreenAsync(terminal, "> PROJECT TREE");
+		var stripRow = Array.FindIndex(
+			tree.Split('\n'),
+			static line => line.Contains("Content 0/5", StringComparison.Ordinal));
+		Assert.True(stripRow > 0, tree);
+		await terminal.SendMouseClickAsync(
+			column: 20,
+			row: stripRow,
+			cancellationToken: TestContext.Current.CancellationToken);
+		var parameters = await WaitForStableScreenAsync(terminal, "> PARAMETERS");
+		Assert.DoesNotContain("PROJECT TREE", parameters, StringComparison.Ordinal);
+		await terminal.SendSpaceAsync(TestContext.Current.CancellationToken);
+		await WaitForStableScreenAsync(terminal, "[x] Hide secrets");
+
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		tree = await WaitForStableScreenAsync(terminal, "> PROJECT TREE");
+		Assert.Contains("Content 1/5", tree, StringComparison.Ordinal);
+		await terminal.SendMouseClickAsync(
+			column: 4,
+			row: stripRow - 1,
+			cancellationToken: TestContext.Current.CancellationToken);
+		await WaitForStableScreenAsync(terminal, "> PARAMETERS");
+
+		await ExitAsync(terminal);
+	}
+
+	[Fact(Timeout = 90_000)]
 	public async Task MiniPanelsRenderAcrossEveryWorkspaceLayout()
 	{
 		using var project = CreatePanelProject();
@@ -367,6 +399,42 @@ public sealed class TerminalSettingsPanelPtyTests
 			"workspace-settings-extensions-focused-en-160x50",
 			extensionsFocused,
 			(project.Path, "<PROJECT_ROOT>"));
+
+		await ExitAsync(terminal);
+	}
+
+	[Fact(Timeout = 90_000)]
+	public async Task WideShortcutsMoveKeyboardFocusIntoExclusionsAndFileTypes()
+	{
+		using var project = CreatePanelProject(initializeGit: true);
+		project.WriteFile("obj/project.assets.json", "{}");
+		var uncheckedRoot = $"[ ] {Path.GetFileName(project.Path)}";
+		await using var terminal = await StartAsync(project.Path, columns: 160, rows: 45);
+		await WaitForStableScreenAsync(terminal, "> PROJECT TREE");
+
+		await terminal.SendAsync("X", TestContext.Current.CancellationToken);
+		var exclusionsFocused = await WaitForStableScreenAsync(terminal, "> PARAMETERS");
+		Assert.DoesNotContain("> PROJECT TREE", exclusionsFocused, StringComparison.Ordinal);
+		await terminal.SendSpaceAsync(TestContext.Current.CancellationToken);
+		await WaitForPanelContainsAsync(terminal, "Exclusions", "File types", "[ ] All");
+		var exclusionsCleared = await WaitForStableScreenAsync(terminal, "[ ] Smart ignore");
+		Assert.Contains(uncheckedRoot, exclusionsCleared, StringComparison.Ordinal);
+
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await WaitForStableScreenAsync(terminal, "> PROJECT TREE");
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await WaitForStableScreenAsync(terminal, "> CONTEXT PREVIEW");
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await WaitForStableScreenAsync(terminal, "> PARAMETERS");
+		await terminal.SendShiftTabAsync(TestContext.Current.CancellationToken);
+		await WaitForStableScreenAsync(terminal, "> CONTEXT PREVIEW");
+
+		await terminal.SendAsync("T", TestContext.Current.CancellationToken);
+		var fileTypesFocused = await WaitForStableScreenAsync(terminal, "> PARAMETERS");
+		Assert.DoesNotContain("> CONTEXT PREVIEW", fileTypesFocused, StringComparison.Ordinal);
+		await terminal.SendSpaceAsync(TestContext.Current.CancellationToken);
+		await WaitForPanelContainsAsync(terminal, "File types", null, "[ ] All");
+		await WaitForStableScreenAsync(terminal, "[ ] .cs");
 
 		await ExitAsync(terminal);
 	}

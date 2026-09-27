@@ -157,8 +157,16 @@ internal sealed class TerminalVirtualizedPreviewView : View
 			: currentIndex < 0 || currentIndex == occurrences.Count - 1 ? 0 : currentIndex + 1;
 		var next = occurrences[nextIndex];
 		_activeRedactionOccurrenceId = next.OccurrenceId;
-		var displayColumn = GetDisplayColumn(next.LineNumber - 1, next.StartColumn);
-		ScrollTo(Math.Max(0, next.LineNumber - 1), Math.Max(0, displayColumn - 2));
+		var line = next.LineNumber - 1;
+		var displayColumn = GetDisplayColumn(line, next.StartColumn);
+		var endDisplayColumn = GetDisplayColumn(line, next.StartColumn + next.Length);
+		// Keep the code left of an already visible value on screen, as search navigation does.
+		var horizontalOffset = !_wordWrap &&
+							   displayColumn >= HorizontalOffset &&
+							   endDisplayColumn <= HorizontalOffset + VisibleTextWidth
+			? HorizontalOffset
+			: Math.Max(0, displayColumn - 2);
+		ScrollTo(Math.Max(0, line), horizontalOffset);
 		SetNeedsDraw();
 		return true;
 	}

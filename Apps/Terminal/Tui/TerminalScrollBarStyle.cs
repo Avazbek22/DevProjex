@@ -31,6 +31,21 @@ internal static class TerminalScrollBarStyle
 			view.HorizontalScrollBar.Slider.DrawingContent += (_, _) =>
 				DrawThumb(view.HorizontalScrollBar.Slider, new Rune(useUnicode ? '━' : '-'));
 		}
+		if (vertical)
+			view.VerticalScrollBar.VisibleChanged += (_, _) => LayoutScrollBars(view, vertical, horizontal);
+		if (horizontal)
+			view.HorizontalScrollBar.VisibleChanged += (_, _) => LayoutScrollBars(view, vertical, horizontal);
+	}
+
+	// Showing or hiding a scrollbar moves the view's padding, but Terminal.Gui keeps both
+	// scrollbar frames computed for the old padding until an unrelated relayout. A horizontal
+	// bar that reappears in that state is placed below the viewport and stays invisible.
+	private static void LayoutScrollBars(View view, bool vertical, bool horizontal)
+	{
+		if (vertical)
+			view.VerticalScrollBar.Layout();
+		if (horizontal)
+			view.HorizontalScrollBar.Layout();
 	}
 
 	private static void DrawThumb(View slider, Rune glyph)

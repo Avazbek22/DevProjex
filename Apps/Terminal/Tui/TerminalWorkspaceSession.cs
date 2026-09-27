@@ -1332,6 +1332,16 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		ClearRoot();
 		_screen = TerminalWorkspaceScreen.Workspace;
 		_provisionalPreviewViewport = null;
+		if (previousProjectRoot is null ||
+			!ProjectTreePathIdentity.CanonicalComparer.Equals(previousProjectRoot, state.Plan.SourceRoot))
+		{
+			// Preview view, format, and searches belong to the project they were chosen in;
+			// a newly opened project starts from its own saved settings or the defaults.
+			_previewView = ProjectContextView.Tree;
+			_format = ProjectContextDocumentFormat.Text;
+			_previewSearchQuery = null;
+			_searchQuery = null;
+		}
 		var persisted = _services.TerminalSettingsStore.LoadProjectSettings(state.Plan.SourceRoot);
 		if (persisted is not null)
 		{
@@ -1590,9 +1600,9 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		}
 		_tree.UpdateContentMetrics(_state.VisibleRowWidth, _state.VisibleRows.Count);
 		UpdateTreeEmptyHint();
-		View? controlToRestore = aggregateControlWasActive
-			? GetAggregateControlSection(focusedControlSection).List
-			: GetControlSection(focusedControlSection).List;
+		var controlToRestore = GetControlFocusTarget(
+			focusedControlSection,
+			aggregateControlWasActive);
 		if (controlsHadFocus ||
 			(controlsWereActive && !HasActiveOperation && controlToRestore?.Enabled == true))
 		{
@@ -1605,7 +1615,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		}
 		UpdateWorkspaceFocus();
 		if (previewDocumentChanged && !string.IsNullOrWhiteSpace(_previewSearchQuery))
-			SchedulePreviewSearch(_previewSearchQuery, showNoResults: false);
+			SchedulePreviewSearch(_previewSearchQuery, showNoResults: false, userInitiated: false);
 		ScheduleWorkspacePersistence();
 	}
 
@@ -2098,6 +2108,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_treeFrame.SchemeName = _activePane == TerminalWorkspacePane.Tree
 			? TerminalWorkspaceTheme.FocusedPanel
 			: TerminalWorkspaceTheme.Panel;
+		// Like the Parameters lists, only the active pane renders a selection highlight.
+		_tree.SchemeName = _activePane == TerminalWorkspacePane.Tree
+			? TerminalWorkspaceTheme.List
+			: TerminalWorkspaceTheme.InactiveList;
 		_previewFrame.SchemeName = _activePane == TerminalWorkspacePane.Preview
 			? TerminalWorkspaceTheme.FocusedPanel
 			: TerminalWorkspaceTheme.Panel;
@@ -2977,7 +2991,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		TerminalPreviewRedactionToggleRequestedEventArgs eventArgs)
 	{
 		var kept = _services.SecretRedactionSession.ToggleKeepAsIs(eventArgs.OccurrenceId);
-		SetOperationStatus(
+		ShowTransientStatus(
 			L(kept
 				? "Terminal.Tui.Secret.Kept"
 				: "Terminal.Tui.Secret.Redacted"),
@@ -3060,7 +3074,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private void SchedulePreviewSearch(
 		string query,
 		bool showNoResults,
-		bool originatedFromCommandLine = false)
+		bool originatedFromCommandLine = false,
+		bool userInitiated = true)
 	{
 		if (_preview is null || _state is null)
 			return;
@@ -3115,7 +3130,9 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 						normalizedQuery,
 						searchResult,
 						startLine);
-					if (match is not null)
+					// A re-run after a document change only refreshes the matches unless the
+					// user is already in Preview; it never pulls focus from Tree or Parameters.
+					if (match is not null && (userInitiated || _preview.HasFocus))
 					{
 						ScrollPreviewToMatch(match.Value);
 						_preview.SetFocus();
@@ -3125,7 +3142,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					{
 						UpdatePanelTitles();
 						UpdatePreviewRange();
-						if (showNoResults)
+						if (match is null && showNoResults)
 						{
 							ShowNotice(
 								L("Terminal.Tui.Search"),
@@ -4817,7 +4834,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		if (aggregate is not null && logicalIndex == 0)
 		{
 			_activeAggregateControlSection = section;
-			aggregate.SetFocus();
+			GetControlFocusTarget(section, aggregateIsActive: true)?.SetFocus();
 		}
 		else
 		{

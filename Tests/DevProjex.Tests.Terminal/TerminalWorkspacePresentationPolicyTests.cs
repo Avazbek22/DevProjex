@@ -196,6 +196,89 @@ public sealed class TerminalWorkspacePresentationPolicyTests
 	}
 
 	[Theory]
+	[InlineData(4, 0)]
+	[InlineData(60, 58)]
+	[InlineData(100, 98)]
+	public void PreviewRedactionNavigationScrollsHorizontallyOnlyToRevealTheValue(
+		int indent,
+		int expectedOffset)
+	{
+		const string placeholder = "DEVPROJEX_REDACTED[github-pat#1]";
+		var line = new string(' ', indent) + placeholder + ";";
+		using var document = new InMemoryPreviewTextDocument(
+			line + "\n" + new string('x', 200),
+			redactions:
+			[
+				new PreviewRedactionSpan(
+					"occurrence",
+					"github-pat",
+					1,
+					indent,
+					placeholder.Length,
+					SecretPreviewSpanState.Redacted)
+			]);
+		using var view = new TerminalVirtualizedPreviewView(showScrollBars: false)
+		{
+			Frame = new Rectangle(0, 0, 80, 5)
+		};
+		view.SetDocument(document, preserveViewport: false);
+
+		Assert.True(view.MoveActiveRedaction(reverse: false));
+
+		Assert.Equal(expectedOffset, view.HorizontalOffset);
+	}
+
+	[Fact]
+	public void PreviewScrollBarsReturnWhenAHiddenPreviewIsNarrowedAgain()
+	{
+		using var document = new InMemoryPreviewTextDocument(string.Join(
+			'\n',
+			Enumerable.Range(1, 60).Select(static index => $"{index:D3} {new string('x', 110)}")));
+		using var root = new View { Width = 130, Height = 30 };
+		var frame = new FrameView { X = 59, Y = 2, Width = Dim.Fill(), Height = Dim.Fill(6) };
+		var preview = new TerminalVirtualizedPreviewView { Width = Dim.Fill(), Height = Dim.Fill(1) };
+		frame.Add(preview);
+		root.Add(frame);
+		root.BeginInit();
+		root.EndInit();
+		preview.SetDocument(document, preserveViewport: false);
+		root.Layout(new Size(130, 30));
+
+		frame.Visible = false;
+		frame.X = 0;
+		frame.Height = Dim.Fill(3);
+		root.Layout(new Size(130, 30));
+		Assert.False(preview.HorizontalScrollBar.Visible);
+
+		frame.X = 59;
+		frame.Height = Dim.Fill(6);
+		frame.Visible = true;
+		root.Layout(new Size(130, 30));
+
+		Assert.True(preview.HorizontalScrollBar.Visible);
+		Assert.Equal(preview.Viewport.Height, preview.HorizontalScrollBar.Frame.Y);
+		Assert.Equal(preview.Viewport.Height, preview.VerticalScrollBar.Frame.Height);
+	}
+
+	[Theory]
+	[InlineData(13, 4, 5)]
+	[InlineData(14, 4, 6)]
+	[InlineData(15, 4, 7)]
+	[InlineData(40, 4, 7)]
+	[InlineData(14, 3, 7)]
+	public void ContentProcessingYieldsRowsSoFilterListsKeepTheirScrollBars(
+		int availableHeight,
+		int minimumFilterFrameHeight,
+		int expectedContentHeight)
+	{
+		Assert.Equal(
+			expectedContentHeight,
+			TerminalWorkspaceSession.ResolveContentControlsFrameHeight(
+				availableHeight,
+				minimumFilterFrameHeight));
+	}
+
+	[Theory]
 	[InlineData(false, false)]
 	[InlineData(true, true)]
 	public void LocalizedTextUsesAsciiWhenPlainOrUnicodeIsUnavailable(
