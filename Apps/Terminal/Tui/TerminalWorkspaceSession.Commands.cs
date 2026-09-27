@@ -144,7 +144,13 @@ internal sealed partial class TerminalWorkspaceSession
 			nextMode,
 			selection.Exclusions ?? [],
 			originatedFromCommandLine: true);
-		return ToggleCommandResult(L(ProjectPresentationCatalog.Get(mode.Value).LabelKey), enabled);
+		var result = ToggleCommandResult(L(ProjectPresentationCatalog.Get(mode.Value).LabelKey), enabled);
+		// Turning a legacy Git toggle off always ends Git filtering, whichever Git mode was
+		// active, so the result names the mode that is now in effect.
+		return enabled
+			? result
+			: TerminalWorkspaceCommandExecutionResult.Success(
+				result.Message + PanelSeparator + L(ProjectPresentationCatalog.Get(GitFilteringMode.None).LabelKey));
 	}
 
 	internal TerminalWorkspaceCommandExecutionResult ExecuteAllCommand(

@@ -248,7 +248,7 @@ inline ghost suffix as soon as a token can be completed:
 
 | Syntax | Session action |
 |---|---|
-| `set <option> on\|off` | toggle one content or exclusion option; legacy `set gitignore` and `set tracked` remain supported |
+| `set <option> on\|off` | toggle one content or exclusion option; legacy `set gitignore` and `set tracked` remain supported, and turning either off switches Git filtering off |
 | `set activity on\|off` | show or hide the persisted live agent-activity status and tree markers |
 | `set git off\|gitignore\|tracked\|staged\|changes\|diff:<ref>..<ref>` | select the Git axis without changing profiles |
 | `all types\|exclusions\|content on\|off` | apply the framed **All** action |
