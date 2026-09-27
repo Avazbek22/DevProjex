@@ -3860,23 +3860,28 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	}
 
 	private string ResolveValidationErrorMessage(string code) =>
+		L(ResolveValidationErrorMessageKey(code));
+
+	internal static string ResolveValidationErrorMessageKey(string code) =>
 		code switch
 		{
 			"DPX-GIT-TRACKED-INDEX-UNAVAILABLE" =>
-				L("Terminal.Diagnostic.TrackedIndexUnavailable"),
+				"Terminal.Diagnostic.TrackedIndexUnavailable",
 			GitScopeFilter.UnavailableDiagnosticCode =>
-				L("Terminal.Diagnostic.GitStateUnavailable"),
+				"Terminal.Diagnostic.GitStateUnavailable",
 			GitScopeFilter.UnsafeFilterDiagnosticCode =>
-				L("Terminal.Diagnostic.GitUnsafeFilter"),
+				"Terminal.Diagnostic.GitUnsafeFilter",
 			GitScopeFilter.DeletedDiagnosticCode =>
-				L("Terminal.Diagnostic.GitStateDeleted"),
+				"Terminal.Diagnostic.GitStateDeleted",
 			"DPX-PROJECT-NOT-FOUND" or "DPX-PROJECT-PATH-INVALID" =>
-				L("Terminal.Tui.Error.ProjectUnavailable"),
+				"Terminal.Tui.Error.ProjectUnavailable",
 			"DPX-SELECTION-PATH-MISSING" =>
-				L("Terminal.Diagnostic.SelectedPathMissing"),
+				"Terminal.Diagnostic.SelectedPathMissing",
 			"DPX-SELECTION-PATH-INVALID" =>
-				L("Terminal.Error.SelectionPathInvalid"),
-			_ => L("Terminal.Tui.Error.InvalidOperation")
+				"Terminal.Error.SelectionPathInvalid",
+			"DPX-CLI-ZIP-EXTENSION-REQUIRED" =>
+				"Terminal.Error.ZipExtensionRequired",
+			_ => "Terminal.Tui.Error.InvalidOperation"
 		};
 
 	private void SetWorkspaceBusy(string? operationName, string? phase = null)

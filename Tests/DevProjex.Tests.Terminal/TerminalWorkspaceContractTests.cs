@@ -2053,6 +2053,32 @@ public sealed class TerminalWorkspaceContractTests
 				.Count(static line => line.StartsWith("Redaction", StringComparison.Ordinal)));
 	}
 
+	[Fact]
+	public async Task ZipExportWithoutExtensionReportsTheLocalizedExtensionMessage()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/app.cs", "class App {}");
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			project,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+
+		var exception = await Assert.ThrowsAsync<ProjectContextValidationException>(() =>
+			controller.PrepareProjectExportAsync(
+				state,
+				ProjectCopyExportFormat.Zip,
+				Path.Combine(workspace.Path, "archive"),
+				TestContext.Current.CancellationToken));
+
+		Assert.Equal(
+			"ZIP output must use the .zip extension.",
+			services.Localization[TerminalWorkspaceSession.ResolveValidationErrorMessageKey(exception.Code)]);
+	}
+
 	[Theory]
 	[InlineData(TerminalExportKind.Folder, true, false, true)]
 	[InlineData(TerminalExportKind.Zip, false, true, true)]
