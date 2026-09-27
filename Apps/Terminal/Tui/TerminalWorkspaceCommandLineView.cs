@@ -305,7 +305,9 @@ internal sealed class TerminalWorkspaceCommandLineView : View
 		if (key == Key.CursorDown)
 		{
 			key.Handled = true;
-			SetInputText(_history.Next());
+			var next = _history.Next(InputText);
+			if (!string.Equals(next, InputText, StringComparison.Ordinal))
+				SetInputText(next);
 			return;
 		}
 		if (key == Key.Tab)

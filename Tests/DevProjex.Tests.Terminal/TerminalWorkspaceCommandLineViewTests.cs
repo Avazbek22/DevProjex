@@ -333,6 +333,18 @@ public sealed class TerminalWorkspaceCommandLineViewTests
 		Assert.Equal("view con", view.InputText);
 	}
 
+	[Fact]
+	public void DownKeepsTheTypedCommandWhenHistoryIsNotBeingBrowsed()
+	{
+		using var view = CreateView(new TerminalCommandHistory(["view tree"]));
+		view.Open("view content");
+		var input = GetField<TerminalTransparentTextEditor>(view, "_input");
+
+		Assert.True(input.NewKeyDownEvent(Key.CursorDown));
+
+		Assert.Equal("view content", view.InputText);
+	}
+
 	private static TerminalWorkspaceCommandLineView CreateView(TerminalCommandHistory? history = null) =>
 		new(
 			null!,
