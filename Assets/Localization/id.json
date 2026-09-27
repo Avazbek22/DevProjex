@@ -155,6 +155,7 @@
   "AgentJournal.Clear.ProjectMessage": "Hapus riwayat proyek “{0}”? File proyek tidak akan berubah.",
   "AgentJournal.Clear.AllMessage": "Hapus semua entri jurnal agen?",
   "AgentJournal.Clear.Completed": "Sesi jurnal yang selesai dihapus ({0}); sesi aktif dipertahankan.",
+  "AgentJournal.Clear.SharedKept": "Sesi yang juga dipakai proyek lain dipertahankan ({0}).",
   "AgentJournal.Live": "Aktif",
   "AgentJournal.Mode.Live": "Aktif",
   "AgentJournal.Mode.Standard": "Standar",

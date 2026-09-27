@@ -155,6 +155,7 @@
   "AgentJournal.Clear.ProjectMessage": "«{0}» жобасының тарихы жойылсын ба? Жоба файлдары өзгермейді.",
   "AgentJournal.Clear.AllMessage": "Агент журналының барлық жазбасын тазалау керек пе?",
   "AgentJournal.Clear.Completed": "Аяқталған журнал сеанстары тазаланды ({0}); белсенді сеанстар сақталды.",
+  "AgentJournal.Clear.SharedKept": "Басқа жобалармен ортақ сеанстар сақталды ({0}).",
   "AgentJournal.Live": "Тікелей",
   "AgentJournal.Mode.Live": "Тікелей",
   "AgentJournal.Mode.Standard": "Қалыпты",

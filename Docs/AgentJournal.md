@@ -31,7 +31,8 @@ colors.
 **Export…** writes the common receipt representation as Markdown or JSON.
 **Clear** asks for confirmation and clears completed sessions for the current
 project when the filter is selected, or completed sessions from the complete
-journal when it is not. Active Standard and Live sessions are preserved by both
+journal when it is not. A session that also served other projects is kept when
+one project is cleared, so their history is not lost. Active Standard and Live sessions are preserved by both
 manual clearing and retention. **Reset data** applies the same protection while
 clearing saved local project data.
 

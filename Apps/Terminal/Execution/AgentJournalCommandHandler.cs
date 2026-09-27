@@ -35,10 +35,18 @@ internal sealed class AgentJournalCommandHandler(
 		var normalizedRoot = NormalizeOptionalProjectRoot(projectRoot);
 		if (clear)
 		{
+			// Sessions that also served other projects are kept when one project is cleared.
+			var sharedSessions = normalizedRoot is null
+				? 0
+				: (await reader.ListSessionsAsync(normalizedRoot, int.MaxValue, cancellationToken).ConfigureAwait(false))
+					.Count(static session => !session.IsLive && session.Roots.Count > 1);
 			var removed = await reader.ClearAsync(normalizedRoot, cancellationToken).ConfigureAwait(false);
+			var shared = sharedSessions > 0
+				? $" {sharedSessions.ToString(CultureInfo.InvariantCulture)} session(s) shared with other projects were kept."
+				: string.Empty;
 			return await WriteAsync(
 				$"Cleared {removed.ToString(CultureInfo.InvariantCulture)} completed agent journal session(s); " +
-				$"active sessions were preserved.{Environment.NewLine}",
+				$"active sessions were preserved.{shared}{Environment.NewLine}",
 				outputPath,
 				cancellationToken).ConfigureAwait(false);
 		}

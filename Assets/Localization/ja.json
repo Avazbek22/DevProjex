@@ -155,6 +155,7 @@
   "AgentJournal.Clear.ProjectMessage": "プロジェクト「{0}」の履歴を削除しますか？プロジェクトのファイルは変更されません。",
   "AgentJournal.Clear.AllMessage": "エージェントジャーナルのすべての項目を消去しますか？",
   "AgentJournal.Clear.Completed": "完了したジャーナルセッションを消去しました（{0}）。アクティブなセッションは保持されます。",
+  "AgentJournal.Clear.SharedKept": "他のプロジェクトと共有しているセッションは保持されました（{0}）。",
   "AgentJournal.Live": "ライブ",
   "AgentJournal.Mode.Live": "ライブ",
   "AgentJournal.Mode.Standard": "標準",

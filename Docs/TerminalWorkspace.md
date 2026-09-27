@@ -275,7 +275,7 @@ inline ghost suffix as soon as a token can be completed:
 | `mcp connect <claude-code\|codex\|cursor\|vscode\|json> [live\|standard]` | connect the selected MCP client to the open project; mode defaults to `live`, and `json` shows the manual configuration |
 | `mcp log [session <id>\|last]` | open the project journal; choose a session to inspect its calls and totals |
 | `mcp log export <path> [markdown\|json] [session <id>\|last]` | write a context receipt with the shared receipt formatter; format defaults to Markdown and session defaults to `last` |
-| `mcp log clear` | clear completed journal sessions for the project after confirmation |
+| `mcp log clear` | clear completed journal sessions for the project after confirmation; sessions shared with other projects are kept |
 | `refresh` | rescan the working copy from disk without network access |
 | `language [code]` | show available language codes or switch the workspace language immediately |
 | `diagnostics` | show every diagnostic in a scrollable overlay |

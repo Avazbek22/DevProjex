@@ -155,6 +155,7 @@
   "AgentJournal.Clear.ProjectMessage": "Supprimer l’historique du projet « {0} » ? Les fichiers du projet ne seront pas modifiés.",
   "AgentJournal.Clear.AllMessage": "Effacer toutes les entrées du journal ?",
   "AgentJournal.Clear.Completed": "Sessions terminées du journal effacées ({0}) ; les sessions actives sont conservées.",
+  "AgentJournal.Clear.SharedKept": "Les sessions partagées avec d’autres projets sont conservées ({0}).",
   "AgentJournal.Live": "Active",
   "AgentJournal.Mode.Live": "Direct",
   "AgentJournal.Mode.Standard": "Standard",

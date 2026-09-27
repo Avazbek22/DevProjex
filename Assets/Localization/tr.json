@@ -155,6 +155,7 @@
   "AgentJournal.Clear.ProjectMessage": "“{0}” projesinin geçmişi silinsin mi? Proje dosyaları değişmeyecek.",
   "AgentJournal.Clear.AllMessage": "Tüm aracı günlüğü kayıtları temizlensin mi?",
   "AgentJournal.Clear.Completed": "Tamamlanan günlük oturumları temizlendi ({0}); etkin oturumlar korundu.",
+  "AgentJournal.Clear.SharedKept": "Diğer projelerle paylaşılan oturumlar korundu ({0}).",
   "AgentJournal.Live": "Canlı",
   "AgentJournal.Mode.Live": "Canlı",
   "AgentJournal.Mode.Standard": "Standart",

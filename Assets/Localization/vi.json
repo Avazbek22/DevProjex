@@ -155,6 +155,7 @@
   "AgentJournal.Clear.ProjectMessage": "Xóa lịch sử của dự án “{0}”? Các tệp dự án sẽ không thay đổi.",
   "AgentJournal.Clear.AllMessage": "Xóa tất cả các mục nhật ký tác nhân?",
   "AgentJournal.Clear.Completed": "Đã xóa các phiên nhật ký đã kết thúc ({0}); các phiên đang hoạt động được giữ lại.",
+  "AgentJournal.Clear.SharedKept": "Các phiên dùng chung với dự án khác được giữ lại ({0}).",
   "AgentJournal.Live": "Trực tiếp",
   "AgentJournal.Mode.Live": "Trực tiếp",
   "AgentJournal.Mode.Standard": "Tiêu chuẩn",

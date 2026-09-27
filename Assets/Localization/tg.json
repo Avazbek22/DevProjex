@@ -155,6 +155,7 @@
   "AgentJournal.Clear.ProjectMessage": "Таърихи лоиҳаи «{0}» нест карда шавад? Файлҳои лоиҳа тағйир намеёбанд.",
   "AgentJournal.Clear.AllMessage": "Ҳамаи сабтҳои журнали агент тоза шаванд?",
   "AgentJournal.Clear.Completed": "Ҷаласаҳои анҷомёфтаи журнал тоза карда шуданд ({0}); ҷаласаҳои фаъол нигоҳ дошта шуданд.",
+  "AgentJournal.Clear.SharedKept": "Ҷаласаҳое, ки бо лоиҳаҳои дигар умумианд, нигоҳ дошта шуданд ({0}).",
   "AgentJournal.Live": "Зинда",
   "AgentJournal.Mode.Live": "Зинда",
   "AgentJournal.Mode.Standard": "Одатӣ",

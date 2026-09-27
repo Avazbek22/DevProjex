@@ -155,6 +155,7 @@
   "AgentJournal.Clear.ProjectMessage": "删除项目“{0}”的历史记录？项目文件不会更改。",
   "AgentJournal.Clear.AllMessage": "清除所有代理日志条目？",
   "AgentJournal.Clear.Completed": "已清除已完成的日志会话（{0}）；活动会话已保留。",
+  "AgentJournal.Clear.SharedKept": "与其他项目共享的会话已保留（{0}）。",
   "AgentJournal.Live": "实时",
   "AgentJournal.Mode.Live": "实时",
   "AgentJournal.Mode.Standard": "标准",

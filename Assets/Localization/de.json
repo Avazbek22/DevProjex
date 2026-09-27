@@ -155,6 +155,7 @@
   "AgentJournal.Clear.ProjectMessage": "Verlauf für Projekt „{0}“ löschen? Projektdateien bleiben unverändert.",
   "AgentJournal.Clear.AllMessage": "Alle Agentenjournal-Einträge löschen?",
   "AgentJournal.Clear.Completed": "Abgeschlossene Journalsitzungen geleert ({0}); aktive Sitzungen bleiben erhalten.",
+  "AgentJournal.Clear.SharedKept": "Mit anderen Projekten geteilte Sitzungen bleiben erhalten ({0}).",
   "AgentJournal.Live": "Aktiv",
   "AgentJournal.Mode.Live": "Live",
   "AgentJournal.Mode.Standard": "Standard",

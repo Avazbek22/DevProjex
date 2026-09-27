@@ -190,7 +190,7 @@ the shared context receipt and therefore requires one of those selectors. JSON i
 the stable `devprojex-agent-journal` version-1 document described in
 [CLI-Output-Contract.md](CLI-Output-Contract.md). `--output` atomically creates a
 new file and never replaces an existing one. `--clear --yes` removes only sessions
-matching the selected project. The journal retains at most 200 sessions for 30
+matching the selected project; sessions shared with other projects are kept. The journal retains at most 200 sessions for 30
 days and stores metadata, counters, relative delivered paths, and whitelisted
 arguments, never file contents or detected values.
 

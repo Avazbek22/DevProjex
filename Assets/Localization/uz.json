@@ -155,6 +155,7 @@
   "AgentJournal.Clear.ProjectMessage": "“{0}” loyihasi tarixi o‘chirilsinmi? Loyiha fayllari o‘zgarmaydi.",
   "AgentJournal.Clear.AllMessage": "Agent jurnalining barcha yozuvlari tozalansinmi?",
   "AgentJournal.Clear.Completed": "Yakunlangan jurnal seanslari tozalandi ({0}); faol seanslar saqlab qolindi.",
+  "AgentJournal.Clear.SharedKept": "Boshqa loyihalar bilan umumiy seanslar saqlab qolindi ({0}).",
   "AgentJournal.Live": "Jonli",
   "AgentJournal.Mode.Live": "Jonli",
   "AgentJournal.Mode.Standard": "Standart",

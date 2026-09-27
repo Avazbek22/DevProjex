@@ -155,6 +155,7 @@
   "AgentJournal.Clear.ProjectMessage": "Eliminare la cronologia del progetto «{0}»? I file del progetto non verranno modificati.",
   "AgentJournal.Clear.AllMessage": "Cancellare tutte le voci del registro?",
   "AgentJournal.Clear.Completed": "Sessioni concluse del registro cancellate ({0}); le sessioni attive sono state mantenute.",
+  "AgentJournal.Clear.SharedKept": "Le sessioni condivise con altri progetti sono state mantenute ({0}).",
   "AgentJournal.Live": "Attiva",
   "AgentJournal.Mode.Live": "Live",
   "AgentJournal.Mode.Standard": "Standard",

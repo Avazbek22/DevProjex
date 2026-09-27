@@ -155,6 +155,7 @@
   "AgentJournal.Clear.ProjectMessage": "Delete the history for project “{0}”? Project files will not be changed.",
   "AgentJournal.Clear.AllMessage": "Clear all agent journal entries?",
   "AgentJournal.Clear.Completed": "Completed journal sessions cleared ({0}); active sessions preserved.",
+  "AgentJournal.Clear.SharedKept": "Sessions shared with other projects were kept ({0}).",
   "AgentJournal.Live": "Live",
   "AgentJournal.Mode.Live": "Live",
   "AgentJournal.Mode.Standard": "Standard",

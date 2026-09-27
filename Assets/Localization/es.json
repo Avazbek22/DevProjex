@@ -155,6 +155,7 @@
   "AgentJournal.Clear.ProjectMessage": "¿Eliminar el historial del proyecto «{0}»? Los archivos del proyecto no cambiarán.",
   "AgentJournal.Clear.AllMessage": "¿Borrar todas las entradas del registro?",
   "AgentJournal.Clear.Completed": "Sesiones finalizadas del registro borradas ({0}); las sesiones activas se conservan.",
+  "AgentJournal.Clear.SharedKept": "Las sesiones compartidas con otros proyectos se conservan ({0}).",
   "AgentJournal.Live": "Activa",
   "AgentJournal.Mode.Live": "En vivo",
   "AgentJournal.Mode.Standard": "Estándar",

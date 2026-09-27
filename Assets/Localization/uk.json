@@ -155,6 +155,7 @@
   "AgentJournal.Clear.ProjectMessage": "Видалити історію проєкту «{0}»? Файли проєкту не зміняться.",
   "AgentJournal.Clear.AllMessage": "Очистити всі записи журналу агента?",
   "AgentJournal.Clear.Completed": "Завершені сеанси журналу очищено ({0}); активні сеанси збережено.",
+  "AgentJournal.Clear.SharedKept": "Сеанси, спільні з іншими проєктами, збережено ({0}).",
   "AgentJournal.Live": "Наживо",
   "AgentJournal.Mode.Live": "Наживо",
   "AgentJournal.Mode.Standard": "Звичайний",

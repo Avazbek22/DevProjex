@@ -69,20 +69,33 @@ internal sealed partial class TerminalWorkspaceSession
 						operationCts.Token).ConfigureAwait(false);
 					break;
 				case TerminalWorkspaceMcpAction.ClearLog:
+					// Sessions that also served other projects are kept by the store.
+					var sharedSessions = (await _agentJournalStore.Value
+						.ListSessionsAsync(projectRoot, int.MaxValue, operationCts.Token)
+						.ConfigureAwait(false))
+						.Count(static session => !session.IsLive && session.Roots.Count > 1);
 					var removed = await _agentJournalStore.Value
 						.ClearAsync(projectRoot, operationCts.Token)
 						.ConfigureAwait(false);
 					// Clearing keeps active sessions, so the live activity projection stays valid.
 					await InvokeAsync(() =>
 					{
-						ShowTransientStatus(
-							string.Format(
+						var message = string.Format(
+							CultureInfo.CurrentCulture,
+							AgentJournalText(
+								"AgentJournal.Clear.Completed",
+								"Completed journal sessions cleared ({0}); active sessions preserved."),
+							removed);
+						if (sharedSessions > 0)
+						{
+							message += " " + string.Format(
 								CultureInfo.CurrentCulture,
 								AgentJournalText(
-									"AgentJournal.Clear.Completed",
-									"Completed journal sessions cleared ({0}); active sessions preserved."),
-								removed),
-							TerminalWorkspaceTheme.Success);
+									"AgentJournal.Clear.SharedKept",
+									"Sessions shared with other projects were kept ({0})."),
+								sharedSessions);
+						}
+						ShowTransientStatus(message, TerminalWorkspaceTheme.Success);
 						return true;
 					}).ConfigureAwait(false);
 					break;

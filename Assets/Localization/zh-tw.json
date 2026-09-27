@@ -155,6 +155,7 @@
   "AgentJournal.Clear.ProjectMessage": "刪除專案「{0}」的歷史記錄？專案檔案不會變更。",
   "AgentJournal.Clear.AllMessage": "清除所有代理程式日誌項目？",
   "AgentJournal.Clear.Completed": "已清除已完成的日誌工作階段（{0}）；使用中的工作階段已保留。",
+  "AgentJournal.Clear.SharedKept": "與其他專案共用的工作階段已保留（{0}）。",
   "AgentJournal.Live": "即時",
   "AgentJournal.Mode.Live": "即時",
   "AgentJournal.Mode.Standard": "標準",

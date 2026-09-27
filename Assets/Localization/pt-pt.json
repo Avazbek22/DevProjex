@@ -155,6 +155,7 @@
   "AgentJournal.Clear.ProjectMessage": "Eliminar o histórico do projeto «{0}»? Os ficheiros do projeto não serão alterados.",
   "AgentJournal.Clear.AllMessage": "Limpar todas as entradas do diário?",
   "AgentJournal.Clear.Completed": "Sessões concluídas do diário limpas ({0}); as sessões ativas foram mantidas.",
+  "AgentJournal.Clear.SharedKept": "As sessões partilhadas com outros projetos foram mantidas ({0}).",
   "AgentJournal.Live": "Ativa",
   "AgentJournal.Mode.Live": "Em direto",
   "AgentJournal.Mode.Standard": "Padrão",

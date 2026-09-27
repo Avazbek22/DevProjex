@@ -355,7 +355,8 @@ Journal files live under the per-user DevProjex state directory in its
 older than 30 days. Active Standard and Live sessions are exempt from both retention
 and clearing. **Journal…** in the desktop MCP menu, `mcp log` in Terminal Workspace,
 and the CLI journal commands read the same records. Clearing can be limited to the
-current project and removes completed sessions while preserving active ones.
+current project and removes completed sessions while preserving active ones and
+sessions shared with other projects.
 
 A context receipt is a Markdown or JSON snapshot of one session. It contains the
 session metadata, totals, delivered-path counts, and call rows, so a user can retain
