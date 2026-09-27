@@ -59,7 +59,8 @@ public sealed record RelatedCommandRequest(
 	TerminalOutputOptions Output,
 	long? MaxFileBytes = null,
 	string? RepositorySourceUrl = null,
-	int Depth = 1);
+	int Depth = 1,
+	string? OutputPath = null);
 
 public sealed record TreeCommandRequest(
 	string ProjectPath,

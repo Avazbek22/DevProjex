@@ -439,7 +439,7 @@ document adds `"notFound": true`, all counters and `bytes` are zero, stdout stil
 contains the complete JSON envelope, stderr is empty, and the command returns
 usage exit code `2`. Successful and other non-not-found documents omit the
 additive `notFound` field. Text mode keeps its localized not-found diagnostic on
-stderr.
+stderr under the stable code `DPX-CLI-CACHE-NOT-FOUND`.
 
 ## Profile Validation JSON
 

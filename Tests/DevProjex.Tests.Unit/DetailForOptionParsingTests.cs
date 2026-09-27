@@ -60,6 +60,25 @@ public sealed class DetailForOptionParsingTests
 	{
 		var values = Enumerable.Range(0, 17).Select(index => $"p{index}=compact").ToArray();
 
-		Assert.Throws<DetailForOptionException>(() => DetailForOption.Parse(values));
+		var failure = Assert.Throws<DetailForOptionException>(() => DetailForOption.Parse(values));
+
+		Assert.Equal(DetailForOptionFailure.TooManyValues, failure.Failure);
+		Assert.Equal("16", failure.Value);
+	}
+
+	[Theory]
+	[InlineData("src/**", DetailForOptionFailure.InvalidFormat, "src/**")]
+	[InlineData("=compact", DetailForOptionFailure.InvalidFormat, "=compact")]
+	[InlineData("src/**=verbose", DetailForOptionFailure.InvalidLevel, "verbose")]
+	[InlineData("../escape=compact", DetailForOptionFailure.InvalidPattern, "../escape")]
+	public void ARejectedValueNamesItsFailureForLocalizedPresentation(
+		string value,
+		DetailForOptionFailure expectedFailure,
+		string expectedValue)
+	{
+		var failure = Assert.Throws<DetailForOptionException>(() => DetailForOption.Parse([value]));
+
+		Assert.Equal(expectedFailure, failure.Failure);
+		Assert.Equal(expectedValue, failure.Value);
 	}
 }

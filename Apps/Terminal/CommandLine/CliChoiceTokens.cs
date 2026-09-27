@@ -128,6 +128,26 @@ internal static class CliChoiceSets
 		new("json", CliSearchOutputFormat.Json),
 		new("markdown", CliSearchOutputFormat.Markdown));
 
+	public static CliChoiceSet<Execution.AgentJournalOutputFormat> AgentJournalFormat { get; } = new(
+		new("text", Execution.AgentJournalOutputFormat.Text),
+		new("json", Execution.AgentJournalOutputFormat.Json),
+		new("markdown", Execution.AgentJournalOutputFormat.Markdown));
+
+	public static CliChoiceSet<DevProjex.Mcp.McpToolSet> McpToolSet { get; } = new(
+		new("full", DevProjex.Mcp.McpToolSet.Full),
+		new("reduced", DevProjex.Mcp.McpToolSet.Reduced));
+
+	public static CliChoiceSet<McpConnectionClient> McpClient { get; } = new(
+		new("claude-code", McpConnectionClient.ClaudeCode),
+		new("codex", McpConnectionClient.Codex),
+		new("cursor", McpConnectionClient.Cursor),
+		new("vscode", McpConnectionClient.VsCode),
+		new("json", McpConnectionClient.Json));
+
+	public static CliChoiceSet<McpConnectionMode> McpMode { get; } = new(
+		new("live", McpConnectionMode.Live),
+		new("standard", McpConnectionMode.Standard));
+
 	public static CliChoiceSet<CliDependencyDirection> DependencyDirection { get; } = new(
 		new("dependencies", CliDependencyDirection.Dependencies),
 		new("dependents", CliDependencyDirection.Dependents),

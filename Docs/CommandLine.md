@@ -110,8 +110,9 @@ devprojex
 `dev` is a hidden maintainer namespace. See `CONTRIBUTING.md` for its supported
 diagnostic workflows.
 
-`devprojex mcp [--root PATH ...] [--live] [--git-mode none|gitignore|tracked] [--exclude NAME ...] [--unrestricted] [--allow-agent-exclusions] [--hide-private-data] [--allow-remote]`
-starts the local read-only MCP stdio server. `--search-body-chars off|N` sets the
+`devprojex mcp [-r|--root PATH ...] [--live] [--git-mode none|gitignore|tracked] [-x|--exclude NAME ...] [--unrestricted [true|false|on|off]] [--allow-agent-exclusions] [--hide-private-data] [--allow-remote [--remote-hosts HOST[,HOST...]]] [--tool-set full|reduced] [--search-body-chars off|N]`
+starts the local read-only MCP stdio server. `-r` and `-x` are the same short
+aliases the selection options use. `--search-body-chars off|N` sets the
 search declaration-body character limit: `N` must be an integer from 1 to 16,000,
 defaulting to 1,800; `off` disables bodies but keeps declaration ranges and matches.
 Invalid values fail before startup. The total search response budget remains
@@ -125,7 +126,10 @@ the normal unknown-tool error. Secret redaction is mandatory; private-data
 redaction is enabled only by the server startup flag and cannot be controlled by
 tools. Remote Git URL project arguments are disabled by default; `--allow-remote`
 enables RepoCache-backed clone/acquire for MCP project tools without changing
-the local roots returned by `list_projects`.
+the local roots returned by `list_projects`. `--remote-hosts HOST[,HOST...]`
+(repeatable or comma-separated) limits that opt-in to exact Git hosts; without it
+`--allow-remote` keeps its unrestricted-host behavior, and with it Git does not
+follow HTTP redirects.
 Without exclusion flags the server runs with `smart-ignore` and `empty-folders`
 only — narrower than the desktop standard set, so an agent sees dot-files,
 extensionless files, hidden entries, and empty files the way Git does.
@@ -138,11 +142,14 @@ list pins the set: exclusion toggles added in later versions default to off for
 that server until the line is updated. `--unrestricted` is the widest-baseline preset — equivalent to
 `--exclude none --git-mode none` and rejected in combination with either flag;
 secret redaction still applies and the `.git` administrative area remains
-excluded in every mode. `--allow-agent-exclusions` opts in to per-call
+excluded in every mode. Like the other boolean switches it accepts an optional
+`true|false|on|off` value; `--unrestricted false` keeps the normal baseline. `--allow-agent-exclusions` opts in to per-call
 agent control by publishing an `exclusions` array parameter on the selection
 tools; redaction toggles are never part of that vocabulary.
 Explicit MCP roots take precedence over `DEVPROJEX_ROOT`, then
-`CLAUDE_PROJECT_DIR`, then the current directory. See
+`CLAUDE_PROJECT_DIR`, then the current directory. A root that does not exist is a
+usage error (exit code `2`); any other filesystem failure while the server starts
+returns `1`. See
 [McpServer.md](McpServer.md) for its security model, tools, and client
 configuration.
 
@@ -153,9 +160,10 @@ ceiling. A directly named readable file can still be returned with an explicit
 outside-focus notice. Without `--live`, server behavior is unchanged.
 
 `devprojex mcp connect [PROJECT] --client
-claude-code|codex|cursor|vscode|json --mode live|standard` connects the selected
-client and prints a human-readable result. The project defaults to the current
-directory, the client to `claude-code`, and the mode to `live`.
+claude-code|codex|cursor|vscode|json --mode live|standard [--replace]
+[--print|--open]` connects the selected client and prints a human-readable
+result. The project defaults to the current directory, the client to
+`claude-code`, and the mode to `live`.
 
 Claude Code receives a project-local `claude mcp remove`/`mcp add` sequence.
 Codex receives the equivalent global `codex mcp` replacement. Cursor updates
@@ -164,7 +172,10 @@ preserve every server other than `devprojex` and are replaced atomically. Invali
 existing JSON is preserved and reported instead of being overwritten. `json`
 prints the manual `mcpServers` configuration and the usual Claude Desktop paths.
 If a command-line client is not installed or a connection fails, the result
-includes the manual command or configuration to use instead.
+includes the manual command or configuration to use instead. For Cursor and
+VS Code, `--replace` confirms replacing additional fields in an existing
+`devprojex` entry; without it, the CLI leaves that entry unchanged and prints the
+affected field names.
 
 Add `--open` to open the client after a successful registration. Claude Code
 and Codex open in a new terminal rooted at the project; Cursor and VS Code open
@@ -180,23 +191,30 @@ their installation directory stays fixed; the Store uses
 its path inside the `.app` bundle. An AppImage uses the current AppImage path, so
 moving that file requires printing or connecting again.
 
-`devprojex mcp log [PROJECT] [--session ID|--last] [--format
-text|json|markdown] [--output PATH] [--clear --yes]` reads the local MCP agent
+`devprojex mcp log [PROJECT] [--session ID|--last] [-f|--format
+text|json|markdown] [-o|--output PATH] [--clear -y|--yes]` reads the local MCP agent
 journal. `PROJECT` defaults to the current directory. Without a session selector,
 text output lists start time, client, mode, project, calls, result characters,
 estimated tokens, delivered files, masked values, duration, and whether the
-session is live. `--session` and `--last` show the recorded calls; Markdown emits
-the shared context receipt and therefore requires one of those selectors. JSON is
+session is live; with no sessions it prints one localized line saying so.
+`--session` and `--last` show the recorded calls; Markdown emits
+the shared context receipt and therefore requires one of those selectors. Text
+tables follow the shared table rule in [Streams and Exit Codes](#streams-and-exit-codes):
+localized headers only on an interactive stdout, the headerless untruncated shape
+for pipes, redirects, and `--output` files. JSON is
 the stable `devprojex-agent-journal` version-1 document described in
 [CLI-Output-Contract.md](CLI-Output-Contract.md). `--output` atomically creates a
-new file and never replaces an existing one. `--clear --yes` removes only sessions
-matching the selected project; sessions shared with other projects are kept. The journal retains at most 200 sessions for 30
+new file, never replaces an existing one (exit code `4`), and on success prints the
+absolute path of the written file to stdout. `--clear --yes` removes only sessions
+matching the selected project; sessions shared with other projects are kept.
+`--clear` without `--yes` and `--yes` without `--clear` are usage errors. The journal retains at most 200 sessions for 30
 days and stores metadata, counters, relative delivered paths, and whitelisted
 arguments, never file contents or detected values.
 
 Commands, option names, enum tokens, JSON properties, and XML element names are
-stable English identifiers. `--language CODE` localizes human-readable help,
-status, diagnostics, and Terminal Workspace labels.
+stable English identifiers. Choice values such as `--format json`, `--tool-set
+reduced`, or `--client codex` are matched case-insensitively. `--language CODE`
+localizes human-readable help, status, diagnostics, and Terminal Workspace labels.
 
 ## Command parity
 
@@ -239,10 +257,11 @@ to stdout and exit with code `0` without opening Desktop or Terminal Workspace.
 
 ## Common Selection Options
 
-Seven commands accept the same typed path-selection options, through `--exclude`
-in the list below: `analyze`, `related`, `tree`, `export context`, `export project`, `open`,
-and `profile save`. All except `tree` and `related` also accept the five
-content-transformation options that follow. `open` additionally accepts the
+Eight commands accept the same typed path-selection options, through `--exclude`
+in the list below: `analyze`, `search`, `related`, `tree`, `export context`,
+`export project`, `open`, and `profile save`. All except `search`, `tree`, and
+`related` also accept the five content-transformation options that follow;
+`search` accepts only `--hide-secrets`. `open` additionally accepts the
 `auto` profile:
 
 ```text
@@ -482,8 +501,9 @@ those characters can be part of a real file name.
 
 ## Repository URL Sources
 
-`tui`, `open`, `analyze`, `tree`, `export context`, and `export project` accept either a
-local project directory or a Git repository URL as `PROJECT`. URL sources use the
+`tui`, `open`, `analyze`, `search`, `tree`, `export context`, and `export project` accept
+either a local project directory or a Git repository URL as `PROJECT`; `related` accepts
+the same source through `--project`. URL sources use the
 same managed clone cache and operation leases as Desktop. `--branch NAME` selects
 a validated branch for a URL source and is rejected for local paths and with
 `open --last`. An existing local directory takes precedence over the SCP-like URL
@@ -509,9 +529,15 @@ staging through the cache lifecycle. Profile-management commands remain local-pa
 
 Common aliases are part of the public contract: `export ctx` equals
 `export context`, `export proj` equals `export project`, and `-f` equals
-`--format`. `-n` equals `--dry-run` where that option is available. `-q` and
+`--format` (on `open`, `-f` and `--format` are aliases of `--tree-format`). `-n`
+equals `--dry-run` where that option is available. `-q` and
 `--quiet` select `quiet` verbosity and cannot be combined with an explicit
 `--verbosity`.
+
+A token that starts with `-` before `--` is always read as an option, so
+`devprojex tree --bogus` reports `DPX-CLI-UNKNOWN-OPTION` instead of treating
+`--bogus` as `PROJECT`. A lone `-` stays a value. Pass a directory whose name starts
+with `-` after `--` (`devprojex tree -- -name`) or as `./-name`.
 
 ## Terminal Workspace
 
@@ -553,7 +579,7 @@ Useful options:
 --wait
 --preview
 --view <tree|content|tree-content>
---tree-format <text|markdown|json|xml>
+-f, --format, --tree-format <text|markdown|json|xml>
 --filter <QUERY>
 --search <QUERY>
 ```
@@ -676,15 +702,22 @@ Specific options are:
 --search-body-chars <off|N>             default: 1800; range: 1..16000
 -f, --format <text|json|markdown>        default: text
 -o, --output <PATH|->                    default: -
---branch <NAME>                          URL source only
---profile <standard|local|FILE>
---root <PATH> ...
---select <RELATIVE_PATH> ...
---exclude <NAME> ...
+-b, --branch <NAME>                      URL source only
+-p, --profile <standard|local|FILE>
+-r, --root <PATH> ...
+-e, --extension <EXT> ...
+-s, --select <RELATIVE_PATH> ...
+--select-from <FILE|->
+-x, --exclude <NAME> ...
 --git-mode <MODE>
---hide-secrets / --no-hide-secrets
+--hide-secrets [<true|false|on|off>] / --no-hide-secrets
+--progress <auto|always|never>
 <shared output options, including --plain>
 ```
+
+The selection options behave as described in
+[Common Selection Options](#common-selection-options); `search` accepts no other
+content transformation.
 
 Text output keeps the MCP path-grouped evidence shape: `line:text` marks a matching
 line, `line-text` is context, and `in SYMBOL` names the containing declaration. A
@@ -705,7 +738,9 @@ to the complete serialized text, JSON, or Markdown document. Evidence is admitte
 as complete lines until the selected format fits; JSON is never made invalid by a
 final string slice, and `writtenMatches` counts exactly the serialized `matches`.
 Markdown contains the complete text form in a fence longer than any backtick run in the result. File output is
-atomic, must be outside the source project, and refuses to replace an existing file.
+atomic, must be outside the source project, and refuses to replace an existing file
+with `DPX-EXPORT-DESTINATION-EXISTS` (exit code `4`); `search` has no `--force`. On
+success it prints the absolute path of the written file to stdout.
 
 Examples:
 
@@ -742,6 +777,7 @@ Specific options are:
 --direction <dependencies|dependents|both>   default: both
 --depth <1..10>                              default: 1
 -f, --format <text|json>                     default: text
+-o, --output <PATH|->                        default: -
 --branch <NAME>                              URL source only
 --max-file-bytes <SIZE>
 <shared path-selection options>
@@ -753,7 +789,10 @@ portable relative path, aggregated evidence reasons, resolution status, estimate
 and a cross-scope marker where applicable; ambiguous references stay grouped with their
 candidate paths. JSON is the deterministic `devprojex-related-files` document described in
 [CLI-Output-Contract.md](CLI-Output-Contract.md). The command has no content-transformation
-flags and does not return source content.
+flags and does not return source content. `-o` follows the `search` rules: the file is
+written atomically outside the source project, an existing file is never replaced
+(`DPX-EXPORT-DESTINATION-EXISTS`, exit code `4`; there is no `--force`), and success
+prints the absolute path of the written file to stdout.
 Depth `1` preserves the direct-neighbor response. A larger depth walks only
 resolved edges: every newly reached file becomes a seed for the next hop, while
 ambiguous, unresolved, and external evidence is reported but never traversed.
@@ -950,8 +989,8 @@ devprojex export context . --hide-secrets --format markdown -o ../devprojex-reda
 devprojex export context . --hide-private-data --format markdown -o ../devprojex-private.md
 devprojex export context . --compress-code --format markdown -o ../devprojex-compact.md
 devprojex export context . --view content --compress-code --detail-for docs/**=full -o -
-$ devprojex export context . --view content --rank importance --max-tokens 16000 -o ../devprojex-ranked.md
-$ devprojex export context . --view content --rank importance --focus Application/Context/ProjectContextDocumentService.cs --max-tokens 16000 -o -
+devprojex export context . --view content --rank importance --max-tokens 16000 -o ../devprojex-ranked.md
+devprojex export context . --view content --rank importance --focus Application/Context/ProjectContextDocumentService.cs --max-tokens 16000 -o -
 ```
 
 ## Export Project
@@ -965,7 +1004,7 @@ The destination is exact:
 ```shell
 devprojex export project . --as folder -o ../devprojex-submission
 devprojex export project . --as zip -o ../devprojex-submission.zip
-$ devprojex export project . --as zip -o - > devprojex-submission.zip
+devprojex export project . --as zip -o - > devprojex-submission.zip
 devprojex export project . --compress-code --as zip -o ../devprojex-compact.zip
 ```
 
@@ -1016,7 +1055,8 @@ devprojex recent [--kind all|folder|repository] [--limit N] [-f text|json]
 Folders come from the 32-entry local-project history and repositories from the
 16-entry clone-URL history. JSON uses `schemaVersion: 1`, kind
 `devprojex-recent`, and stable `kind`, `path`/`url`, `name`, `parent`, and
-`lastOpened` fields.
+`lastOpened` fields. With no matching entries, text output prints one localized
+line on stdout, as `mcp log` does, while JSON keeps an empty `items` array.
 
 ## Git Clone Cache
 
@@ -1046,7 +1086,8 @@ partial cleanup for complete success.
 and `--format json`. Dry-run reports the same counters and bytes without deleting.
 The JSON result has `schemaVersion: 1`, kind `devprojex-cache-removal`, `dryRun`,
 `removed`, `retained`, `failed`, and `bytes`. If `cache remove` cannot find the
-requested URL, text mode writes the localized diagnostic to stderr; JSON mode
+requested URL, text mode writes the localized `DPX-CLI-CACHE-NOT-FOUND` diagnostic
+to stderr; JSON mode
 instead writes the same versioned envelope to stdout with `notFound: true` and
 zero counters/bytes, then returns usage exit code `2`. A temporarily busy cache
 index is not reported as missing: text reports the busy condition, JSON adds
@@ -1162,7 +1203,7 @@ install it using the shell's normal completion mechanism.
 `--color`, `--plain`, `--verbosity`, and `-q`/`--quiet` are recursive root
 options and may be placed on every command. Commands without optional ANSI or
 diagnostic output accept and ignore values that do not affect their payload.
-`--progress` remains limited to `analyze`, `related`, `tree`, and exports.
+`--progress` remains limited to `analyze`, `search`, `related`, `tree`, and exports.
 
 Environment defaults sit below explicit flags and above capability detection:
 `DEVPROJEX_COLOR`, `DEVPROJEX_PROGRESS`, `DEVPROJEX_VERBOSITY`, and

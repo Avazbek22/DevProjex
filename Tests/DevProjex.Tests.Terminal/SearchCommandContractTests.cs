@@ -66,4 +66,32 @@ public sealed class SearchCommandContractTests
 
 		Assert.NotEmpty(parsed.Errors);
 	}
+
+	[Theory]
+	[InlineData("search", false)]
+	[InlineData("analyze", true)]
+	public async Task DestinationConflictHintOffersForceOnlyWhereItExists(string command, bool forceAvailable)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/App.cs", "internal sealed class Widget {}\n");
+		var destination = Path.Combine(workspace.Path, "existing.txt");
+		File.WriteAllText(destination, "keep");
+		string[] arguments = command == "search"
+			? ["search", "Widget", project, "-o", destination]
+			: ["analyze", project, "-o", destination];
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(
+				environment,
+				new TerminalServiceFactory(() => workspace.CreateDirectory("app-data")))
+			.RunAsync(
+				[.. arguments, "--git-mode", "none", "--exclude", "none", "--language", "en"],
+				TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.DestinationConflict, exitCode);
+		Assert.Contains("DPX-EXPORT-DESTINATION-EXISTS", environment.StandardError, StringComparison.Ordinal);
+		Assert.Equal(forceAvailable, environment.StandardError.Contains("--force", StringComparison.Ordinal));
+		Assert.Equal("keep", File.ReadAllText(destination));
+	}
 }

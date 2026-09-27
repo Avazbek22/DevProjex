@@ -52,6 +52,12 @@ internal sealed class RecentCommandHandler(
 			return CommandLineExitCodes.Success;
 		}
 
+		if (entries.Length == 0)
+		{
+			environment.Output.WriteLine(services.Localization["Terminal.Recent.Empty"]);
+			return CommandLineExitCodes.Success;
+		}
+
 		foreach (var line in FormatTextEntries(entries, services.Localization, environment, outputOptions))
 			environment.Output.WriteLine(line);
 

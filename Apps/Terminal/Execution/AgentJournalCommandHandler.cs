@@ -17,6 +17,8 @@ internal sealed class AgentJournalCommandHandler(
 	IAgentJournalReader reader,
 	IAgentJournalReceiptFormatter formatter,
 	ITerminalEnvironment environment,
+	LocalizationService localization,
+	TerminalOutputOptions outputOptions,
 	TimeProvider? timeProvider = null)
 {
 	private static readonly JsonSerializerOptions JsonOptions =
@@ -33,6 +35,7 @@ internal sealed class AgentJournalCommandHandler(
 		CancellationToken cancellationToken)
 	{
 		var normalizedRoot = NormalizeOptionalProjectRoot(projectRoot);
+		var toFile = !string.IsNullOrWhiteSpace(outputPath);
 		if (clear)
 		{
 			// Sessions that also served other projects are kept when one project is cleared.
@@ -41,14 +44,10 @@ internal sealed class AgentJournalCommandHandler(
 				: (await reader.ListSessionsAsync(normalizedRoot, int.MaxValue, cancellationToken).ConfigureAwait(false))
 					.Count(static session => !session.IsLive && session.Roots.Count > 1);
 			var removed = await reader.ClearAsync(normalizedRoot, cancellationToken).ConfigureAwait(false);
-			var shared = sharedSessions > 0
-				? $" {sharedSessions.ToString(CultureInfo.InvariantCulture)} session(s) shared with other projects were kept."
-				: string.Empty;
-			return await WriteAsync(
-				$"Cleared {removed.ToString(CultureInfo.InvariantCulture)} completed agent journal session(s); " +
-				$"active sessions were preserved.{shared}{Environment.NewLine}",
-				outputPath,
-				cancellationToken).ConfigureAwait(false);
+			var message = localization.Format("Terminal.McpLog.Cleared", removed);
+			if (sharedSessions > 0)
+				message += " " + localization.Format("Terminal.McpLog.SharedKept", sharedSessions);
+			return await WriteAsync(message + Environment.NewLine, outputPath, cancellationToken).ConfigureAwait(false);
 		}
 
 		if (sessionId is not null || last)
@@ -58,13 +57,13 @@ internal sealed class AgentJournalCommandHandler(
 				.ConfigureAwait(false))
 				.FirstOrDefault()?.Id;
 			if (resolvedId is null)
-				return WriteNotFound("No matching journal session was found.");
+				return WriteNotFound(localization["AgentJournal.SessionNotFound"]);
 			var receipt = await reader.ReadReceiptAsync(resolvedId, cancellationToken).ConfigureAwait(false);
 			if (receipt is null || normalizedRoot is not null && !ContainsRoot(receipt.Session, normalizedRoot))
-				return WriteNotFound($"Journal session '{resolvedId}' was not found for this project.");
+				return WriteNotFound(localization.Format("Terminal.McpLog.SessionNotFound", resolvedId));
 			var content = format switch
 			{
-				AgentJournalOutputFormat.Text => FormatCalls(receipt),
+				AgentJournalOutputFormat.Text => FormatCalls(receipt, toFile),
 				AgentJournalOutputFormat.Json => formatter.FormatJson(receipt) + Environment.NewLine,
 				AgentJournalOutputFormat.Markdown => formatter.FormatMarkdown(receipt),
 				_ => throw new ArgumentOutOfRangeException(nameof(format), format, null)
@@ -73,12 +72,16 @@ internal sealed class AgentJournalCommandHandler(
 		}
 
 		if (format == AgentJournalOutputFormat.Markdown)
-			return WriteUsageError("DPX-CLI-JOURNAL-SESSION-REQUIRED", "markdown output requires --session or --last.");
+		{
+			return WriteUsageError(
+				"DPX-CLI-JOURNAL-SESSION-REQUIRED",
+				localization["Terminal.Validation.McpLogMarkdownRequiresSession"]);
+		}
 		var sessions = await reader.ListSessionsAsync(normalizedRoot, cancellationToken: cancellationToken)
 			.ConfigureAwait(false);
 		var listing = format == AgentJournalOutputFormat.Json
 			? FormatSessionsJson(sessions)
-			: FormatSessions(sessions);
+			: FormatSessions(sessions, toFile);
 		return await WriteAsync(listing, outputPath, cancellationToken).ConfigureAwait(false);
 	}
 
@@ -94,64 +97,72 @@ internal sealed class AgentJournalCommandHandler(
 		}
 		try
 		{
-			await AtomicOutputWriter.WriteTextAsync(
+			var writtenPath = await AtomicOutputWriter.WriteTextAsync(
 				outputPath,
 				content,
 				overwrite: false,
 				cancellationToken).ConfigureAwait(false);
+			TerminalTextEscaping.WriteSingleLine(environment.Output, writtenPath);
 			return CommandLineExitCodes.Success;
 		}
 		catch (OutputDestinationConflictException)
 		{
 			WriteError(
 				"DPX-CLI-OUTPUT-EXISTS",
-				$"output file already exists: {TerminalTextEscaping.EscapeSingleLine(outputPath)}");
+				localization.Format("Terminal.McpLog.OutputExists", outputPath));
 			return CommandLineExitCodes.DestinationConflict;
 		}
 		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
 		{
-			return WriteRuntimeError("DPX-CLI-JOURNAL-WRITE-FAILED", exception.Message);
+			return WriteRuntimeError("DPX-CLI-JOURNAL-WRITE-FAILED", localization["Terminal.McpLog.WriteFailed"]);
 		}
 	}
 
-	private string FormatSessions(IReadOnlyList<AgentJournalSession> sessions)
+	private string FormatSessions(IReadOnlyList<AgentJournalSession> sessions, bool toFile)
 	{
 		if (sessions.Count == 0)
-			return "No agent journal sessions found." + Environment.NewLine;
-		var rows = new List<string[]>
+			return localization["Terminal.McpLog.Empty"] + Environment.NewLine;
+		var rows = sessions.Select(session => new[]
 		{
-			new[] { "Session", "Started", "Client", "Mode", "Project", "Calls", "Characters", "Tokens", "Files", "Masked", "Duration", "Live" }
-		};
-		rows.AddRange(sessions.Select(session => new[]
-		{
-			session.Id,
+			TerminalTextEscaping.EscapeSingleLine(session.Id),
 			session.StartedUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
-			DisplayClient(session),
+			TerminalTextEscaping.EscapeSingleLine(DisplayClient(session)),
 			session.Mode.ToString().ToLowerInvariant(),
-			string.Join(", ", session.Roots.Select(static root => root.Name)),
+			TerminalTextEscaping.EscapeSingleLine(string.Join(", ", session.Roots.Select(static root => root.Name))),
 			session.Totals.Calls.ToString(CultureInfo.InvariantCulture),
 			session.Totals.ResultCharacters.ToString(CultureInfo.InvariantCulture),
 			session.Totals.EstimatedTokens.ToString(CultureInfo.InvariantCulture),
 			session.Totals.FilesDelivered.ToString(CultureInfo.InvariantCulture),
 			(session.Totals.SecretsMasked + session.Totals.PrivateDataMasked).ToString(CultureInfo.InvariantCulture),
 			FormatDuration(session),
-			session.IsLive ? "yes" : "no"
-		}));
-		return string.Join(Environment.NewLine, TerminalColumnLayout.Format(rows)) + Environment.NewLine;
+			localization[session.IsLive ? "Terminal.Value.Yes" : "Terminal.Value.No"]
+		}).ToArray();
+		string[] headers =
+		[
+			localization["AgentJournal.Column.Session"],
+			localization["AgentJournal.Column.Time"],
+			localization["AgentJournal.Column.Client"],
+			localization["AgentJournal.Column.Mode"],
+			localization["AgentJournal.Column.Project"],
+			localization["AgentJournal.Column.Calls"],
+			localization["AgentJournal.Column.Characters"],
+			localization["AgentJournal.Column.Tokens"],
+			localization["AgentJournal.Column.Files"],
+			localization["AgentJournal.Column.Masked"],
+			localization["AgentJournal.Column.Duration"],
+			localization["AgentJournal.Live"]
+		];
+		return FormatTable(rows, headers, toFile, truncationColumn: 4);
 	}
 
-	private static string FormatCalls(AgentJournalReceipt receipt)
+	private string FormatCalls(AgentJournalReceipt receipt, bool toFile)
 	{
 		var lostEvents = LostEventCount(receipt.Calls);
-		var rows = new List<string[]>
-		{
-			new[] { "#", "UTC", "Tool", "Root", "Revision", "Duration ms", "Characters", "Tokens", "Files", "Masked", "Notices", "Error" }
-		};
-		rows.AddRange(receipt.Calls.Select(call => new[]
+		var rows = receipt.Calls.Select(call => new[]
 		{
 			call.Sequence.ToString(CultureInfo.InvariantCulture),
 			call.Utc.UtcDateTime.ToString("O", CultureInfo.InvariantCulture),
-			call.Tool,
+			TerminalTextEscaping.EscapeSingleLine(call.Tool),
 			call.RootIndex?.ToString(CultureInfo.InvariantCulture) ?? "-",
 			call.Revision?.ToString(CultureInfo.InvariantCulture) ?? "-",
 			call.DurationMs.ToString(CultureInfo.InvariantCulture),
@@ -159,14 +170,44 @@ internal sealed class AgentJournalCommandHandler(
 			call.EstimatedTokens.ToString(CultureInfo.InvariantCulture),
 			call.FilesDelivered.ToString(CultureInfo.InvariantCulture),
 			(call.SecretsMasked + call.PrivateDataMasked).ToString(CultureInfo.InvariantCulture),
-			string.Join(',', call.Notices),
-			call.ErrorCode ?? "-"
-		}));
-		var table = string.Join(Environment.NewLine, TerminalColumnLayout.Format(rows)) + Environment.NewLine;
+			TerminalTextEscaping.EscapeSingleLine(string.Join(',', call.Notices)),
+			call.ErrorCode is null ? "-" : TerminalTextEscaping.EscapeSingleLine(call.ErrorCode)
+		}).ToArray();
+		string[] headers =
+		[
+			localization["AgentJournal.Column.Number"],
+			"UTC",
+			localization["AgentJournal.Column.Tool"],
+			localization["AgentJournal.Column.Project"],
+			localization["AgentJournal.Column.Revision"],
+			localization["AgentJournal.Column.Duration"],
+			localization["AgentJournal.Column.Characters"],
+			localization["AgentJournal.Column.Tokens"],
+			localization["AgentJournal.Column.Files"],
+			localization["AgentJournal.Column.Masked"],
+			localization["AgentJournal.Column.Notices"],
+			localization["AgentJournal.Column.Error"]
+		];
+		var table = FormatTable(rows, headers, toFile, truncationColumn: 10);
 		return lostEvents > 0
-			? $"History is incomplete: {lostEvents.ToString(CultureInfo.InvariantCulture)} " +
-			  $"{(lostEvents == 1 ? "event" : "events")} could not be recorded.{Environment.NewLine}{table}"
+			? localization.Format("AgentJournal.Notice.HistoryIncomplete", lostEvents) + Environment.NewLine + table
 			: table;
+	}
+
+	// Tables follow the shared rule: headers and width fitting only on an interactive
+	// stdout; pipes, redirects, and --output files keep the headerless untruncated shape.
+	private string FormatTable(
+		IReadOnlyList<string[]> rows,
+		IReadOnlyList<string> headers,
+		bool toFile,
+		int truncationColumn)
+	{
+		var lines = toFile
+			? TerminalColumnLayout.Format(rows)
+			: TerminalColumnLayout.FormatForOutput(rows, headers, environment, outputOptions, truncationColumn);
+		return lines.Count == 0
+			? string.Empty
+			: string.Join(Environment.NewLine, lines) + Environment.NewLine;
 	}
 
 	private static long LostEventCount(IEnumerable<AgentJournalCall> calls) => calls

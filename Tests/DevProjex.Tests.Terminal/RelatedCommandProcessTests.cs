@@ -43,6 +43,35 @@ public sealed class RelatedCommandProcessTests
 	}
 
 	[Fact]
+	public void OutputFileMatchesStdoutAndIsNeverReplaced()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />\n");
+		workspace.WriteFile("project/A.cs", "public sealed class A { public B Value { get; } }\n");
+		workspace.WriteFile("project/B.cs", "public sealed class B {}\n");
+		var destination = Path.Combine(workspace.Path, "related.json");
+		string[] arguments =
+		[
+			"related", "A.cs", "--project", project, "--direction", "dependencies",
+			"--format", "json", "--git-mode", "none", "--exclude", "none"
+		];
+
+		var stdout = Run(workspace, arguments);
+		var written = Run(workspace, [.. arguments, "-o", destination]);
+		var refused = Run(workspace, [.. arguments, "--output", destination]);
+
+		Assert.Equal(0, stdout.ExitCode);
+		Assert.Equal(0, written.ExitCode);
+		Assert.Equal(Path.GetFullPath(destination), written.StandardOutput.Trim());
+		Assert.Equal(stdout.StandardOutput, File.ReadAllText(destination));
+		Assert.Equal(CommandLineExitCodes.DestinationConflict, refused.ExitCode);
+		Assert.Empty(refused.StandardOutput);
+		Assert.Contains("DPX-EXPORT-DESTINATION-EXISTS", refused.StandardError, StringComparison.Ordinal);
+		Assert.DoesNotContain("--force", refused.StandardError, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void DepthUsesDeterministicBreadthFirstOrderWithoutRepeatingCyclesOrSharedTargets()
 	{
 		using var workspace = new TemporaryDirectory();

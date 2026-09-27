@@ -123,6 +123,8 @@ public sealed class DocumentationExecutionRegressionTests
 		}
 	}
 
+	// Shell redirections are not an argument vector, and ranked exports report their
+	// ranking summary on stderr by design, so neither fits the clean-stderr contract here.
 	private static bool IsConcreteDirectCommand(string line) =>
 		(line.StartsWith("devprojex analyze ", StringComparison.Ordinal) ||
 		 line.StartsWith("devprojex export context ", StringComparison.Ordinal) ||
@@ -130,6 +132,8 @@ public sealed class DocumentationExecutionRegressionTests
 		 line.StartsWith("devprojex profile ", StringComparison.Ordinal)) &&
 		!line.Contains('[') &&
 		!line.Contains('<') &&
+		!line.Contains('>') &&
+		!line.Contains(" --rank ", StringComparison.Ordinal) &&
 		!line.Contains(" FILE", StringComparison.Ordinal);
 
 	private static string[] PrepareArguments(

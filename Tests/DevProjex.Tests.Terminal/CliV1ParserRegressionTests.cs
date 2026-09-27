@@ -257,6 +257,11 @@ public sealed class CliV1ParserRegressionTests
 	[InlineData("open", "open|--view=TrEe", "--view", "tree")]
 	[InlineData("ui list", "ui|list|--format|JSON", "--format", "json")]
 	[InlineData("doctor", "doctor|--format=JsOn", "--format", "json")]
+	[InlineData("mcp", "mcp|--tool-set|REDUCED", "--tool-set", "reduced")]
+	[InlineData("mcp log", "mcp|log|-f|JSON", "--format", "json")]
+	[InlineData("mcp log", "mcp|log|--format=MarkDown|--last", "--format", "markdown")]
+	[InlineData("mcp connect", "mcp|connect|--client|CODEX", "--client", "codex")]
+	[InlineData("mcp connect", "mcp|connect|--mode=Standard", "--mode", "standard")]
 	public void AcceptedChoiceIsCanonicalAtTheParserBoundary(
 		string commandPath,
 		string invocation,
@@ -272,6 +277,167 @@ public sealed class CliV1ParserRegressionTests
 		Assert.Empty(parseResult.Errors);
 		var optionResult = Assert.IsType<OptionResult>(parseResult.GetResult(option));
 		Assert.Equal(expectedToken, ReadCanonicalToken(optionResult, option));
+	}
+
+	[Theory]
+	[InlineData("mcp|-r|.|-r|../shared|-x|default|-x|dot-folders")]
+	[InlineData("mcp|--unrestricted|on")]
+	[InlineData("mcp|--unrestricted=off|--exclude|none")]
+	[InlineData("mcp|--unrestricted|false|--git-mode|tracked")]
+	[InlineData("open|-f|json")]
+	[InlineData("related|src/a.cs|-o|related.json")]
+	public void SharedSyntaxFormsParse(string invocation)
+	{
+		var root = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();
+
+		var parseResult = root.Parse(invocation.Split('|'));
+
+		Assert.Empty(parseResult.Errors);
+		Assert.Empty(parseResult.UnmatchedTokens);
+	}
+
+	[Theory]
+	[InlineData("tree|--bogus", "--bogus")]
+	[InlineData("tree|-v", "-v")]
+	[InlineData("analyze|--typo", "--typo")]
+	[InlineData("mcp|log|--bogus", "--bogus")]
+	[InlineData("search|needle|--bogus=1", "--bogus")]
+	public async Task OptionLikeTokenInThePlaceOfProjectIsAnUnknownOption(
+		string invocation,
+		string unknownOption)
+	{
+		var arguments = invocation.Split('|');
+		var explicitProject = new List<string>(arguments);
+		explicitProject.Insert(Array.IndexOf(arguments, arguments.First(static token => token.StartsWith('-'))), ".");
+		var implicitEnvironment = new TestTerminalEnvironment();
+		var explicitEnvironment = new TestTerminalEnvironment();
+
+		var implicitExitCode = await new TerminalApplication(implicitEnvironment)
+			.RunAsync([.. arguments, "--language", "en"], TestContext.Current.CancellationToken);
+		var explicitExitCode = await new TerminalApplication(explicitEnvironment)
+			.RunAsync([.. explicitProject, "--language", "en"], TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, implicitExitCode);
+		Assert.Equal(CommandLineExitCodes.UsageError, explicitExitCode);
+		Assert.Empty(implicitEnvironment.StandardOutput);
+		Assert.StartsWith(
+			$"error[DPX-CLI-UNKNOWN-OPTION]: Unknown option: {unknownOption}{Environment.NewLine}",
+			implicitEnvironment.StandardError,
+			StringComparison.Ordinal);
+		Assert.Equal(explicitEnvironment.StandardError, implicitEnvironment.StandardError);
+		Assert.DoesNotContain("DPX-PROJECT-NOT-FOUND", implicitEnvironment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("tree|--|-missing-dash-project")]
+	[InlineData("tree|./-missing-dash-project")]
+	public async Task DashPrefixedProjectStaysReachableAfterDelimiterOrAsRelativePath(string invocation)
+	{
+		using var workspace = new TemporaryDirectory();
+		var environment = new TestTerminalEnvironment
+		{
+			Variables = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+			{
+				["DEVPROJEX_LANGUAGE"] = "en"
+			}
+		};
+
+		var exitCode = await CreateApplication(environment, workspace)
+			.RunAsync(invocation.Split('|'), TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Contains("DPX-PROJECT-NOT-FOUND", environment.StandardError, StringComparison.Ordinal);
+		Assert.DoesNotContain("DPX-CLI-UNKNOWN-OPTION", environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task MisplacedOptionTypoBeforeItsValueSuggestsTheClosestOption()
+	{
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(environment)
+			.RunAsync(["analyze", "--tpo-files", "5", "--language", "en"], TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Equal(
+			"error[DPX-CLI-UNKNOWN-OPTION]: Unknown option: --tpo-files" + Environment.NewLine +
+			"hint: Did you mean 'devprojex analyze --top-files'?" + Environment.NewLine,
+			environment.StandardError);
+	}
+
+	[Theory]
+	[InlineData("tree|.|-v", null)]
+	[InlineData("tree|.|-z", null)]
+	[InlineData("analyze|.|-F|json", "devprojex analyze -f")]
+	public async Task UnknownShortOptionIsOnlyMatchedByLetterCase(string invocation, string? expectedSuggestion)
+	{
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(environment)
+			.RunAsync([.. invocation.Split('|'), "--language", "en"], TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Contains("DPX-CLI-UNKNOWN-OPTION", environment.StandardError, StringComparison.Ordinal);
+		Assert.DoesNotContain("-?", environment.StandardError, StringComparison.Ordinal);
+		if (expectedSuggestion is null)
+			Assert.DoesNotContain("Did you mean", environment.StandardError, StringComparison.Ordinal);
+		else
+			Assert.Contains($"Did you mean '{expectedSuggestion}'?", environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("search", "DPX-CLI-MISSING-VALUE", "A value is required for argument: PATTERN")]
+	[InlineData("related", "DPX-CLI-MISSING-VALUE", "A value is required for argument: PATH")]
+	[InlineData("analyze|.|extra", "DPX-CLI-INVALID-SYNTAX", "Unexpected argument: extra")]
+	[InlineData("search|needle|--max|many", "DPX-CLI-INVALID-VALUE", "Invalid value for --max: many")]
+	[InlineData("analyze|.|-f|json|-f|text", "DPX-CLI-INVALID-SYNTAX", "--format accepts only one value.")]
+	[InlineData("mcp|--tool-set|tiny", "DPX-CLI-INVALID-VALUE", "--tool-set must be one of: full, reduced.")]
+	[InlineData("mcp|connect|--client|bogus", "DPX-CLI-INVALID-VALUE", "--client must be one of: claude-code, codex, cursor, vscode, json.")]
+	[InlineData("mcp|connect|--mode|remote", "DPX-CLI-INVALID-VALUE", "--mode must be one of: live, standard.")]
+	[InlineData("mcp|log|-f|yaml", "DPX-CLI-INVALID-VALUE", "--format must be one of: text, json, markdown.")]
+	[InlineData("mcp|log|--clear", "DPX-CLI-INVALID-VALUE", "--clear requires --yes.")]
+	[InlineData("mcp|log|--yes", "DPX-CLI-INVALID-VALUE", "--yes requires --clear.")]
+	[InlineData("mcp|log|--session|abc|--last", "DPX-CLI-INVALID-VALUE", "--session and --last cannot be combined.")]
+	[InlineData("mcp|log|-f|markdown", "DPX-CLI-INVALID-VALUE", "Markdown output requires --session or --last.")]
+	[InlineData("mcp|log|--clear|--yes|--last", "DPX-CLI-INVALID-VALUE", "--clear cannot be combined with --session or --last.")]
+	[InlineData("mcp|log|--clear|--yes|-o|journal.txt", "DPX-CLI-INVALID-VALUE", "--clear cannot be combined with --output.")]
+	[InlineData("search|needle|--search-body-chars|0", "DPX-CLI-INVALID-VALUE", "--search-body-chars must be off or an integer from 1 to 16000.")]
+	[InlineData("mcp|--search-body-chars|16001", "DPX-CLI-INVALID-VALUE", "--search-body-chars must be off or an integer from 1 to 16000.")]
+	[InlineData("export|context|.|--detail-for|src/**=verbose", "DPX-CLI-INVALID-VALUE", "--detail-for level 'verbose' is invalid; valid values are full, compact, signatures.")]
+	[InlineData("export|context|.|--detail-for|src/**", "DPX-CLI-INVALID-VALUE", "--detail-for value 'src/**' must have the form <glob>=<full|compact|signatures>.")]
+	[InlineData("cache|clear", "DPX-CLI-INVALID-VALUE", "This cache operation requires --force or --yes (-y).")]
+	public async Task ParserErrorsNameWhatIsWrong(string invocation, string code, string message)
+	{
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(environment)
+			.RunAsync([.. invocation.Split('|'), "--language", "en"], TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains($"error[{code}]: {message}", environment.StandardError, StringComparison.Ordinal);
+		Assert.DoesNotContain(
+			"The command, option, or value is invalid.",
+			environment.StandardError,
+			StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("search", "Для аргумента требуется значение: PATTERN")]
+	[InlineData("mcp|log|--clear", "Для --clear требуется --yes.")]
+	[InlineData("export|context|.|--detail-for|src/**=verbose", "Уровень --detail-for 'verbose' недопустим")]
+	[InlineData("search|needle|--search-body-chars|0", "--search-body-chars должен быть off")]
+	public async Task ParserErrorsFollowTheSelectedLanguage(string invocation, string expected)
+	{
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(environment)
+			.RunAsync([.. invocation.Split('|'), "--language", "ru"], TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Contains(expected, environment.StandardError, StringComparison.Ordinal);
+		Assert.DoesNotContain("must be", environment.StandardError, StringComparison.Ordinal);
+		Assert.DoesNotContain("requires", environment.StandardError, StringComparison.Ordinal);
 	}
 
 	[Theory]

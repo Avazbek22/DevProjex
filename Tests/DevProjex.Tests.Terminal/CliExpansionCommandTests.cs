@@ -305,6 +305,60 @@ public sealed class CliExpansionCommandTests
 		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
 		Assert.Empty(environment.StandardOutput);
 		Assert.Contains("--force", environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("--yes", environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("-y", environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("en")]
+	[InlineData("ru")]
+	public async Task CacheRemoveOfAnUncachedUrlReportsAStableCodeInText(string language)
+	{
+		using var data = new TemporaryDirectory();
+		var environment = new TestTerminalEnvironment();
+		var localization = new LocalizationService(
+			new JsonLocalizationCatalog(),
+			CliChoiceSets.Language.TryParse(language, out var appLanguage) ? appLanguage : AppLanguage.En);
+
+		var exitCode = await new TerminalApplication(
+				environment,
+				new TerminalServiceFactory(() => data.Path))
+			.RunAsync(
+				["cache", "remove", "https://github.com/example/missing.git", "--force", "--language", language],
+				TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("[DPX-CLI-CACHE-NOT-FOUND]", environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains(
+			localization.Format("Terminal.Cache.NotFound", "https://github.com/example/missing.git"),
+			environment.StandardError,
+			StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("en")]
+	[InlineData("ru")]
+	public async Task RecentTextWithAnEmptyHistoryPrintsALocalizedLine(string language)
+	{
+		using var data = new TemporaryDirectory();
+		var textEnvironment = new TestTerminalEnvironment();
+		var jsonEnvironment = new TestTerminalEnvironment();
+		var localization = new LocalizationService(
+			new JsonLocalizationCatalog(),
+			CliChoiceSets.Language.TryParse(language, out var appLanguage) ? appLanguage : AppLanguage.En);
+
+		var textExitCode = await new TerminalApplication(textEnvironment, new TerminalServiceFactory(() => data.Path))
+			.RunAsync(["recent", "--language", language], TestContext.Current.CancellationToken);
+		var jsonExitCode = await new TerminalApplication(jsonEnvironment, new TerminalServiceFactory(() => data.Path))
+			.RunAsync(["recent", "-f", "json", "--language", language], TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, textExitCode);
+		Assert.Equal(localization["Terminal.Recent.Empty"] + Environment.NewLine, textEnvironment.StandardOutput);
+		Assert.Empty(textEnvironment.StandardError);
+		Assert.Equal(CommandLineExitCodes.Success, jsonExitCode);
+		using var document = JsonDocument.Parse(jsonEnvironment.StandardOutput);
+		Assert.Empty(document.RootElement.GetProperty("items").EnumerateArray());
 	}
 
 	[Fact]
