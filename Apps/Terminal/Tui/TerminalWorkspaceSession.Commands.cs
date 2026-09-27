@@ -55,7 +55,9 @@ internal sealed partial class TerminalWorkspaceSession
 			},
 			command => definition.Handler(this, command),
 			definition.Availability == TerminalWorkspaceCommandAvailability.GitClone
-				? () => L("Terminal.Tui.Command.Error.GitCloneRequired")
+				? () => L(HasActiveOperation
+					? "Terminal.Tui.Command.Error.Unavailable"
+					: "Terminal.Tui.Command.Error.GitCloneRequired")
 				: null);
 
 	private bool IsGitCloneCommandAvailable() =>
@@ -70,11 +72,10 @@ internal sealed partial class TerminalWorkspaceSession
 			return InvalidCommandExecution();
 		if (command.Target == "git")
 		{
-			if (!GitScopeSelection.TryParse(command.Text, out var gitMode, out var diffRange) ||
-				!IsGitModeAvailable(gitMode))
-			{
+			if (!GitScopeSelection.TryParse(command.Text, out var gitMode, out var diffRange))
 				return InvalidCommandExecution();
-			}
+			if (!IsGitModeAvailable(gitMode))
+				return GitRepositoryRequiredExecution();
 			UpdateDraftPreferredGitMode(gitMode);
 			ApplyPathFilters(
 				gitMode,
@@ -138,7 +139,7 @@ internal sealed partial class TerminalWorkspaceSession
 			? mode.Value
 			: GitFilteringMode.None;
 		if (!IsGitModeAvailable(nextMode))
-			return InvalidCommandExecution();
+			return GitRepositoryRequiredExecution();
 		UpdateDraftPreferredGitMode(nextMode);
 		ApplyPathFilters(
 			nextMode,
@@ -158,21 +159,28 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		if (_state is null || command.Enabled is not { } enabled)
 			return InvalidCommandExecution();
+		string sectionTitle;
 		switch (command.Target)
 		{
 			case "types":
 				ApplyExtensions(enabled ? _state.Plan.AvailableExtensions : [], true);
+				sectionTitle = L("Terminal.Tui.FileTypes");
 				break;
 			case "exclusions":
 				ApplyAllExclusions(enabled, true);
+				sectionTitle = L("Terminal.Tui.Exclusions");
 				break;
 			case "content":
 				ApplyAllContentTransformations(enabled, true);
+				sectionTitle = L("Settings.Secrets.Title");
 				break;
 			default:
 				return InvalidCommandExecution();
 		}
-		return ToggleCommandResult(L("Settings.All"), enabled);
+		// Three sections share the All control, so the result names the one that changed.
+		return ToggleCommandResult(
+			NormalizeControlTitle(sectionTitle) + PanelSeparator + L("Settings.All"),
+			enabled);
 	}
 
 	internal TerminalWorkspaceCommandExecutionResult ExecuteTypeCommand(
@@ -836,6 +844,10 @@ internal sealed partial class TerminalWorkspaceSession
 	private TerminalWorkspaceCommandExecutionResult InvalidCommandExecution() =>
 		TerminalWorkspaceCommandExecutionResult.Failure(
 			L("Terminal.Tui.Command.Error.InvalidState"));
+
+	private TerminalWorkspaceCommandExecutionResult GitRepositoryRequiredExecution() =>
+		TerminalWorkspaceCommandExecutionResult.Failure(
+			L("Terminal.Tui.Command.Error.GitRepositoryRequired"));
 
 	private void ShowCommandHelp(string? verb)
 	{

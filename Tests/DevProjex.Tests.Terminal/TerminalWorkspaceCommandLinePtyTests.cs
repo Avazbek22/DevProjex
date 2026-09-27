@@ -732,9 +732,13 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 			StringComparison.Ordinal);
 		await ExecuteAsync(terminal, "set smart-ignore off", "Smart ignore: disabled");
 		await ExecuteAsync(terminal, "set gitignore off", "Use .gitignore: disabled");
+		await ExecuteAsync(
+			terminal,
+			"set git staged",
+			"This Git mode needs a Git repository and an installed Git.");
 		await ExecuteAsync(terminal, "all content off", "All: disabled");
 		await ExecuteAsync(terminal, "type .cs off", ".cs: disabled");
-		await ExecuteAsync(terminal, "all types off", "All: disabled");
+		await ExecuteAsync(terminal, "all types off", "File types · All: disabled");
 		await terminal.WaitForScreenAsync(
 			"No visible items",
 			cancellationToken: TestContext.Current.CancellationToken);

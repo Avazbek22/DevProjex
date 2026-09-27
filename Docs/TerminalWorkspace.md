@@ -286,8 +286,8 @@ inline ghost suffix as soon as a token can be completed:
 completion continue to advertise the shorter `off` form.
 
 `select` uses the same project-relative glob syntax as the other selection filters. Exact
-directory paths apply to their complete subtree, `select all ...` targets the whole tree,
-and selectors that are absent from the effective tree are counted and reported with the
+directory paths apply to their complete subtree, `select all ...` targets the whole tree
+(write `./all` for a top-level folder named `all`), and selectors that are absent from the effective tree are counted and reported with the
 existing `DPX-SELECTION-PATH-MISSING` warning. The resulting check-state change follows the
 same projection and local-profile persistence path as a manual checkbox, so Live Context
 consumers observe the updated selection.

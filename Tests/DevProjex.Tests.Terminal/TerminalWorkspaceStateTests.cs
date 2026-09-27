@@ -259,6 +259,18 @@ public sealed class TerminalWorkspaceStateTests
 	}
 
 	[Fact]
+	public void CommandSelectionAcceptsADotPrefixedPathForAFolderNamedLikeAKeyword()
+	{
+		using var state = new TerminalWorkspaceState(CreatePlan());
+
+		var result = state.SetSelection(["./src"], selected: true);
+
+		Assert.Equal(4, result.ChangedNodes);
+		Assert.Equal(0, result.MissingSelectors);
+		Assert.Equal(["src"], state.BuildSelectedRelativePaths());
+	}
+
+	[Fact]
 	public void CommandSelectionUsesSharedProjectRelativeGlobSyntax()
 	{
 		using var state = new TerminalWorkspaceState(CreatePlan());
