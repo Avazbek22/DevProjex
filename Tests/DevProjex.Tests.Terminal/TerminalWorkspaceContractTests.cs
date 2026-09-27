@@ -1324,6 +1324,44 @@ public sealed class TerminalWorkspaceContractTests
 	}
 
 	[Fact]
+	public async Task FirstLocalProfileSaveReopensWithTheRootsItWasSavedFrom()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		workspace.WriteFile("node_modules/pkg/index.js", "module.exports = {};\n");
+		workspace.WriteFile("src/app.cs", "class App {}\n");
+		workspace.WriteFile("README.md", "# Readme\n");
+		var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var standard = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+		Assert.Contains("node_modules", standard.Plan.SelectedRoots);
+		controller.SetContentTransformation(
+			standard,
+			IgnoreOptionId.StripComments,
+			enabled: true,
+			TestContext.Current.CancellationToken);
+
+		services.LocalProfileStore.SaveProfile(
+			workspace.Path,
+			TerminalWorkspaceSession.CaptureLocalProfile(standard));
+		using var local = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Local,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(standard.Plan.SelectedRoots, local.Plan.SelectedRoots);
+		Assert.Equal(standard.Plan.SelectedExtensions, local.Plan.SelectedExtensions);
+		Assert.Equal(standard.Plan.IncludedFiles, local.Plan.IncludedFiles);
+		Assert.True(local.Plan.Selection.StripComments);
+		Assert.DoesNotContain(
+			local.Plan.Diagnostics,
+			static diagnostic => diagnostic.Severity != ContextDiagnosticSeverity.Information);
+	}
+
+	[Fact]
 	public async Task RefreshDropsDisappearingProfilePathsWithoutSelectingTheirReplacement()
 	{
 		using var workspace = new TemporaryDirectory();

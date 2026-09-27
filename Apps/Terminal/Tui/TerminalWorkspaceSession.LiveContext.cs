@@ -215,19 +215,25 @@ internal sealed partial class TerminalWorkspaceSession
 		return _selectionProfilePersistence.FlushAsync().GetAwaiter().GetResult();
 	}
 
-	private static ProjectSelectionProfile CaptureLocalProfile(TerminalWorkspaceState state)
+	internal static ProjectSelectionProfile CaptureLocalProfile(TerminalWorkspaceState state)
 	{
 		var selection = state.BuildSelection();
 		var selectedIgnoreOptions = ProjectSelectionAdapter.ToIgnoreOptions(selection).ToArray();
 		var ignoreStates = Enum.GetValues<IgnoreOptionId>().ToDictionary(
 			static option => option,
 			selectedIgnoreOptions.Contains);
+		var selectedRoots = state.Plan.SelectedRoots.ToHashSet(ProjectTreePathIdentity.CanonicalComparer);
 
+		// Without complete root states a reopened local profile falls back to default root
+		// selection, which drops smart-ignore candidates such as node_modules shown right now.
 		return new ProjectSelectionProfile(
-			SelectedRootFolders: [],
+			SelectedRootFolders: state.Plan.SelectedRoots.ToArray(),
 			SelectedExtensions: state.Plan.SelectedExtensions.ToArray(),
 			SelectedIgnoreOptions: selectedIgnoreOptions,
-			RootFolderStates: null,
+			RootFolderStates: state.Plan.AvailableRoots.ToDictionary(
+				static root => root,
+				selectedRoots.Contains,
+				ProjectTreePathIdentity.CanonicalComparer),
 			ExtensionStates: new Dictionary<string, bool>(
 				state.ExtensionOptionStates,
 				StringComparer.OrdinalIgnoreCase),
