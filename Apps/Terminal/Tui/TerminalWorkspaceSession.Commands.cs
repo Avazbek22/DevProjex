@@ -331,7 +331,13 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		if (command.Target == "context")
 		{
-			ExportContext(command.Format, command.Destination, originatedFromCommandLine: true);
+			if (ValidateContextBudget(command, _previewView) is { } budgetError)
+				return budgetError;
+			ExportContext(
+				command.Format,
+				command.Destination,
+				originatedFromCommandLine: true,
+				budget: TerminalContextBudget.From(command));
 			return TerminalWorkspaceCommandExecutionResult.Deferred();
 		}
 		if (command.ProjectExportFormat is not { } projectFormat ||
@@ -346,9 +352,19 @@ internal sealed partial class TerminalWorkspaceSession
 	internal TerminalWorkspaceCommandExecutionResult ExecuteCopyCommand(
 		TerminalWorkspaceCommand command)
 	{
+		if (ValidateContextBudget(command, command.View ?? _previewView) is { } budgetError)
+			return budgetError;
 		CopyCurrentContext(command);
 		return TerminalWorkspaceCommandExecutionResult.Deferred();
 	}
+
+	// Mirrors the direct CLI rule that ranking needs a view with file content.
+	private TerminalWorkspaceCommandExecutionResult? ValidateContextBudget(
+		TerminalWorkspaceCommand command,
+		ProjectContextView view) =>
+		command.Rank is not null && view == ProjectContextView.Tree
+			? TerminalWorkspaceCommandExecutionResult.Failure(L("Terminal.Validation.RankRequiresContent"))
+			: null;
 
 	internal TerminalWorkspaceCommandExecutionResult ExecuteAnalyzeCommand(
 		TerminalWorkspaceCommand command)
@@ -428,6 +444,67 @@ internal sealed partial class TerminalWorkspaceSession
 				return writer.ToString().TrimEnd();
 			},
 			originatedFromCommandLine: true));
+		return TerminalWorkspaceCommandExecutionResult.Deferred();
+	}
+
+	internal TerminalWorkspaceCommandExecutionResult ExecuteGrepCommand(
+		TerminalWorkspaceCommand command)
+	{
+		if (_state is null || string.IsNullOrEmpty(command.Text) ||
+			command.MaximumResults is not { } maximumResults)
+		{
+			return InvalidCommandExecution();
+		}
+
+		var pattern = command.Text;
+		var mode = command.SearchMode;
+		TrackActiveOperation(RunOperationAsync(
+			L("Terminal.Tui.Command.Grep.Title"),
+			async token =>
+			{
+				await AwaitLatestSettingsRefreshAsync(token).ConfigureAwait(false);
+				var plan = await _controller.BuildCurrentPlanAsync(_state, token).ConfigureAwait(false);
+				var planDiagnostics = FormatContextDiagnostics(plan.Diagnostics);
+				if (plan.HasErrors)
+				{
+					throw new TerminalWorkspaceOperationException(
+						"DPX-TUI-GREP-SELECTION-FAILED",
+						planDiagnostics);
+				}
+				SearchCommandHandler.SearchResult result;
+				try
+				{
+					result = await _controller.SearchProjectAsync(plan, pattern, mode, maximumResults, token)
+						.ConfigureAwait(false);
+				}
+				catch (SearchCommandException exception)
+				{
+					throw new TerminalWorkspaceOperationException(
+						exception.Code,
+						L("Terminal.Tui.Command.Grep.Error.InvalidPattern"));
+				}
+				var output = TerminalProjectSearchOutput.Format(result, _services.Localization);
+				return planDiagnostics.Length == 0
+					? output
+					: $"{planDiagnostics}\n\n{output}";
+			},
+			originatedFromCommandLine: true,
+			cornerProgressLabel: L("Terminal.Tui.Command.Grep.Progress")));
+		return TerminalWorkspaceCommandExecutionResult.Deferred();
+	}
+
+	internal TerminalWorkspaceCommandExecutionResult ExecuteRevealCommand(
+		TerminalWorkspaceCommand command)
+	{
+		if (_state is null || _tree is null || string.IsNullOrWhiteSpace(command.Text))
+			return InvalidCommandExecution();
+		if (!TryRevealTreePath(command.Text))
+		{
+			return TerminalWorkspaceCommandExecutionResult.Failure(
+				L("Terminal.Tui.Tree.RevealNotFound"));
+		}
+		// The command line hands focus back to this pane when it closes.
+		_commandReturnPane = TerminalWorkspacePane.Tree;
 		return TerminalWorkspaceCommandExecutionResult.Deferred();
 	}
 
@@ -1015,6 +1092,9 @@ internal sealed partial class TerminalWorkspaceSession
 
 	private string FormatCommandError(TerminalWorkspaceCommandError error)
 	{
+		// Option validation reuses the direct CLI wording verbatim.
+		if (error.MessageKey is { } messageKey)
+			return L(messageKey);
 		var key = error.Code switch
 		{
 			TerminalWorkspaceCommandErrorCode.EmptyInput => "Terminal.Tui.Command.Error.Empty",
@@ -1024,7 +1104,8 @@ internal sealed partial class TerminalWorkspaceSession
 			TerminalWorkspaceCommandErrorCode.MissingArgument => "Terminal.Tui.Command.Error.Missing",
 			TerminalWorkspaceCommandErrorCode.UnexpectedArgument => "Terminal.Tui.Command.Error.Unexpected",
 			TerminalWorkspaceCommandErrorCode.UnknownToken => "Terminal.Tui.Command.Error.UnknownToken",
-			TerminalWorkspaceCommandErrorCode.InvalidValue => "Terminal.Tui.Command.Error.InvalidValue",
+			TerminalWorkspaceCommandErrorCode.InvalidValue or
+				TerminalWorkspaceCommandErrorCode.InvalidOption => "Terminal.Tui.Command.Error.InvalidValue",
 			TerminalWorkspaceCommandErrorCode.UnknownLanguage =>
 				"Terminal.Tui.Command.Language.Error.Unknown",
 			_ => throw new ArgumentOutOfRangeException()

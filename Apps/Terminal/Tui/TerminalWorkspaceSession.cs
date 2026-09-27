@@ -2981,22 +2981,41 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var path = Prompt(L("Terminal.Tui.Tree.Reveal"), L("Terminal.Tui.Tree.RevealPrompt"), null);
 		if (path is null)
 			return;
-		var row = _state.Reveal(path);
-		if (row < 0 && _state.HasTreeFilter && _state.TryResolveTreePath(path, out _))
-		{
-			// The path exists but the active filter hides it; revealing it means leaving the filter.
-			_state.ApplyTreeFilter(null);
-			_searchQuery = null;
-			row = _state.Reveal(path);
-		}
-		if (row < 0)
-		{
+		if (!TryRevealTreePath(path))
 			ShowTransientStatus(L("Terminal.Tui.Tree.RevealNotFound"));
-			return;
-		}
+	}
+
+	private bool TryRevealTreePath(string path)
+	{
+		if (_state is null || _tree is null)
+			return false;
+		var row = RevealTreePathInState(_state, path, out var filterCleared);
+		if (filterCleared)
+			_searchQuery = null;
+		if (row < 0)
+			return false;
 		_tree.SelectedItem = row;
 		_selectedTreePath = _state.VisibleRows[row].Node.FullPath;
 		RefreshWorkspace();
+		return true;
+	}
+
+	internal static int RevealTreePathInState(
+		TerminalWorkspaceState state,
+		string path,
+		out bool filterCleared)
+	{
+		ArgumentNullException.ThrowIfNull(state);
+		filterCleared = false;
+		var row = state.Reveal(path);
+		if (row < 0 && state.HasTreeFilter && state.TryResolveTreePath(path, out _))
+		{
+			// The path exists but the active filter hides it; revealing it means leaving the filter.
+			state.ApplyTreeFilter(null);
+			filterCleared = true;
+			row = state.Reveal(path);
+		}
+		return row;
 	}
 
 	private void MovePreviewSection(bool reverse)
@@ -3378,7 +3397,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private void ExportContext(
 		ProjectContextDocumentFormat? requestedFormat = null,
 		string? requestedDestination = null,
-		bool originatedFromCommandLine = false)
+		bool originatedFromCommandLine = false,
+		TerminalContextBudget? budget = null)
 	{
 		if (_state is null)
 			return;
@@ -3419,7 +3439,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					destination,
 					overwrite: false,
 					token,
-					plain: _options.Plain).ConfigureAwait(false);
+					plain: _options.Plain,
+					budget: budget).ConfigureAwait(false);
 			},
 			async (_, overwrite, token) => new TerminalExportCompletion(
 				await _controller.ExportContextAsync(
@@ -3429,14 +3450,16 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					destination,
 					overwrite,
 					token,
-					plain: _options.Plain).ConfigureAwait(false)),
+					plain: _options.Plain,
+					budget: budget).ConfigureAwait(false)),
 			(exactDestination, dryRun) =>
 				TerminalWorkspaceController.BuildEquivalentContextCommand(
 					_state,
 					_previewView,
 					selectedFormat,
 					exactDestination,
-					dryRun),
+					dryRun,
+					budget),
 			originatedFromCommandLine));
 	}
 

@@ -864,7 +864,7 @@ public sealed class DevProjexCommandTree
 		{
 			Description = L("Terminal.Option.SearchMaximumResults"),
 			HelpName = "N",
-			DefaultValueFactory = _ => 50
+			DefaultValueFactory = _ => SearchCommandHandler.DefaultMaximumResults
 		};
 		var searchBodyCharacters = new Option<string>("--search-body-chars")
 		{
@@ -904,7 +904,8 @@ public sealed class DevProjexCommandTree
 				result.AddError(LocalizedParseError.Create(
 					L("Terminal.Validation.SearchModeConflict")));
 			}
-			if (CliParseValue.TryGet(result, maximumResults, out var maximum) && maximum is < 1 or > 200)
+			if (CliParseValue.TryGet(result, maximumResults, out var maximum) &&
+				maximum is < SearchCommandHandler.MinimumMaximumResults or > SearchCommandHandler.MaximumMaximumResults)
 			{
 				result.AddError(LocalizedParseError.Create(
 					L("Terminal.Validation.SearchMaximumResults")));

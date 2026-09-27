@@ -1,3 +1,5 @@
+using DevProjex.Application.Ranking;
+
 namespace DevProjex.Terminal.Tui;
 
 public enum TerminalExportKind
@@ -33,7 +35,31 @@ public sealed record TerminalExportSummary(
 	int DiagnosticCount,
 	bool SecretsRedacted = false,
 	bool PrivateDataRedacted = false,
-	string? GitDiffRange = null);
+	string? GitDiffRange = null,
+	ProjectContextTokenBudgetReport? TokenBudget = null,
+	ProjectContextRank? Rank = null);
+
+// The direct CLI export options --max-tokens and --rank, applied to one copy or context export.
+public sealed record TerminalContextBudget(
+	long? MaximumEstimatedTokens,
+	ProjectContextRank? Rank)
+{
+	internal static TerminalContextBudget? From(TerminalWorkspaceCommand command) =>
+		command.MaximumEstimatedTokens is null && command.Rank is null
+			? null
+			: new TerminalContextBudget(command.MaximumEstimatedTokens, command.Rank);
+
+	internal static string FormatReport(
+		ProjectContextTokenBudgetReport report,
+		LocalizationService localization) =>
+		localization.Format(
+			"Terminal.TokenBudget.Summary",
+			report.MaximumEstimatedTokens,
+			report.IncludedFileCount,
+			report.IncludedEstimatedTokens,
+			report.SkippedFileCount,
+			report.SkippedEstimatedTokens);
+}
 
 internal readonly record struct TerminalExportCompletion(
 	string DestinationPath,

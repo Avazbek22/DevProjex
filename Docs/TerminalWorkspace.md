@@ -257,12 +257,14 @@ inline ghost suffix as soon as a token can be completed:
 | `view tree\|content\|tree-content` | select Preview mode |
 | `format text\|markdown\|json\|xml` | select tree format |
 | `search [text]` | search Preview, or clear it with no text |
+| `grep <pattern> [--regex\|--symbols] [--max <1..200>]` | search file contents across the current selection with the direct CLI `search` rules and show the matches in the output panel |
 | `filter [text]` | filter Project Tree, or clear it with no text |
-| `export context [format] [path]` | open the existing context-export confirmation |
+| `export context [format] [path] [--max-tokens <N>] [--rank importance]` | open the existing context-export confirmation; the flags apply the direct CLI token budget and importance ranking |
 | `export zip <path>` / `export folder <path>` | open the existing project-export confirmation |
-| `copy [tree\|content\|tree-content] [text\|markdown\|json\|xml]` | copy an exact context document without changing the current view or format |
+| `copy [tree\|content\|tree-content] [text\|markdown\|json\|xml] [--max-tokens <N>] [--rank importance]` | copy an exact context document without changing the current view or format; a format can be given without a view |
 | `analyze` | analyze the current context |
 | `related <path> [--direction <dependencies\|dependents\|both>] [--depth <1..10>]` | show dependency relations in the output panel using the current workspace selection |
+| `reveal <path>` | reveal a project path in Project Tree like `R`: expand its folders, move the cursor to it, and focus the tree |
 | `branch [name]` | switch the cloned repository branch, or open branch selection |
 | `update` | get updates for the cloned repository |
 | `recent` | open recent projects and repositories |
@@ -311,8 +313,12 @@ Examples:
 :select all off
 :view content
 :search "connection string"
+:grep "connection string"
+:grep Configure --symbols --max 20
 :copy content markdown
+:copy json --max-tokens 8000
 :related src/App.cs --direction dependencies --depth 2
+:reveal src/App.cs
 :mcp codex standard
 :mcp connect codex standard
 :mcp log last
@@ -323,7 +329,22 @@ Examples:
 :open "../sample project"
 :profile load "Team Settings"
 :export context markdown "../review context.md"
+:export context "../ranked context.md" --max-tokens 50000 --rank importance
 ```
+
+`grep` runs the same search as `devprojex search` over the files of the current
+workspace selection: the same text, `--regex`, and `--symbols` matching (the two modes
+are mutually exclusive), the same declaration names, the same secret and private-data
+redaction, and the same default limit of 50 matches. The search runs in the background
+and can be cancelled; its results open in the output panel with project-relative paths,
+line numbers, and the enclosing declaration when one is known. `search` keeps searching
+the current Preview.
+
+`--max-tokens` and `--rank` on `copy` and `export context` follow
+`devprojex export context`: the budget admits files by estimated content tokens and
+`--rank importance` orders files by importance before the budget is applied. Ranking needs a view that includes
+file content. The export confirmation lists the applied budget and ranking, and a budgeted
+copy reports the included and skipped files.
 
 `copy` first uses the platform clipboard exposed by Terminal.Gui. When that is not
 available, an interactive terminal receives a complete OSC 52 clipboard sequence.

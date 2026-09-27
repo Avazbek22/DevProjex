@@ -275,6 +275,15 @@ public sealed class TerminalWorkspace
 			(false, true) => "Terminal.Tui.Export.PrivateDataOnlyRedactionInline",
 			_ => null
 		};
+		if (summary.TokenBudget is { } tokenBudget)
+		{
+			rows.Add((
+				L("Terminal.Tui.Export.TokenBudget"),
+				TerminalContextBudget.FormatReport(tokenBudget, services.Localization),
+				TerminalCellWidth.Wrap));
+		}
+		if (summary.Rank is not null)
+			rows.Add((L("Terminal.Tui.Export.Ranking"), L("Terminal.Option.Rank"), TerminalCellWidth.Wrap));
 		if (redactionKey is not null)
 		{
 			rows.Add((L("Terminal.Tui.Redaction"), L(redactionKey), TerminalCellWidth.Wrap));

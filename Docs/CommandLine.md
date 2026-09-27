@@ -214,13 +214,18 @@ request-scoped choice rather than a standalone command.
 | Show profile | direct action | `profile show` | `profile show` | none by design |
 | Reset profile | direct action | `profile reset` | `profile reset` | none by design |
 | Save profile | direct action | `profile save` | `profile save` | none by design |
-| Search | direct action | `search` | `search` | `search_project` |
+| Search | direct action | `grep` | `search` | `search_project` |
 | Related files | none by design | `related` | `related` | `related_files` |
 | Analyze | direct action | `analyze` | `analyze` | `analyze` |
 | Export context | direct action | `export` | `export context` | `pack_context` |
 | Connect MCP client | MCP menu | `mcp connect` | `mcp connect` | none by design |
 | Agent journal and context receipt | direct action | `mcp log`<br>`mcp log export` | `mcp log` | none by design |
 | Diagnostics | none by design | `diagnostics` | `doctor` | none by design |
+
+In Terminal Workspace, `grep` is the project-wide search that matches CLI `search`; the
+TUI `search` command searches only the current Preview. The TUI `copy` and
+`export context` commands also accept the `--max-tokens` and `--rank` options of CLI
+`export context`.
 
 ## Version
 

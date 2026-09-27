@@ -1,3 +1,5 @@
+using DevProjex.Application.Ranking;
+using DevProjex.Terminal.Execution;
 using Terminal.Gui.Input;
 
 namespace DevProjex.Terminal.Tui;
@@ -11,11 +13,13 @@ internal enum TerminalWorkspaceCommandVerb
 	View,
 	Format,
 	Search,
+	Grep,
 	Filter,
 	Export,
 	Copy,
 	Analyze,
 	Related,
+	Reveal,
 	Branch,
 	Update,
 	Recent,
@@ -69,6 +73,8 @@ internal enum TerminalWorkspaceCommandGrammar
 	Profile,
 	McpConnection,
 	Related,
+	Grep,
+	ProjectPath,
 	Language,
 	Help,
 	None
@@ -85,7 +91,11 @@ internal sealed record TerminalWorkspaceCommand(
 	string? Text = null,
 	string? Destination = null,
 	int? Depth = null,
-	TerminalWorkspaceMcpAction McpAction = TerminalWorkspaceMcpAction.Print);
+	TerminalWorkspaceMcpAction McpAction = TerminalWorkspaceMcpAction.Print,
+	SearchMode SearchMode = SearchMode.Text,
+	int? MaximumResults = null,
+	long? MaximumEstimatedTokens = null,
+	ProjectContextRank? Rank = null);
 
 internal enum TerminalWorkspaceMcpAction
 {
@@ -106,14 +116,16 @@ internal enum TerminalWorkspaceCommandErrorCode
 	UnknownToken,
 	InvalidValue,
 	UnknownLanguage,
-	UnavailableVerb
+	UnavailableVerb,
+	InvalidOption
 }
 
 internal sealed record TerminalWorkspaceCommandError(
 	TerminalWorkspaceCommandErrorCode Code,
 	int Position,
 	string? Value,
-	IReadOnlyList<string> Candidates);
+	IReadOnlyList<string> Candidates,
+	string? MessageKey = null);
 
 internal readonly record struct TerminalWorkspaceCommandParseResult(
 	TerminalWorkspaceCommand? Command,
@@ -219,6 +231,13 @@ internal static class TerminalWorkspaceCommandCatalog
 			"search TODO",
 			static (session, command) => session.ExecuteSearchCommand(command)),
 		Define(
+			TerminalWorkspaceCommandVerb.Grep,
+			TerminalWorkspaceCommandGrammar.Grep,
+			"grep",
+			"grep <pattern> [--regex|--symbols] [--max <1..200>]",
+			"grep Configure --symbols",
+			static (session, command) => session.ExecuteGrepCommand(command)),
+		Define(
 			TerminalWorkspaceCommandVerb.Filter,
 			TerminalWorkspaceCommandGrammar.Text,
 			"filter",
@@ -229,15 +248,16 @@ internal static class TerminalWorkspaceCommandCatalog
 			TerminalWorkspaceCommandVerb.Export,
 			TerminalWorkspaceCommandGrammar.Export,
 			"export",
-			"export <context|zip|folder> ...",
+			"export context [text|markdown|json|xml] [path] [--max-tokens <N>] [--rank importance] | " +
+			"export <zip|folder> <path>",
 			"export context markdown ../context.md",
 			static (session, command) => session.ExecuteExportCommand(command)),
 		Define(
 			TerminalWorkspaceCommandVerb.Copy,
 			TerminalWorkspaceCommandGrammar.Copy,
 			"copy",
-			"copy [tree|content|tree-content] [text|markdown|json|xml]",
-			"copy content markdown",
+			"copy [tree|content|tree-content] [text|markdown|json|xml] [--max-tokens <N>] [--rank importance]",
+			"copy json --max-tokens 8000",
 			static (session, command) => session.ExecuteCopyCommand(command)),
 		Define(
 			TerminalWorkspaceCommandVerb.Analyze,
@@ -253,6 +273,13 @@ internal static class TerminalWorkspaceCommandCatalog
 			"related <path> [--direction <dependencies|dependents|both>] [--depth <1..10>]",
 			"related src/App.cs --direction dependencies --depth 2",
 			static (session, command) => session.ExecuteRelatedCommand(command)),
+		Define(
+			TerminalWorkspaceCommandVerb.Reveal,
+			TerminalWorkspaceCommandGrammar.ProjectPath,
+			"reveal",
+			"reveal <path>",
+			"reveal src/App.cs",
+			static (session, command) => session.ExecuteRevealCommand(command)),
 		Define(
 			TerminalWorkspaceCommandVerb.Branch,
 			TerminalWorkspaceCommandGrammar.OptionalText,

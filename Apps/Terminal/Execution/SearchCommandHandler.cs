@@ -13,6 +13,9 @@ public sealed class SearchCommandHandler(
 	TerminalServices services,
 	ITerminalEnvironment environment)
 {
+	internal const int DefaultMaximumResults = 50;
+	internal const int MinimumMaximumResults = 1;
+	internal const int MaximumMaximumResults = 200;
 	private const int ContextLines = 2;
 	private const int MaximumContentCharacters = 16_000;
 	private const int MaximumStoredMatches = 5_000;
@@ -100,6 +103,16 @@ public sealed class SearchCommandHandler(
 		var result = await SearchAsync(plan, request, maximumInspectedBytes, cancellationToken)
 			.ConfigureAwait(false);
 		return Render(result, request.Format);
+	}
+
+	internal Task<SearchResult> SearchForPlanAsync(
+		ProjectContextPlan plan,
+		SearchCommandRequest request,
+		CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(plan);
+		ArgumentNullException.ThrowIfNull(request);
+		return SearchAsync(plan, request, MaximumInspectedBytes, cancellationToken);
 	}
 
 	private async Task<SearchResult> SearchAsync(
@@ -735,7 +748,7 @@ public sealed class SearchCommandHandler(
 		_ => throw new ArgumentOutOfRangeException(nameof(mode), mode, null)
 	};
 
-	private sealed record SearchResult(
+	internal sealed record SearchResult(
 		string Pattern,
 		SearchMode Mode,
 		IReadOnlyList<SearchMatch> Matches,
@@ -745,9 +758,9 @@ public sealed class SearchCommandHandler(
 		string Body,
 		int MatchingFiles);
 
-	private sealed record SearchMatch(string Path, int Line, string Text, string? Declaration);
+	internal sealed record SearchMatch(string Path, int Line, string Text, string? Declaration);
 
-	private sealed record SearchDeclaration(
+	internal sealed record SearchDeclaration(
 		string Path,
 		string Symbol,
 		int StartLine,
@@ -755,7 +768,7 @@ public sealed class SearchCommandHandler(
 		string? Body,
 		int RemainingBodyLines);
 
-	private readonly record struct SearchResolution(int Resolved, int Ambiguous, int Unresolved, int External);
+	internal readonly record struct SearchResolution(int Resolved, int Ambiguous, int Unresolved, int External);
 }
 
 internal sealed class SearchCommandException(string code, string message, Exception? innerException = null)

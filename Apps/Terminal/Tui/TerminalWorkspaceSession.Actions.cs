@@ -1762,15 +1762,17 @@ internal sealed partial class TerminalWorkspaceSession
 			return;
 		var view = command.View ?? _previewView;
 		var format = command.Format ?? _format;
+		var budget = TerminalContextBudget.From(command);
 		TrackActiveOperation(RunOperationAsync(
 			L("Terminal.Tui.Command.Copy.Title"),
 			async token =>
 			{
 				await AwaitLatestSettingsRefreshAsync(token).ConfigureAwait(false);
-				var payload = await _controller.BuildCopyPayloadAsync(
+				var (payload, tokenBudget) = await _controller.BuildCopyPayloadWithBudgetAsync(
 						_state,
 						view,
 						format,
+						budget,
 						token,
 						plain: _options.Plain)
 					.ConfigureAwait(false);
@@ -1788,11 +1790,14 @@ internal sealed partial class TerminalWorkspaceSession
 							? "DPX-TUI-CLIPBOARD-PAYLOAD-TOO-LARGE"
 							: "DPX-TUI-CLIPBOARD-UNAVAILABLE");
 				}
-				return string.Format(
+				var copied = string.Format(
 					CultureInfo.CurrentCulture,
 					L("Terminal.Tui.Command.Copy.Result"),
 					L(ProjectPresentationCatalog.Get(view).LabelKey),
 					payload.Length);
+				return tokenBudget is null
+					? copied
+					: $"{copied}\n{TerminalContextBudget.FormatReport(tokenBudget, _services.Localization)}";
 			},
 			originatedFromCommandLine: true,
 			cornerProgressLabel: L("Terminal.Tui.Progress.BuildingPreview")));
