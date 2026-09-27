@@ -805,7 +805,7 @@
   "Terminal.Tui.Welcome.Exit.Description": "DevProjex Terminal-dan chiqing va terminal holatini tiklang.",
   "Terminal.Tui.Welcome.QuickStart": "Avtomatlashtirish: devprojex analyze .  |  devprojex export context . -o context.md",
   "Terminal.Tui.Footer.Welcome": "1-9 Yaqinda  Enter Ochish  : Buyruqlar  Ctrl+P Amallar  ? Yordam  q Chiqish",
-  "Terminal.Tui.Footer.Loading": "Esc Amalni bekor qilish   ? Yordam",
+  "Terminal.Tui.Footer.Loading": "Esc Amalni bekor qilish",
   "Terminal.Tui.Footer.Tree": "Space Almashish  Shift+←/→ Hammasi  Ctrl+A/U Tanlash  : Buyruqlar",
   "Terminal.Tui.Footer.Tree.Wide": "Space Almashish   Shift+←/→ Hammasini yig'ish/ochish   Ctrl+A/U Hamma/Hech narsani tanlash   R Ko'rsatish   : Buyruqlar",
   "Terminal.Tui.Footer.Preview": "j/k Aylantirish  {/} Bo'lim  Ctrl+G Qator  W O'rash   : Buyruqlar",

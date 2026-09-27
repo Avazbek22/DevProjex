@@ -817,7 +817,7 @@
   "Terminal.Tui.Welcome.Exit.Description": "Rời khỏi DevProjex Terminal và khôi phục trạng thái terminal.",
   "Terminal.Tui.Welcome.QuickStart": "Tự động hóa trực tiếp: devprojex analyze .  |  devprojex export context . -o context.md",
   "Terminal.Tui.Footer.Welcome": "1-9 Gần đây   Enter Chọn   : Lệnh   Ctrl+P Hành động   ? Trợ giúp   q Thoát",
-  "Terminal.Tui.Footer.Loading": "Esc Hủy thao tác  ? Trợ giúp",
+  "Terminal.Tui.Footer.Loading": "Esc Hủy thao tác",
   "Terminal.Tui.Footer.Tree": "Space Chuyển đổi  Shift+←/→ Tất cả  Ctrl+A/U Chọn  : Lệnh",
   "Terminal.Tui.Footer.Tree.Wide": "Space Chuyển đổi   Shift+←/→ Thu gọn/mở rộng tất cả   Ctrl+A/U Chọn tất cả/không   R Hiển thị   : Lệnh",
   "Terminal.Tui.Footer.Preview": "j/k Cuộn  {/} Phần  Ctrl+G Dòng  W Gói  : Lệnh",

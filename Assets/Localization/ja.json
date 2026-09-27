@@ -817,7 +817,7 @@
   "Terminal.Tui.Welcome.Exit.Description": "DevProjexターミナルを終了し、ターミナル状態を復元します。",
   "Terminal.Tui.Welcome.QuickStart": "直接自動化: devprojex analyze .  |  devprojex export context . -o context.md",
   "Terminal.Tui.Footer.Welcome": "1-9 最近   Enter 選択   : コマンド   Ctrl+P アクション   ? ヘルプ   q 終了",
-  "Terminal.Tui.Footer.Loading": "Esc 操作をキャンセル  ? ヘルプ",
+  "Terminal.Tui.Footer.Loading": "Esc 操作をキャンセル",
   "Terminal.Tui.Footer.Tree": "Space 切り替え  Shift+←/→ すべて  Ctrl+A/U 選択  : コマンド",
   "Terminal.Tui.Footer.Tree.Wide": "Space 切り替え   Shift+←/→ すべて折りたたむ/展開   Ctrl+A/U すべて選択/選択解除   R 表示   : コマンド",
   "Terminal.Tui.Footer.Preview": "j/k スクロール  {/} セクション  Ctrl+G 行  W 折り返し  : コマンド",

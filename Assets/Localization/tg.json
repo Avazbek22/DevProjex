@@ -805,7 +805,7 @@
   "Terminal.Tui.Welcome.Exit.Description": "Аз DevProjex Terminal бароед ва ҳолати терминалро барқарор кунед.",
   "Terminal.Tui.Welcome.QuickStart": "Автоматикунонӣ: devprojex analyze .  |  devprojex export context . -o context.md",
   "Terminal.Tui.Footer.Welcome": "1-9 Тазагӣ   Enter Интихоб   : Фармонҳо   Ctrl+P Амалҳо   ? Кӯмак   q Хориҷ",
-  "Terminal.Tui.Footer.Loading": "Esc Бекор кардани амал   ? Роҳнамо",
+  "Terminal.Tui.Footer.Loading": "Esc Бекор кардани амал",
   "Terminal.Tui.Footer.Tree": "Space Робӣ кардан  Shift+←/→ Ҳама  Ctrl+A/U Интихоб  : Фармонҳо",
   "Terminal.Tui.Footer.Tree.Wide": "Space Робӣ кардан   Shift+←/→ Ҳамаи ҷузъҳоро пинҳон/нишон додан   Ctrl+A/U Ҳама/ҳеҷ касро интихоб кардан   R Ошкор кардан   : Фармонҳо",
   "Terminal.Tui.Footer.Preview": "j/k Скролл  {/} Қисм  Ctrl+G Сатр  W Қапидан   : Фармонҳо",

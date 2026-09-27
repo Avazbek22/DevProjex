@@ -823,7 +823,7 @@
   "Terminal.Tui.Welcome.Exit.Description": "Quitter DevProjex Terminal et restaurer l’état du terminal.",
   "Terminal.Tui.Welcome.QuickStart": "Automatisation : devprojex analyze .  |  devprojex export context . -o context.md",
   "Terminal.Tui.Footer.Welcome": "1-9 Récents  Enter Ouvrir  : Commandes  Ctrl+P Actions  ? Aide  q Quitter",
-  "Terminal.Tui.Footer.Loading": "Échap Annuler l’opération   ? Aide",
+  "Terminal.Tui.Footer.Loading": "Échap Annuler l’opération",
   "Terminal.Tui.Footer.Tree": "Space Basculer  Shift+←/→ Tout  Ctrl+A/U Sélectionner  : Commandes",
   "Terminal.Tui.Footer.Tree.Wide": "Space Basculer   Shift+←/→ Réduire/étendre tout   Ctrl+A/U Sélectionner tout/aucun   R Révéler   : Commandes",
   "Terminal.Tui.Footer.Preview": "j/k Faire défiler  {/} Section  Ctrl+G Ligne  W Retour à la ligne  : Commandes",

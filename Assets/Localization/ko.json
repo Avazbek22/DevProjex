@@ -817,7 +817,7 @@
   "Terminal.Tui.Welcome.Exit.Description": "DevProjex Terminal을 종료하고 터미널 상태를 복원합니다.",
   "Terminal.Tui.Welcome.QuickStart": "직접 자동화: devprojex analyze .  |  devprojex export context . -o context.md",
   "Terminal.Tui.Footer.Welcome": "1-9 최근   Enter 선택   : 명령   Ctrl+P 동작   ? 도움말   q 종료",
-  "Terminal.Tui.Footer.Loading": "Esc 작업 취소  ? 도움말",
+  "Terminal.Tui.Footer.Loading": "Esc 작업 취소",
   "Terminal.Tui.Footer.Tree": "Space 전환  Shift+←/→ 모두  Ctrl+A/U 선택  : 명령",
   "Terminal.Tui.Footer.Tree.Wide": "Space 전환   Shift+←/→ 모두 접기/펼치기   Ctrl+A/U 모두/없음 선택   R 표시   : 명령",
   "Terminal.Tui.Footer.Preview": "j/k 스크롤  {/} 섹션  Ctrl+G 줄  W 줄바꿈  : 명령",

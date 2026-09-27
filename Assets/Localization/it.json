@@ -823,7 +823,7 @@
   "Terminal.Tui.Welcome.Exit.Description": "Esci da DevProjex Terminal e ripristina lo stato del terminale.",
   "Terminal.Tui.Welcome.QuickStart": "Automazione: devprojex analyze .  |  devprojex export context . -o context.md",
   "Terminal.Tui.Footer.Welcome": "1-9 Recenti   Enter Seleziona   : Comandi   Ctrl+P Azioni   ? Aiuto   q Esci",
-  "Terminal.Tui.Footer.Loading": "Esc Annulla operazione   ? Guida",
+  "Terminal.Tui.Footer.Loading": "Esc Annulla operazione",
   "Terminal.Tui.Footer.Tree": "Space Alterna  Shift+←/→ Tutti  Ctrl+A/U Seleziona  : Comandi",
   "Terminal.Tui.Footer.Tree.Wide": "Space Alterna   Shift+←/→ Comprimi/espandi tutto   Ctrl+A/U Seleziona tutto/nessuno   R Mostra   : Comandi",
   "Terminal.Tui.Footer.Preview": "j/k Scorri  {/} Sezione  Ctrl+G Riga  W Avvolgi  : Comandi",

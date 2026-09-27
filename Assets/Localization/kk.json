@@ -805,7 +805,7 @@
   "Terminal.Tui.Welcome.Exit.Description": "DevProjex Terminal жұмысын аяқтап, терминал күйін қалпына келтіру.",
   "Terminal.Tui.Welcome.QuickStart": "Автоматтандыру: devprojex analyze .  |  devprojex export context . -o context.md",
   "Terminal.Tui.Footer.Welcome": "1-9 Соңғы  Enter Ашу  : Командалар  Ctrl+P Әрекеттер  ? Көмек  q Шығу",
-  "Terminal.Tui.Footer.Loading": "Esc Әрекетті тоқтату   ? Анықтама",
+  "Terminal.Tui.Footer.Loading": "Esc Әрекетті тоқтату",
   "Terminal.Tui.Footer.Tree": "Space Ауыстыру  Shift+←/→ Барлығын  Ctrl+A/U Таңдау  : Командалар",
   "Terminal.Tui.Footer.Tree.Wide": "Space Ауыстыру   Shift+←/→ Барлығын қыса/кеңейт   Ctrl+A/U Барлығын таңдау/жоққа шығару   R Ашу   : Командалар",
   "Terminal.Tui.Footer.Preview": "j/k Айналдыру  {/} Бөлім  Ctrl+G Жол  W Орау  : Командалар",

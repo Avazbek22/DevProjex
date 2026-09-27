@@ -817,7 +817,7 @@
   "Terminal.Tui.Welcome.Exit.Description": "Keluar dari Terminal DevProjex dan pulihkan status terminal.",
   "Terminal.Tui.Welcome.QuickStart": "Otomatisasi langsung: devprojex analyze .  |  devprojex export context . -o context.md",
   "Terminal.Tui.Footer.Welcome": "1-9 Baru   Enter Pilih   : Perintah   Ctrl+P Tindakan   ? Bantuan   q Keluar",
-  "Terminal.Tui.Footer.Loading": "Esc Batalkan operasi  ? Bantuan",
+  "Terminal.Tui.Footer.Loading": "Esc Batalkan operasi",
   "Terminal.Tui.Footer.Tree": "Space Alihkan  Shift+←/→ Semua  Ctrl+A/U Pilih  : Perintah",
   "Terminal.Tui.Footer.Tree.Wide": "Space Alihkan   Shift+←/→ Tutup/buka semua   Ctrl+A/U Pilih semua/tidak ada   R Ungkapkan   : Perintah",
   "Terminal.Tui.Footer.Preview": "j/k Gulir  {/} Bagian  Ctrl+G Baris  W Bungkus  : Perintah",

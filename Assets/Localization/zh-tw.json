@@ -817,7 +817,7 @@
   "Terminal.Tui.Welcome.Exit.Description": "離開DevProjex終端機並恢復終端狀態。",
   "Terminal.Tui.Welcome.QuickStart": "直接自動化：devprojex analyze .  |  devprojex export context . -o context.md",
   "Terminal.Tui.Footer.Welcome": "1-9 最近   Enter 選擇   : 命令   Ctrl+P 操作   ? 幫助   q 退出",
-  "Terminal.Tui.Footer.Loading": "Esc 取消操作  ? 幫助",
+  "Terminal.Tui.Footer.Loading": "Esc 取消操作",
   "Terminal.Tui.Footer.Tree": "Space 切換  Shift+←/→ 全部  Ctrl+A/U 選擇  : 命令",
   "Terminal.Tui.Footer.Tree.Wide": "Space 切換   Shift+←/→ 全部摺疊/展開   Ctrl+A/U 全部選取/取消選取   R 顯示   : 命令",
   "Terminal.Tui.Footer.Preview": "j/k 滾動  {/} 區段  Ctrl+G 行  W 換行  : 命令",

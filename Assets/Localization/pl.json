@@ -817,7 +817,7 @@
   "Terminal.Tui.Welcome.Exit.Description": "Opuść terminal DevProjex i przywróć stan terminala.",
   "Terminal.Tui.Welcome.QuickStart": "Automatyzacja bezpośrednia: devprojex analyze .  |  devprojex export context . -o context.md",
   "Terminal.Tui.Footer.Welcome": "1-9 Ostatnie  Enter Otwórz  : Polecenia  Ctrl+P Akcje  ? Pomoc  q Wyjście",
-  "Terminal.Tui.Footer.Loading": "Esc Anuluj operację  ? Pomoc",
+  "Terminal.Tui.Footer.Loading": "Esc Anuluj operację",
   "Terminal.Tui.Footer.Tree": "Space Przełącz  Shift+←/→ Wszystkie  Ctrl+A/U Wybierz  : Polecenia",
   "Terminal.Tui.Footer.Tree.Wide": "Space Przełącz   Shift+←/→ Zwiń/rozwiń wszystko   Ctrl+A/U Wybierz wszystko/żadne   R Pokaż   : Polecenia",
   "Terminal.Tui.Footer.Preview": "j/k Przewiń  {/} Sekcja  Ctrl+G Linia  W Zawijanie  : Polecenia",

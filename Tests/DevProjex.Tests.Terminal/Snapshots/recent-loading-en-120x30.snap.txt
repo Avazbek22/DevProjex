@@ -27,4 +27,4 @@
 
 
 
-  Esc Cancel operation   ? Help
+  Esc Cancel operation
