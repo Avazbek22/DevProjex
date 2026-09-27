@@ -57,6 +57,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private ProjectSelectionProfile? _localProfileBaseline;
 	private readonly LiveSessionRegistry _liveSessionRegistry;
 	private readonly TerminalExportDestinationHistory _exportDestinations = new();
+	private readonly TerminalOverlayPointerGuard _overlayPointerGuard = new();
 	private readonly Lazy<AgentJournalStore> _agentJournalStore;
 	private readonly AgentJournalReceiptFormatter _agentJournalReceiptFormatter = new();
 
@@ -212,6 +213,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_terminalWidth = Math.Max(_environment.Width, initialScreen.Width);
 		_terminalHeight = Math.Max(_environment.Height, initialScreen.Height);
 		_application.Keyboard.KeyDown += OnRootKeyDown;
+		_application.Mouse.MouseEvent += SwallowOverlayGestureRemainder;
 		_services.Localization.LanguageChanged += OnLanguageChanged;
 		_screenChangedHandler = OnApplicationScreenChanged;
 		_application.ScreenChanged += _screenChangedHandler;
@@ -5434,6 +5436,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		finally
 		{
 			_application.Keyboard.KeyDown -= CloseOverlayOnEscape;
+			_overlayPointerGuard.OverlayClosed();
 			if (!_stopping)
 			{
 				if (previousFocus is { Visible: true, Enabled: true, CanFocus: true })
@@ -5442,6 +5445,12 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					RestoreScreenFocus();
 			}
 		}
+	}
+
+	private void SwallowOverlayGestureRemainder(object? sender, Mouse mouse)
+	{
+		if (_overlayPointerGuard.ShouldSwallow(mouse.Flags, mouse.ScreenPosition, mouse.Timestamp ?? DateTime.Now))
+			mouse.Handled = true;
 	}
 
 	private void RestoreScreenFocus()
@@ -5701,6 +5710,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			return;
 		_disposed = true;
 		_application.Keyboard.KeyDown -= OnRootKeyDown;
+		_application.Mouse.MouseEvent -= SwallowOverlayGestureRemainder;
 		_services.Localization.LanguageChanged -= OnLanguageChanged;
 		_application.ScreenChanged -= _screenChangedHandler;
 		if (_subscribedDriver is not null && _driverSizeChangedHandler is not null)

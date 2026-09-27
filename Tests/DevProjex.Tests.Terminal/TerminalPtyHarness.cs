@@ -659,6 +659,7 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		int column,
 		int row,
 		int clickCount = 1,
+		int pauseBetweenClicksMilliseconds = 40,
 		CancellationToken cancellationToken = default)
 	{
 		var x = column + 1;
@@ -668,7 +669,7 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			await SendAsync($"\u001b[<0;{x};{y}M\u001b[<0;{x};{y}m", cancellationToken)
 				.ConfigureAwait(false);
 			if (click + 1 < clickCount)
-				await Task.Delay(40, cancellationToken).ConfigureAwait(false);
+				await Task.Delay(pauseBetweenClicksMilliseconds, cancellationToken).ConfigureAwait(false);
 		}
 	}
 
@@ -678,6 +679,7 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		string rowText,
 		string label,
 		int clickCount = 1,
+		int pauseBetweenClicksMilliseconds = 40,
 		CancellationToken cancellationToken = default)
 	{
 		var lines = CaptureScreen().Split('\n');
@@ -688,7 +690,12 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			throw new Xunit.Sdk.XunitException(
 				$"'{label}' was not found on the row containing '{rowText}'.\n{CaptureScreen()}");
 		}
-		await SendMouseClickAsync(column + 1, row, clickCount, cancellationToken).ConfigureAwait(false);
+		await SendMouseClickAsync(
+			column + 1,
+			row,
+			clickCount,
+			pauseBetweenClicksMilliseconds,
+			cancellationToken).ConfigureAwait(false);
 	}
 
 	public Task SendMouseWheelDownAsync(
