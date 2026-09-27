@@ -92,6 +92,10 @@ public sealed class TerminalWorkspace
 				: AppModel.FullScreen;
 			application.Init();
 			initialized = true;
+			// Terminal.Gui binds Esc to Quit for the whole application, so any screen that
+			// leaves Esc unhandled would end the TUI. Only the workspace's own confirmed exit
+			// paths may do that.
+			application.Keyboard.KeyBindings.Remove(global::Terminal.Gui.Input.Key.Esc);
 			application.Mouse.IsMouseDisabled = !mouseEnabled;
 			if (!mouseEnabled)
 			{

@@ -194,6 +194,34 @@ public sealed class TerminalPtyLifecycleTests
 				cancellationToken: TestContext.Current.CancellationToken));
 	}
 
+	[Fact(Timeout = 60_000)]
+	public async Task EscapeAtWelcomeKeepsTheTerminalOpen()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("notes.txt", "markerless directory");
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			workspace.Path,
+			["--language", "en"],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.WaitForScreenAsync(
+			"Choose a workspace action",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		// Input is processed in order: the exit question proves both Esc presses were handled.
+		await terminal.SendCtrlCAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Exit DevProjex Terminal?",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.False(terminal.HasExited);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(
+				cancellationToken: TestContext.Current.CancellationToken));
+	}
+
 	[Theory(Timeout = 90_000)]
 	[InlineData(60, 20)]
 	[InlineData(60, 24)]
