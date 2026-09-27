@@ -1205,6 +1205,7 @@
   "Terminal.Tui.Command.Error.Empty": "Фармонро ворид кунед (мавқеи {1}).",
   "Terminal.Tui.Command.Error.Quote": "Аргументи нохунакдор баста нашудааст (мавқеи {1}).",
   "Terminal.Tui.Command.Error.UnknownVerb": "Фармони номаълум '{0}' (мавқеи {1}).",
+  "Terminal.Tui.Command.Error.UnavailableVerb": "Фармони '{0}' танҳо ҳангоми кушода будани лоиҳа дастрас аст (мавқеи {1}).",
   "Terminal.Tui.Command.Error.Missing": "Аргументи ҳатмӣ намерасад (мавқеи {1}).",
   "Terminal.Tui.Command.Error.Unexpected": "Аргументи ғайричашмдошт '{0}' (мавқеи {1}).",
   "Terminal.Tui.Command.Error.UnknownToken": "Токени номаълум '{0}' (мавқеи {1}).",

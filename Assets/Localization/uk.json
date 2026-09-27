@@ -1199,6 +1199,7 @@
   "Terminal.Tui.Command.Error.Empty": "Введіть команду (позиція {1}).",
   "Terminal.Tui.Command.Error.Quote": "Аргумент у лапках не закритий (позиція {1}).",
   "Terminal.Tui.Command.Error.UnknownVerb": "Невідома команда \" {0} \" (позиція {1}).",
+  "Terminal.Tui.Command.Error.UnavailableVerb": "Команда «{0}» доступна лише у відкритому проєкті (позиція {1}).",
   "Terminal.Tui.Command.Error.Missing": "Відсутній необхідний аргумент (позиція {1}).",
   "Terminal.Tui.Command.Error.Unexpected": "Неочікуваний аргумент \" {0} \" (позиція {1}).",
   "Terminal.Tui.Command.Error.UnknownToken": "Невідомий маркер \" {0} \" (позиція {1}).",

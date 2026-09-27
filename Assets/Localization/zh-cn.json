@@ -1199,6 +1199,7 @@
   "Terminal.Tui.Command.Error.Empty": "输入命令（位置{1}）。",
   "Terminal.Tui.Command.Error.Quote": "带引号的参数未闭合（位置{1}）。",
   "Terminal.Tui.Command.Error.UnknownVerb": "未知命令“ {0} ”（位置{1}）。",
+  "Terminal.Tui.Command.Error.UnavailableVerb": "命令“{0}”仅在打开项目后可用（位置{1}）。",
   "Terminal.Tui.Command.Error.Missing": "缺少必需的参数（位置{1}）。",
   "Terminal.Tui.Command.Error.Unexpected": "意外的参数“ {0} ”（位置{1}）。",
   "Terminal.Tui.Command.Error.UnknownToken": "未知标记“ {0} ”（位置{1}）。",

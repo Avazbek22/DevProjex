@@ -1205,6 +1205,7 @@
   "Terminal.Tui.Command.Error.Empty": "Enter a command (position {1}).",
   "Terminal.Tui.Command.Error.Quote": "A quoted argument is not closed (position {1}).",
   "Terminal.Tui.Command.Error.UnknownVerb": "Unknown command '{0}' (position {1}).",
+  "Terminal.Tui.Command.Error.UnavailableVerb": "Command '{0}' is available only when a project is open (position {1}).",
   "Terminal.Tui.Command.Error.Missing": "A required argument is missing (position {1}).",
   "Terminal.Tui.Command.Error.Unexpected": "Unexpected argument '{0}' (position {1}).",
   "Terminal.Tui.Command.Error.UnknownToken": "Unknown token '{0}' (position {1}).",

@@ -23,8 +23,8 @@ names remain part of the CLI profile contract, not permanent TUI jargon.
 
 Welcome shows up to nine recent projects inline; `1` through `9` open them
 directly. **Open portable profile** is a first-class visible action. The footer
-advertises `:`, and the Welcome command line accepts `recent`, `language`,
-`help`, and `quit`.
+advertises `:`, and the Welcome command line accepts `open`, `recent`,
+`language`, `help`, and `quit`.
 
 The welcome screen offers:
 
@@ -235,7 +235,9 @@ strict: only a complete token executes. Tab accepts or cycles completion, while 
 invalid token reports its position and up to three similar candidates. Arguments
 containing whitespace can use single or double quotes; path completion inserts
 and preserves the required quotes automatically.
-Welcome exposes the focused subset `open`, `recent`, `language`, `help`, and `quit`.
+Welcome exposes the focused subset `open`, `recent`, `language`, `help`, and `quit`;
+`help` without a verb lists only these, and any other workspace command reports
+that it needs an open project.
 
 The input line exposes the active argument schema before execution and renders an
 inline ghost suffix as soon as a token can be completed:

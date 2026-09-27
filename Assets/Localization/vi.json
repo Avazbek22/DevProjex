@@ -1199,6 +1199,7 @@
   "Terminal.Tui.Command.Error.Empty": "Nhập lệnh (vị trí {1}).",
   "Terminal.Tui.Command.Error.Quote": "Đối số được trích dẫn không bị đóng (vị trí {1}).",
   "Terminal.Tui.Command.Error.UnknownVerb": "Lệnh không xác định ' {0} ' (vị trí {1}).",
+  "Terminal.Tui.Command.Error.UnavailableVerb": "Lệnh '{0}' chỉ khả dụng khi đã mở dự án (vị trí {1}).",
   "Terminal.Tui.Command.Error.Missing": "Thiếu đối số bắt buộc (vị trí {1}).",
   "Terminal.Tui.Command.Error.Unexpected": "Đối số không mong đợi ' {0} ' (vị trí {1}).",
   "Terminal.Tui.Command.Error.UnknownToken": "Token không xác định '{0}' (vị trí {1}).",

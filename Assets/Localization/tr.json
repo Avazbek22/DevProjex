@@ -1199,6 +1199,7 @@
   "Terminal.Tui.Command.Error.Empty": "Bir komut girin (konum {1}).",
   "Terminal.Tui.Command.Error.Quote": "Alıntılanan bir bağımsız değişken kapalı değildir (konum {1}).",
   "Terminal.Tui.Command.Error.UnknownVerb": "Bilinmeyen komut ' {0} ' (konum {1}).",
+  "Terminal.Tui.Command.Error.UnavailableVerb": "'{0}' komutu yalnızca bir proje açıkken kullanılabilir (konum {1}).",
   "Terminal.Tui.Command.Error.Missing": "Gerekli bir bağımsız değişken eksik (konum {1}).",
   "Terminal.Tui.Command.Error.Unexpected": "Beklenmeyen bağımsız değişken ' {0} ' ( konum {1}).",
   "Terminal.Tui.Command.Error.UnknownToken": "Bilinmeyen token '{0}' (konum {1}).",

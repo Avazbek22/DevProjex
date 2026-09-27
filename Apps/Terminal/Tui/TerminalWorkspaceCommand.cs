@@ -105,7 +105,8 @@ internal enum TerminalWorkspaceCommandErrorCode
 	UnexpectedArgument,
 	UnknownToken,
 	InvalidValue,
-	UnknownLanguage
+	UnknownLanguage,
+	UnavailableVerb
 }
 
 internal sealed record TerminalWorkspaceCommandError(

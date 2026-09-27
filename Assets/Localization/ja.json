@@ -1199,6 +1199,7 @@
   "Terminal.Tui.Command.Error.Empty": "コマンドを入力します (位置{1})。",
   "Terminal.Tui.Command.Error.Quote": "引用符で囲まれた引数が閉じられていません (位置{1})。",
   "Terminal.Tui.Command.Error.UnknownVerb": "不明なコマンド ' {0} ' (位置{1})。",
+  "Terminal.Tui.Command.Error.UnavailableVerb": "コマンド '{0}' はプロジェクトを開いているときにのみ使用できます (位置{1})。",
   "Terminal.Tui.Command.Error.Missing": "必要な引数がありません (位置{1})。",
   "Terminal.Tui.Command.Error.Unexpected": "予期しない引数 ' {0} ' (位置{1})。",
   "Terminal.Tui.Command.Error.UnknownToken": "不明なトークン ' {0} ' (位置{1})。",

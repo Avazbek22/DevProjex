@@ -1205,6 +1205,7 @@
   "Terminal.Tui.Command.Error.Empty": "Введите команду (позиция {1}).",
   "Terminal.Tui.Command.Error.Quote": "Аргумент в кавычках не закрыт (позиция {1}).",
   "Terminal.Tui.Command.Error.UnknownVerb": "Неизвестная команда «{0}» (позиция {1}).",
+  "Terminal.Tui.Command.Error.UnavailableVerb": "Команда «{0}» доступна только в открытом проекте (позиция {1}).",
   "Terminal.Tui.Command.Error.Missing": "Отсутствует обязательный аргумент (позиция {1}).",
   "Terminal.Tui.Command.Error.Unexpected": "Лишний аргумент «{0}» (позиция {1}).",
   "Terminal.Tui.Command.Error.UnknownToken": "Неизвестный токен «{0}» (позиция {1}).",

@@ -1205,6 +1205,7 @@
   "Terminal.Tui.Command.Error.Empty": "Immetti un comando (posizione {1}).",
   "Terminal.Tui.Command.Error.Quote": "Un argomento tra virgolette non è chiuso (posizione {1}).",
   "Terminal.Tui.Command.Error.UnknownVerb": "Comando sconosciuto '{0}' (posizione {1}).",
+  "Terminal.Tui.Command.Error.UnavailableVerb": "Il comando '{0}' è disponibile solo con un progetto aperto (posizione {1}).",
   "Terminal.Tui.Command.Error.Missing": "Manca un argomento obbligatorio (posizione {1}).",
   "Terminal.Tui.Command.Error.Unexpected": "Argomento inatteso '{0}' (posizione {1}).",
   "Terminal.Tui.Command.Error.UnknownToken": "Token sconosciuto '{0}' (posizione {1}).",

@@ -1199,6 +1199,7 @@
   "Terminal.Tui.Command.Error.Empty": "Wprowadź polecenie (pozycja {1}).",
   "Terminal.Tui.Command.Error.Quote": "Cytowany argument nie jest zamknięty (pozycja {1}).",
   "Terminal.Tui.Command.Error.UnknownVerb": "Nieznane polecenie „ {0} ” (pozycja {1}).",
+  "Terminal.Tui.Command.Error.UnavailableVerb": "Polecenie „{0}” jest dostępne tylko przy otwartym projekcie (pozycja {1}).",
   "Terminal.Tui.Command.Error.Missing": "Brak wymaganego argumentu (pozycja {1}).",
   "Terminal.Tui.Command.Error.Unexpected": "Nieoczekiwany argument „ {0} ” (pozycja {1}).",
   "Terminal.Tui.Command.Error.UnknownToken": "Nieznany token „ {0} ” (pozycja {1}).",

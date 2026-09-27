@@ -1199,6 +1199,7 @@
   "Terminal.Tui.Command.Error.Empty": "輸入指令（位置{1}）。",
   "Terminal.Tui.Command.Error.Quote": "帶引號的參數未閉合（位置{1}）。",
   "Terminal.Tui.Command.Error.UnknownVerb": "未知指令「{0}」（位置{1}）。",
+  "Terminal.Tui.Command.Error.UnavailableVerb": "指令「{0}」僅在開啟專案後可用（位置{1}）。",
   "Terminal.Tui.Command.Error.Missing": "缺少必需的參數（位置{1}）。",
   "Terminal.Tui.Command.Error.Unexpected": "意外的參數「{0}」（位置{1}）。",
   "Terminal.Tui.Command.Error.UnknownToken": "未知標記「{0}」（位置{1}）。",

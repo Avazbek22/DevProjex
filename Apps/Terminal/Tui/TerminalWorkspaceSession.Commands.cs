@@ -7,6 +7,16 @@ namespace DevProjex.Terminal.Tui;
 
 internal sealed partial class TerminalWorkspaceSession
 {
+	private static readonly IReadOnlySet<TerminalWorkspaceCommandVerb> WelcomeCommandVerbs =
+		new HashSet<TerminalWorkspaceCommandVerb>
+		{
+			TerminalWorkspaceCommandVerb.Open,
+			TerminalWorkspaceCommandVerb.Recent,
+			TerminalWorkspaceCommandVerb.Language,
+			TerminalWorkspaceCommandVerb.Help,
+			TerminalWorkspaceCommandVerb.Quit
+		};
+
 	private TerminalWorkspaceActionRegistry BuildWorkspaceActionRegistry()
 	{
 		var key = new TerminalWorkspaceActionRegistryCacheKey(
@@ -820,6 +830,9 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		var definitions = verb is null
 			? TerminalWorkspaceCommandCatalog.All
+				.Where(definition => _screen != TerminalWorkspaceScreen.Welcome ||
+					WelcomeCommandVerbs.Contains(definition.Verb))
+				.ToArray()
 			: TerminalWorkspaceCommandCatalog.All
 				.Where(definition => definition.Token == verb)
 				.ToArray();
@@ -843,14 +856,7 @@ internal sealed partial class TerminalWorkspaceSession
 		{
 			return new TerminalWorkspaceCommandParseContext(
 				[],
-				new HashSet<TerminalWorkspaceCommandVerb>
-				{
-					TerminalWorkspaceCommandVerb.Open,
-					TerminalWorkspaceCommandVerb.Recent,
-					TerminalWorkspaceCommandVerb.Language,
-					TerminalWorkspaceCommandVerb.Help,
-					TerminalWorkspaceCommandVerb.Quit
-				},
+				WelcomeCommandVerbs,
 				WorkingDirectory: Directory.GetCurrentDirectory());
 		}
 
@@ -991,6 +997,7 @@ internal sealed partial class TerminalWorkspaceSession
 			TerminalWorkspaceCommandErrorCode.EmptyInput => "Terminal.Tui.Command.Error.Empty",
 			TerminalWorkspaceCommandErrorCode.UnterminatedQuote => "Terminal.Tui.Command.Error.Quote",
 			TerminalWorkspaceCommandErrorCode.UnknownVerb => "Terminal.Tui.Command.Error.UnknownVerb",
+			TerminalWorkspaceCommandErrorCode.UnavailableVerb => "Terminal.Tui.Command.Error.UnavailableVerb",
 			TerminalWorkspaceCommandErrorCode.MissingArgument => "Terminal.Tui.Command.Error.Missing",
 			TerminalWorkspaceCommandErrorCode.UnexpectedArgument => "Terminal.Tui.Command.Error.Unexpected",
 			TerminalWorkspaceCommandErrorCode.UnknownToken => "Terminal.Tui.Command.Error.UnknownToken",

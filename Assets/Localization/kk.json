@@ -1205,6 +1205,7 @@
   "Terminal.Tui.Command.Error.Empty": "Команданы енгізіңіз ({1}-орын).",
   "Terminal.Tui.Command.Error.Quote": "Тырнақшадағы аргумент жабылмаған ({1}-орын).",
   "Terminal.Tui.Command.Error.UnknownVerb": "Белгісіз команда '{0}' ({1}-орын).",
+  "Terminal.Tui.Command.Error.UnavailableVerb": "'{0}' командасы тек жоба ашық болғанда қолжетімді ({1}-орын).",
   "Terminal.Tui.Command.Error.Missing": "Міндетті аргумент жоқ ({1}-орын).",
   "Terminal.Tui.Command.Error.Unexpected": "Күтпеген аргумент '{0}' ({1}-орын).",
   "Terminal.Tui.Command.Error.UnknownToken": "Белгісіз токен '{0}' ({1}-орын).",

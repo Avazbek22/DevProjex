@@ -148,14 +148,21 @@ internal sealed class TerminalWorkspaceCommandParser
 		}
 
 		var verbToken = tokenization.Tokens[0];
-		if (!TerminalWorkspaceCommandCatalog.TryGet(verbToken.Value, out var definition) ||
-			context.AllowedVerbs is not null && !context.AllowedVerbs.Contains(definition.Verb))
+		if (!TerminalWorkspaceCommandCatalog.TryGet(verbToken.Value, out var definition))
 		{
 			return Failure(
 				TerminalWorkspaceCommandErrorCode.UnknownVerb,
 				verbToken.Start,
 				verbToken.Value,
 				FindSimilar(verbToken.Value, context.VerbTokens));
+		}
+		if (context.AllowedVerbs is not null && !context.AllowedVerbs.Contains(definition.Verb))
+		{
+			return Failure(
+				TerminalWorkspaceCommandErrorCode.UnavailableVerb,
+				verbToken.Start,
+				verbToken.Value,
+				[]);
 		}
 
 		return GrammarHandlers[definition.Grammar].Parse(definition, tokenization.Tokens, context);

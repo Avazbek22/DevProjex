@@ -1205,6 +1205,7 @@
   "Terminal.Tui.Command.Error.Empty": "Saisissez une commande (position {1}).",
   "Terminal.Tui.Command.Error.Quote": "Un argument entre guillemets n'est pas fermé (position {1}).",
   "Terminal.Tui.Command.Error.UnknownVerb": "Commande inconnue « {0} » (position {1}).",
+  "Terminal.Tui.Command.Error.UnavailableVerb": "La commande « {0} » n’est disponible qu’avec un projet ouvert (position {1}).",
   "Terminal.Tui.Command.Error.Missing": "Un argument requis manque (position {1}).",
   "Terminal.Tui.Command.Error.Unexpected": "Argument inattendu « {0} » (position {1}).",
   "Terminal.Tui.Command.Error.UnknownToken": "Jeton inconnu « {0} » (position {1}).",

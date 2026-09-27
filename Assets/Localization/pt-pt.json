@@ -1199,6 +1199,7 @@
   "Terminal.Tui.Command.Error.Empty": "Introduza um comando (posição {1}).",
   "Terminal.Tui.Command.Error.Quote": "Um argumento entre aspas não foi fechado (posição {1}).",
   "Terminal.Tui.Command.Error.UnknownVerb": "Comando desconhecido '{0}' (posição {1}).",
+  "Terminal.Tui.Command.Error.UnavailableVerb": "O comando '{0}' só está disponível com um projeto aberto (posição {1}).",
   "Terminal.Tui.Command.Error.Missing": "Falta um argumento obrigatório (posição {1}).",
   "Terminal.Tui.Command.Error.Unexpected": "Argumento inesperado '{0}' (posição {1}).",
   "Terminal.Tui.Command.Error.UnknownToken": "Token desconhecido '{0}' (posição {1}).",

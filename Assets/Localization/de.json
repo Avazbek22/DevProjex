@@ -1205,6 +1205,7 @@
   "Terminal.Tui.Command.Error.Empty": "Geben Sie einen Befehl ein (Position {1}).",
   "Terminal.Tui.Command.Error.Quote": "Ein Argument in Anführungszeichen ist nicht geschlossen (Position {1}).",
   "Terminal.Tui.Command.Error.UnknownVerb": "Unbekannter Befehl '{0}' (Position {1}).",
+  "Terminal.Tui.Command.Error.UnavailableVerb": "Der Befehl '{0}' ist nur bei geöffnetem Projekt verfügbar (Position {1}).",
   "Terminal.Tui.Command.Error.Missing": "Ein erforderliches Argument fehlt (Position {1}).",
   "Terminal.Tui.Command.Error.Unexpected": "Unerwartetes Argument '{0}' (Position {1}).",
   "Terminal.Tui.Command.Error.UnknownToken": "Unbekanntes Token '{0}' (Position {1}).",

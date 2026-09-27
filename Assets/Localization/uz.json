@@ -1205,6 +1205,7 @@
   "Terminal.Tui.Command.Error.Empty": "Buyruq kiriting ({1}-o'rin).",
   "Terminal.Tui.Command.Error.Quote": "Qo'shtirnoqli argument yopilmagan ({1}-o'rin).",
   "Terminal.Tui.Command.Error.UnknownVerb": "Noma'lum buyruq '{0}' ({1}-o'rin).",
+  "Terminal.Tui.Command.Error.UnavailableVerb": "'{0}' buyrug‘i faqat loyiha ochiq bo‘lganda mavjud ({1}-o'rin).",
   "Terminal.Tui.Command.Error.Missing": "Majburiy argument yetishmaydi ({1}-o'rin).",
   "Terminal.Tui.Command.Error.Unexpected": "Kutilmagan argument '{0}' ({1}-o'rin).",
   "Terminal.Tui.Command.Error.UnknownToken": "Noma'lum token '{0}' ({1}-o'rin).",

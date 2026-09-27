@@ -1199,6 +1199,7 @@
   "Terminal.Tui.Command.Error.Empty": "Escriba un comando (posición {1}).",
   "Terminal.Tui.Command.Error.Quote": "Un argumento entre comillas no está cerrado (posición {1}).",
   "Terminal.Tui.Command.Error.UnknownVerb": "Comando desconocido '{0}' (posición {1}).",
+  "Terminal.Tui.Command.Error.UnavailableVerb": "El comando '{0}' solo está disponible con un proyecto abierto (posición {1}).",
   "Terminal.Tui.Command.Error.Missing": "Falta un argumento obligatorio (posición {1}).",
   "Terminal.Tui.Command.Error.Unexpected": "Argumento inesperado '{0}' (posición {1}).",
   "Terminal.Tui.Command.Error.UnknownToken": "Token desconocido '{0}' (posición {1}).",

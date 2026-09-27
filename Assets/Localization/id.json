@@ -1199,6 +1199,7 @@
   "Terminal.Tui.Command.Error.Empty": "Masukkan perintah (posisi {1}).",
   "Terminal.Tui.Command.Error.Quote": "Argumen yang dikutip tidak tertutup (posisi {1}).",
   "Terminal.Tui.Command.Error.UnknownVerb": "Perintah tidak diketahui ' {0} ' (posisi {1}).",
+  "Terminal.Tui.Command.Error.UnavailableVerb": "Perintah '{0}' hanya tersedia saat proyek terbuka (posisi {1}).",
   "Terminal.Tui.Command.Error.Missing": "Argumen yang diperlukan tidak ada (posisi {1}).",
   "Terminal.Tui.Command.Error.Unexpected": "Argumen tak terduga ' {0} ' (posisi {1}).",
   "Terminal.Tui.Command.Error.UnknownToken": "Token tidak diketahui ' {0} ' (posisi {1}).",

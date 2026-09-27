@@ -609,6 +609,30 @@ public sealed class TerminalWorkspaceCommandParserTests
 	}
 
 	[Fact]
+	public void Parse_KnownVerbOutsideTheAllowedSubsetIsUnavailableRatherThanUnknown()
+	{
+		var welcome = new TerminalWorkspaceCommandParseContext(
+			[],
+			new HashSet<TerminalWorkspaceCommandVerb>
+			{
+				TerminalWorkspaceCommandVerb.Open,
+				TerminalWorkspaceCommandVerb.Help
+			});
+
+		var unavailable = _parser.Parse("set hide-secrets on", welcome);
+		var unknown = _parser.Parse("opne .", welcome);
+
+		Assert.False(unavailable.IsSuccess);
+		Assert.Equal(TerminalWorkspaceCommandErrorCode.UnavailableVerb, unavailable.Error!.Code);
+		Assert.Equal(0, unavailable.Error.Position);
+		Assert.Equal("set", unavailable.Error.Value);
+		Assert.Empty(unavailable.Error.Candidates);
+		Assert.Equal(TerminalWorkspaceCommandErrorCode.UnknownVerb, unknown.Error!.Code);
+		Assert.Contains("open", unknown.Error.Candidates);
+		Assert.DoesNotContain("set", unknown.Error.Candidates);
+	}
+
+	[Fact]
 	public void CompletionOffersEverySupportedLanguageCode()
 	{
 		var completion = _parser.GetCompletion("language ", 9, Context);

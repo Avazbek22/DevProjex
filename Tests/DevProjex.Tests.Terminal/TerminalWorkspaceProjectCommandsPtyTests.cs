@@ -63,6 +63,38 @@ public sealed class TerminalWorkspaceProjectCommandsPtyTests
 		await QuitAsync(terminal);
 	}
 
+	[Fact(Timeout = 120_000)]
+	public async Task WelcomeCommandLineHelpAndErrorsCoverOnlyTheWelcomeCommands()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("notes.txt", "welcome");
+		await using var terminal = await StartWelcomeAsync(workspace.Path);
+		await terminal.WaitForScreenAsync(
+			"Choose a workspace action",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await ExecuteAsync(
+			terminal,
+			"set hide-secrets on",
+			"Command 'set' is available only when a project is open (position 1).");
+		Assert.DoesNotContain("Unknown command", terminal.CaptureScreen(), StringComparison.Ordinal);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+
+		await ExecuteAsync(terminal, "help", "Workspace commands");
+		var help = await terminal.WaitForStableScreenAsync(
+			"quit",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains("open <path|url>", help, StringComparison.Ordinal);
+		Assert.Contains("language [code]", help, StringComparison.Ordinal);
+		Assert.DoesNotContain("set <option> <value>", help, StringComparison.Ordinal);
+		Assert.DoesNotContain("export <context|zip|folder>", help, StringComparison.Ordinal);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenWithoutAsync(
+			"Workspace commands",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await QuitAsync(terminal);
+	}
+
 	[Fact(Timeout = 150_000)]
 	public async Task OpenCommandClonesAndOpensALocalRepositoryAfterConfirmation()
 	{
