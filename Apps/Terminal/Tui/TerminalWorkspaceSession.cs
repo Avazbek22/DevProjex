@@ -5372,15 +5372,12 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 
 	private Dialog CreateDialog(string title, int preferredWidth, int preferredHeight)
 	{
-		var width = ResolveDialogWidth(preferredWidth);
-		var maximumHeight = Math.Max(5, _application.Screen.Height - 2);
-		var minimumHeight = Math.Min(7, maximumHeight);
-		var height = Math.Clamp(preferredHeight, minimumHeight, maximumHeight);
 		var dialog = new Dialog
 		{
 			Title = _options.Plain ? string.Empty : title,
-			Width = width,
-			Height = height,
+			// Resolved on every layout, so an open dialog follows a terminal resize and stays on screen.
+			Width = Dim.Func(_ => ResolveDialogWidth(preferredWidth)),
+			Height = Dim.Func(_ => ResolveDialogHeight(preferredHeight)),
 			BorderStyle = _presentation.BorderStyle,
 			SchemeName = TerminalWorkspaceTheme.Dialog,
 			ButtonAlignment = Alignment.Center
@@ -5397,13 +5394,18 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	{
 		var minimumDialogX =
 			WelcomeHorizontalMargin + WelcomeWideActionsWidth + 2;
-		var availableWidth =
-			_terminalWidth - minimumDialogX - WelcomeHorizontalMargin;
-		if (_layoutMode is TerminalWorkspaceLayoutMode.Split or TerminalWorkspaceLayoutMode.Wide &&
-			availableWidth >= dialogWidth)
+		// Resolved on every layout: once a resize leaves no room beside the actions, the dialog
+		// is centered like any other.
+		dialog.X = Pos.Func(_ =>
 		{
-			dialog.X = minimumDialogX;
-		}
+			var screenWidth = _application.Screen.Width;
+			var width = ResolveDialogWidth(dialogWidth);
+			var availableWidth = screenWidth - minimumDialogX - WelcomeHorizontalMargin;
+			return _layoutMode is TerminalWorkspaceLayoutMode.Split or TerminalWorkspaceLayoutMode.Wide &&
+				availableWidth >= width
+				? minimumDialogX
+				: (screenWidth - width) / 2;
+		});
 	}
 
 	private int ResolveDialogWidth(int preferredWidth)
@@ -5418,6 +5420,13 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var previousFocus = _root.MostFocused;
 		// Focused lists and dialog buttons may consume Esc before it reaches the
 		// runnable. The application-level lease keeps Back behavior consistent.
+	private int ResolveDialogHeight(int preferredHeight)
+	{
+		var maximumHeight = Math.Max(5, _application.Screen.Height - 2);
+		var minimumHeight = Math.Min(7, maximumHeight);
+		return Math.Clamp(preferredHeight, minimumHeight, maximumHeight);
+	}
+
 		void CloseOverlayOnEscape(object? _, Key key)
 		{
 			if (key == Key.Esc && ReferenceEquals(_application.TopRunnableView, overlay))
