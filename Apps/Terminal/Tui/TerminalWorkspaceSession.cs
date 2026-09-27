@@ -2791,13 +2791,35 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	{
 		if (_preview is null || _preview.Sections.Count == 0)
 			return;
-		var line = _preview.FirstVisibleLine + 1;
-		var index = PreviewDocumentSectionLookup.FindFirstIntersectingSectionIndex(_preview.Sections, line);
-		if (index < 0)
-			index = reverse ? _preview.Sections.Count : -1;
-		index = Math.Clamp(index + (reverse ? -1 : 1), 0, _preview.Sections.Count - 1);
+		var index = ResolveAdjacentPreviewSection(
+			_preview.Sections,
+			_preview.FirstVisibleLine + 1,
+			reverse);
 		_preview.ScrollTo(Math.Max(0, _preview.Sections[index].StartLine - 1), 0);
 		UpdatePreviewRange();
+	}
+
+	// The next section is the first one starting below the top visible line and the previous
+	// one the last starting above it, so the root header and the blank separators between
+	// files never make the jump skip a file.
+	internal static int ResolveAdjacentPreviewSection(
+		IReadOnlyList<PreviewDocumentSection> sections,
+		int firstVisibleLine,
+		bool reverse)
+	{
+		// First section whose start line is after (or, going back, at or after) the top line.
+		var boundary = reverse ? firstVisibleLine - 1 : firstVisibleLine;
+		var low = 0;
+		var high = sections.Count;
+		while (low < high)
+		{
+			var middle = low + (high - low) / 2;
+			if (sections[middle].StartLine > boundary)
+				high = middle;
+			else
+				low = middle + 1;
+		}
+		return Math.Clamp(reverse ? low - 1 : low, 0, sections.Count - 1);
 	}
 
 	private void GoToPreviewLine()

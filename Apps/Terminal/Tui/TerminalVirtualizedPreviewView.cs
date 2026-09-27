@@ -10,6 +10,7 @@ internal sealed class TerminalVirtualizedPreviewView : View
 {
 	private const int MaximumCachedLineCount = 256;
 	private const int MaximumCachedCharacterCount = 1_000_000;
+	private const int TabWidth = 4;
 	private static readonly int[] SingleWrappedSegmentColumns = [0];
 	private readonly List<PreviewTextSearchMatch> _searchMatches = [];
 	private readonly Dictionary<int, string> _cachedLines = [];
@@ -430,16 +431,13 @@ internal sealed class TerminalVirtualizedPreviewView : View
 			return;
 
 		var startColumn = GetColumns(line.AsSpan(0, startIndex));
-		var endColumn = startColumn + GetColumns(line.AsSpan(startIndex, length));
+		var endColumn = GetColumns(line.AsSpan(0, startIndex + length));
 		var visibleStart = Math.Max(startColumn, displayOffset);
 		var visibleEnd = Math.Min(endColumn, displayOffset + VisibleTextWidth);
 		if (visibleStart >= visibleEnd)
 			return;
 
-		var text = SliceColumns(
-			line.Substring(startIndex, length),
-			visibleStart - startColumn,
-			visibleEnd - visibleStart);
+		var text = SliceColumns(line, visibleStart, visibleEnd - visibleStart);
 		SetAttribute(GetAttributeForRole(role));
 		AddStr(visibleStart - displayOffset, row, text);
 	}
@@ -461,7 +459,7 @@ internal sealed class TerminalVirtualizedPreviewView : View
 			var startIndex = Math.Clamp(span.StartColumn, 0, line.Length);
 			var length = Math.Clamp(span.Length, 0, line.Length - startIndex);
 			var startColumn = GetColumns(line.AsSpan(0, startIndex));
-			var endColumn = startColumn + GetColumns(line.AsSpan(startIndex, length));
+			var endColumn = GetColumns(line.AsSpan(0, startIndex + length));
 			if (documentColumn >= startColumn && documentColumn < endColumn)
 				return span.OccurrenceId;
 		}
@@ -654,7 +652,7 @@ internal sealed class TerminalVirtualizedPreviewView : View
 		var segmentWidth = 0;
 		foreach (var rune in value.EnumerateRunes())
 		{
-			var runeWidth = Math.Max(0, rune.GetColumns());
+			var runeWidth = GetRuneColumns(rune, displayColumn);
 			if (runeWidth > 0 && segmentWidth > 0 && segmentWidth + runeWidth > effectiveWidth)
 			{
 				starts ??= [0];
@@ -776,7 +774,7 @@ internal sealed class TerminalVirtualizedPreviewView : View
 		var writtenColumns = 0;
 		foreach (var rune in value.EnumerateRunes())
 		{
-			var columns = Math.Max(0, rune.GetColumns());
+			var columns = GetRuneColumns(rune, sourceColumn);
 			var runeStart = sourceColumn;
 			var runeEnd = runeStart + columns;
 			sourceColumn = runeEnd;
@@ -788,10 +786,10 @@ internal sealed class TerminalVirtualizedPreviewView : View
 			}
 			if (runeEnd <= startColumn)
 				continue;
-			if (runeStart < startColumn)
+			if (runeStart < startColumn || rune.Value == '\t')
 			{
 				var padding = Math.Min(
-					runeEnd - startColumn,
+					runeEnd - Math.Max(runeStart, startColumn),
 					maximumColumns - writtenColumns);
 				output.Append(' ', padding);
 				writtenColumns += padding;
@@ -813,9 +811,16 @@ internal sealed class TerminalVirtualizedPreviewView : View
 	{
 		var columns = 0;
 		foreach (var rune in value.EnumerateRunes())
-			columns += Math.Max(0, rune.GetColumns());
+			columns += GetRuneColumns(rune, columns);
 		return columns;
 	}
+
+	// A tab advances to the next tab stop and is drawn as spaces; the terminal would otherwise
+	// render it as a zero-width control picture and shift every later column.
+	private static int GetRuneColumns(Rune rune, int column) =>
+		rune.Value == '\t'
+			? TabWidth - column % TabWidth
+			: Math.Max(0, rune.GetColumns());
 
 	private void EnsureContentWidth(string line)
 	{

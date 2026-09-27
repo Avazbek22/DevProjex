@@ -209,6 +209,58 @@ public sealed class TerminalWorkspacePresentationPolicyTests
 	}
 
 	[Theory]
+	[InlineData("	x", 0, 8, "    x")]
+	[InlineData("a	b", 0, 8, "a   b")]
+	[InlineData("x		y", 0, 12, "x       y")]
+	[InlineData("	x", 2, 4, "  x")]
+	[InlineData("ab	cd", 3, 3, " cd")]
+	public void PreviewSliceExpandsTabsToTabStops(
+		string value,
+		int startColumn,
+		int width,
+		string expected)
+	{
+		Assert.Equal(expected, TerminalVirtualizedPreviewView.SliceColumns(
+			value,
+			startColumn,
+			width));
+	}
+
+	[Fact]
+	public void PreviewWrapCountsTabsAsTheirExpandedWidth()
+	{
+		Assert.Equal([0, 4], TerminalVirtualizedPreviewView.BuildWrappedSegmentColumns("		ab", 6));
+	}
+
+	[Theory]
+	[InlineData(1, false, 0)]
+	[InlineData(3, false, 1)]
+	[InlineData(9, false, 1)]
+	[InlineData(12, false, 2)]
+	[InlineData(25, false, 2)]
+	[InlineData(3, true, 0)]
+	[InlineData(9, true, 0)]
+	[InlineData(10, true, 0)]
+	[InlineData(12, true, 1)]
+	[InlineData(1, true, 0)]
+	public void PreviewSectionJumpTargetsTheNearestFileStart(
+		int firstVisibleLine,
+		bool reverse,
+		int expected)
+	{
+		PreviewDocumentSection[] sections =
+		[
+			new("README.md", 3, 8, 3, 4),
+			new("src/a.cs", 10, 18, 10, 11),
+			new("src/b.cs", 20, 30, 20, 21)
+		];
+
+		Assert.Equal(
+			expected,
+			TerminalWorkspaceSession.ResolveAdjacentPreviewSection(sections, firstVisibleLine, reverse));
+	}
+
+	[Theory]
 	[InlineData(true)]
 	[InlineData(false)]
 	public void PreviewScrollRaisesOneVisibleRangeChange(bool showScrollBars)
