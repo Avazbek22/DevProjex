@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Drawing;
+using Terminal.Gui.Input;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -317,13 +318,27 @@ public sealed class TerminalWorkspaceCommandLineViewTests
 		Assert.Equal("copy", view.InputText);
 	}
 
-	private static TerminalWorkspaceCommandLineView CreateView() =>
+	[Fact]
+	public void PaneNavigationKeysStayInsideAnOpenCommandLine()
+	{
+		using var view = CreateView();
+		view.Open("view con");
+		var input = GetField<TerminalTransparentTextEditor>(view, "_input");
+
+		Assert.True(input.NewKeyDownEvent(Key.F6));
+		Assert.True(input.NewKeyDownEvent(Key.F6.WithShift));
+
+		Assert.True(view.IsEditing);
+		Assert.Equal("view con", view.InputText);
+	}
+
+	private static TerminalWorkspaceCommandLineView CreateView(TerminalCommandHistory? history = null) =>
 		new(
 			null!,
 			static (_, _) => TerminalWorkspaceCommandCompletion.Empty,
 			static (_, _) => TerminalWorkspaceCommandGhostCompletion.Empty,
 			static key => key,
-			new TerminalCommandHistory(),
+			history ?? new TerminalCommandHistory(),
 			plain: false,
 			useUnicode: true)
 		{

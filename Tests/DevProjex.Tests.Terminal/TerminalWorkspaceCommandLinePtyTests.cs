@@ -886,6 +886,57 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 		await QuitAsync(terminal);
 	}
 
+	[Fact(Timeout = 120_000)]
+	public async Task OpenCommandLineKeepsTheKeyboardAfterAClickOnAnotherPane()
+	{
+		using var project = CreateProject();
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			project.Path,
+			[
+				"tui",
+				project.Path,
+				"--profile",
+				"standard",
+				"--screen",
+				"inline",
+				"--language",
+				"en"
+			],
+			columns: 160,
+			rows: 36,
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.WaitForStableScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.OpenCommandLineAsync(TestContext.Current.CancellationToken);
+		await terminal.SendAsync("view con", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			":view con",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendMouseClickAsync(
+			column: 90,
+			row: 10,
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync("tent\r", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"CONTEXT PREVIEW: Content",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.OpenCommandLineAsync(TestContext.Current.CancellationToken);
+		await terminal.SendAsync("view tree", TestContext.Current.CancellationToken);
+		await terminal.SendMouseClickAsync(
+			column: 10,
+			row: 4,
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenWithoutAsync(
+			":view tree",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.False(terminal.HasExited);
+		await QuitAsync(terminal);
+	}
+
 	[Fact(Timeout = 90_000)]
 	public async Task CommandDraftSurvivesATemporarilyTooSmallTerminal()
 	{

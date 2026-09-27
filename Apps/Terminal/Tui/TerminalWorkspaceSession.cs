@@ -2518,7 +2518,12 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		if (!ReferenceEquals(_application.TopRunnableView, _root))
 			return;
 		if (_commandLine?.IsEditing == true)
+		{
+			// A click or a background refresh can move focus while the line stays open;
+			// the keyboard keeps belonging to the line until it is submitted or canceled.
+			_commandLine.RestoreInputFocus();
 			return;
+		}
 		if (_commandLine?.IsShowingResult == true)
 		{
 			key.Handled = true;
