@@ -1551,17 +1551,6 @@ internal sealed partial class TerminalWorkspaceSession
 				null,
 				static () => true,
 				() => ActivateWelcomeAction(action)))
-			.Append(new TerminalPaletteItem(
-				"welcome.palette.open-profile",
-				L("Terminal.Tui.Actions"),
-				L("Terminal.Tui.Welcome.OpenProfile"),
-				L("Terminal.Tui.Welcome.OpenProfile.Description"),
-				string.Empty,
-				null,
-				null,
-				null,
-				static () => true,
-				OpenPortableProfile))
 			.ToArray();
 	}
 

@@ -49,6 +49,40 @@ public sealed class TerminalRecentProjectsPtyTests
 	}
 
 	[Fact(Timeout = 90_000)]
+	public async Task WelcomePaletteListsTheSettingsFileActionOnce()
+	{
+		using var welcomeDirectory = new TemporaryDirectory();
+		welcomeDirectory.WriteFile("notes.txt", "not a project");
+
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			welcomeDirectory.Path,
+			["--language", "en"],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.WaitForScreenAsync(
+			"Choose a workspace action",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync("\u0010", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Filter actions:",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync("settings", TestContext.Current.CancellationToken);
+		var palette = await terminal.WaitForStableScreenAsync(
+			"Actions · Open project with settings file",
+			"Open current directory",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Single(
+			palette.Split('\n'),
+			line => line.Contains("│ Open project with settings file", StringComparison.Ordinal));
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenWithoutAsync(
+			"Filter actions:",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await ExitAsync(terminal);
+	}
+
+	[Fact(Timeout = 90_000)]
 	public async Task PopulatedRecentSelectionOpensWorkspaceAndMovesEntryToFront()
 	{
 		using var firstProject = CreateProject("FirstProject", "FirstMarker.cs");
