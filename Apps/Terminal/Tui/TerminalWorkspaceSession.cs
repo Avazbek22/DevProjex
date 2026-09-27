@@ -1876,7 +1876,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	internal static long ResolveDisplayedTokenCount(TerminalWorkspaceState state)
 	{
 		ArgumentNullException.ThrowIfNull(state);
-		return state.PreviewOutputMetrics.Tokens;
+		// Without visible items the preview still holds the root line, but nothing would be exported.
+		return state.HasVisibleTreeItems ? state.PreviewOutputMetrics.Tokens : 0;
 	}
 
 	private void UpdateWorkspaceHeaderLayout()

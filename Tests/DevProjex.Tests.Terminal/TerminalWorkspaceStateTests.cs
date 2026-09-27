@@ -53,6 +53,22 @@ public sealed class TerminalWorkspaceStateTests
 	}
 
 	[Fact]
+	public void EmptyEffectiveTreeShowsZeroTokensAlthoughThePreviewHasTheRootLine()
+	{
+		var root = CreateSyntheticRoot("empty-effective-tree-tokens");
+		var tree = new TreeNodeDescriptor("project", root, true, false, "folder", []);
+		using var state = new TerminalWorkspaceState(CreatePlan(tree, [], [root]));
+		const string payload = "project";
+		state.TrySetPreviewDocument(
+			new InMemoryPreviewTextDocument(payload),
+			ExportOutputMetricsCalculator.FromText(payload),
+			state.Revision);
+
+		Assert.True(state.PreviewOutputMetrics.Tokens > 0);
+		Assert.Equal(0, TerminalWorkspaceSession.ResolveDisplayedTokenCount(state));
+	}
+
+	[Fact]
 	public void TreePreviewEscapesControlCharactersInDisplayNames()
 	{
 		var root = CreateSyntheticRoot("unsafe-tree-preview");
