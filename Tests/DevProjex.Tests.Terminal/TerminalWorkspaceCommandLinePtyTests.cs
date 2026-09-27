@@ -855,6 +855,88 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 	}
 
 	[Fact(Timeout = 90_000)]
+	public async Task CommandDraftSurvivesATemporarilyTooSmallTerminal()
+	{
+		using var project = CreateProject();
+		await using var terminal = await StartAsync(project.Path, columns: 80, rows: 24);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.OpenCommandLineAsync(TestContext.Current.CancellationToken);
+		await terminal.SendAsync("view content", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			":view content",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.ResizeAsync(59, 19, TestContext.Current.CancellationToken);
+		await terminal.WaitForStableScreenAsync(
+			"Terminal too small",
+			forbidden: ":view content",
+			timeout: PtySafetyTimeout,
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.ResizeAsync(80, 24, TestContext.Current.CancellationToken);
+		await terminal.WaitForStableScreenAsync(
+			":view content",
+			forbidden: "Terminal too small",
+			timeout: PtySafetyTimeout,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"CONTEXT PREVIEW: Content",
+			timeout: PtySafetyTimeout,
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.False(terminal.HasExited);
+		await QuitAsync(terminal);
+	}
+
+	[Fact(Timeout = 90_000)]
+	public async Task WelcomeCommandDraftSurvivesATemporarilyTooSmallTerminal()
+	{
+		using var welcomeDirectory = new TemporaryDirectory();
+		welcomeDirectory.WriteFile("notes.txt", "markerless directory");
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			welcomeDirectory.Path,
+			["--language", "en"],
+			columns: 80,
+			rows: 24,
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Choose a workspace action",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync(":quit", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			":quit",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.ResizeAsync(59, 19, TestContext.Current.CancellationToken);
+		await terminal.WaitForStableScreenAsync(
+			"Terminal too small",
+			forbidden: ":quit",
+			timeout: PtySafetyTimeout,
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.ResizeAsync(80, 24, TestContext.Current.CancellationToken);
+		// The footer shares the command row, so it must stay hidden while the draft is back.
+		await terminal.WaitForStableScreenAsync(
+			":quit",
+			forbidden: "q Exit",
+			timeout: PtySafetyTimeout,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Exit DevProjex Terminal?",
+			timeout: PtySafetyTimeout,
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(
+				timeout: PtySafetyTimeout,
+				cancellationToken: TestContext.Current.CancellationToken));
+	}
+
+	[Fact(Timeout = 90_000)]
 	public async Task PastedCommandPacketIsAcceptedWithoutDroppingCharacters()
 	{
 		using var project = CreateProject();

@@ -211,6 +211,49 @@ public sealed class TerminalWorkspaceCommandLineViewTests
 	}
 
 	[Fact]
+	public void SuspendedCommandKeepsItsDraftAndCaretUntilResumed()
+	{
+		using var view = CreateView();
+		const string draft = @"export context C:\somewhere\long\path\user.md";
+		view.Open(draft);
+		var input = GetField<TerminalTransparentTextEditor>(view, "_input");
+		input.InsertionPoint = 7;
+
+		view.Suspend();
+		// Several resize notifications can arrive while the terminal stays too small.
+		view.Suspend();
+
+		Assert.False(view.Visible);
+		Assert.False(view.IsEditing);
+		Assert.Equal(draft, view.InputText);
+
+		view.Resume();
+
+		Assert.True(view.Visible);
+		Assert.True(view.IsEditing);
+		Assert.Equal(draft, view.InputText);
+		Assert.Equal(7, input.InsertionPoint);
+	}
+
+	[Fact]
+	public void SuspendClosesAResultAndExplicitCloseDiscardsASuspendedDraft()
+	{
+		using var view = CreateView();
+		view.ShowResult("Completed", success: true);
+		view.Suspend();
+		view.Resume();
+		Assert.False(view.Visible);
+		Assert.False(view.IsShowingResult);
+
+		view.Open("view content");
+		view.Suspend();
+		view.Close();
+		view.Resume();
+		Assert.False(view.Visible);
+		Assert.False(view.IsEditing);
+	}
+
+	[Fact]
 	public void GhostUpdatesSynchronouslyWhenCursorMoves()
 	{
 		using var view = new TerminalWorkspaceCommandLineView(
@@ -273,6 +316,19 @@ public sealed class TerminalWorkspaceCommandLineViewTests
 		Assert.Equal(1, fullCompletionCalls);
 		Assert.Equal("copy", view.InputText);
 	}
+
+	private static TerminalWorkspaceCommandLineView CreateView() =>
+		new(
+			null!,
+			static (_, _) => TerminalWorkspaceCommandCompletion.Empty,
+			static (_, _) => TerminalWorkspaceCommandGhostCompletion.Empty,
+			static key => key,
+			new TerminalCommandHistory(),
+			plain: false,
+			useUnicode: true)
+		{
+			Frame = new Rectangle(0, 0, 80, 1)
+		};
 
 	private static string GetResultText(TerminalWorkspaceCommandLineView view)
 	{

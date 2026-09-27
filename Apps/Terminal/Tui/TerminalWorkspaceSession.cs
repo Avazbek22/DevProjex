@@ -2079,6 +2079,16 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		}
 
 		var tooSmall = _layoutMode == TerminalWorkspaceLayoutMode.TooSmall;
+		if (tooSmall)
+		{
+			_commandLine?.Suspend();
+			CancelCommandResult();
+		}
+		else
+		{
+			_commandLine?.Resume();
+			_commandLine?.RestoreInputFocus();
+		}
 		SetVisible(
 			!tooSmall,
 			_welcomeHeading,
@@ -2089,8 +2099,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			_welcomeCurrentStatus,
 			_welcomeActionsFrame,
 			_welcomeDetailFrame,
-			_welcomeQuickStart,
-			_welcomeFooter);
+			_welcomeQuickStart);
+		_welcomeFooter.Visible = !tooSmall && _commandLine?.Visible != true;
 		_tooSmall.Visible = tooSmall;
 		if (_operationProgress is not null)
 			_operationProgress.View.Visible = !tooSmall;
@@ -2161,8 +2171,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		}
 
 		var requestedFocus = _focus.Capture();
-		var commandWasEditing = _commandLine.IsEditing;
 		var tooSmall = _layoutMode == TerminalWorkspaceLayoutMode.TooSmall;
+		if (!tooSmall)
+			_commandLine.Resume();
+		var commandWasEditing = _commandLine.IsEditing;
 		var previousFocusSuppression = _suppressWorkspaceFocusTracking;
 		_suppressWorkspaceFocusTracking = true;
 		try
@@ -2178,7 +2190,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			_footer.Visible = !tooSmall && !_commandLine.Visible;
 			if (tooSmall)
 			{
-				_commandLine.Close();
+				_commandLine.Suspend();
 				CancelCommandResult();
 			}
 			else

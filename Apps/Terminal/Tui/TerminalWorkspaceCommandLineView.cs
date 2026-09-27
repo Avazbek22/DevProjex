@@ -33,6 +33,7 @@ internal sealed class TerminalWorkspaceCommandLineView : View
 	private int _cycleIndex = -1;
 	private bool _applyingCompletion;
 	private bool _cycleWhenCompletionArrives;
+	private bool _suspended;
 	private bool _disposed;
 	private long _completionVersion;
 	private CompletionRequestKey? _activeCompletionRequest;
@@ -184,6 +185,7 @@ internal sealed class TerminalWorkspaceCommandLineView : View
 	public void Open(string initialText = "")
 	{
 		CancelPendingCompletion(clearCache: true);
+		_suspended = false;
 		IsEditing = true;
 		Visible = true;
 		_result.Visible = false;
@@ -198,6 +200,7 @@ internal sealed class TerminalWorkspaceCommandLineView : View
 
 	public void Close()
 	{
+		_suspended = false;
 		IsEditing = false;
 		Visible = false;
 		_result.Visible = false;
@@ -206,8 +209,39 @@ internal sealed class TerminalWorkspaceCommandLineView : View
 		SetNeedsDraw();
 	}
 
+	// Hides the line while the terminal is too small. A command being typed keeps its text
+	// and caret for Resume; a transient result is simply closed.
+	public void Suspend()
+	{
+		if (_suspended)
+			return;
+		if (!IsEditing)
+		{
+			Close();
+			return;
+		}
+		_suspended = true;
+		IsEditing = false;
+		Visible = false;
+		ResetCompletionCycle();
+		CancelPendingCompletion(clearCache: false);
+		SetNeedsDraw();
+	}
+
+	public void Resume()
+	{
+		if (!_suspended)
+			return;
+		_suspended = false;
+		IsEditing = true;
+		Visible = true;
+		UpdateGhost();
+		SetNeedsDraw();
+	}
+
 	public void ShowResult(string text, bool success)
 	{
+		_suspended = false;
 		IsEditing = false;
 		Visible = true;
 		_prompt.Visible = false;
