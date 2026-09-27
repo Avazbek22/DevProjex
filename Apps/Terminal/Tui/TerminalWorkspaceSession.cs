@@ -2554,6 +2554,13 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			OpenCommandLine();
 			return;
 		}
+		// The too-small hint hides the workspace, so only the exit and cancel keys stay live.
+		if (_layoutMode == TerminalWorkspaceLayoutMode.TooSmall &&
+			key != Key.C.WithCtrl && key.NoShift != Key.Q && key != Key.Esc)
+		{
+			key.Handled = true;
+			return;
+		}
 
 		if (key == Key.C.WithCtrl)
 		{
