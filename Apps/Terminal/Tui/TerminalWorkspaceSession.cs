@@ -4403,6 +4403,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				_gitCliAvailable = gitCliAvailable;
 				_preferredGitMode = preferredGitMode;
 				SetSettingsRefreshOutcome(requestId, SettingsRefreshOutcome.Applied);
+				DiscardSettingsFocusSnapshot();
 				ClearSettingsDraft();
 				RefreshWorkspace();
 				ScheduleLocalProfilePersistence();
@@ -4420,6 +4421,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				await InvokeAsync(() =>
 				{
 					SetSettingsRefreshOutcome(requestId, SettingsRefreshOutcome.Failed);
+					DiscardSettingsFocusSnapshot();
 					ClearSettingsDraft();
 					RefreshWorkspace();
 					return true;
@@ -4522,6 +4524,15 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				return;
 			}
 		}
+	}
+
+	// A parameter change keeps the Parameters focus for its failure path. When the change ends
+	// without a failure and without a busy phase, that snapshot must not steer the focus
+	// restored after a later operation such as an export started from another pane.
+	private void DiscardSettingsFocusSnapshot()
+	{
+		if (_operationProgress is null)
+			_focus.DiscardBeforeBusy();
 	}
 
 	private Task ShowSettingsFailureAsync(

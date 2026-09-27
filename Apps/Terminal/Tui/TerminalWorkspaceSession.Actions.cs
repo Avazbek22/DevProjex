@@ -1330,6 +1330,7 @@ internal sealed partial class TerminalWorkspaceSession
 			_activeAggregateControlSection == section
 			? section
 			: null;
+		_focus.SaveBeforeBusy();
 	}
 
 	private void CycleGitMode()
