@@ -508,7 +508,11 @@ public sealed class DevProjexCommandTree
 			McpConnectionStatus.ManualConfiguration;
 		var writer = successfulOutput ? environment.Output : environment.Error;
 		TerminalTextEscaping.WriteSingleLine(writer, result.UserMessage);
-		if (includeNextCommand && result.Succeeded && !string.IsNullOrWhiteSpace(result.NextCommand))
+		if (includeNextCommand && result.Succeeded && !string.IsNullOrWhiteSpace(result.NextStep))
+		{
+			TerminalTextEscaping.WriteSingleLine(writer, result.NextStep);
+		}
+		else if (includeNextCommand && result.Succeeded && !string.IsNullOrWhiteSpace(result.NextCommand))
 		{
 			TerminalTextEscaping.WriteSingleLine(
 				writer,

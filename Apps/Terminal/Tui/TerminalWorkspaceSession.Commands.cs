@@ -732,7 +732,11 @@ internal sealed partial class TerminalWorkspaceSession
 		{
 			TerminalTextEscaping.EscapeSingleLine(result.UserMessage)
 		};
-		if (result.Succeeded && !string.IsNullOrWhiteSpace(result.NextCommand))
+		if (result.Succeeded && !string.IsNullOrWhiteSpace(result.NextStep))
+		{
+			sections.Add(TerminalTextEscaping.EscapeSingleLine(result.NextStep));
+		}
+		else if (result.Succeeded && !string.IsNullOrWhiteSpace(result.NextCommand))
 		{
 			sections.Add(TerminalTextEscaping.EscapeSingleLine(
 				localization.Format("Mcp.Connect.RunInProject", result.NextCommand)));

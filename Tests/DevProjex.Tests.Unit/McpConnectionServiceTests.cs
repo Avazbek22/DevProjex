@@ -988,7 +988,8 @@ public sealed class McpConnectionServiceTests
 		Assert.True(result.Replaced);
 		Assert.Equal(targetPath, result.TargetPath);
 		Assert.Contains("configuration was written", result.UserMessage, StringComparison.Ordinal);
-		Assert.Equal("Restart Cursor", result.NextCommand);
+		Assert.Equal("Restart Cursor", result.NextStep);
+		Assert.Null(result.NextCommand);
 		using var document = JsonDocument.Parse(await File.ReadAllTextAsync(
 			targetPath,
 			TestContext.Current.CancellationToken));
@@ -1031,7 +1032,8 @@ public sealed class McpConnectionServiceTests
 
 		Assert.Equal(McpConnectionStatus.Connected, result.Status);
 		Assert.False(result.Replaced);
-		Assert.Equal("Enable the server in VS Code", result.NextCommand);
+		Assert.Equal("Enable the server in VS Code", result.NextStep);
+		Assert.Null(result.NextCommand);
 		using var document = JsonDocument.Parse(await File.ReadAllTextAsync(
 			targetPath,
 			TestContext.Current.CancellationToken));
