@@ -1152,6 +1152,8 @@
   "Terminal.Tui.Command.Select.Result": "Pilihan: {0} simpul diubah; {1} jalur tidak ditemukan.",
   "Terminal.Tui.Command.Select.Error.InvalidPattern": "Jalur pilihan atau pola glob tidak valid.",
   "Terminal.Tui.Command.Open.CloneConfirm": "Kloning dan buka repositori ini?\n{0}",
+  "Terminal.Tui.Command.Open.CloseAndOpenConfirm": "Tutup proyek ini dan buka folder ini?\n{0}",
+  "Terminal.Tui.Command.Open.CloseAndCloneConfirm": "Tutup proyek ini, lalu kloning dan buka repositori ini?\n{0}",
   "Terminal.Tui.Command.Profile.ResetTitle": "Atur ulang profil proyek",
   "Terminal.Tui.Command.Profile.ResetMessage": "Atur ulang pengaturan dan pilihan proyek ini ke nilai bawaan?",
   "Terminal.Tui.Command.Profile.ResetPartial": "Profil hanya diatur ulang sebagian. Ulangi perintah untuk menyelesaikan pembersihan.",

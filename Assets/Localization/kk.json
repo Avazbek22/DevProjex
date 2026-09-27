@@ -1158,6 +1158,8 @@
   "Terminal.Tui.Command.Select.Result": "Таңдау: {0} түйін өзгертілді; {1} жол табылмады.",
   "Terminal.Tui.Command.Select.Error.InvalidPattern": "Таңдау жолы немесе glob үлгісі жарамсыз.",
   "Terminal.Tui.Command.Open.CloneConfirm": "Осы репозиторийді клондап ашу керек пе?\n{0}",
+  "Terminal.Tui.Command.Open.CloseAndOpenConfirm": "Осы жобаны жауып, осы қалтаны ашу керек пе?\n{0}",
+  "Terminal.Tui.Command.Open.CloseAndCloneConfirm": "Осы жобаны жауып, содан кейін осы репозиторийді клондап ашу керек пе?\n{0}",
   "Terminal.Tui.Command.Profile.ResetTitle": "Жоба профилін қалпына келтіру",
   "Terminal.Tui.Command.Profile.ResetMessage": "Осы жобаның параметрлері мен таңдауын әдепкі мәндерге қайтару керек пе?",
   "Terminal.Tui.Command.Profile.ResetPartial": "Профиль жартылай ғана қалпына келтірілді. Тазалауды аяқтау үшін пәрменді қайталаңыз.",

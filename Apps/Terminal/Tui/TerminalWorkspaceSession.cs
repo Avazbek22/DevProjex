@@ -5821,14 +5821,29 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				return $"{severity} [{diagnostic.Code}]\n{message}{path}";
 			}));
 
-	private bool TryLeaveWorkspace(Action leave)
+	private bool TryLeaveWorkspace(Action leave) =>
+		TryLeaveWorkspace(
+			L("Terminal.Tui.BackToWelcome"),
+			L("Terminal.Tui.ConfirmBackToWelcome"),
+			leave);
+
+	private bool TryLeaveWorkspace(
+		string confirmationTitle,
+		string confirmationMessage,
+		Action leave)
 	{
 		ArgumentNullException.ThrowIfNull(leave);
 		if (_screen == TerminalWorkspaceScreen.Workspace &&
-			!Confirm(L("Terminal.Tui.BackToWelcome"), L("Terminal.Tui.ConfirmBackToWelcome")))
+			!Confirm(confirmationTitle, confirmationMessage))
 		{
 			return false;
 		}
+		return LeaveWorkspace(leave);
+	}
+
+	private bool LeaveWorkspace(Action leave)
+	{
+		ArgumentNullException.ThrowIfNull(leave);
 		return RunOrDeferWorkspaceTransition(() =>
 		{
 			FlushPendingWorkspacePersistence();

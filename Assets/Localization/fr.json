@@ -1158,6 +1158,8 @@
   "Terminal.Tui.Command.Select.Result": "Sélection : {0} nœuds modifiés ; {1} chemins introuvables.",
   "Terminal.Tui.Command.Select.Error.InvalidPattern": "Le chemin ou le motif glob de sélection n’est pas valide.",
   "Terminal.Tui.Command.Open.CloneConfirm": "Cloner et ouvrir ce dépôt ?\n{0}",
+  "Terminal.Tui.Command.Open.CloseAndOpenConfirm": "Fermer ce projet et ouvrir ce dossier ?\n{0}",
+  "Terminal.Tui.Command.Open.CloseAndCloneConfirm": "Fermer ce projet, puis cloner et ouvrir ce dépôt ?\n{0}",
   "Terminal.Tui.Command.Profile.ResetTitle": "Réinitialiser le profil du projet",
   "Terminal.Tui.Command.Profile.ResetMessage": "Réinitialiser les paramètres et la sélection de ce projet aux valeurs par défaut ?",
   "Terminal.Tui.Command.Profile.ResetPartial": "Le profil n’a été réinitialisé que partiellement. Répétez la commande pour terminer le nettoyage.",

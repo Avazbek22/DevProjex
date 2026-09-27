@@ -1152,6 +1152,8 @@
   "Terminal.Tui.Command.Select.Result": "Wybór: zmieniono {0} węzłów; nie znaleziono {1} ścieżek.",
   "Terminal.Tui.Command.Select.Error.InvalidPattern": "Ścieżka wyboru lub wzorzec glob jest nieprawidłowy.",
   "Terminal.Tui.Command.Open.CloneConfirm": "Sklonować i otworzyć to repozytorium?\n{0}",
+  "Terminal.Tui.Command.Open.CloseAndOpenConfirm": "Zamknąć ten projekt i otworzyć ten folder?\n{0}",
+  "Terminal.Tui.Command.Open.CloseAndCloneConfirm": "Zamknąć ten projekt, a następnie sklonować i otworzyć to repozytorium?\n{0}",
   "Terminal.Tui.Command.Profile.ResetTitle": "Resetuj profil projektu",
   "Terminal.Tui.Command.Profile.ResetMessage": "Zresetować ustawienia i wybór tego projektu do wartości domyślnych?",
   "Terminal.Tui.Command.Profile.ResetPartial": "Profil zresetowano tylko częściowo. Powtórz polecenie, aby dokończyć czyszczenie.",

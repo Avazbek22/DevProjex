@@ -1152,6 +1152,8 @@
   "Terminal.Tui.Command.Select.Result": "Lựa chọn: {0} nút đã đổi; không tìm thấy {1} đường dẫn.",
   "Terminal.Tui.Command.Select.Error.InvalidPattern": "Đường dẫn hoặc mẫu glob lựa chọn không hợp lệ.",
   "Terminal.Tui.Command.Open.CloneConfirm": "Sao chép và mở kho này?\n{0}",
+  "Terminal.Tui.Command.Open.CloseAndOpenConfirm": "Đóng dự án này và mở thư mục này?\n{0}",
+  "Terminal.Tui.Command.Open.CloseAndCloneConfirm": "Đóng dự án này, sau đó sao chép và mở kho này?\n{0}",
   "Terminal.Tui.Command.Profile.ResetTitle": "Đặt lại hồ sơ dự án",
   "Terminal.Tui.Command.Profile.ResetMessage": "Đặt lại cài đặt và lựa chọn của dự án này về mặc định?",
   "Terminal.Tui.Command.Profile.ResetPartial": "Hồ sơ chỉ được đặt lại một phần. Hãy lặp lại lệnh để hoàn tất dọn dẹp.",

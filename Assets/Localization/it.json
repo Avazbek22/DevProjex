@@ -1158,6 +1158,8 @@
   "Terminal.Tui.Command.Select.Result": "Selezione: {0} nodi modificati; {1} percorsi non trovati.",
   "Terminal.Tui.Command.Select.Error.InvalidPattern": "Il percorso o il glob di selezione non è valido.",
   "Terminal.Tui.Command.Open.CloneConfirm": "Clonare e aprire questo repository?\n{0}",
+  "Terminal.Tui.Command.Open.CloseAndOpenConfirm": "Chiudere questo progetto e aprire questa cartella?\n{0}",
+  "Terminal.Tui.Command.Open.CloseAndCloneConfirm": "Chiudere questo progetto, quindi clonare e aprire questo repository?\n{0}",
   "Terminal.Tui.Command.Profile.ResetTitle": "Reimposta profilo del progetto",
   "Terminal.Tui.Command.Profile.ResetMessage": "Reimpostare le impostazioni e la selezione del progetto ai valori predefiniti?",
   "Terminal.Tui.Command.Profile.ResetPartial": "Il profilo è stato reimpostato solo in parte. Ripeti il comando per completare la pulizia.",

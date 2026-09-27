@@ -1158,6 +1158,8 @@
   "Terminal.Tui.Command.Select.Result": "Интихоб: {0} гиреҳ тағйир ёфт; {1} роҳ ёфт нашуд.",
   "Terminal.Tui.Command.Select.Error.InvalidPattern": "Роҳ ё қолаби glob-и интихоб нодуруст аст.",
   "Terminal.Tui.Command.Open.CloneConfirm": "Ин анборро клон карда кушоем?\n{0}",
+  "Terminal.Tui.Command.Open.CloseAndOpenConfirm": "Ин лоиҳаро пӯшида, ин ҷузвдонро кушоем?\n{0}",
+  "Terminal.Tui.Command.Open.CloseAndCloneConfirm": "Ин лоиҳаро пӯшида, сипас ин анборро клон карда кушоем?\n{0}",
   "Terminal.Tui.Command.Profile.ResetTitle": "Барқарор кардани профили лоиҳа",
   "Terminal.Tui.Command.Profile.ResetMessage": "Танзимот ва интихоби ин лоиҳаро ба ҳолати пешфарз баргардонем?",
   "Terminal.Tui.Command.Profile.ResetPartial": "Профил танҳо қисман барқарор шуд. Барои анҷоми поксозӣ фармонро такрор кунед.",

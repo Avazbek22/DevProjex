@@ -1158,6 +1158,8 @@
   "Terminal.Tui.Command.Select.Result": "Tanlov: {0} tugun o‘zgardi; {1} yo‘l topilmadi.",
   "Terminal.Tui.Command.Select.Error.InvalidPattern": "Tanlov yo‘li yoki glob andozasi noto‘g‘ri.",
   "Terminal.Tui.Command.Open.CloneConfirm": "Bu ombor klonlanib ochilsinmi?\n{0}",
+  "Terminal.Tui.Command.Open.CloseAndOpenConfirm": "Bu loyihani yopib, bu papka ochilsinmi?\n{0}",
+  "Terminal.Tui.Command.Open.CloseAndCloneConfirm": "Bu loyihani yopib, keyin bu ombor klonlanib ochilsinmi?\n{0}",
   "Terminal.Tui.Command.Profile.ResetTitle": "Loyiha profilini tiklash",
   "Terminal.Tui.Command.Profile.ResetMessage": "Bu loyiha sozlamalari va tanlovini standart qiymatlarga qaytarilsinmi?",
   "Terminal.Tui.Command.Profile.ResetPartial": "Profil faqat qisman tiklandi. Tozalashni tugatish uchun buyruqni takrorlang.",

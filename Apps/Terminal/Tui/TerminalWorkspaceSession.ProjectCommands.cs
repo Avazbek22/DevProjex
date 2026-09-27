@@ -1,4 +1,5 @@
 using DevProjex.Terminal.Execution;
+using DevProjex.Terminal.Rendering;
 
 namespace DevProjex.Terminal.Tui;
 
@@ -27,7 +28,12 @@ internal sealed partial class TerminalWorkspaceSession
 		{
 			if (!TryResolveAutomaticProfileInteractively(project, out var profile))
 				return TerminalWorkspaceCommandExecutionResult.Deferred();
-			TryLeaveWorkspace(() => BeginOpenProject(project, profile));
+			TryLeaveWorkspace(
+				L("Terminal.Tui.Command.Open.Title"),
+				FormatOpenConfirmation(
+					"Terminal.Tui.Command.Open.CloseAndOpenConfirm",
+					TerminalTextEscaping.EscapeSingleLine(project)),
+				() => BeginOpenProject(project, profile));
 			return TerminalWorkspaceCommandExecutionResult.Deferred();
 		}
 
@@ -39,20 +45,27 @@ internal sealed partial class TerminalWorkspaceSession
 					: L("Terminal.Tui.Error.ProjectUnavailable"));
 		}
 
-		var safeUrl = RepositoryUrlUtility.ToSafeDisplay(source);
+		// One confirmation covers both the clone and closing the open project.
 		if (!Confirm(
 				L("Terminal.Tui.Command.Open.Title"),
-				string.Format(
-					System.Globalization.CultureInfo.CurrentCulture,
-					L("Terminal.Tui.Command.Open.CloneConfirm"),
-					safeUrl)))
+				FormatOpenConfirmation(
+					_screen == TerminalWorkspaceScreen.Workspace
+						? "Terminal.Tui.Command.Open.CloseAndCloneConfirm"
+						: "Terminal.Tui.Command.Open.CloneConfirm",
+					RepositoryUrlUtility.ToSafeDisplay(source))))
 		{
 			return TerminalWorkspaceCommandExecutionResult.Deferred();
 		}
 
-		TryLeaveWorkspace(() => BeginCloneRepository(source));
+		LeaveWorkspace(() => BeginCloneRepository(source));
 		return TerminalWorkspaceCommandExecutionResult.Deferred();
 	}
+
+	private string FormatOpenConfirmation(string messageKey, string target) =>
+		string.Format(
+			System.Globalization.CultureInfo.CurrentCulture,
+			L(messageKey),
+			target);
 
 	private TerminalWorkspaceCommandExecutionResult LoadProfile(string? nameOrPath)
 	{

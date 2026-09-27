@@ -1152,6 +1152,8 @@
   "Terminal.Tui.Command.Select.Result": "Вибір: змінено вузлів — {0}; шляхів не знайдено — {1}.",
   "Terminal.Tui.Command.Select.Error.InvalidPattern": "Шлях або glob-шаблон вибору неприпустимий.",
   "Terminal.Tui.Command.Open.CloneConfirm": "Клонувати й відкрити цей репозиторій?\n{0}",
+  "Terminal.Tui.Command.Open.CloseAndOpenConfirm": "Закрити цей проєкт і відкрити цю папку?\n{0}",
+  "Terminal.Tui.Command.Open.CloseAndCloneConfirm": "Закрити цей проєкт, потім клонувати й відкрити цей репозиторій?\n{0}",
   "Terminal.Tui.Command.Profile.ResetTitle": "Скинути профіль проєкту",
   "Terminal.Tui.Command.Profile.ResetMessage": "Скинути налаштування та вибір цього проєкту до типових значень?",
   "Terminal.Tui.Command.Profile.ResetPartial": "Профіль скинуто лише частково. Повторіть команду, щоб завершити очищення.",

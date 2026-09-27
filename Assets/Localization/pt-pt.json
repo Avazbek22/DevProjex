@@ -1152,6 +1152,8 @@
   "Terminal.Tui.Command.Select.Result": "Seleção: {0} nós alterados; {1} caminhos não encontrados.",
   "Terminal.Tui.Command.Select.Error.InvalidPattern": "O caminho ou padrão glob de seleção é inválido.",
   "Terminal.Tui.Command.Open.CloneConfirm": "Clonar e abrir este repositório?\n{0}",
+  "Terminal.Tui.Command.Open.CloseAndOpenConfirm": "Fechar este projeto e abrir esta pasta?\n{0}",
+  "Terminal.Tui.Command.Open.CloseAndCloneConfirm": "Fechar este projeto e depois clonar e abrir este repositório?\n{0}",
   "Terminal.Tui.Command.Profile.ResetTitle": "Repor perfil do projeto",
   "Terminal.Tui.Command.Profile.ResetMessage": "Repor as definições e a seleção deste projeto para os valores predefinidos?",
   "Terminal.Tui.Command.Profile.ResetPartial": "O perfil foi reposto apenas parcialmente. Repita o comando para concluir a limpeza.",

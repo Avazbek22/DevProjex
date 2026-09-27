@@ -1152,6 +1152,8 @@
   "Terminal.Tui.Command.Select.Result": "選択: {0} 個のノードを変更、{1} 個のパスが見つかりません。",
   "Terminal.Tui.Command.Select.Error.InvalidPattern": "選択パスまたは glob が無効です。",
   "Terminal.Tui.Command.Open.CloneConfirm": "このリポジトリをクローンして開きますか?\n{0}",
+  "Terminal.Tui.Command.Open.CloseAndOpenConfirm": "このプロジェクトを閉じて、このフォルダを開きますか?\n{0}",
+  "Terminal.Tui.Command.Open.CloseAndCloneConfirm": "このプロジェクトを閉じてから、このリポジトリをクローンして開きますか?\n{0}",
   "Terminal.Tui.Command.Profile.ResetTitle": "プロジェクト プロファイルをリセット",
   "Terminal.Tui.Command.Profile.ResetMessage": "このプロジェクトの設定と選択を既定値に戻しますか?",
   "Terminal.Tui.Command.Profile.ResetPartial": "プロファイルは一部だけリセットされました。クリーンアップを完了するにはコマンドを繰り返してください。",

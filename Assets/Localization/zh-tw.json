@@ -1152,6 +1152,8 @@
   "Terminal.Tui.Command.Select.Result": "選取：已變更 {0} 個節點；找不到 {1} 個路徑。",
   "Terminal.Tui.Command.Select.Error.InvalidPattern": "選取路徑或 glob 無效。",
   "Terminal.Tui.Command.Open.CloneConfirm": "要複製並開啟此存放庫嗎？\n{0}",
+  "Terminal.Tui.Command.Open.CloseAndOpenConfirm": "要關閉此專案並開啟此資料夾嗎？\n{0}",
+  "Terminal.Tui.Command.Open.CloseAndCloneConfirm": "要關閉此專案，然後複製並開啟此存放庫嗎？\n{0}",
   "Terminal.Tui.Command.Profile.ResetTitle": "重設專案設定檔",
   "Terminal.Tui.Command.Profile.ResetMessage": "要將此專案的設定與選取重設為預設值嗎？",
   "Terminal.Tui.Command.Profile.ResetPartial": "設定檔只完成部分重設。請重複此命令以完成清理。",

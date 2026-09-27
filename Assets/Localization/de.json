@@ -1158,6 +1158,8 @@
   "Terminal.Tui.Command.Select.Result": "Auswahl: {0} Knoten geändert; {1} Pfade nicht gefunden.",
   "Terminal.Tui.Command.Select.Error.InvalidPattern": "Der Auswahlpfad oder Glob ist ungültig.",
   "Terminal.Tui.Command.Open.CloneConfirm": "Dieses Repository klonen und öffnen?\n{0}",
+  "Terminal.Tui.Command.Open.CloseAndOpenConfirm": "Dieses Projekt schließen und diesen Ordner öffnen?\n{0}",
+  "Terminal.Tui.Command.Open.CloseAndCloneConfirm": "Dieses Projekt schließen und danach dieses Repository klonen und öffnen?\n{0}",
   "Terminal.Tui.Command.Profile.ResetTitle": "Projektprofil zurücksetzen",
   "Terminal.Tui.Command.Profile.ResetMessage": "Einstellungen und Auswahl dieses Projekts auf die Standardwerte zurücksetzen?",
   "Terminal.Tui.Command.Profile.ResetPartial": "Das Profil wurde nur teilweise zurückgesetzt. Wiederholen Sie den Befehl, um die Bereinigung abzuschließen.",

@@ -1152,6 +1152,8 @@
   "Terminal.Tui.Command.Select.Result": "Selección: {0} nodos cambiados; {1} rutas no encontradas.",
   "Terminal.Tui.Command.Select.Error.InvalidPattern": "La ruta o el patrón glob de selección no es válido.",
   "Terminal.Tui.Command.Open.CloneConfirm": "¿Clonar y abrir este repositorio?\n{0}",
+  "Terminal.Tui.Command.Open.CloseAndOpenConfirm": "¿Cerrar este proyecto y abrir esta carpeta?\n{0}",
+  "Terminal.Tui.Command.Open.CloseAndCloneConfirm": "¿Cerrar este proyecto y después clonar y abrir este repositorio?\n{0}",
   "Terminal.Tui.Command.Profile.ResetTitle": "Restablecer perfil del proyecto",
   "Terminal.Tui.Command.Profile.ResetMessage": "¿Restablecer la configuración y la selección de este proyecto a los valores predeterminados?",
   "Terminal.Tui.Command.Profile.ResetPartial": "El perfil se restableció solo parcialmente. Repita el comando para completar la limpieza.",

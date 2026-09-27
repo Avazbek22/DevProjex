@@ -1152,6 +1152,8 @@
   "Terminal.Tui.Command.Select.Result": "선택: 노드 {0}개 변경, 경로 {1}개를 찾지 못했습니다.",
   "Terminal.Tui.Command.Select.Error.InvalidPattern": "선택 경로 또는 glob이 올바르지 않습니다.",
   "Terminal.Tui.Command.Open.CloneConfirm": "이 리포지토리를 복제하여 여시겠습니까?\n{0}",
+  "Terminal.Tui.Command.Open.CloseAndOpenConfirm": "이 프로젝트를 닫고 이 폴더를 여시겠습니까?\n{0}",
+  "Terminal.Tui.Command.Open.CloseAndCloneConfirm": "이 프로젝트를 닫은 다음 이 리포지토리를 복제하여 여시겠습니까?\n{0}",
   "Terminal.Tui.Command.Profile.ResetTitle": "프로젝트 프로필 초기화",
   "Terminal.Tui.Command.Profile.ResetMessage": "이 프로젝트의 설정과 선택을 기본값으로 초기화하시겠습니까?",
   "Terminal.Tui.Command.Profile.ResetPartial": "프로필이 일부만 초기화되었습니다. 정리를 완료하려면 명령을 다시 실행하세요.",

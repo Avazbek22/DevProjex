@@ -1152,6 +1152,8 @@
   "Terminal.Tui.Command.Select.Result": "选择：已更改 {0} 个节点；未找到 {1} 个路径。",
   "Terminal.Tui.Command.Select.Error.InvalidPattern": "选择路径或 glob 无效。",
   "Terminal.Tui.Command.Open.CloneConfirm": "是否克隆并打开此存储库？\n{0}",
+  "Terminal.Tui.Command.Open.CloseAndOpenConfirm": "是否关闭此项目并打开此文件夹？\n{0}",
+  "Terminal.Tui.Command.Open.CloseAndCloneConfirm": "是否关闭此项目，然后克隆并打开此存储库？\n{0}",
   "Terminal.Tui.Command.Profile.ResetTitle": "重置项目配置文件",
   "Terminal.Tui.Command.Profile.ResetMessage": "是否将此项目的设置和选择重置为默认值？",
   "Terminal.Tui.Command.Profile.ResetPartial": "配置文件只完成了部分重置。请重复该命令以完成清理。",

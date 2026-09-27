@@ -1158,6 +1158,8 @@
   "Terminal.Tui.Command.Select.Result": "Выбор: изменено узлов — {0}; путей не найдено — {1}.",
   "Terminal.Tui.Command.Select.Error.InvalidPattern": "Путь или glob-шаблон выбора недопустим.",
   "Terminal.Tui.Command.Open.CloneConfirm": "Клонировать и открыть этот репозиторий?\n{0}",
+  "Terminal.Tui.Command.Open.CloseAndOpenConfirm": "Закрыть проект и открыть эту папку?\n{0}",
+  "Terminal.Tui.Command.Open.CloseAndCloneConfirm": "Закрыть проект, затем клонировать и открыть этот репозиторий?\n{0}",
   "Terminal.Tui.Command.Profile.ResetTitle": "Сбросить профиль проекта",
   "Terminal.Tui.Command.Profile.ResetMessage": "Сбросить настройки и выбор этого проекта к значениям по умолчанию?",
   "Terminal.Tui.Command.Profile.ResetPartial": "Профиль сброшен лишь частично. Повторите команду, чтобы завершить очистку.",

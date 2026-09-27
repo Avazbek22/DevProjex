@@ -94,6 +94,67 @@ public sealed class TerminalWorkspaceProjectCommandsPtyTests
 		await QuitAsync(terminal);
 	}
 
+	[Fact(Timeout = 120_000)]
+	public async Task OpenCommandInWorkspaceAsksToCloseTheProjectAndOpenTheFolder()
+	{
+		using var workspace = new TemporaryDirectory();
+		var current = workspace.CreateDirectory("current");
+		workspace.WriteFile("current/CurrentMarker.cs", "class CurrentMarker { }");
+		workspace.CreateDirectory("next");
+		workspace.WriteFile("next/NextMarker.cs", "class NextMarker { }");
+		await using var terminal = await StartWorkspaceAsync(current);
+		await terminal.WaitForScreenAsync(
+			"CurrentMarker.cs",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await ExecuteAsync(terminal, "open ../next", "Close this project and open this folder?");
+		var confirmation = terminal.CaptureScreen();
+		Assert.Contains("Open project", confirmation, StringComparison.Ordinal);
+		Assert.DoesNotContain("return to Welcome", confirmation, StringComparison.Ordinal);
+		await AcceptDialogAsync(terminal);
+		await terminal.WaitForScreenAsync(
+			"NextMarker.cs",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
+		await QuitAsync(terminal);
+	}
+
+	[Fact(Timeout = 150_000)]
+	public async Task OpenCommandInWorkspaceConfirmsCloneAndCloseOnce()
+	{
+		using var workspace = new TemporaryDirectory();
+		var current = workspace.CreateDirectory("current");
+		workspace.WriteFile("current/CurrentMarker.cs", "class CurrentMarker { }");
+		var origin = workspace.CreateDirectory("LocalRepository");
+		workspace.WriteFile("LocalRepository/CloneMarker.cs", "class CloneMarker { }");
+		InitializeGitRepository(origin);
+		await using var terminal = await StartWorkspaceAsync(
+			current,
+			allowFileGitTransport: true);
+		await terminal.WaitForScreenAsync(
+			"CurrentMarker.cs",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await ExecuteAsync(
+			terminal,
+			$"open \"{new Uri(origin).AbsoluteUri}\"",
+			"Close this project, then clone and open this repository?");
+		Assert.DoesNotContain(
+			"return to Welcome",
+			terminal.CaptureScreen(),
+			StringComparison.Ordinal);
+		await AcceptDialogAsync(terminal);
+		var opened = await terminal.WaitForScreenAsync(
+			"CloneMarker.cs",
+			timeout: TimeSpan.FromSeconds(45),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains("LocalRepository", opened, StringComparison.Ordinal);
+		await QuitAsync(terminal);
+	}
+
 	[Fact(Timeout = 150_000)]
 	public async Task ProfileCommandsLoadShowAndResetTheCurrentWorkspace()
 	{
@@ -357,14 +418,16 @@ public sealed class TerminalWorkspaceProjectCommandsPtyTests
 	private static Task<TerminalPtyHarness> StartWorkspaceAsync(
 		string projectPath,
 		Action<string>? initializeDataRoot = null,
-		string profile = "standard") =>
+		string profile = "standard",
+		bool allowFileGitTransport = false) =>
 		TerminalPtyHarness.StartAsync(
 			projectPath,
 			["tui", projectPath, "--profile", profile, "--screen", "inline", "--no-mouse", "--language", "en"],
 			columns: 160,
 			rows: 40,
 			initializeDataRoot: initializeDataRoot,
-			cancellationToken: TestContext.Current.CancellationToken);
+			cancellationToken: TestContext.Current.CancellationToken,
+			allowFileGitTransport: allowFileGitTransport);
 
 	private static async Task<ProjectSelectionProfile> WaitForLocalProfileAsync(
 		string dataRoot,

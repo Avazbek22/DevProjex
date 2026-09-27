@@ -1152,6 +1152,8 @@
   "Terminal.Tui.Command.Select.Result": "Seçim: {0} düğüm değiştirildi; {1} yol bulunamadı.",
   "Terminal.Tui.Command.Select.Error.InvalidPattern": "Seçim yolu veya glob deseni geçersiz.",
   "Terminal.Tui.Command.Open.CloneConfirm": "Bu depo klonlanıp açılsın mı?\n{0}",
+  "Terminal.Tui.Command.Open.CloseAndOpenConfirm": "Bu proje kapatılıp bu klasör açılsın mı?\n{0}",
+  "Terminal.Tui.Command.Open.CloseAndCloneConfirm": "Bu proje kapatılıp ardından bu depo klonlanıp açılsın mı?\n{0}",
   "Terminal.Tui.Command.Profile.ResetTitle": "Proje profilini sıfırla",
   "Terminal.Tui.Command.Profile.ResetMessage": "Bu projenin ayarları ve seçimi varsayılanlara sıfırlansın mı?",
   "Terminal.Tui.Command.Profile.ResetPartial": "Profil yalnızca kısmen sıfırlandı. Temizliği tamamlamak için komutu yineleyin.",

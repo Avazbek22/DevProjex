@@ -1185,6 +1185,8 @@
   "Terminal.Tui.Command.Select.Result": "Selection: {0} nodes changed; {1} paths not found.",
   "Terminal.Tui.Command.Select.Error.InvalidPattern": "The selection path or glob is invalid.",
   "Terminal.Tui.Command.Open.CloneConfirm": "Clone and open this repository?\n{0}",
+  "Terminal.Tui.Command.Open.CloseAndOpenConfirm": "Close this project and open this folder?\n{0}",
+  "Terminal.Tui.Command.Open.CloseAndCloneConfirm": "Close this project, then clone and open this repository?\n{0}",
   "Terminal.Tui.Command.Profile.ResetTitle": "Reset project profile",
   "Terminal.Tui.Command.Profile.ResetMessage": "Reset this project's settings and selection to the defaults?",
   "Terminal.Tui.Command.Profile.ResetPartial": "The profile was only partially reset. Repeat the command to finish cleanup.",
