@@ -1241,26 +1241,17 @@ public sealed class TerminalWorkspaceController(
 		}
 	}
 
-	public async Task<string> SavePortableProfileAsync(
+	public Task<string> SavePortableProfileAsync(
 		TerminalWorkspaceState state,
 		string destination,
 		bool overwrite,
-		CancellationToken cancellationToken)
-	{
-		var plan = await BuildReprojectedPlanAsync(
-			state.Plan,
-			state.BuildSelectedRelativePaths(),
-			state.IsEffectiveRootUnchecked,
-			cancellationToken).ConfigureAwait(false);
-		return await services.PortableProfileService
-			.SaveAsync(
-				plan.SourceRoot,
-				destination,
-				plan.Selection,
-				overwrite,
-				cancellationToken)
-			.ConfigureAwait(false);
-	}
+		CancellationToken cancellationToken) =>
+		services.PortableProfileService.SaveAsync(
+			state.Plan.SourceRoot,
+			destination,
+			state.BuildSelection(),
+			overwrite,
+			cancellationToken);
 
 	public Task<int> OpenDesktopAsync(
 		TerminalWorkspaceState state,

@@ -1279,6 +1279,51 @@ public sealed class TerminalWorkspaceContractTests
 	}
 
 	[Fact]
+	public async Task PortableProfileKeepsWholeTreeAndExplicitEmptySelectionsDistinct()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var output = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		workspace.WriteFile("src/App.cs", "class App {}\n");
+		workspace.WriteFile("docs/Guide.md", "# Guide\n");
+		var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+
+		var noChecks = await SaveAndLoadAsync("no-checks.json");
+		state.SelectAll();
+		var allChecked = await SaveAndLoadAsync("all-checked.json");
+		state.RestoreSelectedRelativePaths([]);
+		var explicitEmpty = await SaveAndLoadAsync("explicit-empty.json");
+
+		Assert.Null(noChecks.SelectedPaths);
+		Assert.Null(allChecked.SelectedPaths);
+		Assert.Empty(explicitEmpty.SelectedPaths!);
+		using var reopened = await controller.OpenAsync(
+			workspace.Path,
+			new ProjectProfileReference(
+				ProjectProfileSourceKind.Portable,
+				Path.Combine(output.Path, "all-checked.json")),
+			TestContext.Current.CancellationToken);
+		Assert.Equal(2, reopened.Plan.IncludedFiles.Count);
+
+		async Task<ProjectSelectionSpec> SaveAndLoadAsync(string fileName)
+		{
+			var written = await controller.SavePortableProfileAsync(
+				state,
+				Path.Combine(output.Path, fileName),
+				overwrite: false,
+				TestContext.Current.CancellationToken);
+			return await services.PortableProfileService.LoadAsync(
+				written,
+				TestContext.Current.CancellationToken);
+		}
+	}
+
+	[Fact]
 	public async Task RefreshDropsDisappearingProfilePathsWithoutSelectingTheirReplacement()
 	{
 		using var workspace = new TemporaryDirectory();
