@@ -7,7 +7,6 @@ namespace DevProjex.Terminal.Tui;
 
 internal sealed class TerminalParameterListView : ListView
 {
-	private readonly TerminalPointerEventDeduplicator _pointerEvents = new();
 	private IReadOnlyList<TerminalParameterRow>? _rows;
 
 	public TerminalParameterListView(
@@ -54,12 +53,12 @@ internal sealed class TerminalParameterListView : ListView
 			return base.OnMouseEvent(mouse);
 		}
 
-		if (TerminalPointerEventDeduplicator.IsMotion(mouse.Flags))
+		if (TerminalPointerInput.IsMotion(mouse.Flags))
 			return true;
-
-		var pressed = mouse.Flags.HasFlag(MouseFlags.LeftButtonPressed);
-		if (!IsPrimaryActivation(mouse.Flags) || mouse.Position is not { } position)
+		if (!IsPrimaryActivation(mouse.Flags))
 			return base.OnMouseEvent(mouse);
+		if (!TerminalPointerInput.IsPress(mouse.Flags) || mouse.Position is not { } position)
+			return true;
 
 		SetFocus();
 		InteractionStarted?.Invoke(this, EventArgs.Empty);
@@ -75,10 +74,6 @@ internal sealed class TerminalParameterListView : ListView
 			return true;
 		SelectedItem = row;
 		EnsureSelectedItemVisible();
-		if (!_pointerEvents.ShouldHandle(pressed))
-		{
-			return true;
-		}
 		if (TogglesOnPointer(row, Viewport.X + position.X))
 			SelectionToggleRequested?.Invoke(this, EventArgs.Empty);
 		return true;
@@ -95,7 +90,7 @@ internal sealed class TerminalParameterListView : ListView
 		_rows is null || row >= 0 && row < _rows.Count && _rows[row].IsEnabled;
 
 	internal static bool IsPrimaryActivation(MouseFlags flags) =>
-		!TerminalPointerEventDeduplicator.IsMotion(flags) &&
+		!TerminalPointerInput.IsMotion(flags) &&
 		(flags.HasFlag(MouseFlags.LeftButtonPressed) ||
 		 flags.HasFlag(MouseFlags.LeftButtonClicked));
 

@@ -14,27 +14,16 @@ internal static class TerminalInteractiveView
 	}
 }
 
-// Terminal.Gui reports one click twice: the press and, after the release, a synthesized
-// Clicked event. The Clicked event completes the press that started it however long the
-// button was held and even when the pointer moved a cell in between. A Clicked event with no
-// press before it is handled on its own.
-internal sealed class TerminalPointerEventDeduplicator
+// Pointer actions in the workspace happen on the press a view receives itself. Terminal.Gui
+// synthesizes Clicked and DoubleClicked for the view under the release, even when the press
+// started elsewhere (the preview, or a dialog button that has just closed), so those events
+// are never treated as a new action.
+internal static class TerminalPointerInput
 {
-	private bool _pressPending;
+	// A real button press, not movement: movement with a button held arrives with
+	// PositionReport and may still carry the pressed flag.
+	public static bool IsPress(MouseFlags flags) =>
+		flags.HasFlag(MouseFlags.LeftButtonPressed) && !IsMotion(flags);
 
-	public bool ShouldHandle(bool pressed)
-	{
-		if (pressed)
-		{
-			_pressPending = true;
-			return true;
-		}
-		var completesPress = _pressPending;
-		_pressPending = false;
-		return !completesPress;
-	}
-
-	// Pointer movement, including movement with a button held, arrives with PositionReport and
-	// may still carry the pressed flag; it continues a gesture and never starts a new one.
 	public static bool IsMotion(MouseFlags flags) => flags.HasFlag(MouseFlags.PositionReport);
 }

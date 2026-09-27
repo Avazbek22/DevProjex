@@ -8,7 +8,6 @@ namespace DevProjex.Terminal.Tui;
 
 internal sealed class TerminalAggregateControl : Label
 {
-	private readonly TerminalPointerEventDeduplicator _pointerEvents = new();
 	private bool _isActive;
 
 	public TerminalAggregateControl(bool isOnBorder)
@@ -63,17 +62,19 @@ internal sealed class TerminalAggregateControl : Label
 
 	protected override bool OnMouseEvent(Mouse mouse)
 	{
-		if (TerminalPointerEventDeduplicator.IsMotion(mouse.Flags))
+		if (TerminalPointerInput.IsMotion(mouse.Flags))
 			return true;
-
-		var pressed = mouse.Flags.HasFlag(MouseFlags.LeftButtonPressed);
-		var clicked = mouse.Flags.HasFlag(MouseFlags.LeftButtonClicked);
-		if (!pressed && !clicked)
+		if (!mouse.Flags.HasFlag(MouseFlags.LeftButtonPressed) &&
+			!mouse.Flags.HasFlag(MouseFlags.LeftButtonClicked))
+		{
 			return base.OnMouseEvent(mouse);
+		}
+		if (!TerminalPointerInput.IsPress(mouse.Flags))
+			return true;
 
 		SetFocus();
 		InteractionStarted?.Invoke(this, EventArgs.Empty);
-		if (_pointerEvents.ShouldHandle(pressed) && IsMarkerColumn(mouse.Position?.X))
+		if (IsMarkerColumn(mouse.Position?.X))
 			SelectionToggleRequested?.Invoke(this, EventArgs.Empty);
 		return true;
 	}

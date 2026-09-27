@@ -65,6 +65,19 @@ public sealed class TerminalParameterPointerTests
 		Assert.Equal(1, toggles.Count);
 	}
 
+	[Theory]
+	[InlineData(1, CheckBoxRow)]
+	[InlineData(6, RadioRow)]
+	public void ReleaseOverARowAfterAPressElsewhereDoesNothing(int column, int row)
+	{
+		using var list = CreateList(out var toggles);
+
+		Send(list, column, row, MouseFlags.LeftButtonReleased);
+		Send(list, column, row, MouseFlags.LeftButtonClicked);
+
+		Assert.Equal(0, toggles.Count);
+	}
+
 	[Fact]
 	public void ReleaseAloneDoesNothing()
 	{
@@ -127,6 +140,25 @@ public sealed class TerminalParameterPointerTests
 		control.NewMouseEvent(new Mouse { Position = new Point(3, 0), Flags = MouseFlags.LeftButtonClicked });
 
 		Assert.Equal(1, count);
+	}
+
+	[Fact]
+	public void ReleaseOverTheAggregateMarkerAfterAPressElsewhereDoesNothing()
+	{
+		using var control = new TerminalAggregateControl(isOnBorder: true);
+		control.SetRow(new TerminalParameterRow(
+			"extensions:all",
+			TerminalParameterRowKind.ToggleAllExtensions,
+			"All",
+			IsSelected: true));
+		control.Frame = new Rectangle(0, 0, control.Text.GetColumns(), 1);
+		var count = 0;
+		control.SelectionToggleRequested += (_, _) => count++;
+
+		control.NewMouseEvent(new Mouse { Position = new Point(2, 0), Flags = MouseFlags.LeftButtonReleased });
+		control.NewMouseEvent(new Mouse { Position = new Point(2, 0), Flags = MouseFlags.LeftButtonClicked });
+
+		Assert.Equal(0, count);
 	}
 
 	private static TerminalParameterListView CreateList(out List<int> toggles)

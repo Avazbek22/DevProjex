@@ -139,13 +139,40 @@ public sealed class TerminalProjectTreeViewPointerTests
 	}
 
 	[Fact]
-	public void ClickedCompletesThePendingPressAndStandsAloneOtherwise()
+	public void OnlyARealPressIsAPointerAction()
 	{
-		var pointer = new TerminalPointerEventDeduplicator();
+		Assert.True(TerminalPointerInput.IsPress(MouseFlags.LeftButtonPressed));
+		Assert.False(TerminalPointerInput.IsPress(MouseFlags.LeftButtonPressed | MouseFlags.PositionReport));
+		Assert.False(TerminalPointerInput.IsPress(MouseFlags.LeftButtonClicked));
+		Assert.False(TerminalPointerInput.IsPress(MouseFlags.LeftButtonDoubleClicked));
+	}
 
-		Assert.True(pointer.ShouldHandle(pressed: true));
-		Assert.False(pointer.ShouldHandle(pressed: false));
-		Assert.True(pointer.ShouldHandle(pressed: false));
+	[Theory]
+	[InlineData(3, FileRow)]
+	[InlineData(0, FolderRow)]
+	[InlineData(7, FolderRow)]
+	public void ReleaseOverTheTreeAfterAPressElsewhereDoesNothing(int column, int row)
+	{
+		using var tree = CreateTree(out var toggles, out var expansions);
+
+		Send(tree, column, row, MouseFlags.LeftButtonReleased);
+		Send(tree, column, row, MouseFlags.LeftButtonClicked);
+
+		Assert.Empty(toggles);
+		Assert.Equal(0, expansions.Count);
+	}
+
+	[Fact]
+	public void SecondHalfOfADoubleClickThatStartedOnAClosedDialogDoesNotExpandAFolder()
+	{
+		using var tree = CreateTree(out var toggles, out var expansions);
+
+		Send(tree, column: 7, FolderRow, MouseFlags.LeftButtonPressed);
+		Send(tree, column: 7, FolderRow, MouseFlags.LeftButtonReleased);
+		Send(tree, column: 7, FolderRow, MouseFlags.LeftButtonDoubleClicked);
+
+		Assert.Empty(toggles);
+		Assert.Equal(0, expansions.Count);
 	}
 
 	[Fact]
