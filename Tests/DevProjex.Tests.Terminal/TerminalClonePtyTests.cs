@@ -569,6 +569,80 @@ public sealed class TerminalClonePtyTests
 				cancellationToken: TestContext.Current.CancellationToken));
 	}
 
+	[Fact(Timeout = 120_000)]
+	public async Task CloneProgressFollowsTerminalResize()
+	{
+		using var originRoot = new TemporaryDirectory();
+		var origin = originRoot.CreateDirectory("ResizeRepository");
+		File.WriteAllText(
+			Path.Combine(origin, "ResizeMarker.cs"),
+			"internal sealed class ResizeMarker {}",
+			new UTF8Encoding(false));
+		InitializeGitRepository(origin);
+		using var welcomeDirectory = new TemporaryDirectory();
+		welcomeDirectory.WriteFile("notes.txt", "markerless directory");
+		string? internalDataRoot = null;
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			welcomeDirectory.Path,
+			["--language", "en"],
+			columns: 120,
+			rows: 30,
+			environment: new Dictionary<string, string>
+			{
+				[TerminalProgressCheckpointProtocol.PhasesVariable] = "clone-connecting"
+			},
+			cancellationToken: TestContext.Current.CancellationToken,
+			initializeDataRoot: dataRoot => internalDataRoot = dataRoot,
+			useProgressCheckpointHost: true,
+			allowFileGitTransport: true);
+
+		await terminal.WaitForScreenAsync(
+			"Choose a workspace action",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await StartCloneAsync(
+			terminal,
+			new Uri(origin).AbsoluteUri,
+			TestContext.Current.CancellationToken);
+		await WaitForFileAsync(
+			Path.Combine(
+				internalDataRoot!,
+				TerminalProgressCheckpointProtocol.DirectoryName,
+				TerminalProgressCheckpointProtocol.GetReachedFileName("clone-connecting")),
+			TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Starting the existing Git clone engine.",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.ResizeAsync(72, 24, TestContext.Current.CancellationToken);
+		await WaitUntilAsync(
+			() => ShowsWholeCloneProgressFrame(terminal.CaptureScreen()),
+			TestContext.Current.CancellationToken);
+
+		await terminal.ResizeAsync(59, 19, TestContext.Current.CancellationToken);
+		await terminal.WaitForStableScreenAsync(
+			"Terminal too small",
+			forbidden: "Cloning repository",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.ResizeAsync(120, 30, TestContext.Current.CancellationToken);
+		await WaitUntilAsync(
+			() => terminal.CaptureScreen() is var screen &&
+				ShowsWholeCloneProgressFrame(screen) &&
+				!screen.Contains("Terminal too small", StringComparison.Ordinal),
+			TestContext.Current.CancellationToken);
+
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await WaitForStableScreenAsync(
+			terminal,
+			"Operation canceled",
+			TestContext.Current.CancellationToken);
+		Assert.False(terminal.HasExited);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(
+				cancellationToken: TestContext.Current.CancellationToken));
+	}
+
 	private static void Verify(
 		string name,
 		TerminalPtyHarness terminal,
@@ -740,6 +814,18 @@ public sealed class TerminalClonePtyTests
 		}
 
 		return Convert.ToHexString(hash.GetHashAndReset());
+	}
+
+	private static bool ShowsWholeCloneProgressFrame(string screen)
+	{
+		var rows = screen.Split('\n').Select(static row => row.TrimStart()).ToArray();
+		return rows.Any(static row =>
+				row.StartsWith("┌┤Cloning repository", StringComparison.Ordinal) &&
+				row.EndsWith('┐')) &&
+			rows.Any(static row =>
+				row.StartsWith("│  Esc or Ctrl+C cancels this operation", StringComparison.Ordinal) &&
+				row.EndsWith('│')) &&
+			rows.Any(static row => row.StartsWith('└') && row.EndsWith('┘'));
 	}
 
 	private static async Task WaitForFileAsync(

@@ -2158,6 +2158,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		foreach (var view in _root.SubViews.Where(view => !ReferenceEquals(view, _tooSmall)))
 			view.Visible = !tooSmall;
 		_tooSmall.Visible = tooSmall;
+		_operationProgress?.ApplyLayout(_terminalWidth, _terminalHeight);
 	}
 
 	private void ApplyWorkspaceLayout()
