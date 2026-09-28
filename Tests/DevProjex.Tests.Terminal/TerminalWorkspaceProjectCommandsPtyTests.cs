@@ -63,6 +63,38 @@ public sealed class TerminalWorkspaceProjectCommandsPtyTests
 		await QuitAsync(terminal);
 	}
 
+	[Fact(Timeout = 120_000)]
+	public async Task WelcomeCommandLineHelpAndErrorsCoverOnlyTheWelcomeCommands()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("notes.txt", "welcome");
+		await using var terminal = await StartWelcomeAsync(workspace.Path);
+		await terminal.WaitForScreenAsync(
+			"Choose a workspace action",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await ExecuteAsync(
+			terminal,
+			"set hide-secrets on",
+			"Command 'set' is available only when a project is open (position 1).");
+		Assert.DoesNotContain("Unknown command", terminal.CaptureScreen(), StringComparison.Ordinal);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+
+		await ExecuteAsync(terminal, "help", "Workspace commands");
+		var help = await terminal.WaitForStableScreenAsync(
+			"quit",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains("open <path|url>", help, StringComparison.Ordinal);
+		Assert.Contains("language [code]", help, StringComparison.Ordinal);
+		Assert.DoesNotContain("set <option> <value>", help, StringComparison.Ordinal);
+		Assert.DoesNotContain("export <context|zip|folder>", help, StringComparison.Ordinal);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenWithoutAsync(
+			"Workspace commands",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await QuitAsync(terminal);
+	}
+
 	[Fact(Timeout = 150_000)]
 	public async Task OpenCommandClonesAndOpensALocalRepositoryAfterConfirmation()
 	{
@@ -91,6 +123,88 @@ public sealed class TerminalWorkspaceProjectCommandsPtyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Contains("LocalRepository", opened, StringComparison.Ordinal);
+		await QuitAsync(terminal);
+	}
+
+	[Fact(Timeout = 120_000)]
+	public async Task OpenCommandInWorkspaceAsksToCloseTheProjectAndOpenTheFolder()
+	{
+		using var workspace = new TemporaryDirectory();
+		var current = workspace.CreateDirectory("current");
+		workspace.WriteFile("current/CurrentMarker.cs", "class CurrentMarker { }");
+		workspace.CreateDirectory("next");
+		workspace.WriteFile("next/NextMarker.cs", "class NextMarker { }");
+		await using var terminal = await StartWorkspaceAsync(current);
+		await terminal.WaitForScreenAsync(
+			"CurrentMarker.cs",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await ExecuteAsync(terminal, "open ../next", "Close this project and open this folder?");
+		var confirmation = terminal.CaptureScreen();
+		Assert.Contains("Open project", confirmation, StringComparison.Ordinal);
+		Assert.DoesNotContain("return to Welcome", confirmation, StringComparison.Ordinal);
+		await AcceptDialogAsync(terminal);
+		await terminal.WaitForScreenAsync(
+			"NextMarker.cs",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
+		await QuitAsync(terminal);
+	}
+
+	[Fact(Timeout = 150_000)]
+	public async Task OpenCommandInWorkspaceConfirmsCloneAndCloseOnce()
+	{
+		using var workspace = new TemporaryDirectory();
+		var current = workspace.CreateDirectory("current");
+		workspace.WriteFile("current/CurrentMarker.cs", "class CurrentMarker { }");
+		var origin = workspace.CreateDirectory("LocalRepository");
+		workspace.WriteFile("LocalRepository/CloneMarker.cs", "class CloneMarker { }");
+		InitializeGitRepository(origin);
+		await using var terminal = await StartWorkspaceAsync(
+			current,
+			allowFileGitTransport: true);
+		await terminal.WaitForScreenAsync(
+			"CurrentMarker.cs",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await ExecuteAsync(
+			terminal,
+			$"open \"{new Uri(origin).AbsoluteUri}\"",
+			"Close this project, then clone and open this repository?");
+		Assert.DoesNotContain(
+			"return to Welcome",
+			terminal.CaptureScreen(),
+			StringComparison.Ordinal);
+		await AcceptDialogAsync(terminal);
+		var opened = await terminal.WaitForScreenAsync(
+			"CloneMarker.cs",
+			timeout: TimeSpan.FromSeconds(45),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains("LocalRepository", opened, StringComparison.Ordinal);
+		await QuitAsync(terminal);
+	}
+
+	[Fact(Timeout = 120_000)]
+	public async Task RecentCommandDeclinedAtConfirmationKeepsTheWorkspaceWithoutAnError()
+	{
+		using var project = new TemporaryDirectory();
+		project.WriteFile("src/App.cs", "class App { }");
+		await using var terminal = await StartWorkspaceAsync(project.Path);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await ExecuteAsync(terminal, "recent", "Close this project and return to Welcome?");
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		var workspace = await terminal.WaitForStableScreenAsync(
+			"PROJECT TREE",
+			"Close this project and return to Welcome?",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.DoesNotContain("command is unavailable", workspace, StringComparison.Ordinal);
 		await QuitAsync(terminal);
 	}
 
@@ -357,14 +471,16 @@ public sealed class TerminalWorkspaceProjectCommandsPtyTests
 	private static Task<TerminalPtyHarness> StartWorkspaceAsync(
 		string projectPath,
 		Action<string>? initializeDataRoot = null,
-		string profile = "standard") =>
+		string profile = "standard",
+		bool allowFileGitTransport = false) =>
 		TerminalPtyHarness.StartAsync(
 			projectPath,
 			["tui", projectPath, "--profile", profile, "--screen", "inline", "--no-mouse", "--language", "en"],
 			columns: 160,
 			rows: 40,
 			initializeDataRoot: initializeDataRoot,
-			cancellationToken: TestContext.Current.CancellationToken);
+			cancellationToken: TestContext.Current.CancellationToken,
+			allowFileGitTransport: allowFileGitTransport);
 
 	private static async Task<ProjectSelectionProfile> WaitForLocalProfileAsync(
 		string dataRoot,

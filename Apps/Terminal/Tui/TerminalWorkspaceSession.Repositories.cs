@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
 using DevProjex.Terminal.Execution;
+using Terminal.Gui.Text;
 using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
 
@@ -52,7 +53,9 @@ internal sealed partial class TerminalWorkspaceSession
 			{
 				var confirmed = Confirm(
 					L("Terminal.Tui.Recent.Remove"),
-					L("Terminal.Tui.RecentRepositories.RemoveHistoryOnly"));
+					workspace.Kind == RecentWorkspaceKind.Repository
+						? L("Terminal.Tui.RecentRepositories.RemoveHistoryOnly")
+						: L("Terminal.Tui.Recent.RemoveFolderHistoryOnly"));
 				if (!confirmed)
 					continue;
 				_recentProjectsSnapshot = workspace.Kind == RecentWorkspaceKind.Repository
@@ -63,6 +66,7 @@ internal sealed partial class TerminalWorkspaceSession
 						_recentProjectsSnapshot,
 						workspace.Source);
 				_recentWorkspaceSelectionKey = null;
+				RefreshWelcomeRecentProjects();
 				continue;
 			}
 
@@ -82,6 +86,7 @@ internal sealed partial class TerminalWorkspaceSession
 							_recentProjectsSnapshot,
 							workspace.Source);
 						_recentWorkspaceSelectionKey = null;
+						RefreshWelcomeRecentProjects();
 					}
 					continue;
 				}
@@ -145,9 +150,12 @@ internal sealed partial class TerminalWorkspaceSession
 				return L("Terminal.Tui.Recent.Yesterday");
 			return openedUtc.ToLocalTime().ToString("d", CultureInfo.CurrentCulture);
 		}
+		var nameWidth = TerminalRecentWorkspaceRow.ResolveNameWidth(
+			dialogWidth - 8,
+			workspaces.Max(workspace => OpenedLabel(workspace.OpenedUtc).GetColumns()));
 		var rows = new ObservableCollection<TerminalRecentWorkspaceRow>(
 			workspaces.Select(workspace =>
-				new TerminalRecentWorkspaceRow(workspace, KindLabel, OpenedLabel)));
+				new TerminalRecentWorkspaceRow(workspace, KindLabel, OpenedLabel, nameWidth)));
 		var list = new ListView
 		{
 			X = 1,
@@ -206,14 +214,14 @@ internal sealed partial class TerminalWorkspaceSession
 		}
 
 		list.ValueChanged += (_, _) => UpdateSelection();
-		list.Accepted += (_, _) => SelectCurrent(TerminalRecentWorkspaceDecisionKind.Open);
+		TerminalInteractiveView.OnAccept(list, () => SelectCurrent(TerminalRecentWorkspaceDecisionKind.Open));
 		dialog.Add(description, list, details);
 		dialog.AddButton(CreateDialogButton(L("Terminal.Tui.Back")));
 		var remove = CreateDialogButton(L("Terminal.Tui.Recent.Remove"));
-		remove.Accepted += (_, _) => SelectCurrent(TerminalRecentWorkspaceDecisionKind.Remove);
+		TerminalInteractiveView.OnAccept(remove, () => SelectCurrent(TerminalRecentWorkspaceDecisionKind.Remove));
 		dialog.AddButton(remove);
 		var open = CreateDialogButton(L("Terminal.Tui.Open"));
-		open.Accepted += (_, _) => SelectCurrent(TerminalRecentWorkspaceDecisionKind.Open);
+		TerminalInteractiveView.OnAccept(open, () => SelectCurrent(TerminalRecentWorkspaceDecisionKind.Open));
 		dialog.AddButton(open);
 		UpdateSelection();
 		RunOverlay(dialog, list);

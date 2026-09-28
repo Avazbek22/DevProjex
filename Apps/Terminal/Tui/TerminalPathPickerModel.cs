@@ -18,7 +18,8 @@ internal enum TerminalPathPickerError
 
 internal readonly record struct TerminalPathPickerSelection(
 	string? Path,
-	bool InvalidTypedPath);
+	bool InvalidTypedPath,
+	string? DirectoryToBrowse = null);
 
 internal sealed record TerminalPathPickerEntry(
 	string Path,
@@ -139,9 +140,17 @@ internal sealed class TerminalPathPickerModel
 	{
 		if (!string.IsNullOrWhiteSpace(input))
 		{
-			return SelectInputPath(input) is { } typedPath
-				? new TerminalPathPickerSelection(typedPath, InvalidTypedPath: false)
-				: new TerminalPathPickerSelection(null, InvalidTypedPath: true);
+			if (SelectInputPath(input) is { } typedPath)
+				return new TerminalPathPickerSelection(typedPath, InvalidTypedPath: false);
+			// A settings file is never a folder: a typed folder is browsed, and the folder already
+			// shown (the path field mirrors it) defers to the highlighted entry.
+			if (_mode == TerminalPathPickerMode.JsonFile && ResolveExistingDirectory(input) is { } directory)
+			{
+				return PathComparer.Default.Equals(directory, Path.TrimEndingDirectorySeparator(CurrentDirectory))
+					? new TerminalPathPickerSelection(SelectEntry(selectedIndex), InvalidTypedPath: false)
+					: new TerminalPathPickerSelection(null, InvalidTypedPath: false, DirectoryToBrowse: directory);
+			}
+			return new TerminalPathPickerSelection(null, InvalidTypedPath: true);
 		}
 
 		var fallback = _mode == TerminalPathPickerMode.Directory
@@ -170,6 +179,19 @@ internal sealed class TerminalPathPickerModel
 					path.EndsWith(".json", StringComparison.OrdinalIgnoreCase) => path,
 				_ => null
 			};
+		}
+		catch (Exception exception) when (exception is ArgumentException or NotSupportedException or IOException)
+		{
+			return null;
+		}
+	}
+
+	private string? ResolveExistingDirectory(string input)
+	{
+		try
+		{
+			var path = Path.TrimEndingDirectorySeparator(ResolveInputPath(input));
+			return Directory.Exists(path) ? path : null;
 		}
 		catch (Exception exception) when (exception is ArgumentException or NotSupportedException or IOException)
 		{

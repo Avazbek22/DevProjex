@@ -1,5 +1,8 @@
+using System.Globalization;
 using DevProjex.Terminal.Execution;
 using DevProjex.Terminal.CommandLine;
+using DevProjex.Application.Ranking;
+using DevProjex.Mcp;
 using DevProjex.Terminal.DesktopControl;
 using DevProjex.Application.Compression;
 using DevProjex.Application.Secrets;
@@ -791,16 +794,172 @@ public sealed class TerminalWorkspaceController(
 		TerminalWorkspaceState state,
 		ProjectContextView view,
 		ProjectContextDocumentFormat format,
-		CancellationToken cancellationToken)
-	{
-		var plan = await BuildCurrentPlanAsync(state, cancellationToken).ConfigureAwait(false);
-		using var document = await BuildExactExportDocumentAsync(
-				plan,
+		CancellationToken cancellationToken,
+		bool plain = false) =>
+		(await BuildCopyPayloadWithBudgetAsync(
+				state,
 				view,
 				format,
+				budget: null,
+				cancellationToken,
+				plain)
+			.ConfigureAwait(false)).Payload;
+
+	internal async Task<(string? Payload, ProjectContextTokenBudgetReport? TokenBudget)>
+		BuildCopyPayloadWithBudgetAsync(
+			TerminalWorkspaceState state,
+			ProjectContextView view,
+			ProjectContextDocumentFormat format,
+			TerminalContextBudget? budget,
+			CancellationToken cancellationToken,
+			bool plain = false)
+	{
+		ValidateView(view);
+		ValidateDocumentFormat(format);
+		var plan = await BuildCurrentPlanAsync(state, cancellationToken).ConfigureAwait(false);
+		ProjectContextWriteResult? writeResult = null;
+		using var document = await services.PreviewDocumentBuilder.CreateDocumentAsync(
+				async (stream, token) => writeResult = await WriteContextDocumentAsync(
+						plan,
+						view,
+						format,
+						stream,
+						budget,
+						plain,
+						token)
+					.ConfigureAwait(false),
 				cancellationToken)
 			.ConfigureAwait(false);
-		return MaterializeCopyPayload(document);
+		return (MaterializeCopyPayload(document), writeResult?.TokenBudget);
+	}
+
+	internal async Task<SearchCommandHandler.SearchResult> SearchProjectAsync(
+		ProjectContextPlan plan,
+		string pattern,
+		SearchMode mode,
+		int maximumResults,
+		CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(plan);
+		ArgumentException.ThrowIfNullOrEmpty(pattern);
+		// The declaration body preview is a CLI reading aid; the workspace lists matches only.
+		var request = new SearchCommandRequest(
+			plan.SourceRoot,
+			pattern,
+			plan.Selection,
+			mode,
+			maximumResults,
+			SearchBodyCharacters: 0,
+			SearchOutputFormat.Text,
+			OutputPath: null,
+			new TerminalOutputOptions());
+		try
+		{
+			return await new SearchCommandHandler(services, environment)
+				.SearchForPlanAsync(plan, request, cancellationToken)
+				.ConfigureAwait(false);
+		}
+		catch (McpToolException exception) when (exception.Code == McpErrorCodes.InvalidPattern)
+		{
+			throw new SearchCommandException(
+				"DPX-TUI-GREP-PATTERN",
+				"The search pattern is invalid or exceeded the evaluation limit.",
+				exception);
+		}
+	}
+
+	// Budget and ranking follow the direct CLI export pipeline: rank the selection, admit files
+	// against measured (transformed) content, and write the admitted plan in ranked order.
+	private async Task<ProjectContextWriteResult> WriteContextDocumentAsync(
+		ProjectContextPlan plan,
+		ProjectContextView view,
+		ProjectContextDocumentFormat format,
+		Stream destination,
+		TerminalContextBudget? budget,
+		bool plain,
+		CancellationToken cancellationToken)
+	{
+		if (budget is null)
+		{
+			return await services.ContextDocumentService
+				.WriteCompleteWithReportAsync(plan, view, format, destination, cancellationToken, plain)
+				.ConfigureAwait(false);
+		}
+
+		var ranking = budget.Rank is null
+			? null
+			: await new ImportanceRankingService(
+					services.DependencyFactsEngine,
+					new ProjectGitHistoryReader())
+				.RankAsync(plan.SourceRoot, plan.IncludedFiles, cancellationToken)
+				.ConfigureAwait(false);
+		var transformationContext = ExportContextCommandHandler.CreateTransformationContext(
+			services,
+			plan,
+			view);
+		await using var measured = transformationContext is null || budget.MaximumEstimatedTokens is null
+			? null
+			: await services.SecretRedactionOutputPreparer
+				.MeasureAsync(
+					transformationContext,
+					plan.IncludedFiles,
+					captureEffectiveFindings: false,
+					cancellationToken: cancellationToken)
+				.ConfigureAwait(false);
+		ProjectContextWriteResult? admission = null;
+		if (budget.MaximumEstimatedTokens is { } maximumTokens && measured is not null)
+		{
+			var admitted = await new ProjectContextTokenAdmissionService(services.ContextDocumentService)
+				.AdmitMeasuredAsync(
+					plan,
+					view,
+					format,
+					maximumTokens,
+					measured,
+					ranking,
+					cancellationToken)
+				.ConfigureAwait(false);
+			plan = admitted.Plan;
+			admission = admitted.WriteResult;
+		}
+		await using var prepared = transformationContext is null
+			? null
+			: await services.SecretRedactionOutputPreparer
+				.PrepareAsync(
+					transformationContext,
+					plan.IncludedFiles,
+					captureEffectiveFindings: false,
+					captureTransformedMetrics: format is
+						ProjectContextDocumentFormat.Json or ProjectContextDocumentFormat.Xml,
+					cancellationToken)
+				.ConfigureAwait(false);
+		if (admission is not null)
+			measured!.EnsureSourceVersionsCurrent(plan.IncludedFiles);
+		return prepared is null
+			? await services.ContextDocumentService.WriteCompleteWithReportAsync(
+					plan,
+					view,
+					format,
+					destination,
+					cancellationToken,
+					plain,
+					maximumEstimatedTokens: budget.MaximumEstimatedTokens,
+					ranking: ranking,
+					precomputedTokenBudget: admission?.TokenBudget)
+				.ConfigureAwait(false)
+			: await services.ContextDocumentService.WritePreparedCompleteAsync(
+					plan,
+					view,
+					format,
+					destination,
+					prepared,
+					cancellationToken,
+					plain,
+					maximumEstimatedTokens: budget.MaximumEstimatedTokens,
+					ranking: ranking,
+					precomputedTokenBudget: admission?.TokenBudget,
+					preserveContentMetrics: admission is not null)
+				.ConfigureAwait(false);
 	}
 
 	internal static string? MaterializeCopyPayload(IPreviewTextDocument document)
@@ -930,7 +1089,8 @@ public sealed class TerminalWorkspaceController(
 		string destination,
 		bool overwrite,
 		CancellationToken cancellationToken,
-		bool plain = false)
+		bool plain = false,
+		TerminalContextBudget? budget = null)
 	{
 		ValidateView(view);
 		ValidateDocumentFormat(format);
@@ -947,13 +1107,14 @@ public sealed class TerminalWorkspaceController(
 			.WriteAsync(
 				requestedDestination,
 				overwrite,
-				(stream, token) => services.ContextDocumentService.WriteCompleteAsync(
+				(stream, token) => WriteContextDocumentAsync(
 					plan,
 					view,
 					format,
 					stream,
-					token,
-					plain),
+					budget,
+					plain,
+					token),
 				cancellationToken,
 				path => ExactOutputDestinationValidator.ValidateContext(
 					plan.SourceRoot,
@@ -969,7 +1130,8 @@ public sealed class TerminalWorkspaceController(
 		string destination,
 		bool overwrite,
 		CancellationToken cancellationToken,
-		bool plain = false)
+		bool plain = false,
+		TerminalContextBudget? budget = null)
 	{
 		ValidateView(view);
 		ValidateDocumentFormat(format);
@@ -978,19 +1140,22 @@ public sealed class TerminalWorkspaceController(
 		var (exactDestination, destinationState) = ResolveDestination(
 			plan.SourceRoot,
 			destination,
-			path => ExactOutputDestinationValidator.ValidateContext(
+			(path, replace) => ExactOutputDestinationValidator.ValidateContext(
 				plan.SourceRoot,
 				path,
-				overwrite));
+				overwrite || replace));
+		ProjectContextWriteResult? writeResult = null;
 		var outputMetrics = await ExportOutputMetricsCalculator
 			.FromUtf8WriterAsync(
-				(stream, token) => services.ContextDocumentService.WriteCompleteAsync(
-					plan,
-					view,
-					format,
-					stream,
-					token,
-					plain),
+				async (stream, token) => writeResult = await WriteContextDocumentAsync(
+						plan,
+						view,
+						format,
+						stream,
+						budget,
+						plain,
+						token)
+					.ConfigureAwait(false),
 				cancellationToken)
 			.ConfigureAwait(false);
 		return CreateSummary(
@@ -1001,7 +1166,11 @@ public sealed class TerminalWorkspaceController(
 			exactDestination,
 			destinationState,
 			outputMetrics.Chars,
-			outputMetrics.Tokens);
+			outputMetrics.Tokens) with
+		{
+			TokenBudget = writeResult?.TokenBudget,
+			Rank = budget?.Rank
+		};
 	}
 
 	public async Task<string> ExportProjectAsync(
@@ -1094,11 +1263,11 @@ public sealed class TerminalWorkspaceController(
 		var (exactDestination, destinationState) = ResolveDestination(
 			plan.SourceRoot,
 			destination,
-			path => ExactOutputDestinationValidator.ValidateProject(
+			(path, replace) => ExactOutputDestinationValidator.ValidateProject(
 				plan.SourceRoot,
 				path,
 				format,
-				overwrite: false));
+				replace));
 		return CreateSummary(
 			plan,
 			MapExportKind(format),
@@ -1207,17 +1376,32 @@ public sealed class TerminalWorkspaceController(
 	private static (string Destination, TerminalExportDestinationState State) ResolveDestination(
 		string workingDirectory,
 		string destination,
-		Func<string, string> validate)
+		Func<string, bool, string> validate)
 	{
 		var exactDestination = TerminalWorkspacePathResolver.Resolve(destination, workingDirectory);
 		try
 		{
-			_ = validate(exactDestination);
+			_ = validate(exactDestination, false);
 			return (exactDestination, TerminalExportDestinationState.Ready);
 		}
 		catch (OutputDestinationConflictException exception)
 		{
-			return (exception.Path, TerminalExportDestinationState.Conflict);
+			return (exception.Path, CanReplace(exactDestination, validate)
+				? TerminalExportDestinationState.Conflict
+				: TerminalExportDestinationState.Blocked);
+		}
+	}
+
+	private static bool CanReplace(string destination, Func<string, bool, string> validate)
+	{
+		try
+		{
+			_ = validate(destination, true);
+			return true;
+		}
+		catch (OutputDestinationConflictException)
+		{
+			return false;
 		}
 	}
 
@@ -1241,26 +1425,17 @@ public sealed class TerminalWorkspaceController(
 		}
 	}
 
-	public async Task<string> SavePortableProfileAsync(
+	public Task<string> SavePortableProfileAsync(
 		TerminalWorkspaceState state,
 		string destination,
 		bool overwrite,
-		CancellationToken cancellationToken)
-	{
-		var plan = await BuildReprojectedPlanAsync(
-			state.Plan,
-			state.BuildSelectedRelativePaths(),
-			state.IsEffectiveRootUnchecked,
-			cancellationToken).ConfigureAwait(false);
-		return await services.PortableProfileService
-			.SaveAsync(
-				plan.SourceRoot,
-				destination,
-				plan.Selection,
-				overwrite,
-				cancellationToken)
-			.ConfigureAwait(false);
-	}
+		CancellationToken cancellationToken) =>
+		services.PortableProfileService.SaveAsync(
+			state.Plan.SourceRoot,
+			destination,
+			state.BuildSelection(),
+			overwrite,
+			cancellationToken);
 
 	public Task<int> OpenDesktopAsync(
 		TerminalWorkspaceState state,
@@ -1291,7 +1466,8 @@ public sealed class TerminalWorkspaceController(
 		ProjectContextView view,
 		ProjectContextDocumentFormat format,
 		string destination,
-		bool dryRun = false)
+		bool dryRun = false,
+		TerminalContextBudget? budget = null)
 	{
 		var arguments = new List<string>
 		{
@@ -1311,6 +1487,16 @@ public sealed class TerminalWorkspaceController(
 		else
 			AppendSelectedPaths(arguments, state);
 		AppendSelection(arguments, state.Plan);
+		if (budget?.MaximumEstimatedTokens is { } maximumTokens)
+		{
+			arguments.Add("--max-tokens");
+			arguments.Add(maximumTokens.ToString(CultureInfo.InvariantCulture));
+		}
+		if (budget?.Rank is { } rank)
+		{
+			arguments.Add("--rank");
+			arguments.Add(CliChoiceSets.ContextRank.ToToken(rank));
+		}
 		if (dryRun)
 			arguments.Add("--dry-run");
 		return CliArgumentVectorFormatter.Format(arguments);

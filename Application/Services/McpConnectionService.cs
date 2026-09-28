@@ -20,6 +20,8 @@ public sealed record McpConnectionRequest(
 	bool ReplaceExistingFields = false,
 	string? ExpectedExistingEntryFingerprint = null);
 
+// NextCommand names a client command to run in the project folder; NextStep is a complete
+// localized instruction that is shown as is.
 public sealed record McpConnectionResult(
 	McpConnectionStatus Status,
 	string UserMessage,
@@ -30,7 +32,8 @@ public sealed record McpConnectionResult(
 	string? TargetPath = null,
 	bool Replaced = false,
 	IReadOnlyList<string>? FieldsToReplace = null,
-	string? ExistingEntryFingerprint = null)
+	string? ExistingEntryFingerprint = null,
+	string? NextStep = null)
 {
 	public bool Succeeded => Status is McpConnectionStatus.Connected or McpConnectionStatus.Updated;
 

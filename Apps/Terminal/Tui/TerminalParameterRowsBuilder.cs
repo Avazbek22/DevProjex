@@ -103,13 +103,16 @@ internal sealed class TerminalParameterRowsBuilder(
 			.Where(descriptor => IsPathExclusionAvailable(descriptor, plan))
 			.ToArray();
 		var count = availableExclusions.Length;
+		// With nothing to exclude in this project there are no rows to toggle, so the control
+		// is shown as unavailable instead of offering an action that cannot change anything.
 		return new TerminalParameterRow(
 			"exclusions:all",
 			TerminalParameterRowKind.ToggleAllExclusions,
 			FormatAggregateLabel(count),
 			count > 0 &&
 			availableExclusions.All(descriptor =>
-				exclusions.Contains(descriptor.RequireId())));
+				exclusions.Contains(descriptor.RequireId())),
+			IsEnabled: count > 0);
 	}
 
 	public IReadOnlyList<TerminalParameterRow> BuildExtensions(

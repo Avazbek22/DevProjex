@@ -21,6 +21,7 @@ internal sealed class TerminalTransparentTextEditor : View
 		CanFocus = true;
 		Height = 1;
 		ViewportSettings |= ViewportSettingsFlags.Transparent;
+		KeyBindings.Add(Key.V.WithCtrl, Command.Paste);
 		HasFocusChanged += (_, _) => UpdateCursor();
 	}
 
@@ -105,8 +106,19 @@ internal sealed class TerminalTransparentTextEditor : View
 		}
 
 		var text = key.GetPrintableText();
-		if (string.IsNullOrEmpty(text))
+		// Keys such as Shift+Tab or Shift+Enter resolve to control characters, not typed text.
+		if (string.IsNullOrEmpty(text) || text.Any(char.IsControl))
 			return base.OnKeyDown(key);
+		InsertText(text);
+		return true;
+	}
+
+	// A copied line usually ends with a line break that must not become part of the command.
+	protected override string OnSanitizingPaste(string raw) =>
+		base.OnSanitizingPaste(raw).TrimEnd('\r', '\n');
+
+	protected override bool OnPaste(string text)
+	{
 		InsertText(text);
 		return true;
 	}

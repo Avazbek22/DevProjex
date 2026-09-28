@@ -27,10 +27,7 @@ internal sealed partial class TerminalWorkspaceSession
 		{
 			_agentJournalWorkspaceOpenedUtc = DateTimeOffset.UtcNow;
 			_agentJournalOpeningRoot = state.Plan.SourceRoot;
-			_agentJournalOpeningSessionId = null;
-			_agentJournalOpeningSequence = 0;
-			_agentJournalReadSequence = 0;
-			_agentJournalSnapshot = null;
+			ResetAgentJournalProjection();
 		}
 		var sessions = _state is null
 			? Array.Empty<LiveSessionRecord>()
@@ -47,6 +44,26 @@ internal sealed partial class TerminalWorkspaceSession
 		{
 			_status.Text = BuildStatus(_state, _application.Screen.Width);
 		}
+	}
+
+	// Dropping the projection also forgets the read cursor, so the next refresh rebuilds the
+	// trace from the journal instead of reading only calls appended after the old cursor.
+	private void ResetAgentJournalProjection()
+	{
+		_agentJournalOpeningSessionId = null;
+		_agentJournalOpeningSequence = 0;
+		_agentJournalReadSequence = 0;
+		_agentJournalSnapshot = null;
+	}
+
+	// Sessions arrive newest first; an idle newer session must not hide an older one the agent uses.
+	internal static AgentJournalSession? SelectActivitySession(IReadOnlyList<AgentJournalSession> sessions)
+	{
+		ArgumentNullException.ThrowIfNull(sessions);
+		var live = sessions
+			.Where(static candidate => candidate.IsLive && candidate.Mode == AgentJournalMode.Live)
+			.ToArray();
+		return live.FirstOrDefault(static candidate => candidate.Totals.Calls > 0) ?? live.FirstOrDefault();
 	}
 
 	private void ScheduleAgentJournalRefresh()
@@ -70,8 +87,7 @@ internal sealed partial class TerminalWorkspaceSession
 			var sessions = await _agentJournalStore.Value
 				.ListSessionsAsync(projectRoot, limit: 10, _sessionCts.Token)
 				.ConfigureAwait(false);
-			var session = sessions.FirstOrDefault(static candidate =>
-				candidate.IsLive && candidate.Mode == AgentJournalMode.Live);
+			var session = SelectActivitySession(sessions);
 			AgentJournalActivitySnapshot? activity = null;
 			if (session is not null)
 			{
@@ -104,8 +120,8 @@ internal sealed partial class TerminalWorkspaceSession
 			if (activity is not null && sessionChanged)
 			{
 				openingSequence = TerminalAgentJournalSnapshot.ResolveOpeningBaseline(
-					activity.Session.StartedUtc <= _agentJournalWorkspaceOpenedUtc,
-					activity.LatestCall?.Sequence ?? 0);
+					activity.AppendedCalls,
+					_agentJournalWorkspaceOpenedUtc);
 				previousSnapshot = null;
 			}
 			var snapshot = activity is null
@@ -215,19 +231,25 @@ internal sealed partial class TerminalWorkspaceSession
 		return _selectionProfilePersistence.FlushAsync().GetAwaiter().GetResult();
 	}
 
-	private static ProjectSelectionProfile CaptureLocalProfile(TerminalWorkspaceState state)
+	internal static ProjectSelectionProfile CaptureLocalProfile(TerminalWorkspaceState state)
 	{
 		var selection = state.BuildSelection();
 		var selectedIgnoreOptions = ProjectSelectionAdapter.ToIgnoreOptions(selection).ToArray();
 		var ignoreStates = Enum.GetValues<IgnoreOptionId>().ToDictionary(
 			static option => option,
 			selectedIgnoreOptions.Contains);
+		var selectedRoots = state.Plan.SelectedRoots.ToHashSet(ProjectTreePathIdentity.CanonicalComparer);
 
+		// Without complete root states a reopened local profile falls back to default root
+		// selection, which drops smart-ignore candidates such as node_modules shown right now.
 		return new ProjectSelectionProfile(
-			SelectedRootFolders: [],
+			SelectedRootFolders: state.Plan.SelectedRoots.ToArray(),
 			SelectedExtensions: state.Plan.SelectedExtensions.ToArray(),
 			SelectedIgnoreOptions: selectedIgnoreOptions,
-			RootFolderStates: null,
+			RootFolderStates: state.Plan.AvailableRoots.ToDictionary(
+				static root => root,
+				selectedRoots.Contains,
+				ProjectTreePathIdentity.CanonicalComparer),
 			ExtensionStates: new Dictionary<string, bool>(
 				state.ExtensionOptionStates,
 				StringComparer.OrdinalIgnoreCase),

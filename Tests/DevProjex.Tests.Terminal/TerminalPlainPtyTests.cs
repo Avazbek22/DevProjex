@@ -100,9 +100,13 @@ public sealed partial class TerminalPlainPtyTests
 			timeout: TimeSpan.FromSeconds(45),
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendAsync("E", TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenAsync(
+		var prompt = (await terminal.WaitForScreenAsync(
 			"Destination:",
-			cancellationToken: TestContext.Current.CancellationToken);
+			cancellationToken: TestContext.Current.CancellationToken)).Split('\n');
+		var destinationRow = Array.FindIndex(
+			prompt,
+			static line => line.Contains("Destination:", StringComparison.Ordinal));
+		Assert.Contains("Export context", prompt[destinationRow - 1], StringComparison.Ordinal);
 		await terminal.SendCtrlAAsync(TestContext.Current.CancellationToken);
 		await terminal.SendAsync(destination, TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);

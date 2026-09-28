@@ -1,5 +1,6 @@
 using DevProjex.Infrastructure.AgentJournal;
 using DevProjex.Infrastructure.LiveContext;
+using DevProjex.Infrastructure.ResourceStore;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -249,12 +250,50 @@ public sealed class TerminalAgentJournalPresentationTests
 	[Fact]
 	public void SessionOpeningBaselineDistinguishesAnExistingSessionFromANewSession()
 	{
+		var calls = new[] { CreateCall(6, "get_tree", []), CreateCall(7, "get_file", []) };
+
 		Assert.Equal(7, TerminalAgentJournalSnapshot.ResolveOpeningBaseline(
-			sessionExistedAtWorkspaceOpen: true,
-			latestSequence: 7));
+			calls,
+			workspaceOpenedUtc: calls[^1].Utc.AddSeconds(1)));
 		Assert.Equal(0, TerminalAgentJournalSnapshot.ResolveOpeningBaseline(
-			sessionExistedAtWorkspaceOpen: false,
-			latestSequence: 7));
+			calls,
+			workspaceOpenedUtc: calls[0].Utc.AddSeconds(-1)));
+	}
+
+	[Fact]
+	public void CallsMadeAfterTheProjectOpenedStayInTheTraceWhenActivityIsEnabledLater()
+	{
+		using var workspace = new TemporaryDirectory();
+		var session = CreateSession() with
+		{
+			Totals = CreateSession().Totals with { Calls = 3 },
+			Roots = [new AgentJournalRoot(workspace.Path, "project")]
+		};
+		var beforeOpen = CreateCall(1, "get_tree", ["src/Old.cs"]);
+		var afterOpen = new[]
+		{
+			CreateCall(2, "get_file", ["README.md"]),
+			CreateCall(3, "get_file", ["src/New.cs"])
+		};
+		var openedUtc = beforeOpen.Utc.AddMilliseconds(500);
+		var activity = new AgentJournalActivitySnapshot(
+			session,
+			afterOpen[^1],
+			[beforeOpen, .. afterOpen],
+			RequiresReset: false,
+			LastEventUtc: afterOpen[^1].Utc);
+
+		var snapshot = TerminalAgentJournalSnapshot.Create(
+			workspace.Path,
+			activity,
+			previous: null,
+			TerminalAgentJournalSnapshot.ResolveOpeningBaseline(activity.AppendedCalls, openedUtc));
+
+		Assert.Equal("get_file", snapshot.LatestCall?.Tool);
+		Assert.Equal(3, snapshot.LatestCall?.Sequence);
+		Assert.Contains(Path.Combine(workspace.Path, "README.md"), snapshot.DeliveredPathCalls.Keys);
+		Assert.Contains(Path.Combine(workspace.Path, "src", "New.cs"), snapshot.DeliveredPathCalls.Keys);
+		Assert.DoesNotContain(Path.Combine(workspace.Path, "src", "Old.cs"), snapshot.DeliveredPathCalls.Keys);
 	}
 
 	[Fact]
@@ -338,7 +377,59 @@ public sealed class TerminalAgentJournalPresentationTests
 		Assert.Contains("AgentJournal.Footer", keys);
 		Assert.Contains("Menu.View.AgentActivity", keys);
 		Assert.Contains("AgentActivity.Tree.ToolTip", keys);
-		Assert.Contains("AgentActivity.Status.Calls", keys);
+		Assert.Contains("AgentActivity.Status.Calls.Other", keys);
+		Assert.Contains("AgentJournal.Column.Session", keys);
+		Assert.Contains("AgentJournal.Column.Client", keys);
+	}
+
+	[Theory]
+	[InlineData(1, "get_file (1 вызов)")]
+	[InlineData(3, "get_file (3 вызова)")]
+	[InlineData(5, "get_file (5 вызовов)")]
+	[InlineData(21, "get_file (21 вызов)")]
+	public void ActivityIndicatorUsesTheLanguagePluralForm(long calls, string expectedSuffix)
+	{
+		using var workspace = new TemporaryDirectory();
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.Ru);
+		var session = CreateSession() with
+		{
+			Totals = CreateSession().Totals with { Calls = calls },
+			Roots = [new AgentJournalRoot(workspace.Path, "project")]
+		};
+		var call = CreateCall(1, "get_file", ["README.md"]);
+		var snapshot = TerminalAgentJournalSnapshot.Create(
+			workspace.Path,
+			new AgentJournalReceipt(session, session.Totals, [], [call]));
+
+		var indicator = TerminalAgentJournalPresentation.BuildActivityIndicator(
+			snapshot,
+			focusedTreePath: null,
+			compact: false,
+			(key, _) => localization[key],
+			AppLanguage.Ru);
+
+		Assert.Equal($"{localization["Menu.View.AgentActivity"]}: {expectedSuffix}", indicator);
+	}
+
+	[Fact]
+	public void JournalSessionLabelsFollowTheWorkspaceLanguage()
+	{
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.Ru);
+		string Localize(string key, string _) => localization[key];
+
+		var header = TerminalAgentJournalPresentation.BuildSessionHeader(Localize);
+		var details = TerminalAgentJournalPresentation.BuildCallDetails(CreateSession(), [], Localize);
+
+		Assert.StartsWith($"{localization["AgentJournal.Column.Session"]} | ", header, StringComparison.Ordinal);
+		Assert.Contains($"{localization["AgentJournal.Column.Session"]}: session-42", details, StringComparison.Ordinal);
+		Assert.Contains(
+			$"{localization["AgentJournal.Column.Client"]}: client | " +
+			$"{localization["AgentJournal.Column.Mode"]}: {localization["AgentJournal.Mode.Live"]} | " +
+			$"{localization["AgentJournal.Live"]}: {localization["Terminal.Value.Yes"]}",
+			details,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain("Session ", details, StringComparison.Ordinal);
+		Assert.DoesNotContain("Client ", details, StringComparison.Ordinal);
 	}
 
 	[Fact]

@@ -548,6 +548,10 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 			{
 				if (content.Session is null || !ContainsRoot(content.Session.Roots, requestedRoot))
 					continue;
+				// A session that also served other projects holds their history too; clearing
+				// one project must not delete another project's records.
+				if (content.Session.Roots.Count > 1)
+					continue;
 			}
 			try
 			{

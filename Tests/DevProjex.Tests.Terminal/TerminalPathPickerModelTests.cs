@@ -130,4 +130,62 @@ public sealed class TerminalPathPickerModelTests
 		Assert.True(selection.InvalidTypedPath);
 		Assert.Null(selection.Path);
 	}
+
+	[Fact]
+	public void SettingsPickerBrowsesATypedFolderInsteadOfReportingItMissing()
+	{
+		using var workspace = new TemporaryDirectory();
+		var child = workspace.CreateDirectory("child");
+		var model = new TerminalPathPickerModel(TerminalPathPickerMode.JsonFile, workspace.Path);
+
+		var selection = model.ResolveSelection(child + Path.DirectorySeparatorChar, selectedIndex: 0);
+
+		Assert.False(selection.InvalidTypedPath);
+		Assert.Null(selection.Path);
+		Assert.Equal(child, selection.DirectoryToBrowse);
+	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public void SettingsPickerOpensTheHighlightedEntryWhileThePathFieldShowsTheCurrentFolder(
+		bool trailingSeparator)
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.CreateDirectory("child");
+		var settings = workspace.WriteFile("settings.json", "{}");
+		var model = new TerminalPathPickerModel(TerminalPathPickerMode.JsonFile, workspace.Path);
+		var settingsIndex = IndexOf(model, settings);
+		var folderIndex = model.Entries
+			.Select((entry, index) => (entry, index))
+			.First(pair => pair.entry is { IsDirectory: true, IsParent: false })
+			.index;
+		var typed = trailingSeparator
+			? model.CurrentDirectory + Path.DirectorySeparatorChar
+			: model.CurrentDirectory;
+
+		var fileSelection = model.ResolveSelection(typed, settingsIndex);
+		var folderSelection = model.ResolveSelection(typed, folderIndex);
+
+		Assert.Equal(new TerminalPathPickerSelection(settings, InvalidTypedPath: false), fileSelection);
+		Assert.Equal(new TerminalPathPickerSelection(null, InvalidTypedPath: false), folderSelection);
+	}
+
+	[Fact]
+	public void FolderPickerStillSelectsATypedFolder()
+	{
+		using var workspace = new TemporaryDirectory();
+		var child = workspace.CreateDirectory("child");
+		var model = new TerminalPathPickerModel(TerminalPathPickerMode.Directory, workspace.Path);
+
+		var selection = model.ResolveSelection(child, selectedIndex: 0);
+
+		Assert.Equal(new TerminalPathPickerSelection(child, InvalidTypedPath: false), selection);
+	}
+
+	private static int IndexOf(TerminalPathPickerModel model, string path) =>
+		model.Entries
+			.Select((entry, index) => (entry, index))
+			.Single(pair => PathComparer.Default.Equals(pair.entry.Path, path))
+			.index;
 }

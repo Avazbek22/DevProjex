@@ -9,7 +9,8 @@ namespace DevProjex.Terminal.Execution;
 
 internal sealed class CacheCommandHandler(
 	TerminalCacheServices services,
-	ITerminalEnvironment environment)
+	ITerminalEnvironment environment,
+	TerminalOutputOptions? outputOptions = null)
 {
 	private static readonly JsonSerializerOptions JsonOptions = new()
 	{
@@ -273,11 +274,13 @@ internal sealed class CacheCommandHandler(
 			return CommandLineExitCodes.UsageError;
 		}
 
-		var safeUrl = TerminalTextEscaping.EscapeSingleLine(
-			RepositoryUrlUtility.ToSafeDisplay(repositoryUrl));
-		environment.Error.WriteLine(services.Localization.Format(
-			"Terminal.Cache.NotFound",
-			safeUrl));
+		new ErrorRenderer(environment, outputOptions ?? new TerminalOutputOptions(), services.Localization).Write(
+			new TerminalError(
+				"DPX-CLI-CACHE-NOT-FOUND",
+				services.Localization.Format(
+					"Terminal.Cache.NotFound",
+					RepositoryUrlUtility.ToSafeDisplay(repositoryUrl)),
+				ExitCode: CommandLineExitCodes.UsageError));
 		return CommandLineExitCodes.UsageError;
 	}
 

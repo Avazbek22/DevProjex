@@ -1094,7 +1094,7 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 		return new McpConnectionResult(
 			result.Replaced ? McpConnectionStatus.Updated : McpConnectionStatus.Connected,
 			message,
-			NextCommand: _localization[nextStepKey],
+			NextStep: _localization[nextStepKey],
 			TargetPath: result.TargetPath,
 			Replaced: result.Replaced);
 	}

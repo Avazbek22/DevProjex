@@ -11,7 +11,8 @@ public sealed class DevProjexRootCommand(string description) : RootCommand(descr
 		"--hide-private-data",
 		"--compress-code",
 		"--strip-comments",
-		"--strip-blank-lines"
+		"--strip-blank-lines",
+		"--unrestricted"
 	};
 
 	public new ParseResult Parse(

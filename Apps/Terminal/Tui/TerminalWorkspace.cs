@@ -27,6 +27,9 @@ public sealed record TerminalWorkspaceOptions(
 
 public sealed class TerminalWorkspace
 {
+	private const int SummaryColumnSpacing = 2;
+	private const int MinimumSummaryValueColumns = 8;
+
 	private readonly TerminalServices services;
 	private readonly ITerminalEnvironment environment;
 	private readonly ITerminalOperationObserver operationObserver;
@@ -70,6 +73,7 @@ public sealed class TerminalWorkspace
 
 		var mouseEnabled = ResolveMouseEnabled(options.MouseMode, environment);
 		using var mousePolicy = new TerminalGuiMousePolicy(mouseEnabled);
+		using var lineGlyphs = environment.SupportsUnicode ? null : new TerminalAsciiLineGlyphs();
 		// Terminal.Gui can leave the cursor hidden on either side of application
 		// disposal, so bracket its teardown with idempotent visibility restoration.
 		using var postApplicationCursorRestoration =
@@ -89,6 +93,10 @@ public sealed class TerminalWorkspace
 				: AppModel.FullScreen;
 			application.Init();
 			initialized = true;
+			// Terminal.Gui binds Esc to Quit for the whole application, so any screen that
+			// leaves Esc unhandled would end the TUI. Only the workspace's own confirmed exit
+			// paths may do that.
+			application.Keyboard.KeyBindings.Remove(global::Terminal.Gui.Input.Key.Esc);
 			application.Mouse.IsMouseDisabled = !mouseEnabled;
 			if (!mouseEnabled)
 			{
@@ -236,7 +244,7 @@ public sealed class TerminalWorkspace
 
 	internal string BuildExportSummaryText(
 		TerminalExportSummary summary,
-		int maximumValueColumns = int.MaxValue)
+		int maximumColumns = int.MaxValue)
 	{
 		var gitMode = summary.GitMode == GitFilteringMode.Diff
 			? GitScopeSelection.ToToken(summary.GitMode, summary.GitDiffRange)
@@ -244,23 +252,22 @@ public sealed class TerminalWorkspace
 		var exclusions = summary.Exclusions.Count == 0
 			? L("Terminal.Tui.NoneSelected")
 			: string.Join(", ", summary.Exclusions.Select(LocalizeExclusion));
-		string Fit(string value) => maximumValueColumns == int.MaxValue
-			? value
-			: TerminalParameterRow.FitLabel(value, maximumValueColumns, useUnicode: true);
-		var rows = new List<string[]>
+		var rows = new List<(string Label, string Value, Func<string, int, IReadOnlyList<string>> Fit)>
 		{
-			new[]
-			{
-				L("Terminal.Tui.Destination").TrimEnd(':'),
-				Fit(TerminalTextEscaping.EscapeSingleLine(summary.Destination))
-			},
-			new[] { L("Terminal.Analysis.Files"), summary.FileCount.ToString("N0", CultureInfo.CurrentCulture) },
-			new[] { L("Terminal.Analysis.Folders"), summary.FolderCount.ToString("N0", CultureInfo.CurrentCulture) },
-			new[] { L("Terminal.Analysis.Size"), FormatBytes(summary.Bytes) },
-			new[] { L("Terminal.Analysis.Tokens"), summary.EstimatedTokens.ToString("N0", CultureInfo.CurrentCulture) },
-			new[] { L("Terminal.Tui.Filters"), Fit($"{gitMode}; {exclusions}") },
-			new[] { L("Terminal.Tui.Diagnostics"), summary.DiagnosticCount.ToString("N0", CultureInfo.CurrentCulture) }
+			(L("Terminal.Tui.Destination").TrimEnd(':'), summary.Destination, FitSummaryPath),
+			(L("Terminal.Analysis.Files"), summary.FileCount.ToString("N0", CultureInfo.CurrentCulture), FitSummaryLine),
+			(L("Terminal.Analysis.Folders"), summary.FolderCount.ToString("N0", CultureInfo.CurrentCulture), FitSummaryLine),
+			(L("Terminal.Analysis.Size"), FormatBytes(summary.Bytes), FitSummaryLine),
+			(L("Terminal.Analysis.Tokens"), summary.EstimatedTokens.ToString("N0", CultureInfo.CurrentCulture), FitSummaryLine),
+			(L("Terminal.Tui.Filters"), $"{gitMode}; {exclusions}", FitSummaryLine),
+			(L("Terminal.Tui.Diagnostics"), summary.DiagnosticCount.ToString("N0", CultureInfo.CurrentCulture), FitSummaryLine)
 		};
+		if (summary.DestinationState == TerminalExportDestinationState.Blocked)
+		{
+			rows.Insert(
+				1,
+				(L("Terminal.Tui.DestinationState"), L("Terminal.Tui.Error.DestinationExists"), TerminalCellWidth.Wrap));
+		}
 		var redactionKey = (summary.SecretsRedacted, summary.PrivateDataRedacted) switch
 		{
 			(true, true) => "Terminal.Tui.Export.RedactionInline",
@@ -268,10 +275,48 @@ public sealed class TerminalWorkspace
 			(false, true) => "Terminal.Tui.Export.PrivateDataOnlyRedactionInline",
 			_ => null
 		};
+		if (summary.TokenBudget is { } tokenBudget)
+		{
+			rows.Add((
+				L("Terminal.Tui.Export.TokenBudget"),
+				TerminalContextBudget.FormatReport(tokenBudget, services.Localization),
+				TerminalCellWidth.Wrap));
+		}
+		if (summary.Rank is not null)
+			rows.Add((L("Terminal.Tui.Export.Ranking"), L("Terminal.Option.Rank"), TerminalCellWidth.Wrap));
 		if (redactionKey is not null)
-			rows.Add([L("Terminal.Tui.Redaction"), L(redactionKey)]);
-		return string.Join(Environment.NewLine, TerminalColumnLayout.Format(rows));
+		{
+			rows.Add((L("Terminal.Tui.Redaction"), L(redactionKey), TerminalCellWidth.Wrap));
+			if (summary.Kind != TerminalExportKind.Context)
+			{
+				rows.Add((
+					string.Empty,
+					L("Terminal.DryRun.ProjectCopy.RedactionWarning"),
+					TerminalCellWidth.Wrap));
+			}
+		}
+
+		// Values get the width left after the widest localized label, so no row wraps back
+		// under the label column; messages continue on their own aligned lines instead.
+		var labelColumns = rows.Max(static row => TerminalCellWidth.Measure(row.Label));
+		var valueColumns = Math.Max(
+			MinimumSummaryValueColumns,
+			maximumColumns - labelColumns - SummaryColumnSpacing);
+		var table = new List<string[]>();
+		foreach (var (label, value, fit) in rows)
+		{
+			var lines = fit(value, valueColumns);
+			table.Add([label, lines[0]]);
+			table.AddRange(lines.Skip(1).Select(static line => new[] { string.Empty, line }));
+		}
+		return string.Join(Environment.NewLine, TerminalColumnLayout.Format(table, SummaryColumnSpacing));
 	}
+
+	private static IReadOnlyList<string> FitSummaryPath(string value, int columns) =>
+		[TerminalWorkspaceSession.FitPathToWidth(value, columns)];
+
+	private static IReadOnlyList<string> FitSummaryLine(string value, int columns) =>
+		[TerminalParameterRow.FitLabel(value, columns, useUnicode: true)];
 
 	internal string LocalizeView(ProjectContextView view) =>
 		L(ProjectPresentationCatalog.Get(view).LabelKey);

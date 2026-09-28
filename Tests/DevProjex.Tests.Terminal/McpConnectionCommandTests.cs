@@ -99,6 +99,50 @@ public sealed class McpConnectionCommandTests
 	}
 
 	[Fact]
+	public void TuiConnectionOutput_ShowsAnIdeNextStepAsWritten()
+	{
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.Ru);
+		var nextStep = localization["Mcp.Connect.Cursor.NextStep"];
+		var output = TerminalWorkspaceSession.BuildMcpConnectionOutput(
+			new McpConnectionResult(
+				McpConnectionStatus.Connected,
+				"Cursor connected.",
+				NextStep: nextStep),
+			localization);
+
+		Assert.Contains(Environment.NewLine + nextStep, output, StringComparison.Ordinal);
+		Assert.DoesNotContain(
+			localization.Format("Mcp.Connect.RunInProject", nextStep),
+			output,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task Connect_IdeClientPrintsItsNextStepAsWritten()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En);
+		var nextStep = localization["Mcp.Connect.VsCode.NextStep"];
+		var connectionService = new StubMcpConnectionService
+		{
+			Result = new McpConnectionResult(
+				McpConnectionStatus.Connected,
+				"VS Code: configuration was written to .vscode/mcp.json.",
+				NextStep: nextStep)
+		};
+
+		var run = await RunAsync(
+			workspace,
+			connectionService,
+			["mcp", "connect", project, "--client", "vscode", "--language", "en"]);
+
+		Assert.Equal(CommandLineExitCodes.Success, run.ExitCode);
+		Assert.Contains(nextStep, run.Environment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("in the project folder", run.Environment.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task CursorConnectionRequiresReplaceFlagBeforeDiscardingAdditionalFields()
 	{
 		using var workspace = new TemporaryDirectory();

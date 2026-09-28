@@ -1,3 +1,5 @@
+using DevProjex.Application.Ranking;
+
 namespace DevProjex.Terminal.Tui;
 
 public enum TerminalExportKind
@@ -10,7 +12,11 @@ public enum TerminalExportKind
 public enum TerminalExportDestinationState
 {
 	Ready = 0,
-	Conflict = 1
+	// The destination exists and Overwrite may replace it.
+	Conflict = 1,
+	// The destination exists and cannot be replaced: a folder export target, or a
+	// directory where a file is expected.
+	Blocked = 2
 }
 
 public sealed record TerminalExportSummary(
@@ -29,7 +35,31 @@ public sealed record TerminalExportSummary(
 	int DiagnosticCount,
 	bool SecretsRedacted = false,
 	bool PrivateDataRedacted = false,
-	string? GitDiffRange = null);
+	string? GitDiffRange = null,
+	ProjectContextTokenBudgetReport? TokenBudget = null,
+	ProjectContextRank? Rank = null);
+
+// The direct CLI export options --max-tokens and --rank, applied to one copy or context export.
+public sealed record TerminalContextBudget(
+	long? MaximumEstimatedTokens,
+	ProjectContextRank? Rank)
+{
+	internal static TerminalContextBudget? From(TerminalWorkspaceCommand command) =>
+		command.MaximumEstimatedTokens is null && command.Rank is null
+			? null
+			: new TerminalContextBudget(command.MaximumEstimatedTokens, command.Rank);
+
+	internal static string FormatReport(
+		ProjectContextTokenBudgetReport report,
+		LocalizationService localization) =>
+		localization.Format(
+			"Terminal.TokenBudget.Summary",
+			report.MaximumEstimatedTokens,
+			report.IncludedFileCount,
+			report.IncludedEstimatedTokens,
+			report.SkippedFileCount,
+			report.SkippedEstimatedTokens);
+}
 
 internal readonly record struct TerminalExportCompletion(
 	string DestinationPath,
@@ -45,14 +75,33 @@ internal enum TerminalExportDecision
 
 internal sealed class TerminalExportDestinationHistory
 {
-	private readonly Dictionary<TerminalExportKind, string> _destinations = [];
+	private static readonly string[] ContextExtensions = [".md", ".txt", ".json", ".xml"];
 
-	public string Resolve(TerminalExportKind kind, string fallback) =>
-		_destinations.GetValueOrDefault(kind) ?? fallback;
+	private readonly Dictionary<string, Dictionary<TerminalExportKind, string>> _destinations =
+		new(PathComparer.Default);
 
-	public void Remember(TerminalExportKind kind, string destination)
+	public string Resolve(string sourceRoot, TerminalExportKind kind, string fallback) =>
+		_destinations.GetValueOrDefault(sourceRoot)?.GetValueOrDefault(kind) ?? fallback;
+
+	// A remembered context destination follows the selected format, so a JSON export is
+	// never proposed under the name of an earlier text export.
+	public string ResolveContext(string sourceRoot, string extension, string fallback)
 	{
-		if (!string.IsNullOrWhiteSpace(destination))
-			_destinations[kind] = destination;
+		var destination = Resolve(sourceRoot, TerminalExportKind.Context, fallback);
+		return ContextExtensions.Contains(Path.GetExtension(destination), StringComparer.OrdinalIgnoreCase)
+			? Path.ChangeExtension(destination, extension)
+			: destination;
+	}
+
+	public void Remember(string sourceRoot, TerminalExportKind kind, string destination)
+	{
+		if (string.IsNullOrWhiteSpace(destination))
+			return;
+		if (!_destinations.TryGetValue(sourceRoot, out var destinations))
+		{
+			destinations = [];
+			_destinations[sourceRoot] = destinations;
+		}
+		destinations[kind] = destination;
 	}
 }

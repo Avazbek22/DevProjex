@@ -21,4 +21,4 @@ v [ ] <PROJECT>
 
 
  Files 2 | Folders 2 | 54 B | ~<TOKENS> tokens | Warnings 0 | Errors 0
- Space Toggle  Shift+h/l All  Ctrl+A/U Select  : Commands
+ Space Toggle  Shift+Left/Right All  Ctrl+A/U Select  : Commands

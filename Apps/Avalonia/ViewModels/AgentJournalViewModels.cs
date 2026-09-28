@@ -279,31 +279,9 @@ internal static class AgentActivityPresentation
         string key,
         long count)
     {
-        var plural = ResolvePlural(localization.CurrentLanguage, count);
+        var plural = LocalizationPluralRules.ResolveCategory(localization.CurrentLanguage, count);
         return localization.Format(
             $"{key}.{plural}",
             AgentJournalPresentation.FormatNumber(count, localization.CurrentLanguage));
-    }
-
-    private static string ResolvePlural(AppLanguage language, long count)
-    {
-        var absolute = count == long.MinValue ? long.MaxValue : Math.Abs(count);
-        var modulo10 = absolute % 10;
-        var modulo100 = absolute % 100;
-        return language switch
-        {
-            AppLanguage.Ru or AppLanguage.Uk => modulo10 == 1 && modulo100 != 11
-                ? "One"
-                : modulo10 is >= 2 and <= 4 && modulo100 is not (>= 12 and <= 14)
-                    ? "Few"
-                    : "Many",
-            AppLanguage.Pl => absolute == 1
-                ? "One"
-                : modulo10 is >= 2 and <= 4 && modulo100 is not (>= 12 and <= 14)
-                    ? "Few"
-                    : "Many",
-            AppLanguage.Fr => absolute is 0 or 1 ? "One" : "Other",
-            _ => absolute == 1 ? "One" : "Other"
-        };
     }
 }

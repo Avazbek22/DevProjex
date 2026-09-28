@@ -2,8 +2,10 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using DevProjex.Kernel.Models;
 using DevProjex.Terminal.Execution;
+using DevProjex.Terminal.Rendering;
 using Terminal.Gui.App;
 using Terminal.Gui.Drawing;
+using Terminal.Gui.Text;
 using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
 
@@ -14,6 +16,10 @@ namespace DevProjex.Terminal.Tui;
 internal sealed partial class TerminalWorkspaceSession
 {
 	private string AgentJournalTitle => AgentJournalText("AgentJournal.Title", "Agent journal");
+
+	private string AgentJournalSessionNotFound => AgentJournalText(
+		"AgentJournal.SessionNotFound",
+		"No matching journal session was found.");
 
 	private TerminalWorkspaceCommandExecutionResult ExecuteAgentJournalCommand(
 		TerminalWorkspaceCommand command)
@@ -63,16 +69,33 @@ internal sealed partial class TerminalWorkspaceSession
 						operationCts.Token).ConfigureAwait(false);
 					break;
 				case TerminalWorkspaceMcpAction.ClearLog:
+					// Sessions that also served other projects are kept by the store.
+					var sharedSessions = (await _agentJournalStore.Value
+						.ListSessionsAsync(projectRoot, int.MaxValue, operationCts.Token)
+						.ConfigureAwait(false))
+						.Count(static session => !session.IsLive && session.Roots.Count > 1);
 					var removed = await _agentJournalStore.Value
 						.ClearAsync(projectRoot, operationCts.Token)
 						.ConfigureAwait(false);
+					// Clearing keeps active sessions, so the live activity projection stays valid.
 					await InvokeAsync(() =>
 					{
-						_agentJournalSnapshot = null;
-						_state?.SetAgentActivity(_agentActivityEnabled, null);
-						ShowTransientStatus(
-							$"Completed journal sessions cleared ({removed:N0}); active sessions preserved.",
-							TerminalWorkspaceTheme.Success);
+						var message = string.Format(
+							CultureInfo.CurrentCulture,
+							AgentJournalText(
+								"AgentJournal.Clear.Completed",
+								"Completed journal sessions cleared ({0}); active sessions preserved."),
+							removed);
+						if (sharedSessions > 0)
+						{
+							message += " " + string.Format(
+								CultureInfo.CurrentCulture,
+								AgentJournalText(
+									"AgentJournal.Clear.SharedKept",
+									"Sessions shared with other projects were kept ({0})."),
+								sharedSessions);
+						}
+						ShowTransientStatus(message, TerminalWorkspaceTheme.Success);
 						return true;
 					}).ConfigureAwait(false);
 					break;
@@ -83,21 +106,10 @@ internal sealed partial class TerminalWorkspaceSession
 		catch (OperationCanceledException) when (operationCts.IsCancellationRequested)
 		{
 		}
-		catch (OutputDestinationConflictException)
+		catch (Exception exception)
 		{
-			await ShowAgentJournalErrorAsync(
-				"DPX-TUI-JOURNAL-DESTINATION-EXISTS",
-				"The receipt destination already exists.").ConfigureAwait(false);
-		}
-		catch (Exception exception) when (exception is
-				   IOException or
-				   UnauthorizedAccessException or
-				   ArgumentException or
-				   NotSupportedException)
-		{
-			await ShowAgentJournalErrorAsync(
-				"DPX-TUI-JOURNAL-UNAVAILABLE",
-				"The agent journal is unavailable.").ConfigureAwait(false);
+			var error = MapAgentJournalFailure(exception, _services.Localization);
+			await ShowAgentJournalErrorAsync(error.Code, error.Message).ConfigureAwait(false);
 		}
 		finally
 		{
@@ -105,19 +117,41 @@ internal sealed partial class TerminalWorkspaceSession
 		}
 	}
 
+	// The command runs as a tracked background task, so an exception left unhandled here
+	// would be swallowed without any visible result.
+	internal static TerminalError MapAgentJournalFailure(
+		Exception exception,
+		LocalizationService localization) =>
+		exception switch
+		{
+			OutputDestinationConflictException => new TerminalError(
+				"DPX-TUI-JOURNAL-DESTINATION-EXISTS",
+				localization["Terminal.Tui.Error.DestinationExists"]),
+			ProjectCopyExportException copyException =>
+				ProjectCopyTerminalErrorMapper.Map(copyException, localization),
+			IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException =>
+				new TerminalError(
+					"DPX-TUI-JOURNAL-UNAVAILABLE",
+					localization["AgentJournal.Unavailable"]),
+			_ => new TerminalError(
+				"DPX-TUI-OPERATION-FAILED",
+				localization["Terminal.Tui.Error.OperationFailed"])
+		};
+
 	private async Task ShowAgentJournalAsync(
 		string projectRoot,
 		string? selector,
 		CancellationToken cancellationToken)
 	{
-		var sessions = await _agentJournalStore.Value
+		var projectSessions = await _agentJournalStore.Value
 			.ListSessionsAsync(projectRoot, cancellationToken: cancellationToken)
 			.ConfigureAwait(false);
-		if (!string.IsNullOrWhiteSpace(selector) && selector != "last")
+		if (SelectAgentJournalSessions(projectSessions, selector) is not { } sessions)
 		{
-			sessions = sessions
-				.Where(session => string.Equals(session.Id, selector, StringComparison.Ordinal))
-				.ToArray();
+			await ShowAgentJournalErrorAsync(
+				"DPX-TUI-JOURNAL-NOT-FOUND",
+				AgentJournalSessionNotFound).ConfigureAwait(false);
+			return;
 		}
 
 		var receipts = new Dictionary<string, AgentJournalReceipt>(StringComparer.Ordinal);
@@ -137,6 +171,20 @@ internal sealed partial class TerminalWorkspaceSession
 		}).ConfigureAwait(false);
 	}
 
+	// Returns null when an explicit session id matches nothing in a non-empty journal, so an
+	// id typo is not reported as an empty journal.
+	internal static IReadOnlyList<AgentJournalSession>? SelectAgentJournalSessions(
+		IReadOnlyList<AgentJournalSession> sessions,
+		string? selector)
+	{
+		if (string.IsNullOrWhiteSpace(selector) || selector == "last" || sessions.Count == 0)
+			return sessions;
+		var selected = sessions
+			.Where(session => string.Equals(session.Id, selector, StringComparison.Ordinal))
+			.ToArray();
+		return selected.Length == 0 ? null : selected;
+	}
+
 	private async Task ExportAgentJournalAsync(
 		string projectRoot,
 		TerminalWorkspaceCommand command,
@@ -152,7 +200,7 @@ internal sealed partial class TerminalWorkspaceSession
 		{
 			await ShowAgentJournalErrorAsync(
 				"DPX-TUI-JOURNAL-NOT-FOUND",
-				"No matching journal session was found.").ConfigureAwait(false);
+				AgentJournalSessionNotFound).ConfigureAwait(false);
 			return;
 		}
 
@@ -163,7 +211,7 @@ internal sealed partial class TerminalWorkspaceSession
 		{
 			await ShowAgentJournalErrorAsync(
 				"DPX-TUI-JOURNAL-NOT-FOUND",
-				"No matching journal session was found.").ConfigureAwait(false);
+				AgentJournalSessionNotFound).ConfigureAwait(false);
 			return;
 		}
 		var content = command.Format == ProjectContextDocumentFormat.Json
@@ -184,8 +232,9 @@ internal sealed partial class TerminalWorkspaceSession
 
 		await InvokeAsync(() =>
 		{
+			var completed = L("Terminal.Tui.ExportCompletedStatus");
 			ShowTransientStatus(
-				$"Agent journal exported: {FitPathToWidth(destination, Math.Max(12, _terminalWidth - 24))}",
+				FormatStatusPath(completed, destination, _terminalWidth - 2),
 				TerminalWorkspaceTheme.Success);
 			return true;
 		}).ConfigureAwait(false);
@@ -276,6 +325,8 @@ internal sealed partial class TerminalWorkspaceSession
 		}
 
 		list.ValueChanged += (_, _) => UpdateDetails();
+		// Choosing a session only shows its calls; Enter or a double-click must not close the journal.
+		list.Accepting += static (_, args) => args.Handled = true;
 		dialog.Add(sessionHeader, list, details);
 		dialog.AddButton(CreateDialogButton(L("Terminal.Tui.Close")));
 		UpdateDetails();

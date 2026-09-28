@@ -53,6 +53,22 @@ public sealed class TerminalWorkspaceStateTests
 	}
 
 	[Fact]
+	public void EmptyEffectiveTreeShowsZeroTokensAlthoughThePreviewHasTheRootLine()
+	{
+		var root = CreateSyntheticRoot("empty-effective-tree-tokens");
+		var tree = new TreeNodeDescriptor("project", root, true, false, "folder", []);
+		using var state = new TerminalWorkspaceState(CreatePlan(tree, [], [root]));
+		const string payload = "project";
+		state.TrySetPreviewDocument(
+			new InMemoryPreviewTextDocument(payload),
+			ExportOutputMetricsCalculator.FromText(payload),
+			state.Revision);
+
+		Assert.True(state.PreviewOutputMetrics.Tokens > 0);
+		Assert.Equal(0, TerminalWorkspaceSession.ResolveDisplayedTokenCount(state));
+	}
+
+	[Fact]
 	public void TreePreviewEscapesControlCharactersInDisplayNames()
 	{
 		var root = CreateSyntheticRoot("unsafe-tree-preview");
@@ -243,6 +259,18 @@ public sealed class TerminalWorkspaceStateTests
 	}
 
 	[Fact]
+	public void CommandSelectionAcceptsADotPrefixedPathForAFolderNamedLikeAKeyword()
+	{
+		using var state = new TerminalWorkspaceState(CreatePlan());
+
+		var result = state.SetSelection(["./src"], selected: true);
+
+		Assert.Equal(4, result.ChangedNodes);
+		Assert.Equal(0, result.MissingSelectors);
+		Assert.Equal(["src"], state.BuildSelectedRelativePaths());
+	}
+
+	[Fact]
 	public void CommandSelectionUsesSharedProjectRelativeGlobSyntax()
 	{
 		using var state = new TerminalWorkspaceState(CreatePlan());
@@ -268,6 +296,83 @@ public sealed class TerminalWorkspaceStateTests
 		Assert.True(result.SelectionChanged);
 		Assert.Equal(revision + 1, state.Revision);
 		Assert.Null(state.BuildSelection().SelectedPaths);
+	}
+
+	[Fact]
+	public void TargetedCommandSelectionWithoutChangedNodesKeepsAnExplicitlyEmptySelection()
+	{
+		using var state = new TerminalWorkspaceState(CreatePlan());
+		state.RestoreSelectedRelativePaths([]);
+		var revision = state.Revision;
+
+		var result = state.SetSelection(["src"], selected: false);
+
+		Assert.Equal(0, result.ChangedNodes);
+		Assert.False(result.SelectionChanged);
+		Assert.Equal(revision, state.Revision);
+		Assert.Empty(state.BuildSelection().SelectedPaths!);
+		Assert.True(state.IsEffectiveRootUnchecked);
+		Assert.Equal(0, state.SelectedFileCount);
+	}
+
+	[Fact]
+	public void CommandSelectionAndRevealAcceptAnotherCaseOnlyOnWindows()
+	{
+		using var state = new TerminalWorkspaceState(CreatePlan());
+		state.CollapseAll();
+
+		var result = state.SetSelection(["SRC/A.cs"], selected: true);
+		var revealed = state.Reveal("Src/B.CS");
+
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Equal(0, result.MissingSelectors);
+			Assert.Equal(["src/a.cs"], state.BuildSelectedRelativePaths());
+			Assert.Equal("b.cs", state.VisibleRows[revealed].Node.DisplayName);
+		}
+		else
+		{
+			Assert.Equal(1, result.MissingSelectors);
+			Assert.Empty(state.BuildSelectedRelativePaths());
+			Assert.Equal(-1, revealed);
+		}
+	}
+
+	[Fact]
+	public void CommandSelectionPrefersTheExactCaseAndRejectsAnAmbiguousOne()
+	{
+		var root = CreateSyntheticRoot("case-distinct-selection");
+		var lower = Node(root, "src/x.cs", isDirectory: false);
+		var upper = Node(root, "src/X.cs", isDirectory: false);
+		var src = Node(root, "src", isDirectory: true, lower, upper);
+		var tree = new TreeNodeDescriptor("project", root, true, false, "folder", [src]);
+		using var state = new TerminalWorkspaceState(
+			CreatePlan(tree, [lower.FullPath, upper.FullPath], [root, src.FullPath]));
+
+		var exact = state.SetSelection(["src/X.cs"], selected: true);
+		var ambiguous = state.SetSelection(["SRC/X.CS"], selected: true);
+
+		Assert.Equal(0, exact.MissingSelectors);
+		Assert.Equal(1, ambiguous.MissingSelectors);
+		Assert.Equal(["src/X.cs"], state.BuildSelectedRelativePaths());
+	}
+
+	[Fact]
+	public void PlanReplacementPreviewStaysProvisionalUntilARenderedDocumentArrives()
+	{
+		var plan = CreatePlan();
+		using var state = new TerminalWorkspaceState(plan);
+		Assert.False(state.IsPreviewProvisional);
+
+		state.ReplacePlan(plan);
+
+		Assert.True(state.IsPreviewProvisional);
+		const string rendered = "rendered";
+		Assert.True(state.TrySetPreviewDocument(
+			new InMemoryPreviewTextDocument(rendered),
+			ExportOutputMetricsCalculator.FromText(rendered),
+			state.Revision));
+		Assert.False(state.IsPreviewProvisional);
 	}
 
 	[Fact]
@@ -712,6 +817,50 @@ public sealed class TerminalWorkspaceStateTests
 		state.ExpandAll();
 		Assert.Equal(5, state.VisibleRows.Count);
 		Assert.Contains("src", state.BuildExpandedRelativePaths());
+	}
+
+	[Fact]
+	public void FilteredTreeFoldsItsOwnFoldersWithoutChangingTheUnfilteredLayout()
+	{
+		using var state = new TerminalWorkspaceState(CreatePlan());
+		var unfiltered = state.BuildExpandedRelativePaths();
+		state.ApplyTreeFilter("a.cs");
+		Assert.True(state.VisibleRows[FindRow(state, "src")].IsExpanded);
+
+		state.Collapse(FindRow(state, "src"));
+
+		Assert.False(state.VisibleRows[FindRow(state, "src")].IsExpanded);
+		Assert.DoesNotContain(state.VisibleRows, row => row.Node.DisplayName == "a.cs");
+
+		state.ToggleExpansion(FindRow(state, "src"));
+		Assert.Contains(state.VisibleRows, row => row.Node.DisplayName == "a.cs");
+		state.CollapseAll();
+		Assert.Single(state.VisibleRows);
+		state.ExpandAll();
+		Assert.Contains(state.VisibleRows, row => row.Node.DisplayName == "a.cs");
+
+		state.ApplyTreeFilter(null);
+		Assert.Equal(unfiltered, state.BuildExpandedRelativePaths());
+	}
+
+	[Fact]
+	public void RevealAcceptsTrailingSeparatorsAndKnowsPathsHiddenByTheFilter()
+	{
+		using var state = new TerminalWorkspaceState(CreatePlan());
+
+		Assert.Equal("src", state.VisibleRows[state.Reveal("src/")].Node.DisplayName);
+		Assert.Equal(
+			"src",
+			state.VisibleRows[state.Reveal("src" + System.IO.Path.DirectorySeparatorChar)].Node.DisplayName);
+
+		state.ApplyTreeFilter("a.cs");
+		Assert.Equal(-1, state.Reveal("empty"));
+		Assert.True(state.TryResolveTreePath("empty", out _));
+		Assert.False(state.TryResolveTreePath("missing", out _));
+
+		state.Collapse(FindRow(state, "src"));
+		var revealed = state.Reveal("src/a.cs");
+		Assert.Equal("a.cs", state.VisibleRows[revealed].Node.DisplayName);
 	}
 
 	[Fact]

@@ -85,7 +85,7 @@ public sealed partial class McpServerProcessTests
 				$":mcp log export \"{exportPath}\" markdown last\r",
 				TestContext.Current.CancellationToken);
 			await terminal.WaitForScreenAsync(
-				"Agent journal exported",
+				"Export completed",
 				timeout: TimeSpan.FromSeconds(30),
 				cancellationToken: TestContext.Current.CancellationToken);
 

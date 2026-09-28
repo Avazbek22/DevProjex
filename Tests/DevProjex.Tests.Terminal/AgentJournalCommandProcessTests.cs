@@ -63,7 +63,7 @@ public sealed class AgentJournalCommandProcessTests
 		var empty = Run(dataRoot, "mcp", "log", project);
 
 		Assert.Equal(CommandLineExitCodes.UsageError, refused.ExitCode);
-		Assert.Contains("DPX-CLI-INVALID-SYNTAX", refused.StandardError, StringComparison.Ordinal);
+		Assert.Contains("error[DPX-CLI-INVALID-VALUE]: --clear requires --yes.", refused.StandardError, StringComparison.Ordinal);
 		Assert.Equal(CommandLineExitCodes.Success, cleared.ExitCode);
 		Assert.Contains("Cleared 1 completed agent journal session", cleared.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("active sessions were preserved", cleared.StandardOutput, StringComparison.Ordinal);
@@ -137,6 +137,112 @@ public sealed class AgentJournalCommandProcessTests
 		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
 		Assert.Contains("≥0:07", result.StandardOutput, StringComparison.Ordinal);
 		Assert.DoesNotContain("running", result.StandardOutput, StringComparison.OrdinalIgnoreCase);
+	}
+
+	[Fact]
+	public async Task RealCliOutputFilePrintsItsAbsolutePathAndIsNeverReplaced()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var dataRoot = workspace.CreateDirectory("data");
+		await SeedAsync(dataRoot, project);
+		var destination = Path.Combine(workspace.Path, "journal.json");
+
+		var written = Run(dataRoot, "mcp", "log", project, "-f", "json", "-o", destination);
+		var refused = Run(dataRoot, "mcp", "log", project, "-f", "json", "-o", destination);
+
+		Assert.Equal(CommandLineExitCodes.Success, written.ExitCode);
+		Assert.Equal(Path.GetFullPath(destination), written.StandardOutput.Trim());
+		Assert.Empty(written.StandardError);
+		using (var document = JsonDocument.Parse(File.ReadAllText(destination)))
+			Assert.Single(document.RootElement.GetProperty("sessions").EnumerateArray());
+		Assert.Equal(CommandLineExitCodes.DestinationConflict, refused.ExitCode);
+		Assert.Empty(refused.StandardOutput);
+		Assert.Contains("DPX-CLI-OUTPUT-EXISTS", refused.StandardError, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RealCliRedirectedTablesUseTheHeaderlessShape()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var dataRoot = workspace.CreateDirectory("data");
+		await SeedAsync(dataRoot, project);
+
+		var sessions = Run(dataRoot, "mcp", "log", project);
+		var calls = Run(dataRoot, "mcp", "log", project, "--last");
+
+		Assert.Equal(CommandLineExitCodes.Success, sessions.ExitCode);
+		Assert.Equal(CommandLineExitCodes.Success, calls.ExitCode);
+		var sessionLines = sessions.StandardOutput.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
+		var callLines = calls.StandardOutput.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
+		Assert.StartsWith(AgentJournalStore.CreateSessionId(new DateTimeOffset(2026, 9, 20, 1, 2, 3, TimeSpan.Zero), 42), Assert.Single(sessionLines), StringComparison.Ordinal);
+		Assert.Contains("get_file", Assert.Single(callLines), StringComparison.Ordinal);
+		Assert.DoesNotContain("Tool", calls.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task InteractiveTablesShowLocalizedHeaders()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var dataRoot = workspace.CreateDirectory("data");
+		await SeedAsync(dataRoot, project);
+		var environment = new TestTerminalEnvironment { IsOutputInteractive = true, Width = 240 };
+		var localization = new LocalizationService(
+			new DevProjex.Infrastructure.ResourceStore.JsonLocalizationCatalog(),
+			AppLanguage.Ru);
+
+		var exitCode = await new TerminalApplication(environment, new TerminalServiceFactory(() => dataRoot))
+			.RunAsync(["mcp", "log", project, "--language", "ru", "--plain"], TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		var lines = environment.StandardOutput.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
+		Assert.Equal(2, lines.Length);
+		Assert.StartsWith(localization["AgentJournal.Column.Session"], lines[0], StringComparison.Ordinal);
+		Assert.Contains(localization["AgentJournal.Column.Calls"], lines[0], StringComparison.Ordinal);
+		Assert.EndsWith(localization["Terminal.Value.No"], lines[1].TrimEnd(), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task YesWithoutClearIsRejectedBeforeTouchingTheJournal()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var dataRoot = workspace.CreateDirectory("data");
+		await SeedAsync(dataRoot, project);
+
+		var refused = Run(dataRoot, "mcp", "log", project, "--yes");
+
+		Assert.Equal(CommandLineExitCodes.UsageError, refused.ExitCode);
+		Assert.Empty(refused.StandardOutput);
+		Assert.Contains("error[DPX-CLI-INVALID-VALUE]: --yes requires --clear.", refused.StandardError, StringComparison.Ordinal);
+		using var reader = new AgentJournalStore(() => dataRoot, activeSessionProvider: static () => []);
+		Assert.Single(await reader.ListSessionsAsync(project, cancellationToken: TestContext.Current.CancellationToken));
+	}
+
+	[Fact]
+	public async Task JournalMessagesFollowTheSelectedLanguage()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var dataRoot = workspace.CreateDirectory("data");
+		var emptyEnvironment = new TestTerminalEnvironment();
+		var missingEnvironment = new TestTerminalEnvironment();
+		var localization = new LocalizationService(
+			new DevProjex.Infrastructure.ResourceStore.JsonLocalizationCatalog(),
+			AppLanguage.Ru);
+
+		var emptyExitCode = await new TerminalApplication(emptyEnvironment, new TerminalServiceFactory(() => dataRoot))
+			.RunAsync(["mcp", "log", project, "--language", "ru"], TestContext.Current.CancellationToken);
+		var missingExitCode = await new TerminalApplication(missingEnvironment, new TerminalServiceFactory(() => dataRoot))
+			.RunAsync(["mcp", "log", project, "--last", "--language", "ru"], TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, emptyExitCode);
+		Assert.Equal(localization["Terminal.McpLog.Empty"] + Environment.NewLine, emptyEnvironment.StandardOutput);
+		Assert.Equal(CommandLineExitCodes.RuntimeError, missingExitCode);
+		Assert.Contains("DPX-CLI-JOURNAL-NOT-FOUND", missingEnvironment.StandardError, StringComparison.Ordinal);
+		Assert.Contains(localization["AgentJournal.SessionNotFound"], missingEnvironment.StandardError, StringComparison.Ordinal);
 	}
 
 	private static async Task SeedAsync(string dataRoot, string project)

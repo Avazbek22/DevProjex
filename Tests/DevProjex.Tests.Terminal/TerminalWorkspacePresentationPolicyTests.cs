@@ -2,6 +2,7 @@ using System.Drawing;
 using DevProjex.Application.Preview;
 using DevProjex.Application.Secrets;
 using Terminal.Gui.Drawing;
+using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
 
@@ -46,7 +47,7 @@ public sealed class TerminalWorkspacePresentationPolicyTests
 	{
 		var value = TerminalPlainText.Normalize("↑↓ ←/→ Action · Value… — ready");
 
-		Assert.Equal("j/k h/l Action | Value... - ready", value);
+		Assert.Equal("Up/Down Left/Right Action | Value... - ready", value);
 		Assert.DoesNotContain(value, static character =>
 			"↑↓←→·…—".Contains(character));
 	}
@@ -63,6 +64,49 @@ public sealed class TerminalWorkspacePresentationPolicyTests
 		Assert.True(button.NoDecorations);
 		Assert.True(button.NoPadding);
 		Assert.Equal(ShadowStyles.None, button.ShadowStyle);
+	}
+
+	[Theory]
+	[InlineData("Cancel", "Dry run", "Export", false, false)]
+	[InlineData("Отмена", "Проверить без записи", "Экспортировать", true, false)]
+	[InlineData("Bekor qilish", "Yozmasdan tekshirish", "Eksport qilish", true, true)]
+	public void OverlayButtonRowSheddingDecorationsKeepsEveryButtonInsideANarrowDialog(
+		string cancel,
+		string dryRun,
+		string export,
+		bool expectedCompact,
+		bool expectedUndecorated)
+	{
+		const int availableColumns = 54;
+		var buttons = new[]
+		{
+			new Button { Text = cancel },
+			new Button { Text = dryRun },
+			new Button { Text = export, IsDefault = true }
+		};
+
+		TerminalWorkspacePresentationPolicy.FitOverlayButtonRow(buttons, availableColumns);
+
+		Assert.True(TerminalWorkspacePresentationPolicy.MeasureButtonRow(buttons) <= availableColumns);
+		Assert.All(buttons, button =>
+		{
+			Assert.Equal(expectedCompact, button.NoPadding);
+			Assert.Equal(expectedCompact, button.ShadowStyle == ShadowStyles.None);
+			Assert.Equal(expectedUndecorated, button.NoDecorations);
+		});
+	}
+
+	[Fact]
+	public void OverlayButtonRowMeasureMatchesTheDecoratedButtonText()
+	{
+		var buttons = new[]
+		{
+			new Button { Text = "Cancel" },
+			new Button { Text = "Export", IsDefault = true }
+		};
+
+		// "⟦ Cancel ⟧" plus its shadow, one separator, "⟦► Export ◄⟧" plus its shadow.
+		Assert.Equal(11 + 1 + 13, TerminalWorkspacePresentationPolicy.MeasureButtonRow(buttons));
 	}
 
 	[Fact]
@@ -113,6 +157,127 @@ public sealed class TerminalWorkspacePresentationPolicyTests
 		Assert.Equal([firstOccurrence, secondOccurrence], toggled);
 	}
 
+	[Fact]
+	public void PreviewSecretTogglesOnlyOnAPressInsideThePreview()
+	{
+		const string occurrence = "occurrence-a";
+		using var document = new InMemoryPreviewTextDocument(
+			"DEVPROJEX_REDACTED[github-pat#1]",
+			redactions:
+			[
+				new PreviewRedactionSpan(
+					occurrence,
+					"github-pat",
+					1,
+					0,
+					35,
+					SecretPreviewSpanState.Redacted)
+			]);
+		using var view = new TerminalVirtualizedPreviewView(showScrollBars: false)
+		{
+			Frame = new Rectangle(0, 0, 60, 5)
+		};
+		var toggled = new List<string>();
+		view.RedactionToggleRequested += (_, eventArgs) => toggled.Add(eventArgs.OccurrenceId);
+		view.SetDocument(document, preserveViewport: false);
+
+		void Send(MouseFlags flags) =>
+			view.NewMouseEvent(new Mouse { Position = new Point(3, 0), Flags = flags });
+
+		Send(MouseFlags.LeftButtonReleased);
+		Send(MouseFlags.LeftButtonClicked);
+		Send(MouseFlags.LeftButtonPressed | MouseFlags.PositionReport);
+		Assert.Empty(toggled);
+
+		Send(MouseFlags.LeftButtonPressed);
+		Send(MouseFlags.LeftButtonReleased);
+		Send(MouseFlags.LeftButtonClicked);
+		Assert.Equal([occurrence], toggled);
+	}
+
+	[Theory]
+	[InlineData(4, 0)]
+	[InlineData(60, 58)]
+	[InlineData(100, 98)]
+	public void PreviewRedactionNavigationScrollsHorizontallyOnlyToRevealTheValue(
+		int indent,
+		int expectedOffset)
+	{
+		const string placeholder = "DEVPROJEX_REDACTED[github-pat#1]";
+		var line = new string(' ', indent) + placeholder + ";";
+		using var document = new InMemoryPreviewTextDocument(
+			line + "\n" + new string('x', 200),
+			redactions:
+			[
+				new PreviewRedactionSpan(
+					"occurrence",
+					"github-pat",
+					1,
+					indent,
+					placeholder.Length,
+					SecretPreviewSpanState.Redacted)
+			]);
+		using var view = new TerminalVirtualizedPreviewView(showScrollBars: false)
+		{
+			Frame = new Rectangle(0, 0, 80, 5)
+		};
+		view.SetDocument(document, preserveViewport: false);
+
+		Assert.True(view.MoveActiveRedaction(reverse: false));
+
+		Assert.Equal(expectedOffset, view.HorizontalOffset);
+	}
+
+	[Fact]
+	public void PreviewScrollBarsReturnWhenAHiddenPreviewIsNarrowedAgain()
+	{
+		using var document = new InMemoryPreviewTextDocument(string.Join(
+			'\n',
+			Enumerable.Range(1, 60).Select(static index => $"{index:D3} {new string('x', 110)}")));
+		using var root = new View { Width = 130, Height = 30 };
+		var frame = new FrameView { X = 59, Y = 2, Width = Dim.Fill(), Height = Dim.Fill(6) };
+		var preview = new TerminalVirtualizedPreviewView { Width = Dim.Fill(), Height = Dim.Fill(1) };
+		frame.Add(preview);
+		root.Add(frame);
+		root.BeginInit();
+		root.EndInit();
+		preview.SetDocument(document, preserveViewport: false);
+		root.Layout(new Size(130, 30));
+
+		frame.Visible = false;
+		frame.X = 0;
+		frame.Height = Dim.Fill(3);
+		root.Layout(new Size(130, 30));
+		Assert.False(preview.HorizontalScrollBar.Visible);
+
+		frame.X = 59;
+		frame.Height = Dim.Fill(6);
+		frame.Visible = true;
+		root.Layout(new Size(130, 30));
+
+		Assert.True(preview.HorizontalScrollBar.Visible);
+		Assert.Equal(preview.Viewport.Height, preview.HorizontalScrollBar.Frame.Y);
+		Assert.Equal(preview.Viewport.Height, preview.VerticalScrollBar.Frame.Height);
+	}
+
+	[Theory]
+	[InlineData(13, 4, 5)]
+	[InlineData(14, 4, 6)]
+	[InlineData(15, 4, 7)]
+	[InlineData(40, 4, 7)]
+	[InlineData(14, 3, 7)]
+	public void ContentProcessingYieldsRowsSoFilterListsKeepTheirScrollBars(
+		int availableHeight,
+		int minimumFilterFrameHeight,
+		int expectedContentHeight)
+	{
+		Assert.Equal(
+			expectedContentHeight,
+			TerminalWorkspaceSession.ResolveContentControlsFrameHeight(
+				availableHeight,
+				minimumFilterFrameHeight));
+	}
+
 	[Theory]
 	[InlineData(false, false)]
 	[InlineData(true, true)]
@@ -125,7 +290,17 @@ public sealed class TerminalWorkspacePresentationPolicyTests
 			plain,
 			supportsUnicode);
 
-		Assert.Equal("k/j Action...", value);
+		Assert.Equal("Up/Down Action...", value);
+	}
+
+	[Theory]
+	[InlineData("Space Toggle  Shift+←/→ All  : Commands", "Space Toggle  Shift+Left/Right All  : Commands")]
+	[InlineData("↑/↓ or j/k moves", "Up/Down or j/k moves")]
+	public void PlainTextNamesArrowKeysInsteadOfUnboundLetterKeys(
+		string value,
+		string expected)
+	{
+		Assert.Equal(expected, TerminalPlainText.Normalize(value));
 	}
 
 	[Fact]
@@ -206,6 +381,58 @@ public sealed class TerminalWorkspacePresentationPolicyTests
 			value,
 			startColumn,
 			width));
+	}
+
+	[Theory]
+	[InlineData("	x", 0, 8, "    x")]
+	[InlineData("a	b", 0, 8, "a   b")]
+	[InlineData("x		y", 0, 12, "x       y")]
+	[InlineData("	x", 2, 4, "  x")]
+	[InlineData("ab	cd", 3, 3, " cd")]
+	public void PreviewSliceExpandsTabsToTabStops(
+		string value,
+		int startColumn,
+		int width,
+		string expected)
+	{
+		Assert.Equal(expected, TerminalVirtualizedPreviewView.SliceColumns(
+			value,
+			startColumn,
+			width));
+	}
+
+	[Fact]
+	public void PreviewWrapCountsTabsAsTheirExpandedWidth()
+	{
+		Assert.Equal([0, 4], TerminalVirtualizedPreviewView.BuildWrappedSegmentColumns("		ab", 6));
+	}
+
+	[Theory]
+	[InlineData(1, false, 0)]
+	[InlineData(3, false, 1)]
+	[InlineData(9, false, 1)]
+	[InlineData(12, false, 2)]
+	[InlineData(25, false, 2)]
+	[InlineData(3, true, 0)]
+	[InlineData(9, true, 0)]
+	[InlineData(10, true, 0)]
+	[InlineData(12, true, 1)]
+	[InlineData(1, true, 0)]
+	public void PreviewSectionJumpTargetsTheNearestFileStart(
+		int firstVisibleLine,
+		bool reverse,
+		int expected)
+	{
+		PreviewDocumentSection[] sections =
+		[
+			new("README.md", 3, 8, 3, 4),
+			new("src/a.cs", 10, 18, 10, 11),
+			new("src/b.cs", 20, 30, 20, 21)
+		];
+
+		Assert.Equal(
+			expected,
+			TerminalWorkspaceSession.ResolveAdjacentPreviewSection(sections, firstVisibleLine, reverse));
 	}
 
 	[Theory]

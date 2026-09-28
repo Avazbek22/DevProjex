@@ -45,10 +45,11 @@ internal sealed class TerminalCommandHistory
 		return _entries[_navigationIndex];
 	}
 
-	public string Next()
+	public string Next(string currentText)
 	{
-		if (_entries.Count == 0 || _navigationIndex >= _entries.Count)
-			return _draft;
+		// Below the newest entry there is nothing newer; the text being typed stays.
+		if (_navigationIndex >= _entries.Count)
+			return currentText;
 		_navigationIndex++;
 		return _navigationIndex == _entries.Count
 			? _draft

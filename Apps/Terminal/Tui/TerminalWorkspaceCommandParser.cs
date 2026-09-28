@@ -1,7 +1,9 @@
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text;
+using DevProjex.Application.Ranking;
 using DevProjex.Terminal.CommandLine;
+using DevProjex.Terminal.Execution;
 
 namespace DevProjex.Terminal.Tui;
 
@@ -13,6 +15,10 @@ internal sealed class TerminalWorkspaceCommandParser
 	private static readonly string[] ToggleValues = ["on", "off"];
 	private static readonly string[] GitModeValues =
 		["off", "gitignore", "tracked", "staged", "changes", "diff:<ref>..<ref>"];
+	// Completion inserts text into the command, so the diff form stops at its prefix
+	// instead of inserting the <ref> placeholders shown in hints.
+	private static readonly string[] GitModeCompletions =
+		["off", "gitignore", "tracked", "staged", "changes", "diff:"];
 	private static readonly string[] AggregateTargets = ["types", "exclusions", "content"];
 	private static readonly string[] ExportTargets = ["context", "zip", "folder"];
 	private static readonly string[] ProfileTargets = ["save", "load", "show", "reset"];
@@ -26,6 +32,18 @@ internal sealed class TerminalWorkspaceCommandParser
 	private static readonly string[] RelatedDepths = Enumerable.Range(1, 10)
 		.Select(static depth => depth.ToString(CultureInfo.InvariantCulture))
 		.ToArray();
+	private const string RegexOption = "--regex";
+	private const string SymbolsOption = "--symbols";
+	private const string MaximumResultsOption = "--max";
+	private const string MaximumTokensOption = "--max-tokens";
+	private const string RankOption = "--rank";
+	private static readonly string[] GrepOptions = [RegexOption, SymbolsOption, MaximumResultsOption];
+	private static readonly string[] ContextBudgetOptions = [MaximumTokensOption, RankOption];
+	private static readonly string[] CopyValueTokens =
+	[
+		.. CliChoiceSets.ContextView.Tokens,
+		.. CliChoiceSets.ContextDocumentFormat.Tokens
+	];
 	private static readonly IReadOnlyList<string> LanguageCodes = CliChoiceSets.Language.Tokens;
 
 	private static readonly IReadOnlyList<string> SetTargets =
@@ -97,6 +115,12 @@ internal sealed class TerminalWorkspaceCommandParser
 			[TerminalWorkspaceCommandGrammar.Related] = new(
 				static (definition, tokens, _) => ParseRelated(definition, tokens),
 				CompleteRelated),
+			[TerminalWorkspaceCommandGrammar.Grep] = new(
+				static (definition, tokens, _) => ParseGrep(definition, tokens),
+				CompleteGrep),
+			[TerminalWorkspaceCommandGrammar.ProjectPath] = new(
+				static (definition, tokens, _) => ParseRequiredText(definition, tokens),
+				CompleteProjectPath),
 			[TerminalWorkspaceCommandGrammar.Language] = new(
 				static (definition, tokens, _) => ParseLanguage(definition, tokens),
 				CompleteLanguage),
@@ -148,14 +172,21 @@ internal sealed class TerminalWorkspaceCommandParser
 		}
 
 		var verbToken = tokenization.Tokens[0];
-		if (!TerminalWorkspaceCommandCatalog.TryGet(verbToken.Value, out var definition) ||
-			context.AllowedVerbs is not null && !context.AllowedVerbs.Contains(definition.Verb))
+		if (!TerminalWorkspaceCommandCatalog.TryGet(verbToken.Value, out var definition))
 		{
 			return Failure(
 				TerminalWorkspaceCommandErrorCode.UnknownVerb,
 				verbToken.Start,
 				verbToken.Value,
 				FindSimilar(verbToken.Value, context.VerbTokens));
+		}
+		if (context.AllowedVerbs is not null && !context.AllowedVerbs.Contains(definition.Verb))
+		{
+			return Failure(
+				TerminalWorkspaceCommandErrorCode.UnavailableVerb,
+				verbToken.Start,
+				verbToken.Value,
+				[]);
 		}
 
 		return GrammarHandlers[definition.Grammar].Parse(definition, tokenization.Tokens, context);
@@ -484,24 +515,33 @@ internal sealed class TerminalWorkspaceCommandParser
 				Destination: tokens[2].Value));
 		}
 
-		if (tokens.Count > 4)
-			return Unexpected(tokens[4]);
+		if (ParseContextBudgetOptions(
+				tokens,
+				2,
+				out var arguments,
+				out var maximumTokens,
+				out var rank) is { } budgetError)
+		{
+			return budgetError;
+		}
+		if (arguments.Count > 2)
+			return Unexpected(arguments[2]);
 
 		ProjectContextDocumentFormat? format = null;
 		string? destination = null;
-		if (tokens.Count >= 3)
+		if (arguments.Count >= 1)
 		{
-			if (CliChoiceSets.ContextDocumentFormat.TryParse(tokens[2].Value, out var parsedFormat))
+			if (CliChoiceSets.ContextDocumentFormat.TryParse(arguments[0].Value, out var parsedFormat))
 			{
 				format = parsedFormat;
-				if (tokens.Count == 4)
-					destination = tokens[3].Value;
+				if (arguments.Count == 2)
+					destination = arguments[1].Value;
 			}
 			else
 			{
-				if (tokens.Count == 4)
-					return Unknown(tokens[2], CliChoiceSets.ContextDocumentFormat.Tokens);
-				destination = tokens[2].Value;
+				if (arguments.Count == 2)
+					return Unknown(arguments[0], CliChoiceSets.ContextDocumentFormat.Tokens);
+				destination = arguments[0].Value;
 			}
 		}
 
@@ -509,35 +549,102 @@ internal sealed class TerminalWorkspaceCommandParser
 			definition,
 			Target: "context",
 			Format: format,
-			Destination: destination));
+			Destination: destination,
+			MaximumEstimatedTokens: maximumTokens,
+			Rank: rank));
 	}
 
+	// View and format values are disjoint, so either may be given alone; a view still precedes
+	// the format when both are present.
 	private static TerminalWorkspaceCommandParseResult ParseCopy(
 		TerminalWorkspaceCommandDefinition definition,
 		IReadOnlyList<ParsedToken> tokens)
 	{
-		if (tokens.Count > 3)
-			return Unexpected(tokens[3]);
+		if (ParseContextBudgetOptions(
+				tokens,
+				1,
+				out var arguments,
+				out var maximumTokens,
+				out var rank) is { } budgetError)
+		{
+			return budgetError;
+		}
 
 		ProjectContextView? view = null;
 		ProjectContextDocumentFormat? format = null;
-		if (tokens.Count >= 2)
+		var index = 0;
+		if (index < arguments.Count &&
+			CliChoiceSets.ContextView.TryParse(arguments[index].Value, out var parsedView))
 		{
-			if (!CliChoiceSets.ContextView.TryParse(tokens[1].Value, out var parsedView))
-				return Unknown(tokens[1], CliChoiceSets.ContextView.Tokens);
 			view = parsedView;
+			index++;
 		}
-		if (tokens.Count == 3)
+		if (index < arguments.Count &&
+			CliChoiceSets.ContextDocumentFormat.TryParse(arguments[index].Value, out var parsedFormat))
 		{
-			if (!CliChoiceSets.ContextDocumentFormat.TryParse(tokens[2].Value, out var parsedFormat))
-				return Unknown(tokens[2], CliChoiceSets.ContextDocumentFormat.Tokens);
 			format = parsedFormat;
+			index++;
+		}
+		if (index < arguments.Count)
+		{
+			var token = arguments[index];
+			if (format is not null)
+				return Unexpected(token);
+			return Unknown(token, view is null ? CopyValueTokens : CliChoiceSets.ContextDocumentFormat.Tokens);
 		}
 
 		return TerminalWorkspaceCommandParseResult.Success(new TerminalWorkspaceCommand(
 			definition,
 			View: view,
-			Format: format));
+			Format: format,
+			MaximumEstimatedTokens: maximumTokens,
+			Rank: rank));
+	}
+
+	private static TerminalWorkspaceCommandParseResult? ParseContextBudgetOptions(
+		IReadOnlyList<ParsedToken> tokens,
+		int firstArgument,
+		out IReadOnlyList<ParsedToken> arguments,
+		out long? maximumTokens,
+		out ProjectContextRank? rank)
+	{
+		var positional = new List<ParsedToken>(tokens.Count);
+		arguments = positional;
+		maximumTokens = null;
+		rank = null;
+		for (var index = firstArgument; index < tokens.Count; index++)
+		{
+			var token = tokens[index];
+			if (!IsOptionToken(token))
+			{
+				positional.Add(token);
+				continue;
+			}
+			if (!Contains(ContextBudgetOptions, token.Value))
+				return Unknown(token, ContextBudgetOptions);
+
+			var isRank = string.Equals(token.Value, RankOption, StringComparison.OrdinalIgnoreCase);
+			if (isRank ? rank is not null : maximumTokens is not null)
+				return Unexpected(token);
+			if (index + 1 >= tokens.Count)
+				return Missing(tokens, isRank ? CliChoiceSets.ContextRank.Tokens : []);
+
+			var value = tokens[++index];
+			if (isRank)
+			{
+				if (!CliChoiceSets.ContextRank.TryParse(value.Value, out var parsedRank))
+					return Unknown(value, CliChoiceSets.ContextRank.Tokens);
+				rank = parsedRank;
+				continue;
+			}
+			if (!long.TryParse(value.Value, NumberStyles.None, CultureInfo.InvariantCulture, out var parsedTokens) ||
+				parsedTokens < 1)
+			{
+				return InvalidOption(value, "Terminal.Validation.MaxTokens");
+			}
+			maximumTokens = parsedTokens;
+		}
+		return null;
 	}
 
 	private static TerminalWorkspaceCommandParseResult ParseOptionalText(
@@ -648,7 +755,7 @@ internal sealed class TerminalWorkspaceCommandParser
 					McpAction: TerminalWorkspaceMcpAction.ShowLog));
 			case "session":
 				if (tokens.Count < 4)
-					return Missing(tokens, ["id"]);
+					return Missing(tokens, []);
 				if (tokens.Count > 4)
 					return Unexpected(tokens[4]);
 				return TerminalWorkspaceCommandParseResult.Success(new TerminalWorkspaceCommand(
@@ -673,7 +780,7 @@ internal sealed class TerminalWorkspaceCommandParser
 		IReadOnlyList<ParsedToken> tokens)
 	{
 		if (tokens.Count < 4)
-			return Missing(tokens, ["path"]);
+			return Missing(tokens, []);
 
 		var index = 4;
 		var format = ProjectContextDocumentFormat.Markdown;
@@ -696,7 +803,7 @@ internal sealed class TerminalWorkspaceCommandParser
 			{
 				index++;
 				if (tokens.Count <= index)
-					return Missing(tokens, ["id"]);
+					return Missing(tokens, []);
 				session = tokens[index].Value;
 				index++;
 			}
@@ -721,7 +828,7 @@ internal sealed class TerminalWorkspaceCommandParser
 		IReadOnlyList<ParsedToken> tokens)
 	{
 		if (tokens.Count < 2)
-			return Missing(tokens, ["path"]);
+			return Missing(tokens, []);
 
 		var direction = "both";
 		var depth = 1;
@@ -765,6 +872,63 @@ internal sealed class TerminalWorkspaceCommandParser
 			Target: tokens[1].Value,
 			Text: direction,
 			Depth: depth));
+	}
+
+	private static TerminalWorkspaceCommandParseResult ParseGrep(
+		TerminalWorkspaceCommandDefinition definition,
+		IReadOnlyList<ParsedToken> tokens)
+	{
+		string? pattern = null;
+		SearchMode? mode = null;
+		int? maximumResults = null;
+		for (var index = 1; index < tokens.Count; index++)
+		{
+			var token = tokens[index];
+			if (!IsOptionToken(token))
+			{
+				if (pattern is not null)
+					return Unexpected(token);
+				pattern = token.Value;
+				continue;
+			}
+			if (!Contains(GrepOptions, token.Value))
+				return Unknown(token, GrepOptions);
+
+			if (string.Equals(token.Value, MaximumResultsOption, StringComparison.OrdinalIgnoreCase))
+			{
+				if (maximumResults is not null)
+					return Unexpected(token);
+				if (index + 1 >= tokens.Count)
+					return Missing(tokens, []);
+				var value = tokens[++index];
+				if (!int.TryParse(value.Value, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed) ||
+					parsed is < SearchCommandHandler.MinimumMaximumResults or > SearchCommandHandler.MaximumMaximumResults)
+				{
+					return InvalidOption(value, "Terminal.Validation.SearchMaximumResults");
+				}
+				maximumResults = parsed;
+				continue;
+			}
+
+			var requestedMode = string.Equals(token.Value, RegexOption, StringComparison.OrdinalIgnoreCase)
+				? SearchMode.Regex
+				: SearchMode.Symbols;
+			if (mode is { } selectedMode)
+			{
+				return requestedMode == selectedMode
+					? Unexpected(token)
+					: InvalidOption(token, "Terminal.Validation.SearchModeConflict");
+			}
+			mode = requestedMode;
+		}
+		if (string.IsNullOrEmpty(pattern))
+			return Missing(tokens, []);
+
+		return TerminalWorkspaceCommandParseResult.Success(new TerminalWorkspaceCommand(
+			definition,
+			Text: pattern,
+			SearchMode: mode ?? SearchMode.Text,
+			MaximumResults: maximumResults ?? SearchCommandHandler.DefaultMaximumResults));
 	}
 
 	private static TerminalWorkspaceCommandParseResult ParseHelp(
@@ -822,7 +986,7 @@ internal sealed class TerminalWorkspaceCommandParser
 			0 => new CompletionCandidateSource(SetTargets),
 			1 when tokens.Count > 1 &&
 				   string.Equals(tokens[1].Value, "git", StringComparison.OrdinalIgnoreCase) =>
-				new CompletionCandidateSource(GitModeValues),
+				new CompletionCandidateSource(GitModeCompletions),
 			1 => new CompletionCandidateSource(ToggleValues),
 			_ => default
 		};
@@ -892,18 +1056,36 @@ internal sealed class TerminalWorkspaceCommandParser
 			return new CompletionCandidateSource(ExportTargets);
 		var isContext = tokens.Count > 1 &&
 			string.Equals(tokens[1].Value, "context", StringComparison.OrdinalIgnoreCase);
-		if (argumentIndex == 1 && isContext)
+		if (!isContext)
+		{
+			return argumentIndex == 1 && tokens.Count > 1
+				? new CompletionCandidateSource(ResolveExportPathCompletions(
+					current,
+					context.WorkingDirectory,
+					cancellationToken))
+				: default;
+		}
+
+		var preceding = PrecedingArguments(tokens, argumentIndex).Skip(1).ToArray();
+		if (TryCompleteBudgetOptionValue(preceding, out var optionValues))
+			return optionValues;
+		var (positional, remainingOptions) = ScanBudgetArguments(preceding);
+		if (current.StartsWith('-'))
+			return new CompletionCandidateSource(remainingOptions);
+		if (positional.Count == 0)
 		{
 			return new CompletionCandidateSource(
 				CliChoiceSets.ContextDocumentFormat.Tokens,
-				ResolvePathCompletions(current, context.WorkingDirectory, cancellationToken));
+				ResolveExportPathCompletions(current, context.WorkingDirectory, cancellationToken));
 		}
-		if (argumentIndex == 2 && isContext || argumentIndex == 1 && tokens.Count > 1)
-			return new CompletionCandidateSource(ResolvePathCompletions(
-				current,
-				context.WorkingDirectory,
-				cancellationToken));
-		return default;
+		if (positional.Count == 1 &&
+			CliChoiceSets.ContextDocumentFormat.TryParse(positional[0].Value, out _))
+		{
+			return new CompletionCandidateSource(
+				ResolveExportPathCompletions(current, context.WorkingDirectory, cancellationToken),
+				remainingOptions);
+		}
+		return new CompletionCandidateSource(remainingOptions);
 	}
 
 	private static CompletionCandidateSource CompleteCopy(
@@ -911,13 +1093,27 @@ internal sealed class TerminalWorkspaceCommandParser
 		IReadOnlyList<ParsedToken> tokens,
 		string current,
 		TerminalWorkspaceCommandParseContext context,
-		CancellationToken cancellationToken) =>
-		argumentIndex switch
+		CancellationToken cancellationToken)
+	{
+		if (argumentIndex < 0)
+			return default;
+		var preceding = PrecedingArguments(tokens, argumentIndex);
+		if (TryCompleteBudgetOptionValue(preceding, out var optionValues))
+			return optionValues;
+		var (positional, remainingOptions) = ScanBudgetArguments(preceding);
+		if (current.StartsWith('-'))
+			return new CompletionCandidateSource(remainingOptions);
+		if (positional.Count == 0)
+			return new CompletionCandidateSource(CopyValueTokens, remainingOptions);
+		if (positional.Count == 1 &&
+			CliChoiceSets.ContextView.TryParse(positional[0].Value, out _))
 		{
-			0 => new CompletionCandidateSource(CliChoiceSets.ContextView.Tokens),
-			1 => new CompletionCandidateSource(CliChoiceSets.ContextDocumentFormat.Tokens),
-			_ => default
-		};
+			return new CompletionCandidateSource(
+				CliChoiceSets.ContextDocumentFormat.Tokens,
+				remainingOptions);
+		}
+		return new CompletionCandidateSource(remainingOptions);
+	}
 
 	private static CompletionCandidateSource CompleteProfile(
 		int argumentIndex,
@@ -974,7 +1170,7 @@ internal sealed class TerminalWorkspaceCommandParser
 				new CompletionCandidateSource(McpLogTargets),
 			2 when tokens.Count > 2 && string.Equals(tokens[1].Value, "log", StringComparison.OrdinalIgnoreCase) &&
 								string.Equals(tokens[2].Value, "export", StringComparison.OrdinalIgnoreCase) =>
-				new CompletionCandidateSource(ResolvePathCompletions(
+				new CompletionCandidateSource(ResolveExportPathCompletions(
 					current,
 					context.WorkingDirectory,
 					cancellationToken)),
@@ -1025,6 +1221,100 @@ internal sealed class TerminalWorkspaceCommandParser
 			RelatedOptions.Where(option => !usedOptions.Contains(option)).ToArray());
 	}
 
+	// The pattern comes first, so options are offered once it exists or an option is being typed.
+	private static CompletionCandidateSource CompleteGrep(
+		int argumentIndex,
+		IReadOnlyList<ParsedToken> tokens,
+		string current,
+		TerminalWorkspaceCommandParseContext context,
+		CancellationToken cancellationToken)
+	{
+		if (argumentIndex < 0)
+			return default;
+		var preceding = PrecedingArguments(tokens, argumentIndex);
+		if (preceding.Count > 0 &&
+			string.Equals(preceding[^1].Value, MaximumResultsOption, StringComparison.OrdinalIgnoreCase))
+		{
+			return default;
+		}
+
+		var hasPattern = false;
+		var usedOptions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		for (var index = 0; index < preceding.Count; index++)
+		{
+			var token = preceding[index];
+			if (!IsOptionToken(token))
+			{
+				hasPattern = true;
+				continue;
+			}
+			usedOptions.Add(token.Value);
+			if (string.Equals(token.Value, MaximumResultsOption, StringComparison.OrdinalIgnoreCase))
+				index++;
+		}
+		if (!hasPattern && !current.StartsWith('-'))
+			return default;
+
+		var modeSelected = usedOptions.Contains(RegexOption) || usedOptions.Contains(SymbolsOption);
+		return new CompletionCandidateSource(GrepOptions
+			.Where(option => !usedOptions.Contains(option) &&
+				!(modeSelected && option is RegexOption or SymbolsOption))
+			.ToArray());
+	}
+
+	private static CompletionCandidateSource CompleteProjectPath(
+		int argumentIndex,
+		IReadOnlyList<ParsedToken> tokens,
+		string current,
+		TerminalWorkspaceCommandParseContext context,
+		CancellationToken cancellationToken) =>
+		argumentIndex == 0
+			? new CompletionCandidateSource(context.KnownProjectPaths is { } knownPaths
+				? ResolveKnownPathCompletions(current, knownPaths)
+				: ResolvePathCompletions(current, context.WorkingDirectory, cancellationToken))
+			: default;
+
+	private static IReadOnlyList<ParsedToken> PrecedingArguments(
+		IReadOnlyList<ParsedToken> tokens,
+		int argumentIndex) =>
+		tokens.Skip(1).Take(argumentIndex).ToArray();
+
+	private static bool TryCompleteBudgetOptionValue(
+		IReadOnlyList<ParsedToken> preceding,
+		out CompletionCandidateSource candidates)
+	{
+		candidates = default;
+		if (preceding.Count == 0 || !IsOptionToken(preceding[^1]))
+			return false;
+		if (string.Equals(preceding[^1].Value, RankOption, StringComparison.OrdinalIgnoreCase))
+		{
+			candidates = new CompletionCandidateSource(CliChoiceSets.ContextRank.Tokens);
+			return true;
+		}
+		return string.Equals(preceding[^1].Value, MaximumTokensOption, StringComparison.OrdinalIgnoreCase);
+	}
+
+	private static (IReadOnlyList<ParsedToken> Positional, IReadOnlyList<string> RemainingOptions)
+		ScanBudgetArguments(IReadOnlyList<ParsedToken> preceding)
+	{
+		var positional = new List<ParsedToken>(preceding.Count);
+		var usedOptions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		for (var index = 0; index < preceding.Count; index++)
+		{
+			var token = preceding[index];
+			if (!IsOptionToken(token))
+			{
+				positional.Add(token);
+				continue;
+			}
+			if (usedOptions.Add(token.Value) && Contains(ContextBudgetOptions, token.Value))
+				index++;
+		}
+		return (
+			positional,
+			ContextBudgetOptions.Where(option => !usedOptions.Contains(option)).ToArray());
+	}
+
 	private static CompletionCandidateSource CompleteLanguage(
 		int argumentIndex,
 		IReadOnlyList<ParsedToken> tokens,
@@ -1048,10 +1338,23 @@ internal sealed class TerminalWorkspaceCommandParser
 		TerminalWorkspaceCommandParseContext context,
 		CancellationToken cancellationToken) => default;
 
+	// Export destinations resolve from the project directory but are always rejected inside it,
+	// so their completion offers only paths that lead out of the project.
+	private static IReadOnlyList<string> ResolveExportPathCompletions(
+		string current,
+		string? workingDirectory,
+		CancellationToken cancellationToken) =>
+		ResolvePathCompletions(
+			current,
+			workingDirectory,
+			cancellationToken,
+			outsideWorkingDirectoryOnly: true);
+
 	private static IReadOnlyList<string> ResolvePathCompletions(
 		string current,
 		string? workingDirectory,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		bool outsideWorkingDirectoryOnly = false)
 	{
 		if (string.IsNullOrWhiteSpace(workingDirectory))
 			return [];
@@ -1074,6 +1377,8 @@ internal sealed class TerminalWorkspaceCommandParser
 			{
 				cancellationToken.ThrowIfCancellationRequested();
 				if (!Path.GetFileName(path).StartsWith(prefix, StringComparison.CurrentCultureIgnoreCase))
+					continue;
+				if (outsideWorkingDirectoryOnly && PathUtility.IsPathInside(path, baseDirectory))
 					continue;
 				AddBoundedCompletionCandidate(
 					matches,
@@ -1359,6 +1664,23 @@ internal sealed class TerminalWorkspaceCommandParser
 			null,
 			candidates);
 
+	private static TerminalWorkspaceCommandParseResult InvalidOption(
+		ParsedToken token,
+		string messageKey) =>
+		TerminalWorkspaceCommandParseResult.Failure(new TerminalWorkspaceCommandError(
+			TerminalWorkspaceCommandErrorCode.InvalidOption,
+			token.Start,
+			token.Value,
+			[],
+			messageKey));
+
+	// A quoted token is always a value, so a pattern or path that starts with "--" can be quoted.
+	private static bool IsOptionToken(ParsedToken token) =>
+		token.OpeningQuote is null && IsOptionPrefix(token.Value);
+
+	private static bool IsOptionPrefix(string value) =>
+		value.StartsWith("--", StringComparison.Ordinal);
+
 	private static TerminalWorkspaceCommandParseResult Unexpected(ParsedToken token) =>
 		Failure(
 			TerminalWorkspaceCommandErrorCode.UnexpectedArgument,
@@ -1442,11 +1764,12 @@ internal sealed class TerminalWorkspaceCommandParser
 			while (index < text.Length && (quote is not null || !char.IsWhiteSpace(text[index])))
 			{
 				var character = text[index];
-				if (quote is null && character is '\'' or '"')
+				// Only a quote that starts a token opens a quoted value, so apostrophes inside
+				// words such as don't or O'Brien stay literal.
+				if (quote is null && index == start && character is '\'' or '"')
 				{
 					quote = character;
-					if (index == start)
-						openingQuote = character;
+					openingQuote = character;
 					quoteStart = index++;
 					continue;
 				}

@@ -26,6 +26,11 @@ public sealed class RelatedCommandHandler(
 		new ContextDiagnosticRenderer(environment, request.Output, services.Localization).Write(plan.Diagnostics);
 		if (plan.HasErrors) return CommandLineExitCodes.PolicyFailure;
 
+		var destination = request.OutputPath is null or "-"
+			? null
+			: Path.GetFullPath(request.OutputPath);
+		if (destination is not null)
+			_ = ExactOutputDestinationValidator.ValidateAnalysis(plan.SourceRoot, destination, overwrite: false);
 		var relative = RelatedQueryRunner.ResolveSeed(plan, request.SeedPath);
 		DependencyRelatedResult related;
 		try
@@ -55,13 +60,34 @@ public sealed class RelatedCommandHandler(
 				"warning[DPX-DEPENDENCY-UNSUPPORTED]: " +
 				TerminalTextEscaping.EscapeSingleLine(services.Localization["Terminal.Related.NoFacts"]));
 		}
+		if (destination is null)
+		{
+			await RelatedOutputRenderer.WriteAsync(
+				environment.Output,
+				related,
+				request.Direction,
+				request.Format,
+				services.Localization,
+				cancellationToken).ConfigureAwait(false);
+			return CommandLineExitCodes.Success;
+		}
+
+		await using var payload = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
 		await RelatedOutputRenderer.WriteAsync(
-			environment.Output,
+			payload,
 			related,
 			request.Direction,
 			request.Format,
 			services.Localization,
 			cancellationToken).ConfigureAwait(false);
+		var writtenPath = await AtomicOutputWriter.WriteTextAsync(
+			destination,
+			payload.ToString(),
+			overwrite: false,
+			cancellationToken,
+			path => ExactOutputDestinationValidator.ValidateAnalysis(plan.SourceRoot, path, overwrite: false))
+			.ConfigureAwait(false);
+		TerminalTextEscaping.WriteSingleLine(environment.Output, writtenPath);
 		return CommandLineExitCodes.Success;
 	}
 }

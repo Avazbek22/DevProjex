@@ -104,16 +104,17 @@ public sealed class CommandHelpRenderer(
 		return path switch
 		{
 			"open" => [0, 1, 2, 3, 4, 5, 130],
-			"analyze" or "related" or "tree" or "export context" or "export project" or
+			"analyze" or "search" or "related" or "tree" or "export context" or "export project" or
 				"profile export" => [0, 1, 2, 3, 4, 130],
 			"profile import" or "profile save" or
 				"cache list" or "cache remove" or "cache clear" or "cache update" or
 				"doctor" => [0, 1, 2, 3, 130],
 			"ui list" => [0, 1, 2, 5, 130],
 			"tui" => [0, 1, 2, 3, 130],
+			"mcp log" => [0, 1, 2, 4, 130],
 			"export" or "profile" or "cache" or "ui" => [0, 2, 130],
 			"recent" or "profile show" or "profile validate" or "profile reset" or
-			"cache path" or "completion" or "mcp connect" or "mcp log" => [0, 1, 2, 130],
+			"cache path" or "completion" or "mcp" or "mcp connect" => [0, 1, 2, 130],
 			_ when path.StartsWith("ui ", StringComparison.Ordinal) => [0, 1, 2, 3, 4, 5, 130],
 			_ => [0, 2, 130]
 		};
@@ -187,8 +188,10 @@ public sealed class CommandHelpRenderer(
 			.ThenBy(static value => value, StringComparer.Ordinal)
 			.ToArray();
 		var valueName = ResolveValueName(option);
-		return string.IsNullOrWhiteSpace(valueName)
-			? string.Join(", ", names)
+		if (string.IsNullOrWhiteSpace(valueName))
+			return string.Join(", ", names);
+		return option.Arity.MinimumNumberOfValues == 0
+			? $"{string.Join(", ", names)} [<{valueName}>]"
 			: $"{string.Join(", ", names)} <{valueName}>";
 	}
 
@@ -302,8 +305,10 @@ public sealed class CommandHelpRenderer(
 			.Where(static character => character != '-' && character != '_')
 			.Select(static character => char.ToLowerInvariant(character))
 			.ToArray());
+		// Enum options also complete their CLR member names ("Ru", "PtPt"); only the
+		// lower-case choice tokens are valid spellings to show as a default.
 		var canonicalTokens = ParseHelpNameTokens(option.HelpName)
-			.Concat(GetCompletionTokens(option))
+			.Concat(GetCompletionTokens(option).Where(IsChoiceToken))
 			.Distinct(StringComparer.Ordinal);
 		var canonical = canonicalTokens.FirstOrDefault(token =>
 			new string(token
@@ -339,10 +344,13 @@ public sealed class CommandHelpRenderer(
 			return [];
 		return helpName
 			.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-			.Where(static token => token.All(character =>
-				char.IsLower(character) ||
-				char.IsDigit(character) ||
-				character is '-'));
+			.Where(IsChoiceToken);
 	}
+
+	private static bool IsChoiceToken(string token) =>
+		token.All(static character =>
+			char.IsLower(character) ||
+			char.IsDigit(character) ||
+			character is '-');
 
 }

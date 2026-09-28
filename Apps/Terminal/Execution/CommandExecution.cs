@@ -11,7 +11,8 @@ internal static class CommandExecution
 		ITerminalEnvironment environment,
 		TerminalOutputOptions outputOptions,
 		Func<Task<int>> operation,
-		LocalizationService? localization = null)
+		LocalizationService? localization = null,
+		bool forceReplacementAvailable = true)
 	{
 		var text = localization ?? new LocalizationService(
 			new JsonLocalizationCatalog(),
@@ -117,7 +118,9 @@ internal static class CommandExecution
 			return WriteError(environment, outputOptions, text, new TerminalError(
 				"DPX-EXPORT-DESTINATION-EXISTS",
 				text["Terminal.Error.DestinationExists"],
-				text["Terminal.Hint.DestinationForce"],
+				forceReplacementAvailable
+					? text["Terminal.Hint.DestinationForce"]
+					: text["Terminal.Hint.DestinationChooseAnother"],
 				CommandLineExitCodes.DestinationConflict,
 				exception,
 				exception.Path));

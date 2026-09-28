@@ -39,6 +39,8 @@ internal sealed class WorkspaceFocusModel
 
 	public void SaveBeforeBusy() => _beforeBusy ??= Capture();
 
+	public void DiscardBeforeBusy() => _beforeBusy = null;
+
 	public WorkspaceFocusSnapshot RestoreAfterBusy()
 	{
 		var snapshot = _beforeBusy ?? Capture();

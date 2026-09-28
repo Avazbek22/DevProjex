@@ -325,6 +325,35 @@ public sealed class AgentJournalStoreTests(ITestOutputHelper output)
 	}
 
 	[Fact]
+	public async Task ClearForOneProjectKeepsSessionsSharedWithOtherProjects()
+	{
+		var cancellationToken = TestContext.Current.CancellationToken;
+		using var temporary = new TemporaryDirectory();
+		var firstRoot = temporary.CreateFolder("first");
+		var secondRoot = temporary.CreateFolder("second");
+		using var store = CreateStore(temporary.Path);
+		var single = CreateSession(firstRoot, 63, new DateTimeOffset(2026, 9, 20, 1, 2, 3, TimeSpan.Zero));
+		var shared = CreateSession(firstRoot, 64, new DateTimeOffset(2026, 9, 20, 1, 2, 4, TimeSpan.Zero)) with
+		{
+			Roots =
+			[
+				new AgentJournalRoot(Path.GetFullPath(firstRoot), "first"),
+				new AgentJournalRoot(Path.GetFullPath(secondRoot), "second")
+			]
+		};
+		await store.StartSession(single, cancellationToken);
+		await store.StartSession(shared, cancellationToken);
+
+		var removed = await store.ClearAsync(firstRoot, cancellationToken);
+
+		Assert.Equal(1, removed);
+		var remaining = Assert.Single(await store.ListSessionsAsync(cancellationToken: cancellationToken));
+		Assert.Equal(shared.Id, remaining.Id);
+		Assert.Single(await store.ListSessionsAsync(secondRoot, cancellationToken: cancellationToken));
+		Assert.Equal(1, await store.ClearAsync(cancellationToken: cancellationToken));
+	}
+
+	[Fact]
 	public async Task ClearPreservesActiveSessionsAndRemovesCompletedSessions()
 	{
 		var cancellationToken = TestContext.Current.CancellationToken;

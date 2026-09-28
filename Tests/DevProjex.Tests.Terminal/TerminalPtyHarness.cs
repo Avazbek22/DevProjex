@@ -659,6 +659,7 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		int column,
 		int row,
 		int clickCount = 1,
+		int pauseBetweenClicksMilliseconds = 40,
 		CancellationToken cancellationToken = default)
 	{
 		var x = column + 1;
@@ -668,8 +669,33 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			await SendAsync($"\u001b[<0;{x};{y}M\u001b[<0;{x};{y}m", cancellationToken)
 				.ConfigureAwait(false);
 			if (click + 1 < clickCount)
-				await Task.Delay(40, cancellationToken).ConfigureAwait(false);
+				await Task.Delay(pauseBetweenClicksMilliseconds, cancellationToken).ConfigureAwait(false);
 		}
+	}
+
+	// Clicks a label on the first row containing rowText; a dialog's buttons are found by a
+	// label that appears only on their row, because the same words often appear behind it.
+	public async Task ClickLabelOnRowAsync(
+		string rowText,
+		string label,
+		int clickCount = 1,
+		int pauseBetweenClicksMilliseconds = 40,
+		CancellationToken cancellationToken = default)
+	{
+		var lines = CaptureScreen().Split('\n');
+		var row = Array.FindIndex(lines, line => line.Contains(rowText, StringComparison.Ordinal));
+		var column = row < 0 ? -1 : lines[row].IndexOf(label, StringComparison.Ordinal);
+		if (column < 0)
+		{
+			throw new Xunit.Sdk.XunitException(
+				$"'{label}' was not found on the row containing '{rowText}'.\n{CaptureScreen()}");
+		}
+		await SendMouseClickAsync(
+			column + 1,
+			row,
+			clickCount,
+			pauseBetweenClicksMilliseconds,
+			cancellationToken).ConfigureAwait(false);
 	}
 
 	public Task SendMouseWheelDownAsync(

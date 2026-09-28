@@ -23,15 +23,16 @@ names remain part of the CLI profile contract, not permanent TUI jargon.
 
 Welcome shows up to nine recent projects inline; `1` through `9` open them
 directly. **Open portable profile** is a first-class visible action. The footer
-advertises `:`, and the Welcome command line accepts `recent`, `language`,
-`help`, and `quit`.
+advertises `:`, and the Welcome command line accepts `open`, `recent`,
+`language`, `help`, and `quit`.
 
 The welcome screen offers:
 
 - open the current directory when it is a reasonable project candidate;
 - open Recent Workspaces, combining local folders and Git repositories;
 - browse for a folder;
-- clone through the existing DevProjex Git service;
+- clone through the existing DevProjex Git service; a local folder path opens
+  in place, as with `open`;
 - open DevProjex Desktop;
 - help and exit.
 
@@ -234,7 +235,9 @@ strict: only a complete token executes. Tab accepts or cycles completion, while 
 invalid token reports its position and up to three similar candidates. Arguments
 containing whitespace can use single or double quotes; path completion inserts
 and preserves the required quotes automatically.
-Welcome exposes the focused subset `open`, `recent`, `language`, `help`, and `quit`.
+Welcome exposes the focused subset `open`, `recent`, `language`, `help`, and `quit`;
+`help` without a verb lists only these, and any other workspace command reports
+that it needs an open project.
 
 The input line exposes the active argument schema before execution and renders an
 inline ghost suffix as soon as a token can be completed:
@@ -245,7 +248,7 @@ inline ghost suffix as soon as a token can be completed:
 
 | Syntax | Session action |
 |---|---|
-| `set <option> on\|off` | toggle one content or exclusion option; legacy `set gitignore` and `set tracked` remain supported |
+| `set <option> on\|off` | toggle one content or exclusion option; legacy `set gitignore` and `set tracked` remain supported, and turning either off switches Git filtering off |
 | `set activity on\|off` | show or hide the persisted live agent-activity status and tree markers |
 | `set git off\|gitignore\|tracked\|staged\|changes\|diff:<ref>..<ref>` | select the Git axis without changing profiles |
 | `all types\|exclusions\|content on\|off` | apply the framed **All** action |
@@ -254,12 +257,14 @@ inline ghost suffix as soon as a token can be completed:
 | `view tree\|content\|tree-content` | select Preview mode |
 | `format text\|markdown\|json\|xml` | select tree format |
 | `search [text]` | search Preview, or clear it with no text |
+| `grep <pattern> [--regex\|--symbols] [--max <1..200>]` | search file contents across the current selection with the direct CLI `search` rules and show the matches in the output panel |
 | `filter [text]` | filter Project Tree, or clear it with no text |
-| `export context [format] [path]` | open the existing context-export confirmation |
+| `export context [format] [path] [--max-tokens <N>] [--rank importance]` | open the existing context-export confirmation; the flags apply the direct CLI token budget and importance ranking |
 | `export zip <path>` / `export folder <path>` | open the existing project-export confirmation |
-| `copy [tree\|content\|tree-content] [text\|markdown\|json\|xml]` | copy an exact context document without changing the current view or format |
+| `copy [tree\|content\|tree-content] [text\|markdown\|json\|xml] [--max-tokens <N>] [--rank importance]` | copy an exact context document without changing the current view or format; a format can be given without a view |
 | `analyze` | analyze the current context |
 | `related <path> [--direction <dependencies\|dependents\|both>] [--depth <1..10>]` | show dependency relations in the output panel using the current workspace selection |
+| `reveal <path>` | reveal a project path in Project Tree like `R`: expand its folders, move the cursor to it, and focus the tree |
 | `branch [name]` | switch the cloned repository branch, or open branch selection |
 | `update` | get updates for the cloned repository |
 | `recent` | open recent projects and repositories |
@@ -272,7 +277,7 @@ inline ghost suffix as soon as a token can be completed:
 | `mcp connect <claude-code\|codex\|cursor\|vscode\|json> [live\|standard]` | connect the selected MCP client to the open project; mode defaults to `live`, and `json` shows the manual configuration |
 | `mcp log [session <id>\|last]` | open the project journal; choose a session to inspect its calls and totals |
 | `mcp log export <path> [markdown\|json] [session <id>\|last]` | write a context receipt with the shared receipt formatter; format defaults to Markdown and session defaults to `last` |
-| `mcp log clear` | clear completed journal sessions for the project after confirmation |
+| `mcp log clear` | clear completed journal sessions for the project after confirmation; sessions shared with other projects are kept |
 | `refresh` | rescan the working copy from disk without network access |
 | `language [code]` | show available language codes or switch the workspace language immediately |
 | `diagnostics` | show every diagnostic in a scrollable overlay |
@@ -283,8 +288,8 @@ inline ghost suffix as soon as a token can be completed:
 completion continue to advertise the shorter `off` form.
 
 `select` uses the same project-relative glob syntax as the other selection filters. Exact
-directory paths apply to their complete subtree, `select all ...` targets the whole tree,
-and selectors that are absent from the effective tree are counted and reported with the
+directory paths apply to their complete subtree, `select all ...` targets the whole tree
+(write `./all` for a top-level folder named `all`), and selectors that are absent from the effective tree are counted and reported with the
 existing `DPX-SELECTION-PATH-MISSING` warning. The resulting check-state change follows the
 same projection and local-profile persistence path as a manual checkbox, so Live Context
 consumers observe the updated selection.
@@ -308,8 +313,12 @@ Examples:
 :select all off
 :view content
 :search "connection string"
+:grep "connection string"
+:grep Configure --symbols --max 20
 :copy content markdown
+:copy json --max-tokens 8000
 :related src/App.cs --direction dependencies --depth 2
+:reveal src/App.cs
 :mcp codex standard
 :mcp connect codex standard
 :mcp log last
@@ -320,7 +329,22 @@ Examples:
 :open "../sample project"
 :profile load "Team Settings"
 :export context markdown "../review context.md"
+:export context "../ranked context.md" --max-tokens 50000 --rank importance
 ```
+
+`grep` runs the same search as `devprojex search` over the files of the current
+workspace selection: the same text, `--regex`, and `--symbols` matching (the two modes
+are mutually exclusive), the same declaration names, the same secret and private-data
+redaction, and the same default limit of 50 matches. The search runs in the background
+and can be cancelled; its results open in the output panel with project-relative paths,
+line numbers, and the enclosing declaration when one is known. `search` keeps searching
+the current Preview.
+
+`--max-tokens` and `--rank` on `copy` and `export context` follow
+`devprojex export context`: the budget admits files by estimated content tokens and
+`--rank importance` orders files by importance before the budget is applied. Ranking needs a view that includes
+file content. The export confirmation lists the applied budget and ranking, and a budgeted
+copy reports the included and skipped files.
 
 `copy` first uses the platform clipboard exposed by Terminal.Gui. When that is not
 available, an interactive terminal receives a complete OSC 52 clipboard sequence.
@@ -433,8 +457,10 @@ destinations use filesystem completion from the active project directory. A
 nonempty typed path that does not exist remains in the open picker with a
 localized error; it is never replaced by the current folder or highlighted file.
 
-Clicking anywhere on a tree or parameter row toggles its checkbox; double-clicking
-a folder expands or collapses it.
+Clicking a checkbox marker (`[ ]`) toggles it; a click elsewhere on a tree or
+parameter row only moves the cursor to that row. Git mode rows are radio buttons
+and are selected by a click anywhere on the row. Clicking a folder's `>`/`v`
+marker or double-clicking its name expands or collapses it.
 
 Within Parameters, Up/Down and `j`/`k` move through the active mini-list. At a
 list boundary focus crosses to the adjacent mini-panel. Enter or Space toggles
@@ -519,8 +545,10 @@ sequence at all. The upstream behavior is documented in the
 The export summary asks whether to export and presents a compact aligned
 table containing destination, file and folder counts, size, estimated tokens,
 filters, diagnostics, and an inline redaction warning when applicable. Export is
-the default action. A destination conflict offers **Overwrite** directly in the
-summary. Successful exports do
+the default action. When the destination is an existing file or ZIP, the summary
+offers **Overwrite** directly. An existing folder, or a folder where a file is
+expected, cannot be replaced: the summary says so and offers no export action.
+Successful exports do
 not open another dialog; the result path appears transiently in the status bar.
 
 When redaction is enabled, the project-copy summary states that matching text

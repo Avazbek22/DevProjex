@@ -11,13 +11,42 @@ public sealed class TerminalWorkspaceContractTests
 	[Fact]
 	public void ExportDestinationHistoryIsIndependentForContextFolderAndZip()
 	{
+		const string project = "project";
 		var history = new TerminalExportDestinationHistory();
-		history.Remember(TerminalExportKind.Context, "context.md");
-		history.Remember(TerminalExportKind.Folder, "project-folder");
+		history.Remember(project, TerminalExportKind.Context, "context.md");
+		history.Remember(project, TerminalExportKind.Folder, "project-folder");
 
-		Assert.Equal("context.md", history.Resolve(TerminalExportKind.Context, "default.md"));
-		Assert.Equal("project-folder", history.Resolve(TerminalExportKind.Folder, "default-folder"));
-		Assert.Equal("default.zip", history.Resolve(TerminalExportKind.Zip, "default.zip"));
+		Assert.Equal("context.md", history.Resolve(project, TerminalExportKind.Context, "default.md"));
+		Assert.Equal("project-folder", history.Resolve(project, TerminalExportKind.Folder, "default-folder"));
+		Assert.Equal("default.zip", history.Resolve(project, TerminalExportKind.Zip, "default.zip"));
+	}
+
+	[Fact]
+	public void ExportDestinationHistoryBelongsToOneProjectAndFollowsTheContextFormat()
+	{
+		var projectC = Path.Combine(Path.GetTempPath(), "projC");
+		var projectB = Path.Combine(Path.GetTempPath(), "projB");
+		var history = new TerminalExportDestinationHistory();
+		history.Remember(projectC, TerminalExportKind.Context, Path.Combine("out", "projC-context.txt"));
+		history.Remember(projectC, TerminalExportKind.Zip, Path.Combine("out", "projC.zip"));
+
+		Assert.Equal(
+			Path.Combine("out", "projB-context.md"),
+			history.ResolveContext(projectB, ".md", Path.Combine("out", "projB-context.md")));
+		Assert.Equal(
+			Path.Combine("out", "projB.zip"),
+			history.Resolve(projectB, TerminalExportKind.Zip, Path.Combine("out", "projB.zip")));
+		Assert.Equal(
+			Path.Combine("out", "projC-context.json"),
+			history.ResolveContext(projectC, ".json", "unused.json"));
+		Assert.Equal(
+			Path.Combine("out", "projC-context.txt"),
+			history.ResolveContext(projectC, ".txt", "unused.txt"));
+
+		history.Remember(projectC, TerminalExportKind.Context, Path.Combine("out", "notes"));
+		Assert.Equal(
+			Path.Combine("out", "notes"),
+			history.ResolveContext(projectC, ".json", "unused.json"));
 	}
 	[Fact]
 	public void CancellationSourceCleanupIsIdempotentAcrossBackgroundCompletion()
@@ -843,6 +872,45 @@ public sealed class TerminalWorkspaceContractTests
 	}
 
 	[Fact]
+	public async Task PlainTuiCopyPayloadMatchesThePlainContextExport()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/src/app.cs", "class App {}");
+		var destination = Path.Combine(workspace.Path, "context.txt");
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			project,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+
+		var payload = await controller.BuildCopyPayloadAsync(
+			state,
+			ProjectContextView.Tree,
+			ProjectContextDocumentFormat.Text,
+			TestContext.Current.CancellationToken,
+			plain: true);
+		await controller.ExportContextAsync(
+			state,
+			ProjectContextView.Tree,
+			ProjectContextDocumentFormat.Text,
+			destination,
+			overwrite: false,
+			TestContext.Current.CancellationToken,
+			plain: true);
+		var exported = await File.ReadAllTextAsync(
+			destination,
+			TestContext.Current.CancellationToken);
+
+		Assert.NotNull(payload);
+		Assert.Contains("`-- src", payload, StringComparison.Ordinal);
+		Assert.DoesNotContain("└", payload, StringComparison.Ordinal);
+		Assert.Equal(exported.ReplaceLineEndings(), payload.ReplaceLineEndings());
+	}
+
+	[Fact]
 	public async Task PreparedContextExportSummarizesCurrentSelectionWithoutWriting()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -1276,6 +1344,89 @@ public sealed class TerminalWorkspaceContractTests
 
 		Assert.Equal(TerminalTreeCheckState.Unchecked, state.VisibleRows[0].CheckState);
 		Assert.Null(state.BuildSelection().SelectedPaths);
+	}
+
+	[Fact]
+	public async Task PortableProfileKeepsWholeTreeAndExplicitEmptySelectionsDistinct()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var output = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		workspace.WriteFile("src/App.cs", "class App {}\n");
+		workspace.WriteFile("docs/Guide.md", "# Guide\n");
+		var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+
+		var noChecks = await SaveAndLoadAsync("no-checks.json");
+		state.SelectAll();
+		var allChecked = await SaveAndLoadAsync("all-checked.json");
+		state.RestoreSelectedRelativePaths([]);
+		var explicitEmpty = await SaveAndLoadAsync("explicit-empty.json");
+
+		Assert.Null(noChecks.SelectedPaths);
+		Assert.Null(allChecked.SelectedPaths);
+		Assert.Empty(explicitEmpty.SelectedPaths!);
+		using var reopened = await controller.OpenAsync(
+			workspace.Path,
+			new ProjectProfileReference(
+				ProjectProfileSourceKind.Portable,
+				Path.Combine(output.Path, "all-checked.json")),
+			TestContext.Current.CancellationToken);
+		Assert.Equal(2, reopened.Plan.IncludedFiles.Count);
+
+		async Task<ProjectSelectionSpec> SaveAndLoadAsync(string fileName)
+		{
+			var written = await controller.SavePortableProfileAsync(
+				state,
+				Path.Combine(output.Path, fileName),
+				overwrite: false,
+				TestContext.Current.CancellationToken);
+			return await services.PortableProfileService.LoadAsync(
+				written,
+				TestContext.Current.CancellationToken);
+		}
+	}
+
+	[Fact]
+	public async Task FirstLocalProfileSaveReopensWithTheRootsItWasSavedFrom()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		workspace.WriteFile("node_modules/pkg/index.js", "module.exports = {};\n");
+		workspace.WriteFile("src/app.cs", "class App {}\n");
+		workspace.WriteFile("README.md", "# Readme\n");
+		var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var standard = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+		Assert.Contains("node_modules", standard.Plan.SelectedRoots);
+		controller.SetContentTransformation(
+			standard,
+			IgnoreOptionId.StripComments,
+			enabled: true,
+			TestContext.Current.CancellationToken);
+
+		services.LocalProfileStore.SaveProfile(
+			workspace.Path,
+			TerminalWorkspaceSession.CaptureLocalProfile(standard));
+		using var local = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Local,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(standard.Plan.SelectedRoots, local.Plan.SelectedRoots);
+		Assert.Equal(standard.Plan.SelectedExtensions, local.Plan.SelectedExtensions);
+		Assert.Equal(standard.Plan.IncludedFiles, local.Plan.IncludedFiles);
+		Assert.True(local.Plan.Selection.StripComments);
+		Assert.DoesNotContain(
+			local.Plan.Diagnostics,
+			static diagnostic => diagnostic.Severity != ContextDiagnosticSeverity.Information);
 	}
 
 	[Fact]
@@ -1968,6 +2119,194 @@ public sealed class TerminalWorkspaceContractTests
 			1,
 			text.Split(Environment.NewLine)
 				.Count(static line => line.StartsWith("Redaction", StringComparison.Ordinal)));
+	}
+
+	[Fact]
+	public async Task ZipExportWithoutExtensionReportsTheLocalizedExtensionMessage()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/app.cs", "class App {}");
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			project,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+
+		var exception = await Assert.ThrowsAsync<ProjectContextValidationException>(() =>
+			controller.PrepareProjectExportAsync(
+				state,
+				ProjectCopyExportFormat.Zip,
+				Path.Combine(workspace.Path, "archive"),
+				TestContext.Current.CancellationToken));
+
+		Assert.Equal(
+			"ZIP output must use the .zip extension.",
+			services.Localization[TerminalWorkspaceSession.ResolveValidationErrorMessageKey(exception.Code)]);
+	}
+
+	[Theory]
+	[InlineData(TerminalExportKind.Folder, true, false, true)]
+	[InlineData(TerminalExportKind.Zip, false, true, true)]
+	[InlineData(TerminalExportKind.Zip, false, false, false)]
+	[InlineData(TerminalExportKind.Context, true, true, false)]
+	public void ExportSummaryWarnsThatARedactedProjectCopyMayNotBuild(
+		TerminalExportKind kind,
+		bool secretsRedacted,
+		bool privateDataRedacted,
+		bool expectedWarning)
+	{
+		using var workspace = new TemporaryDirectory();
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var summary = new TerminalExportSummary(
+			kind,
+			View: null,
+			DocumentFormat: null,
+			"export",
+			TerminalExportDestinationState.Ready,
+			FileCount: 1,
+			FolderCount: 1,
+			Bytes: 1,
+			Characters: 1,
+			EstimatedTokens: 1,
+			GitFilteringMode.None,
+			Exclusions: [],
+			DiagnosticCount: 0,
+			SecretsRedacted: secretsRedacted,
+			PrivateDataRedacted: privateDataRedacted);
+
+		var text = new TerminalWorkspace(
+			services,
+			new TestTerminalEnvironment()).BuildExportSummaryText(summary);
+
+		Assert.Equal(
+			expectedWarning,
+			text.Contains(
+				services.Localization["Terminal.DryRun.ProjectCopy.RedactionWarning"],
+				StringComparison.Ordinal));
+	}
+
+	[Fact]
+	public void BoundedExportSummaryKeepsTheDestinationFileNameAndTheLabelColumn()
+	{
+		using var workspace = new TemporaryDirectory();
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.Ru);
+		var destination = Path.Combine(
+			Path.GetTempPath(),
+			string.Join(Path.DirectorySeparatorChar, Enumerable.Repeat("deeply-nested-export-folder", 5)),
+			"final context.md");
+		var summary = new TerminalExportSummary(
+			TerminalExportKind.Context,
+			ProjectContextView.Tree,
+			ProjectContextDocumentFormat.Markdown,
+			destination,
+			TerminalExportDestinationState.Ready,
+			FileCount: 3,
+			FolderCount: 2,
+			Bytes: 75,
+			Characters: 200,
+			EstimatedTokens: 52,
+			GitFilteringMode.RespectGitIgnore,
+			Exclusions:
+			[
+				ProjectExclusion.SmartIgnore,
+				ProjectExclusion.HiddenFolders,
+				ProjectExclusion.HiddenFiles,
+				ProjectExclusion.DotFolders,
+				ProjectExclusion.DotFiles,
+				ProjectExclusion.EmptyFolders
+			],
+			DiagnosticCount: 0,
+			SecretsRedacted: true);
+		const int maximumColumns = 60;
+
+		var lines = new TerminalWorkspace(services, new TestTerminalEnvironment())
+			.BuildExportSummaryText(summary, maximumColumns)
+			.Split(Environment.NewLine);
+
+		var labels = new[]
+			{
+				"Terminal.Tui.Destination",
+				"Terminal.Analysis.Files",
+				"Terminal.Analysis.Folders",
+				"Terminal.Analysis.Size",
+				"Terminal.Analysis.Tokens",
+				"Terminal.Tui.Filters",
+				"Terminal.Tui.Diagnostics",
+				"Terminal.Tui.Redaction"
+			}
+			.Select(key => services.Localization[key].TrimEnd(':'))
+			.ToArray();
+		var labelColumns = labels.Max(static label => label.Length);
+		Assert.All(lines, line => Assert.True(line.Length <= maximumColumns, line));
+		Assert.All(lines, line => Assert.True(
+			labels.Any(label => line.StartsWith(label, StringComparison.Ordinal)) ||
+			line.StartsWith(new string(' ', labelColumns + 2), StringComparison.Ordinal),
+			line));
+		var destinationLine = Assert.Single(lines, line => line.StartsWith(labels[0], StringComparison.Ordinal));
+		Assert.EndsWith(Path.DirectorySeparatorChar + "final context.md", destinationLine, StringComparison.Ordinal);
+		Assert.Contains(
+			"...",
+			destinationLine,
+			StringComparison.Ordinal);
+		Assert.Single(lines, line => line.StartsWith(labels[5], StringComparison.Ordinal));
+	}
+
+	[Fact]
+	public async Task PreparedExportBlocksDestinationsThatOverwriteCannotReplace()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/app.cs", "class App {}");
+		var existingFolder = workspace.CreateDirectory("output/existing");
+		var folderNamedAsZip = workspace.CreateDirectory("output/folder.zip");
+		var existingZip = workspace.WriteFile("output/existing.zip", "zip");
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var environment = new TestTerminalEnvironment();
+		var controller = new TerminalWorkspaceController(services, environment);
+		using var state = await controller.OpenAsync(
+			project,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+
+		var context = await controller.PrepareContextExportAsync(
+			state,
+			ProjectContextView.Tree,
+			ProjectContextDocumentFormat.Markdown,
+			existingFolder,
+			overwrite: false,
+			TestContext.Current.CancellationToken);
+		var folder = await controller.PrepareProjectExportAsync(
+			state,
+			ProjectCopyExportFormat.Folder,
+			existingFolder,
+			TestContext.Current.CancellationToken);
+		var zipOverFolder = await controller.PrepareProjectExportAsync(
+			state,
+			ProjectCopyExportFormat.Zip,
+			folderNamedAsZip,
+			TestContext.Current.CancellationToken);
+		var zipOverFile = await controller.PrepareProjectExportAsync(
+			state,
+			ProjectCopyExportFormat.Zip,
+			existingZip,
+			TestContext.Current.CancellationToken);
+		var text = new TerminalWorkspace(services, environment).BuildExportSummaryText(folder);
+
+		Assert.Equal(TerminalExportDestinationState.Blocked, context.DestinationState);
+		Assert.Equal(TerminalExportDestinationState.Blocked, folder.DestinationState);
+		Assert.Equal(TerminalExportDestinationState.Blocked, zipOverFolder.DestinationState);
+		Assert.Equal(TerminalExportDestinationState.Conflict, zipOverFile.DestinationState);
+		Assert.Contains(
+			$"{services.Localization["Terminal.Tui.DestinationState"]}  " +
+			services.Localization["Terminal.Tui.Error.DestinationExists"],
+			text,
+			StringComparison.Ordinal);
 	}
 
 	[Fact]

@@ -26,6 +26,7 @@ internal sealed record TerminalParameterRow(
 	IgnoreOptionId? ContentTransformation = null,
 	string? Value = null)
 {
+	internal const int MarkerColumns = 3;
 	private string? _displayText;
 
 	private TerminalParameterRow(TerminalParameterRow original)

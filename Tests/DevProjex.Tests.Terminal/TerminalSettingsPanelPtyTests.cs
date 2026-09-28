@@ -6,6 +6,9 @@ namespace DevProjex.Tests.Terminal;
 [Collection(TerminalProcessCollection.Name)]
 public sealed class TerminalSettingsPanelPtyTests
 {
+	// The 38-column wide panel shortens the title to "Content processi…"; other layouts show it whole.
+	private const string ContentProcessingTitle = "Content processi";
+
 	[Fact(Timeout = 90_000)]
 	public async Task SelectionStatusShowsOnlyFailureAfterSelectionChanges()
 	{
@@ -218,6 +221,38 @@ public sealed class TerminalSettingsPanelPtyTests
 	}
 
 	[Fact(Timeout = 90_000)]
+	public async Task ClickOnTheCollapsedParametersStripOpensParameters()
+	{
+		using var project = CreatePanelProject();
+		await using var terminal = await StartAsync(project.Path, columns: 130, rows: 40, mouse: true);
+
+		var tree = await WaitForStableScreenAsync(terminal, "> PROJECT TREE");
+		var stripRow = Array.FindIndex(
+			tree.Split('\n'),
+			static line => line.Contains("Content 0/5", StringComparison.Ordinal));
+		Assert.True(stripRow > 0, tree);
+		await terminal.SendMouseClickAsync(
+			column: 20,
+			row: stripRow,
+			cancellationToken: TestContext.Current.CancellationToken);
+		var parameters = await WaitForStableScreenAsync(terminal, "> PARAMETERS");
+		Assert.DoesNotContain("PROJECT TREE", parameters, StringComparison.Ordinal);
+		await terminal.SendSpaceAsync(TestContext.Current.CancellationToken);
+		await WaitForStableScreenAsync(terminal, "[x] Hide secrets");
+
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		tree = await WaitForStableScreenAsync(terminal, "> PROJECT TREE");
+		Assert.Contains("Content 1/5", tree, StringComparison.Ordinal);
+		await terminal.SendMouseClickAsync(
+			column: 4,
+			row: stripRow - 1,
+			cancellationToken: TestContext.Current.CancellationToken);
+		await WaitForStableScreenAsync(terminal, "> PARAMETERS");
+
+		await ExitAsync(terminal);
+	}
+
+	[Fact(Timeout = 90_000)]
 	public async Task MiniPanelsRenderAcrossEveryWorkspaceLayout()
 	{
 		using var project = CreatePanelProject();
@@ -310,9 +345,8 @@ public sealed class TerminalSettingsPanelPtyTests
 		Assert.DoesNotContain('▼', fileTypes);
 
 		await terminal.ResizeAsync(160, 30, TestContext.Current.CancellationToken);
-		var wide = await WaitForStableScreenAsync(terminal, "Content processing");
+		var wide = await WaitForStableScreenAsync(terminal, "┤Content processi…├");
 		Assert.DoesNotContain("Saved settings", wide, StringComparison.Ordinal);
-		Assert.Contains("Content processing", wide, StringComparison.Ordinal);
 		await ExitAsync(terminal);
 	}
 
@@ -328,7 +362,7 @@ public sealed class TerminalSettingsPanelPtyTests
 		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
 		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
 		var contentFocused = await WaitForStableScreenAsync(terminal, "> PARAMETERS");
-		AssertFrameAggregate(contentFocused, "Content processing", expectedCount: 5);
+		AssertFrameAggregate(contentFocused, ContentProcessingTitle, expectedCount: 5);
 		AssertFrameAggregate(contentFocused, "Exclusions", expectedCount: 0);
 		AssertFrameAggregate(contentFocused, "File types", expectedCount: 3);
 		Assert.DoesNotContain("Content processing:", contentFocused, StringComparison.Ordinal);
@@ -367,6 +401,42 @@ public sealed class TerminalSettingsPanelPtyTests
 			"workspace-settings-extensions-focused-en-160x50",
 			extensionsFocused,
 			(project.Path, "<PROJECT_ROOT>"));
+
+		await ExitAsync(terminal);
+	}
+
+	[Fact(Timeout = 90_000)]
+	public async Task WideShortcutsMoveKeyboardFocusIntoExclusionsAndFileTypes()
+	{
+		using var project = CreatePanelProject(initializeGit: true);
+		project.WriteFile("obj/project.assets.json", "{}");
+		var uncheckedRoot = $"[ ] {Path.GetFileName(project.Path)}";
+		await using var terminal = await StartAsync(project.Path, columns: 160, rows: 45);
+		await WaitForStableScreenAsync(terminal, "> PROJECT TREE");
+
+		await terminal.SendAsync("X", TestContext.Current.CancellationToken);
+		var exclusionsFocused = await WaitForStableScreenAsync(terminal, "> PARAMETERS");
+		Assert.DoesNotContain("> PROJECT TREE", exclusionsFocused, StringComparison.Ordinal);
+		await terminal.SendSpaceAsync(TestContext.Current.CancellationToken);
+		await WaitForPanelContainsAsync(terminal, "Exclusions", "File types", "[ ] All");
+		var exclusionsCleared = await WaitForStableScreenAsync(terminal, "[ ] Smart ignore");
+		Assert.Contains(uncheckedRoot, exclusionsCleared, StringComparison.Ordinal);
+
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await WaitForStableScreenAsync(terminal, "> PROJECT TREE");
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await WaitForStableScreenAsync(terminal, "> CONTEXT PREVIEW");
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await WaitForStableScreenAsync(terminal, "> PARAMETERS");
+		await terminal.SendShiftTabAsync(TestContext.Current.CancellationToken);
+		await WaitForStableScreenAsync(terminal, "> CONTEXT PREVIEW");
+
+		await terminal.SendAsync("T", TestContext.Current.CancellationToken);
+		var fileTypesFocused = await WaitForStableScreenAsync(terminal, "> PARAMETERS");
+		Assert.DoesNotContain("> CONTEXT PREVIEW", fileTypesFocused, StringComparison.Ordinal);
+		await terminal.SendSpaceAsync(TestContext.Current.CancellationToken);
+		await WaitForPanelContainsAsync(terminal, "File types", null, "[ ] All");
+		await WaitForStableScreenAsync(terminal, "[ ] .cs");
 
 		await ExitAsync(terminal);
 	}
@@ -941,6 +1011,9 @@ public sealed class TerminalSettingsPanelPtyTests
 			.Select(static pair => pair.index)
 			.ToArray();
 		Assert.Equal(3, aggregateRows.Length);
+		Assert.StartsWith("Content processing  [ ] All (5)", lines[aggregateRows[0]], StringComparison.Ordinal);
+		Assert.StartsWith("Exclusions  [ ] All", lines[aggregateRows[1]], StringComparison.Ordinal);
+		Assert.StartsWith("File types  [x] All (3)", lines[aggregateRows[2]], StringComparison.Ordinal);
 		Assert.True(aggregateRows[0] < Array.FindIndex(
 			lines,
 			line => line.Contains("Hide secrets", StringComparison.Ordinal)));
@@ -974,7 +1047,7 @@ public sealed class TerminalSettingsPanelPtyTests
 		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
 		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
 		var screen = await WaitForStableScreenAsync(terminal, "> PARAMETERS");
-		AssertFrameAggregate(screen, "Content processing", expectedCount: 5);
+		AssertFrameAggregate(screen, ContentProcessingTitle, expectedCount: 5);
 		AssertFrameAggregate(screen, "Exclusions", expectedCount: 0);
 		AssertFrameAggregate(screen, "File types", expectedCount: 3);
 
@@ -1259,8 +1332,8 @@ public sealed class TerminalSettingsPanelPtyTests
 	}
 
 	[Theory(Timeout = 90_000)]
-	[InlineData("ru", "Обработка содержи…", "Исключения")]
-	[InlineData("uz", "Kontentni qa…", "Istisnolar")]
+	[InlineData("ru", "Обработка содерж…", "Исключения")]
+	[InlineData("uz", "Kontentni q…", "Istisnolar")]
 	public async Task LocalizedRedactionLabelsKeepTheirCountersWhenEllipsized(
 		string language,
 		string contentTitle,
@@ -1419,7 +1492,7 @@ public sealed class TerminalSettingsPanelPtyTests
 	{
 		var screen = await WaitForStableScreenAsync(
 			terminal,
-			"Content processing",
+			ContentProcessingTitle,
 			value => IsCompletedSettingsLayout(value, expectWide));
 		Assert.True(screen.Contains("Exclusions", StringComparison.Ordinal), screen);
 		Assert.True(screen.Contains("File types", StringComparison.Ordinal), screen);
@@ -1427,7 +1500,7 @@ public sealed class TerminalSettingsPanelPtyTests
 		Assert.True(screen.Contains("Strip blank lines", StringComparison.Ordinal), screen);
 		Assert.DoesNotContain("Content processing:", screen, StringComparison.Ordinal);
 		Assert.DoesNotContain("Saved settings", screen, StringComparison.Ordinal);
-		AssertFrameAggregate(screen, "Content processing", expectedCount: 5);
+		AssertFrameAggregate(screen, ContentProcessingTitle, expectedCount: 5);
 		AssertFrameAggregate(screen, "Exclusions", expectedCount: 0);
 		AssertFrameAggregate(screen, "File types", expectedCount: 3);
 		Assert.DoesNotContain("ROOT FOLDERS", screen, StringComparison.Ordinal);
@@ -1443,7 +1516,7 @@ public sealed class TerminalSettingsPanelPtyTests
 		string title,
 		int? expectedCount = null)
 	{
-		var marker = title == "Content processing" || expectedCount == 0 ? "[ ]" : "[x]";
+		var marker = title == ContentProcessingTitle || expectedCount == 0 ? "[ ]" : "[x]";
 		var suffix = expectedCount switch
 		{
 			0 => string.Empty,
@@ -1457,6 +1530,11 @@ public sealed class TerminalSettingsPanelPtyTests
 			titleLine is not null,
 			$"Expected frame aggregate '{marker} All{suffix}' for '{title}'.{Environment.NewLine}{screen}");
 		Assert.Contains($"{marker} All{suffix}", titleLine, StringComparison.Ordinal);
+		var titleEnd = titleLine.IndexOf(title, StringComparison.Ordinal) + title.Length;
+		var aggregateStart = titleLine.IndexOf($"{marker} All{suffix}", titleEnd, StringComparison.Ordinal);
+		Assert.True(
+			titleLine[titleEnd..aggregateStart].Contains('├', StringComparison.Ordinal),
+			$"The aggregate covers the closing cap of the '{title}' frame title.{Environment.NewLine}{titleLine}");
 	}
 
 	private static (int Row, int Column) FindFrameAggregate(

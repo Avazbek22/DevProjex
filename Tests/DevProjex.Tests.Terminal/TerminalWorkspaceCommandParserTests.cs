@@ -1,3 +1,4 @@
+using DevProjex.Application.Ranking;
 using Terminal.Gui.Input;
 
 namespace DevProjex.Tests.Terminal;
@@ -65,11 +66,15 @@ public sealed class TerminalWorkspaceCommandParserTests
 	{
 		var git = _parser.GetCompletion("set git ", 8, Context);
 		var legacy = _parser.GetCompletion("set tracked ", 12, Context);
+		var diff = _parser.GetCompletion("set git d", 9, Context);
 
 		Assert.Equal(
-			["off", "gitignore", "tracked", "staged", "changes", "diff:<ref>..<ref>"],
+			["off", "gitignore", "tracked", "staged", "changes", "diff:"],
 			git.Candidates.Select(static candidate => candidate.Token));
 		Assert.Equal(["on", "off"], legacy.Candidates.Select(static candidate => candidate.Token));
+		var diffCandidate = Assert.Single(diff.Candidates);
+		Assert.Equal("set git diff:", diffCandidate.CompletedText);
+		Assert.Equal("set git diff:".Length, diffCandidate.CursorPosition);
 	}
 
 	[Fact]
@@ -99,6 +104,10 @@ public sealed class TerminalWorkspaceCommandParserTests
 	[InlineData("search hello world", "hello world")]
 	[InlineData("search \"hello world\"", "hello world")]
 	[InlineData("filter 'generated files'", "generated files")]
+	[InlineData("search don't panic", "don't panic")]
+	[InlineData("filter it's", "it's")]
+	[InlineData("search say\"hi\"", "say\"hi\"")]
+	[InlineData("search \"it's done\"", "it's done")]
 	internal void Parse_SearchAndFilterAcceptQuotedOrUnquotedText(string text, string expected)
 	{
 		var result = _parser.Parse(text, Context);
@@ -302,6 +311,209 @@ public sealed class TerminalWorkspaceCommandParserTests
 		Assert.Equal("10", depths.Candidates.Last().Token);
 		Assert.Equal(["--depth"], nextOption.Candidates.Select(static item => item.Token));
 		Assert.Empty(noOptions.Candidates);
+	}
+
+	[Theory]
+	[InlineData("grep Widget", "Widget", SearchMode.Text, 50)]
+	[InlineData("grep \"class\\s+Widget\" --regex", "class\\s+Widget", SearchMode.Regex, 50)]
+	[InlineData("grep --symbols Demo.Sample.Run --max 200", "Demo.Sample.Run", SearchMode.Symbols, 200)]
+	[InlineData("grep \"--regex\" --max 1", "--regex", SearchMode.Text, 1)]
+	internal void Parse_GrepUsesTheCliSearchModesAndDefaultLimit(
+		string text,
+		string expectedPattern,
+		SearchMode expectedMode,
+		int expectedMaximum)
+	{
+		var result = _parser.Parse(text, Context);
+
+		Assert.True(result.IsSuccess, result.Error?.ToString());
+		Assert.Equal(TerminalWorkspaceCommandVerb.Grep, result.Command!.Definition.Verb);
+		Assert.Equal(expectedPattern, result.Command.Text);
+		Assert.Equal(expectedMode, result.Command.SearchMode);
+		Assert.Equal(expectedMaximum, result.Command.MaximumResults);
+	}
+
+	[Theory]
+	[InlineData("grep Widget --regex --symbols", "Terminal.Validation.SearchModeConflict")]
+	[InlineData("grep --symbols Widget --regex", "Terminal.Validation.SearchModeConflict")]
+	[InlineData("grep Widget --max 0", "Terminal.Validation.SearchMaximumResults")]
+	[InlineData("grep Widget --max 201", "Terminal.Validation.SearchMaximumResults")]
+	[InlineData("grep Widget --max many", "Terminal.Validation.SearchMaximumResults")]
+	[InlineData("copy --max-tokens 0", "Terminal.Validation.MaxTokens")]
+	[InlineData("copy json --max-tokens -5", "Terminal.Validation.MaxTokens")]
+	[InlineData("export context --max-tokens 1.5", "Terminal.Validation.MaxTokens")]
+	public void Parse_OptionValidationReusesTheCliMessages(string text, string expectedMessageKey)
+	{
+		var result = _parser.Parse(text, Context);
+
+		Assert.False(result.IsSuccess);
+		Assert.Equal(TerminalWorkspaceCommandErrorCode.InvalidOption, result.Error!.Code);
+		Assert.Equal(expectedMessageKey, result.Error.MessageKey);
+	}
+
+	[Fact]
+	public void Parse_CopyAcceptsAFormatWithoutAViewAndTheCliBudgetOptions()
+	{
+		var formatOnly = _parser.Parse("copy json", Context);
+		var viewAndFormat = _parser.Parse("copy tree-content xml", Context);
+		var budgeted = _parser.Parse("copy --max-tokens 8000 content --rank importance", Context);
+
+		Assert.True(formatOnly.IsSuccess, formatOnly.Error?.ToString());
+		Assert.Null(formatOnly.Command!.View);
+		Assert.Equal(ProjectContextDocumentFormat.Json, formatOnly.Command.Format);
+		Assert.Null(formatOnly.Command.MaximumEstimatedTokens);
+		Assert.Null(formatOnly.Command.Rank);
+		Assert.Equal(ProjectContextView.TreeContent, viewAndFormat.Command!.View);
+		Assert.Equal(ProjectContextDocumentFormat.Xml, viewAndFormat.Command.Format);
+		Assert.Equal(ProjectContextView.Content, budgeted.Command!.View);
+		Assert.Null(budgeted.Command.Format);
+		Assert.Equal(8000, budgeted.Command.MaximumEstimatedTokens);
+		Assert.Equal(ProjectContextRank.Importance, budgeted.Command.Rank);
+	}
+
+	[Fact]
+	public void Parse_ExportContextAcceptsTheCliBudgetOptionsAroundItsArguments()
+	{
+		var full = _parser.Parse(
+			"export context --max-tokens 50000 markdown \"../team context.md\" --rank importance",
+			Context);
+		var destinationOnly = _parser.Parse("export context ../context.md --max-tokens 10", Context);
+		var plain = _parser.Parse("export context json", Context);
+
+		Assert.True(full.IsSuccess, full.Error?.ToString());
+		Assert.Equal("context", full.Command!.Target);
+		Assert.Equal(ProjectContextDocumentFormat.Markdown, full.Command.Format);
+		Assert.Equal("../team context.md", full.Command.Destination);
+		Assert.Equal(50000, full.Command.MaximumEstimatedTokens);
+		Assert.Equal(ProjectContextRank.Importance, full.Command.Rank);
+		Assert.Null(destinationOnly.Command!.Format);
+		Assert.Equal("../context.md", destinationOnly.Command.Destination);
+		Assert.Equal(10, destinationOnly.Command.MaximumEstimatedTokens);
+		Assert.Null(destinationOnly.Command.Rank);
+		Assert.Null(plain.Command!.MaximumEstimatedTokens);
+		Assert.Null(plain.Command.Rank);
+	}
+
+	[Fact]
+	public void Parse_RevealTakesOneProjectPath()
+	{
+		var result = _parser.Parse("reveal \"src/My App.cs\"", Context);
+
+		Assert.True(result.IsSuccess, result.Error?.ToString());
+		Assert.Equal(TerminalWorkspaceCommandVerb.Reveal, result.Command!.Definition.Verb);
+		Assert.Equal("src/My App.cs", result.Command.Text);
+	}
+
+	[Theory]
+	[InlineData("grep TODO")]
+	[InlineData("reveal src")]
+	[InlineData("copy json --max-tokens 10")]
+	internal void Parse_NewWorkspaceCommandsNeedAnOpenProjectOnWelcome(string text)
+	{
+		var welcome = new TerminalWorkspaceCommandParseContext(
+			[],
+			new HashSet<TerminalWorkspaceCommandVerb>
+			{
+				TerminalWorkspaceCommandVerb.Open,
+				TerminalWorkspaceCommandVerb.Recent,
+				TerminalWorkspaceCommandVerb.Language,
+				TerminalWorkspaceCommandVerb.Help,
+				TerminalWorkspaceCommandVerb.Quit
+			});
+
+		var result = _parser.Parse(text, welcome);
+
+		Assert.False(result.IsSuccess);
+		Assert.Equal(TerminalWorkspaceCommandErrorCode.UnavailableVerb, result.Error!.Code);
+	}
+
+	[Fact]
+	public void CompletionOffersGrepOptionsOnlyAfterThePattern()
+	{
+		var beforePattern = _parser.GetCompletion("grep ", 5, Context);
+		var afterPattern = _parser.GetCompletion("grep TODO ", 10, Context);
+		var afterMode = _parser.GetCompletion("grep TODO --regex ", 18, Context);
+		var maximumValue = _parser.GetCompletion("grep TODO --max ", 16, Context);
+		var optionPrefix = _parser.GetCompletion("grep --s", 8, Context);
+
+		Assert.Empty(beforePattern.Candidates);
+		Assert.Equal("Terminal.Tui.Command.Grep.Schema", beforePattern.SchemaKey);
+		Assert.Equal(
+			["--regex", "--symbols", "--max"],
+			afterPattern.Candidates.Select(static item => item.Token));
+		Assert.Equal(["--max"], afterMode.Candidates.Select(static item => item.Token));
+		Assert.Empty(maximumValue.Candidates);
+		Assert.Equal(["--symbols"], optionPrefix.Candidates.Select(static item => item.Token));
+	}
+
+	[Fact]
+	public void CompletionOffersCopyValuesInEitherOrderAndTheBudgetOptions()
+	{
+		var first = _parser.GetCompletion("copy ", 5, Context);
+		var format = _parser.GetCompletion("copy js", 7, Context);
+		var afterView = _parser.GetCompletion("copy content ", 13, Context);
+		var afterFormat = _parser.GetCompletion("copy json ", 10, Context);
+		var rank = _parser.GetCompletion("copy --rank ", 12, Context);
+		var tokens = _parser.GetCompletion("copy --max-tokens ", 18, Context);
+		var afterBudget = _parser.GetCompletion("copy --max-tokens 10 ", 21, Context);
+
+		Assert.Equal(
+			[
+				.. CliChoiceSets.ContextView.Tokens,
+				.. CliChoiceSets.ContextDocumentFormat.Tokens,
+				"--max-tokens",
+				"--rank"
+			],
+			first.Candidates.Select(static item => item.Token));
+		Assert.Equal("Terminal.Tui.Command.Copy.Schema", first.SchemaKey);
+		Assert.Equal(["json"], format.Candidates.Select(static item => item.Token));
+		Assert.Equal(
+			[.. CliChoiceSets.ContextDocumentFormat.Tokens, "--max-tokens", "--rank"],
+			afterView.Candidates.Select(static item => item.Token));
+		Assert.Equal(["--max-tokens", "--rank"], afterFormat.Candidates.Select(static item => item.Token));
+		Assert.Equal(["importance"], rank.Candidates.Select(static item => item.Token));
+		Assert.Empty(tokens.Candidates);
+		Assert.Equal(
+			[
+				.. CliChoiceSets.ContextView.Tokens,
+				.. CliChoiceSets.ContextDocumentFormat.Tokens,
+				"--rank"
+			],
+			afterBudget.Candidates.Select(static item => item.Token));
+	}
+
+	[Fact]
+	public void CompletionOffersExportContextBudgetOptionsAndRankValues()
+	{
+		var option = _parser.GetCompletion("export context --", 17, Context);
+		var afterDestination = _parser.GetCompletion("export context json ../x.md ", 28, Context);
+		var rank = _parser.GetCompletion("export context --rank ", 22, Context);
+		var zip = _parser.GetCompletion("export zip out.zip ", 19, Context);
+
+		Assert.Equal(["--max-tokens", "--rank"], option.Candidates.Select(static item => item.Token));
+		Assert.Equal(
+			["--max-tokens", "--rank"],
+			afterDestination.Candidates.Select(static item => item.Token));
+		Assert.Equal(["importance"], rank.Candidates.Select(static item => item.Token));
+		Assert.Empty(zip.Candidates);
+	}
+
+	[Fact]
+	public void RevealCompletionUsesTheKnownProjectTreeForFilesAndFolders()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("disk-only.cs", "class DiskOnly { }");
+		var context = new TerminalWorkspaceCommandParseContext(
+			[".cs"],
+			WorkingDirectory: workspace.Path,
+			KnownProjectPaths: ["src", "src/App.cs"],
+			KnownProjectFiles: ["src/App.cs"]);
+
+		var reveal = _parser.GetCompletion("reveal sr", 9, context);
+		var disk = _parser.GetCompletion("reveal di", 9, context);
+
+		Assert.Equal(["src", "src/App.cs"], reveal.Candidates.Select(static item => item.Token));
+		Assert.Empty(disk.Candidates);
 	}
 
 	[Fact]
@@ -522,41 +734,66 @@ public sealed class TerminalWorkspaceCommandParserTests
 	public void CompletionOffersAPathForContextExportWithoutAnExplicitFormat()
 	{
 		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
 		workspace.WriteFile("review.md", "context");
 		var context = new TerminalWorkspaceCommandParseContext(
 			[".md"],
-			WorkingDirectory: workspace.Path);
+			WorkingDirectory: project);
 
-		var completion = _parser.GetCompletion("export context re", 17, context);
+		var completion = _parser.GetCompletion("export context ../re", 20, context);
 
-		Assert.Contains(completion.Candidates, candidate => candidate.Token == "review.md");
+		Assert.Contains(completion.Candidates, candidate => candidate.Token == "../review.md");
+	}
+
+	[Fact]
+	public void ExportDestinationCompletionNeverOffersPathsInsideTheProject()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/README.md", "# Project");
+		workspace.CreateDirectory("exports");
+		var context = new TerminalWorkspaceCommandParseContext(
+			[".md"],
+			WorkingDirectory: project);
+
+		var zip = _parser.GetCompletion("export zip ", "export zip ".Length, context);
+		var journal = _parser.GetCompletion("mcp log export ", "mcp log export ".Length, context);
+		var parent = _parser.GetCompletion("export folder ../", "export folder ../".Length, context);
+		var open = _parser.GetCompletion("open ", "open ".Length, context);
+
+		Assert.DoesNotContain(zip.Candidates, static item => item.Token == "README.md");
+		Assert.DoesNotContain(journal.Candidates, static item => item.Token == "README.md");
+		Assert.Contains(parent.Candidates, static item => item.Token == "../exports");
+		Assert.DoesNotContain(parent.Candidates, static item => item.Token == "../project");
+		Assert.Contains(open.Candidates, static item => item.Token == "README.md");
 	}
 
 	[Fact]
 	public void CompletionQuotesPathsWithSpacesAndPreservesAnOpeningQuote()
 	{
 		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
 		workspace.WriteFile("review notes.md", "context");
 		var context = new TerminalWorkspaceCommandParseContext(
 			[".md"],
-			WorkingDirectory: workspace.Path);
+			WorkingDirectory: project);
 
-		var unquoted = _parser.GetCompletion("export context rev", 18, context);
-		var quoted = _parser.GetCompletion("export context \"rev", 19, context);
+		var unquoted = _parser.GetCompletion("export context ../rev", 21, context);
+		var quoted = _parser.GetCompletion("export context \"../rev", 22, context);
 		var quotedWithSuffix = _parser.GetCompletion(
-			"export context \"rev stale.md\" trailing",
-			19,
+			"export context \"../rev stale.md\" trailing",
+			22,
 			context);
 
 		Assert.Equal(
-			"export context \"review notes.md\"",
-			Assert.Single(unquoted.Candidates, static item => item.Token == "review notes.md").CompletedText);
+			"export context \"../review notes.md\"",
+			Assert.Single(unquoted.Candidates, static item => item.Token == "../review notes.md").CompletedText);
 		Assert.Equal(
-			"export context \"review notes.md\"",
-			Assert.Single(quoted.Candidates, static item => item.Token == "review notes.md").CompletedText);
+			"export context \"../review notes.md\"",
+			Assert.Single(quoted.Candidates, static item => item.Token == "../review notes.md").CompletedText);
 		Assert.Equal(
-			"export context \"review notes.md\" trailing",
-			Assert.Single(quotedWithSuffix.Candidates, static item => item.Token == "review notes.md").CompletedText);
+			"export context \"../review notes.md\" trailing",
+			Assert.Single(quotedWithSuffix.Candidates, static item => item.Token == "../review notes.md").CompletedText);
 	}
 
 	[Theory]
@@ -581,6 +818,30 @@ public sealed class TerminalWorkspaceCommandParserTests
 		Assert.Equal(TerminalWorkspaceCommandErrorCode.UnknownLanguage, result.Error!.Code);
 		Assert.InRange(result.Error.Candidates.Count, 2, 3);
 		Assert.True(result.Error.Candidates.Count < CliChoiceSets.Language.Tokens.Count);
+	}
+
+	[Fact]
+	public void Parse_KnownVerbOutsideTheAllowedSubsetIsUnavailableRatherThanUnknown()
+	{
+		var welcome = new TerminalWorkspaceCommandParseContext(
+			[],
+			new HashSet<TerminalWorkspaceCommandVerb>
+			{
+				TerminalWorkspaceCommandVerb.Open,
+				TerminalWorkspaceCommandVerb.Help
+			});
+
+		var unavailable = _parser.Parse("set hide-secrets on", welcome);
+		var unknown = _parser.Parse("opne .", welcome);
+
+		Assert.False(unavailable.IsSuccess);
+		Assert.Equal(TerminalWorkspaceCommandErrorCode.UnavailableVerb, unavailable.Error!.Code);
+		Assert.Equal(0, unavailable.Error.Position);
+		Assert.Equal("set", unavailable.Error.Value);
+		Assert.Empty(unavailable.Error.Candidates);
+		Assert.Equal(TerminalWorkspaceCommandErrorCode.UnknownVerb, unknown.Error!.Code);
+		Assert.Contains("open", unknown.Error.Candidates);
+		Assert.DoesNotContain("set", unknown.Error.Candidates);
 	}
 
 	[Fact]
@@ -617,6 +878,21 @@ public sealed class TerminalWorkspaceCommandParserTests
 		Assert.Equal(expectedPosition, result.Error.Position);
 		if (expectedCandidate is not null)
 			Assert.Contains(expectedCandidate, result.Error.Candidates);
+	}
+
+	[Theory]
+	[InlineData("related")]
+	[InlineData("grep")]
+	[InlineData("reveal")]
+	[InlineData("mcp log session")]
+	[InlineData("mcp log export")]
+	public void Parse_MissingFreeFormArgumentOffersNoPlaceholderCandidates(string text)
+	{
+		var result = _parser.Parse(text, Context);
+
+		Assert.False(result.IsSuccess);
+		Assert.Equal(TerminalWorkspaceCommandErrorCode.MissingArgument, result.Error!.Code);
+		Assert.Empty(result.Error.Candidates);
 	}
 
 	[Fact]
@@ -659,6 +935,11 @@ public sealed class TerminalWorkspaceCommandParserTests
 	[InlineData("language zh-", 12)]
 	[InlineData("viw content", 2)]
 	[InlineData("profile save \"My", 16)]
+	[InlineData("grep ", 5)]
+	[InlineData("grep TODO --r", 13)]
+	[InlineData("copy js", 7)]
+	[InlineData("copy json --m", 13)]
+	[InlineData("export context --r", 18)]
 	internal void GhostCompletionMatchesFullCompletionHints(string text, int cursorPosition)
 	{
 		var full = _parser.GetCompletion(text, cursorPosition, Context);
@@ -728,19 +1009,26 @@ public sealed class TerminalWorkspaceCommandParserTests
 		["format markdown", TerminalWorkspaceCommandVerb.Format],
 		["search private value", TerminalWorkspaceCommandVerb.Search],
 		["search", TerminalWorkspaceCommandVerb.Search],
+		["grep TODO", TerminalWorkspaceCommandVerb.Grep],
+		["grep \"connection string\" --regex --max 10", TerminalWorkspaceCommandVerb.Grep],
 		["filter generated", TerminalWorkspaceCommandVerb.Filter],
 		["filter", TerminalWorkspaceCommandVerb.Filter],
 		["export context", TerminalWorkspaceCommandVerb.Export],
 		["export context json", TerminalWorkspaceCommandVerb.Export],
 		["export context output.md", TerminalWorkspaceCommandVerb.Export],
 		["export context markdown output.md", TerminalWorkspaceCommandVerb.Export],
+		["export context --max-tokens 5000", TerminalWorkspaceCommandVerb.Export],
+		["export context json ../out.json --rank importance", TerminalWorkspaceCommandVerb.Export],
 		["export zip output.zip", TerminalWorkspaceCommandVerb.Export],
 		["export folder output", TerminalWorkspaceCommandVerb.Export],
 		["copy", TerminalWorkspaceCommandVerb.Copy],
 		["copy tree-content json", TerminalWorkspaceCommandVerb.Copy],
+		["copy json", TerminalWorkspaceCommandVerb.Copy],
+		["copy content --max-tokens 100 --rank importance", TerminalWorkspaceCommandVerb.Copy],
 		["analyze", TerminalWorkspaceCommandVerb.Analyze],
 		["related src/App.cs", TerminalWorkspaceCommandVerb.Related],
 		["related src/App.cs --direction both --depth 2", TerminalWorkspaceCommandVerb.Related],
+		["reveal src/App.cs", TerminalWorkspaceCommandVerb.Reveal],
 		["branch", TerminalWorkspaceCommandVerb.Branch],
 		["branch feature/review", TerminalWorkspaceCommandVerb.Branch],
 		["update", TerminalWorkspaceCommandVerb.Update],
@@ -760,6 +1048,7 @@ public sealed class TerminalWorkspaceCommandParserTests
 		["language zh-cn", TerminalWorkspaceCommandVerb.Language],
 		["help", TerminalWorkspaceCommandVerb.Help],
 		["help export", TerminalWorkspaceCommandVerb.Help],
+		["help grep", TerminalWorkspaceCommandVerb.Help],
 		["quit", TerminalWorkspaceCommandVerb.Quit]
 	];
 
@@ -782,6 +1071,22 @@ public sealed class TerminalWorkspaceCommandParserTests
 		["export zip", TerminalWorkspaceCommandErrorCode.MissingArgument, 10, (string?)null],
 		["copy contents", TerminalWorkspaceCommandErrorCode.UnknownToken, 5, "content"],
 		["copy content yaml", TerminalWorkspaceCommandErrorCode.UnknownToken, 13, "xml"],
+		["copy json tree", TerminalWorkspaceCommandErrorCode.UnexpectedArgument, 10, (string?)null],
+		["copy --rank size", TerminalWorkspaceCommandErrorCode.UnknownToken, 12, "importance"],
+		["copy --budget 5", TerminalWorkspaceCommandErrorCode.UnknownToken, 5, "--max-tokens"],
+		["copy --rank importance --rank importance", TerminalWorkspaceCommandErrorCode.UnexpectedArgument, 23, (string?)null],
+		["copy --max-tokens", TerminalWorkspaceCommandErrorCode.MissingArgument, 17, (string?)null],
+		["export context --rank", TerminalWorkspaceCommandErrorCode.MissingArgument, 21, "importance"],
+		["export context json out.md extra", TerminalWorkspaceCommandErrorCode.UnexpectedArgument, 27, (string?)null],
+		["export zip out.zip --max-tokens 5", TerminalWorkspaceCommandErrorCode.UnexpectedArgument, 19, (string?)null],
+		["grep", TerminalWorkspaceCommandErrorCode.MissingArgument, 4, (string?)null],
+		["grep \"\"", TerminalWorkspaceCommandErrorCode.MissingArgument, 7, (string?)null],
+		["grep a b", TerminalWorkspaceCommandErrorCode.UnexpectedArgument, 7, (string?)null],
+		["grep a --regex --regex", TerminalWorkspaceCommandErrorCode.UnexpectedArgument, 15, (string?)null],
+		["grep a --maximum 5", TerminalWorkspaceCommandErrorCode.UnknownToken, 7, "--max"],
+		["grep a --max", TerminalWorkspaceCommandErrorCode.MissingArgument, 12, (string?)null],
+		["reveal", TerminalWorkspaceCommandErrorCode.MissingArgument, 6, (string?)null],
+		["reveal a b", TerminalWorkspaceCommandErrorCode.UnexpectedArgument, 9, (string?)null],
 		["analyze now", TerminalWorkspaceCommandErrorCode.UnexpectedArgument, 8, (string?)null],
 		["branch one two", TerminalWorkspaceCommandErrorCode.UnexpectedArgument, 11, (string?)null],
 		["update now", TerminalWorkspaceCommandErrorCode.UnexpectedArgument, 7, (string?)null],
@@ -796,7 +1101,9 @@ public sealed class TerminalWorkspaceCommandParserTests
 		["mcp connect codex unknown", TerminalWorkspaceCommandErrorCode.UnknownToken, 18, "standard"],
 		["mcp connect codex live extra", TerminalWorkspaceCommandErrorCode.UnexpectedArgument, 23, (string?)null],
 		["mcp codex unknown", TerminalWorkspaceCommandErrorCode.UnknownToken, 10, "standard"],
-		["related", TerminalWorkspaceCommandErrorCode.MissingArgument, 7, "path"],
+		["mcp log session", TerminalWorkspaceCommandErrorCode.MissingArgument, 15, (string?)null],
+		["mcp log export", TerminalWorkspaceCommandErrorCode.MissingArgument, 14, (string?)null],
+		["related", TerminalWorkspaceCommandErrorCode.MissingArgument, 7, (string?)null],
 		["related src/App.cs --side both", TerminalWorkspaceCommandErrorCode.UnknownToken, 19, "--direction"],
 		["related src/App.cs --depth 0", TerminalWorkspaceCommandErrorCode.InvalidValue, 27, "1"],
 		["related src/App.cs --depth 11", TerminalWorkspaceCommandErrorCode.InvalidValue, 27, "10"],

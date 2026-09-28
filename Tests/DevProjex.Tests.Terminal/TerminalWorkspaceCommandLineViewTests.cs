@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Drawing;
+using Terminal.Gui.Input;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -211,6 +212,49 @@ public sealed class TerminalWorkspaceCommandLineViewTests
 	}
 
 	[Fact]
+	public void SuspendedCommandKeepsItsDraftAndCaretUntilResumed()
+	{
+		using var view = CreateView();
+		const string draft = @"export context C:\somewhere\long\path\user.md";
+		view.Open(draft);
+		var input = GetField<TerminalTransparentTextEditor>(view, "_input");
+		input.InsertionPoint = 7;
+
+		view.Suspend();
+		// Several resize notifications can arrive while the terminal stays too small.
+		view.Suspend();
+
+		Assert.False(view.Visible);
+		Assert.False(view.IsEditing);
+		Assert.Equal(draft, view.InputText);
+
+		view.Resume();
+
+		Assert.True(view.Visible);
+		Assert.True(view.IsEditing);
+		Assert.Equal(draft, view.InputText);
+		Assert.Equal(7, input.InsertionPoint);
+	}
+
+	[Fact]
+	public void SuspendClosesAResultAndExplicitCloseDiscardsASuspendedDraft()
+	{
+		using var view = CreateView();
+		view.ShowResult("Completed", success: true);
+		view.Suspend();
+		view.Resume();
+		Assert.False(view.Visible);
+		Assert.False(view.IsShowingResult);
+
+		view.Open("view content");
+		view.Suspend();
+		view.Close();
+		view.Resume();
+		Assert.False(view.Visible);
+		Assert.False(view.IsEditing);
+	}
+
+	[Fact]
 	public void GhostUpdatesSynchronouslyWhenCursorMoves()
 	{
 		using var view = new TerminalWorkspaceCommandLineView(
@@ -273,6 +317,46 @@ public sealed class TerminalWorkspaceCommandLineViewTests
 		Assert.Equal(1, fullCompletionCalls);
 		Assert.Equal("copy", view.InputText);
 	}
+
+	[Fact]
+	public void PaneNavigationKeysStayInsideAnOpenCommandLine()
+	{
+		using var view = CreateView();
+		view.Open("view con");
+		var input = GetField<TerminalTransparentTextEditor>(view, "_input");
+
+		Assert.True(input.NewKeyDownEvent(Key.F6));
+		Assert.True(input.NewKeyDownEvent(Key.F6.WithShift));
+		Assert.True(input.NewKeyDownEvent(Key.Tab.WithShift));
+
+		Assert.True(view.IsEditing);
+		Assert.Equal("view con", view.InputText);
+	}
+
+	[Fact]
+	public void DownKeepsTheTypedCommandWhenHistoryIsNotBeingBrowsed()
+	{
+		using var view = CreateView(new TerminalCommandHistory(["view tree"]));
+		view.Open("view content");
+		var input = GetField<TerminalTransparentTextEditor>(view, "_input");
+
+		Assert.True(input.NewKeyDownEvent(Key.CursorDown));
+
+		Assert.Equal("view content", view.InputText);
+	}
+
+	private static TerminalWorkspaceCommandLineView CreateView(TerminalCommandHistory? history = null) =>
+		new(
+			null!,
+			static (_, _) => TerminalWorkspaceCommandCompletion.Empty,
+			static (_, _) => TerminalWorkspaceCommandGhostCompletion.Empty,
+			static key => key,
+			history ?? new TerminalCommandHistory(),
+			plain: false,
+			useUnicode: true)
+		{
+			Frame = new Rectangle(0, 0, 80, 1)
+		};
 
 	private static string GetResultText(TerminalWorkspaceCommandLineView view)
 	{

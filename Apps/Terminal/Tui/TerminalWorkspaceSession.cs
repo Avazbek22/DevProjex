@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
+using System.Text.RegularExpressions;
 using DevProjex.Terminal.CommandLine;
 using DevProjex.Terminal.DesktopControl;
 using DevProjex.Terminal.Execution;
@@ -24,6 +25,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private const int WelcomeHorizontalMargin = 2;
 	private const int WelcomeWideActionsWidth = 42;
 	private const int SettingsRefreshDebounceMilliseconds = 200;
+	private const int ChoiceDialogChromeHeight = 9;
 	private static readonly TimeSpan SettingsPersistenceShutdownBudget = TimeSpan.FromSeconds(1);
 
 	private readonly IApplication _application;
@@ -57,6 +59,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private ProjectSelectionProfile? _localProfileBaseline;
 	private readonly LiveSessionRegistry _liveSessionRegistry;
 	private readonly TerminalExportDestinationHistory _exportDestinations = new();
+	private readonly TerminalOverlayPointerGuard _overlayPointerGuard = new();
 	private readonly Lazy<AgentJournalStore> _agentJournalStore;
 	private readonly AgentJournalReceiptFormatter _agentJournalReceiptFormatter = new();
 
@@ -88,6 +91,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 
 	private TerminalWelcomeContext? _welcomeContext;
 	private RecentProjectsDb? _recentProjectsSnapshot;
+	private int _welcomeDetailPathWidth;
 	private string? _recentWorkspaceSelectionKey;
 	private WelcomeViewGraph? _welcomeViews;
 	private LoadingViewGraph? _loadingViews;
@@ -136,6 +140,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private string? _searchQuery;
 	private string? _previewSearchQuery;
 	private string? _selectedTreePath;
+	private (int Row, int Column)? _provisionalPreviewViewport;
 	private bool _suppressTreeSelectionTracking;
 	private bool _suppressWorkspaceFocusTracking;
 	private TerminalWorkspaceActionRegistry? _workspaceActionRegistry;
@@ -211,6 +216,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_terminalWidth = Math.Max(_environment.Width, initialScreen.Width);
 		_terminalHeight = Math.Max(_environment.Height, initialScreen.Height);
 		_application.Keyboard.KeyDown += OnRootKeyDown;
+		_application.Mouse.MouseEvent += SwallowOverlayGestureRemainder;
 		_services.Localization.LanguageChanged += OnLanguageChanged;
 		_screenChangedHandler = OnApplicationScreenChanged;
 		_application.ScreenChanged += _screenChangedHandler;
@@ -262,23 +268,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		if (_welcomeContext is null || _welcomeRows is null || _welcomeList is null)
 			return;
 
-		var selectedKind = _welcomeList.SelectedItem is { } selected &&
-						   selected >= 0 && selected < _welcomeRows.Count
-			? _welcomeRows[selected].Action.Kind
-			: (TerminalWelcomeActionKind?)null;
-		var actions = BuildWelcomeActions(_welcomeContext);
-		_welcomeRows.Clear();
-		foreach (var action in actions)
-			_welcomeRows.Add(new TerminalWelcomeActionRow(action));
-		var selectedIndex = selectedKind is null
-			? 0
-			: actions
-				.Select((action, index) => (action, index))
-				.FirstOrDefault(pair => pair.action.Kind == selectedKind)
-				.index;
-		if (_welcomeRows.Count > 0)
-			_welcomeList.SelectedItem = Math.Clamp(selectedIndex, 0, _welcomeRows.Count - 1);
-
+		RebuildWelcomeRows();
 		if (_welcomeTagline is not null)
 			_welcomeTagline.Text = L("Terminal.Tui.Welcome.Description");
 		if (_welcomeCurrentTitle is not null)
@@ -299,9 +289,69 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			_welcomeDetailHeading.Text = L("Terminal.Tui.Details");
 		if (_welcomeQuickStart is not null)
 			_welcomeQuickStart.Text = L("Terminal.Tui.Welcome.QuickStart");
-		if (_welcomeFooter is not null)
-			_welcomeFooter.Text = L("Terminal.Tui.Footer.Welcome");
+		UpdateWelcomeFooter();
 		UpdateWelcomeSelection();
+		// Translated texts differ in width, so the status line is fitted to the new language.
+		ApplyWelcomeLayout();
+	}
+
+	private void RefreshWelcomeRecentProjects()
+	{
+		if (_screen != TerminalWorkspaceScreen.Welcome || _recentProjectsSnapshot is null)
+			return;
+
+		_welcomeContext = CreateWelcomeContext(_recentProjectsSnapshot);
+		RebuildWelcomeRows();
+		UpdateWelcomeSelection();
+		ApplyWelcomeLayout();
+	}
+
+	private void RebuildWelcomeRows()
+	{
+		if (_welcomeContext is null || _welcomeRows is null || _welcomeList is null)
+			return;
+
+		var selectedAction = _welcomeList.SelectedItem is { } selected &&
+							 selected >= 0 && selected < _welcomeRows.Count
+			? _welcomeRows[selected].Action
+			: null;
+		var actions = BuildWelcomeActions(_welcomeContext);
+		_welcomeRows.Clear();
+		foreach (var action in actions)
+			_welcomeRows.Add(new TerminalWelcomeActionRow(action));
+		if (_welcomeRows.Count > 0)
+			_welcomeList.SelectedItem = FindWelcomeActionIndex(actions, selectedAction);
+	}
+
+	// Keeps the same recent project selected when its number changes, otherwise the same kind of row.
+	private static int FindWelcomeActionIndex(
+		IReadOnlyList<TerminalWelcomeAction> actions,
+		TerminalWelcomeAction? selected)
+	{
+		if (selected is null)
+			return 0;
+		var firstOfKind = -1;
+		for (var index = 0; index < actions.Count; index++)
+		{
+			if (actions[index].Kind != selected.Kind)
+				continue;
+			if (string.Equals(actions[index].Value, selected.Value, StringComparison.Ordinal))
+				return index;
+			if (firstOfKind < 0)
+				firstOfKind = index;
+		}
+		return Math.Max(0, firstOfKind);
+	}
+
+	private void UpdateWelcomeFooter()
+	{
+		// The Welcome footer leaves two columns on each side of the screen.
+		if (_welcomeFooter is not null)
+		{
+			_welcomeFooter.Text = FitFooterToWidth(
+				L("Terminal.Tui.Footer.Welcome"),
+				Math.Max(1, _terminalWidth - 4));
+		}
 	}
 
 	private void OnApplicationScreenChanged(
@@ -401,14 +451,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	{
 		ClearRoot();
 		_screen = TerminalWorkspaceScreen.TooSmall;
-		var tooSmall = new TerminalLiteralLabel
-		{
-			X = Pos.Center(),
-			Y = Pos.Center(),
-			Width = Dim.Auto(),
-			Text = L("Terminal.Tui.Error.Resize"),
-			SchemeName = TerminalWorkspaceTheme.Warning
-		};
+		var tooSmall = CreateTooSmallLabel();
+		tooSmall.Visible = true;
 		_loadingViews = new LoadingViewGraph(tooSmall);
 		_root.Add(tooSmall);
 	}
@@ -454,6 +498,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			X = 2,
 			Y = 2,
 			Width = Dim.Fill(2),
+			// A fixed height lets the tagline wrap into the free row below it from the first layout.
+			Height = 2,
 			Text = L("Terminal.Tui.Welcome.Description"),
 			SchemeName = TerminalWorkspaceTheme.Base
 		};
@@ -629,10 +675,13 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var loadResult = _services.RecentProjectsStore.LoadForStartupWithStatus(
 			TimeSpan.FromMilliseconds(200));
 		_recentProjectsSnapshot = loadResult.Database;
-		var recent = loadResult.Database.RecentFolders
-			.Select(static entry => entry.Path);
-		return TerminalWelcomePolicy.Create(_options.ProjectPath, recent);
+		return CreateWelcomeContext(loadResult.Database);
 	}
+
+	private TerminalWelcomeContext CreateWelcomeContext(RecentProjectsDb database) =>
+		TerminalWelcomePolicy.Create(
+			_options.ProjectPath,
+			database.RecentFolders.Select(static entry => entry.Path));
 
 	private IReadOnlyList<TerminalWelcomeAction> BuildWelcomeActions(TerminalWelcomeContext context)
 	{
@@ -700,7 +749,9 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_welcomeList.SetNeedsDraw();
 
 		var action = _welcomeRows[selected].Action;
-		_welcomeDetail.Text = action.Description;
+		_welcomeDetail.Text = action is { Kind: TerminalWelcomeActionKind.RecentProject, Value: { } path }
+			? $"{action.Description}\n{FitPathToWidth(path, _welcomeDetailPathWidth)}"
+			: action.Description;
 	}
 
 	private void ActivateWelcomeSelection()
@@ -716,14 +767,14 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		{
 			case TerminalWelcomeActionKind.OpenCurrent:
 				if (_welcomeContext is not null)
-					BeginOpenProject(_welcomeContext.CurrentDirectory, _options.Profile);
+					BeginOpenFolder(_welcomeContext.CurrentDirectory);
 				break;
 			case TerminalWelcomeActionKind.RecentWorkspaces:
 				OpenRecentWorkspaces();
 				break;
 			case TerminalWelcomeActionKind.RecentProject:
 				if (action.Value is { } recentProject)
-					BeginOpenProject(recentProject, _options.Profile, TerminalProjectOpenSource.Recent);
+					BeginOpenFolder(recentProject, TerminalProjectOpenSource.Recent);
 				break;
 			case TerminalWelcomeActionKind.BrowseFolder:
 				BrowseForProject();
@@ -762,8 +813,16 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			return;
 		}
 
+		BeginOpenFolder(project);
+	}
+
+	// Saved settings are resolved for the folder being opened, not for the startup directory.
+	private void BeginOpenFolder(
+		string project,
+		TerminalProjectOpenSource source = TerminalProjectOpenSource.Other)
+	{
 		if (TryResolveAutomaticProfileInteractively(project, out var profile))
-			BeginOpenProject(project, profile);
+			BeginOpenProject(project, profile, source);
 	}
 
 	private void OpenPortableProfile()
@@ -809,6 +868,13 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			string.Empty);
 		if (string.IsNullOrWhiteSpace(url))
 			return;
+
+		// Shipped builds never clone over the local transport, so a folder opens in place, as with :open.
+		if (TryResolveDirectory(url, out var localProject))
+		{
+			BeginOpenFolder(localProject);
+			return;
+		}
 
 		if (!RepositoryUrlUtility.IsSupportedCloneSource(url))
 		{
@@ -1082,11 +1148,14 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					state.Plan,
 					operationCts.Token)
 				.ConfigureAwait(false);
-			if (_stopping || operationCts.IsCancellationRequested)
+			if (_stopping)
 				return;
+			// Esc is handled on the UI thread, so checking cancellation there as well lets a
+			// cancel that arrives just before publishing still return to Welcome.
 			sessionAccepted = await InvokeAsync(() =>
 				TerminalRepositorySessionOwnership.TryPublishAndReplace(
-					_operations.IsCurrent(WorkspaceOperationKind.Active, operationCts),
+					_operations.IsCurrent(WorkspaceOperationKind.Active, operationCts) &&
+					!operationCts.IsCancellationRequested,
 					() =>
 					{
 						_gitCliAvailable = gitCliAvailable;
@@ -1095,7 +1164,11 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					ref _ownedRepositorySession,
 					preparedRepositorySession)).ConfigureAwait(false);
 			if (!sessionAccepted)
+			{
+				if (operationCts.IsCancellationRequested)
+					throw new OperationCanceledException();
 				return;
+			}
 
 			if (state.Plan.SourceIdentity?.RepositoryUrl is { Length: > 0 } repositoryUrl)
 			{
@@ -1269,6 +1342,17 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		CancelWorkspaceRefreshes();
 		ClearRoot();
 		_screen = TerminalWorkspaceScreen.Workspace;
+		_provisionalPreviewViewport = null;
+		if (previousProjectRoot is null ||
+			!ProjectTreePathIdentity.CanonicalComparer.Equals(previousProjectRoot, state.Plan.SourceRoot))
+		{
+			// Preview view, format, and searches belong to the project they were chosen in;
+			// a newly opened project starts from its own saved settings or the defaults.
+			_previewView = ProjectContextView.Tree;
+			_format = ProjectContextDocumentFormat.Text;
+			_previewSearchQuery = null;
+			_searchQuery = null;
+		}
 		var persisted = _services.TerminalSettingsStore.LoadProjectSettings(state.Plan.SourceRoot);
 		if (persisted is not null)
 		{
@@ -1417,6 +1501,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			X = 1,
 			Y = Pos.AnchorEnd(2),
 			Width = Dim.Fill(1),
+			Height = 1,
 			SchemeName = TerminalWorkspaceTheme.Secondary
 		};
 		var footer = new TerminalLiteralLabel
@@ -1494,13 +1579,18 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var controlsHadFocus = ControlsHaveFocus;
 		var focusedControlSection = _activeControlSection;
 		var aggregateControlWasActive = _activeAggregateControlSection == focusedControlSection;
-		var previewRow = _preview.FirstVisibleLine;
-		var previewColumn = _preview.HorizontalOffset;
+		var (previewRow, previewColumn) = _provisionalPreviewViewport ??
+			(_preview.FirstVisibleLine, _preview.HorizontalOffset);
 		if (_state.VisibleRows.Count > 0)
 			_tree.SelectedItem = Math.Clamp(selected, 0, _state.VisibleRows.Count - 1);
 		var previewDocumentChanged = _preview.SetDocument(
 			_state.PreviewDocument,
 			preserveViewport: true);
+		// The short tree listing shown between a plan change and its rendered document would
+		// clamp the viewport, so the position is carried over to the rendered document.
+		_provisionalPreviewViewport = _state.IsPreviewProvisional
+			? (previewRow, previewColumn)
+			: null;
 		RestorePreviewViewport(previewRow, previewColumn);
 		_state.ReleaseRetiredPreviewDocuments();
 		if (treeHadFocus)
@@ -1521,11 +1611,13 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		}
 		_tree.UpdateContentMetrics(_state.VisibleRowWidth, _state.VisibleRows.Count);
 		UpdateTreeEmptyHint();
-		View? controlToRestore = aggregateControlWasActive
-			? GetAggregateControlSection(focusedControlSection).List
-			: GetControlSection(focusedControlSection).List;
+		var controlToRestore = GetControlFocusTarget(
+			focusedControlSection,
+			aggregateControlWasActive);
+		// An open command line owns the focus; Parameters regains it when the line closes.
 		if (controlsHadFocus ||
-			(controlsWereActive && !HasActiveOperation && controlToRestore?.Enabled == true))
+			(controlsWereActive && _commandLine?.IsEditing != true &&
+			 !HasActiveOperation && controlToRestore?.Enabled == true))
 		{
 			_activeControlSection = focusedControlSection;
 			_activeAggregateControlSection = aggregateControlWasActive
@@ -1536,7 +1628,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		}
 		UpdateWorkspaceFocus();
 		if (previewDocumentChanged && !string.IsNullOrWhiteSpace(_previewSearchQuery))
-			SchedulePreviewSearch(_previewSearchQuery, showNoResults: false);
+			SchedulePreviewSearch(_previewSearchQuery, showNoResults: false, userInitiated: false);
 		ScheduleWorkspacePersistence();
 	}
 
@@ -1564,9 +1656,11 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var focusedPath = string.IsNullOrWhiteSpace(_selectedTreePath)
 			? null
 			: PathUtility.NormalizeSeparators(Path.GetRelativePath(state.Plan.SourceRoot, _selectedTreePath));
+		// The tree selection lives in the local project profile; repeating a large frontier here
+		// would only crowd presentation state out of the size-limited settings document.
 		return new TerminalProjectSettings(
 			state.Plan.SourceRoot,
-			state.BuildPersistedSelectedRelativePaths(),
+			[],
 			state.BuildExpandedRelativePaths(),
 			focusedPath,
 			_previewView,
@@ -1642,6 +1736,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		});
 	}
 
+	private bool IsTreePathVisible(string? path) =>
+		_state is not null && !string.IsNullOrWhiteSpace(path) &&
+		_state.VisibleRows.Any(row => ProjectTreePathIdentity.CanonicalComparer.Equals(row.Node.FullPath, path));
+
 	private int FindSelectedTreeRow()
 	{
 		if (_state is null || _state.VisibleRows.Count == 0)
@@ -1671,21 +1769,21 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var tokens = ResolveDisplayedTokenCount(state);
 		var folders = state.HasVisibleTreeItems ? state.SelectedFolderCount : 0;
 		var compressionUnavailable = GetCurrentCompressionAvailability(state)?.IsUnavailable == true;
+		var compactMetrics = $"{state.SelectedFileCount:N0} F  {folders:N0} D  " +
+							 $"~{tokens:N0} tok  " +
+							 $"{warningCount:N0} W  {errorCount:N0} E";
+		var selectionPersistence = BuildSelectionPersistenceIndicator();
+		var compactActivity = BuildAgentActivityIndicator(compact: true);
 		if (width < 80)
 		{
-			var compactActivity = BuildAgentActivityIndicator(compact: true);
-			var compactSelectionPersistence = BuildSelectionPersistenceIndicator();
-			return $"{state.SelectedFileCount:N0} F  {folders:N0} D  " +
-				   $"~{tokens:N0} tok  " +
-				   $"{warningCount:N0} W  {errorCount:N0} E" +
+			return compactMetrics +
 				   (compressionUnavailable ? "  C!" : string.Empty) +
 				   (_liveSessions.Count > 0 ? "  Live context" : string.Empty) +
-				   (compactSelectionPersistence is null ? string.Empty : $"  {compactSelectionPersistence}") +
+				   (selectionPersistence is null ? string.Empty : $"  {selectionPersistence}") +
 				   (compactActivity is null ? string.Empty : $"  {compactActivity}");
 		}
 
-		var separator = _environment.SupportsUnicode ? PanelSeparator : " | ";
-		var parts = new List<string>
+		var metrics = new[]
 		{
 			$"{L("Terminal.Analysis.Files")} {state.SelectedFileCount:N0}",
 			$"{L("Terminal.Analysis.Folders")} {folders:N0}",
@@ -1694,17 +1792,59 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			$"{L("Terminal.Tui.Warnings")} {warningCount:N0}",
 			$"{L("Terminal.Tui.Errors")} {errorCount:N0}"
 		};
+		var indicators = new List<string>();
+		var compactIndicators = new List<string>();
 		if (compressionUnavailable)
-			parts.Add(L("Compression.Metrics.Unavailable"));
+		{
+			indicators.Add(L("Compression.Metrics.Unavailable"));
+			compactIndicators.Add("C!");
+		}
 		if (_liveSessions.Count > 0)
-			parts.Add(BuildLiveSessionIndicator(_liveSessions));
-		if (BuildSelectionPersistenceIndicator() is { } selectionPersistence)
-			parts.Add(selectionPersistence);
-		if (BuildAgentActivityIndicator(compact: false) is { } activity)
-			parts.Add(activity);
-		return string.Join(
-			separator,
-			parts);
+		{
+			var liveSessions = BuildLiveSessionIndicator(_liveSessions);
+			indicators.Add(liveSessions);
+			compactIndicators.Add(liveSessions);
+		}
+		if (selectionPersistence is not null)
+		{
+			indicators.Add(selectionPersistence);
+			compactIndicators.Add(selectionPersistence);
+		}
+		if (BuildAgentActivityIndicator(compact: false) is { } activity && compactActivity is not null)
+		{
+			indicators.Add(activity);
+			compactIndicators.Add(compactActivity);
+		}
+		return FitStatusLine(
+			metrics,
+			compactMetrics,
+			indicators,
+			compactIndicators,
+			_environment.SupportsUnicode ? PanelSeparator : " | ",
+			width - 2);
+	}
+
+	// The full metrics come first when everything fits. Otherwise the metrics shrink to their
+	// compact form so the error count and the indicators stay visible; the Live context
+	// indicator keeps its client name at this width, the activity text shortens, and whatever
+	// still does not fit is cut at the end with an ellipsis.
+	internal static string FitStatusLine(
+		IReadOnlyList<string> metrics,
+		string compactMetrics,
+		IReadOnlyList<string> indicators,
+		IReadOnlyList<string> compactIndicators,
+		string separator,
+		int availableColumns)
+	{
+		var full = string.Join(separator, metrics.Concat(indicators));
+		if (full.GetColumns() <= availableColumns)
+			return full;
+		var withCompactMetrics = string.Join(separator, indicators.Prepend(compactMetrics));
+		return withCompactMetrics.GetColumns() <= availableColumns
+			? withCompactMetrics
+			: FitEndToWidth(
+				string.Join(separator, compactIndicators.Prepend(compactMetrics)),
+				availableColumns);
 	}
 
 	private string? BuildSelectionPersistenceIndicator() =>
@@ -1739,7 +1879,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			snapshot,
 			focusedTreePath,
 			compact,
-			AgentJournalText);
+			AgentJournalText,
+			_services.Localization.CurrentLanguage);
 	}
 
 	private CodeCompressionAvailabilitySnapshot? GetCurrentCompressionAvailability(
@@ -1758,7 +1899,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	internal static long ResolveDisplayedTokenCount(TerminalWorkspaceState state)
 	{
 		ArgumentNullException.ThrowIfNull(state);
-		return state.PreviewOutputMetrics.Tokens;
+		// Without visible items the preview still holds the root line, but nothing would be exported.
+		return state.HasVisibleTreeItems ? state.PreviewOutputMetrics.Tokens : 0;
 	}
 
 	private void UpdateWorkspaceHeaderLayout()
@@ -1908,8 +2050,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var previewTitleWidth = Math.Max(8, _previewFrame.Viewport.Width - 2);
 		var renderedPreviewTitle = previewTitle.GetColumns() <= previewTitleWidth
 			? previewTitle
-			: $"{previewMarker}{L("Terminal.Tui.Preview")}{PanelSeparator}" +
-			  $"{_workspace.LocalizeView(_previewView)}{PanelSeparator}{GetFormatToken()}";
+			: FitEndToWidth(
+				$"{previewMarker}{L("Terminal.Tui.Preview")}{PanelSeparator}" +
+				$"{_workspace.LocalizeView(_previewView)}{PanelSeparator}{GetFormatToken()}",
+				previewTitleWidth);
 		_previewFrame.Title = _options.Plain ? string.Empty : renderedPreviewTitle;
 		if (_previewPanelHeading is not null)
 			_previewPanelHeading.Text = renderedPreviewTitle;
@@ -1925,8 +2069,16 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	{
 		if (_footer is null || _commandLine?.Visible == true)
 			return;
-		var wide = _application.Screen.Width >= 110;
-		_footer.Text = _activePane switch
+		// The footer label leaves one column on each side of the screen.
+		var width = Math.Max(1, _application.Screen.Width - 2);
+		var footer = _application.Screen.Width >= 110 ? BuildFooterText(wide: true) : null;
+		if (footer is null || footer.GetColumns() > width)
+			footer = BuildFooterText(wide: false);
+		_footer.Text = FitFooterToWidth(footer, width);
+	}
+
+	private string BuildFooterText(bool wide) =>
+		_activePane switch
 		{
 			TerminalWorkspacePane.Tree =>
 				L(wide ? "Terminal.Tui.Footer.Tree.Wide" : "Terminal.Tui.Footer.Tree"),
@@ -1934,7 +2086,30 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				L(wide ? "Terminal.Tui.Footer.Preview.Wide" : "Terminal.Tui.Footer.Preview"),
 			_ => BuildControlsFooterText(wide)
 		};
+
+	// Drops shortcut groups from the end until the footer fits. The leading group and the
+	// ':' and '?' entry points stay: every dropped shortcut remains reachable through them.
+	internal static string FitFooterToWidth(string footer, int width)
+	{
+		ArgumentNullException.ThrowIfNull(footer);
+		// Even entries are shortcut groups; odd entries are the separators between them.
+		var parts = FooterGroupSeparatorRegex().Split(footer).ToList();
+		for (var index = parts.Count - 1;
+			 index > 0 && string.Concat(parts).GetColumns() > width;
+			 index -= 2)
+		{
+			if (!IsFooterEntryPoint(parts[index]))
+				parts.RemoveRange(index - 1, 2);
+		}
+		return FitEndToWidth(string.Concat(parts), width);
 	}
+
+	private static bool IsFooterEntryPoint(string group) =>
+		group.StartsWith(": ", StringComparison.Ordinal) ||
+		group.StartsWith("? ", StringComparison.Ordinal);
+
+	[GeneratedRegex("( {2,})", RegexOptions.CultureInvariant)]
+	private static partial Regex FooterGroupSeparatorRegex();
 
 	private string BuildControlsFooterText(bool wide)
 	{
@@ -1979,6 +2154,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_treeFrame.SchemeName = _activePane == TerminalWorkspacePane.Tree
 			? TerminalWorkspaceTheme.FocusedPanel
 			: TerminalWorkspaceTheme.Panel;
+		// Like the Parameters lists, only the active pane renders a selection highlight.
+		_tree.SchemeName = _activePane == TerminalWorkspacePane.Tree
+			? TerminalWorkspaceTheme.List
+			: TerminalWorkspaceTheme.InactiveList;
 		_previewFrame.SchemeName = _activePane == TerminalWorkspacePane.Preview
 			? TerminalWorkspaceTheme.FocusedPanel
 			: TerminalWorkspaceTheme.Panel;
@@ -2072,6 +2251,16 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		}
 
 		var tooSmall = _layoutMode == TerminalWorkspaceLayoutMode.TooSmall;
+		if (tooSmall)
+		{
+			_commandLine?.Suspend();
+			CancelCommandResult();
+		}
+		else
+		{
+			_commandLine?.Resume();
+			_commandLine?.RestoreInputFocus();
+		}
 		SetVisible(
 			!tooSmall,
 			_welcomeHeading,
@@ -2082,15 +2271,20 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			_welcomeCurrentStatus,
 			_welcomeActionsFrame,
 			_welcomeDetailFrame,
-			_welcomeQuickStart,
-			_welcomeFooter);
+			_welcomeQuickStart);
+		_welcomeFooter.Visible = !tooSmall && _commandLine?.Visible != true;
 		_tooSmall.Visible = tooSmall;
 		if (_operationProgress is not null)
 			_operationProgress.View.Visible = !tooSmall;
 		if (tooSmall)
 			return;
 
-		var actionHeight = Math.Min((_welcomeRows?.Count ?? 6) + 2, 13);
+		UpdateWelcomeFooter();
+		var wideLayout = _layoutMode is TerminalWorkspaceLayoutMode.Split or TerminalWorkspaceLayoutMode.Wide;
+		// Both frames end above the footer, and the stacked layout keeps a line of Details visible.
+		var actionHeight = Math.Min(
+			Math.Min((_welcomeRows?.Count ?? 6) + 2, 13),
+			_terminalHeight - (wideLayout ? 8 : 11));
 		var contentWidth = Math.Max(1, _terminalWidth - 4);
 		_welcomeCurrentPath.Text = FitPathToWidth(
 			_welcomeContext?.CurrentDirectory ?? string.Empty,
@@ -2105,7 +2299,11 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_welcomeCurrentStatus.X = Pos.AnchorEnd(statusWidth + 2);
 		_welcomeCurrentStatus.Text = FitEndToWidth(currentStatus, statusWidth);
 		_welcomeCurrentStatus.Visible = statusWidth >= currentStatus.GetColumns();
-		if (_layoutMode is TerminalWorkspaceLayoutMode.Split or TerminalWorkspaceLayoutMode.Wide)
+		var actionsWidth = wideLayout ? WelcomeWideActionsWidth : contentWidth;
+		FitWelcomeRecentPaths(
+			actionsWidth,
+			wideLayout ? contentWidth - actionsWidth - 2 : contentWidth);
+		if (wideLayout)
 		{
 			_welcomeActionsFrame.X = WelcomeHorizontalMargin;
 			_welcomeActionsFrame.Y = 7;
@@ -2133,6 +2331,19 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_welcomeCurrentPath.Width = Dim.Fill(2);
 	}
 
+	private void FitWelcomeRecentPaths(int actionsFrameWidth, int detailFrameWidth)
+	{
+		if (_welcomeRows is null)
+			return;
+
+		var borderWidth = _presentation.BorderStyle == LineStyle.None ? 0 : 2;
+		foreach (var row in _welcomeRows)
+			row.Width = actionsFrameWidth - borderWidth;
+		// The details text is inset by one column on each side of the frame.
+		_welcomeDetailPathWidth = detailFrameWidth - borderWidth - 2;
+		UpdateWelcomeSelection();
+	}
+
 	private void ApplyLoadingLayout()
 	{
 		if (_tooSmall is null)
@@ -2141,6 +2352,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		foreach (var view in _root.SubViews.Where(view => !ReferenceEquals(view, _tooSmall)))
 			view.Visible = !tooSmall;
 		_tooSmall.Visible = tooSmall;
+		_operationProgress?.ApplyLayout(_terminalWidth, _terminalHeight);
 	}
 
 	private void ApplyWorkspaceLayout()
@@ -2154,8 +2366,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		}
 
 		var requestedFocus = _focus.Capture();
-		var commandWasEditing = _commandLine.IsEditing;
 		var tooSmall = _layoutMode == TerminalWorkspaceLayoutMode.TooSmall;
+		if (!tooSmall)
+			_commandLine.Resume();
+		var commandWasEditing = _commandLine.IsEditing;
 		var previousFocusSuppression = _suppressWorkspaceFocusTracking;
 		_suppressWorkspaceFocusTracking = true;
 		try
@@ -2171,7 +2385,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			_footer.Visible = !tooSmall && !_commandLine.Visible;
 			if (tooSmall)
 			{
-				_commandLine.Close();
+				_commandLine.Suspend();
 				CancelCommandResult();
 			}
 			else
@@ -2328,12 +2542,20 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	}
 
 	private Label CreateTooSmallLabel() =>
-		new()
+		CreateTooSmallLabel(L("Terminal.Tui.Error.Resize"));
+
+	// The hint fills the screen and wraps inside it: a single centered line would clip both of
+	// its ends, including the required size, on exactly the screens that need it.
+	internal static Label CreateTooSmallLabel(string text) =>
+		new TerminalLiteralLabel
 		{
-			X = Pos.Center(),
-			Y = Pos.Center(),
-			Width = Dim.Auto(),
-			Text = L("Terminal.Tui.Error.Resize"),
+			X = 1,
+			Y = 0,
+			Width = Dim.Fill(1),
+			Height = Dim.Fill(),
+			TextAlignment = Alignment.Center,
+			VerticalTextAlignment = Alignment.Center,
+			Text = text,
 			SchemeName = TerminalWorkspaceTheme.Warning,
 			Visible = false
 		};
@@ -2343,15 +2565,26 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		if (!ReferenceEquals(_application.TopRunnableView, _root))
 			return;
 		if (_commandLine?.IsEditing == true)
+		{
+			// A click or a background refresh can move focus while the line stays open;
+			// the keyboard keeps belonging to the line until it is submitted or canceled.
+			_commandLine.RestoreInputFocus();
 			return;
+		}
 		if (_commandLine?.IsShowingResult == true)
 		{
-			key.Handled = true;
+			var dismissedError = _commandLine.IsShowingError;
 			CancelCommandResult();
 			_commandLine.Close();
 			RestoreCommandFooterAndFocus();
-			if (!TerminalWorkspaceCommandKey.IsActivation(key))
+			// An error waits for a key that only dismisses it. A success hides on its own,
+			// so a key pressed before that still performs its action; Esc only dismisses.
+			if (key == Key.Esc ||
+				dismissedError && !TerminalWorkspaceCommandKey.IsActivation(key))
+			{
+				key.Handled = true;
 				return;
+			}
 		}
 		if (_operationProgress is not null && IsOverlayActivationKey(key))
 		{
@@ -2364,6 +2597,13 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		{
 			key.Handled = true;
 			OpenCommandLine();
+			return;
+		}
+		// The too-small hint hides the workspace, so only the exit and cancel keys stay live.
+		if (_layoutMode == TerminalWorkspaceLayoutMode.TooSmall &&
+			key != Key.C.WithCtrl && key.NoShift != Key.Q && key != Key.Esc)
+		{
+			key.Handled = true;
 			return;
 		}
 
@@ -2741,28 +2981,76 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var path = Prompt(L("Terminal.Tui.Tree.Reveal"), L("Terminal.Tui.Tree.RevealPrompt"), null);
 		if (path is null)
 			return;
-		var row = _state.Reveal(path);
-		if (row < 0)
-		{
+		if (!TryRevealTreePath(path))
 			ShowTransientStatus(L("Terminal.Tui.Tree.RevealNotFound"));
-			return;
-		}
+	}
+
+	private bool TryRevealTreePath(string path)
+	{
+		if (_state is null || _tree is null)
+			return false;
+		var row = RevealTreePathInState(_state, path, out var filterCleared);
+		if (filterCleared)
+			_searchQuery = null;
+		if (row < 0)
+			return false;
 		_tree.SelectedItem = row;
 		_selectedTreePath = _state.VisibleRows[row].Node.FullPath;
 		RefreshWorkspace();
+		return true;
+	}
+
+	internal static int RevealTreePathInState(
+		TerminalWorkspaceState state,
+		string path,
+		out bool filterCleared)
+	{
+		ArgumentNullException.ThrowIfNull(state);
+		filterCleared = false;
+		var row = state.Reveal(path);
+		if (row < 0 && state.HasTreeFilter && state.TryResolveTreePath(path, out _))
+		{
+			// The path exists but the active filter hides it; revealing it means leaving the filter.
+			state.ApplyTreeFilter(null);
+			filterCleared = true;
+			row = state.Reveal(path);
+		}
+		return row;
 	}
 
 	private void MovePreviewSection(bool reverse)
 	{
 		if (_preview is null || _preview.Sections.Count == 0)
 			return;
-		var line = _preview.FirstVisibleLine + 1;
-		var index = PreviewDocumentSectionLookup.FindFirstIntersectingSectionIndex(_preview.Sections, line);
-		if (index < 0)
-			index = reverse ? _preview.Sections.Count : -1;
-		index = Math.Clamp(index + (reverse ? -1 : 1), 0, _preview.Sections.Count - 1);
+		var index = ResolveAdjacentPreviewSection(
+			_preview.Sections,
+			_preview.FirstVisibleLine + 1,
+			reverse);
 		_preview.ScrollTo(Math.Max(0, _preview.Sections[index].StartLine - 1), 0);
 		UpdatePreviewRange();
+	}
+
+	// The next section is the first one starting below the top visible line and the previous
+	// one the last starting above it, so the root header and the blank separators between
+	// files never make the jump skip a file.
+	internal static int ResolveAdjacentPreviewSection(
+		IReadOnlyList<PreviewDocumentSection> sections,
+		int firstVisibleLine,
+		bool reverse)
+	{
+		// First section whose start line is after (or, going back, at or after) the top line.
+		var boundary = reverse ? firstVisibleLine - 1 : firstVisibleLine;
+		var low = 0;
+		var high = sections.Count;
+		while (low < high)
+		{
+			var middle = low + (high - low) / 2;
+			if (sections[middle].StartLine > boundary)
+				high = middle;
+			else
+				low = middle + 1;
+		}
+		return Math.Clamp(reverse ? low - 1 : low, 0, sections.Count - 1);
 	}
 
 	private void GoToPreviewLine()
@@ -2787,7 +3075,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		TerminalPreviewRedactionToggleRequestedEventArgs eventArgs)
 	{
 		var kept = _services.SecretRedactionSession.ToggleKeepAsIs(eventArgs.OccurrenceId);
-		SetOperationStatus(
+		ShowTransientStatus(
 			L(kept
 				? "Terminal.Tui.Secret.Kept"
 				: "Terminal.Tui.Secret.Redacted"),
@@ -2814,7 +3102,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_searchQuery = query;
 		var selectedPath = CaptureCurrentTreePath();
 		_state.ApplyTreeFilter(query);
-		_selectedTreePath = selectedPath;
+		if (string.IsNullOrWhiteSpace(query))
+			RevealTreeSelection(selectedPath);
+		else
+			_selectedTreePath = selectedPath;
 		RefreshWorkspace();
 		if (string.IsNullOrWhiteSpace(query))
 		{
@@ -2867,7 +3158,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private void SchedulePreviewSearch(
 		string query,
 		bool showNoResults,
-		bool originatedFromCommandLine = false)
+		bool originatedFromCommandLine = false,
+		bool userInitiated = true)
 	{
 		if (_preview is null || _state is null)
 			return;
@@ -2922,9 +3214,14 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 						normalizedQuery,
 						searchResult,
 						startLine);
-					if (match is not null)
+					// A re-run after a document change only refreshes the matches unless the
+					// user is already in Preview; it never pulls focus from Tree or Parameters.
+					if (match is not null && (userInitiated || _preview.HasFocus))
 					{
 						ScrollPreviewToMatch(match.Value);
+						// Closing the command result must not take focus back from the match.
+						if (originatedFromCommandLine)
+							_commandReturnPane = TerminalWorkspacePane.Preview;
 						_preview.SetFocus();
 						UpdateWorkspaceFocus();
 					}
@@ -2932,7 +3229,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					{
 						UpdatePanelTitles();
 						UpdatePreviewRange();
-						if (showNoResults)
+						if (match is null && showNoResults)
 						{
 							ShowNotice(
 								L("Terminal.Tui.Search"),
@@ -3044,9 +3341,18 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var selectedPath = CaptureCurrentTreePath();
 		_state.ApplyTreeFilter(null);
 		_searchQuery = null;
-		_selectedTreePath = selectedPath;
+		RevealTreeSelection(selectedPath);
 		RefreshWorkspace();
 		_tree.SetFocus();
+	}
+
+	// Keeps the cursor on the same node after the visible projection changes, expanding its
+	// folders when the node would otherwise be hidden.
+	private void RevealTreeSelection(string? path)
+	{
+		_selectedTreePath = path;
+		if (_state is not null && !string.IsNullOrWhiteSpace(path))
+			_state.Reveal(path);
 	}
 
 	private void ToggleCurrentTreeSelection()
@@ -3091,34 +3397,36 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private void ExportContext(
 		ProjectContextDocumentFormat? requestedFormat = null,
 		string? requestedDestination = null,
-		bool originatedFromCommandLine = false)
+		bool originatedFromCommandLine = false,
+		TerminalContextBudget? budget = null)
 	{
 		if (_state is null)
 			return;
 		if (!EnsureRepositoryExportAllowed(originatedFromCommandLine))
 			return;
 		var selectedFormat = requestedFormat ?? _format;
+		var sourceRoot = _state.Plan.SourceRoot;
+		var extension = selectedFormat switch
+		{
+			ProjectContextDocumentFormat.Json => ".json",
+			ProjectContextDocumentFormat.Xml => ".xml",
+			ProjectContextDocumentFormat.Text => ".txt",
+			_ => ".md"
+		};
 		var defaultPath = BuildDefaultExportPath(
-			_state.Plan.SourceRoot,
+			sourceRoot,
 			Directory.GetCurrentDirectory(),
-			$"{GetProjectDisplayName(_state.Plan)}-context" +
-			(selectedFormat switch
-			{
-				ProjectContextDocumentFormat.Json => ".json",
-				ProjectContextDocumentFormat.Xml => ".xml",
-				ProjectContextDocumentFormat.Text => ".txt",
-				_ => ".md"
-			}));
+			$"{GetProjectDisplayName(_state.Plan)}-context{extension}");
 		var destination = requestedDestination ?? Prompt(
 			L("Terminal.Tui.ExportContext"),
 			L("Terminal.Tui.Destination"),
-			_exportDestinations.Resolve(TerminalExportKind.Context, defaultPath));
+			_exportDestinations.ResolveContext(sourceRoot, extension, defaultPath));
 		if (string.IsNullOrWhiteSpace(destination))
 		{
 			ShowTransientStatus(L("Terminal.Tui.Export.DestinationRequired"));
 			return;
 		}
-		_exportDestinations.Remember(TerminalExportKind.Context, destination);
+		_exportDestinations.Remember(sourceRoot, TerminalExportKind.Context, destination);
 		TrackActiveOperation(RunExportWorkflowAsync(
 			L("Terminal.Tui.ExportContext"),
 			async token =>
@@ -3131,7 +3439,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					destination,
 					overwrite: false,
 					token,
-					plain: _options.Plain).ConfigureAwait(false);
+					plain: _options.Plain,
+					budget: budget).ConfigureAwait(false);
 			},
 			async (_, overwrite, token) => new TerminalExportCompletion(
 				await _controller.ExportContextAsync(
@@ -3141,14 +3450,16 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					destination,
 					overwrite,
 					token,
-					plain: _options.Plain).ConfigureAwait(false)),
+					plain: _options.Plain,
+					budget: budget).ConfigureAwait(false)),
 			(exactDestination, dryRun) =>
 				TerminalWorkspaceController.BuildEquivalentContextCommand(
 					_state,
 					_previewView,
 					selectedFormat,
 					exactDestination,
-					dryRun),
+					dryRun,
+					budget),
 			originatedFromCommandLine));
 	}
 
@@ -3174,13 +3485,13 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var destination = requestedDestination ?? Prompt(
 			L("Terminal.Tui.ExportProject"),
 			L("Terminal.Tui.ExactDestination"),
-			_exportDestinations.Resolve(exportKind, defaultPath));
+			_exportDestinations.Resolve(_state.Plan.SourceRoot, exportKind, defaultPath));
 		if (string.IsNullOrWhiteSpace(destination))
 		{
 			ShowTransientStatus(L("Terminal.Tui.Export.DestinationRequired"));
 			return;
 		}
-		_exportDestinations.Remember(exportKind, destination);
+		_exportDestinations.Remember(_state.Plan.SourceRoot, exportKind, destination);
 		TrackActiveOperation(RunExportWorkflowAsync(
 			L("Terminal.Tui.ExportProject"),
 			async token =>
@@ -3701,17 +4012,18 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				SetWorkspaceBusy(null);
 				RefreshWorkspace();
 				SchedulePreviewRefresh();
-				var completed = string.Format(
-					CultureInfo.CurrentCulture,
-					L("Terminal.Tui.ExportCompletedStatus"),
-					result.DestinationPath);
-				if (result.SkippedUnscannableCount > 0)
-				{
-					completed = string.Format(
+				var skippedNotice = result.SkippedUnscannableCount > 0
+					? string.Format(
 						CultureInfo.CurrentCulture,
 						L("Content.Redaction.UnscannableFiles"),
-						result.SkippedUnscannableCount) + " " + completed;
-				}
+						result.SkippedUnscannableCount) + " "
+					: string.Empty;
+				// The command result row starts with a two-column success marker.
+				var availableColumns = _terminalWidth - 2 - (originatedFromCommandLine ? 2 : 0);
+				var completed = skippedNotice + FormatStatusPath(
+					L("Terminal.Tui.ExportCompletedStatus"),
+					result.DestinationPath,
+					availableColumns - skippedNotice.GetColumns());
 				if (originatedFromCommandLine)
 					ShowCommandResult(completed, success: true);
 				else
@@ -3781,23 +4093,28 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	}
 
 	private string ResolveValidationErrorMessage(string code) =>
+		L(ResolveValidationErrorMessageKey(code));
+
+	internal static string ResolveValidationErrorMessageKey(string code) =>
 		code switch
 		{
 			"DPX-GIT-TRACKED-INDEX-UNAVAILABLE" =>
-				L("Terminal.Diagnostic.TrackedIndexUnavailable"),
+				"Terminal.Diagnostic.TrackedIndexUnavailable",
 			GitScopeFilter.UnavailableDiagnosticCode =>
-				L("Terminal.Diagnostic.GitStateUnavailable"),
+				"Terminal.Diagnostic.GitStateUnavailable",
 			GitScopeFilter.UnsafeFilterDiagnosticCode =>
-				L("Terminal.Diagnostic.GitUnsafeFilter"),
+				"Terminal.Diagnostic.GitUnsafeFilter",
 			GitScopeFilter.DeletedDiagnosticCode =>
-				L("Terminal.Diagnostic.GitStateDeleted"),
+				"Terminal.Diagnostic.GitStateDeleted",
 			"DPX-PROJECT-NOT-FOUND" or "DPX-PROJECT-PATH-INVALID" =>
-				L("Terminal.Tui.Error.ProjectUnavailable"),
+				"Terminal.Tui.Error.ProjectUnavailable",
 			"DPX-SELECTION-PATH-MISSING" =>
-				L("Terminal.Diagnostic.SelectedPathMissing"),
+				"Terminal.Diagnostic.SelectedPathMissing",
 			"DPX-SELECTION-PATH-INVALID" =>
-				L("Terminal.Error.SelectionPathInvalid"),
-			_ => L("Terminal.Tui.Error.InvalidOperation")
+				"Terminal.Error.SelectionPathInvalid",
+			"DPX-CLI-ZIP-EXTENSION-REQUIRED" =>
+				"Terminal.Error.ZipExtensionRequired",
+			_ => "Terminal.Tui.Error.InvalidOperation"
 		};
 
 	private void SetWorkspaceBusy(string? operationName, string? phase = null)
@@ -4109,6 +4426,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				_gitCliAvailable = gitCliAvailable;
 				_preferredGitMode = preferredGitMode;
 				SetSettingsRefreshOutcome(requestId, SettingsRefreshOutcome.Applied);
+				DiscardSettingsFocusSnapshot();
 				ClearSettingsDraft();
 				RefreshWorkspace();
 				ScheduleLocalProfilePersistence();
@@ -4126,6 +4444,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				await InvokeAsync(() =>
 				{
 					SetSettingsRefreshOutcome(requestId, SettingsRefreshOutcome.Failed);
+					DiscardSettingsFocusSnapshot();
 					ClearSettingsDraft();
 					RefreshWorkspace();
 					return true;
@@ -4228,6 +4547,15 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				return;
 			}
 		}
+	}
+
+	// A parameter change keeps the Parameters focus for its failure path. When the change ends
+	// without a failure and without a busy phase, that snapshot must not steer the focus
+	// restored after a later operation such as an export started from another pane.
+	private void DiscardSettingsFocusSnapshot()
+	{
+		if (_operationProgress is null)
+			_focus.DiscardBeforeBusy();
 	}
 
 	private Task ShowSettingsFailureAsync(
@@ -4608,7 +4936,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		if (aggregate is not null && logicalIndex == 0)
 		{
 			_activeAggregateControlSection = section;
-			aggregate.SetFocus();
+			GetControlFocusTarget(section, aggregateIsActive: true)?.SetFocus();
 		}
 		else
 		{
@@ -4741,10 +5069,11 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private string? Prompt(string title, string label, string? initialValue)
 	{
 		using var dialog = CreateDialog(title, 74, 9);
+		var top = AddPlainDialogTitle(dialog, title);
 		var prompt = new TextView
 		{
 			X = 1,
-			Y = 0,
+			Y = top,
 			Width = Dim.Fill(1),
 			Height = 2,
 			ReadOnly = true,
@@ -4756,7 +5085,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var input = new TextField
 		{
 			X = 1,
-			Y = 2,
+			Y = top + 2,
 			Width = Dim.Fill(1),
 			Text = initialValue ?? string.Empty,
 			SchemeName = TerminalWorkspaceTheme.List
@@ -4776,12 +5105,13 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	{
 		if (values.Count == 0)
 			return null;
-		var height = Math.Clamp(values.Count + 9, 12, Math.Max(12, _application.Screen.Height - 4));
+		var height = Math.Clamp(values.Count + ChoiceDialogChromeHeight, 12, Math.Max(12, _application.Screen.Height - 4));
 		using var dialog = CreateDialog(title, preferredWidth, height);
+		var top = AddPlainDialogTitle(dialog, title);
 		var label = new TextView
 		{
 			X = 1,
-			Y = 0,
+			Y = top,
 			Width = Dim.Fill(1),
 			Height = 2,
 			ReadOnly = true,
@@ -4794,10 +5124,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var list = new ListView
 		{
 			X = 1,
-			Y = 2,
+			Y = top + 2,
 			Width = Dim.Fill(1),
 			// Dialog button layout can collapse Dim.Fill() to one row in Terminal.Gui v2.
-			Height = values.Count,
+			Height = Dim.Func(_ => ResolveChoiceListHeight(values.Count, ResolveDialogHeight(height))),
 			SchemeName = TerminalWorkspaceTheme.List
 		};
 		list.SetSource(source);
@@ -4810,19 +5140,16 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			_application.RequestStop(dialog);
 		}
 
-		list.Accepted += (_, _) => AcceptSelection();
-		list.KeyDown += (_, key) =>
-		{
-			if (key != Key.Enter)
-				return;
-			key.Handled = true;
-			AcceptSelection();
-		};
+		TerminalInteractiveView.OnAccept(list, AcceptSelection);
 		dialog.Add(label, list);
 		dialog.AddButton(CreateDialogButton(L("Terminal.Tui.Back")));
 		RunOverlay(dialog, list);
 		return selected;
 	}
+
+	// The list keeps its rows inside the dialog so a long list scrolls instead of running under the frame.
+	internal static int ResolveChoiceListHeight(int itemCount, int dialogHeight)
+		=> Math.Max(1, Math.Min(itemCount, dialogHeight - ChoiceDialogChromeHeight));
 
 	private string? SelectPath(
 		string title,
@@ -4836,31 +5163,32 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			16,
 			Math.Max(16, _terminalHeight - 2));
 		using var dialog = CreateDialog(title, dialogWidth, dialogHeight);
+		var top = AddPlainDialogTitle(dialog, title);
 		var locationTitle = new TerminalLiteralLabel
 		{
 			X = 1,
-			Y = 0,
+			Y = top,
 			Text = L("Terminal.Tui.Picker.CurrentFolder"),
 			SchemeName = TerminalWorkspaceTheme.Secondary
 		};
 		var location = new TerminalLiteralLabel
 		{
 			X = 1,
-			Y = 1,
+			Y = top + 1,
 			Width = Dim.Fill(1),
 			SchemeName = TerminalWorkspaceTheme.Base
 		};
 		var pathTitle = new TerminalLiteralLabel
 		{
 			X = 1,
-			Y = 3,
+			Y = top + 3,
 			Text = L("Terminal.Tui.Picker.Path"),
 			SchemeName = TerminalWorkspaceTheme.Secondary
 		};
 		var pathInput = new TextField
 		{
 			X = 1,
-			Y = 4,
+			Y = top + 4,
 			Width = Dim.Fill(1),
 			Text = initialPath ?? string.Empty,
 			SchemeName = TerminalWorkspaceTheme.List
@@ -4869,7 +5197,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var list = new ListView
 		{
 			X = 1,
-			Y = 6,
+			Y = top + 6,
 			Width = Dim.Fill(1),
 			Height = Dim.Fill(3),
 			SchemeName = TerminalWorkspaceTheme.List
@@ -4943,11 +5271,19 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				_application.RequestStop(dialog);
 				return;
 			}
+			if (selection.DirectoryToBrowse is { } directory)
+			{
+				model.Open(directory);
+				Refresh();
+				pathInput.Text = model.CurrentDirectory;
+				list.SetFocus();
+				return;
+			}
 
 			ActivateCurrent();
 		}
 
-		list.Accepted += (_, _) => ActivateCurrent();
+		TerminalInteractiveView.OnAccept(list, ActivateCurrent);
 		pathInput.KeyDown += (_, key) =>
 		{
 			if (key == Key.Tab)
@@ -4981,7 +5317,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		};
 		dialog.Add(locationTitle, location, pathTitle, pathInput, list, status);
 		var back = CreateDialogButton(L("Terminal.Tui.Back"));
-		back.Accepted += (_, _) =>
+		TerminalInteractiveView.OnAccept(back, () =>
 		{
 			var parent = model.Entries.FirstOrDefault(static entry => entry.IsParent);
 			if (parent is null)
@@ -4990,11 +5326,11 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			Refresh();
 			pathInput.Text = model.CurrentDirectory;
 			list.SetFocus();
-		};
+		});
 		dialog.AddButton(back);
 		dialog.AddButton(CreateDialogButton(L("Terminal.Tui.Cancel")));
 		var open = CreateDialogButton(L("Terminal.Tui.Open"));
-		open.Accepted += (_, _) => OpenSelection();
+		TerminalInteractiveView.OnAccept(open, OpenSelection);
 		dialog.AddButton(open);
 		dialog.KeyDown += (_, key) =>
 		{
@@ -5012,10 +5348,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	{
 		var title = L("Terminal.Tui.ExportConfirmTitle");
 		var dialogWidth = ResolveDialogWidth(86);
-		var text = _workspace.BuildExportSummaryText(summary, Math.Max(12, dialogWidth - 26));
+		var bodyWidth = Math.Max(20, dialogWidth - 6);
+		var text = _workspace.BuildExportSummaryText(summary, bodyWidth);
 		if (_options.Plain)
 			text = $"{title}\n\n{text}";
-		var bodyWidth = Math.Max(20, dialogWidth - 6);
 		var dialogHeight = EstimateWrappedLineCount(text, bodyWidth) + 8;
 		using var dialog = CreateDialog(title, dialogWidth, dialogHeight);
 		var body = new TextView
@@ -5035,9 +5371,9 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		dialog.AddButton(cancel);
 		var dryRun = CreateDialogButton(L("Terminal.Tui.DryRun"));
 		dialog.AddButton(dryRun);
-		var canExport = summary.Kind != TerminalExportKind.Folder ||
-						summary.DestinationState != TerminalExportDestinationState.Conflict;
+		var canExport = summary.DestinationState != TerminalExportDestinationState.Blocked;
 		var focusedButton = cancel;
+		var buttons = new List<Button> { cancel, dryRun };
 		if (canExport)
 		{
 			var export = CreateDialogButton(summary.DestinationState == TerminalExportDestinationState.Conflict
@@ -5045,8 +5381,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				: L("Terminal.Tui.Export"));
 			export.IsDefault = true;
 			dialog.AddButton(export);
+			buttons.Add(export);
 			focusedButton = export;
 		}
+		TerminalWorkspacePresentationPolicy.FitOverlayButtonRow(buttons, dialogWidth - 2);
 		RunOverlay(dialog, focusedButton);
 		return dialog.Result switch
 		{
@@ -5219,6 +5557,17 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		return lineCount;
 	}
 
+	// Status and command-result rows hold a single line, so the path keeps its tail and
+	// the written file name stays visible.
+	internal static string FormatStatusPath(string format, string path, int columns)
+	{
+		var fixedColumns = string.Format(CultureInfo.CurrentCulture, format, string.Empty).GetColumns();
+		return string.Format(
+			CultureInfo.CurrentCulture,
+			format,
+			FitPathToWidth(path, Math.Max(12, columns - fixedColumns)));
+	}
+
 	internal static string FitPathToWidth(string value, int width)
 	{
 		value = TerminalTextEscaping.EscapeSingleLine(value);
@@ -5293,15 +5642,12 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 
 	private Dialog CreateDialog(string title, int preferredWidth, int preferredHeight)
 	{
-		var width = ResolveDialogWidth(preferredWidth);
-		var maximumHeight = Math.Max(5, _application.Screen.Height - 2);
-		var minimumHeight = Math.Min(7, maximumHeight);
-		var height = Math.Clamp(preferredHeight, minimumHeight, maximumHeight);
 		var dialog = new Dialog
 		{
 			Title = _options.Plain ? string.Empty : title,
-			Width = width,
-			Height = height,
+			// Resolved on every layout, so an open dialog follows a terminal resize and stays on screen.
+			Width = Dim.Func(_ => ResolveDialogWidth(preferredWidth)),
+			Height = Dim.Func(_ => ResolveDialogHeight(preferredHeight)),
 			BorderStyle = _presentation.BorderStyle,
 			SchemeName = TerminalWorkspaceTheme.Dialog,
 			ButtonAlignment = Alignment.Center
@@ -5312,19 +5658,42 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		return dialog;
 	}
 
+	// A plain dialog has no frame title, so its title becomes the first content row.
+	// Returns the number of rows the title occupies.
+	private int AddPlainDialogTitle(Dialog dialog, string title)
+	{
+		if (!_options.Plain)
+			return 0;
+		dialog.Add(new TerminalLiteralLabel
+		{
+			X = 1,
+			Y = 0,
+			Width = Dim.Fill(1),
+			Height = 1,
+			Text = title,
+			SchemeName = TerminalWorkspaceTheme.Secondary
+		});
+		return 1;
+	}
+
 	private void AlignWelcomeDialogAfterActions(
 		Dialog dialog,
 		int dialogWidth)
 	{
 		var minimumDialogX =
 			WelcomeHorizontalMargin + WelcomeWideActionsWidth + 2;
-		var availableWidth =
-			_terminalWidth - minimumDialogX - WelcomeHorizontalMargin;
-		if (_layoutMode is TerminalWorkspaceLayoutMode.Split or TerminalWorkspaceLayoutMode.Wide &&
-			availableWidth >= dialogWidth)
+		// Resolved on every layout: once a resize leaves no room beside the actions, the dialog
+		// is centered like any other.
+		dialog.X = Pos.Func(_ =>
 		{
-			dialog.X = minimumDialogX;
-		}
+			var screenWidth = _application.Screen.Width;
+			var width = ResolveDialogWidth(dialogWidth);
+			var availableWidth = screenWidth - minimumDialogX - WelcomeHorizontalMargin;
+			return _layoutMode is TerminalWorkspaceLayoutMode.Split or TerminalWorkspaceLayoutMode.Wide &&
+				availableWidth >= width
+				? minimumDialogX
+				: (screenWidth - width) / 2;
+		});
 	}
 
 	private int ResolveDialogWidth(int preferredWidth)
@@ -5332,6 +5701,13 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var maximumWidth = Math.Max(12, _application.Screen.Width - 4);
 		var minimumWidth = Math.Min(40, maximumWidth);
 		return Math.Clamp(preferredWidth, minimumWidth, maximumWidth);
+	}
+
+	private int ResolveDialogHeight(int preferredHeight)
+	{
+		var maximumHeight = Math.Max(5, _application.Screen.Height - 2);
+		var minimumHeight = Math.Min(7, maximumHeight);
+		return Math.Clamp(preferredHeight, minimumHeight, maximumHeight);
 	}
 
 	private void RunOverlay(IRunnable overlay, View? initialFocus = null)
@@ -5357,6 +5733,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		finally
 		{
 			_application.Keyboard.KeyDown -= CloseOverlayOnEscape;
+			_overlayPointerGuard.OverlayClosed();
 			if (!_stopping)
 			{
 				if (previousFocus is { Visible: true, Enabled: true, CanFocus: true })
@@ -5365,6 +5742,12 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					RestoreScreenFocus();
 			}
 		}
+	}
+
+	private void SwallowOverlayGestureRemainder(object? sender, Mouse mouse)
+	{
+		if (_overlayPointerGuard.ShouldSwallow(mouse.Flags, mouse.ScreenPosition, mouse.Timestamp ?? DateTime.Now))
+			mouse.Handled = true;
 	}
 
 	private void RestoreScreenFocus()
@@ -5421,7 +5804,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			dispose: false);
 
 	private void CancelActiveOperation()
-		=> _operations.Cancel(WorkspaceOperationKind.Active);
+		=> _operations.RequestCancel(WorkspaceOperationKind.Active);
 
 	private bool HasActiveOperation =>
 		_operations.IsRunning(WorkspaceOperationKind.Active);
@@ -5461,7 +5844,9 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		ExitRequested = true;
 		_prepareForShutdown();
 		_sessionCts.Cancel();
-		CancelActiveOperation();
+		// Unregister instead of requesting cancellation: an operation that is still unwinding
+		// must not navigate back to Welcome while the session exits.
+		_operations.Cancel(WorkspaceOperationKind.Active);
 		CancelWorkspaceRefreshes();
 		_application.RequestStop(_root);
 	}
@@ -5602,7 +5987,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private void ReleaseOwnedRepositorySession() =>
 		Interlocked.Exchange(ref _ownedRepositorySession, null)?.Dispose();
 
-	private string PanelSeparator => _options.Plain ? " | " : " · ";
+	private string PanelSeparator =>
+		_options.Plain || !_environment.SupportsUnicode ? " | " : " · ";
 
 	private string L(string key)
 	{
@@ -5622,6 +6008,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			return;
 		_disposed = true;
 		_application.Keyboard.KeyDown -= OnRootKeyDown;
+		_application.Mouse.MouseEvent -= SwallowOverlayGestureRemainder;
 		_services.Localization.LanguageChanged -= OnLanguageChanged;
 		_application.ScreenChanged -= _screenChangedHandler;
 		if (_subscribedDriver is not null && _driverSizeChangedHandler is not null)
@@ -5689,14 +6076,29 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				return $"{severity} [{diagnostic.Code}]\n{message}{path}";
 			}));
 
-	private bool TryLeaveWorkspace(Action leave)
+	private bool TryLeaveWorkspace(Action leave) =>
+		TryLeaveWorkspace(
+			L("Terminal.Tui.BackToWelcome"),
+			L("Terminal.Tui.ConfirmBackToWelcome"),
+			leave);
+
+	private bool TryLeaveWorkspace(
+		string confirmationTitle,
+		string confirmationMessage,
+		Action leave)
 	{
 		ArgumentNullException.ThrowIfNull(leave);
 		if (_screen == TerminalWorkspaceScreen.Workspace &&
-			!Confirm(L("Terminal.Tui.BackToWelcome"), L("Terminal.Tui.ConfirmBackToWelcome")))
+			!Confirm(confirmationTitle, confirmationMessage))
 		{
 			return false;
 		}
+		return LeaveWorkspace(leave);
+	}
+
+	private bool LeaveWorkspace(Action leave)
+	{
+		ArgumentNullException.ThrowIfNull(leave);
 		return RunOrDeferWorkspaceTransition(() =>
 		{
 			FlushPendingWorkspacePersistence();

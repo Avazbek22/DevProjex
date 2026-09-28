@@ -72,6 +72,9 @@ internal readonly record struct TerminalTreeSelectionResult(
 public sealed class TerminalWorkspaceState : IDisposable
 {
 	private readonly HashSet<string> _expandedPaths = new(ProjectTreePathIdentity.CanonicalComparer);
+	// Folders the user collapsed while a tree filter is active. The filtered projection keeps
+	// its own expansion so browsing matches never rewrites the unfiltered tree layout.
+	private readonly HashSet<string> _filterCollapsedPaths = new(ProjectTreePathIdentity.CanonicalComparer);
 	private readonly HashSet<string> _selectedFiles = new(ProjectTreePathIdentity.CanonicalComparer);
 	private readonly HashSet<string> _selectedEmptyDirectories = new(ProjectTreePathIdentity.CanonicalComparer);
 	private readonly HashSet<string> _agentActivityPaths = new(ProjectTreePathIdentity.CanonicalComparer);
@@ -168,6 +171,12 @@ public sealed class TerminalWorkspaceState : IDisposable
 	public long Revision => Volatile.Read(ref _revision);
 	public IPreviewTextDocument PreviewDocument { get; private set; }
 	public ExportOutputMetrics PreviewOutputMetrics { get; private set; }
+
+	/// <summary>
+	/// True while Preview holds the quick tree listing published by a plan replacement, until
+	/// the rendered document for the new plan replaces it.
+	/// </summary>
+	internal bool IsPreviewProvisional { get; private set; }
 	public string PreviewText => PreviewDocument.GetFullText();
 
 	public void ReplacePlan(
@@ -221,6 +230,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 		UpdatePathOptionStates(plan);
 		RebuildVisibleRows();
 		SetPreviewText(BuildTreePreview());
+		IsPreviewProvisional = true;
 	}
 
 	private void DropUnavailablePathsFromSelectionFrontier()
@@ -232,8 +242,10 @@ public sealed class TerminalWorkspaceState : IDisposable
 		HashSet<string>? unavailablePaths = null;
 		foreach (var selectedPath in selectedPathFrontier)
 		{
+			// Filters and Git scopes hide paths reversibly, so only a path that no longer
+			// exists leaves the frontier; a hidden one returns checked with its filter.
 			if (TryResolvePersistedPath(selectedPath, out var fullPath) &&
-				_nodesByPath.ContainsKey(fullPath))
+				(_nodesByPath.ContainsKey(fullPath) || Path.Exists(fullPath)))
 			{
 				survivingPaths.Add(selectedPath);
 				continue;
@@ -372,6 +384,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 			_retiredPreviewDocuments.Add(PreviewDocument);
 			PreviewDocument = document;
 			PreviewOutputMetrics = outputMetrics;
+			IsPreviewProvisional = false;
 		}
 	}
 
@@ -389,6 +402,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 			_retiredPreviewDocuments.Add(PreviewDocument);
 			PreviewDocument = document;
 			PreviewOutputMetrics = outputMetrics;
+			IsPreviewProvisional = false;
 			return true;
 		}
 	}
@@ -411,16 +425,20 @@ public sealed class TerminalWorkspaceState : IDisposable
 		if (!TryGetRow(rowIndex, out var row) || !row.Node.IsDirectory)
 			return;
 
-		if (!_expandedPaths.Add(row.Node.FullPath))
-			_expandedPaths.Remove(row.Node.FullPath);
-		RebuildVisibleRows();
+		if (row.IsExpanded)
+			Collapse(rowIndex);
+		else
+			Expand(rowIndex);
 	}
 
 	public void Expand(int rowIndex)
 	{
 		if (!TryGetRow(rowIndex, out var row) || !row.Node.IsDirectory)
 			return;
-		if (_expandedPaths.Add(row.Node.FullPath))
+		var changed = HasTreeFilter
+			? _filterCollapsedPaths.Remove(row.Node.FullPath)
+			: _expandedPaths.Add(row.Node.FullPath);
+		if (changed)
 			RebuildVisibleRows();
 	}
 
@@ -428,12 +446,22 @@ public sealed class TerminalWorkspaceState : IDisposable
 	{
 		if (!TryGetRow(rowIndex, out var row) || !row.Node.IsDirectory)
 			return;
-		if (_expandedPaths.Remove(row.Node.FullPath))
+		var changed = HasTreeFilter
+			? _filterCollapsedPaths.Add(row.Node.FullPath)
+			: _expandedPaths.Remove(row.Node.FullPath);
+		if (changed)
 			RebuildVisibleRows();
 	}
 
 	public void ExpandAll()
 	{
+		if (HasTreeFilter)
+		{
+			_filterCollapsedPaths.Clear();
+			RebuildVisibleRows();
+			return;
+		}
+
 		foreach (var node in _nodesByPath.Values)
 		{
 			if (node.IsDirectory)
@@ -444,7 +472,18 @@ public sealed class TerminalWorkspaceState : IDisposable
 
 	public void CollapseAll()
 	{
-		_expandedPaths.Clear();
+		if (HasTreeFilter)
+		{
+			foreach (var node in _nodesByPath.Values)
+			{
+				if (node.IsDirectory)
+					_filterCollapsedPaths.Add(node.FullPath);
+			}
+		}
+		else
+		{
+			_expandedPaths.Clear();
+		}
 		RebuildVisibleRows();
 	}
 
@@ -480,14 +519,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 
 	public int Reveal(string path)
 	{
-		if (string.IsNullOrWhiteSpace(path))
-			return -1;
-		var fullPath = Path.IsPathRooted(path)
-			? Path.GetFullPath(path)
-			: Path.GetFullPath(Path.Combine(
-				Plan.SourceRoot,
-				path.Replace('/', Path.DirectorySeparatorChar)));
-		if (!_nodesByPath.ContainsKey(fullPath))
+		if (!TryResolveTreePath(path, out var fullPath))
 			return -1;
 
 		ExpandAncestors(fullPath);
@@ -499,6 +531,31 @@ public sealed class TerminalWorkspaceState : IDisposable
 				return index;
 		}
 		return -1;
+	}
+
+	// Resolves a relative or absolute path, with or without a trailing separator, to a node of
+	// the effective tree regardless of the active tree filter.
+	internal bool TryResolveTreePath(string? path, out string fullPath)
+	{
+		fullPath = string.Empty;
+		if (string.IsNullOrWhiteSpace(path))
+			return false;
+		try
+		{
+			var candidate = Path.IsPathRooted(path)
+				? Path.GetFullPath(path)
+				: Path.GetFullPath(Path.Combine(
+					Plan.SourceRoot,
+					path.Replace('/', Path.DirectorySeparatorChar)));
+			fullPath = Path.TrimEndingDirectorySeparator(candidate);
+		}
+		catch (Exception exception) when (exception is
+			ArgumentException or NotSupportedException or PathTooLongException)
+		{
+			return false;
+		}
+		return _nodesByPath.ContainsKey(fullPath) ||
+			ProjectTreePathIdentity.TryResolveAvailableName(_orderedPaths, fullPath, out fullPath);
 	}
 
 	public IReadOnlyList<string> BuildExpandedRelativePaths() =>
@@ -591,16 +648,21 @@ public sealed class TerminalWorkspaceState : IDisposable
 		foreach (var target in targets.Order(ProjectTreePathIdentity.CanonicalComparer))
 			SetSubtreeSelection(_nodesByPath[target], selected);
 		RecomputeCheckStates();
-		_selectedPathFrontier = ResolveUpdatedSelectedPathFrontier(
-			previousFrontier,
-			previousRootState);
-		_usesUncheckedWholeTreePresentation =
-			GetCheckState(Plan.EffectiveTree) == TerminalTreeCheckState.Unchecked;
+		var changed = _checkStates.Count(pair =>
+			previousStates.GetValueOrDefault(pair.Key) != pair.Value);
+		// A whole-tree command states selection intent even when no mark changes, like
+		// Select None. A targeted command that changes no mark leaves the selection as it was.
+		if (changed > 0 || targets.Contains(Plan.EffectiveTree.FullPath))
+		{
+			_selectedPathFrontier = ResolveUpdatedSelectedPathFrontier(
+				previousFrontier,
+				previousRootState);
+			_usesUncheckedWholeTreePresentation =
+				GetCheckState(Plan.EffectiveTree) == TerminalTreeCheckState.Unchecked;
+		}
 		UpdatePathOptionStates(Plan);
 		RebuildVisibleRows();
 
-		var changed = _checkStates.Count(pair =>
-			previousStates.GetValueOrDefault(pair.Key) != pair.Value);
 		var selectionChanged = changed > 0 || !SelectedPathsEqual(
 			previousSelectedPaths,
 			BuildSelection().SelectedPaths);
@@ -627,11 +689,13 @@ public sealed class TerminalWorkspaceState : IDisposable
 		if (selector.IndexOfAny(['*', '?', '{', '}']) < 0)
 		{
 			var normalized = ProjectSelectionPath.NormalizeRelative(selector);
-			return _nodesByPath.Values
-				.Where(node => ProjectTreePathIdentity.CanonicalComparer.Equals(
-					ToRelativePath(node.FullPath),
-					normalized.Length == 0 ? "." : normalized))
-				.ToArray();
+			return ProjectTreePathIdentity.TryResolveAvailableEntry(
+				_orderedPaths,
+				normalized.Length == 0 ? "." : normalized,
+				ToRelativePath,
+				out var fullPath)
+				? [_nodesByPath[fullPath]]
+				: [];
 		}
 
 		ProjectRelativeGlob.Validate(selector);
@@ -712,6 +776,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 			return;
 
 		_treeFilterQuery = normalized;
+		_filterCollapsedPaths.Clear();
 		RebuildVisibleRows();
 	}
 
@@ -856,15 +921,19 @@ public sealed class TerminalWorkspaceState : IDisposable
 		while (projection.Count > 0)
 		{
 			var (current, currentDepth) = projection.Pop();
-			var descendantMatches = current.IsDirectory &&
+			var expanded = current.IsDirectory &&
+				!_filterCollapsedPaths.Contains(current.FullPath) &&
 				current.Children.Any(child => includedPaths.Contains(child.FullPath));
 			rows.Add(new TerminalTreeRow(
 				current,
 				currentDepth,
-				descendantMatches,
+				expanded,
 				GetCheckState(current),
 				_showAgentActivity,
 				_agentActivityPaths.Contains(current.FullPath)));
+			if (!expanded)
+				continue;
+
 			for (var index = current.Children.Count - 1; index >= 0; index--)
 			{
 				var child = current.Children[index];
@@ -1093,7 +1162,11 @@ public sealed class TerminalWorkspaceState : IDisposable
 		while (current is not null)
 		{
 			if (_nodesByPath[current].IsDirectory)
-				changed |= _expandedPaths.Add(current);
+			{
+				changed |= HasTreeFilter
+					? _filterCollapsedPaths.Remove(current)
+					: _expandedPaths.Add(current);
+			}
 			current = _parentsByPath[current];
 		}
 

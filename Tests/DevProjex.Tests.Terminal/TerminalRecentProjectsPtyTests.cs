@@ -49,6 +49,91 @@ public sealed class TerminalRecentProjectsPtyTests
 	}
 
 	[Fact(Timeout = 90_000)]
+	public async Task WelcomePaletteListsTheSettingsFileActionOnce()
+	{
+		using var welcomeDirectory = new TemporaryDirectory();
+		welcomeDirectory.WriteFile("notes.txt", "not a project");
+
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			welcomeDirectory.Path,
+			["--language", "en"],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.WaitForScreenAsync(
+			"Choose a workspace action",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync("\u0010", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Filter actions:",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync("settings", TestContext.Current.CancellationToken);
+		var palette = await terminal.WaitForStableScreenAsync(
+			"Actions · Open project with settings file",
+			"Open current directory",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Single(
+			palette.Split('\n'),
+			line => line.Contains("│ Open project with settings file", StringComparison.Ordinal));
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenWithoutAsync(
+			"Filter actions:",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await ExitAsync(terminal);
+	}
+
+	[Fact(Timeout = 90_000)]
+	public async Task InlineRecentRowsAndDetailsShowFolderNamesUnderALongSharedParent()
+	{
+		using var projects = new TemporaryDirectory();
+		var sharedParent = projects.CreateDirectory(
+			Path.Combine("customer-workspaces-with-long-names", "backend-services-and-tools"));
+		var firstProject = Directory.CreateDirectory(
+			Path.Combine(sharedParent, "AlphaSharedProject")).FullName;
+		var secondProject = Directory.CreateDirectory(
+			Path.Combine(sharedParent, "BetaSharedProject")).FullName;
+		using var welcomeDirectory = new TemporaryDirectory();
+		welcomeDirectory.WriteFile("notes.txt", "not a project");
+
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			welcomeDirectory.Path,
+			["--language", "en"],
+			initializeDataRoot: dataRoot =>
+			{
+				var store = new RecentProjectsStore(() => dataRoot);
+				var snapshot = store.AddFolder(null, firstProject);
+				store.AddFolder(snapshot, secondProject);
+			},
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var welcome = await terminal.WaitForStableScreenAsync(
+			"[2]",
+			cancellationToken: TestContext.Current.CancellationToken);
+		var lines = welcome.Split('\n');
+		Assert.Contains(lines, line => line.Contains("[1] ...", StringComparison.Ordinal) &&
+			line.Contains("BetaSharedProject", StringComparison.Ordinal));
+		Assert.Contains(lines, line => line.Contains("[2] ...", StringComparison.Ordinal) &&
+			line.Contains("AlphaSharedProject", StringComparison.Ordinal));
+
+		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
+		var selected = await terminal.WaitForStableScreenAsync(
+			"Open this recent project.",
+			cancellationToken: TestContext.Current.CancellationToken);
+		lines = selected.Split('\n');
+		var descriptionRow = Array.FindIndex(
+			lines,
+			line => line.Contains("Open this recent project.", StringComparison.Ordinal));
+		var detailsColumn = lines[descriptionRow].IndexOf(
+			"Open this recent project.",
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"BetaSharedProject",
+			lines[descriptionRow + 1][detailsColumn..],
+			StringComparison.Ordinal);
+		await ExitAsync(terminal);
+	}
+
+	[Fact(Timeout = 90_000)]
 	public async Task PopulatedRecentSelectionOpensWorkspaceAndMovesEntryToFront()
 	{
 		using var firstProject = CreateProject("FirstProject", "FirstMarker.cs");
@@ -75,6 +160,9 @@ public sealed class TerminalRecentProjectsPtyTests
 			"Recent workspaces",
 			TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"┤Recent workspaces├",
+			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"FirstProject",
 			cancellationToken: TestContext.Current.CancellationToken);
@@ -125,6 +213,9 @@ public sealed class TerminalRecentProjectsPtyTests
 			"Recent workspaces",
 			TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"┤Recent workspaces├",
+			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"Second Project",
 			cancellationToken: TestContext.Current.CancellationToken);
@@ -198,11 +289,99 @@ public sealed class TerminalRecentProjectsPtyTests
 		Assert.DoesNotContain("Profile:", workspace, StringComparison.Ordinal);
 		await terminal.ResizeAsync(160, 40, TestContext.Current.CancellationToken);
 		await terminal.SendShiftF6Async(TestContext.Current.CancellationToken);
+		// The wide Parameters panel shortens the title to "Content processi…".
 		var parameters = await terminal.WaitForScreenAsync(
-			"Content processing",
+			"Content processi",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("PARAMETERS", parameters, StringComparison.Ordinal);
 		Assert.DoesNotContain("Saved settings", parameters, StringComparison.Ordinal);
+		Assert.False(terminal.HasExited);
+		await ExitAsync(terminal);
+	}
+
+	[Fact(Timeout = 90_000)]
+	public async Task InlineRecentNumberAppliesTheSavedSettingsOfThatProject()
+	{
+		using var project = CreateProject("InlineSavedProject", "InlineSavedMarker.cs");
+		using var welcomeDirectory = new TemporaryDirectory();
+		welcomeDirectory.WriteFile("notes.txt", "not a project");
+
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			welcomeDirectory.Path,
+			["--language", "en"],
+			initializeDataRoot: dataRoot =>
+			{
+				new RecentProjectsStore(() => dataRoot).AddFolder(null, project.Path);
+				new ProjectProfileStore(() => dataRoot).SaveProfile(
+					project.Path,
+					new ProjectSelectionProfile(
+						SelectedRootFolders: ["src"],
+						SelectedExtensions: [".cs"],
+						SelectedIgnoreOptions: [],
+						RootFolderStates: new Dictionary<string, bool>(PathComparer.Default)
+						{
+							["src"] = true
+						},
+						ExtensionStates: new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+						{
+							[".cs"] = true,
+							[".json"] = false
+						},
+						IgnoreOptionStates: new Dictionary<IgnoreOptionId, bool>()));
+			},
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.WaitForScreenAsync(
+			"[1]",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync("1", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		var workspace = await terminal.WaitForScreenAsync(
+			"InlineSavedMarker.cs",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.DoesNotContain("global.json", workspace, StringComparison.Ordinal);
+		Assert.False(terminal.HasExited);
+		await ExitAsync(terminal);
+	}
+
+	[Fact(Timeout = 90_000)]
+	public async Task InlineRecentNumberOpensProjectWithoutSavedSettingsFromFolderThatHasThem()
+	{
+		using var project = CreateProject("InlineDefaultProject", "InlineDefaultMarker.cs");
+		using var welcomeDirectory = new TemporaryDirectory();
+		welcomeDirectory.WriteFile("notes.txt", "saved settings belong to this folder");
+
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			welcomeDirectory.Path,
+			["--language", "en"],
+			initializeDataRoot: dataRoot =>
+			{
+				new RecentProjectsStore(() => dataRoot).AddFolder(null, project.Path);
+				new ProjectProfileStore(() => dataRoot).SaveProfile(
+					welcomeDirectory.Path,
+					new ProjectSelectionProfile(
+						SelectedRootFolders: [],
+						SelectedExtensions: [".txt"],
+						SelectedIgnoreOptions: []));
+			},
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.WaitForScreenAsync(
+			"[1]",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync("1", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		var workspace = await terminal.WaitForScreenAsync(
+			"InlineDefaultMarker.cs",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains("global.json", workspace, StringComparison.Ordinal);
+		Assert.DoesNotContain("DPX-CLI-PROFILE-NOT-FOUND", workspace, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 		await ExitAsync(terminal);
 	}
@@ -325,6 +504,56 @@ public sealed class TerminalRecentProjectsPtyTests
 		await terminal.WaitForScreenWithoutAsync(
 			"(none available)",
 			cancellationToken: TestContext.Current.CancellationToken);
+		var welcome = await terminal.WaitForStableScreenAsync(
+			"Choose a workspace action",
+			"[1]",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.DoesNotContain("Deleted Project", welcome, StringComparison.Ordinal);
+		await ExitAsync(terminal);
+	}
+
+	[Fact(Timeout = 90_000)]
+	public async Task RemoveEntryButtonAsksFirstAndRemovesOnlyTheChosenEntry()
+	{
+		var cancellationToken = TestContext.Current.CancellationToken;
+		using var removedProject = CreateProject("RemovedProject", "RemovedMarker.cs");
+		using var keptProject = CreateProject("KeptProject", "KeptMarker.cs");
+		using var welcomeDirectory = new TemporaryDirectory();
+		welcomeDirectory.WriteFile("notes.txt", "not a project");
+		string? dataRoot = null;
+
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			welcomeDirectory.Path,
+			["--language", "en"],
+			initializeDataRoot: root =>
+			{
+				dataRoot = root;
+				var store = new RecentProjectsStore(() => root);
+				var snapshot = store.AddFolder(null, keptProject.Path);
+				store.AddFolder(snapshot, removedProject.Path);
+			},
+			cancellationToken: cancellationToken);
+
+		await OpenRecentOverlayAsync(terminal, cancellationToken);
+		await terminal.WaitForScreenAsync("Folder · RemovedProject", cancellationToken: cancellationToken);
+		await terminal.ClickLabelOnRowAsync("Remove entry", "Remove entry", cancellationToken: cancellationToken);
+		var prompt = await terminal.WaitForScreenAsync(
+			"Remove this folder from recent history?",
+			cancellationToken: cancellationToken);
+		Assert.DoesNotContain("URL", prompt, StringComparison.Ordinal);
+		Assert.NotNull(dataRoot);
+		Assert.Equal(2, new RecentProjectsStore(() => dataRoot).Load().RecentFolders.Count);
+
+		await terminal.SendEnterAsync(cancellationToken);
+		await terminal.WaitForScreenAsync("Folder · KeptProject", cancellationToken: cancellationToken);
+		var remaining = new RecentProjectsStore(() => dataRoot).Load().RecentFolders;
+		Assert.Equal(
+			[Path.GetFullPath(keptProject.Path)],
+			remaining.Select(static folder => Path.GetFullPath(folder.Path)));
+
+		await terminal.ClickLabelOnRowAsync("Remove entry", "Open", cancellationToken: cancellationToken);
+		await terminal.WaitForScreenAsync("PROJECT TREE", cancellationToken: cancellationToken);
+		await terminal.WaitForScreenAsync("KeptMarker.cs", cancellationToken: cancellationToken);
 		await ExitAsync(terminal);
 	}
 
@@ -523,6 +752,10 @@ public sealed class TerminalRecentProjectsPtyTests
 			cancellationToken: cancellationToken);
 		await SelectWelcomeActionAsync(terminal, "Recent workspaces", cancellationToken);
 		await terminal.SendEnterAsync(cancellationToken);
+		// Welcome rows show recent project names too, so wait for the overlay itself.
+		await terminal.WaitForScreenAsync(
+			"┤Recent workspaces├",
+			cancellationToken: cancellationToken);
 	}
 
 	private static async Task ExitAsync(TerminalPtyHarness terminal)

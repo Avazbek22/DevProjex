@@ -88,7 +88,7 @@ public sealed class ExportContextCommandHandler(
 						new FocusRankingRequest(focusSeeds),
 						cancellationToken: cancellationToken)
 					.ConfigureAwait(false);
-		var transformationContext = CreateTransformationContext(plan, request.View);
+		var transformationContext = CreateTransformationContext(services, plan, request.View);
 		await using var measured = transformationContext is null ||
 		                               (!request.DryRun && request.MaximumEstimatedTokens is null)
 			? null
@@ -391,7 +391,8 @@ public sealed class ExportContextCommandHandler(
 		return resolved;
 	}
 
-	private ContentTransformationContext? CreateTransformationContext(
+	internal static ContentTransformationContext? CreateTransformationContext(
+		TerminalServices services,
 		ProjectContextPlan plan,
 		ProjectContextView view)
 	{

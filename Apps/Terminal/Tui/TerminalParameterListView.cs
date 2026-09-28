@@ -7,13 +7,15 @@ namespace DevProjex.Terminal.Tui;
 
 internal sealed class TerminalParameterListView : ListView
 {
-	private readonly TerminalPointerEventDeduplicator _pointerEvents = new();
 	private IReadOnlyList<TerminalParameterRow>? _rows;
 
 	public TerminalParameterListView(
 		bool showVerticalScrollBar = false,
 		bool useUnicode = true)
 	{
+		// OnMouseEvent owns pointer input; the list's default bindings would activate on release.
+		MouseBindings.Clear(Command.Activate);
+		MouseBindings.Clear(Command.Accept);
 		if (showVerticalScrollBar)
 			TerminalScrollBarStyle.Apply(this, useUnicode, vertical: true, horizontal: false);
 	}
@@ -51,9 +53,12 @@ internal sealed class TerminalParameterListView : ListView
 			return base.OnMouseEvent(mouse);
 		}
 
-		var pressed = mouse.Flags.HasFlag(MouseFlags.LeftButtonPressed);
-		if (!IsPrimaryActivation(mouse.Flags) || mouse.Position is not { } position)
+		if (TerminalPointerInput.IsMotion(mouse.Flags))
+			return true;
+		if (!IsPrimaryActivation(mouse.Flags))
 			return base.OnMouseEvent(mouse);
+		if (!TerminalPointerInput.IsPress(mouse.Flags) || mouse.Position is not { } position)
+			return true;
 
 		SetFocus();
 		InteractionStarted?.Invoke(this, EventArgs.Empty);
@@ -69,20 +74,25 @@ internal sealed class TerminalParameterListView : ListView
 			return true;
 		SelectedItem = row;
 		EnsureSelectedItemVisible();
-		if (!_pointerEvents.ShouldHandle(pressed, position.X, position.Y))
-		{
-			return true;
-		}
-		SelectionToggleRequested?.Invoke(this, EventArgs.Empty);
+		if (TogglesOnPointer(row, Viewport.X + position.X))
+			SelectionToggleRequested?.Invoke(this, EventArgs.Empty);
 		return true;
 	}
+
+	// A checkbox changes only when its "[x]" marker is clicked; a click on the label moves the
+	// cursor. Git mode rows are radio buttons and select from anywhere on the row.
+	internal bool TogglesOnPointer(int row, int column) =>
+		column is >= 0 and < TerminalParameterRow.MarkerColumns ||
+		_rows is not null && row >= 0 && row < _rows.Count &&
+		_rows[row].Kind == TerminalParameterRowKind.GitMode;
 
 	internal bool IsRowEnabled(int row) =>
 		_rows is null || row >= 0 && row < _rows.Count && _rows[row].IsEnabled;
 
 	internal static bool IsPrimaryActivation(MouseFlags flags) =>
-		flags.HasFlag(MouseFlags.LeftButtonPressed) ||
-		flags.HasFlag(MouseFlags.LeftButtonClicked);
+		!TerminalPointerInput.IsMotion(flags) &&
+		(flags.HasFlag(MouseFlags.LeftButtonPressed) ||
+		 flags.HasFlag(MouseFlags.LeftButtonClicked));
 
 	internal static bool TryResolveSelectionIndex(
 		int viewportTop,
