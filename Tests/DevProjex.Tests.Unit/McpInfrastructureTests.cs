@@ -327,6 +327,21 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
+	public void AmbiguousSymbolListsTheFirstSixCandidateRangesAndCountsTheRest()
+	{
+		var two = McpSymbolLookup.Ambiguous([(4, 7), (9, 12)]);
+		var eight = McpSymbolLookup.Ambiguous(
+			Enumerable.Range(0, 8).Select(static index => (index * 10 + 1, index * 10 + 5)).ToArray());
+
+		Assert.Equal(2, two.CandidateCount);
+		Assert.Equal("4-7, 9-12", two.FormatCandidateLines());
+		Assert.Equal(8, eight.CandidateCount);
+		Assert.Equal("1-5, 11-15, 21-25, 31-35, 41-45, 51-55 and 2 more", eight.FormatCandidateLines());
+		Assert.Equal(1, McpSymbolLookup.Found(3, 9).CandidateCount);
+		Assert.Equal(0, McpSymbolLookup.Unknown.CandidateCount);
+	}
+
+	[Fact]
 	public void RootRegistryRejectsTraversalAndAbsolutePathsOutsideRoot()
 	{
 		using var workspace = new TemporaryDirectory();

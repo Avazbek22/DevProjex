@@ -1466,10 +1466,13 @@ declaration, and `symbol` reads it without a line arithmetic step in between.
 `symbol` cannot be combined with `start_line`, `end_line`, or `start_column`, and
 that combination is rejected before the file is read. Three cases return
 `DPX-MCP-INVALID-ARGUMENTS` rather than a guess: a name matching more than one
-declaration, which reports how many and asks for the qualified form; a name
-matching none; and a file no declarations were extracted from, which is how an
-unsupported language answers. None of these echoes a declaration name, because the
-error text sits outside the untrusted block and a declaration name is project text.
+declaration, which reports how many and the line range of each in file order (the
+first six, then how many more), so one can be read with `start_line` and `end_line`
+even where no qualified form tells them apart, as with overloads or a property's
+getter and setter; a name matching none; and a file no declarations were extracted
+from, which is how an unsupported language answers. None of these echoes a
+declaration name, because the error text sits outside the untrusted block and a
+declaration name is project text; line numbers are not.
 
 The range is the declaration the navigation projection reports, so its granularity is
 the same as the naming on search hits. Every successful scalar read starts with
@@ -1504,7 +1507,8 @@ is never copied onto all merged inputs. Thus a page ending at line 992 reports
 `1450-1600`. In live mode a path that disappeared since discovery
 is an unavailable item rather than a failure for the whole batch. An unknown,
 ambiguous, or unsupported `symbol` is likewise reported only on its item, while
-syntactically invalid request records still reject the call before any read. An
+syntactically invalid request records still reject the call before any read; an
+ambiguous item names its candidates' line ranges for a follow-up `ranges` read. An
 unavailable status contains only a count-safe reason.
 The complete batch, including section headers, is limited to 1,000 lines and 50,000
 characters. A partial section reports the next 1-based `start_line` and, when the

@@ -3550,9 +3550,10 @@ internal sealed class DevProjexMcpTools(
 
 	/// <summary>
 	/// Turns a symbol lookup into the line range to read, or into the error that says why there is
-	/// none. An ambiguous name reports how many declarations answered to it and asks for a
-	/// qualified name; it never names them, because a declaration name is project text and the
-	/// error text is outside the untrusted block.
+	/// none. An ambiguous name reports how many declarations answered to it and their line ranges,
+	/// because a qualified name cannot tell overloads or a property's accessors apart; it never
+	/// names them, because a declaration name is project text and the error text is outside the
+	/// untrusted block.
 	/// </summary>
 	private static (int? Start, int? End) ResolveSymbolRange(McpSymbolLookup located) =>
 		located.Status switch
@@ -3562,7 +3563,8 @@ internal sealed class DevProjexMcpTools(
 				McpErrorCodes.InvalidArguments,
 				$"{McpErrorCodes.InvalidArguments}: 'symbol' matches " +
 				$"{located.CandidateCount.ToString(CultureInfo.InvariantCulture)} declarations in this " +
-				"file; pass the qualified name, or read the file and choose a line range."),
+				$"file, at lines {located.FormatCandidateLines()}; read one with start_line and end_line " +
+				"instead, or pass a more qualified name."),
 			McpSymbolLookupStatus.Unsupported => throw new McpToolException(
 				McpErrorCodes.InvalidArguments,
 				$"{McpErrorCodes.InvalidArguments}: 'symbol' is not supported for this file, because no " +
@@ -3576,7 +3578,8 @@ internal sealed class DevProjexMcpTools(
 	private static string FormatBatchSymbolFailure(McpSymbolLookup located) => located.Status switch
 	{
 		McpSymbolLookupStatus.Ambiguous =>
-			$"symbol is ambiguous ({located.CandidateCount.ToString(CultureInfo.InvariantCulture)} declarations)",
+			$"symbol is ambiguous ({located.CandidateCount.ToString(CultureInfo.InvariantCulture)} declarations, " +
+			$"at lines {located.FormatCandidateLines()})",
 		McpSymbolLookupStatus.Unsupported => "symbol lookup is unsupported for this file",
 		_ => "symbol matches no declaration in this file"
 	};

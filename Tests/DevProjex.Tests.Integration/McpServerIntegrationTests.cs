@@ -7001,6 +7001,27 @@ public sealed partial class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task BatchAmbiguousSymbolNamesTheCandidateLineRanges()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(
+			Path.Combine(project, "App.cs"),
+			"namespace P;\nsealed class App\n{\n    string Run(int value) => \"int\";\n    string Run(string value) => \"text\";\n}\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync("get_file", new Dictionary<string, object?>
+		{
+			["requests"] = new object[] { new { path = "App.cs", symbol = "P.App.Run" } }
+		});
+		var text = AllText(result);
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.Contains("1.1 — unavailable — symbol is ambiguous (2 declarations, at lines 4-4, 5-5)", text,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task RelatedFilesRemovesSourceBoundManualMarkFromEvidenceReason()
 	{
 		using var workspace = new TemporaryDirectory();

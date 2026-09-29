@@ -409,7 +409,7 @@ internal static class McpSearchSymbols
 		if (qualified.Length == 1)
 			return McpSymbolLookup.Found(qualified[0].Start, qualified[0].End);
 		if (qualified.Length > 1)
-			return McpSymbolLookup.Ambiguous(qualified.Length);
+			return McpSymbolLookup.Ambiguous(ToCandidateLines(qualified));
 
 		var ownerQualified = spans
 			.Where(span => span.Name.EndsWith('.' + symbol, StringComparison.Ordinal))
@@ -417,16 +417,23 @@ internal static class McpSearchSymbols
 		if (ownerQualified.Length == 1)
 			return McpSymbolLookup.Found(ownerQualified[0].Start, ownerQualified[0].End);
 		if (ownerQualified.Length > 1)
-			return McpSymbolLookup.Ambiguous(ownerQualified.Length);
+			return McpSymbolLookup.Ambiguous(ToCandidateLines(ownerQualified));
 
 		var simple = spans.Where(span => LastSegment(span.Name).Equals(symbol, StringComparison.Ordinal)).ToArray();
 		return simple.Length switch
 		{
 			1 => McpSymbolLookup.Found(simple[0].Start, simple[0].End),
-			> 1 => McpSymbolLookup.Ambiguous(simple.Length),
+			> 1 => McpSymbolLookup.Ambiguous(ToCandidateLines(simple)),
 			_ => McpSymbolLookup.Unknown
 		};
 	}
+
+	private static (int StartLine, int EndLine)[] ToCandidateLines(DeclarationSpan[] spans) =>
+		spans
+			.OrderBy(static span => span.Start)
+			.ThenBy(static span => span.End)
+			.Select(static span => (span.Start, span.End))
+			.ToArray();
 
 	private static ReadOnlySpan<char> LastSegment(string name)
 	{
@@ -497,16 +504,39 @@ internal readonly record struct McpSymbolLookup(
 	McpSymbolLookupStatus Status,
 	int StartLine,
 	int EndLine,
-	int CandidateCount)
+	IReadOnlyList<(int StartLine, int EndLine)> Candidates)
 {
-	public static readonly McpSymbolLookup Unknown = new(McpSymbolLookupStatus.Unknown, 0, 0, 0);
-	public static readonly McpSymbolLookup Unsupported = new(McpSymbolLookupStatus.Unsupported, 0, 0, 0);
+	private const int MaximumListedCandidates = 6;
+
+	public static readonly McpSymbolLookup Unknown = new(McpSymbolLookupStatus.Unknown, 0, 0, []);
+	public static readonly McpSymbolLookup Unsupported = new(McpSymbolLookupStatus.Unsupported, 0, 0, []);
+
+	public int CandidateCount => Candidates.Count;
 
 	public static McpSymbolLookup Found(int startLine, int endLine) =>
-		new(McpSymbolLookupStatus.Resolved, startLine, endLine, 1);
+		new(McpSymbolLookupStatus.Resolved, startLine, endLine, [(startLine, endLine)]);
 
-	public static McpSymbolLookup Ambiguous(int candidates) =>
+	public static McpSymbolLookup Ambiguous(IReadOnlyList<(int StartLine, int EndLine)> candidates) =>
 		new(McpSymbolLookupStatus.Ambiguous, 0, 0, candidates);
+
+	/// <summary>
+	/// Lists the candidates' line ranges in file order, so an ambiguous name can be read by range
+	/// instead of by reading the whole file. Line numbers are not project text.
+	/// </summary>
+	public string FormatCandidateLines()
+	{
+		var listed = string.Join(
+			", ",
+			Candidates
+				.Take(MaximumListedCandidates)
+				.Select(static candidate => string.Create(
+					CultureInfo.InvariantCulture,
+					$"{candidate.StartLine}-{candidate.EndLine}")));
+		var unlisted = Candidates.Count - MaximumListedCandidates;
+		return unlisted > 0
+			? string.Create(CultureInfo.InvariantCulture, $"{listed} and {unlisted} more")
+			: listed;
+	}
 }
 
 internal readonly record struct McpSearchHit(string RelativePath, string FullPath, int Line);

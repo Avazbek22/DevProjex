@@ -77,6 +77,42 @@ public sealed partial class McpServerProcessTests
 	}
 
 	[Fact]
+	public async Task RealProcessNamesTheLinesOfAnAmbiguousSymbolSoOneCanBeReadByRange()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("overload-read-project");
+		workspace.WriteFile(
+			"overload-read-project/src/App.cs",
+			"namespace P;\n\npublic sealed class App\n{\n\tpublic string Run(int value)\n\t{\n\t\treturn \"first-overload-marker\";\n\t}\n\n\tpublic string Run(string value)\n\t{\n\t\treturn \"second-overload-marker\";\n\t}\n}\n");
+		await using var server = await ActualMcpProcess.StartAsync(project, workspace.CreateDirectory("data"));
+
+		// Overloads share their qualified name, so only line ranges can tell them apart.
+		var ambiguous = await CallAsync(
+			server,
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "src/App.cs", ["symbol"] = "P.App.Run" });
+		var ambiguousText = AllProcessText(ambiguous);
+
+		Assert.True(ambiguous.IsError);
+		Assert.Contains(
+			"'symbol' matches 2 declarations in this file, at lines 5-8, 10-13; read one with start_line and end_line",
+			ambiguousText,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain("overload-marker", ambiguousText, StringComparison.Ordinal);
+		Assert.DoesNotContain("Run(", ambiguousText, StringComparison.Ordinal);
+
+		var first = await CallAsync(
+			server,
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "src/App.cs", ["start_line"] = 5, ["end_line"] = 8 });
+		var firstText = AllProcessText(first);
+
+		Assert.NotEqual(true, first.IsError);
+		Assert.Contains("first-overload-marker", firstText, StringComparison.Ordinal);
+		Assert.DoesNotContain("second-overload-marker", firstText, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task RealProcessLeavesALineAddressedReadExactlyAsItWas()
 	{
 		using var workspace = new TemporaryDirectory();
