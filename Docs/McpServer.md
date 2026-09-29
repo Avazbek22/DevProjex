@@ -62,15 +62,19 @@ omitted, and trusted text never repeats those paths.
 A scalar path hidden by the effective filters still returns
 `DPX-MCP-PATH-NOT-FOUND`. In a batched read, that range is reported as
 `unavailable — outside effective selection` while the remaining ranges continue.
-Every live response ends with the current per-root revision and the selected
-file count from the latest plan built for that root. Before the first plan is
-built, the count is `0`. A multi-root server identifies the root by a stable
+Every live response ends with the current per-root revision and, once a plan
+has been built at that revision, its selected file count. A response that builds
+no plan, such as `read_pack` right after the selection changed, reports the
+revision alone. Without a saved window selection the count reads
+`files selected by server defaults`. A multi-root server identifies the root by a stable
 ordinal in trusted text and places its project-controlled name in an untrusted
 data block:
 
 ```text
 [Live context] revision 16 · 128 files selected in the window
 [Live context] revision 16 · 128 files selected in the window · root 1 of 2
+[Live context] revision 1 · 42 files selected by server defaults
+[Live context] revision 17
 
 Live context root 1 name:
 project-name

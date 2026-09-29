@@ -148,6 +148,7 @@ public sealed class DocumentationAndPackagingContractTests
 			"[Live context] 1 named file(s) returned outside the current focus; effective filters still apply.",
 			"[Live context] revision 16 · 128 files selected in the window",
 			"[Live context] revision 16 · 128 files selected in the window · root 1 of 2",
+			"[Live context] revision 1 · 42 files selected by server defaults",
 			"[Live context] changed since revision 14: +2 folders, -1 file",
 			"[Live context] changed since revision 14: +7 folders, -2 files · 5 names shown, 4 more",
 			"[Live context] changed since revision 14: selection settings changed",
@@ -169,8 +170,9 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("Live context changed paths since revision 14:", server, StringComparison.Ordinal);
 		Assert.Contains("remain inside the same randomized untrusted-data boundary", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("including an error result", normalizedServer, StringComparison.Ordinal);
-		Assert.Contains("latest plan built for that root", normalizedServer, StringComparison.Ordinal);
-		Assert.Contains("Before the first plan is built, the count is `0`", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("once a plan has been built at that revision", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("reports the revision alone", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("`files selected by server defaults`", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("saved profile is busy", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("malformed document or unsupported future schema", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("no usable backup is available", normalizedServer, StringComparison.Ordinal);

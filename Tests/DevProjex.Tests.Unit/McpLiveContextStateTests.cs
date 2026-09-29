@@ -617,7 +617,8 @@ public sealed class McpLiveContextStateTests
 		using var invocation = state.BeginInvocation();
 		var response = Text(state.AppendNotices(McpToolResults.TextSuccess("invalid request")));
 
-		Assert.Contains("[Live context] revision 1 · 0 files selected in the window", response, StringComparison.Ordinal);
+		Assert.Contains("[Live context] revision 1", response, StringComparison.Ordinal);
+		Assert.DoesNotContain("files selected", response, StringComparison.Ordinal);
 	}
 
 	[Fact]

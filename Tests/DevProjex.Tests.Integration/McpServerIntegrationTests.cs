@@ -320,7 +320,7 @@ public sealed partial class McpServerIntegrationTests
 			"[Live context] no window selection saved for this root; using server defaults.",
 			tree,
 			StringComparison.Ordinal);
-		Assert.Contains("[Live context] revision 1 · 1 files selected in the window", tree, StringComparison.Ordinal);
+		Assert.Contains("[Live context] revision 1 · 1 files selected by server defaults", tree, StringComparison.Ordinal);
 	}
 
 	[Fact]
