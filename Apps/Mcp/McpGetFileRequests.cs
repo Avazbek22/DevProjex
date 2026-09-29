@@ -54,6 +54,19 @@ internal sealed record McpGetFileRequestSet(bool IsBatch, IReadOnlyList<McpGetFi
 	public const int MaximumFiles = 8;
 	public const int MaximumRanges = 16;
 
+	// Agents that want several ranges guess a list in start_line or invent start_range; both
+	// refusals end with this sentence so the next call can use the batch form directly.
+	internal const string SeveralRangesHint =
+		"For several ranges, call get_file once with requests: [{\"path\":\"src/a.cs\",\"ranges\":" +
+		"[{\"start_line\":140,\"end_line\":160},{\"start_line\":200,\"end_line\":241}]}].";
+
+	public static string? HintForUnknownArguments(IReadOnlyList<string> unknownNames) =>
+		unknownNames.Any(static name =>
+			name.Contains("range", StringComparison.OrdinalIgnoreCase) ||
+			name.Contains("lines", StringComparison.OrdinalIgnoreCase))
+			? SeveralRangesHint
+			: null;
+
 	public static McpGetFileRequestSet Parse(McpJsonArguments arguments)
 	{
 		var hasPath = arguments.Contains("path");
@@ -63,6 +76,8 @@ internal sealed record McpGetFileRequestSet(bool IsBatch, IReadOnlyList<McpGetFi
 
 		if (hasPath)
 		{
+			RejectSeveralLineNumbers(arguments, "start_line");
+			RejectSeveralLineNumbers(arguments, "end_line");
 			var start = arguments.OptionalInteger("start_line", 1, int.MaxValue) ?? 1;
 			var end = arguments.OptionalInteger("end_line", 1, int.MaxValue) ?? int.MaxValue;
 			return new McpGetFileRequestSet(false,
@@ -203,6 +218,33 @@ internal sealed record McpGetFileRequestSet(bool IsBatch, IReadOnlyList<McpGetFi
 				? InvalidEntry(requestIndex, $"contains unknown property '{property.Name}'")
 				: InvalidRange(requestIndex, rangeIndex.Value, $"contains unknown property '{property.Name}'");
 		}
+	}
+
+	private static void RejectSeveralLineNumbers(McpJsonArguments arguments, string name)
+	{
+		if (!arguments.TryGetElement(name, out var value) || !HoldsSeveralNumbers(value))
+			return;
+		throw new McpToolException(
+			McpErrorCodes.InvalidRange,
+			$"{McpErrorCodes.InvalidRange}: '{name}' takes one line number. {SeveralRangesHint}");
+	}
+
+	private static bool HoldsSeveralNumbers(JsonElement value)
+	{
+		if (value.ValueKind == JsonValueKind.Array)
+			return true;
+		if (value.ValueKind != JsonValueKind.String)
+			return false;
+		var digitRuns = 0;
+		var previousWasDigit = false;
+		foreach (var character in value.GetString() ?? string.Empty)
+		{
+			var isDigit = char.IsAsciiDigit(character);
+			if (isDigit && !previousWasDigit)
+				digitRuns++;
+			previousWasDigit = isDigit;
+		}
+		return digitRuns >= 2;
 	}
 
 	private static McpToolException Invalid(string message) =>

@@ -1172,6 +1172,61 @@ public sealed partial class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task GetFilePointsSeveralRangesAtTheBatchForm()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(
+			Path.Combine(project, "Lines.cs"),
+			string.Join('\n', Enumerable.Range(1, 30).Select(static line => $"// line {line}")) + "\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+		const string batchHint = "For several ranges, call get_file once with requests: [{\"path\":\"src/a.cs\",\"ranges\":";
+
+		var commaList = await server.CallAsync("get_file", new Dictionary<string, object?>
+		{
+			["path"] = "Lines.cs", ["start_line"] = "10, 20", ["end_line"] = 25
+		});
+		var arrayValue = await server.CallAsync("get_file", new Dictionary<string, object?>
+		{
+			["path"] = "Lines.cs", ["start_line"] = new[] { 3, 12 }
+		});
+		var inventedArgument = await server.CallAsync("get_file", new Dictionary<string, object?>
+		{
+			["path"] = "Lines.cs", ["start_range"] = new[] { 3, 12 }
+		});
+		var notANumber = await server.CallAsync("get_file", new Dictionary<string, object?>
+		{
+			["path"] = "Lines.cs", ["start_line"] = "ten"
+		});
+		var otherUnknown = await server.CallAsync("get_file", new Dictionary<string, object?>
+		{
+			["path"] = "Lines.cs", ["colour"] = "blue"
+		});
+		var single = await server.CallAsync("get_file", new Dictionary<string, object?>
+		{
+			["path"] = "Lines.cs", ["start_line"] = "7", ["end_line"] = "8"
+		});
+
+		Assert.True(commaList.IsError);
+		Assert.Contains("DPX-MCP-INVALID-RANGE: 'start_line' takes one line number.", Text(commaList), StringComparison.Ordinal);
+		Assert.Contains(batchHint, Text(commaList), StringComparison.Ordinal);
+		Assert.True(arrayValue.IsError);
+		Assert.Contains(batchHint, Text(arrayValue), StringComparison.Ordinal);
+		Assert.True(inventedArgument.IsError);
+		Assert.Contains("unknown argument(s): start_range.", Text(inventedArgument), StringComparison.Ordinal);
+		Assert.Contains(batchHint, Text(inventedArgument), StringComparison.Ordinal);
+
+		// A malformed single value and an unrelated unknown argument keep their plain refusals.
+		Assert.True(notANumber.IsError);
+		Assert.Contains("'start_line' must be an integer", Text(notANumber), StringComparison.Ordinal);
+		Assert.DoesNotContain(batchHint, Text(notANumber), StringComparison.Ordinal);
+		Assert.True(otherUnknown.IsError);
+		Assert.DoesNotContain(batchHint, Text(otherUnknown), StringComparison.Ordinal);
+		Assert.NotEqual(true, single.IsError);
+		Assert.Contains("// line 7", Text(single), StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task GetFileRejectsDirectoriesAndUnreadableBinaryContent()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -1186,6 +1241,8 @@ public sealed partial class McpServerIntegrationTests
 			new Dictionary<string, object?> { ["path"] = "Src" });
 		Assert.True(directory.IsError);
 		Assert.Contains("is a directory", Text(directory), StringComparison.Ordinal);
+		// The refusal carries the exact call that lists the directory.
+		Assert.Contains("list it with get_tree {\"paths\":[\"Src\"]}", Text(directory), StringComparison.Ordinal);
 
 		var binary = await server.CallAsync(
 			"get_file",
@@ -3069,6 +3126,64 @@ public sealed partial class McpServerIntegrationTests
 		using var jsonDocument = JsonDocument.Parse(ExtractSpotlightBody(Text(fittingJson)));
 		_ = XDocument.Parse(ExtractSpotlightBody(Text(fittingXml)));
 		Assert.Equal(JsonValueKind.Object, jsonDocument.RootElement.ValueKind);
+	}
+
+	[Fact]
+	public async Task GetTreeReportsWhenAnExplicitMaxDepthHidesARequestedPath()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var deepDirectory = workspace.CreateDirectory("project/src/main/java/org/app");
+		File.WriteAllText(Path.Combine(deepDirectory, "App.java"), "class App {}\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var hidden = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["paths"] = new[] { "src/main/java" },
+				["max_depth"] = 3
+			});
+		var notHidden = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["paths"] = new[] { "src/main/java" },
+				["max_depth"] = 5
+			});
+		var noMaxDepth = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["paths"] = new[] { "src/main/java" } });
+		var scalarPath = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["paths"] = "src/main/java",
+				["max_depth"] = 3
+			});
+
+		Assert.NotEqual(true, hidden.IsError);
+		AssertTrustedTrailerOutsideSpotlight(
+			hidden,
+			"[Tree depth] max_depth counts from the project root; 1 requested path(s) sit at depth 3 " +
+			"or deeper, so nothing under them is shown. Omit max_depth, or pass 5 to show two levels " +
+			"below them.");
+		var hiddenText = AllText(hidden);
+		var hiddenTrustedTail = hiddenText[(hiddenText.LastIndexOf("</untrusted-data-", StringComparison.Ordinal) + 1)..];
+		Assert.DoesNotContain("src/main/java", hiddenTrustedTail, StringComparison.Ordinal);
+
+		Assert.NotEqual(true, notHidden.IsError);
+		Assert.DoesNotContain("[Tree depth]", AllText(notHidden), StringComparison.Ordinal);
+
+		Assert.NotEqual(true, noMaxDepth.IsError);
+		Assert.DoesNotContain("[Tree depth]", AllText(noMaxDepth), StringComparison.Ordinal);
+
+		Assert.NotEqual(true, scalarPath.IsError);
+		AssertTrustedTrailerOutsideSpotlight(
+			scalarPath,
+			"[Tree depth] max_depth counts from the project root; 1 requested path(s) sit at depth 3 " +
+			"or deeper, so nothing under them is shown. Omit max_depth, or pass 5 to show two levels " +
+			"below them.");
 	}
 
 	[Fact]

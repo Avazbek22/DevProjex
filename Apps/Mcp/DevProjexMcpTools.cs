@@ -349,6 +349,7 @@ internal sealed class DevProjexMcpTools(
 			return McpToolResults.TextSuccess(AppendTrustedNotices(
 				McpSpotlight.Wrap(treeWriter.Text),
 				treeTruncationNotice,
+				FormatTreeDepthNotice(plan, depth, paths),
 				McpTrustedDiagnosticFormatter.FormatWarnings(plan),
 				FormatNameSearchNotice(plan, paths),
 				SelectionNotices(
@@ -1714,7 +1715,10 @@ internal sealed class DevProjexMcpTools(
 		CancellationToken cancellationToken) =>
 		RunProjectAsync("get_file", request, async () =>
 		{
-			var arguments = McpJsonArguments.Create(request.Params, getFileArgumentNames);
+			var arguments = McpJsonArguments.Create(
+				request.Params,
+				getFileArgumentNames,
+				McpGetFileRequestSet.HintForUnknownArguments);
 			var requestSet = McpGetFileRequestSet.Parse(arguments);
 			if (requestSet.IsBatch)
 				return await GetFileBatchAsync(arguments, requestSet, cancellationToken).ConfigureAwait(false);
@@ -4525,6 +4529,60 @@ internal sealed class DevProjexMcpTools(
 		return boundary.IsComplete
 			? null
 			: "[Next read] Narrow pattern, paths, or include_patterns and rerun the search.";
+	}
+
+	/// <summary>
+	/// max_depth counts levels from the project root, never from a requested path. A directory
+	/// entry that already sits at or past that depth renders with no children, and a file entry
+	/// past that depth does not render at all — both read as "not found" rather than "too deep".
+	/// Depth is resolved against the real path, not the selection anchors a narrowed projection
+	/// keeps: a non-empty selected directory is represented there by its descendant files, not
+	/// by its own path.
+	/// </summary>
+	private string? FormatTreeDepthNotice(
+		ProjectContextPlan plan,
+		int? explicitMaxDepth,
+		IReadOnlyList<string>? paths)
+	{
+		if (explicitMaxDepth is not { } maxDepth || !HasItems(paths))
+			return null;
+
+		var hiddenCount = 0;
+		var smallestHiddenDepth = int.MaxValue;
+		var largestSuggestedDepth = 0;
+		foreach (var path in paths!)
+		{
+			string fullPath;
+			try
+			{
+				fullPath = roots.ResolveExistingPath(plan.SourceRoot, path);
+			}
+			catch (McpToolException)
+			{
+				// Missing paths are already reported by the existing selection diagnostics.
+				continue;
+			}
+
+			var relative = PathUtility.GetPortableRelativePath(plan.SourceRoot, fullPath);
+			var depth = relative.Length == 0 ? 0 : relative.Count(static character => character == '/') + 1;
+			var isDirectory = Directory.Exists(fullPath);
+			var isHidden = isDirectory ? depth >= maxDepth : depth > maxDepth;
+			if (!isHidden)
+				continue;
+
+			hiddenCount++;
+			smallestHiddenDepth = Math.Min(smallestHiddenDepth, depth);
+			largestSuggestedDepth = Math.Max(largestSuggestedDepth, isDirectory ? depth + 2 : depth);
+		}
+
+		if (hiddenCount == 0)
+			return null;
+
+		return "[Tree depth] max_depth counts from the project root; " +
+			$"{hiddenCount.ToString(CultureInfo.InvariantCulture)} requested path(s) sit at depth " +
+			$"{smallestHiddenDepth.ToString(CultureInfo.InvariantCulture)} or deeper, so nothing under them is shown. " +
+			$"Omit max_depth, or pass {largestSuggestedDepth.ToString(CultureInfo.InvariantCulture)} " +
+			"to show two levels below them.";
 	}
 
 	/// <summary>

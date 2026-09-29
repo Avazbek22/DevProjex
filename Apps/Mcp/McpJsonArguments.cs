@@ -15,12 +15,22 @@ internal sealed class McpJsonArguments(
 
 	public static McpJsonArguments Create(
 		CallToolRequestParams request,
-		IReadOnlySet<string> allowed)
+		IReadOnlySet<string> allowed) =>
+		Create(request, allowed, unknownArgumentHint: null);
+
+	/// <param name="unknownArgumentHint">
+	/// Receives the rejected argument names and may return one fixed sentence that points at the
+	/// supported form, so the refusal also says what to send instead.
+	/// </param>
+	public static McpJsonArguments Create(
+		CallToolRequestParams request,
+		IReadOnlySet<string> allowed,
+		Func<IReadOnlyList<string>, string?>? unknownArgumentHint)
 	{
 		ArgumentNullException.ThrowIfNull(request);
 		ArgumentNullException.ThrowIfNull(allowed);
 		var arguments = new McpJsonArguments(request.Arguments, allowed);
-		arguments.ValidateNames();
+		arguments.ValidateNames(unknownArgumentHint);
 		return arguments;
 	}
 
@@ -230,7 +240,7 @@ internal sealed class McpJsonArguments(
 		return true;
 	}
 
-	private void ValidateNames()
+	private void ValidateNames(Func<IReadOnlyList<string>, string?>? unknownArgumentHint)
 	{
 		var unexpected = _values.Keys
 			.Where(name => !_allowed.Contains(name))
@@ -242,6 +252,8 @@ internal sealed class McpJsonArguments(
 		var guidance = _allowed.Count == 0
 			? "This tool takes no arguments."
 			: $"Valid arguments: {string.Join(", ", _allowed.OrderBy(static name => name, StringComparer.Ordinal))}.";
+		if (unknownArgumentHint?.Invoke(unexpected) is { Length: > 0 } hint)
+			guidance += " " + hint;
 		throw new McpToolException(
 			McpErrorCodes.InvalidArguments,
 			$"{McpErrorCodes.InvalidArguments}: unknown argument(s): {string.Join(", ", unexpected)}. {guidance}");
