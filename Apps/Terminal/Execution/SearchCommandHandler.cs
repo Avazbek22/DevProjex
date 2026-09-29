@@ -409,17 +409,20 @@ public sealed class SearchCommandHandler(
 	private static string ToRegexPattern(
 		string pattern,
 		SearchMode mode,
-		IReadOnlyList<string> declarationNames) => mode switch
+		IReadOnlyList<string> declarationNames)
 	{
-		SearchMode.Regex => pattern,
-		SearchMode.Text => Regex.Escape(pattern),
-		SearchMode.Symbols => declarationNames.Count > 0
-			? McpSearchSymbols.ToDeclarationNamePattern(declarationNames)
-			: throw new McpToolException(
-				McpErrorCodes.InvalidPattern,
-				$"{McpErrorCodes.InvalidPattern}: --symbols needs a declared name such as OrderService."),
-		_ => throw new ArgumentOutOfRangeException(nameof(mode), mode, null)
-	};
+		return mode switch
+		{
+			SearchMode.Regex => pattern,
+			SearchMode.Text => Regex.Escape(pattern),
+			SearchMode.Symbols => declarationNames.Count > 0
+				? McpSearchSymbols.ToDeclarationNamePattern(declarationNames)
+				: throw new McpToolException(
+					McpErrorCodes.InvalidPattern,
+					$"{McpErrorCodes.InvalidPattern}: --symbols needs a declared name such as OrderService."),
+			_ => throw new ArgumentOutOfRangeException(nameof(mode), mode, null)
+		};
+	}
 
 	private static long ResolveFileSize(
 		ProjectContextPlan plan,
