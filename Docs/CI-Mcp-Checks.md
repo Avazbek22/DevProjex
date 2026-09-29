@@ -41,9 +41,9 @@ enabling per-call exclusions adds exactly 2,616. Instructions remain between 900
 characters. The test prints actual sizes into its result log. These are wire-character limits,
 not API usage or tokenizer measurements; no model call is involved.
 
-Measured by the process check on this baseline: default result 28,023 characters, delegated result
-30,639, instructions 1,175. The `search_project` `symbols` parameter added 202 characters, so the
-default ceiling moved from 27,900 to 28,300 to keep the same deliberate headroom: 277 characters
+Measured by the process check on this baseline: default result 28,058 characters, delegated result
+30,674, instructions 1,175. The `search_project` `symbols` parameter added 237 characters, so the
+default ceiling moved from 27,900 to 28,300 to keep a deliberate headroom: 242 characters
 remain for the default result and 25 for the instructions. The exact delegation difference is
 unchanged.
 

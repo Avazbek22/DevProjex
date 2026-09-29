@@ -285,13 +285,32 @@ public sealed class McpInfrastructureTests
 	[InlineData("OrderService", "public sealed class OrderService", true)]
 	[InlineData("Shop.OrderService.CalculateTotal", "decimal CalculateTotal(", true)]
 	[InlineData("OrderService", "public sealed class OrderServices", false)]
-	[InlineData("Order(Service", "Order(Service", true)]
-	[InlineData("Order(Service", "OrderService", false)]
-	public void DeclarationNamePatternMatchesOnlyTheWholeLastSegment(string name, string text, bool matches)
+	[InlineData("OrderService|Checkout", "class Checkout", true)]
+	[InlineData("Service", "ServiceProvider", false)]
+	public void DeclarationNamePatternMatchesOnlyWholeLastSegments(string pattern, string text, bool matches)
 	{
-		var regex = new McpSearchRegex(McpSearchSymbols.ToDeclarationNamePattern(name), ignoreCase: false);
+		var names = McpSearchSymbols.ParseDeclarationNames(pattern);
+		var regex = new McpSearchRegex(McpSearchSymbols.ToDeclarationNamePattern(names), ignoreCase: false);
 
 		Assert.Equal(matches, regex.IsMatch(text));
+	}
+
+	[Theory]
+	[InlineData("OrderService", "OrderService")]
+	[InlineData("class InvalidURL", "InvalidURL")]
+	[InlineData("class Request|class URL", "Request,URL")]
+	[InlineData("type JSONRespond|interface JSONRespond", "JSONRespond")]
+	[InlineData("def compute(self):", "compute")]
+	[InlineData("interface Box<T> {", "Box")]
+	[InlineData("class Foo:", "Foo")]
+	[InlineData("Shop.OrderService.CalculateTotal", "Shop.OrderService.CalculateTotal")]
+	[InlineData(" | ", "")]
+	[InlineData("(", "")]
+	public void DeclarationNameQueriesKeepTheDeclaredNameOfEachAlternative(string pattern, string expected)
+	{
+		Assert.Equal(
+			expected.Split(',', StringSplitOptions.RemoveEmptyEntries),
+			McpSearchSymbols.ParseDeclarationNames(pattern));
 	}
 
 	[Fact]

@@ -121,7 +121,12 @@ public sealed class SearchCommandHandler(
 		long maximumInspectedBytes,
 		CancellationToken cancellationToken)
 	{
-		var regex = new McpSearchRegex(ToRegexPattern(request.Pattern, request.Mode), ignoreCase: true);
+		var declarationNames = request.Mode == SearchMode.Symbols
+			? McpSearchSymbols.ParseDeclarationNames(request.Pattern)
+			: [];
+		var regex = new McpSearchRegex(
+			ToRegexPattern(request.Pattern, request.Mode, declarationNames),
+			ignoreCase: true);
 		var context = CreateTransformationContext(plan);
 		var inspectedFiles = new List<string>(plan.IncludedFiles.Count);
 		long inspectedBytes = 0;
@@ -189,7 +194,7 @@ public sealed class SearchCommandHandler(
 					regex,
 					ContextLines,
 					file.ReplacementRanges,
-					request.Pattern,
+					declarationNames,
 					token,
 					out var fileNavigation);
 				navigation = fileNavigation;
@@ -401,11 +406,18 @@ public sealed class SearchCommandHandler(
 				: new SecretRedactionContext(plan.SourceRoot, services.SecretRedactionSession, redactionFeatures));
 	}
 
-	private static string ToRegexPattern(string pattern, SearchMode mode) => mode switch
+	private static string ToRegexPattern(
+		string pattern,
+		SearchMode mode,
+		IReadOnlyList<string> declarationNames) => mode switch
 	{
 		SearchMode.Regex => pattern,
 		SearchMode.Text => Regex.Escape(pattern),
-		SearchMode.Symbols => McpSearchSymbols.ToDeclarationNamePattern(pattern),
+		SearchMode.Symbols => declarationNames.Count > 0
+			? McpSearchSymbols.ToDeclarationNamePattern(declarationNames)
+			: throw new McpToolException(
+				McpErrorCodes.InvalidPattern,
+				$"{McpErrorCodes.InvalidPattern}: --symbols needs a declared name such as OrderService."),
 		_ => throw new ArgumentOutOfRangeException(nameof(mode), mode, null)
 	};
 

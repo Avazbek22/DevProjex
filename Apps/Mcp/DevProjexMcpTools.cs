@@ -1039,8 +1039,15 @@ internal sealed class DevProjexMcpTools(
 			// symbols=true is the declaration-name mode of CLI search --symbols: the pattern is one
 			// identifier, and only declarations with that name match, not its uses.
 			var declarationsOnly = arguments.OptionalBoolean("symbols", false);
+			var declarationNames = declarationsOnly ? McpSearchSymbols.ParseDeclarationNames(pattern) : [];
+			if (declarationsOnly && declarationNames.Count == 0)
+			{
+				throw new McpToolException(
+					McpErrorCodes.InvalidArguments,
+					$"{McpErrorCodes.InvalidArguments}: symbols=true needs a declared name in pattern, such as OrderService or Foo|Bar.");
+			}
 			var regex = new McpSearchRegex(
-				declarationsOnly ? McpSearchSymbols.ToDeclarationNamePattern(pattern) : pattern,
+				declarationsOnly ? McpSearchSymbols.ToDeclarationNamePattern(declarationNames) : pattern,
 				ignoreCase);
 			var paths = ParsePaths(arguments);
 			var includePatterns = arguments.OptionalStringArray("include_patterns");
@@ -1145,7 +1152,7 @@ internal sealed class DevProjexMcpTools(
 							regex,
 							contextLines,
 							file.ReplacementRanges,
-							pattern,
+							declarationNames,
 							token,
 							out var fileNavigation);
 						navigation = fileNavigation;

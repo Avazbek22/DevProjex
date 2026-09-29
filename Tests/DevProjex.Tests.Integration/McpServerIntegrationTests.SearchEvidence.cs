@@ -254,6 +254,25 @@ public sealed partial class McpServerIntegrationTests
 		Assert.Contains("Checkout.cs", uses, StringComparison.Ordinal);
 		Assert.NotEqual(true, literal.IsError);
 		Assert.Contains("matches retained=0/0", Text(literal), StringComparison.Ordinal);
+
+		// Readers write the declaration they picture; each alternative keeps its declared name.
+		var pictured = Text(await server.CallAsync("search_project", new Dictionary<string, object?>
+		{
+			["pattern"] = "class OrderService|class Checkout",
+			["symbols"] = true,
+			["context_lines"] = 0
+		}));
+		Assert.Contains("OrderService.cs", pictured, StringComparison.Ordinal);
+		Assert.Contains("Checkout.cs", pictured, StringComparison.Ordinal);
+		Assert.Contains("matches retained=2/2", pictured, StringComparison.Ordinal);
+
+		var nameless = await server.CallAsync("search_project", new Dictionary<string, object?>
+		{
+			["pattern"] = " | ",
+			["symbols"] = true
+		});
+		Assert.True(nameless.IsError);
+		Assert.Contains(McpErrorCodes.InvalidArguments, AllText(nameless), StringComparison.Ordinal);
 	}
 
 	[Fact]

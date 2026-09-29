@@ -21,15 +21,44 @@ internal static class McpSearchSymbols
 	public const int MaximumAnnotatedFiles = 64;
 
 	/// <summary>
+	/// Reduces a declaration-name query to the names it asks for. Readers write the declaration
+	/// they picture, such as "class Foo", "type Foo|interface Foo" or "def foo(", so each
+	/// alternative keeps its last word, cut before any parameter list or type arguments.
+	/// </summary>
+	public static IReadOnlyList<string> ParseDeclarationNames(string pattern)
+	{
+		ArgumentNullException.ThrowIfNull(pattern);
+		var names = new List<string>();
+		foreach (var alternative in pattern.Split('|', StringSplitOptions.TrimEntries))
+		{
+			var words = alternative.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+			for (var index = words.Length - 1; index >= 0; index--)
+			{
+				var word = words[index];
+				var cut = word.IndexOfAny(['(', '<', '{', '[', ';', ',', '=']);
+				var name = (cut >= 0 ? word[..cut] : word).TrimEnd('.', '#', '/', ':');
+				if (name.Length == 0)
+					continue;
+				if (!names.Contains(name, StringComparer.Ordinal))
+					names.Add(name);
+				break;
+			}
+		}
+		return names;
+	}
+
+	/// <summary>
 	/// Builds the whole-identifier pattern for a declaration-name search. A qualified name is
 	/// matched on its last segment here and narrowed to the qualified declaration afterwards.
 	/// </summary>
-	public static string ToDeclarationNamePattern(string name)
+	public static string ToDeclarationNamePattern(IReadOnlyList<string> names)
 	{
-		ArgumentNullException.ThrowIfNull(name);
-		var separator = name.LastIndexOfAny(['.', '#', '/', ':']);
-		var simpleName = separator >= 0 ? name[(separator + 1)..] : name;
-		return $"(?<![\\p{{L}}\\p{{N}}_]){Regex.Escape(simpleName)}(?![\\p{{L}}\\p{{N}}_])";
+		ArgumentNullException.ThrowIfNull(names);
+		ArgumentOutOfRangeException.ThrowIfZero(names.Count);
+		var alternatives = names
+			.Select(static name => Regex.Escape(LastSearchSegment(name).ToString()))
+			.Distinct(StringComparer.Ordinal);
+		return $"(?<![\\p{{L}}\\p{{N}}_])(?:{string.Join('|', alternatives)})(?![\\p{{L}}\\p{{N}}_])";
 	}
 
 	/// <summary>
@@ -48,8 +77,8 @@ internal static class McpSearchSymbols
 	}
 
 	/// <summary>
-	/// Finds the declarations named <paramref name="requestedName"/> in one file. A file whose text
-	/// never contains the name cannot declare it, so it is ruled out without a parse.
+	/// Finds the declarations named by <paramref name="requestedNames"/> in one file. A file whose
+	/// text never contains any of the names cannot declare them, so it is ruled out without a parse.
 	/// </summary>
 	public static IReadOnlyList<McpSearchMatchContext> FindNamedDeclarationMatches(
 		DependencyFactsEngine engine,
@@ -58,7 +87,7 @@ internal static class McpSearchSymbols
 		McpSearchRegex regex,
 		int contextLines,
 		IReadOnlyList<TransformedTextRange> protectedRanges,
-		string requestedName,
+		IReadOnlyList<string> requestedNames,
 		CancellationToken cancellationToken,
 		out IReadOnlyList<NavigationDeclaration>? navigation)
 	{
@@ -73,22 +102,22 @@ internal static class McpSearchSymbols
 			contextLines,
 			protectedRanges,
 			navigation,
-			requestedName,
+			requestedNames,
 			cancellationToken);
 	}
 
 	private static NavigationDeclaration? FindNamedDeclarationAtLine(
 		IReadOnlyList<NavigationDeclaration> declarations,
 		int line,
-		string requestedName)
+		IReadOnlyList<string> requestedNames)
 	{
 		ArgumentNullException.ThrowIfNull(declarations);
-		ArgumentNullException.ThrowIfNull(requestedName);
+		ArgumentNullException.ThrowIfNull(requestedNames);
 		NavigationDeclaration? best = null;
 		foreach (var declaration in declarations)
 		{
 			if (line < declaration.StartLine || line > declaration.EndLine ||
-				!NameMatches(declaration.Name, requestedName))
+				!NameMatchesAny(declaration.Name, requestedNames))
 			{
 				continue;
 			}
@@ -110,18 +139,18 @@ internal static class McpSearchSymbols
 		int contextLines,
 		IReadOnlyList<TransformedTextRange> protectedRanges,
 		IReadOnlyList<NavigationDeclaration> declarations,
-		string requestedName,
+		IReadOnlyList<string> requestedNames,
 		CancellationToken cancellationToken)
 	{
 		ArgumentNullException.ThrowIfNull(content);
 		ArgumentNullException.ThrowIfNull(regex);
 		ArgumentNullException.ThrowIfNull(protectedRanges);
 		ArgumentNullException.ThrowIfNull(declarations);
-		ArgumentNullException.ThrowIfNull(requestedName);
+		ArgumentNullException.ThrowIfNull(requestedNames);
 		ArgumentOutOfRangeException.ThrowIfNegative(contextLines);
 
 		var matching = declarations
-			.Where(declaration => NameMatches(declaration.Name, requestedName))
+			.Where(declaration => NameMatchesAny(declaration.Name, requestedNames))
 			.ToArray();
 		if (matching.Length == 0)
 			return [];
@@ -137,7 +166,7 @@ internal static class McpSearchSymbols
 				var declaration = FindNamedDeclarationAtLine(
 					matching,
 					match.MatchLineNumber,
-					requestedName);
+					requestedNames);
 				if (declaration is not null)
 					contexts.TryAdd(declaration, match);
 			},
@@ -403,6 +432,16 @@ internal static class McpSearchSymbols
 	{
 		var separator = name.AsSpan().LastIndexOfAny('.', '#', '/');
 		return separator >= 0 ? name.AsSpan(separator + 1) : name.AsSpan();
+	}
+
+	private static bool NameMatchesAny(string declaredName, IReadOnlyList<string> requestedNames)
+	{
+		foreach (var requestedName in requestedNames)
+		{
+			if (NameMatches(declaredName, requestedName))
+				return true;
+		}
+		return false;
 	}
 
 	private static bool NameMatches(string declaredName, string requestedName)
