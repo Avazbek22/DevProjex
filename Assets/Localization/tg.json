@@ -666,6 +666,7 @@
   "Terminal.Option.Extension": "Пасванди файлро дохил мекунад.",
   "Terminal.Option.Select": "Роҳи нисбии файл ё ҷузвдонро дохил мекунад.",
   "Terminal.Option.GitMode": "Реҷаи филтркунии Git: none, gitignore, tracked, staged, changes ё diff:<ref>..<ref>.",
+  "Terminal.Option.GitModeChoices": "Реҷаи филтркунии Git: {0}.",
   "Terminal.Option.McpGitMode": "Реҷаи асосии филтркунии Git: none, gitignore ё tracked.",
   "Terminal.Option.McpExclude": "Маҷмӯи истисноҳои асосии сервер: номҳои истисноҳо, default ё none. Номҳо маҷмӯи пешфарзро иваз мекунанд; барои васеъ кардани он default-ро нишон диҳед.",
   "Terminal.Option.McpUnrestricted": "Ҳамаро нишон додан: ҳамаи истисноҳо ва филтркунии Git-ро хомӯш мекунад. Пинҳонкунии қиматҳои махфӣ фаъол мемонад.",

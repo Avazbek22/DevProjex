@@ -678,6 +678,7 @@
   "Terminal.Option.Extension": "Sertakan ekstensi file.",
   "Terminal.Option.Select": "Sertakan file relatif atau jalur direktori.",
   "Terminal.Option.GitMode": "Mode pemfilteran Git: none, gitignore, tracked, staged, changes, atau diff:<ref>..<ref>.",
+  "Terminal.Option.GitModeChoices": "Mode pemfilteran Git: {0}.",
   "Terminal.Option.McpGitMode": "Mode pemfilteran Git dasar: none, gitignore, atau tracked.",
   "Terminal.Option.McpExclude": "Set pengecualian dasar server: nama pengecualian, default, atau none. Nama menggantikan set bawaan; sertakan default untuk memperluasnya.",
   "Terminal.Option.McpUnrestricted": "Tampilkan semuanya: menonaktifkan semua pengecualian dan pemfilteran Git. Penyamaran nilai rahasia tetap aktif.",

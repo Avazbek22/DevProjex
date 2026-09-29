@@ -678,6 +678,7 @@
   "Terminal.Option.Extension": "파일 확장자를 포함합니다.",
   "Terminal.Option.Select": "상대 파일 또는 디렉터리 경로를 포함합니다.",
   "Terminal.Option.GitMode": "Git 필터링 모드: none, gitignore, tracked, staged, changes 또는 diff:<ref>..<ref>.",
+  "Terminal.Option.GitModeChoices": "Git 필터링 모드: {0}.",
   "Terminal.Option.McpGitMode": "기본 Git 필터링 모드: none, gitignore 또는 tracked.",
   "Terminal.Option.McpExclude": "서버의 기본 제외 집합: 제외 이름, default 또는 none. 이름은 기본 집합을 대체합니다. 기본 집합을 확장하려면 default를 포함하세요.",
   "Terminal.Option.McpUnrestricted": "모두 표시: 모든 제외와 Git 필터링을 끕니다. 비밀 값 마스킹은 계속 켜져 있습니다.",
