@@ -10,6 +10,12 @@ public sealed class MemoryCleanupCoordinatorTests
     private static readonly TimeSpan CompletionTimeout =
         TimeSpan.FromSeconds(5);
 
+    // Fast CI timings scale the production 3 s readiness deadline to 240 ms, which a loaded
+    // runner can miss, and a missed deadline silently skips the cleanup under test. Tests that
+    // do not exercise the deadline get a bound that only a hang reaches.
+    private static readonly TimeSpan SettledUiReadinessTimeout =
+        TimeSpan.FromMinutes(1);
+
     [AvaloniaFact]
     public async Task SchedulePreview_PreviewCloseRunsForDetachedGraphAtAnyHeapSize()
     {
@@ -581,7 +587,7 @@ public sealed class MemoryCleanupCoordinatorTests
             captureMemorySnapshot: static () => EmptySnapshot(),
             collect: mode => completion.TrySetResult(mode),
             uiReady: () => Interlocked.Increment(ref readinessChecks) > 1,
-            uiReadinessTimeout: TimeSpan.FromSeconds(1),
+            uiReadinessTimeout: SettledUiReadinessTimeout,
             uiReadinessPollInterval: TimeSpan.FromMilliseconds(1),
             uiReadinessMaximumAttempts: 6);
 
@@ -802,7 +808,7 @@ public sealed class MemoryCleanupCoordinatorTests
             animationDuration: TimeSpan.Zero,
             captureMemorySnapshot,
             collect,
-            uiReadinessTimeout,
+            uiReadinessTimeout ?? SettledUiReadinessTimeout,
             uiReadinessPollInterval,
             uiReadinessMaximumAttempts,
             trimWorkingSet ?? (static () => { }),
