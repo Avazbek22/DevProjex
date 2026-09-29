@@ -138,7 +138,9 @@ public sealed partial class McpServerIntegrationTests
 			Assert.False(readCompletedDuringSearch);
 			Assert.Contains("Old.cs", searchText, StringComparison.Ordinal);
 			Assert.Contains("[Live context] revision 1 · 1 files selected", searchText, StringComparison.Ordinal);
-			Assert.Contains("[Live context] revision 2 · ", readText, StringComparison.Ordinal);
+			// read_pack builds no plan, so the new revision is reported without a selection count.
+			Assert.Matches(@"(?m)^\[Live context\] revision 2(?: · .*)?\r?$", readText);
+			Assert.DoesNotMatch(@"(?m)^\[Live context\] revision 1(?: · .*)?\r?$", readText);
 		}
 		finally
 		{
