@@ -240,6 +240,48 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
+	public void ZeroIndexAddressesTheOnlyRootAndStaysAnErrorWithSeveralRoots()
+	{
+		using var workspace = new TemporaryDirectory();
+		var first = workspace.CreateFolder("first");
+		var second = workspace.CreateFolder("second");
+		var single = new McpRootRegistry([first]);
+		var several = new McpRootRegistry([first, second]);
+
+		Assert.Equal(single.Roots[0], single.ResolveProject("#0"));
+		Assert.Equal(single.Roots[0], single.ResolveProject("#1"));
+		Assert.Equal(
+			McpErrorCodes.UnknownProject,
+			Assert.Throws<McpToolException>(() => several.ResolveProject("#0")).Code);
+		Assert.Equal(
+			McpErrorCodes.UnknownProject,
+			Assert.Throws<McpToolException>(() => single.ResolveProject("#2")).Code);
+	}
+
+	[Fact]
+	public void UriStyleDrivePathAddressesTheRootOnWindowsOnly()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var registry = new McpRootRegistry([project]);
+		var uriStyle = "/" + project.Replace('\\', '/');
+
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Equal(registry.Roots[0], registry.ResolveProject(uriStyle));
+			Assert.Equal("C:/repo", McpRootRegistry.NormalizeUriStyleDrivePath("/C:/repo"));
+			Assert.Equal(@"C:\repo", McpRootRegistry.NormalizeUriStyleDrivePath(@"\C:\repo"));
+		}
+		else
+		{
+			Assert.Equal("/C:/repo", McpRootRegistry.NormalizeUriStyleDrivePath("/C:/repo"));
+		}
+		Assert.Equal("/C:", McpRootRegistry.NormalizeUriStyleDrivePath("/C:"));
+		Assert.Equal("//server/share", McpRootRegistry.NormalizeUriStyleDrivePath("//server/share"));
+		Assert.Equal("#1", McpRootRegistry.NormalizeUriStyleDrivePath("#1"));
+	}
+
+	[Fact]
 	public void RootRegistryRejectsTraversalAndAbsolutePathsOutsideRoot()
 	{
 		using var workspace = new TemporaryDirectory();
