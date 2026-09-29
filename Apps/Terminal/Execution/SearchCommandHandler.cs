@@ -121,7 +121,12 @@ public sealed class SearchCommandHandler(
 		long maximumInspectedBytes,
 		CancellationToken cancellationToken)
 	{
-		var regex = new McpSearchRegex(ToRegexPattern(request.Pattern, request.Mode), ignoreCase: true);
+		var declarationNames = request.Mode == SearchMode.Symbols
+			? McpSearchSymbols.ParseDeclarationNames(request.Pattern)
+			: [];
+		var regex = new McpSearchRegex(
+			ToRegexPattern(request.Pattern, request.Mode, declarationNames),
+			ignoreCase: true);
 		var context = CreateTransformationContext(plan);
 		var inspectedFiles = new List<string>(plan.IncludedFiles.Count);
 		long inspectedBytes = 0;
@@ -141,6 +146,7 @@ public sealed class SearchCommandHandler(
 		var inspectedSources = 0;
 		var matchingFiles = 0;
 		var unscannableSources = 0;
+		var skippedBinarySources = 0;
 		ValueTask Consume(TransformedTextFile file, CancellationToken token)
 		{
 			inspectedSources++;
@@ -181,19 +187,17 @@ public sealed class SearchCommandHandler(
 			int effectiveMatches;
 			if (request.Mode == SearchMode.Symbols)
 			{
-				navigation = McpSearchSymbols.CaptureNavigation(
+				var declarationMatches = McpSearchSymbols.FindNamedDeclarationMatches(
 					services.DependencyFactsEngine,
 					relative,
-					file.Content,
-					token);
-				var declarationMatches = McpSearchSymbols.FindNamedDeclarationMatches(
 					file.Content,
 					regex,
 					ContextLines,
 					file.ReplacementRanges,
-					navigation,
-					request.Pattern,
-					token);
+					declarationNames,
+					token,
+					out var fileNavigation);
+				navigation = fileNavigation;
 				foreach (var match in declarationMatches)
 					AcceptMatch(match);
 				effectiveMatches = declarationMatches.Count;
@@ -244,6 +248,11 @@ public sealed class SearchCommandHandler(
 					inspectionByteLimitReached = true;
 					break;
 				}
+				if (read.Classification == FileContentClassification.Binary)
+				{
+					skippedBinarySources++;
+					continue;
+				}
 				if (read.Classification != FileContentClassification.Text || read.Content is null)
 				{
 					unscannableSources++;
@@ -261,6 +270,10 @@ public sealed class SearchCommandHandler(
 				.ConsumeTransformedTextAsync(context, inspectedFiles, Consume, cancellationToken)
 				.ConfigureAwait(false);
 			unscannableSources = searched.UnscannableFiles.Count;
+			skippedBinarySources = McpSearchBoundary.CountSkippedBinarySources(
+				inspectedFiles,
+				inspectedSources,
+				searched);
 		}
 
 		var candidateSnapshot = candidates.Snapshot();
@@ -334,7 +347,8 @@ public sealed class SearchCommandHandler(
 				rendered.ShownMatches < candidates.Count && rendered.ShownMatches >= request.MaximumResults,
 				candidates.CharacterCapacityReached,
 				StoredCharacterLimitReached: false,
-				unscannableSources);
+				unscannableSources,
+				skippedBinarySources);
 			return new SearchResult(
 				request.Pattern,
 				request.Mode,
@@ -392,19 +406,22 @@ public sealed class SearchCommandHandler(
 				: new SecretRedactionContext(plan.SourceRoot, services.SecretRedactionSession, redactionFeatures));
 	}
 
-	private static string ToRegexPattern(string pattern, SearchMode mode) => mode switch
+	private static string ToRegexPattern(
+		string pattern,
+		SearchMode mode,
+		IReadOnlyList<string> declarationNames)
 	{
-		SearchMode.Regex => pattern,
-		SearchMode.Text => Regex.Escape(pattern),
-		SearchMode.Symbols =>
-			$"(?<![\\p{{L}}\\p{{N}}_]){Regex.Escape(LastSymbolSegment(pattern))}(?![\\p{{L}}\\p{{N}}_])",
-		_ => throw new ArgumentOutOfRangeException(nameof(mode), mode, null)
-	};
-
-	private static string LastSymbolSegment(string name)
-	{
-		var separator = name.LastIndexOfAny(['.', '#', '/', ':']);
-		return separator >= 0 ? name[(separator + 1)..] : name;
+		return mode switch
+		{
+			SearchMode.Regex => pattern,
+			SearchMode.Text => Regex.Escape(pattern),
+			SearchMode.Symbols => declarationNames.Count > 0
+				? McpSearchSymbols.ToDeclarationNamePattern(declarationNames)
+				: throw new McpToolException(
+					McpErrorCodes.InvalidPattern,
+					$"{McpErrorCodes.InvalidPattern}: --symbols needs a declared name such as OrderService."),
+			_ => throw new ArgumentOutOfRangeException(nameof(mode), mode, null)
+		};
 	}
 
 	private static long ResolveFileSize(
@@ -535,9 +552,10 @@ public sealed class SearchCommandHandler(
 				.Append(preview.Text);
 			if (preview.RemainingLines > 0)
 			{
-				body.AppendLine().Append("[Declaration body truncated: ")
-					.Append(preview.RemainingLines.ToString(CultureInfo.InvariantCulture))
-					.Append(" line(s) remain.]");
+				body.AppendLine().Append(McpSearchSymbols.FormatBodyTruncationNotice(
+					preview.RemainingLines,
+					preview.Declaration.EndLine,
+					offerGetFile: false));
 			}
 			body.AppendLine();
 			if (output.Length + section.Length + body.Length <= maximumCharacters)
@@ -637,7 +655,8 @@ public sealed class SearchCommandHandler(
 			output.AppendLine(result.Body);
 		else if (result.Boundary.EncounteredMatches > 0)
 			output.AppendLine("[Matches omitted] Matches were found, but no complete result line fit within the output budget.");
-		else if (result.Boundary.InspectedSources < result.Boundary.EligibleSources)
+		else if (result.Boundary.InspectedSources + result.Boundary.SkippedBinarySources < result.Boundary.EligibleSources ||
+				 result.Boundary.BinaryOnlySelection)
 			output.Append("[Search partial] No matches were found in ")
 				.Append(result.Boundary.InspectedSources)
 				.Append(" inspected selected file(s); ")
@@ -704,6 +723,7 @@ public sealed class SearchCommandHandler(
 					complete = result.Boundary.IsComplete,
 					eligibleSources = result.Boundary.EligibleSources,
 					inspectedSources = result.Boundary.InspectedSources,
+					skippedBinarySources = result.Boundary.SkippedBinarySources,
 					encounteredMatches = result.Boundary.EncounteredMatches,
 					retainedMatches = result.Boundary.RetainedMatches,
 					writtenMatches = result.Boundary.WrittenMatches,
@@ -737,6 +757,7 @@ public sealed class SearchCommandHandler(
 		if (boundary.RetainedCharacterLimitReached) limits.Add("retained-characters");
 		if (boundary.StoredCharacterLimitReached) limits.Add("stored-characters");
 		if (boundary.UnscannableSources > 0) limits.Add("unscannable-sources");
+		if (boundary.BinaryOnlySelection) limits.Add("binary-sources");
 		return limits;
 	}
 

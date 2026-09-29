@@ -108,7 +108,7 @@ internal sealed class DevProjexMcpTools(
 		"max_tokens", "max_file_bytes", McpRelatedExpansion.ParameterName);
 	private readonly IReadOnlySet<string> searchArgumentNames = Allowed(agentExclusions,
 		"project", "branch", "pattern", "paths", "include_patterns", "exclude_patterns", "context_lines",
-		"ignore_case", "max_results", "tracked_only", "git_scope", "max_file_bytes");
+		"ignore_case", "max_results", "symbols", "tracked_only", "git_scope", "max_file_bytes");
 	private readonly IReadOnlySet<string> relatedArgumentNames = Allowed(agentExclusions,
 		"project", "branch", "path", "direction", "include_patterns", "exclude_patterns", "profile",
 		"tracked_only", "git_scope", "max_file_bytes");
@@ -1025,7 +1025,7 @@ internal sealed class DevProjexMcpTools(
 	}
 
 	[Description(
-		"Searches transformed text with a timed .NET regex. It matches file content, never paths; find names with get_tree include_patterns. Use it for symbols or phrases; use related_files for dependency links. Returns grouped numbered matches, merged context, complete|partial status, inspected/retained/written counts, and continuation. Line numbers use returned text; generated redaction replacements never match. Key parameters: pattern, paths, context_lines, ignore_case, max_results=1..200, git_scope, include_patterns, exclude_patterns, and max_file_bytes. The best unique declaration includes up to 1,800 protected body characters within the same cap.")]
+		"Searches transformed text with a timed .NET regex. It matches file content, never paths; find names with get_tree include_patterns. Use it for symbols or phrases; symbols=true finds declarations, not uses; use related_files for dependency links. Returns grouped numbered matches, merged context, complete|partial status, inspected/retained/written counts, and continuation. Line numbers use returned text; generated redaction replacements never match. Key parameters: pattern, paths, context_lines, ignore_case, max_results=1..200, git_scope, include_patterns, exclude_patterns, and max_file_bytes. The best unique declaration includes up to 1,800 protected body characters within the same cap.")]
 	public Task<CallToolResult> SearchProject(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -1036,7 +1036,19 @@ internal sealed class DevProjexMcpTools(
 			var contextLines = arguments.OptionalInteger("context_lines", 0, 20) ?? 2;
 			var ignoreCase = arguments.OptionalBoolean("ignore_case", true);
 			var maximumResults = arguments.OptionalInteger("max_results", 1, 200) ?? 50;
-			var regex = new McpSearchRegex(pattern, ignoreCase);
+			// symbols=true is the declaration-name mode of CLI search --symbols: the pattern is one
+			// identifier, and only declarations with that name match, not its uses.
+			var declarationsOnly = arguments.OptionalBoolean("symbols", false);
+			var declarationNames = declarationsOnly ? McpSearchSymbols.ParseDeclarationNames(pattern) : [];
+			if (declarationsOnly && declarationNames.Count == 0)
+			{
+				throw new McpToolException(
+					McpErrorCodes.InvalidArguments,
+					$"{McpErrorCodes.InvalidArguments}: symbols=true needs a declared name in pattern, such as OrderService or Foo|Bar.");
+			}
+			var regex = new McpSearchRegex(
+				declarationsOnly ? McpSearchSymbols.ToDeclarationNamePattern(declarationNames) : pattern,
+				ignoreCase);
 			var paths = ParsePaths(arguments);
 			var includePatterns = arguments.OptionalStringArray("include_patterns");
 			var excludePatterns = arguments.OptionalStringArray("exclude_patterns");
@@ -1097,46 +1109,69 @@ internal sealed class DevProjexMcpTools(
 					McpSearchDeclarationPreviewCache? declarationPreviews = null;
 					IReadOnlyDictionary<int, int>? protectionCountsByLine = null;
 					var priorityState = new McpSearchFilePriorityState();
-					var scan = McpSearchTextScanner.ScanEach(
-						file.Content,
-						regex,
-						contextLines,
-						file.ReplacementRanges,
-						match =>
-						{
-							protectionCountsByLine ??= BuildRedactionLineCounts(file);
-							navigation ??= McpSearchSymbols.CaptureNavigation(
-								Projects.DependencyFactsEngine,
+					void AcceptMatch(McpSearchMatchContext match)
+					{
+						protectionCountsByLine ??= BuildRedactionLineCounts(file);
+						navigation ??= McpSearchSymbols.CaptureNavigation(
+							Projects.DependencyFactsEngine,
+							relative,
+							file.Content,
+							token);
+						navigationIndex ??= new McpNavigationDeclarationIndex(navigation);
+						if (searchBodyCharacters > 0)
+							declarationPreviews ??= new McpSearchDeclarationPreviewCache(
 								relative,
 								file.Content,
-								token);
-							navigationIndex ??= new McpNavigationDeclarationIndex(navigation);
-							if (searchBodyCharacters > 0)
-								declarationPreviews ??= new McpSearchDeclarationPreviewCache(
-									relative,
-									file.Content,
-									navigation,
+								navigation,
 								searchBodyCharacters,
 								token,
 								protectionCountsByLine);
-							AddSearchCandidates(
-								candidates,
-								relative,
-								file.Path,
-								file.Content,
-								[match],
-								navigation,
-								regex,
-								contextLines,
-								explicitScope: HasItems(paths),
-								priorityState,
-								declarationPreviews,
-								navigationIndex,
-								protectionCountsByLine: protectionCountsByLine);
-						},
-						token);
-					totalMatches += scan.TotalMatches;
-					if (scan.TotalMatches > 0)
+						AddSearchCandidates(
+							candidates,
+							relative,
+							file.Path,
+							file.Content,
+							[match],
+							navigation,
+							regex,
+							contextLines,
+							explicitScope: HasItems(paths),
+							priorityState,
+							declarationPreviews,
+							navigationIndex,
+							protectionCountsByLine: protectionCountsByLine);
+					}
+
+					int fileMatches;
+					if (declarationsOnly)
+					{
+						var declarationMatches = McpSearchSymbols.FindNamedDeclarationMatches(
+							Projects.DependencyFactsEngine,
+							relative,
+							file.Content,
+							regex,
+							contextLines,
+							file.ReplacementRanges,
+							declarationNames,
+							token,
+							out var fileNavigation);
+						navigation = fileNavigation;
+						foreach (var match in declarationMatches)
+							AcceptMatch(match);
+						fileMatches = declarationMatches.Count;
+					}
+					else
+					{
+						fileMatches = McpSearchTextScanner.ScanEach(
+							file.Content,
+							regex,
+							contextLines,
+							file.ReplacementRanges,
+							AcceptMatch,
+							token).TotalMatches;
+					}
+					totalMatches += fileMatches;
+					if (fileMatches > 0)
 					{
 						matchingFiles++;
 						McpSearchExecutionHooks.AfterScan?.Invoke(relative);
@@ -1150,17 +1185,10 @@ internal sealed class DevProjexMcpTools(
 					return ValueTask.CompletedTask;
 				},
 				cancellationToken).ConfigureAwait(false);
-			var skippedBinarySources = 0;
-			if (inspectedFiles.Count > inspectedSourceCount + searched.UnscannableFiles.Count)
-			{
-				var unscannablePaths = searched.UnscannableFiles
-					.Select(static file => file.Path)
-					.ToHashSet(PathComparer.Default);
-				skippedBinarySources = inspectedFiles
-					.Where(path => !unscannablePaths.Contains(path))
-					.Distinct(PathComparer.Default)
-					.Count(path => searched.GetFile(path).Classification == FileContentClassification.Binary);
-			}
+			var skippedBinarySources = McpSearchBoundary.CountSkippedBinarySources(
+				inspectedFiles,
+				inspectedSourceCount,
+				searched);
 			// Candidate priority is applied before response sizing, so the retained set and the
 			// displayed slice are both independent of directory traversal order.
 			var candidateSnapshot = candidates.Snapshot();
@@ -1342,7 +1370,8 @@ internal sealed class DevProjexMcpTools(
 				requestResultLimitReached,
 				retentionCharacterBoundReached,
 				storeHitCharacterBound,
-				searched.UnscannableFiles.Count + skippedBinarySources);
+				searched.UnscannableFiles.Count,
+				skippedBinarySources);
 			if (!boundary.IsComplete)
 				journal?.RecordNotice(AgentJournalNoticeCodes.SearchPartial);
 			if (totalMatches > shownMatches)
@@ -1363,7 +1392,7 @@ internal sealed class DevProjexMcpTools(
 						? null
 						: $"[Search skipped] {skippedBinarySources.ToString(CultureInfo.InvariantCulture)} selected binary " +
 						  (skippedBinarySources == 1 ? "file was" : "files were") +
-						  " not searched as text. Results are partial.",
+						  " not searched as text.",
 					McpTrustedDiagnosticFormatter.FormatWarnings(plan),
 					noMatches,
 					ordered.Count == 0 ? null : SearchOrderNotice,
@@ -3521,9 +3550,10 @@ internal sealed class DevProjexMcpTools(
 
 	/// <summary>
 	/// Turns a symbol lookup into the line range to read, or into the error that says why there is
-	/// none. An ambiguous name reports how many declarations answered to it and asks for a
-	/// qualified name; it never names them, because a declaration name is project text and the
-	/// error text is outside the untrusted block.
+	/// none. An ambiguous name reports how many declarations answered to it and their line ranges,
+	/// because a qualified name cannot tell overloads or a property's accessors apart; it never
+	/// names them, because a declaration name is project text and the error text is outside the
+	/// untrusted block.
 	/// </summary>
 	private static (int? Start, int? End) ResolveSymbolRange(McpSymbolLookup located) =>
 		located.Status switch
@@ -3533,7 +3563,8 @@ internal sealed class DevProjexMcpTools(
 				McpErrorCodes.InvalidArguments,
 				$"{McpErrorCodes.InvalidArguments}: 'symbol' matches " +
 				$"{located.CandidateCount.ToString(CultureInfo.InvariantCulture)} declarations in this " +
-				"file; pass the qualified name, or read the file and choose a line range."),
+				$"file, at lines {located.FormatCandidateLines()}; read one with start_line and end_line " +
+				"instead, or pass a more qualified name."),
 			McpSymbolLookupStatus.Unsupported => throw new McpToolException(
 				McpErrorCodes.InvalidArguments,
 				$"{McpErrorCodes.InvalidArguments}: 'symbol' is not supported for this file, because no " +
@@ -3547,7 +3578,8 @@ internal sealed class DevProjexMcpTools(
 	private static string FormatBatchSymbolFailure(McpSymbolLookup located) => located.Status switch
 	{
 		McpSymbolLookupStatus.Ambiguous =>
-			$"symbol is ambiguous ({located.CandidateCount.ToString(CultureInfo.InvariantCulture)} declarations)",
+			$"symbol is ambiguous ({located.CandidateCount.ToString(CultureInfo.InvariantCulture)} declarations, " +
+			$"at lines {located.FormatCandidateLines()})",
 		McpSymbolLookupStatus.Unsupported => "symbol lookup is unsupported for this file",
 		_ => "symbol matches no declaration in this file"
 	};
@@ -4099,7 +4131,10 @@ internal sealed class DevProjexMcpTools(
 					: preview.Declaration.EndLine - preview.Declaration.StartLine + 1 - includedLines
 			};
 			var truncationCharacters = prefix.RemainingLines > 0
-				? Environment.NewLine.Length + FormatDeclarationBodyTruncationNotice(prefix.RemainingLines).Length
+				? Environment.NewLine.Length + McpSearchSymbols.FormatBodyTruncationNotice(
+					prefix.RemainingLines,
+					prefix.Declaration.EndLine,
+					offerGetFile: true).Length
 				: 0;
 			if (prefix.Text.Length == 0 || rendered.Output.Length - reclaimed + framingCharacters +
 				prefix.Text.Length + truncationCharacters > MaximumSearchContentCharacters)
@@ -4163,7 +4198,10 @@ internal sealed class DevProjexMcpTools(
 			.Append(preview.Text);
 		if (preview.RemainingLines > 0)
 		{
-			output.AppendLine().Append(FormatDeclarationBodyTruncationNotice(preview.RemainingLines));
+			output.AppendLine().Append(McpSearchSymbols.FormatBodyTruncationNotice(
+				preview.RemainingLines,
+				preview.Declaration.EndLine,
+				offerGetFile: true));
 		}
 		output.AppendLine();
 		return output.ToString();
@@ -4205,10 +4243,6 @@ internal sealed class DevProjexMcpTools(
 		arguments["symbol"] = declaration.Name;
 		return JsonSerializer.Serialize(arguments);
 	}
-
-	private static string FormatDeclarationBodyTruncationNotice(int remainingLines) =>
-		$"[Declaration body truncated: {remainingLines.ToString(CultureInfo.InvariantCulture)} " +
-		"line(s) remain.]";
 
 	private static string? FormatDeclarationBodyNotice(
 		McpDeclarationSectionResult section,
@@ -4422,9 +4456,13 @@ internal sealed class DevProjexMcpTools(
 	internal static string FormatSearchBoundaryNotice(McpSearchBoundary boundary, bool hasStoredContinuation)
 	{
 		var prefix = boundary.IsComplete ? "[Search boundary] complete" : "[Search boundary] partial";
+		var binary = boundary.SkippedBinarySources > 0
+			? $"binary files skipped={boundary.SkippedBinarySources.ToString(CultureInfo.InvariantCulture)} · "
+			: string.Empty;
 		var counts =
 			$"sources inspected={boundary.InspectedSources.ToString(CultureInfo.InvariantCulture)}/" +
 			$"{boundary.EligibleSources.ToString(CultureInfo.InvariantCulture)} · " +
+			binary +
 			$"matches retained={boundary.RetainedMatches.ToString(CultureInfo.InvariantCulture)}/" +
 			$"{boundary.EncounteredMatches.ToString(CultureInfo.InvariantCulture)} · " +
 			$"matches written={boundary.WrittenMatches.ToString(CultureInfo.InvariantCulture)} · " +
@@ -4449,6 +4487,8 @@ internal sealed class DevProjexMcpTools(
 			limits.Add("stored-characters");
 		if (boundary.UnscannableSources > 0)
 			limits.Add("unscannable-sources");
+		if (boundary.BinaryOnlySelection)
+			limits.Add("binary-sources");
 		return $"{prefix} · {counts} · limits={string.Join(',', limits)}.";
 	}
 

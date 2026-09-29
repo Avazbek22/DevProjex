@@ -284,6 +284,7 @@ the JSON document itself is never truncated.
     "complete": true,
     "eligibleSources": 24,
     "inspectedSources": 24,
+    "skippedBinarySources": 0,
     "encounteredMatches": 1,
     "retainedMatches": 1,
     "writtenMatches": 1,
@@ -305,7 +306,9 @@ For search it describes containing-declaration evidence for written matches:
 `resolved` means one containing declaration was named and `unresolved` means none
 was proved; search does not invent ambiguous or external declaration targets.
 `searchBoundary.limits` uses the same constant tokens as the text
-`[Search boundary]` line. An empty `matches` array is meaningful only together with
+`[Search boundary]` line. `skippedBinarySources` counts selected binary files, which
+hold no text to search: they do not make a search partial, except when they are the
+whole selection, which is partial with the `binary-sources` limit. An empty `matches` array is meaningful only together with
 that boundary: a complete empty search and a partial search of no readable sources
 are different results. `writtenMatches` is the number of entries in `matches`.
 When matches were observed but no complete matching line fits, text and Markdown
@@ -314,6 +317,8 @@ empty result emits `[Search partial]`. Neither state is described as `[No matche
 When a declaration body is included, text and Markdown print its project-relative
 address followed by an executable `devprojex export context ... --view content`
 command for reading that file through the CLI; they never print an MCP-only call.
+A cut body ends with `[Declaration body truncated: N line(s) remain: lines A-B.]`,
+naming the unshown lines of that declaration.
 
 ## Related-files JSON
 

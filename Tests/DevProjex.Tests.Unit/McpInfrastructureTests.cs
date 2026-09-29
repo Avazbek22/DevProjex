@@ -240,6 +240,108 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
+	public void ZeroIndexAddressesTheOnlyRootAndStaysAnErrorWithSeveralRoots()
+	{
+		using var workspace = new TemporaryDirectory();
+		var first = workspace.CreateFolder("first");
+		var second = workspace.CreateFolder("second");
+		var single = new McpRootRegistry([first]);
+		var several = new McpRootRegistry([first, second]);
+
+		Assert.Equal(single.Roots[0], single.ResolveProject("#0"));
+		Assert.Equal(single.Roots[0], single.ResolveProject("#1"));
+		Assert.Equal(
+			McpErrorCodes.UnknownProject,
+			Assert.Throws<McpToolException>(() => several.ResolveProject("#0")).Code);
+		Assert.Equal(
+			McpErrorCodes.UnknownProject,
+			Assert.Throws<McpToolException>(() => single.ResolveProject("#2")).Code);
+	}
+
+	[Fact]
+	public void UriStyleDrivePathAddressesTheRootOnWindowsOnly()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var registry = new McpRootRegistry([project]);
+		var uriStyle = "/" + project.Replace('\\', '/');
+
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Equal(registry.Roots[0], registry.ResolveProject(uriStyle));
+			Assert.Equal("C:/repo", McpRootRegistry.NormalizeUriStyleDrivePath("/C:/repo"));
+			Assert.Equal(@"C:\repo", McpRootRegistry.NormalizeUriStyleDrivePath(@"\C:\repo"));
+		}
+		else
+		{
+			Assert.Equal("/C:/repo", McpRootRegistry.NormalizeUriStyleDrivePath("/C:/repo"));
+		}
+		Assert.Equal("/C:", McpRootRegistry.NormalizeUriStyleDrivePath("/C:"));
+		Assert.Equal("//server/share", McpRootRegistry.NormalizeUriStyleDrivePath("//server/share"));
+		Assert.Equal("#1", McpRootRegistry.NormalizeUriStyleDrivePath("#1"));
+	}
+
+	[Theory]
+	[InlineData("OrderService", "public sealed class OrderService", true)]
+	[InlineData("Shop.OrderService.CalculateTotal", "decimal CalculateTotal(", true)]
+	[InlineData("OrderService", "public sealed class OrderServices", false)]
+	[InlineData("OrderService|Checkout", "class Checkout", true)]
+	[InlineData("Service", "ServiceProvider", false)]
+	public void DeclarationNamePatternMatchesOnlyWholeLastSegments(string pattern, string text, bool matches)
+	{
+		var names = McpSearchSymbols.ParseDeclarationNames(pattern);
+		var regex = new McpSearchRegex(McpSearchSymbols.ToDeclarationNamePattern(names), ignoreCase: false);
+
+		Assert.Equal(matches, regex.IsMatch(text));
+	}
+
+	[Theory]
+	[InlineData("OrderService", "OrderService")]
+	[InlineData("class InvalidURL", "InvalidURL")]
+	[InlineData("class Request|class URL", "Request,URL")]
+	[InlineData("type JSONRespond|interface JSONRespond", "JSONRespond")]
+	[InlineData("def compute(self):", "compute")]
+	[InlineData("interface Box<T> {", "Box")]
+	[InlineData("class Foo:", "Foo")]
+	[InlineData("Shop.OrderService.CalculateTotal", "Shop.OrderService.CalculateTotal")]
+	[InlineData(" | ", "")]
+	[InlineData("(", "")]
+	public void DeclarationNameQueriesKeepTheDeclaredNameOfEachAlternative(string pattern, string expected)
+	{
+		Assert.Equal(
+			expected.Split(',', StringSplitOptions.RemoveEmptyEntries),
+			McpSearchSymbols.ParseDeclarationNames(pattern));
+	}
+
+	[Fact]
+	public void BodyTruncationNoticeNamesTheExactUnshownLines()
+	{
+		Assert.Equal(
+			"[Declaration body truncated: 60 line(s) remain; read lines 30-89 with get_file.]",
+			McpSearchSymbols.FormatBodyTruncationNotice(60, 89, offerGetFile: true));
+		Assert.Equal(
+			"[Declaration body truncated: 1 line(s) remain: lines 12-12.]",
+			McpSearchSymbols.FormatBodyTruncationNotice(1, 12, offerGetFile: false));
+		Assert.Throws<ArgumentOutOfRangeException>(() =>
+			McpSearchSymbols.FormatBodyTruncationNotice(0, 12, offerGetFile: true));
+	}
+
+	[Fact]
+	public void AmbiguousSymbolListsTheFirstSixCandidateRangesAndCountsTheRest()
+	{
+		var two = McpSymbolLookup.Ambiguous([(4, 7), (9, 12)]);
+		var eight = McpSymbolLookup.Ambiguous(
+			Enumerable.Range(0, 8).Select(static index => (index * 10 + 1, index * 10 + 5)).ToArray());
+
+		Assert.Equal(2, two.CandidateCount);
+		Assert.Equal("4-7, 9-12", two.FormatCandidateLines());
+		Assert.Equal(8, eight.CandidateCount);
+		Assert.Equal("1-5, 11-15, 21-25, 31-35, 41-45, 51-55 and 2 more", eight.FormatCandidateLines());
+		Assert.Equal(1, McpSymbolLookup.Found(3, 9).CandidateCount);
+		Assert.Equal(0, McpSymbolLookup.Unknown.CandidateCount);
+	}
+
+	[Fact]
 	public void RootRegistryRejectsTraversalAndAbsolutePathsOutsideRoot()
 	{
 		using var workspace = new TemporaryDirectory();

@@ -178,8 +178,11 @@ internal readonly record struct McpSearchBoundary(
 	bool RequestResultLimitReached,
 	bool RetainedCharacterLimitReached,
 	bool StoredCharacterLimitReached,
-	int UnscannableSources)
+	int UnscannableSources,
+	int SkippedBinarySources = 0)
 {
+	// Binary files hold no text to search, so skipping them does not leave text unsearched; only a
+	// selection with nothing but binary files stays partial, because nothing in it was searchable.
 	public bool IsComplete =>
 		!InspectionByteLimitReached &&
 		!RetainedMatchLimitReached &&
@@ -188,5 +191,26 @@ internal readonly record struct McpSearchBoundary(
 		!RequestResultLimitReached &&
 		!RetainedCharacterLimitReached &&
 		!StoredCharacterLimitReached &&
-		UnscannableSources == 0;
+		UnscannableSources == 0 &&
+		!BinaryOnlySelection;
+
+	public bool BinaryOnlySelection => SkippedBinarySources > 0 && InspectedSources == 0;
+
+	public static int CountSkippedBinarySources(
+		IReadOnlyCollection<string> inspectedFiles,
+		int consumedSources,
+		PreparedSecretRedactionOutput searched)
+	{
+		ArgumentNullException.ThrowIfNull(inspectedFiles);
+		ArgumentNullException.ThrowIfNull(searched);
+		if (inspectedFiles.Count <= consumedSources + searched.UnscannableFiles.Count)
+			return 0;
+		var unscannablePaths = searched.UnscannableFiles
+			.Select(static file => file.Path)
+			.ToHashSet(PathComparer.Default);
+		return inspectedFiles
+			.Where(path => !unscannablePaths.Contains(path))
+			.Distinct(PathComparer.Default)
+			.Count(path => searched.GetFile(path).Classification == FileContentClassification.Binary);
+	}
 }

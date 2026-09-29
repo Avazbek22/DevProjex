@@ -76,11 +76,15 @@ public sealed class McpRootRegistry
 				$"{McpErrorCodes.UnknownProject}: 'project' is required because multiple roots are available. " +
 				$"Call list_projects and use a listed project index: {FormatRoots()}.");
 		}
-		var requestedProject = project!;
+		var requestedProject = NormalizeUriStyleDrivePath(project!);
 		if (TryParseProjectIndex(requestedProject, out var projectIndex))
 		{
 			if (projectIndex >= 1 && projectIndex <= _roots.Count)
 				return _roots[projectIndex - 1];
+			// Agents often count from zero. With one root "#0" can only mean that root; with
+			// several it is ambiguous and stays an error.
+			if (projectIndex == 0 && _roots.Count == 1)
+				return _roots[0];
 			throw UnknownProject();
 		}
 		if (_rootsByName.TryGetValue(requestedProject, out var namedRoots))
@@ -351,6 +355,19 @@ public sealed class McpRootRegistry
 	private string FormatIndexes(IEnumerable<string> roots) => string.Join(
 		", ",
 		roots.Select(root => $"#{GetProjectIndex(root)}"));
+
+	// Clients that derive a path from a file URI send "/C:/repo". On Windows that spelling is
+	// "C:/repo"; elsewhere it is an ordinary absolute path and is left as written. The result
+	// still passes every containment check below, so this changes spelling, not access.
+	internal static string NormalizeUriStyleDrivePath(string project) =>
+		OperatingSystem.IsWindows() &&
+		project.Length >= 4 &&
+		project[0] is '/' or '\\' &&
+		char.IsAsciiLetter(project[1]) &&
+		project[2] == ':' &&
+		project[3] is '/' or '\\'
+			? project[1..]
+			: project;
 
 	private static bool TryParseProjectIndex(string project, out int index)
 	{

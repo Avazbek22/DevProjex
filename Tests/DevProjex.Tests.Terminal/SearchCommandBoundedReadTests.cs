@@ -98,4 +98,68 @@ public sealed class SearchCommandBoundedReadTests
 		Assert.Equal(1, counters.FullFileReads);
 		Assert.Equal(100, counters.FullFileReadBytes);
 	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task BinaryFilesAreReportedWithoutMakingATextSearchPartial(bool hideSecrets)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/notes.txt", "needle here\n");
+		File.WriteAllBytes(Path.Combine(project, "logo.bin"), [0x00, 0x01, 0x02, 0xFF]);
+		var selection = ProjectSelectionSpec.Standard with { HideSecrets = hideSecrets };
+
+		var mixed = await SearchAsync(workspace, project, selection, includeOnly: null);
+		var binaryOnly = await SearchAsync(workspace, project, selection, includeOnly: "logo.bin");
+
+		var mixedBoundary = mixed.RootElement.GetProperty("searchBoundary");
+		Assert.True(mixedBoundary.GetProperty("complete").GetBoolean());
+		Assert.Equal(1, mixedBoundary.GetProperty("inspectedSources").GetInt32());
+		Assert.Equal(1, mixedBoundary.GetProperty("skippedBinarySources").GetInt32());
+		Assert.Empty(mixedBoundary.GetProperty("limits").EnumerateArray());
+		Assert.Single(mixed.RootElement.GetProperty("matches").EnumerateArray());
+
+		var binaryBoundary = binaryOnly.RootElement.GetProperty("searchBoundary");
+		Assert.False(binaryBoundary.GetProperty("complete").GetBoolean());
+		Assert.Equal(0, binaryBoundary.GetProperty("inspectedSources").GetInt32());
+		Assert.Equal(1, binaryBoundary.GetProperty("skippedBinarySources").GetInt32());
+		Assert.Equal(
+			["binary-sources"],
+			binaryBoundary.GetProperty("limits").EnumerateArray().Select(static limit => limit.GetString()));
+		mixed.Dispose();
+		binaryOnly.Dispose();
+	}
+
+	private static async Task<JsonDocument> SearchAsync(
+		TemporaryDirectory workspace,
+		string project,
+		ProjectSelectionSpec selection,
+		string? includeOnly)
+	{
+		using var services = new TerminalServiceFactory(
+			() => workspace.CreateDirectory("app-data")).Create(AppLanguage.En);
+		var plan = await services.ContextFactory.BuildAsync(
+			project,
+			includeOnly is null ? selection : selection with { SelectedPaths = [includeOnly] },
+			includeOutputMetrics: false,
+			cancellationToken: TestContext.Current.CancellationToken);
+		var request = new SearchCommandRequest(
+			project,
+			"needle",
+			plan.Selection,
+			SearchMode.Text,
+			MaximumResults: 10,
+			SearchBodyCharacters: 0,
+			Format: SearchOutputFormat.Json,
+			OutputPath: null,
+			Output: new TerminalOutputOptions());
+		var payload = await new SearchCommandHandler(services, new TestTerminalEnvironment())
+			.RenderSearchForPlanAsync(
+				plan,
+				request,
+				maximumInspectedBytes: 1_024 * 1_024,
+				cancellationToken: TestContext.Current.CancellationToken);
+		return JsonDocument.Parse(payload);
+	}
 }

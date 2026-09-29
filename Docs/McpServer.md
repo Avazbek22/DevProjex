@@ -176,10 +176,10 @@ The server records a live-session heartbeat under the application state root in
 identity no longer matches or whose heartbeat is older than 15 seconds; a
 healthy server updates every 5 seconds and removes its record on normal exit.
 
-The Release process measurement on Windows x64 gives 27,710 characters for the
-full `tools/list` result and 17,049 for reduced. These correspond to roughly
-6,928 and 4,262 tokens using the character/4 estimate, not model usage. Process
-budgets are 27,900 and 17,500 characters respectively.
+The process measurement on Windows x64 gives 28,058 characters for the
+full `tools/list` result and 17,206 for reduced. These correspond to roughly
+7,015 and 4,302 tokens using the character/4 estimate, not model usage. Process
+budgets are 28,300 and 17,500 characters respectively.
 
 Repeat `--root` to expose more than one project. When no explicit root is given,
 DevProjex uses `DEVPROJEX_ROOT`, then `CLAUDE_PROJECT_DIR`, then the current
@@ -589,12 +589,12 @@ description has to fit a budget rather than grow one silently.
 
 | Tool | Parameters | Result and limits |
 |---|---|---|
-| `list_projects` | none | Session inventory used for profiles, active policy, or choosing among several projects: allowed local roots with 1-based index, path, name, type, and profiles, plus the server `baseline`. String metadata is protected before JSON serialization. If a name or path is masked, use its stable address for this process, such as `project: "#1"`. The profile database is read once per call and `profilesStatus` reports an unavailable bounded read. The baseline reports secret/private-data policy and the optional remote-host allowlist. With one local root, project tools accept an omitted `project`; otherwise they accept a listed `#index`, a unique listed name, or its absolute path. Remote projects are addressed by URL and are not added to this list. |
+| `list_projects` | none | Session inventory used for profiles, active policy, or choosing among several projects: allowed local roots with 1-based index, path, name, type, and profiles, plus the server `baseline`. String metadata is protected before JSON serialization. If a name or path is masked, use its stable address for this process, such as `project: "#1"`. The profile database is read once per call and `profilesStatus` reports an unavailable bounded read. The baseline reports secret/private-data policy and the optional remote-host allowlist. With one local root, project tools accept an omitted `project` or `#0`; otherwise they accept a listed `#index`, a unique listed name, or its absolute path. On Windows the file-URI spelling `/C:/path` is read as `C:/path` before the same root checks. Remote projects are addressed by URL and are not added to this list. |
 | `get_tree` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `max_depth?`, `format?` | Effective tree in `markdown` (default), `text`, `json`, or `xml`; at most 2,000 lines and 50,000 characters. Its root label masks a supported local-user segment when Hide Private Data is effective. Select several directories in one call with a brace pattern such as `include_patterns: ["src/middleware/{powered-by,body-limit,bearer-auth}/**"]` instead of walking each directory separately. Without `max_depth`, a large human-readable tree uses the deepest complete depth that fits. |
 | `analyze` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `detail_by_pattern?`, `tracked_only?`, `git_scope?`, `top_files?`, `max_file_bytes?`, `max_tokens?`, `rank?`, `focus?` | File, character, and token metrics plus the requested largest files by tokens. `contentMetrics` separates measured transformed bodies from size-based estimates; `documentMetrics` models `pack_context` with `view=content`, `format=text`, relative file headings, and its Root line. Every ranked file carries `estimated`; an uninspected one also carries `uninspected: true`. The `topFiles` array has a 32,000-character aggregate budget; `topFilesTruncated` and `topFilesRemaining` make any omission explicit. With `max_tokens` the result also carries `admission`: which files that budget would admit, from the same greedy pass `pack_context` uses and without producing content. `rank` and `focus` order that admission and are invalid without `max_tokens`. |
 | `pack_context` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `detail_by_pattern?`, `tracked_only?`, `git_scope?`, `max_tokens?`, `rank?`, `focus?`, `max_file_bytes?`, `view?`, `format?` | Exact DevProjex context pipeline. `max_tokens` measures the safe transformed selection, applies the ordinary token admission order, and materializes only admitted content without changing the budget report. `rank: "importance"` opts into importance-aware admission and document order; `focus` seeds graph-hop order within it. `detail_by_pattern` overrides `detail` per file. `full` adds no transformations; transformations enabled by the active profile still apply. Inline through 50,000 characters; otherwise returns a `pack_id` valid until this server process exits. After restart, call `pack_context` again. |
 | `read_pack` | `pack_id`, `start_line?`, `end_line?`, `start_column?` | Pages a stored result from `pack_context`, `search_project`, or `related_files`. Inclusive, 1-based line range; `start_column` continues within `start_line` using 1-based Unicode characters. At most 1,000 lines or 50,000 characters per call. An `end_line` after EOF is clamped and reported. A manual protection-policy change after storage fails with `DPX-MCP-STORED-PROTECTION-CHANGED` and requires rerunning the producing tool. If the current saved policy cannot be verified, `DPX-MCP-STORED-PROTECTION-UNAVAILABLE` fails closed until the selection becomes readable. A selection-only revision change keeps the stored page readable with its existing revision warning. Call the originating tool again after server restart or quota eviction. |
-| `search_project` | `project?`, `branch?`, `pattern`, `paths?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `max_results?` | Matches over safe transformed text, grouped by file: the relative path stands on its own line, then each line of the group is written as `line:text` for a match and `line-text` for context. Line numbers refer to that returned text after replacements. `search_project` matches file content only and never matches paths; use `get_tree` with `include_patterns` to find files by name. A bounded collector keeps stronger evidence from everything inspected instead of preserving arrival order. The returned match text is capped at 16,000 characters. Overlapping or adjacent context windows are merged and distinct groups use `--`. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200. The trusted `[Search boundary]` line distinguishes a complete result from every partial limit and reports inspected sources, encountered and retained matches, written matches, named declaration files, and continuation guidance. Actual text inserted by redaction never matches. |
+| `search_project` | `project?`, `branch?`, `pattern`, `paths?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `symbols?`, `max_results?` | `symbols: true` is the declaration-name mode of CLI `search --symbols`: `pattern` names one or more declarations separated by `|`, and each alternative keeps its last word before any parameter list or type arguments, so `class Foo`, `type Foo|interface Foo` and `def foo(` all ask for their names. A qualified name is matched on its last segment and then narrowed to that declaration. Only declarations with those names match, never their uses; a pattern that names nothing is refused with `DPX-MCP-INVALID-ARGUMENTS`. Otherwise matches over safe transformed text, grouped by file: the relative path stands on its own line, then each line of the group is written as `line:text` for a match and `line-text` for context. Line numbers refer to that returned text after replacements. `search_project` matches file content only and never matches paths; use `get_tree` with `include_patterns` to find files by name. A bounded collector keeps stronger evidence from everything inspected instead of preserving arrival order. The returned match text is capped at 16,000 characters. Overlapping or adjacent context windows are merged and distinct groups use `--`. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200. The trusted `[Search boundary]` line distinguishes a complete result from every partial limit and reports inspected sources, encountered and retained matches, written matches, named declaration files, and continuation guidance. Actual text inserted by redaction never matches. |
 | `related_files` | `project?`, `branch?`, `path`, `direction?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `tracked_only?`, `git_scope?`, `max_file_bytes?` | Statically evidenced dependencies and dependents for one seed or up to 16 seeds. `direction` is `dependencies`, `dependents`, or `both` (default). The trusted `[Resolution]` line counts resolved, ambiguous, unresolved, and external edges for the call. Coverage distinguishes recognized supported languages from unsupported files and reports configuration diagnostics. Evidence protection consumes transformed sources one at a time under a cumulative 64 MiB source budget; sources outside that budget are not opened by this pass and their dynamic fragments become bounded generic reasons. Results larger than 50,000 characters use `read_pack`. |
 | `get_file` | `project?`, `branch?`, `profile?`, either `path` with `start_line?`, `end_line?`, `start_column?`, `symbol?`, or `requests` | Redacted text from one effective file or a batch of up to eight file requests and sixteen file selections. Every returned section starts with its path and returned line interval. A batch item with only `path` reads the whole file; `ranges` or `symbol` narrows it. Ranges are inclusive, each physical file is read and redacted once, overlaps merge, and every original range reports `ok`, `partial`, `not-returned`, or `unavailable` from its own returned coverage. Both forms share the 1,000-line/50,000-character limit. Coordinates refer to returned text after replacements. A non-empty file that cannot pass the 16 MiB mandatory-redaction boundary is withheld; the single form returns `DPX-MCP-PAYLOAD-TRUNCATED` and never returns an empty success, while batch output reports the count-only unavailable status. `profile` applies the same effective selection and transformations as `analyze` and `pack_context`. Markdown-escaped names copied from default `get_tree` are accepted (`\_` and other ASCII punctuation); use `format: "text"` to copy unescaped names. |
 
@@ -937,6 +937,13 @@ ends with the detailed trusted counters. A complete search says:
 ```text
 [Search boundary] complete · sources inspected=X/Y · matches retained=R/T · matches written=W · declaration files named=N.
 ```
+
+Binary files hold no text to search. Each skipped one is counted as
+`binary files skipped=B` after the inspected sources and reported once by
+`[Search skipped] B selected binary files were not searched as text.`; skipping them
+does not make a search partial. A selection that contains only binary files is partial
+with `limits=binary-sources`, because nothing in it was searchable. Files that could not
+be read as text for other reasons remain `limits=unscannable-sources`.
 
 A partial search places `[Search boundary] partial; retained matches are available
 below.` before the data, then uses the same detailed counters at the end and names
@@ -1398,7 +1405,7 @@ lines, context outside the printed body, and other files remain in their origina
 Only spare space is used beyond that reclaimed context. When space is insufficient,
 the body is cut at a complete line or omitted, never at the expense of a shown match.
 A cut body reports exactly how many
-declaration lines remain and prints the complete `get_file` arguments needed to read it.
+declaration lines remain, names them as a range, as in `[Declaration body truncated: 60 line(s) remain; read lines 30-89 with get_file.]`, and prints the complete `get_file` arguments needed to read it.
 The trusted `[Declaration body] shown=1/N` notice states how many other declarations need
 separate reads. If the selected printed name identifies more than one declaration in its
 file, no body is guessed; the response says to use the listed inclusive range instead.
@@ -1459,10 +1466,13 @@ declaration, and `symbol` reads it without a line arithmetic step in between.
 `symbol` cannot be combined with `start_line`, `end_line`, or `start_column`, and
 that combination is rejected before the file is read. Three cases return
 `DPX-MCP-INVALID-ARGUMENTS` rather than a guess: a name matching more than one
-declaration, which reports how many and asks for the qualified form; a name
-matching none; and a file no declarations were extracted from, which is how an
-unsupported language answers. None of these echoes a declaration name, because the
-error text sits outside the untrusted block and a declaration name is project text.
+declaration, which reports how many and the line range of each in file order (the
+first six, then how many more), so one can be read with `start_line` and `end_line`
+even where no qualified form tells them apart, as with overloads or a property's
+getter and setter; a name matching none; and a file no declarations were extracted
+from, which is how an unsupported language answers. None of these echoes a
+declaration name, because the error text sits outside the untrusted block and a
+declaration name is project text; line numbers are not.
 
 The range is the declaration the navigation projection reports, so its granularity is
 the same as the naming on search hits. Every successful scalar read starts with
@@ -1497,7 +1507,8 @@ is never copied onto all merged inputs. Thus a page ending at line 992 reports
 `1450-1600`. In live mode a path that disappeared since discovery
 is an unavailable item rather than a failure for the whole batch. An unknown,
 ambiguous, or unsupported `symbol` is likewise reported only on its item, while
-syntactically invalid request records still reject the call before any read. An
+syntactically invalid request records still reject the call before any read; an
+ambiguous item names its candidates' line ranges for a follow-up `ranges` read. An
 unavailable status contains only a count-safe reason.
 The complete batch, including section headers, is limited to 1,000 lines and 50,000
 characters. A partial section reports the next 1-based `start_line` and, when the

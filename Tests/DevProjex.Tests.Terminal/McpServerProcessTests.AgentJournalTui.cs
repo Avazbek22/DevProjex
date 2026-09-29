@@ -102,12 +102,17 @@ public sealed partial class McpServerProcessTests
 			var cli = RunJournalExport(dataRoot!, project, session.Id, cliExportPath);
 			Assert.Equal(CommandLineExitCodes.Success, cli.ExitCode);
 			Assert.Empty(cli.StandardError);
-			Assert.Equal(
-				await File.ReadAllBytesAsync(cliExportPath, TestContext.Current.CancellationToken),
-				await File.ReadAllBytesAsync(exportPath, TestContext.Current.CancellationToken));
-			Assert.Equal(
-				new AgentJournalReceiptFormatter().FormatMarkdown(receipt),
+			// Every export wraps project text in a fresh random untrusted-data boundary, so two
+			// exports of one session agree once those nonces are normalized.
+			var terminalExport = NormalizeUntrustedBoundaries(
 				await File.ReadAllTextAsync(exportPath, TestContext.Current.CancellationToken));
+			Assert.Equal(
+				NormalizeUntrustedBoundaries(
+					await File.ReadAllTextAsync(cliExportPath, TestContext.Current.CancellationToken)),
+				terminalExport);
+			Assert.Equal(
+				NormalizeUntrustedBoundaries(new AgentJournalReceiptFormatter().FormatMarkdown(receipt)),
+				terminalExport);
 
 			await terminal.SendAsync(":mcp log clear\r", TestContext.Current.CancellationToken);
 			await terminal.WaitForScreenAsync(
@@ -129,6 +134,14 @@ public sealed partial class McpServerProcessTests
 				timeout: TimeSpan.FromSeconds(30),
 				cancellationToken: TestContext.Current.CancellationToken));
 	}
+
+	private static string NormalizeUntrustedBoundaries(string text) =>
+		System.Text.RegularExpressions.Regex.Replace(
+			text,
+			"untrusted-data-[0-9a-f]{24}",
+			"untrusted-data-nonce",
+			System.Text.RegularExpressions.RegexOptions.None,
+			TimeSpan.FromSeconds(2));
 
 	private static TerminalTestProcessResult RunJournalExport(
 		string dataRoot,

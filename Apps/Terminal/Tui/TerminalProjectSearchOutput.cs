@@ -58,11 +58,12 @@ internal static class TerminalProjectSearchOutput
 				boundary.InspectedSources,
 				boundary.EligibleSources));
 		}
-		if (boundary.UnscannableSources > 0)
+		var notSearchedAsText = boundary.UnscannableSources + boundary.SkippedBinarySources;
+		if (notSearchedAsText > 0)
 		{
 			lines.Add(localization.Format(
 				"Terminal.Tui.Command.Grep.Result.Unscannable",
-				boundary.UnscannableSources));
+				notSearchedAsText));
 		}
 		return string.Join('\n', lines);
 	}

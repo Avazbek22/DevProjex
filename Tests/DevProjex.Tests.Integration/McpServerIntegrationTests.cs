@@ -2499,7 +2499,7 @@ public sealed partial class McpServerIntegrationTests
 			["analyze"] = ["project", "branch", "paths", "include_patterns", "exclude_patterns", "profile", "detail", "detail_by_pattern", "tracked_only", "git_scope", "top_files", "max_file_bytes", "max_tokens", "rank", "focus"],
 			["pack_context"] = ["project", "branch", "paths", "include_patterns", "exclude_patterns", "profile", "detail", "detail_by_pattern", "tracked_only", "git_scope", "rank", "focus", "max_tokens", "max_file_bytes", "expand_related", "view", "format"],
 			["read_pack"] = ["pack_id", "start_line", "end_line", "start_column"],
-			["search_project"] = ["project", "branch", "pattern", "paths", "include_patterns", "exclude_patterns", "tracked_only", "git_scope", "max_file_bytes", "context_lines", "ignore_case", "max_results"],
+			["search_project"] = ["project", "branch", "pattern", "paths", "include_patterns", "exclude_patterns", "tracked_only", "git_scope", "max_file_bytes", "context_lines", "ignore_case", "symbols", "max_results"],
 			["related_files"] = ["project", "branch", "path", "direction", "include_patterns", "exclude_patterns", "profile", "tracked_only", "git_scope", "max_file_bytes"],
 			["get_file"] = ["project", "branch", "profile", "path", "requests", "start_line", "end_line", "start_column", "symbol"]
 		};
@@ -6997,6 +6997,27 @@ public sealed partial class McpServerIntegrationTests
 		Assert.NotEqual(true, result.IsError);
 		Assert.Contains("found-marker", text, StringComparison.Ordinal);
 		Assert.Contains("2.1 — unavailable — symbol matches no declaration in this file", text,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task BatchAmbiguousSymbolNamesTheCandidateLineRanges()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(
+			Path.Combine(project, "App.cs"),
+			"namespace P;\nsealed class App\n{\n    string Run(int value) => \"int\";\n    string Run(string value) => \"text\";\n}\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync("get_file", new Dictionary<string, object?>
+		{
+			["requests"] = new object[] { new { path = "App.cs", symbol = "P.App.Run" } }
+		});
+		var text = AllText(result);
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.Contains("1.1 — unavailable — symbol is ambiguous (2 declarations, at lines 4-4, 5-5)", text,
 			StringComparison.Ordinal);
 	}
 

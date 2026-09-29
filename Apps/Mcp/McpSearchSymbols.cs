@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace DevProjex.Mcp;
 
 /// <summary>
@@ -18,18 +20,104 @@ internal static class McpSearchSymbols
 	/// </summary>
 	public const int MaximumAnnotatedFiles = 64;
 
+	/// <summary>
+	/// Reduces a declaration-name query to the names it asks for. Readers write the declaration
+	/// they picture, such as "class Foo", "type Foo|interface Foo" or "def foo(", so each
+	/// alternative keeps its last word, cut before any parameter list or type arguments.
+	/// </summary>
+	public static IReadOnlyList<string> ParseDeclarationNames(string pattern)
+	{
+		ArgumentNullException.ThrowIfNull(pattern);
+		var names = new List<string>();
+		foreach (var alternative in pattern.Split('|', StringSplitOptions.TrimEntries))
+		{
+			var words = alternative.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+			for (var index = words.Length - 1; index >= 0; index--)
+			{
+				var word = words[index];
+				var cut = word.IndexOfAny(['(', '<', '{', '[', ';', ',', '=']);
+				var name = (cut >= 0 ? word[..cut] : word).TrimEnd('.', '#', '/', ':');
+				if (name.Length == 0)
+					continue;
+				if (!names.Contains(name, StringComparer.Ordinal))
+					names.Add(name);
+				break;
+			}
+		}
+		return names;
+	}
+
+	/// <summary>
+	/// Builds the whole-identifier pattern for a declaration-name search. A qualified name is
+	/// matched on its last segment here and narrowed to the qualified declaration afterwards.
+	/// </summary>
+	public static string ToDeclarationNamePattern(IReadOnlyList<string> names)
+	{
+		ArgumentNullException.ThrowIfNull(names);
+		ArgumentOutOfRangeException.ThrowIfZero(names.Count);
+		var alternatives = names
+			.Select(static name => Regex.Escape(LastSearchSegment(name).ToString()))
+			.Distinct(StringComparer.Ordinal);
+		return $"(?<![\\p{{L}}\\p{{N}}_])(?:{string.Join('|', alternatives)})(?![\\p{{L}}\\p{{N}}_])";
+	}
+
+	/// <summary>
+	/// Names the unshown tail of a declaration body, so a reader asks for exactly those lines
+	/// instead of rereading the whole declaration to be sure nothing was missed.
+	/// </summary>
+	public static string FormatBodyTruncationNotice(int remainingLines, int declarationEndLine, bool offerGetFile)
+	{
+		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(remainingLines);
+		var remaining = remainingLines.ToString(CultureInfo.InvariantCulture);
+		var range = (declarationEndLine - remainingLines + 1).ToString(CultureInfo.InvariantCulture) + "-" +
+			declarationEndLine.ToString(CultureInfo.InvariantCulture);
+		return offerGetFile
+			? $"[Declaration body truncated: {remaining} line(s) remain; read lines {range} with get_file.]"
+			: $"[Declaration body truncated: {remaining} line(s) remain: lines {range}.]";
+	}
+
+	/// <summary>
+	/// Finds the declarations named by <paramref name="requestedNames"/> in one file. A file whose
+	/// text never contains any of the names cannot declare them, so it is ruled out without a parse.
+	/// </summary>
+	public static IReadOnlyList<McpSearchMatchContext> FindNamedDeclarationMatches(
+		DependencyFactsEngine engine,
+		string relativePath,
+		string content,
+		McpSearchRegex regex,
+		int contextLines,
+		IReadOnlyList<TransformedTextRange> protectedRanges,
+		IReadOnlyList<string> requestedNames,
+		CancellationToken cancellationToken,
+		out IReadOnlyList<NavigationDeclaration>? navigation)
+	{
+		ArgumentNullException.ThrowIfNull(regex);
+		navigation = null;
+		if (!regex.IsMatch(content))
+			return [];
+		navigation = CaptureNavigation(engine, relativePath, content, cancellationToken);
+		return FindNamedDeclarationMatches(
+			content,
+			regex,
+			contextLines,
+			protectedRanges,
+			navigation,
+			requestedNames,
+			cancellationToken);
+	}
+
 	private static NavigationDeclaration? FindNamedDeclarationAtLine(
 		IReadOnlyList<NavigationDeclaration> declarations,
 		int line,
-		string requestedName)
+		IReadOnlyList<string> requestedNames)
 	{
 		ArgumentNullException.ThrowIfNull(declarations);
-		ArgumentNullException.ThrowIfNull(requestedName);
+		ArgumentNullException.ThrowIfNull(requestedNames);
 		NavigationDeclaration? best = null;
 		foreach (var declaration in declarations)
 		{
 			if (line < declaration.StartLine || line > declaration.EndLine ||
-				!NameMatches(declaration.Name, requestedName))
+				!NameMatchesAny(declaration.Name, requestedNames))
 			{
 				continue;
 			}
@@ -51,18 +139,18 @@ internal static class McpSearchSymbols
 		int contextLines,
 		IReadOnlyList<TransformedTextRange> protectedRanges,
 		IReadOnlyList<NavigationDeclaration> declarations,
-		string requestedName,
+		IReadOnlyList<string> requestedNames,
 		CancellationToken cancellationToken)
 	{
 		ArgumentNullException.ThrowIfNull(content);
 		ArgumentNullException.ThrowIfNull(regex);
 		ArgumentNullException.ThrowIfNull(protectedRanges);
 		ArgumentNullException.ThrowIfNull(declarations);
-		ArgumentNullException.ThrowIfNull(requestedName);
+		ArgumentNullException.ThrowIfNull(requestedNames);
 		ArgumentOutOfRangeException.ThrowIfNegative(contextLines);
 
 		var matching = declarations
-			.Where(declaration => NameMatches(declaration.Name, requestedName))
+			.Where(declaration => NameMatchesAny(declaration.Name, requestedNames))
 			.ToArray();
 		if (matching.Length == 0)
 			return [];
@@ -78,7 +166,7 @@ internal static class McpSearchSymbols
 				var declaration = FindNamedDeclarationAtLine(
 					matching,
 					match.MatchLineNumber,
-					requestedName);
+					requestedNames);
 				if (declaration is not null)
 					contexts.TryAdd(declaration, match);
 			},
@@ -321,7 +409,7 @@ internal static class McpSearchSymbols
 		if (qualified.Length == 1)
 			return McpSymbolLookup.Found(qualified[0].Start, qualified[0].End);
 		if (qualified.Length > 1)
-			return McpSymbolLookup.Ambiguous(qualified.Length);
+			return McpSymbolLookup.Ambiguous(ToCandidateLines(qualified));
 
 		var ownerQualified = spans
 			.Where(span => span.Name.EndsWith('.' + symbol, StringComparison.Ordinal))
@@ -329,21 +417,38 @@ internal static class McpSearchSymbols
 		if (ownerQualified.Length == 1)
 			return McpSymbolLookup.Found(ownerQualified[0].Start, ownerQualified[0].End);
 		if (ownerQualified.Length > 1)
-			return McpSymbolLookup.Ambiguous(ownerQualified.Length);
+			return McpSymbolLookup.Ambiguous(ToCandidateLines(ownerQualified));
 
 		var simple = spans.Where(span => LastSegment(span.Name).Equals(symbol, StringComparison.Ordinal)).ToArray();
 		return simple.Length switch
 		{
 			1 => McpSymbolLookup.Found(simple[0].Start, simple[0].End),
-			> 1 => McpSymbolLookup.Ambiguous(simple.Length),
+			> 1 => McpSymbolLookup.Ambiguous(ToCandidateLines(simple)),
 			_ => McpSymbolLookup.Unknown
 		};
 	}
+
+	private static (int StartLine, int EndLine)[] ToCandidateLines(DeclarationSpan[] spans) =>
+		spans
+			.OrderBy(static span => span.Start)
+			.ThenBy(static span => span.End)
+			.Select(static span => (span.Start, span.End))
+			.ToArray();
 
 	private static ReadOnlySpan<char> LastSegment(string name)
 	{
 		var separator = name.AsSpan().LastIndexOfAny('.', '#', '/');
 		return separator >= 0 ? name.AsSpan(separator + 1) : name.AsSpan();
+	}
+
+	private static bool NameMatchesAny(string declaredName, IReadOnlyList<string> requestedNames)
+	{
+		foreach (var requestedName in requestedNames)
+		{
+			if (NameMatches(declaredName, requestedName))
+				return true;
+		}
+		return false;
 	}
 
 	private static bool NameMatches(string declaredName, string requestedName)
@@ -399,16 +504,39 @@ internal readonly record struct McpSymbolLookup(
 	McpSymbolLookupStatus Status,
 	int StartLine,
 	int EndLine,
-	int CandidateCount)
+	IReadOnlyList<(int StartLine, int EndLine)> Candidates)
 {
-	public static readonly McpSymbolLookup Unknown = new(McpSymbolLookupStatus.Unknown, 0, 0, 0);
-	public static readonly McpSymbolLookup Unsupported = new(McpSymbolLookupStatus.Unsupported, 0, 0, 0);
+	private const int MaximumListedCandidates = 6;
+
+	public static readonly McpSymbolLookup Unknown = new(McpSymbolLookupStatus.Unknown, 0, 0, []);
+	public static readonly McpSymbolLookup Unsupported = new(McpSymbolLookupStatus.Unsupported, 0, 0, []);
+
+	public int CandidateCount => Candidates.Count;
 
 	public static McpSymbolLookup Found(int startLine, int endLine) =>
-		new(McpSymbolLookupStatus.Resolved, startLine, endLine, 1);
+		new(McpSymbolLookupStatus.Resolved, startLine, endLine, [(startLine, endLine)]);
 
-	public static McpSymbolLookup Ambiguous(int candidates) =>
+	public static McpSymbolLookup Ambiguous(IReadOnlyList<(int StartLine, int EndLine)> candidates) =>
 		new(McpSymbolLookupStatus.Ambiguous, 0, 0, candidates);
+
+	/// <summary>
+	/// Lists the candidates' line ranges in file order, so an ambiguous name can be read by range
+	/// instead of by reading the whole file. Line numbers are not project text.
+	/// </summary>
+	public string FormatCandidateLines()
+	{
+		var listed = string.Join(
+			", ",
+			Candidates
+				.Take(MaximumListedCandidates)
+				.Select(static candidate => string.Create(
+					CultureInfo.InvariantCulture,
+					$"{candidate.StartLine}-{candidate.EndLine}")));
+		var unlisted = Candidates.Count - MaximumListedCandidates;
+		return unlisted > 0
+			? string.Create(CultureInfo.InvariantCulture, $"{listed} and {unlisted} more")
+			: listed;
+	}
 }
 
 internal readonly record struct McpSearchHit(string RelativePath, string FullPath, int Line);
