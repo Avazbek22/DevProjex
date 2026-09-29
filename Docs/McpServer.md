@@ -515,6 +515,30 @@ text uses the credential-free display form of the URL.
 `DPX-MCP-REMOTE-HOST-DENIED` reports that an otherwise valid URL is outside the
 optional startup host allowlist without echoing the rejected host.
 
+### Error code catalog
+
+Every `DPX-MCP-*` code a tool can return in its `isError: true` result.
+
+| Code | Meaning |
+|---|---|
+| `DPX-MCP-ROOT-VIOLATION` | The requested path resolves outside every allowed project root. |
+| `DPX-MCP-UNKNOWN-PROJECT` | The supplied `project` value does not match a listed project. |
+| `DPX-MCP-PROJECT-UNAVAILABLE` | The project root is temporarily unreadable; retry advised. |
+| `DPX-MCP-PATH-NOT-FOUND` | The requested path does not exist in the effective selection. |
+| `DPX-MCP-INVALID-ARGUMENTS` | Tool arguments are malformed, ambiguous, or mutually exclusive. |
+| `DPX-MCP-INVALID-RANGE` | The requested line or column range is invalid or past end of file. |
+| `DPX-MCP-INVALID-PATTERN` | The search pattern is unsupported (for example a character class) or malformed. |
+| `DPX-MCP-PAYLOAD-TRUNCATED` | The response would exceed the payload limit and was withheld or truncated. |
+| `DPX-MCP-PACK-EXPIRED` | The stored pack or result id was evicted or has expired; rerun the producing tool. |
+| `DPX-MCP-PACK-TOO-LARGE` | The result exceeds the pack size limit; narrow the request. |
+| `DPX-MCP-STORED-PROTECTION-CHANGED` | The protection policy changed after a page was stored; rerun the producing tool. |
+| `DPX-MCP-STORED-PROTECTION-UNAVAILABLE` | The current protection policy cannot be verified; fails closed. |
+| `DPX-MCP-REMOTE-DISABLED` | A remote URL was passed to a server started without `--allow-remote`. |
+| `DPX-MCP-REMOTE-FAILED` | Cloning or fetching the remote source failed. |
+| `DPX-MCP-REMOTE-LIMIT` | The 16-source remote session cap was reached. |
+| `DPX-MCP-REMOTE-HOST-DENIED` | The remote URL's host is outside the optional startup host allowlist. |
+| `DPX-MCP-OPERATION-FAILED` | Generic fallback for an unexpected tool-execution failure. |
+
 ### Redaction placeholders
 
 Secrets are replaced before text is returned with placeholders shaped as

@@ -586,3 +586,40 @@ status bar without interrupting keyboard navigation.
 For very large explicit selections, save a portable profile and use
 `--profile FILE` instead of producing a command with hundreds of `--select`
 arguments.
+
+## Error code catalog
+
+`DPX-TUI-*` codes are Workspace-only: they surface as an inline status message
+or dialog inside the running Workspace, not as a process exit code. Some
+`DPX-DESKTOP-*` and `DPX-CLI-*` codes (see
+[CLI-Output-Contract.md](CLI-Output-Contract.md)) also reach the Workspace
+when a desktop-control or startup check fails there.
+
+| Code | Meaning |
+|---|---|
+| `DPX-TUI-NOT-INTERACTIVE` | The Workspace was started without an interactive terminal. |
+| `DPX-TUI-PROJECT-UNAVAILABLE` | The current project became unreadable. |
+| `DPX-TUI-PROJECT-OPEN-FAILED` | Opening the selected project failed. |
+| `DPX-TUI-CLONE-FAILED` | Cloning the entered repository URL failed. |
+| `DPX-TUI-GIT-URL-INVALID` | The entered repository URL is not a supported clone source. |
+| `DPX-TUI-GIT-UPDATE-FAILED` | Updating (pulling) the repository failed. |
+| `DPX-TUI-GIT-BRANCH-FAILED` | Switching branch failed. |
+| `DPX-TUI-GIT-BRANCH-NOT-FOUND` | The requested branch does not exist on the remote. |
+| `DPX-TUI-REPOSITORY-STATE-INCONSISTENT` | The repository's cached state no longer matches what the Workspace expects. |
+| `DPX-TUI-RECENT-REPOSITORIES-UNAVAILABLE` | The recent-repositories list could not be read. |
+| `DPX-TUI-GREP-PATTERN` | The entered search pattern is invalid. |
+| `DPX-TUI-GREP-SELECTION-FAILED` | Applying the search result to the selection failed. |
+| `DPX-TUI-RELATED-SELECTION-FAILED` | Applying a related-files result to the selection failed. |
+| `DPX-TUI-PREVIEW-FAILED` | The file preview could not be rendered. |
+| `DPX-TUI-PREVIEW-SEARCH-FAILED` | Searching within the open preview failed. |
+| `DPX-TUI-PROFILE-SAVE-FAILED` | Saving the current selection as a portable profile failed. |
+| `DPX-TUI-PROFILE-APPLY-FAILED` | Applying a portable profile to the current selection failed. |
+| `DPX-TUI-PROFILE-RESET-FAILED` | Resetting the selection profile failed. |
+| `DPX-TUI-PROFILE-RESET-PARTIAL` | The selection profile reset completed only partially. |
+| `DPX-TUI-JOURNAL-NOT-FOUND` | The referenced agent-journal session does not exist. |
+| `DPX-TUI-JOURNAL-UNAVAILABLE` | The agent journal could not be read. |
+| `DPX-TUI-JOURNAL-DESTINATION-EXISTS` | The journal export destination already exists. |
+| `DPX-TUI-CLIPBOARD-UNAVAILABLE` | The system clipboard is unavailable. |
+| `DPX-TUI-CLIPBOARD-PAYLOAD-TOO-LARGE` | The content is too large to copy to the clipboard. |
+| `DPX-TUI-SETTINGS-REFRESH-FAILED` | Reloading Workspace settings after a change failed. |
+| `DPX-TUI-OPERATION-FAILED` | A Workspace operation failed without a more specific code. |
