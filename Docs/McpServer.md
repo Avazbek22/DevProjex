@@ -440,7 +440,10 @@ with recording. The 0.036 ms difference was below the baseline spread.
   `--hide-private-data` or the active live profile enables it. Root paths in
   `list_projects` and project-derived details in tool errors remain data inside
   the untrusted boundary and are scanned as string values before JSON serialization;
-  remote tools use the safe Git URL as the project address. If a local name or path
+  secrets are always masked there, while a `list_projects` root and name follow the
+  same private-data policy as the `get_tree` root label: exact without the policy,
+  and with it only the supported local-user segment becomes `[local-user-1]`.
+  Remote tools use the safe Git URL as the project address. If a local name or path
   is masked, its 1-based `index` remains a safe address such as `project: "#1"`.
   Generated read and search continuation hints use that index instead of the
   masked local path. Trusted warning trailers report fixed codes and counts,

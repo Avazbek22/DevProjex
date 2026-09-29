@@ -158,11 +158,20 @@ internal sealed class DevProjexMcpTools(
 						includeOutputMetrics: false).ConfigureAwait(false);
 				}
 			}
+			var privateRoots = validatedRoots
+				.Where(IsPrivateDataHidden)
+				.ToHashSet(PathComparer.Default);
 			var projectItems = validatedRoots
 				.Select(root =>
 				{
-					var path = McpToolResults.ProtectMetadataString(root);
-					var name = McpToolResults.ProtectMetadataString(ResolveProjectName(root));
+					// A root is the address an agent passes back, so without an effective private
+					// data policy it stays exact; with one, only the local-user segment is masked,
+					// exactly as the get_tree root label does.
+					var hidePrivateData = privateRoots.Contains(root);
+					var path = McpToolResults.ProtectMetadataString(
+						hidePrivateData ? OutputRootPathPresentation.MaskLocalUserSegment(root) : root,
+						hidePrivateData);
+					var name = McpToolResults.ProtectMetadataString(ResolveProjectName(root), hidePrivateData);
 					return new
 					{
 						index = roots.GetProjectIndex(root),
@@ -194,7 +203,10 @@ internal sealed class DevProjexMcpTools(
 					profileCatalog.ProjectRoots.Contains(identity.Physical))
 				.Select(identity => new
 				{
-					project = McpToolResults.ProtectMetadataString(identity.Physical),
+					project = privateRoots.Contains(identity.Physical)
+						? McpToolResults.ProtectMetadataString(
+							OutputRootPathPresentation.MaskLocalUserSegment(identity.Physical))
+						: McpToolResults.ProtectMetadataString(identity.Physical, detectPrivateData: false),
 					name = "local"
 				})
 				.ToArray();
@@ -239,8 +251,16 @@ internal sealed class DevProjexMcpTools(
 			},
 			maskedReferences.Length == 0
 				? null
-				: $"[Project reference] A project name or path was masked; use {string.Join(" or ", maskedReferences)}.");
+				: $"[Project reference] A project name or path was masked; use {string.Join(" or ", maskedReferences)}.",
+			static (_, trailer) => trailer,
+			detectPrivateData: privateRoots.Count > 0);
 		}
+
+		// Live mode adds the window's own opt-in on top of the server flag.
+		bool IsPrivateDataHidden(string root) =>
+			Projects.HidePrivateData ||
+			liveContext?.ReadProfile(root).Profile?.SelectedIgnoreOptions
+				.Contains(IgnoreOptionId.HidePrivateData) == true;
 	}
 
 	[Description(

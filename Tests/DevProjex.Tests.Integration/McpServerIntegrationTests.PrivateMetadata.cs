@@ -57,6 +57,13 @@ public sealed partial class McpServerIntegrationTests
 				["context_lines"] = 0
 			});
 
+			var listed = await server.CallAsync("list_projects");
+			var listedPath = Structured(listed).GetProperty("projects")[0].GetProperty("path").GetString();
+			Assert.Equal(hidePrivateData ? protectedProject : physicalProject, listedPath);
+			Assert.Equal(
+				hidePrivateData,
+				AllText(listed).Contains("[Project reference]", StringComparison.Ordinal));
+
 			foreach (var result in new[] { tree, batch, search })
 				Assert.NotEqual(true, result.IsError);
 			Assert.Contains("Best declaration body", Text(search), StringComparison.Ordinal);
