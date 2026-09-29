@@ -213,10 +213,14 @@ public sealed partial class McpServerProcessTests
 		var wideText = AllProcessText(wide).Replace("\r\n", "\n", StringComparison.Ordinal);
 		Assert.NotEqual(true, wide.IsError);
 		Assert.True(wideText.Length <= 18_000, $"Wide search returned {wideText.Length} characters.");
-		Assert.StartsWith(
-			"[Search boundary] partial; retained matches are available below.",
+		// Every file was searched and every match kept; only the written text hit the cap, so the
+		// opening line says how many of the kept matches are written rather than a bare "partial".
+		var opening = Regex.Match(
 			wideText,
-			StringComparison.Ordinal);
+			@"^\[Search boundary\] partial output: every selected file was searched; (\d+) of (\d+) matches are " +
+			@"written here and the rest are stored for read_pack\.");
+		Assert.True(opening.Success, wideText);
+		Assert.Equal(800, int.Parse(opening.Groups[2].Value));
 		Assert.Contains("[Search truncated]", wideText, StringComparison.Ordinal);
 		Assert.Contains(
 			"[Next read] Call read_pack with the reported pack_id for the remaining retained matches.",
@@ -236,6 +240,7 @@ public sealed partial class McpServerProcessTests
 		var additional = Regex.Match(wideText, @"\[(\d+) additional observed matches not shown\.\]");
 		Assert.True(additional.Success, wideText);
 		Assert.Equal(800, shown + int.Parse(additional.Groups[1].Value));
+		Assert.Equal(shown, int.Parse(opening.Groups[1].Value));
 
 		// A search that returns everything it found keeps its previous response exactly.
 		var narrowText = AllProcessText(narrow).Replace("\r\n", "\n", StringComparison.Ordinal);
