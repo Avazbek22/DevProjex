@@ -797,7 +797,8 @@ follow it, `[Protection]` comes after that, a pinned remote checkout adds
 tool adds an `[Empty selection]` line when no file survived the filters and the
 request arguments. A stage token is included only when that stage has evidence
 that it emptied the selection: `stage=patterns`, `stage=paths`, `stage=git-scope`,
-or `stage=filters`. Otherwise the line is `[Empty selection] No files survived the
+`stage=filters`, or `stage=source` when the project folder itself contains no file
+outside Git metadata. Otherwise the line is `[Empty selection] No files survived the
 effective filters and request selection.` A pattern with no `/` and no
 `**` matches only an entry directly in the project root, and its empty result
 names the `**/` and `/**` rewrites instead of restating the general rule. `search_project` adds a `[No matches]` line

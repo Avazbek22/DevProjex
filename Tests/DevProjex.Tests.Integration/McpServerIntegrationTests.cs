@@ -773,11 +773,24 @@ public sealed partial class McpServerIntegrationTests
 			StringComparison.Ordinal);
 
 		var emptyProject = workspace.CreateDirectory("empty-project");
+		Directory.CreateDirectory(Path.Combine(emptyProject, "src", "empty"));
 		await using var emptyServer = await McpTestServer.StartAsync(emptyProject, workspace.Path);
-		var projectSelection = Text(await emptyServer.CallAsync("get_tree"));
+		var emptySelection = Text(await emptyServer.CallAsync("get_tree"));
+		Assert.Contains(
+			"[Empty selection] stage=source. The project folder contains no files.",
+			emptySelection,
+			StringComparison.Ordinal);
+
+		var filteredProject = workspace.CreateDirectory("filtered-project");
+		File.WriteAllText(Path.Combine(filteredProject, ".hidden.cs"), "class Hidden {}\n");
+		await using var filteredServer = await McpTestServer.StartAsync(
+			filteredProject,
+			workspace.Path,
+			exclusions: [ProjectExclusion.DotFiles]);
+		var filteredSelection = Text(await filteredServer.CallAsync("get_tree"));
 		Assert.Contains(
 			"[Empty selection] stage=filters. The effective filters leave no file in this project.",
-			projectSelection,
+			filteredSelection,
 			StringComparison.Ordinal);
 	}
 
