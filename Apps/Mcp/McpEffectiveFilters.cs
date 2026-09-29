@@ -43,6 +43,8 @@ internal static class McpEffectiveFilters
 		"[Empty selection] stage=paths. None of the requested paths is in the effective selection; paths the filters hide never match.";
 	private const string ProjectSelectionEmptyNotice =
 		"[Empty selection] stage=filters. The effective filters leave no file in this project.";
+	private const string SourceEmptyNotice =
+		"[Empty selection] stage=source. The project folder contains no files.";
 	private const string IndeterminateEmptySelectionNotice =
 		"[Empty selection] No files survived the effective filters and request selection.";
 
@@ -127,7 +129,41 @@ internal static class McpEffectiveFilters
 		if (isGitNarrowing)
 			return IndeterminateEmptySelectionNotice;
 
-		return ProjectSelectionEmptyNotice;
+		return ContainsAnyFile(plan.SourceRoot) ? ProjectSelectionEmptyNotice : SourceEmptyNotice;
+	}
+
+	// Blaming the filters for a folder that holds no file sends an agent looking for a filter to
+	// relax. The walk runs only for an empty selection, stops at the first file, skips Git
+	// metadata and links, and keeps the filters wording whenever the folder cannot be read.
+	internal static bool ContainsAnyFile(string root)
+	{
+		var options = new EnumerationOptions
+		{
+			AttributesToSkip = FileAttributes.ReparsePoint,
+			IgnoreInaccessible = false,
+			RecurseSubdirectories = false
+		};
+		var pending = new Stack<string>();
+		pending.Push(root);
+		try
+		{
+			while (pending.Count > 0)
+			{
+				var directory = pending.Pop();
+				if (Directory.EnumerateFiles(directory, "*", options).Any())
+					return true;
+				foreach (var child in Directory.EnumerateDirectories(directory, "*", options))
+				{
+					if (!string.Equals(Path.GetFileName(child), ".git", StringComparison.OrdinalIgnoreCase))
+						pending.Push(child);
+				}
+			}
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+		{
+			return true;
+		}
+		return false;
 	}
 
 	private static string DescribeGitMode(ProjectSelectionSpec selection) =>

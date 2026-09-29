@@ -360,7 +360,9 @@ internal sealed class SelectionOptions
 		{
 			Description = capability == GitModeOptionCapability.All
 				? localization["Terminal.Option.GitMode"]
-				: capabilityMessage,
+				: localization.Format(
+					"Terminal.Option.GitModeChoices",
+					string.Join(", ", advertisedTokens)),
 			HelpName = "MODE",
 			Arity = ArgumentArity.ExactlyOne,
 			CustomParser = result =>

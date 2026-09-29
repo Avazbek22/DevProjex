@@ -684,6 +684,7 @@
   "Terminal.Option.Extension": "Include a file extension.",
   "Terminal.Option.Select": "Include a relative file or directory path.",
   "Terminal.Option.GitMode": "Git filtering mode: none, gitignore, tracked, staged, changes, or diff:<ref>..<ref>.",
+  "Terminal.Option.GitModeChoices": "Git filtering mode: {0}.",
   "Terminal.Option.McpGitMode": "Baseline Git filtering mode: none, gitignore, or tracked.",
   "Terminal.Option.McpExclude": "Baseline exclusion set for the server: exclusion names, default, or none. Names replace the default set; list default to extend it.",
   "Terminal.Option.McpUnrestricted": "Show everything: turn every exclusion off and disable Git filtering. Secret redaction stays on.",

@@ -846,6 +846,160 @@ leaves it out of the copy and names it in `DEVPROJEX-NOTICE.txt`.
 classified-read failure on any command; it is a runtime failure (exit `1`) and never
 falls back to an unredacted artifact.
 
+## Error code catalog
+
+Every `DPX-*` code the `devprojex` command line can print, grouped by area. The
+`Exit code` column gives the process exit code for a failure; a code marked
+`warning` is a non-fatal diagnostic that does not change a successful exit
+code (it may appear in the `diagnostics` array or on stderr).
+
+### Parsing and general
+
+| Code | Exit code | Meaning |
+|---|---:|---|
+| `DPX-CLI-UNKNOWN-COMMAND` | 2 | Command name is not recognized. |
+| `DPX-CLI-UNKNOWN-OPTION` | 2 | Option name is not recognized. |
+| `DPX-CLI-MISSING-VALUE` | 2 | A required argument or an option value is missing. |
+| `DPX-CLI-INVALID-VALUE` | 2 | An option value failed validation. |
+| `DPX-CLI-INVALID-SYNTAX` | 2 | Malformed command line (value on a flag that takes none, empty argument, etc.). |
+| `DPX-CLI-LEGACY-SYNTAX` | 2 | A pre-v1 command form was used; see [CLI-Migration.md](CLI-Migration.md). |
+| `DPX-CLI-SELECT-FROM-INVALID` | 2 | `--select-from` file is missing, unreadable, or has no usable paths. |
+| `DPX-CLI-SEARCH-PATTERN` | 2 | The search pattern or its flag combination is invalid. |
+| `DPX-CLI-INVALID-REQUEST` | 2 | The export request is internally inconsistent. |
+| `DPX-CLI-CANCELED` | 130 | The command was canceled (Ctrl+C). |
+| `DPX-CLI-UNEXPECTED` | 1 | An unhandled exception occurred; diagnostic verbosity reports more detail. |
+| `DPX-DEV-RUNNER-UNAVAILABLE` | 1 | An internal developer-only command is not available in this build. |
+
+### Project and selection
+
+| Code | Exit code | Meaning |
+|---|---:|---|
+| `DPX-PROJECT-NOT-FOUND` | 2 | The project path does not exist or is not a readable directory. |
+| `DPX-PROJECT-PATH-REQUIRED` | 2 | No project path was supplied and none can be inferred. |
+| `DPX-PROJECT-PATH-INVALID` | 2 | The project path is malformed. |
+| `DPX-PROJECT-ROOT-ACCESS-DENIED` | 2 | The project root cannot be read (permissions). |
+| `DPX-SELECTION-PATH-INVALID` | 2 | An explicitly selected path is malformed. |
+| `DPX-SELECTION-PATH-MISSING` | 2 | An explicitly selected path does not exist under the project root. |
+| `DPX-PROJECT-PARTIAL-ACCESS` | warning | Some files or folders under the root could not be read; the result is partial. |
+| `DPX-PROJECT-SELECTION-WARNING` | warning | The selection includes paths outside the recognized project boundary. |
+
+### Profiles
+
+| Code | Exit code | Meaning |
+|---|---:|---|
+| `DPX-CLI-PROFILE-NOT-FOUND` | 2 | The referenced portable profile could not be resolved. |
+| `DPX-CLI-PROFILE-UNRESOLVED` | 2 | The profile selection could not be resolved against the current project. |
+| `DPX-CLI-PROFILE-BUSY` | 2 | Another operation is currently using the profile store. |
+| `DPX-CLI-PROFILE-CORRUPT` | 2 | The profile file failed to parse or fails its schema. |
+| `DPX-CLI-PROFILE-FUTURE-SCHEMA` | 2 | The profile was written by a newer, unsupported schema version. |
+| `DPX-CLI-PROFILE-INVALID` | 2 | The profile content is structurally invalid. |
+| `DPX-CLI-PROFILE-SELECTION-TOO-LARGE` | 2 | The explicit selection is too large to save into a portable profile. |
+| `DPX-CLI-PROFILE-WRITE-FAILED` | 1 | The profile store could not be written. |
+| `DPX-CLI-PROFILE-PARTIAL` | 3 | `profile reset` removed persistent marks but not the selection profile; repeat the command. |
+| `DPX-CLI-PROFILE-CONFLICT` | 3 | The local profile changed after the command observed its revision; repeat the command. |
+| `DPX-PROFILE-DESTINATION-EXISTS` | 4 | The profile export destination already exists. |
+
+### Git and remote sources
+
+| Code | Exit code | Meaning |
+|---|---:|---|
+| `DPX-CLI-GIT-URL-INVALID` | 2 | The repository source is not a supported clone URL. |
+| `DPX-CLI-GIT-BRANCH-INVALID` | 2 | `--branch` is not a syntactically valid branch name. |
+| `DPX-CLI-GIT-BRANCH-LOCAL` | 2 | `--branch` was given together with a local (non-URL) source. |
+| `DPX-CLI-GIT-UNAVAILABLE` | 1 | Git is not available on this machine. |
+| `DPX-CLI-GIT-CLONE-FAILED` | 1 | The repository clone did not complete successfully. |
+| `DPX-CLI-GIT-CACHE-FAILED` | 1 | The clone succeeded but could not be published to the managed cache. |
+| `DPX-CLI-GIT-BRANCH-UNAVAILABLE` | 1 | The requested branch could not be resolved on the remote. |
+| `DPX-CLI-CACHE-NOT-FOUND` | 2 | The referenced repository cache entry does not exist. |
+| `DPX-GIT-CACHE-QUOTA` | diagnostic | Git cache size exceeds the configured limit; detail text inside `DPX-CLI-GIT-CACHE-FAILED`. |
+| `DPX-GIT-CACHE-RESERVE` | diagnostic | Git cache destination lacks the required free-space reserve; detail text inside `DPX-CLI-GIT-CACHE-FAILED`. |
+| `DPX-ZIP-METADATA-TIMEOUT` | diagnostic | A ZIP-archive fallback metadata request timed out; detail text inside the clone failure. |
+| `DPX-ZIP-BODY-TIMEOUT` | diagnostic | A ZIP-archive fallback body download made no progress within the deadline; detail text inside the clone failure. |
+| `DPX-ZIP-SYMLINK-SKIPPED` | notice | Progress notice that a symbolic-link entry was skipped while extracting a ZIP-archive fallback; not a failure. |
+| `DPX-GIT-STATE-UNAVAILABLE` | warning | The Git worktree state needed for the requested Git scope could not be read. |
+| `DPX-GIT-STATE-DELETED` | warning | A tracked file the Git scope depends on was deleted in the worktree. |
+| `DPX-GIT-TRACKED-INDEX-UNAVAILABLE` | warning | The tracked-file index could not be loaded for tracked Git mode. |
+| `DPX-GIT-TRACKED-INDEX-PARTIAL` | warning | The tracked-file index loaded only partially. |
+| `DPX-GIT-UNSAFE-FILTER` | warning | A requested Git filter could not be applied safely and was skipped. |
+
+### Export and project copy
+
+| Code | Exit code | Meaning |
+|---|---:|---|
+| `DPX-EXPORT-DESTINATION-EXISTS` | 4 | The export destination already exists. |
+| `DPX-EXPORT-UNSAFE-DESTINATION` | 3 | The destination is inside the source, or otherwise unsafe to write to. |
+| `DPX-EXPORT-UNSAFE-SOURCE` | 1 | The source changed identity during export and can no longer be trusted. |
+| `DPX-EXPORT-SYMLINK-NOT-SUPPORTED` | 1 | A symbolic link in the selection is not supported by this export mode. |
+| `DPX-EXPORT-DESTINATION-UNAVAILABLE` | 1 | The destination could not be created or opened for writing. |
+| `DPX-EXPORT-SOURCE-UNAVAILABLE` | 1 | The source became unreadable during export. |
+| `DPX-EXPORT-RESERVED-NAME` | 3 | The generated `DEVPROJEX-NOTICE.txt` name conflicts with an existing source file. |
+| `DPX-EXPORT-FAILED` | 1 | The export failed for an unclassified reason. |
+| `DPX-CLI-FORCE-NOT-SUPPORTED` | 2 | `--force` was combined with folder export, which does not support replacement. |
+| `DPX-CLI-FOLDER-STDOUT-NOT-SUPPORTED` | 2 | Folder export cannot be written to stdout (`-`). |
+| `DPX-CLI-ZIP-EXTENSION-REQUIRED` | 2 | A ZIP export destination must end in `.zip`. |
+| `DPX-CLI-BINARY-STDOUT-UNAVAILABLE` | 2 | The host does not expose a raw binary stdout stream for ZIP-to-stdout export. |
+| `DPX-CLI-OUTPUT-EXISTS` | 4 | The agent-journal output file already exists. |
+| `DPX-COMPRESSION-UNAVAILABLE` | warning | A requested syntax-compression grammar could not load; the affected source is copied uncompressed. |
+
+### Secrets and dependencies
+
+| Code | Exit code | Meaning |
+|---|---:|---|
+| `DPX-SECRET-DETECTION-FAILED` | 1 | Secret-rule loading, matching, timeout, or classified read failed. |
+| `DPX-SECRET-SCAN-LIMIT-EXCEEDED` | 1 | The secret scan exceeded its size or time budget. |
+| `DPX-DEPENDENCY-TRAVERSAL-LIMIT` | 3 | Related-file traversal exceeded 256 distinct seed files; no partial document is written. |
+| `DPX-DEPENDENCY-UNSUPPORTED` | warning | A dependency fact could not be extracted for an unsupported construct or language. |
+
+### Desktop control
+
+| Code | Exit code | Meaning |
+|---|---:|---|
+| `DPX-DESKTOP-NOT-RUNNING` | 5 | No desktop instance is running to receive the request. |
+| `DPX-DESKTOP-AMBIGUOUS` | 5 | Multiple desktop instances are running and none uniquely matches the project. |
+| `DPX-DESKTOP-TIMEOUT` | 5 | The desktop instance did not respond within the request timeout. |
+| `DPX-DESKTOP-PROTOCOL-MISMATCH` | 5 | The desktop instance uses an incompatible control-protocol version. |
+| `DPX-DESKTOP-INSTANCE-MISMATCH` | 5 | The response did not match the expected instance or request id. |
+| `DPX-DESKTOP-PAYLOAD-TOO-LARGE` | 5 | The control-protocol payload exceeded its size limit. |
+| `DPX-DESKTOP-INVALID-PAYLOAD` | 5 | The control-protocol payload failed validation. |
+| `DPX-DESKTOP-REQUEST-FAILED` | 5 | The desktop instance reported a request failure without a more specific code. |
+| `DPX-DESKTOP-UNKNOWN-ACTION` | 5 | The requested desktop action is not recognized. |
+| `DPX-DESKTOP-NOT-INCLUDED` | 5 | This build does not include the desktop application. |
+| `DPX-DESKTOP-LAUNCH-FAILED` | 5 | The desktop application process could not be launched. |
+| `DPX-DESKTOP-NO-RECENT-PROJECT` | 5 | No recent project is available to open in the desktop application. |
+| `DPX-DESKTOP-PROJECT-OPEN-FAILED` | 5 | The desktop application failed to open the requested project. |
+| `DPX-DESKTOP-STARTUP-FAILED` | 5 | The desktop application failed to start. |
+| `DPX-DESKTOP-SHUTTING-DOWN` | 5 | The desktop instance is shutting down and cannot accept the request. |
+| `DPX-DESKTOP-MODAL-BUSY` | 5 | The desktop instance has a blocking dialog open. |
+| `DPX-DESKTOP-BUSY` | 5 | The desktop instance is busy with another operation. |
+| `DPX-DESKTOP-ACCESS-DENIED` | 5 | The desktop instance denied the request (permissions). |
+| `DPX-DESKTOP-RESOURCE-UNAVAILABLE` | 5 | A resource the desktop instance needed for the request is unavailable. |
+| `DPX-DESKTOP-INVALID-DATA` | 5 | The desktop instance received or holds invalid data for the request. |
+| `DPX-DESKTOP-OPERATION-FAILED` | 5 | The desktop instance's operation failed without a more specific code. |
+
+### Store, cache, and agent journal
+
+| Code | Exit code | Meaning |
+|---|---:|---|
+| `DPX-STORE-MIGRATION-UNAVAILABLE` | 1 | Store-packaged user-data migration could not run. |
+| `DPX-CLI-JOURNAL-NOT-FOUND` | 2 | The referenced agent-journal session does not exist. |
+| `DPX-CLI-JOURNAL-SESSION-REQUIRED` | 2 | Markdown journal output requires an explicit session id. |
+| `DPX-CLI-JOURNAL-WRITE-FAILED` | 1 | The agent-journal output could not be written. |
+| `DPX-MCP-STARTUP` | 1 | The `devprojex mcp` server process failed to start. |
+| `DPX-IO-ACCESS-DENIED` | 1 | The operating system denied access to a file or directory. |
+| `DPX-IO-FAILURE` | 1 | An unclassified I/O failure occurred. |
+
+### Doctor checks
+
+`devprojex doctor --format json` gives each check a stable identifier
+`DPX-DOCTOR-<CHECK-NAME>`, built from its uppercase check name: `terminal-launcher`,
+`path-resolution`, `interactive-tty`, `terminal-capabilities`, `unicode`, `git`,
+`tracked-git-mode`, `current-directory`, `profile-store`, `configuration-root`,
+`data-root`, `state-root`, `cache-root`, `terminal-settings`, `recent-workspaces`,
+`temporary-directory`, `repository-cache`, `desktop-ipc`, and `environment`. Each
+check carries its own `pass`/`warning`/`failure`/`skip` status instead of a
+process exit code; only an overall `failure` check changes the command's exit
+code, to policy exit code `3` (see [Doctor JSON](#doctor-json)).
+
 ## Exit Codes
 
 | Code | Meaning |

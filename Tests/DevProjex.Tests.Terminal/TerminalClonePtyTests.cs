@@ -210,10 +210,27 @@ public sealed class TerminalClonePtyTests
 			workspace,
 			StringComparison.Ordinal);
 
-		await terminal.SendAsync("3", TestContext.Current.CancellationToken);
-		var preview = await terminal.WaitForScreenAsync(
-			"internal sealed class PublishedCloneMarker",
+		// The tree can appear while the clone's follow-up work is still running, and the workspace
+		// rejects keys with a busy hint until it ends; the view key is idempotent, so repeat it.
+		await terminal.WaitForStableScreenAsync(
+			required: "PublishedCloneMarker.cs",
+			timeout: TimeSpan.FromSeconds(30),
 			cancellationToken: TestContext.Current.CancellationToken);
+		string? preview = null;
+		for (var attempt = 0; attempt < 3 && preview is null; attempt++)
+		{
+			await terminal.SendAsync("3", TestContext.Current.CancellationToken);
+			try
+			{
+				preview = await terminal.WaitForScreenAsync(
+					"internal sealed class PublishedCloneMarker",
+					timeout: TimeSpan.FromSeconds(10),
+					cancellationToken: TestContext.Current.CancellationToken);
+			}
+			catch (TimeoutException) when (attempt < 2)
+			{
+			}
+		}
 		Assert.Contains("PublishedCloneMarker.cs", preview, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 

@@ -678,6 +678,7 @@
   "Terminal.Option.Extension": "包括文件扩展名。",
   "Terminal.Option.Select": "包括相对文件或目录路径。",
   "Terminal.Option.GitMode": "Git过滤模式：none、gitignore、tracked、staged、changes或diff:<ref>..<ref>。",
+  "Terminal.Option.GitModeChoices": "Git过滤模式：{0}。",
   "Terminal.Option.McpGitMode": "基础Git过滤模式：none、gitignore或tracked。",
   "Terminal.Option.McpExclude": "服务器的基线排除集：排除项名称、default 或 none。名称会替换默认集；如需在默认集上扩展，请加入 default。",
   "Terminal.Option.McpUnrestricted": "显示全部：关闭所有排除项并停用Git过滤。机密遮蔽保持开启。",

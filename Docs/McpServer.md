@@ -62,15 +62,19 @@ omitted, and trusted text never repeats those paths.
 A scalar path hidden by the effective filters still returns
 `DPX-MCP-PATH-NOT-FOUND`. In a batched read, that range is reported as
 `unavailable — outside effective selection` while the remaining ranges continue.
-Every live response ends with the current per-root revision and the selected
-file count from the latest plan built for that root. Before the first plan is
-built, the count is `0`. A multi-root server identifies the root by a stable
+Every live response ends with the current per-root revision and, once a plan
+has been built at that revision, its selected file count. A response that builds
+no plan, such as `read_pack` right after the selection changed, reports the
+revision alone. Without a saved window selection the count reads
+`files selected by server defaults`. A multi-root server identifies the root by a stable
 ordinal in trusted text and places its project-controlled name in an untrusted
 data block:
 
 ```text
 [Live context] revision 16 · 128 files selected in the window
 [Live context] revision 16 · 128 files selected in the window · root 1 of 2
+[Live context] revision 1 · 42 files selected by server defaults
+[Live context] revision 17
 
 Live context root 1 name:
 project-name
@@ -440,7 +444,10 @@ with recording. The 0.036 ms difference was below the baseline spread.
   `--hide-private-data` or the active live profile enables it. Root paths in
   `list_projects` and project-derived details in tool errors remain data inside
   the untrusted boundary and are scanned as string values before JSON serialization;
-  remote tools use the safe Git URL as the project address. If a local name or path
+  secrets are always masked there, while a `list_projects` root and name follow the
+  same private-data policy as the `get_tree` root label: exact without the policy,
+  and with it only the supported local-user segment becomes `[local-user-1]`.
+  Remote tools use the safe Git URL as the project address. If a local name or path
   is masked, its 1-based `index` remains a safe address such as `project: "#1"`.
   Generated read and search continuation hints use that index instead of the
   masked local path. Trusted warning trailers report fixed codes and counts,
@@ -507,6 +514,30 @@ when Git, cloning, cache publication, or branch checkout fails.
 text uses the credential-free display form of the URL.
 `DPX-MCP-REMOTE-HOST-DENIED` reports that an otherwise valid URL is outside the
 optional startup host allowlist without echoing the rejected host.
+
+### Error code catalog
+
+Every `DPX-MCP-*` code a tool can return in its `isError: true` result.
+
+| Code | Meaning |
+|---|---|
+| `DPX-MCP-ROOT-VIOLATION` | The requested path resolves outside every allowed project root. |
+| `DPX-MCP-UNKNOWN-PROJECT` | The supplied `project` value does not match a listed project. |
+| `DPX-MCP-PROJECT-UNAVAILABLE` | The project root is temporarily unreadable; retry advised. |
+| `DPX-MCP-PATH-NOT-FOUND` | The requested path does not exist in the effective selection. |
+| `DPX-MCP-INVALID-ARGUMENTS` | Tool arguments are malformed, ambiguous, or mutually exclusive. |
+| `DPX-MCP-INVALID-RANGE` | The requested line or column range is invalid or past end of file. |
+| `DPX-MCP-INVALID-PATTERN` | The search pattern is unsupported (for example a character class) or malformed. |
+| `DPX-MCP-PAYLOAD-TRUNCATED` | The response would exceed the payload limit and was withheld or truncated. |
+| `DPX-MCP-PACK-EXPIRED` | The stored pack or result id was evicted or has expired; rerun the producing tool. |
+| `DPX-MCP-PACK-TOO-LARGE` | The result exceeds the pack size limit; narrow the request. |
+| `DPX-MCP-STORED-PROTECTION-CHANGED` | The protection policy changed after a page was stored; rerun the producing tool. |
+| `DPX-MCP-STORED-PROTECTION-UNAVAILABLE` | The current protection policy cannot be verified; fails closed. |
+| `DPX-MCP-REMOTE-DISABLED` | A remote URL was passed to a server started without `--allow-remote`. |
+| `DPX-MCP-REMOTE-FAILED` | Cloning or fetching the remote source failed. |
+| `DPX-MCP-REMOTE-LIMIT` | The 16-source remote session cap was reached. |
+| `DPX-MCP-REMOTE-HOST-DENIED` | The remote URL's host is outside the optional startup host allowlist. |
+| `DPX-MCP-OPERATION-FAILED` | Generic fallback for an unexpected tool-execution failure. |
 
 ### Redaction placeholders
 
@@ -794,7 +825,8 @@ follow it, `[Protection]` comes after that, a pinned remote checkout adds
 tool adds an `[Empty selection]` line when no file survived the filters and the
 request arguments. A stage token is included only when that stage has evidence
 that it emptied the selection: `stage=patterns`, `stage=paths`, `stage=git-scope`,
-or `stage=filters`. Otherwise the line is `[Empty selection] No files survived the
+`stage=filters`, or `stage=source` when the project folder itself contains no file
+outside Git metadata. Otherwise the line is `[Empty selection] No files survived the
 effective filters and request selection.` A pattern with no `/` and no
 `**` matches only an entry directly in the project root, and its empty result
 names the `**/` and `/**` rewrites instead of restating the general rule. `search_project` adds a `[No matches]` line

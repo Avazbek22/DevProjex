@@ -678,6 +678,7 @@
   "Terminal.Option.Extension": "Bir dosya uzantısı ekleyin.",
   "Terminal.Option.Select": "Göreli bir dosya veya dizin yolu ekleyin.",
   "Terminal.Option.GitMode": "Git filtreleme modu: none, gitignore, tracked, staged, changes veya diff:<ref>..<ref>.",
+  "Terminal.Option.GitModeChoices": "Git filtreleme modu: {0}.",
   "Terminal.Option.McpGitMode": "Temel Git filtreleme modu: none, gitignore veya tracked.",
   "Terminal.Option.McpExclude": "Sunucunun temel hariç tutma kümesi: hariç tutma adları, default veya none. Adlar varsayılan kümenin yerini alır; genişletmek için default belirtin.",
   "Terminal.Option.McpUnrestricted": "Her şeyi göster: tüm hariç tutmaları ve Git filtrelemesini kapatır. Gizli değerlerin maskelenmesi açık kalır.",

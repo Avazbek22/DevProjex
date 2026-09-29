@@ -678,6 +678,7 @@
   "Terminal.Option.Extension": "Додайте розширення файлу.",
   "Terminal.Option.Select": "Включіть відносний шлях до файлу або каталогу.",
   "Terminal.Option.GitMode": "Режим фільтрації Git: none, gitignore, tracked, staged, changes або diff:<ref>..<ref>.",
+  "Terminal.Option.GitModeChoices": "Режим фільтрації Git: {0}.",
   "Terminal.Option.McpGitMode": "Базовий режим фільтрації Git: none, gitignore або tracked.",
   "Terminal.Option.McpExclude": "Базовий набір виключень сервера: імена виключень, default або none. Імена замінюють типовий набір; вкажіть default, щоб його розширити.",
   "Terminal.Option.McpUnrestricted": "Показати все: вимикає всі виключення та фільтрацію Git. Маскування секретів залишається увімкненим.",

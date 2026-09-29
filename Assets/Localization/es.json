@@ -678,6 +678,7 @@
     "Terminal.Option.Extension": "Incluye una extensión de archivo.",
     "Terminal.Option.Select": "Incluye una ruta relativa de archivo o carpeta.",
     "Terminal.Option.GitMode": "Modo de filtrado Git: none, gitignore, tracked, staged, changes o diff:<ref>..<ref>.",
+    "Terminal.Option.GitModeChoices": "Modo de filtrado Git: {0}.",
     "Terminal.Option.McpGitMode": "Modo base de filtrado Git: none, gitignore o tracked.",
     "Terminal.Option.McpExclude": "Conjunto de exclusiones base del servidor: nombres de exclusiones, default o none. Los nombres reemplazan el conjunto predeterminado; indique default para ampliarlo.",
     "Terminal.Option.McpUnrestricted": "Mostrar todo: desactiva todas las exclusiones y el filtrado Git. La ocultación de secretos permanece activa.",

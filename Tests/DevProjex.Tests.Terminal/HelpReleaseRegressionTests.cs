@@ -211,6 +211,29 @@ public sealed class HelpReleaseRegressionTests
 	}
 
 	[Theory]
+	[InlineData("en")]
+	[InlineData("ru")]
+	public async Task OptionDescriptionsAreNotValidationMessages(string language)
+	{
+		var localization = new LocalizationService(
+			new JsonLocalizationCatalog(),
+			CliChoiceSets.Language.TryParse(language, out var appLanguage) ? appLanguage : AppLanguage.En);
+		var choiceError = localization.Format("Terminal.Validation.Choice", "--git-mode", "\u0001")
+			.Split('\u0001')[0];
+		var root = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();
+		var violations = new List<string>();
+		foreach (var path in EnumeratePublicCommandPaths(root))
+		{
+			var help = await RenderHelpAsync(400, language, path.ToArray());
+			violations.AddRange(ReadOptionEntries(help, localization["Terminal.Help.Options"])
+				.Where(entry => entry.Contains(choiceError, StringComparison.Ordinal))
+				.Select(entry => $"devprojex {string.Join(' ', path)}: {entry}"));
+		}
+
+		Assert.True(violations.Count == 0, string.Join(Environment.NewLine, violations.Distinct()));
+	}
+
+	[Theory]
 	[InlineData("pt-pt")]
 	[InlineData("zh-cn")]
 	[InlineData("ru")]

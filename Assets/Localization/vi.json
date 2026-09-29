@@ -678,6 +678,7 @@
   "Terminal.Option.Extension": "Bao gồm phần mở rộng tập tin.",
   "Terminal.Option.Select": "Bao gồm đường dẫn tệp hoặc thư mục tương đối.",
   "Terminal.Option.GitMode": "Chế độ lọc Git: none, gitignore, tracked, staged, changes hoặc diff:<ref>..<ref>.",
+  "Terminal.Option.GitModeChoices": "Chế độ lọc Git: {0}.",
   "Terminal.Option.McpGitMode": "Chế độ lọc Git cơ sở: none, gitignore hoặc tracked.",
   "Terminal.Option.McpExclude": "Tập loại trừ cơ sở của máy chủ: tên các mục loại trừ, default hoặc none. Tên sẽ thay thế tập mặc định; thêm default để mở rộng tập đó.",
   "Terminal.Option.McpUnrestricted": "Hiển thị tất cả: tắt mọi mục loại trừ và bộ lọc Git. Việc che các giá trị bí mật vẫn được bật.",

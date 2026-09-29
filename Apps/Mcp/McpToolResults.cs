@@ -11,6 +11,9 @@ internal static class McpToolResults
 	private static readonly Lazy<IReadOnlyList<ISecretDetector>> MetadataDetectors = new(
 		static () => [new GitleaksSecretDetector(), new PrivateDataDetector()],
 		LazyThreadSafetyMode.ExecutionAndPublication);
+	private static readonly Lazy<IReadOnlyList<ISecretDetector>> SecretMetadataDetectors = new(
+		static () => [new GitleaksSecretDetector()],
+		LazyThreadSafetyMode.ExecutionAndPublication);
 	private static readonly JsonSerializerOptions StructuredTextOptions = new()
 	{
 		WriteIndented = true
@@ -39,11 +42,12 @@ internal static class McpToolResults
 	public static CallToolResult ProtectedJsonSuccess(
 		object value,
 		string? notice,
-		Func<int, string?, string?> completeNotice)
+		Func<int, string?, string?> completeNotice,
+		bool detectPrivateData = true)
 	{
 		ArgumentNullException.ThrowIfNull(value);
 		ArgumentNullException.ThrowIfNull(completeNotice);
-		var protectedValue = ProtectStructuredMetadata(value);
+		var protectedValue = ProtectStructuredMetadata(value, detectPrivateData);
 		var spotlighted = McpSpotlight.Wrap(JsonSerializer.Serialize(protectedValue, StructuredTextOptions));
 		notice = completeNotice(spotlighted.Length, notice);
 		List<ContentBlock> content = [new TextContentBlock { Text = spotlighted }];
@@ -121,13 +125,15 @@ internal static class McpToolResults
 			McpSpotlight.EnsureBalanced(block.Text);
 	}
 
-	internal static string ProtectMetadataString(string value)
+	// Secrets are always masked. Private data is masked only when the caller's effective policy
+	// hides it, so an address such as a project root is not rewritten without that opt-in.
+	internal static string ProtectMetadataString(string value, bool detectPrivateData = true)
 	{
 		if (string.IsNullOrEmpty(value))
 			return value;
 		try
 		{
-			var ranges = MetadataDetectors.Value
+			var ranges = (detectPrivateData ? MetadataDetectors : SecretMetadataDetectors).Value
 				.SelectMany(detector => detector.Detect("mcp-metadata.txt", value))
 				.Where(finding => finding.Start >= 0 && finding.Length > 0 && finding.Start + finding.Length <= value.Length)
 				.Select(finding => (Start: finding.Start, End: finding.Start + finding.Length))
@@ -165,14 +171,14 @@ internal static class McpToolResults
 		}
 	}
 
-	private static JsonElement ProtectStructuredMetadata(object value)
+	private static JsonElement ProtectStructuredMetadata(object value, bool detectPrivateData)
 	{
 		var node = JsonSerializer.SerializeToNode(value) ?? new JsonObject();
-		ProtectNode(node);
+		ProtectNode(node, detectPrivateData);
 		return JsonSerializer.SerializeToElement(node);
 	}
 
-	private static void ProtectNode(JsonNode node)
+	private static void ProtectNode(JsonNode node, bool detectPrivateData)
 	{
 		switch (node)
 		{
@@ -180,18 +186,18 @@ internal static class McpToolResults
 				foreach (var property in jsonObject.ToArray())
 				{
 					if (property.Value is JsonValue value && value.TryGetValue<string>(out var text))
-						jsonObject[property.Key] = ProtectMetadataString(text);
+						jsonObject[property.Key] = ProtectMetadataString(text, detectPrivateData);
 					else if (property.Value is not null)
-						ProtectNode(property.Value);
+						ProtectNode(property.Value, detectPrivateData);
 				}
 				break;
 			case JsonArray jsonArray:
 				for (var index = 0; index < jsonArray.Count; index++)
 				{
 					if (jsonArray[index] is JsonValue value && value.TryGetValue<string>(out var text))
-						jsonArray[index] = ProtectMetadataString(text);
+						jsonArray[index] = ProtectMetadataString(text, detectPrivateData);
 					else if (jsonArray[index] is { } child)
-						ProtectNode(child);
+						ProtectNode(child, detectPrivateData);
 				}
 				break;
 		}

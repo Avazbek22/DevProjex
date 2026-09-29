@@ -606,7 +606,7 @@ public sealed partial class McpServerProcessTests
 			afterResetText,
 			StringComparison.Ordinal);
 		Assert.Contains(
-			"[Live context] revision 2 · 2 files selected in the window",
+			"[Live context] revision 2 · 2 files selected by server defaults",
 			afterResetText,
 			StringComparison.Ordinal);
 	}

@@ -684,6 +684,7 @@
   "Terminal.Option.Extension": "Включить расширение файлов.",
   "Terminal.Option.Select": "Включить относительный путь файла или каталога.",
   "Terminal.Option.GitMode": "Режим Git-фильтрации: none, gitignore, tracked, staged, changes или diff:<ref>..<ref>.",
+  "Terminal.Option.GitModeChoices": "Режим Git-фильтрации: {0}.",
   "Terminal.Option.McpGitMode": "Базовый режим Git-фильтрации: none, gitignore или tracked.",
   "Terminal.Option.McpExclude": "Базовый набор исключений сервера: имена исключений, default или none. Имена заменяют набор по умолчанию; укажите default, чтобы дополнить его.",
   "Terminal.Option.McpUnrestricted": "Показать всё: отключает все исключения и Git-фильтрацию. Скрытие секретов остаётся включённым.",

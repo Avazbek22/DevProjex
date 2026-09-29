@@ -579,9 +579,14 @@ internal sealed class McpLiveContextState(
 			state.PendingChange = null;
 		}
 
-		var count = state.SelectedFileCount?.ToString(CultureInfo.InvariantCulture) ?? "0";
+		// The count is known only once a plan exists for this revision; a "0" before that reads as an
+		// empty window selection. Without a saved selection the files come from server defaults.
+		var count = state.SelectedFileCount is { } selected
+			? $" · {selected.ToString(CultureInfo.InvariantCulture)} files selected " +
+			  (state.IsMissing ? "by server defaults" : "in the window")
+			: string.Empty;
 		var rootSuffix = includeRoot ? $" · root {rootIndex} of {rootCount}" : string.Empty;
-		notices.Add($"[Live context] revision {state.Revision} · {count} files selected in the window{rootSuffix}");
+		notices.Add($"[Live context] revision {state.Revision}{count}{rootSuffix}");
 		if (includeRoot)
 		{
 			untrustedDetails.Add(
