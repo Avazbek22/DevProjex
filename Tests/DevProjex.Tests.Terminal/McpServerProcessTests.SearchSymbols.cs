@@ -674,11 +674,21 @@ public sealed partial class McpServerProcessTests
 		Assert.InRange(body.Length, 1, 1_800);
 		var truncation = Regex.Match(
 			text,
-			@"\[Declaration body truncated: (?<remaining>[0-9]+) line\(s\) remain\.\]",
+			@"\[Declaration body truncated: (?<remaining>[0-9]+) line\(s\) remain; read lines (?<from>[0-9]+)-(?<to>[0-9]+) with get_file\.\]",
 			RegexOptions.None,
 			TimeSpan.FromSeconds(2));
 		Assert.True(truncation.Success, text);
-		Assert.True(int.Parse(truncation.Groups["remaining"].Value, CultureInfo.InvariantCulture) > 0);
+		var remaining = int.Parse(truncation.Groups["remaining"].Value, CultureInfo.InvariantCulture);
+		var from = int.Parse(truncation.Groups["from"].Value, CultureInfo.InvariantCulture);
+		var to = int.Parse(truncation.Groups["to"].Value, CultureInfo.InvariantCulture);
+		var declarationRange = Regex.Match(
+			text,
+			@"\nlines (?<start>[0-9]+)-(?<end>[0-9]+)\n",
+			RegexOptions.None,
+			TimeSpan.FromSeconds(2));
+		Assert.True(remaining > 0);
+		Assert.Equal(remaining, to - from + 1);
+		Assert.Equal(int.Parse(declarationRange.Groups["end"].Value, CultureInfo.InvariantCulture), to);
 		Assert.Contains("get_file {\"path\":\"LongBody.cs\",\"symbol\":\"LongBody.Read\"}", text,
 			StringComparison.Ordinal);
 	}

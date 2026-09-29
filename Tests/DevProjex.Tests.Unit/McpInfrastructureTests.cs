@@ -281,6 +281,32 @@ public sealed class McpInfrastructureTests
 		Assert.Equal("#1", McpRootRegistry.NormalizeUriStyleDrivePath("#1"));
 	}
 
+	[Theory]
+	[InlineData("OrderService", "public sealed class OrderService", true)]
+	[InlineData("Shop.OrderService.CalculateTotal", "decimal CalculateTotal(", true)]
+	[InlineData("OrderService", "public sealed class OrderServices", false)]
+	[InlineData("Order(Service", "Order(Service", true)]
+	[InlineData("Order(Service", "OrderService", false)]
+	public void DeclarationNamePatternMatchesOnlyTheWholeLastSegment(string name, string text, bool matches)
+	{
+		var regex = new McpSearchRegex(McpSearchSymbols.ToDeclarationNamePattern(name), ignoreCase: false);
+
+		Assert.Equal(matches, regex.IsMatch(text));
+	}
+
+	[Fact]
+	public void BodyTruncationNoticeNamesTheExactUnshownLines()
+	{
+		Assert.Equal(
+			"[Declaration body truncated: 60 line(s) remain; read lines 30-89 with get_file.]",
+			McpSearchSymbols.FormatBodyTruncationNotice(60, 89, offerGetFile: true));
+		Assert.Equal(
+			"[Declaration body truncated: 1 line(s) remain: lines 12-12.]",
+			McpSearchSymbols.FormatBodyTruncationNotice(1, 12, offerGetFile: false));
+		Assert.Throws<ArgumentOutOfRangeException>(() =>
+			McpSearchSymbols.FormatBodyTruncationNotice(0, 12, offerGetFile: true));
+	}
+
 	[Fact]
 	public void RootRegistryRejectsTraversalAndAbsolutePathsOutsideRoot()
 	{

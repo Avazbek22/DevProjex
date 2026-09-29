@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace DevProjex.Mcp;
 
 /// <summary>
@@ -17,6 +19,63 @@ internal static class McpSearchSymbols
 	/// Additional matching files are counted as unannotated.
 	/// </summary>
 	public const int MaximumAnnotatedFiles = 64;
+
+	/// <summary>
+	/// Builds the whole-identifier pattern for a declaration-name search. A qualified name is
+	/// matched on its last segment here and narrowed to the qualified declaration afterwards.
+	/// </summary>
+	public static string ToDeclarationNamePattern(string name)
+	{
+		ArgumentNullException.ThrowIfNull(name);
+		var separator = name.LastIndexOfAny(['.', '#', '/', ':']);
+		var simpleName = separator >= 0 ? name[(separator + 1)..] : name;
+		return $"(?<![\\p{{L}}\\p{{N}}_]){Regex.Escape(simpleName)}(?![\\p{{L}}\\p{{N}}_])";
+	}
+
+	/// <summary>
+	/// Names the unshown tail of a declaration body, so a reader asks for exactly those lines
+	/// instead of rereading the whole declaration to be sure nothing was missed.
+	/// </summary>
+	public static string FormatBodyTruncationNotice(int remainingLines, int declarationEndLine, bool offerGetFile)
+	{
+		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(remainingLines);
+		var remaining = remainingLines.ToString(CultureInfo.InvariantCulture);
+		var range = (declarationEndLine - remainingLines + 1).ToString(CultureInfo.InvariantCulture) + "-" +
+			declarationEndLine.ToString(CultureInfo.InvariantCulture);
+		return offerGetFile
+			? $"[Declaration body truncated: {remaining} line(s) remain; read lines {range} with get_file.]"
+			: $"[Declaration body truncated: {remaining} line(s) remain: lines {range}.]";
+	}
+
+	/// <summary>
+	/// Finds the declarations named <paramref name="requestedName"/> in one file. A file whose text
+	/// never contains the name cannot declare it, so it is ruled out without a parse.
+	/// </summary>
+	public static IReadOnlyList<McpSearchMatchContext> FindNamedDeclarationMatches(
+		DependencyFactsEngine engine,
+		string relativePath,
+		string content,
+		McpSearchRegex regex,
+		int contextLines,
+		IReadOnlyList<TransformedTextRange> protectedRanges,
+		string requestedName,
+		CancellationToken cancellationToken,
+		out IReadOnlyList<NavigationDeclaration>? navigation)
+	{
+		ArgumentNullException.ThrowIfNull(regex);
+		navigation = null;
+		if (!regex.IsMatch(content))
+			return [];
+		navigation = CaptureNavigation(engine, relativePath, content, cancellationToken);
+		return FindNamedDeclarationMatches(
+			content,
+			regex,
+			contextLines,
+			protectedRanges,
+			navigation,
+			requestedName,
+			cancellationToken);
+	}
 
 	private static NavigationDeclaration? FindNamedDeclarationAtLine(
 		IReadOnlyList<NavigationDeclaration> declarations,

@@ -690,7 +690,9 @@ budget, 16,000-character serialized-output budget, and 200-match request ceiling
 `search_project`. The default mode treats `PATTERN` as literal text. `--regex`
 enables a timed .NET regular expression; `--symbols` treats the pattern as one
 complete identifier while retaining the same source evidence and containing-
-declaration lookup. The two mode switches are mutually exclusive. Matching ignores
+declaration lookup, and is the same mode as MCP `search_project` with `symbols: true`.
+Selected binary files are counted as skipped rather than searched and do not make
+a search partial unless nothing else was selected. The two mode switches are mutually exclusive. Matching ignores
 case, as does the default MCP call, and returns two context lines around each match.
 
 Specific options are:

@@ -176,10 +176,10 @@ The server records a live-session heartbeat under the application state root in
 identity no longer matches or whose heartbeat is older than 15 seconds; a
 healthy server updates every 5 seconds and removes its record on normal exit.
 
-The Release process measurement on Windows x64 gives 27,710 characters for the
-full `tools/list` result and 17,049 for reduced. These correspond to roughly
-6,928 and 4,262 tokens using the character/4 estimate, not model usage. Process
-budgets are 27,900 and 17,500 characters respectively.
+The process measurement on Windows x64 gives 28,023 characters for the
+full `tools/list` result and 17,171 for reduced. These correspond to roughly
+7,006 and 4,293 tokens using the character/4 estimate, not model usage. Process
+budgets are 28,300 and 17,500 characters respectively.
 
 Repeat `--root` to expose more than one project. When no explicit root is given,
 DevProjex uses `DEVPROJEX_ROOT`, then `CLAUDE_PROJECT_DIR`, then the current
@@ -938,6 +938,13 @@ ends with the detailed trusted counters. A complete search says:
 [Search boundary] complete · sources inspected=X/Y · matches retained=R/T · matches written=W · declaration files named=N.
 ```
 
+Binary files hold no text to search. Each skipped one is counted as
+`binary files skipped=B` after the inspected sources and reported once by
+`[Search skipped] B selected binary files were not searched as text.`; skipping them
+does not make a search partial. A selection that contains only binary files is partial
+with `limits=binary-sources`, because nothing in it was searchable. Files that could not
+be read as text for other reasons remain `limits=unscannable-sources`.
+
 A partial search places `[Search boundary] partial; retained matches are available
 below.` before the data, then uses the same detailed counters at the end and names
 the exact bound or bounds that applied. It emits exactly one primary next step for
@@ -1398,7 +1405,7 @@ lines, context outside the printed body, and other files remain in their origina
 Only spare space is used beyond that reclaimed context. When space is insufficient,
 the body is cut at a complete line or omitted, never at the expense of a shown match.
 A cut body reports exactly how many
-declaration lines remain and prints the complete `get_file` arguments needed to read it.
+declaration lines remain, names them as a range, as in `[Declaration body truncated: 60 line(s) remain; read lines 30-89 with get_file.]`, and prints the complete `get_file` arguments needed to read it.
 The trusted `[Declaration body] shown=1/N` notice states how many other declarations need
 separate reads. If the selected printed name identifies more than one declaration in its
 file, no body is guessed; the response says to use the listed inclusive range instead.

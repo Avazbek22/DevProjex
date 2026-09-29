@@ -9,7 +9,7 @@ public sealed partial class McpServerProcessTests
 		["list_projects", "get_tree", "read_pack", "search_project", "related_files", "get_file"];
 
 	[Theory]
-	[InlineData("full", 27_900)]
+	[InlineData("full", 28_300)]
 	[InlineData("reduced", 17_500)]
 	public async Task RealProcessPublishesTheSelectedToolSetWithinItsOwnBudget(string toolSet, int ceiling)
 	{

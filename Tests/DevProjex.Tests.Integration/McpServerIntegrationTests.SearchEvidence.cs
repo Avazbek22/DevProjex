@@ -182,7 +182,12 @@ public sealed partial class McpServerIntegrationTests
 			["include_patterns"] = new[] { "Blob.bin" }
 		});
 		Assert.NotEqual(true, binaryOnly.IsError);
-		Assert.Contains("[Search boundary] partial · sources inspected=0/1", Text(binaryOnly), StringComparison.Ordinal);
+		// Nothing in this selection holds searchable text, so a zero-match answer proves nothing.
+		Assert.Contains(
+			"[Search boundary] partial · sources inspected=0/1 · binary files skipped=1",
+			Text(binaryOnly),
+			StringComparison.Ordinal);
+		Assert.Contains("limits=binary-sources", Text(binaryOnly), StringComparison.Ordinal);
 		Assert.Contains("[Search skipped] 1 selected binary file was not searched as text.",
 			Text(binaryOnly), StringComparison.Ordinal);
 
@@ -191,10 +196,64 @@ public sealed partial class McpServerIntegrationTests
 			["pattern"] = "needle"
 		});
 		Assert.NotEqual(true, mixed.IsError);
-		Assert.Contains("[Search boundary] partial · sources inspected=1/2", Text(mixed), StringComparison.Ordinal);
-		Assert.Contains("limits=unscannable-sources", Text(mixed), StringComparison.Ordinal);
+		// Every text source was searched; the binary file is reported but does not make it partial.
+		Assert.Contains(
+			"[Search boundary] complete · sources inspected=1/2 · binary files skipped=1",
+			Text(mixed),
+			StringComparison.Ordinal);
+		Assert.DoesNotContain("limits=", Text(mixed), StringComparison.Ordinal);
+		Assert.DoesNotContain("Results are partial", Text(mixed), StringComparison.Ordinal);
 		Assert.Contains("[Search skipped] 1 selected binary file was not searched as text.",
 			Text(mixed), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task SymbolsSearchReturnsDeclarationsAndNotUses()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(
+			Path.Combine(project, "OrderService.cs"),
+			"namespace Shop;\n\npublic sealed class OrderService\n{\n" +
+			"\tpublic decimal CalculateTotal(decimal price, int quantity) => price * quantity;\n}\n");
+		File.WriteAllText(
+			Path.Combine(project, "Checkout.cs"),
+			"namespace Shop;\n\npublic sealed class Checkout\n{\n" +
+			"\tprivate readonly OrderService orders = new OrderService();\n\n" +
+			"\tpublic decimal Pay() => orders.CalculateTotal(10, 2);\n}\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var declarations = Text(await server.CallAsync("search_project", new Dictionary<string, object?>
+		{
+			["pattern"] = "OrderService",
+			["symbols"] = true,
+			["context_lines"] = 0
+		}));
+		var qualified = Text(await server.CallAsync("search_project", new Dictionary<string, object?>
+		{
+			["pattern"] = "Shop.OrderService.CalculateTotal",
+			["symbols"] = "true",
+			["context_lines"] = 0
+		}));
+		var uses = Text(await server.CallAsync("search_project", new Dictionary<string, object?>
+		{
+			["pattern"] = "OrderService",
+			["context_lines"] = 0
+		}));
+		var literal = await server.CallAsync("search_project", new Dictionary<string, object?>
+		{
+			["pattern"] = "Order(Service",
+			["symbols"] = true
+		});
+
+		Assert.Contains("OrderService.cs", declarations, StringComparison.Ordinal);
+		Assert.DoesNotContain("Checkout.cs", declarations, StringComparison.Ordinal);
+		Assert.Contains("matches retained=1/1", declarations, StringComparison.Ordinal);
+		Assert.Contains("Shop.OrderService.CalculateTotal", qualified, StringComparison.Ordinal);
+		Assert.DoesNotContain("Checkout.cs", qualified, StringComparison.Ordinal);
+		Assert.Contains("Checkout.cs", uses, StringComparison.Ordinal);
+		Assert.NotEqual(true, literal.IsError);
+		Assert.Contains("matches retained=0/0", Text(literal), StringComparison.Ordinal);
 	}
 
 	[Fact]
