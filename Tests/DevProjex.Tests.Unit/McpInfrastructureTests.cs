@@ -326,6 +326,44 @@ public sealed class McpInfrastructureTests
 			McpSearchSymbols.FormatBodyTruncationNotice(0, 12, offerGetFile: true));
 	}
 
+	[Theory]
+	[InlineData(true, false, false, false, false, 0, true)]
+	[InlineData(false, true, false, false, false, 0, true)]
+	[InlineData(true, false, true, false, false, 0, true)]
+	[InlineData(true, false, false, true, false, 0, false)]
+	[InlineData(true, false, false, false, true, 0, false)]
+	[InlineData(true, false, false, false, false, 2, false)]
+	[InlineData(false, false, false, false, false, 0, false)]
+	public void SearchIsOnlyOutputCappedWhenEverySourceWasSearchedAndEveryMatchKept(
+		bool maxResults,
+		bool responseCharacters,
+		bool annotationFiles,
+		bool inspectionBytes,
+		bool retainedMatches,
+		int unscannableSources,
+		bool expected)
+	{
+		var boundary = new McpSearchBoundary(
+			EligibleSources: 10,
+			InspectedSources: inspectionBytes ? 6 : 10,
+			EncounteredMatches: 40,
+			RetainedMatches: retainedMatches ? 30 : 40,
+			WrittenMatches: 5,
+			NamedDeclarationFiles: 1,
+			InspectionByteLimitReached: inspectionBytes,
+			RetainedMatchLimitReached: retainedMatches,
+			AnnotationFileLimitReached: annotationFiles,
+			ResponseCharacterLimitReached: responseCharacters,
+			RequestResultLimitReached: maxResults,
+			RetainedCharacterLimitReached: false,
+			StoredCharacterLimitReached: false,
+			UnscannableSources: unscannableSources);
+
+		Assert.Equal(expected, boundary.OnlyOutputCapped);
+		// The narrower wording never applies to a complete search.
+		Assert.False(boundary.OnlyOutputCapped && boundary.IsComplete);
+	}
+
 	[Fact]
 	public void AmbiguousSymbolListsTheFirstSixCandidateRangesAndCountsTheRest()
 	{

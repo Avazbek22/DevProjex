@@ -4494,12 +4494,24 @@ internal sealed class DevProjexMcpTools(
 
 	private static string? FormatSearchBoundaryPrelude(
 		McpSearchBoundary boundary,
-		bool hasStoredContinuation) =>
-		boundary.IsComplete
-			? null
-			: hasStoredContinuation
-				? "[Search boundary] partial; retained matches are available below."
-				: "[Search boundary] partial; available matches are shown below.";
+		bool hasStoredContinuation)
+	{
+		if (boundary.IsComplete)
+			return null;
+		if (boundary.OnlyOutputCapped)
+		{
+			var shown =
+				"[Search boundary] partial output: every selected file was searched; " +
+				$"{boundary.WrittenMatches.ToString(CultureInfo.InvariantCulture)} of " +
+				$"{boundary.RetainedMatches.ToString(CultureInfo.InvariantCulture)} matches are written here";
+			return hasStoredContinuation
+				? shown + " and the rest are stored for read_pack."
+				: shown + ".";
+		}
+		return hasStoredContinuation
+			? "[Search boundary] partial; retained matches are available below."
+			: "[Search boundary] partial; available matches are shown below.";
+	}
 
 	private static string? FormatSearchNextRead(
 		McpSearchBoundary boundary,

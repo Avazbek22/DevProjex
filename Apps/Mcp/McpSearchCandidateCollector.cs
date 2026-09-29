@@ -196,6 +196,18 @@ internal readonly record struct McpSearchBoundary(
 
 	public bool BinaryOnlySelection => SkippedBinarySources > 0 && InspectedSources == 0;
 
+	// Every selected source was searched and every match it produced was kept; only the written
+	// response stopped at max_results or the character cap. Agents read a bare "partial" as an
+	// unfinished scan, so this case is worded separately.
+	public bool OnlyOutputCapped =>
+		(RequestResultLimitReached || ResponseCharacterLimitReached) &&
+		!InspectionByteLimitReached &&
+		!RetainedMatchLimitReached &&
+		!RetainedCharacterLimitReached &&
+		!StoredCharacterLimitReached &&
+		UnscannableSources == 0 &&
+		!BinaryOnlySelection;
+
 	public static int CountSkippedBinarySources(
 		IReadOnlyCollection<string> inspectedFiles,
 		int consumedSources,

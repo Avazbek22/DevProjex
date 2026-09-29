@@ -947,7 +947,12 @@ be read as text for other reasons remain `limits=unscannable-sources`.
 
 A partial search places `[Search boundary] partial; retained matches are available
 below.` before the data, then uses the same detailed counters at the end and names
-the exact bound or bounds that applied. It emits exactly one primary next step for
+the exact bound or bounds that applied. When every selected file was searched and
+every match was kept, and only the written response stopped at `max_results` or the
+character cap, the opening line says so instead: `[Search boundary] partial output:
+every selected file was searched; W of R matches are written here and the rest are
+stored for read_pack.` (ending after `written here.` when nothing is stored). The
+closing counters and `limits=` stay the same. It emits exactly one primary next step for
 the limiting condition. With a stored continuation that step is `[Next read] Call
 read_pack with the reported pack_id for the remaining retained matches.` When known
 declarations are the needed continuation it is `[Next read] Read only declarations

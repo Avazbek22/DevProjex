@@ -31,7 +31,10 @@ public sealed partial class McpServerProcessTests
 				["max_results"] = 1
 			})));
 
-		const string boundary = "[Search boundary] partial; retained matches are available below.";
+		// Forty matches were all found and kept; only max_results held the written answer to one.
+		const string boundary =
+			"[Search boundary] partial output: every selected file was searched; 1 of 40 matches are " +
+			"written here and the rest are stored for read_pack.";
 		const string nextRead =
 			"[Next read] Call read_pack with the reported pack_id for the remaining retained matches.";
 		Assert.True(
