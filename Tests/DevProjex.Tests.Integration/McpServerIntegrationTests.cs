@@ -1184,27 +1184,35 @@ public sealed partial class McpServerIntegrationTests
 
 		var commaList = await server.CallAsync("get_file", new Dictionary<string, object?>
 		{
-			["path"] = "Lines.cs", ["start_line"] = "10, 20", ["end_line"] = 25
+			["path"] = "Lines.cs",
+			["start_line"] = "10, 20",
+			["end_line"] = 25
 		});
 		var arrayValue = await server.CallAsync("get_file", new Dictionary<string, object?>
 		{
-			["path"] = "Lines.cs", ["start_line"] = new[] { 3, 12 }
+			["path"] = "Lines.cs",
+			["start_line"] = new[] { 3, 12 }
 		});
 		var inventedArgument = await server.CallAsync("get_file", new Dictionary<string, object?>
 		{
-			["path"] = "Lines.cs", ["start_range"] = new[] { 3, 12 }
+			["path"] = "Lines.cs",
+			["start_range"] = new[] { 3, 12 }
 		});
 		var notANumber = await server.CallAsync("get_file", new Dictionary<string, object?>
 		{
-			["path"] = "Lines.cs", ["start_line"] = "ten"
+			["path"] = "Lines.cs",
+			["start_line"] = "ten"
 		});
 		var otherUnknown = await server.CallAsync("get_file", new Dictionary<string, object?>
 		{
-			["path"] = "Lines.cs", ["colour"] = "blue"
+			["path"] = "Lines.cs",
+			["colour"] = "blue"
 		});
 		var single = await server.CallAsync("get_file", new Dictionary<string, object?>
 		{
-			["path"] = "Lines.cs", ["start_line"] = "7", ["end_line"] = "8"
+			["path"] = "Lines.cs",
+			["start_line"] = "7",
+			["end_line"] = "8"
 		});
 
 		Assert.True(commaList.IsError);
