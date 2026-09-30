@@ -71,7 +71,8 @@ public sealed class AgentJournalStoreTests(ITestOutputHelper output)
 		}
 
 		using var temporary = new TemporaryDirectory();
-		var directory = Directory.CreateDirectory(Path.Combine(temporary.Path, "agent-journal")).FullName;
+		var directory = Directory.CreateDirectory(
+			Path.Combine(temporary.Path, "DevProjex", "agent-journal")).FullName;
 		File.SetUnixFileMode(
 			directory,
 			UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
@@ -458,7 +459,9 @@ public sealed class AgentJournalStoreTests(ITestOutputHelper output)
 	{
 		using var temporary = new TemporaryDirectory();
 		using var outside = new TemporaryDirectory();
-		var link = Path.Combine(temporary.Path, "agent-journal");
+		var link = Path.Combine(
+			Directory.CreateDirectory(Path.Combine(temporary.Path, "DevProjex")).FullName,
+			"agent-journal");
 		try
 		{
 			Directory.CreateSymbolicLink(link, outside.Path);
@@ -473,6 +476,41 @@ public sealed class AgentJournalStoreTests(ITestOutputHelper output)
 
 		Assert.Contains("symbolic link or junction", exception.Message, StringComparison.Ordinal);
 		Assert.Empty(Directory.EnumerateFileSystemEntries(outside.Path));
+	}
+
+	[Fact]
+	public void JournalStorageRejectsASymbolicLinkDevProjexFolder()
+	{
+		using var temporary = new TemporaryDirectory();
+		using var outside = new TemporaryDirectory();
+		var link = Path.Combine(temporary.Path, "DevProjex");
+		try
+		{
+			Directory.CreateSymbolicLink(link, outside.Path);
+		}
+		catch (Exception linkException) when (linkException is IOException or UnauthorizedAccessException)
+		{
+			Assert.Skip("Creating directory symbolic links is unavailable in this environment.");
+			return;
+		}
+
+		var exception = Assert.Throws<IOException>(() => CreateStore(temporary.Path));
+
+		Assert.Contains("symbolic link or junction", exception.Message, StringComparison.Ordinal);
+		Assert.Empty(Directory.EnumerateFileSystemEntries(outside.Path));
+	}
+
+	[Fact]
+	public void JournalDirectoryIsInTheDevProjexFolderOfTheStateRoot()
+	{
+		using var temporary = new TemporaryDirectory();
+		using var store = CreateStore(temporary.Path);
+
+		Assert.Equal(
+			Path.Combine(temporary.Path, "DevProjex", "agent-journal"),
+			store.DirectoryPath,
+			PathComparer.Default);
+		Assert.False(Directory.Exists(Path.Combine(temporary.Path, "agent-journal")));
 	}
 
 	[Fact]

@@ -9,7 +9,7 @@ public sealed class AvaloniaCompositionRootAgentJournalTests
 	public async Task UnavailableJournalDirectoryDoesNotPreventServiceComposition()
 	{
 		using var temporary = new TemporaryDirectory();
-		var blockedPath = Path.Combine(temporary.Path, "agent-journal");
+		var blockedPath = Path.Combine(temporary.CreateFolder("DevProjex"), "agent-journal");
 		await File.WriteAllTextAsync(blockedPath, "keep", TestContext.Current.CancellationToken);
 
 		var services = AvaloniaCompositionRoot.CreateDefault(
@@ -46,6 +46,14 @@ public sealed class AvaloniaCompositionRootAgentJournalTests
 			DesktopStartupOptions.Default,
 			() => temporary.Path);
 
-		Assert.IsType<AgentJournalStore>(services.AgentJournalReader);
+		var store = Assert.IsType<AgentJournalStore>(services.AgentJournalReader);
+		Assert.Equal(
+			Path.Combine(temporary.Path, "DevProjex", "agent-journal"),
+			store.DirectoryPath,
+			PathComparer.Default);
+		Assert.Equal(
+			Path.Combine(temporary.Path, "DevProjex", "agent-activity-view.json"),
+			services.AgentActivityPreferenceStore.GetPath(),
+			PathComparer.Default);
 	}
 }

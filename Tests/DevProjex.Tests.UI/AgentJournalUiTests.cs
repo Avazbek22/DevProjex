@@ -1179,6 +1179,8 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 		var store = new AgentActivityPreferenceStore(() => root);
 		Assert.False(store.Load());
 		Assert.True(store.TrySave(enabled: true));
+		Assert.True(File.Exists(Path.Combine(root, "DevProjex", "agent-activity-view.json")));
+		Assert.False(File.Exists(Path.Combine(root, "agent-activity-view.json")));
 		Assert.True(new AgentActivityPreferenceStore(() => root).Load());
 		Assert.True(store.TrySave(enabled: false));
 		Assert.False(new AgentActivityPreferenceStore(() => root).Load());
@@ -1193,9 +1195,9 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 	{
 		using var project = UiTestProject.CreateDefault();
 		var root = project.AppDataPath;
-		Directory.CreateDirectory(root);
+		Directory.CreateDirectory(Path.Combine(root, "DevProjex"));
 		const string json = "{\"Enabled\":true}";
-		var path = Path.Combine(root, "agent-activity-view.json");
+		var path = Path.Combine(root, "DevProjex", "agent-activity-view.json");
 		File.WriteAllText(path, json + new string(' ', documentBytes - json.Length));
 
 		var store = new AgentActivityPreferenceStore(() => root);

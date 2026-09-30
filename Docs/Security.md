@@ -56,7 +56,8 @@ Journal recording does not change the telemetry-free guarantee: DevProjex does n
 transmit the journal or collect it as telemetry.
 
 Application-owned journal and live-session directories must be physical directories;
-DevProjex refuses a symbolic link or junction at those service-directory boundaries.
+DevProjex refuses a symbolic link or junction at the state root, at its `DevProjex`
+folder, and at those service-directory boundaries.
 Journal retention considers only a validated session header whose session identity,
 process identity, root shape, and exact `.jsonl` file name agree. Invalid or foreign
 files are not classified as expired journal sessions and are not deleted by retention.

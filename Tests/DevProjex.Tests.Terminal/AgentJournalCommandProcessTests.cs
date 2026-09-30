@@ -25,6 +25,23 @@ public sealed class AgentJournalCommandProcessTests
 	}
 
 	[Fact]
+	public async Task RealCliReadsSessionsFromTheDevProjexStateFolder()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var dataRoot = workspace.CreateDirectory("data");
+		await SeedAsync(dataRoot, project);
+
+		var result = Run(dataRoot, "mcp", "log", project, "--format", "json");
+
+		Assert.Single(Directory.GetFiles(Path.Combine(dataRoot, "DevProjex", "agent-journal"), "*.jsonl"));
+		Assert.False(Directory.Exists(Path.Combine(dataRoot, "agent-journal")));
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		using var document = JsonDocument.Parse(result.StandardOutput);
+		Assert.Equal(1, document.RootElement.GetProperty("sessions").GetArrayLength());
+	}
+
+	[Fact]
 	public async Task SessionListAndReceiptUseTheSameEnumSpelling()
 	{
 		using var workspace = new TemporaryDirectory();

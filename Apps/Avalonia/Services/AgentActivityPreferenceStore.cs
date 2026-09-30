@@ -1,4 +1,5 @@
 using System.Text.Json;
+using DevProjex.Infrastructure.Persistence;
 using DevProjex.Kernel.IO;
 
 namespace DevProjex.Avalonia.Services;
@@ -78,7 +79,9 @@ public sealed class AgentActivityPreferenceStore(Func<string> stateRootProvider)
         }
     }
 
-    private string GetPath() => Path.Combine(Path.GetFullPath(_stateRootProvider()), FileName);
+    internal string GetPath() => Path.Combine(
+        UserDataPathResolver.GetApplicationStateDirectory(_stateRootProvider()),
+        FileName);
 
     private sealed record AgentActivityPreference(bool Enabled);
 }

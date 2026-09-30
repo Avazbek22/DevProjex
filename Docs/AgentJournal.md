@@ -11,6 +11,14 @@ available before a project is opened. In that state the window shows sessions
 from all projects. With a project open, **Current project only** is selected by
 default and can be cleared to show the complete journal.
 
+The journal is stored in the `agent-journal` folder of the per-user DevProjex state
+directory: `%LOCALAPPDATA%\DevProjex` on Windows, and `$XDG_STATE_HOME/DevProjex` on
+Linux and macOS, or `~/.local/state/DevProjex` when `XDG_STATE_HOME` is not set. The
+live-session registry (`live-sessions`) and the Desktop Agent activity preference
+(`agent-activity-view.json`) live in the same directory. Desktop, Terminal Workspace,
+the CLI, and the MCP server all resolve it the same way, so they always read and write
+the same records.
+
 The upper table lists sessions by start time, client and version, live or
 standard mode, project roots, calls, result characters, estimated tokens,
 delivered files, masked values, and duration. A live session is marked and its

@@ -208,8 +208,9 @@ These trusted lines supplement rather than replace `[Search boundary]`,
 live lines contain only fixed words, revision and count values, the saved date,
 and fixed enum states. Root names, file and folder names, and paths remain inside the same
 randomized untrusted-data boundary used for other project-controlled text.
-The server records a live-session heartbeat under the application state root in
-`live-sessions/<pid>.json`. Desktop and Terminal remove records whose process
+The server records a live-session heartbeat in `live-sessions/<pid>.json` inside the
+per-user DevProjex state directory described under [Agent journal](#agent-journal).
+Desktop and Terminal remove records whose process
 identity no longer matches or whose heartbeat is older than 15 seconds; a
 healthy server updates every 5 seconds and removes its record on normal exit.
 
@@ -391,8 +392,10 @@ queueing it. The journal does not store file contents, tool-result bodies,
 search-query text, symbol-selector text, detected secret values, or masked
 private-data values.
 
-Journal files live under the per-user DevProjex state directory in its
-`agent-journal` folder. Retention keeps at most 200 sessions and removes entries
+Journal files live in the `agent-journal` folder of the per-user DevProjex state
+directory: `%LOCALAPPDATA%\DevProjex` on Windows, and `$XDG_STATE_HOME/DevProjex` on
+Linux and macOS, or `~/.local/state/DevProjex` when `XDG_STATE_HOME` is not set.
+Retention keeps at most 200 sessions and removes entries
 older than 30 days. Active Standard and Live sessions are exempt from both retention
 and clearing. **Journal…** in the desktop MCP menu, `mcp log` in Terminal Workspace,
 and the CLI journal commands read the same records. Clearing can be limited to the

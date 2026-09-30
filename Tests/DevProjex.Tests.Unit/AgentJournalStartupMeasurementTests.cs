@@ -14,7 +14,7 @@ public sealed class AgentJournalStartupMeasurementTests(ITestOutputHelper output
 		foreach (var headerCount in new[] { 0, 200, 512 })
 		{
 			using var fixture = new TemporaryDirectory();
-			var journalDirectory = fixture.CreateFolder("agent-journal");
+			var journalDirectory = fixture.CreateFolder(Path.Combine("DevProjex", "agent-journal"));
 			var headers = CreateHeaders(fixture.Path, headerCount);
 			var headerBytes = headers.Sum(header => (long)Encoding.UTF8.GetByteCount(header.Json));
 			for (var iteration = 0; iteration < 4; iteration++)
@@ -22,7 +22,7 @@ public sealed class AgentJournalStartupMeasurementTests(ITestOutputHelper output
 				TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
 				// Restore the same workload outside timing; default retention removes excess sessions.
 				foreach (var header in headers)
-					fixture.CreateFile(Path.Combine("agent-journal", header.FileName), header.Json);
+					fixture.CreateFile(Path.Combine("DevProjex", "agent-journal", header.FileName), header.Json);
 				var filesBefore = Directory.GetFiles(journalDirectory, "*.jsonl").Length;
 				var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
 				var started = Stopwatch.GetTimestamp();

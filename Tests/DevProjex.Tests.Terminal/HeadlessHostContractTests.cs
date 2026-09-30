@@ -94,7 +94,7 @@ public sealed class HeadlessHostContractTests
 		{
 			var tools = await client.ListToolsAsync(options: null, timeout.Token);
 			Assert.Contains(tools, static tool => tool.Name == "get_tree");
-			var sessionPath = Path.Combine(dataRoot, "live-sessions", $"{process.Id}.json");
+			var sessionPath = Path.Combine(dataRoot, "DevProjex", "live-sessions", $"{process.Id}.json");
 			Assert.True(File.Exists(sessionPath));
 			using var session = JsonDocument.Parse(await File.ReadAllTextAsync(
 				sessionPath,
@@ -105,7 +105,10 @@ public sealed class HeadlessHostContractTests
 		process.StandardInput.Close();
 		await process.WaitForExitAsync(timeout.Token).WaitAsync(TimeSpan.FromSeconds(15), timeout.Token);
 		Assert.Equal(0, process.ExitCode);
-		Assert.False(File.Exists(Path.Combine(dataRoot, "live-sessions", $"{process.Id}.json")));
+		Assert.False(File.Exists(Path.Combine(dataRoot, "DevProjex", "live-sessions", $"{process.Id}.json")));
+		Assert.True(Directory.Exists(Path.Combine(dataRoot, "DevProjex", "agent-journal")));
+		Assert.False(Directory.Exists(Path.Combine(dataRoot, "live-sessions")));
+		Assert.False(Directory.Exists(Path.Combine(dataRoot, "agent-journal")));
 		Assert.True(string.IsNullOrWhiteSpace(await standardError));
 	}
 
