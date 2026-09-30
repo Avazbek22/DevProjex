@@ -287,7 +287,7 @@ public sealed class StoreListingImportFolderIntegrationTests
     public void ImportFolder_FeatureSummaryAdvertisesBothGitAwareFilteringModes()
     {
         var document = StoreListingCsvDocument.Load(StoreListingPaths.GetImportCsvPath(RepoRoot.Value));
-        var feature = document.RowsByField["Feature7"];
+        var feature = document.RowsByField["Feature11"];
         var expectedValues = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["en-us"] = "Smart Ignore, .gitignore, and Git-tracked mode",
