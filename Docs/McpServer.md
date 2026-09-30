@@ -1430,7 +1430,11 @@ src/Core/LevelOverrideMap.cs Core.LevelOverrideMap 17-58
 
 One line per declaration, not per hit: a declaration ten matches landed in is still
 one thing to open. The name and inclusive range come directly from the innermost named
-declaration the navigation projection reports. The name is accepted unchanged by
+declaration the navigation projection reports. A name declared more than once in one
+file, such as overloads or typing stubs, is still one line, and that line lists every
+range of the name in file order in the form an ambiguous `get_file.symbol` reports: at
+most six ranges, then `and N more`, as in
+`src/click/decorators.py command 138-138, 143-151, 152-161, 162-166, 167-250`. The name is accepted unchanged by
 `get_file.symbol`. C#, JavaScript, TypeScript, Go, Python, Java, Rust, Kotlin, Ruby, PHP,
 C, and C++ include supported members and functions, with their owner chain when names
 repeat within a file. When more than one root is configured, the printed `get_file`
@@ -1474,7 +1478,10 @@ A cut body reports exactly how many
 declaration lines remain, names them as a range, as in `[Declaration body truncated: 60 line(s) remain; read lines 30-89 with get_file.]`, and prints the complete `get_file` arguments needed to read it.
 The trusted `[Declaration body] shown=1/N` notice states how many other declarations need
 separate reads. If the selected printed name identifies more than one declaration in its
-file, no body is guessed; the response says to use the listed inclusive range instead.
+file, no body is guessed; the trusted `[Declaration body]` notice names those ranges, as
+in `[Declaration body] omitted because the selected symbol names 5 declarations in its file,
+at lines 138-138, 143-151, 152-161, 162-166, 167-250; read the one you need with get_file
+ranges.`
 
 #### Evidence-preserving placement checks
 

@@ -422,6 +422,39 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
+	public void SearchDeclarationOfARepeatedNameCarriesEveryRangeOfThatNameInItsFile()
+	{
+		IReadOnlyList<NavigationDeclaration> declarations =
+		[
+			new("command", NavigationSymbolKind.Function, null, 8, 12, "fingerprint"),
+			new("command", NavigationSymbolKind.Function, null, 3, 3, "fingerprint"),
+			new("command", NavigationSymbolKind.Function, null, 5, 6, "fingerprint"),
+			new("group", NavigationSymbolKind.Function, null, 14, 15, "fingerprint")
+		];
+		var navigation = new Dictionary<string, IReadOnlyList<NavigationDeclaration>>(StringComparer.Ordinal)
+		{
+			["src/cli.py"] = declarations
+		};
+
+		var result = McpSearchSymbols.Resolve(
+			[
+				new McpSearchHit("src/cli.py", "/repo/src/cli.py", 5),
+				new McpSearchHit("src/cli.py", "/repo/src/cli.py", 9),
+				new McpSearchHit("src/cli.py", "/repo/src/cli.py", 14)
+			],
+			navigation,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(2, result.Declarations.Count);
+		var command = result.Declarations[0];
+		Assert.Equal(new McpSearchDeclaration("src/cli.py", "command", 5, 6), command);
+		Assert.Equal("3-3, 5-6, 8-12", result.DeclarationRanges.Format(command));
+		Assert.Equal(new[] { (3, 3), (5, 6), (8, 12) }, result.DeclarationRanges.Of(command));
+		Assert.Equal("14-15", result.DeclarationRanges.Format(result.Declarations[1]));
+		Assert.Equal("14-15", McpDeclarationLineRanges.None.Format(result.Declarations[1]));
+	}
+
+	[Fact]
 	public void RootRegistryRejectsTraversalAndAbsolutePathsOutsideRoot()
 	{
 		using var workspace = new TemporaryDirectory();

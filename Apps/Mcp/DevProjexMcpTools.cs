@@ -1233,7 +1233,8 @@ internal sealed class DevProjexMcpTools(
 				rendered,
 				symbols.Declarations,
 				declarationPreview,
-				declarationReadContext);
+				declarationReadContext,
+				symbols.DeclarationRanges);
 			rendered = bodyLayout.Rendered;
 			declarationPreview = bodyLayout.Preview;
 			var output = rendered.Output;
@@ -1318,7 +1319,8 @@ internal sealed class DevProjexMcpTools(
 				? MaximumSearchContentCharacters - MinimumDeclarationSectionCharacters(
 					declarationPreview,
 					symbols.Declarations,
-					declarationReadContext)
+					declarationReadContext,
+					symbols.DeclarationRanges)
 				: MaximumSearchContentCharacters;
 			var namesRefused = !InsertDeclarationHeaders(output, renderedLines, symbols, matchContentLimit);
 			if (namesRefused)
@@ -1328,7 +1330,8 @@ internal sealed class DevProjexMcpTools(
 				output,
 				symbols.Declarations,
 				declarationPreview,
-				declarationReadContext);
+				declarationReadContext,
+				symbols.DeclarationRanges);
 			// A lone declaration whose body is already shown whole leaves nothing to read.
 			var declarationsToRead = declarationSection.DeclarationsListed &&
 									 !(declarationSection.BodyWritten &&
@@ -1417,7 +1420,11 @@ internal sealed class DevProjexMcpTools(
 						  " not searched as text.",
 					McpTrustedDiagnosticFormatter.FormatWarnings(plan),
 					noMatches,
-					FormatDeclarationBodyNotice(declarationSection, symbols.Declarations.Count),
+					FormatDeclarationBodyNotice(
+						declarationSection,
+						symbols.Declarations.Count,
+						declarationPreview,
+						symbols.DeclarationRanges),
 					FormatStoredSearchNotice(
 						storedSearch,
 						withheldStored,
@@ -4078,7 +4085,8 @@ internal sealed class DevProjexMcpTools(
 		StringBuilder output,
 		IReadOnlyList<McpSearchDeclaration> declarations,
 		McpSearchDeclarationPreview? preview,
-		McpDeclarationReadContext? readContext = null)
+		McpDeclarationReadContext? readContext = null,
+		McpDeclarationLineRanges? ranges = null)
 	{
 		if (declarations.Count == 0)
 			return McpDeclarationSectionResult.None;
@@ -4091,7 +4099,7 @@ internal sealed class DevProjexMcpTools(
 		var rows = new StringBuilder();
 		foreach (var declaration in declarations.Take(MaximumDeclarationsReported))
 		{
-			var line = FormatDeclarationSelector(declaration);
+			var line = FormatDeclarationSelector(declaration, ranges);
 			if (rows.Length + line.Length > room)
 				break;
 			rows.Append(line);
@@ -4112,18 +4120,20 @@ internal sealed class DevProjexMcpTools(
 	private static int MinimumDeclarationSectionCharacters(
 		McpSearchDeclarationPreview preview,
 		IReadOnlyList<McpSearchDeclaration> declarations,
-		McpDeclarationReadContext? readContext = null) =>
+		McpDeclarationReadContext? readContext = null,
+		McpDeclarationLineRanges? ranges = null) =>
 		Environment.NewLine.Length +
 		DeclarationsHeading.Length +
 		Environment.NewLine.Length +
-		FormatDeclarationSelector(declarations[0]).Length +
+		FormatDeclarationSelector(declarations[0], ranges).Length +
 		FormatDeclarationBody(preview, declarations.Count, readContext).Length;
 
 	internal static McpSearchBodyLayout PlanSearchDeclarationBody(
 		McpSearchRenderSlice rendered,
 		IReadOnlyList<McpSearchDeclaration> declarations,
 		McpSearchDeclarationPreview? preview,
-		McpDeclarationReadContext? readContext = null)
+		McpDeclarationReadContext? readContext = null,
+		McpDeclarationLineRanges? ranges = null)
 	{
 		if (preview is not { IsAddressable: true, Text.Length: > 0 } || declarations.Count == 0)
 			return new McpSearchBodyLayout(rendered, preview);
@@ -4153,7 +4163,7 @@ internal sealed class DevProjexMcpTools(
 		var prefixLength = 0;
 		var includedLines = 0;
 		var framingCharacters = MinimumDeclarationSectionCharacters(
-			preview with { Text = string.Empty, RemainingLines = 0 }, declarations, readContext);
+			preview with { Text = string.Empty, RemainingLines = 0 }, declarations, readContext, ranges);
 		McpSearchDeclarationPreview? fitting = null;
 		var fittingLineCount = 0;
 		foreach (var bodyLine in bodyLines)
@@ -4212,10 +4222,11 @@ internal sealed class DevProjexMcpTools(
 		return new McpSearchBodyLayout(rendered with { Output = output, RenderedLines = lines }, fitting);
 	}
 
-	private static string FormatDeclarationSelector(McpSearchDeclaration declaration) =>
+	private static string FormatDeclarationSelector(
+		McpSearchDeclaration declaration,
+		McpDeclarationLineRanges? ranges) =>
 		$"{EscapeSingleLine(declaration.RelativePath)} {EscapeSingleLine(declaration.Name)} " +
-		$"{declaration.StartLine.ToString(CultureInfo.InvariantCulture)}-" +
-		$"{declaration.EndLine.ToString(CultureInfo.InvariantCulture)}{Environment.NewLine}";
+		$"{(ranges ?? McpDeclarationLineRanges.None).Format(declaration)}{Environment.NewLine}";
 
 	private static string FormatDeclarationBody(
 		McpSearchDeclarationPreview preview,
@@ -4287,11 +4298,20 @@ internal sealed class DevProjexMcpTools(
 
 	private static string? FormatDeclarationBodyNotice(
 		McpDeclarationSectionResult section,
-		int declarationCount)
+		int declarationCount,
+		McpSearchDeclarationPreview? preview,
+		McpDeclarationLineRanges ranges)
 	{
-		if (section.SelectedSymbolAmbiguous)
+		if (section.SelectedSymbolAmbiguous && preview is not null)
 		{
-			return "[Declaration body] omitted because the selected symbol is not unique in its file.";
+			// Line numbers are not project text, so the ranges may stand in this trusted line and
+			// let the reader pick one range instead of opening the whole file.
+			var sameName = ranges.Of(preview.Declaration);
+			return sameName.Count > 1
+				? "[Declaration body] omitted because the selected symbol names " +
+				  $"{sameName.Count.ToString(CultureInfo.InvariantCulture)} declarations in its file, at lines " +
+				  $"{McpSymbolLookup.FormatLineRanges(sameName)}; read the one you need with get_file ranges."
+				: "[Declaration body] omitted because the selected symbol is not unique in its file.";
 		}
 		if (!section.BodyWritten)
 			return null;

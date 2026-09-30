@@ -297,6 +297,7 @@ internal static class McpSearchSymbols
 
 		var names = new Dictionary<McpSearchHitKey, string>();
 		var declarations = new List<McpSearchDeclaration>();
+		var repeatedNameRanges = new Dictionary<McpSearchDeclaration, IReadOnlyList<(int StartLine, int EndLine)>>();
 		var declared = new HashSet<string>(StringComparer.Ordinal);
 		var annotated = 0;
 		var unannotatedFiles = new HashSet<string>(StringComparer.Ordinal);
@@ -331,11 +332,17 @@ internal static class McpSearchSymbols
 			// declaration touched by ten matches is still one thing to open.
 			if (declared.Add($"{hit.RelativePath}\u0000{best.Name}"))
 			{
-				declarations.Add(new McpSearchDeclaration(
+				var declaration = new McpSearchDeclaration(
 					hit.RelativePath,
 					best.Name,
 					best.Start,
-					best.End));
+					best.End);
+				declarations.Add(declaration);
+				// Overloads and stubs share one name, so the one row lists every range: the hit's
+				// declaration alone would hide the implementation a reader came for.
+				var sameName = SameNameRanges(spans, best.Name);
+				if (sameName.Count > 1)
+					repeatedNameRanges[declaration] = sameName;
 			}
 			annotated++;
 		}
@@ -345,8 +352,22 @@ internal static class McpSearchSymbols
 			declarations,
 			annotated,
 			unannotatedFiles.Count,
-			skippedFiles);
+			skippedFiles)
+		{
+			DeclarationRanges = new McpDeclarationLineRanges(repeatedNameRanges)
+		};
 	}
+
+	private static IReadOnlyList<(int StartLine, int EndLine)> SameNameRanges(
+		IReadOnlyList<DeclarationSpan> spans,
+		string name) =>
+		spans
+			.Where(span => string.Equals(span.Name, name, StringComparison.Ordinal))
+			.Select(static span => (span.Start, span.End))
+			.Distinct()
+			.OrderBy(static range => range.Start)
+			.ThenBy(static range => range.End)
+			.ToArray();
 
 	public static IReadOnlyList<NavigationDeclaration> CaptureNavigation(
 		DependencyFactsEngine engine,
@@ -573,20 +594,45 @@ internal readonly record struct McpSymbolLookup(
 	/// Lists the candidates' line ranges in file order, so an ambiguous name can be read by range
 	/// instead of by reading the whole file. Line numbers are not project text.
 	/// </summary>
-	public string FormatCandidateLines()
+	public string FormatCandidateLines() => FormatLineRanges(Candidates);
+
+	/// <summary>
+	/// Writes inclusive line ranges compactly: at most six, then how many more there are.
+	/// </summary>
+	public static string FormatLineRanges(IReadOnlyList<(int StartLine, int EndLine)> ranges)
 	{
+		ArgumentNullException.ThrowIfNull(ranges);
 		var listed = string.Join(
 			", ",
-			Candidates
+			ranges
 				.Take(MaximumListedCandidates)
-				.Select(static candidate => string.Create(
+				.Select(static range => string.Create(
 					CultureInfo.InvariantCulture,
-					$"{candidate.StartLine}-{candidate.EndLine}")));
-		var unlisted = Candidates.Count - MaximumListedCandidates;
+					$"{range.StartLine}-{range.EndLine}")));
+		var unlisted = ranges.Count - MaximumListedCandidates;
 		return unlisted > 0
 			? string.Create(CultureInfo.InvariantCulture, $"{listed} and {unlisted} more")
 			: listed;
 	}
+}
+
+/// <summary>
+/// The line ranges of every declaration that shares a listed declaration's name in its file. An
+/// overloaded name is one row, so the row carries all of its ranges rather than whichever one a
+/// hit happened to land in first.
+/// </summary>
+internal sealed class McpDeclarationLineRanges(
+	IReadOnlyDictionary<McpSearchDeclaration, IReadOnlyList<(int StartLine, int EndLine)>> repeatedNames)
+{
+	public static readonly McpDeclarationLineRanges None =
+		new(new Dictionary<McpSearchDeclaration, IReadOnlyList<(int StartLine, int EndLine)>>());
+
+	public IReadOnlyList<(int StartLine, int EndLine)> Of(McpSearchDeclaration declaration) =>
+		repeatedNames.TryGetValue(declaration, out var ranges)
+			? ranges
+			: [(declaration.StartLine, declaration.EndLine)];
+
+	public string Format(McpSearchDeclaration declaration) => McpSymbolLookup.FormatLineRanges(Of(declaration));
 }
 
 internal readonly record struct McpSearchHit(string RelativePath, string FullPath, int Line);
@@ -781,4 +827,6 @@ internal sealed record McpSearchSymbolResult(
 {
 	public static readonly McpSearchSymbolResult None =
 		new(new Dictionary<McpSearchHitKey, string>(), [], 0, 0, 0);
+
+	public McpDeclarationLineRanges DeclarationRanges { get; init; } = McpDeclarationLineRanges.None;
 }

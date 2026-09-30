@@ -318,7 +318,8 @@ public sealed class SearchCommandHandler(
 			var layout = DevProjexMcpTools.PlanSearchDeclarationBody(
 				rendered,
 				symbols.Declarations,
-				preview);
+				preview,
+				ranges: symbols.DeclarationRanges);
 			rendered = layout.Rendered;
 			preview = layout.Preview;
 
@@ -329,7 +330,13 @@ public sealed class SearchCommandHandler(
 				contentCharacters);
 			if (!namesWritten)
 				symbols = symbols with { AnnotatedHits = 0 };
-			AppendDeclarationSection(rendered.Output, symbols.Declarations, preview, request, contentCharacters);
+			AppendDeclarationSection(
+				rendered.Output,
+				symbols.Declarations,
+				symbols.DeclarationRanges,
+				preview,
+				request,
+				contentCharacters);
 
 			var matches = rendered.WrittenHits.Select(hit =>
 			{
@@ -378,7 +385,10 @@ public sealed class SearchCommandHandler(
 					declaration.StartLine,
 					declaration.EndLine,
 					preview?.Declaration == declaration ? preview.Text : null,
-					preview?.Declaration == declaration ? preview.RemainingLines : 0)).ToArray(),
+					preview?.Declaration == declaration ? preview.RemainingLines : 0,
+					symbols.DeclarationRanges.Of(declaration)
+						.Select(static range => new SearchDeclarationRange(range.StartLine, range.EndLine))
+						.ToArray())).ToArray(),
 				resolution,
 				boundary,
 				rendered.Output.ToString().TrimEnd(),
@@ -533,6 +543,7 @@ public sealed class SearchCommandHandler(
 	private static void AppendDeclarationSection(
 		StringBuilder output,
 		IReadOnlyList<McpSearchDeclaration> declarations,
+		McpDeclarationLineRanges ranges,
 		McpSearchDeclarationPreview? preview,
 		SearchCommandRequest request,
 		int maximumCharacters)
@@ -546,8 +557,7 @@ public sealed class SearchCommandHandler(
 		{
 			var row = $"{McpTextEscaping.EscapeSingleLine(declaration.RelativePath)} " +
 					  $"{McpTextEscaping.EscapeSingleLine(declaration.Name)} " +
-					  $"{declaration.StartLine.ToString(CultureInfo.InvariantCulture)}-" +
-					  $"{declaration.EndLine.ToString(CultureInfo.InvariantCulture)}{Environment.NewLine}";
+					  $"{ranges.Format(declaration)}{Environment.NewLine}";
 			if (output.Length + section.Length + row.Length > maximumCharacters)
 				break;
 			section.Append(row);
@@ -730,6 +740,11 @@ public sealed class SearchCommandHandler(
 					symbol = declaration.Symbol,
 					startLine = declaration.StartLine,
 					endLine = declaration.EndLine,
+					ranges = declaration.Ranges.Select(static range => new
+					{
+						startLine = range.StartLine,
+						endLine = range.EndLine
+					}),
 					body = declaration.Body,
 					remainingBodyLines = declaration.RemainingBodyLines
 				}),
@@ -809,7 +824,10 @@ public sealed class SearchCommandHandler(
 		int StartLine,
 		int EndLine,
 		string? Body,
-		int RemainingBodyLines);
+		int RemainingBodyLines,
+		IReadOnlyList<SearchDeclarationRange> Ranges);
+
+	internal readonly record struct SearchDeclarationRange(int StartLine, int EndLine);
 
 	internal readonly record struct SearchResolution(int Resolved, int Ambiguous, int Unresolved, int External);
 }

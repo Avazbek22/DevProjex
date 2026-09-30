@@ -111,6 +111,66 @@ public sealed partial class McpServerProcessTests
 		}
 	}
 
+	[Fact]
+	public async Task PublishedCliAndMcpListEveryRangeOfAnOverloadedName()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("overload-parity-project");
+		workspace.WriteFile(
+			"overload-parity-project/src/cli.py",
+			"""
+			import typing as t
+
+
+			@t.overload
+			def command(name: str) -> int: ...
+
+
+			@t.overload
+			def command(name: None) -> str: ...
+
+
+			def command(name=None):
+			    value = name
+			    return value
+			""");
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			workspace.CreateDirectory("mcp-data"));
+
+		var cli = RunCliSymbolSearch(workspace, project, "command");
+		Assert.True(cli.ExitCode == 0, cli.StandardError + cli.StandardOutput);
+		using var document = JsonDocument.Parse(cli.StandardOutput);
+		var declaration = Assert.Single(document.RootElement.GetProperty("declarations").EnumerateArray());
+		var ranges = declaration.GetProperty("ranges").EnumerateArray()
+			.Select(static range => $"{range.GetProperty("startLine").GetInt32()}-{range.GetProperty("endLine").GetInt32()}")
+			.ToArray();
+		Assert.Equal(3, ranges.Length);
+		Assert.Contains(
+			$"{declaration.GetProperty("startLine").GetInt32()}-{declaration.GetProperty("endLine").GetInt32()}",
+			ranges);
+		var listedRanges = string.Join(", ", ranges);
+
+		var mcp = Normalize(AllProcessText(await CallAsync(
+			server,
+			"search_project",
+			new Dictionary<string, object?>
+			{
+				["pattern"] = "^def command\\(",
+				["context_lines"] = 0
+			})));
+
+		// One row per name, carrying every range: the stub a hit found first is not the whole answer.
+		Assert.Contains($"src/cli.py command {listedRanges}", mcp, StringComparison.Ordinal);
+		var untrustedEnd = mcp.LastIndexOf("</untrusted-data-", StringComparison.Ordinal);
+		var notice = mcp.IndexOf(
+			$"[Declaration body] omitted because the selected symbol names 3 declarations in its file, at lines {listedRanges}; " +
+			"read the one you need with get_file ranges.",
+			StringComparison.Ordinal);
+		Assert.True(notice > untrustedEnd, mcp);
+		Assert.DoesNotContain("Best declaration body", mcp, StringComparison.Ordinal);
+	}
+
 	private static HashSet<string> ExtractMcpMatches(string output, IReadOnlySet<string> paths)
 	{
 		var matches = new HashSet<string>(StringComparer.Ordinal);
