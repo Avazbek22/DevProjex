@@ -626,6 +626,11 @@ The top-level shape is:
 Property order is deterministic where contract tests require it. Paths use `/`
 inside machine documents. A binary entry has `isBinary: true` and null content;
 binary bytes are never inserted into AI context output.
+Context JSON and `tree --format json` escape only what JSON requires: a quote is
+written as `\"`, a backslash as `\\`, and control characters and characters outside
+the Basic Multilingual Plane as `\uXXXX` escapes; `<`, `>`, `&`, `'` and other
+non-ASCII text stay as written. Every document remains valid JSON that parses back
+to the original text.
 
 For a cached Git clone, `project.source` is an additive object containing the
 source type, safe repository URL, and optional branch/commit metadata. Human

@@ -1,7 +1,6 @@
 using System.Buffers;
 using System.Text.Encodings.Web;
 using System.Text.Json;
-using System.Text.Unicode;
 using System.Xml;
 
 namespace DevProjex.Application.Services;
@@ -13,7 +12,9 @@ public sealed class TreeExportService
 	private static readonly JsonWriterOptions JsonWriterOptions = new()
 	{
 		Indented = true,
-		Encoder = JavaScriptEncoder.Create(UnicodeRanges.All),
+		// Names are read by people and agents, not embedded in HTML: quotes stay \" and non-ASCII
+		// names stay readable, while control characters are still escaped.
+		Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
 		MaxDepth = int.MaxValue
 	};
 

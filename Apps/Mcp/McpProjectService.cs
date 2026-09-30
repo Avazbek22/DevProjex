@@ -1393,7 +1393,7 @@ internal sealed class McpProjectService(
 			throw new McpToolException(
 				McpErrorCodes.PathNotFound,
 				$"{McpErrorCodes.PathNotFound}: '{requestedPath}' is a directory; provide a file path returned by " +
-				$"get_tree or search_project, or list it with get_tree {{\"paths\":[{JsonSerializer.Serialize(requestedPath)}]}}.");
+				$"get_tree or search_project, or list it with get_tree {{\"paths\":[{JsonSerializer.Serialize(requestedPath, McpToolResults.CompactJsonOptions)}]}}.");
 		}
 		if (!Membership(plan).Files.Contains(physicalPath))
 		{

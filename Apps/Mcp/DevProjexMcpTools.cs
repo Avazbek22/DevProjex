@@ -508,7 +508,7 @@ internal sealed class DevProjexMcpTools(
 			var topCharacters = 2;
 			foreach (var item in allTop)
 			{
-				var itemCharacters = JsonSerializer.Serialize(item).Length + (top.Count == 0 ? 0 : 1);
+				var itemCharacters = JsonSerializer.Serialize(item, McpToolResults.CompactJsonOptions).Length + (top.Count == 0 ? 0 : 1);
 				if (topCharacters + itemCharacters > MaximumAnalyzeTopFilesCharacters)
 					break;
 				top.Add(item);
@@ -2490,7 +2490,7 @@ internal sealed class DevProjexMcpTools(
 		}
 
 		return heading + Environment.NewLine +
-			McpSpotlight.Wrap("get_file " + JsonSerializer.Serialize(arguments));
+			McpSpotlight.Wrap("get_file " + JsonSerializer.Serialize(arguments, McpToolResults.CompactJsonOptions));
 	}
 
 	private static IReadOnlyList<McpMergedFileReadGroup> BuildMergedReadGroups(
@@ -3397,7 +3397,7 @@ internal sealed class DevProjexMcpTools(
 				entry["priority"] = priority;
 			if (file.Hop is { } hop)
 				entry["hop"] = hop;
-			var entryCharacters = JsonSerializer.Serialize(entry).Length + (included.Count == 0 ? 0 : 1);
+			var entryCharacters = JsonSerializer.Serialize(entry, McpToolResults.CompactJsonOptions).Length + (included.Count == 0 ? 0 : 1);
 			if (characters + entryCharacters > MaximumAdmissionIncludedFilesCharacters)
 				break;
 			included.Add(entry);
@@ -4322,7 +4322,7 @@ internal sealed class DevProjexMcpTools(
 			arguments["branch"] = branch;
 		arguments["path"] = declaration.RelativePath;
 		arguments["symbol"] = declaration.Name;
-		return JsonSerializer.Serialize(arguments);
+		return JsonSerializer.Serialize(arguments, McpToolResults.CompactJsonOptions);
 	}
 
 	private static string? FormatDeclarationBodyNotice(

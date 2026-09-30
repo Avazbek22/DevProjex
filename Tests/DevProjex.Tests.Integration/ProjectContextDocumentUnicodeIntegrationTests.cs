@@ -40,6 +40,32 @@ public sealed class ProjectContextDocumentUnicodeIntegrationTests
 		}
 	}
 
+	[Fact]
+	public async Task JsonDocument_EscapesOnlyWhatJsonRequiresAndRoundTripsTheContent()
+	{
+		using var temporary = new TemporaryDirectory();
+		var root = temporary.CreateDirectory("escaping");
+		const string fileName = "R&D's notes.txt";
+		const string content = "say \"hi\" <b>&amp;</b> it's Привет 😀 \u001B[0m\tend";
+		File.WriteAllText(Path.Combine(root, fileName), content, Utf8WithoutBom);
+		var plan = await BuildPlanAsync(root);
+		var analyzer = new FileContentAnalyzer();
+		await using var prepared = await PrepareAsync(analyzer, plan);
+
+		var document = await WritePreparedAsync(analyzer, plan, prepared, ProjectContextDocumentFormat.Json);
+
+		Assert.Equal(content, ExtractContent(document, ProjectContextDocumentFormat.Json, fileName));
+		// Quotes, markup and non-ASCII text cost no escapes; control characters and characters
+		// outside the Basic Multilingual Plane are still escaped.
+		Assert.Contains(
+			"say \\\"hi\\\" <b>&amp;</b> it's Привет \\uD83D\\uDE00 \\u001B[0m\\tend",
+			document,
+			StringComparison.Ordinal);
+		Assert.Contains("\"R&D's notes.txt\"", document, StringComparison.Ordinal);
+		Assert.DoesNotContain("\\u0022", document, StringComparison.Ordinal);
+		Assert.DoesNotContain("\\u0026", document, StringComparison.Ordinal);
+	}
+
 	private static string CreateProject(TemporaryDirectory temporary, string name, int fileCount)
 	{
 		var root = temporary.CreateDirectory(name);

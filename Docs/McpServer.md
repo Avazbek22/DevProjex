@@ -1093,6 +1093,11 @@ messages; the safe trusted warning trailer remains authoritative.
 For tools that expose a format choice, `markdown` and `text` representations are
 intended for people and agents to read. JSON and XML are machine-readable forms
 with escaping guarantees; use `json` or `xml` when reliable parsing is required.
+JSON in a response (`list_projects`, `analyze`, `json` trees and packs, and the
+arguments printed for a follow-up call) escapes only what JSON requires: a quote
+costs `\"` rather than a six-character escape, a backslash is `\\`, and control
+characters and characters outside the Basic Multilingual Plane use `\uXXXX`;
+`<`, `>`, `&`, `'` and other non-ASCII text stay as written.
 
 The documented per-tool character limits apply to useful payload text.
 Untrusted-data markers and trusted warning trailers can add a small fixed overhead

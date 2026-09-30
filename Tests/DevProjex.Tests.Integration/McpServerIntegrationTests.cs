@@ -6801,6 +6801,48 @@ public sealed partial class McpServerIntegrationTests
 		return match.Groups[1].Value;
 	}
 
+	[Fact]
+	public async Task JsonPayloadsEscapeOnlyWhatJsonRequiresAndRoundTripTheContent()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("проект");
+		const string fileName = "R&D's Привет.txt";
+		const string content = "say \"hi\" <b>&amp;</b> it's Привет \u001B[0m\tend";
+		File.WriteAllText(Path.Combine(project, fileName), content);
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var pack = ExtractSpotlightBody(Text(await server.CallAsync("pack_context", new Dictionary<string, object?>
+		{
+			["view"] = "content",
+			["format"] = "json"
+		})));
+		var tree = ExtractSpotlightBody(Text(await server.CallAsync("get_tree", new Dictionary<string, object?>
+		{
+			["format"] = "json"
+		})));
+		var projects = ExtractSpotlightBody(Text(await server.CallAsync("list_projects")));
+
+		using (var document = JsonDocument.Parse(pack))
+		{
+			var file = Assert.Single(document.RootElement.GetProperty("files").EnumerateArray());
+			Assert.Equal(content, file.GetProperty("content").GetString());
+		}
+		using (JsonDocument.Parse(tree))
+		using (JsonDocument.Parse(projects))
+		{
+		}
+		// A quote costs two characters, markup and non-ASCII text stay as written, and a control
+		// character is still escaped, so the payload remains one valid JSON document.
+		Assert.Contains("say \\\"hi\\\" <b>&amp;</b> it's Привет \\u001B[0m\\tend", pack, StringComparison.Ordinal);
+		Assert.Contains(fileName, tree, StringComparison.Ordinal);
+		Assert.Contains("проект", projects, StringComparison.Ordinal);
+		foreach (var payload in new[] { pack, tree, projects })
+		{
+			foreach (var escape in new[] { "\\u0022", "\\u003C", "\\u003E", "\\u0026", "\\u0027", "\\u043F" })
+				Assert.DoesNotContain(escape, payload, StringComparison.OrdinalIgnoreCase);
+		}
+	}
+
 	private static string ExtractSpotlightBody(string text)
 	{
 		var opening = Regex.Match(text, "<untrusted-data-[0-9a-f]{24}>\\n");
