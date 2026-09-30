@@ -107,8 +107,8 @@ internal sealed class McpBoundedLineTextWriter : TextWriter
 			if (_lines.Count >= _maximumLines)
 				ThrowLimitReached(characterLimit: false);
 			var scalarLength = char.IsHighSurrogate(character) &&
-			                   index + 1 < characters.Length &&
-			                   char.IsLowSurrogate(characters[index + 1])
+							   index + 1 < characters.Length &&
+							   char.IsLowSurrogate(characters[index + 1])
 				? 2
 				: 1;
 			if (_charactersWritten > _maximumCharacters - scalarLength)

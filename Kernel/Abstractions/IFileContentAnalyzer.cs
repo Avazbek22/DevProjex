@@ -218,7 +218,7 @@ internal sealed class MaterializedFileContentSnapshot : IFileContentSnapshot
 		ArgumentOutOfRangeException.ThrowIfNegative(maximumCharacters);
 		ArgumentNullException.ThrowIfNull(writeChunk);
 		if (Result.Classification != FileContentClassification.Text ||
-		    _content is null)
+			_content is null)
 		{
 			throw new IOException("The snapshot does not contain readable text.");
 		}

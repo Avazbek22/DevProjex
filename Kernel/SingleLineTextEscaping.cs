@@ -30,8 +30,8 @@ public static class SingleLineTextEscaping
 		{
 			var character = value[index];
 			var isSurrogatePair = char.IsHighSurrogate(character) &&
-			                      index + 1 < value.Length &&
-			                      char.IsLowSurrogate(value[index + 1]);
+								  index + 1 < value.Length &&
+								  char.IsLowSurrogate(value[index + 1]);
 			length = checked(length + GetEscapedLength(character, isSurrogatePair, preserveTabs));
 			if (isSurrogatePair)
 				index++;
@@ -53,8 +53,8 @@ public static class SingleLineTextEscaping
 		{
 			var character = value[index];
 			var isSurrogatePair = char.IsHighSurrogate(character) &&
-			                      index + 1 < value.Length &&
-			                      char.IsLowSurrogate(value[index + 1]);
+								  index + 1 < value.Length &&
+								  char.IsLowSurrogate(value[index + 1]);
 			var required = GetEscapedLength(character, isSurrogatePair, preserveTabs);
 			if (required > remaining)
 				return false;

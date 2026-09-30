@@ -497,7 +497,7 @@ public sealed class FileContentAnalyzer :
 		if (ReferenceEquals(bomEncoding, StrictUtf8))
 			return 3;
 		if (ReferenceEquals(bomEncoding, StrictUtf16Le) ||
-		    ReferenceEquals(bomEncoding, StrictUtf16Be))
+			ReferenceEquals(bomEncoding, StrictUtf16Be))
 		{
 			return 2;
 		}
@@ -940,21 +940,21 @@ public sealed class FileContentAnalyzer :
 	private static bool TryResolveBomEncoding(ReadOnlySpan<byte> value, out Encoding encoding)
 	{
 		if (value.Length >= 4 &&
-		    value[0] == 0x00 && value[1] == 0x00 &&
-		    value[2] == 0xFE && value[3] == 0xFF)
+			value[0] == 0x00 && value[1] == 0x00 &&
+			value[2] == 0xFE && value[3] == 0xFF)
 		{
 			encoding = StrictUtf32Be;
 			return true;
 		}
 		if (value.Length >= 4 &&
-		    value[0] == 0xFF && value[1] == 0xFE &&
-		    value[2] == 0x00 && value[3] == 0x00)
+			value[0] == 0xFF && value[1] == 0xFE &&
+			value[2] == 0x00 && value[3] == 0x00)
 		{
 			encoding = StrictUtf32Le;
 			return true;
 		}
 		if (value.Length >= 3 &&
-		    value[0] == 0xEF && value[1] == 0xBB && value[2] == 0xBF)
+			value[0] == 0xEF && value[1] == 0xBB && value[2] == 0xBF)
 		{
 			encoding = StrictUtf8;
 			return true;
@@ -1142,10 +1142,10 @@ public sealed class FileContentAnalyzer :
 	private static Encoding ResolveBomFallbackEncoding(Encoding bomEncoding)
 	{
 		if (ReferenceEquals(bomEncoding, StrictUtf8) ||
-		    ReferenceEquals(bomEncoding, StrictUtf16Le) ||
-		    ReferenceEquals(bomEncoding, StrictUtf16Be) ||
-		    ReferenceEquals(bomEncoding, StrictUtf32Le) ||
-		    ReferenceEquals(bomEncoding, StrictUtf32Be))
+			ReferenceEquals(bomEncoding, StrictUtf16Le) ||
+			ReferenceEquals(bomEncoding, StrictUtf16Be) ||
+			ReferenceEquals(bomEncoding, StrictUtf32Le) ||
+			ReferenceEquals(bomEncoding, StrictUtf32Be))
 		{
 			return bomEncoding;
 		}
@@ -1296,7 +1296,7 @@ public sealed class FileContentAnalyzer :
 					return true;
 				}
 				if (boundaryOffset < MinimumVectorizedOrdinaryRun &&
-				    ++shortBoundaryStreak >= DenseBoundaryThreshold)
+					++shortBoundaryStreak >= DenseBoundaryThreshold)
 				{
 					// Dense markup and line-oriented payloads retain the original scalar cost.
 					return AppendScalar(span[index..]);
@@ -1460,11 +1460,11 @@ public sealed class FileContentAnalyzer :
 		var counter = new TextMetricsCounter();
 		using var fingerprint = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
 		using (var reader = new StreamReader(
-		       stream,
-			       encoding,
-			       detectEncodingFromByteOrderMarks: true,
-			       bufferSize: StreamingBufferSize,
-			       leaveOpen: true))
+			   stream,
+				   encoding,
+				   detectEncodingFromByteOrderMarks: true,
+				   bufferSize: StreamingBufferSize,
+				   leaveOpen: true))
 		{
 			try
 			{
@@ -1615,8 +1615,8 @@ public sealed class FileContentAnalyzer :
 				maximumCharacters,
 				metrics.CharCount);
 			var source = _stream ??
-			             throw new ObjectDisposedException(
-				             nameof(StreamFileContentSnapshot));
+						 throw new ObjectDisposedException(
+							 nameof(StreamFileContentSnapshot));
 			if (source.Length != metrics.SizeBytes)
 				throw CreateChangedFileException();
 			ContentPipelineDiagnostics.RecordFullFileRead(metrics.SizeBytes);
@@ -1654,8 +1654,8 @@ public sealed class FileContentAnalyzer :
 					if (count == 0)
 					{
 						if (prefixLength != 0)
-						throw new DecoderFallbackException(
-							"The text ends with an unmatched high surrogate.");
+							throw new DecoderFallbackException(
+								"The text ends with an unmatched high surrogate.");
 						break;
 					}
 
@@ -1682,8 +1682,8 @@ public sealed class FileContentAnalyzer :
 					if (charactersToWrite <= 0)
 						continue;
 					if (charactersToWrite < count &&
-					    char.IsHighSurrogate(buffer[charactersToWrite - 1]) &&
-					    char.IsLowSurrogate(buffer[charactersToWrite]))
+						char.IsHighSurrogate(buffer[charactersToWrite - 1]) &&
+						char.IsLowSurrogate(buffer[charactersToWrite]))
 					{
 						throw new IOException(
 							"The requested snapshot prefix splits a Unicode scalar.");
@@ -1698,11 +1698,11 @@ public sealed class FileContentAnalyzer :
 
 				var currentFingerprint = fingerprint.GetHashAndReset();
 				if (totalCharacters != metrics.CharCount ||
-				    writtenCharacters != maximumCharacters ||
-				    source.Length != metrics.SizeBytes ||
-				    !CryptographicOperations.FixedTimeEquals(
-					    currentFingerprint,
-					    contentFingerprint))
+					writtenCharacters != maximumCharacters ||
+					source.Length != metrics.SizeBytes ||
+					!CryptographicOperations.FixedTimeEquals(
+						currentFingerprint,
+						contentFingerprint))
 				{
 					throw CreateChangedFileException();
 				}
