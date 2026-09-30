@@ -313,6 +313,48 @@ public sealed class McpInfrastructureTests
 			McpSearchSymbols.ParseDeclarationNames(pattern));
 	}
 
+	[Theory]
+	[InlineData("command\\(")]
+	[InlineData("\\bcommand\\b")]
+	[InlineData("def\\s+command")]
+	[InlineData("def command\\s*\\(")]
+	[InlineData("^def command")]
+	[InlineData("command.*")]
+	[InlineData("command+")]
+	[InlineData("comm?and")]
+	[InlineData("[Cc]ommand")]
+	[InlineData("(command|group)")]
+	[InlineData("(?i)command")]
+	[InlineData("Foo|Bar*")]
+	public void DeclarationNameQueriesRecognizeRegularExpressions(string pattern)
+	{
+		Assert.True(McpSearchSymbols.LooksLikeRegularExpression(pattern));
+	}
+
+	[Theory]
+	[InlineData("command")]
+	[InlineData("class Command")]
+	[InlineData("def command")]
+	[InlineData("def command(")]
+	[InlineData("def compute(self):")]
+	[InlineData("Foo|Bar")]
+	[InlineData("type JSONRespond|interface JSONRespond")]
+	[InlineData("Group.command")]
+	[InlineData("A::B")]
+	[InlineData("Shop.OrderService.CalculateTotal")]
+	[InlineData("interface Box<T> {")]
+	[InlineData("function load() {}")]
+	[InlineData("func Map[T](")]
+	[InlineData("class Foo:")]
+	[InlineData("Order(Service")]
+	[InlineData("valid?")]
+	[InlineData("$http")]
+	[InlineData(" | ")]
+	public void DeclarationNameQueriesKeepAcceptingDeclarationForms(string pattern)
+	{
+		Assert.False(McpSearchSymbols.LooksLikeRegularExpression(pattern));
+	}
+
 	[Fact]
 	public void BodyTruncationNoticeNamesTheExactUnshownLines()
 	{

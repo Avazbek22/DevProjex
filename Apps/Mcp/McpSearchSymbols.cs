@@ -20,6 +20,10 @@ internal static class McpSearchSymbols
 	/// </summary>
 	public const int MaximumAnnotatedFiles = 64;
 
+	private static readonly char[] DeclarationTailStarts = ['(', '<', '{', '[', ';', ',', '='];
+	private static readonly char[] RegularExpressionOnlySyntax = ['\\', '^', '+'];
+	private static readonly char[] NameMetacharacters = ['*', '?', '(', ')', '[', ']', '{', '}'];
+
 	/// <summary>
 	/// Reduces a declaration-name query to the names it asks for. Readers write the declaration
 	/// they picture, such as "class Foo", "type Foo|interface Foo" or "def foo(", so each
@@ -31,21 +35,67 @@ internal static class McpSearchSymbols
 		var names = new List<string>();
 		foreach (var alternative in pattern.Split('|', StringSplitOptions.TrimEntries))
 		{
-			var words = alternative.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-			for (var index = words.Length - 1; index >= 0; index--)
-			{
-				var word = words[index];
-				var cut = word.IndexOfAny(['(', '<', '{', '[', ';', ',', '=']);
-				var name = (cut >= 0 ? word[..cut] : word).TrimEnd('.', '#', '/', ':');
-				if (name.Length == 0)
-					continue;
-				if (!names.Contains(name, StringComparer.Ordinal))
-					names.Add(name);
-				break;
-			}
+			var name = FindDeclaredName(alternative);
+			if (name.Length > 0 && !names.Contains(name, StringComparer.Ordinal))
+				names.Add(name);
 		}
 		return names;
 	}
+
+	/// <summary>
+	/// Tells a regular expression from a declaration-name query, so a regex sent in declaration
+	/// mode is refused instead of answering a confident "no matches". No supported language puts
+	/// a backslash, '^', '+', ".*" or "(?" in a declaration, and a declared name never holds a
+	/// quantifier, bracket, brace or parenthesis: those may only follow the name as its parameter
+	/// list, type arguments or body, as in "def foo(" or "interface Box&lt;T&gt; {". One trailing
+	/// '?' stays part of a name, because Ruby declares predicates such as "valid?".
+	/// </summary>
+	public static bool LooksLikeRegularExpression(string pattern)
+	{
+		ArgumentNullException.ThrowIfNull(pattern);
+		if (pattern.AsSpan().IndexOfAny(RegularExpressionOnlySyntax) >= 0 ||
+			pattern.Contains(".*", StringComparison.Ordinal) ||
+			pattern.Contains("(?", StringComparison.Ordinal))
+		{
+			return true;
+		}
+
+		foreach (var alternative in pattern.Split('|', StringSplitOptions.TrimEntries))
+		{
+			var name = FindDeclaredName(alternative);
+			var looksLikeRegex = name.Length == 0
+				? alternative.AsSpan().IndexOfAny(NameMetacharacters) >= 0
+				: !IsPlainDeclaredName(name);
+			if (looksLikeRegex)
+				return true;
+		}
+		return false;
+	}
+
+	private static string FindDeclaredName(string alternative)
+	{
+		var words = alternative.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+		for (var index = words.Length - 1; index >= 0; index--)
+		{
+			var word = words[index];
+			var cut = word.IndexOfAny(DeclarationTailStarts);
+			var name = (cut >= 0 ? word[..cut] : word).TrimEnd('.', '#', '/', ':');
+			if (name.Length > 0)
+				return name;
+		}
+		return string.Empty;
+	}
+
+	private static bool IsPlainDeclaredName(string name)
+	{
+		var body = name.Length > 1 && name[^1] == '?' && IsIdentifierCharacter(name[^2])
+			? name.AsSpan(0, name.Length - 1)
+			: name.AsSpan();
+		return body.IndexOfAny(NameMetacharacters) < 0;
+	}
+
+	private static bool IsIdentifierCharacter(char character) =>
+		char.IsLetterOrDigit(character) || character == '_';
 
 	/// <summary>
 	/// Builds the whole-identifier pattern for a declaration-name search. A qualified name is

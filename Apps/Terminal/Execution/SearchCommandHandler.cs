@@ -22,6 +22,9 @@ public sealed class SearchCommandHandler(
 	private const int MaximumStoredCharacters = 2_000_000;
 	private const int MaximumDeclarationsReported = 20;
 	private const long MaximumInspectedBytes = 64L * 1024 * 1024;
+	private const string SymbolsRegularExpressionMessage =
+		"--symbols takes declaration names such as command, class Command or Foo|Bar; " +
+		"this pattern looks like a regular expression.";
 	private static readonly JsonSerializerOptions JsonOptions = new()
 	{
 		WriteIndented = true,
@@ -32,6 +35,16 @@ public sealed class SearchCommandHandler(
 		SearchCommandRequest request,
 		CancellationToken cancellationToken)
 	{
+		// A regular expression in declaration mode would otherwise report a confident "no
+		// matches"; refusing it before the project is analyzed also keeps the refusal cheap.
+		if (request.Mode == SearchMode.Symbols && McpSearchSymbols.LooksLikeRegularExpression(request.Pattern))
+		{
+			throw new SearchCommandException(
+				"DPX-CLI-SEARCH-PATTERN",
+				SymbolsRegularExpressionMessage,
+				hint: "Pass the name, or use --regex instead of --symbols to search text with a regular expression.");
+		}
+
 		var status = new StatusRenderer(environment, request.Output);
 		var plan = await status.RunAsync(
 			services.Localization["Terminal.Status.AnalyzingProject"],
@@ -421,6 +434,9 @@ public sealed class SearchCommandHandler(
 		{
 			SearchMode.Regex => pattern,
 			SearchMode.Text => Regex.Escape(pattern),
+			SearchMode.Symbols when McpSearchSymbols.LooksLikeRegularExpression(pattern) => throw new McpToolException(
+				McpErrorCodes.InvalidPattern,
+				$"{McpErrorCodes.InvalidPattern}: {SymbolsRegularExpressionMessage}"),
 			SearchMode.Symbols => declarationNames.Count > 0
 				? McpSearchSymbols.ToDeclarationNamePattern(declarationNames)
 				: throw new McpToolException(
@@ -798,8 +814,14 @@ public sealed class SearchCommandHandler(
 	internal readonly record struct SearchResolution(int Resolved, int Ambiguous, int Unresolved, int External);
 }
 
-internal sealed class SearchCommandException(string code, string message, Exception? innerException = null)
+internal sealed class SearchCommandException(
+	string code,
+	string message,
+	Exception? innerException = null,
+	string? hint = null)
 	: Exception(message, innerException)
 {
 	public string Code { get; } = code;
+
+	public string? Hint { get; } = hint;
 }

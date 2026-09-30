@@ -1053,6 +1053,14 @@ internal sealed class DevProjexMcpTools(
 			// symbols=true is the declaration-name mode of CLI search --symbols: the pattern is one
 			// identifier, and only declarations with that name match, not its uses.
 			var declarationsOnly = arguments.OptionalBoolean("symbols", false);
+			if (declarationsOnly && McpSearchSymbols.LooksLikeRegularExpression(pattern))
+			{
+				throw new McpToolException(
+					McpErrorCodes.InvalidArguments,
+					$"{McpErrorCodes.InvalidArguments}: symbols=true takes declaration names such as command, " +
+					"class Command or Foo|Bar; this pattern looks like a regular expression. Pass the name, " +
+					"or omit symbols to search text with a regex.");
+			}
 			var declarationNames = declarationsOnly ? McpSearchSymbols.ParseDeclarationNames(pattern) : [];
 			if (declarationsOnly && declarationNames.Count == 0)
 			{

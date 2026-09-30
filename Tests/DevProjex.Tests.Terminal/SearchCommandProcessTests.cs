@@ -222,6 +222,24 @@ public sealed class SearchCommandProcessTests
 	}
 
 	[Fact]
+	public void SymbolModeRefusesARegularExpressionWithAHintInsteadOfReportingNoMatches()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = CreateProject(workspace);
+
+		var refused = Run(workspace, project, "Run\\(", "--symbols");
+		var named = Run(workspace, project, "string Run(", "--symbols", "--format", "json");
+
+		Assert.Equal(CommandLineExitCodes.UsageError, refused.ExitCode);
+		Assert.Empty(refused.StandardOutput);
+		Assert.Contains("DPX-CLI-SEARCH-PATTERN", refused.StandardError, StringComparison.Ordinal);
+		Assert.Contains("looks like a regular expression", refused.StandardError, StringComparison.Ordinal);
+		Assert.Contains("use --regex instead of --symbols", refused.StandardError, StringComparison.Ordinal);
+		Assert.Equal(0, named.ExitCode);
+		Assert.Single(JsonDocument.Parse(named.StandardOutput).RootElement.GetProperty("matches").EnumerateArray());
+	}
+
+	[Fact]
 	public void MaximumResultAndDisabledBodyRemainExplicitInJson()
 	{
 		using var workspace = new TemporaryDirectory();
