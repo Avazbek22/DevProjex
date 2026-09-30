@@ -988,6 +988,7 @@ public sealed class McpConnectionServiceTests
 		Assert.True(result.Replaced);
 		Assert.Equal(targetPath, result.TargetPath);
 		Assert.Contains("configuration was written", result.UserMessage, StringComparison.Ordinal);
+		Assert.Contains("The file belongs to this computer", result.UserMessage, StringComparison.Ordinal);
 		Assert.Equal("Restart Cursor", result.NextStep);
 		Assert.Null(result.NextCommand);
 		using var document = JsonDocument.Parse(await File.ReadAllTextAsync(
@@ -1002,7 +1003,7 @@ public sealed class McpConnectionServiceTests
 		AssertConnection(
 			servers.GetProperty("devprojex"),
 			executable,
-			project.Path,
+			McpConnectionFragmentGenerator.WorkspaceFolderVariable,
 			expectLive: true,
 			expectVsCodeType: false);
 		AssertNoTemporaryFiles(Path.GetDirectoryName(targetPath)!);
@@ -1034,6 +1035,7 @@ public sealed class McpConnectionServiceTests
 		Assert.False(result.Replaced);
 		Assert.Equal("Enable the server in VS Code", result.NextStep);
 		Assert.Null(result.NextCommand);
+		Assert.Contains("The file belongs to this computer", result.UserMessage, StringComparison.Ordinal);
 		using var document = JsonDocument.Parse(await File.ReadAllTextAsync(
 			targetPath,
 			TestContext.Current.CancellationToken));
@@ -1047,7 +1049,7 @@ public sealed class McpConnectionServiceTests
 		AssertConnection(
 			servers.GetProperty("devprojex"),
 			executable,
-			project.Path,
+			McpConnectionFragmentGenerator.WorkspaceFolderVariable,
 			expectLive: false,
 			expectVsCodeType: true);
 		AssertNoTemporaryFiles(Path.GetDirectoryName(targetPath)!);
@@ -1225,7 +1227,7 @@ public sealed class McpConnectionServiceTests
 		AssertConnection(
 			entry,
 			executable,
-			project.Path,
+			McpConnectionFragmentGenerator.WorkspaceFolderVariable,
 			expectLive: true,
 			expectVsCodeType: (McpConnectionClient)clientValue == McpConnectionClient.VsCode);
 	}
@@ -1808,6 +1810,7 @@ public sealed class McpConnectionServiceTests
 			["Mcp.Connect.ProjectConfigurationFailed"] = "{0}: {1}",
 			["Mcp.Connect.ProjectConfigurationUpdated"] = "{0}: {1}; restart {2}",
 			["Mcp.Connect.ProjectConfigurationWritten"] = "{0}: configuration was written to {1}",
+			["Mcp.Connect.ProjectConfigurationMachinePath"] = "The file belongs to this computer",
 			["Mcp.Connect.Cursor.NextStep"] = "Restart Cursor",
 			["Mcp.Connect.VsCode.NextStep"] = "Enable the server in VS Code",
 			["Mcp.Connect.RestartClient"] = "Restart {0}",

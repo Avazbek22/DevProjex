@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.Globalization;
 using System.CommandLine.Parsing;
 using DevProjex.Terminal.DesktopControl;
 using DevProjex.Terminal.Execution;
@@ -396,10 +397,12 @@ public sealed class DevProjexCommandTree
 			CliChoiceSets.McpClient,
 			_localization);
 		client.HelpName = "CLIENT";
+		// Standard is the default here: live mode follows a selection saved by the window, which a
+		// command-line user may never have opened. Desktop and Terminal Workspace choose explicitly.
 		var mode = CliChoiceSymbols.Option(
 			"--mode",
 			L("Terminal.Option.McpConnectionMode"),
-			McpConnectionMode.Live,
+			McpConnectionMode.Standard,
 			CliChoiceSets.McpMode,
 			_localization);
 		var print = new Option<bool>("--print")
@@ -431,10 +434,10 @@ public sealed class DevProjexCommandTree
 		});
 		CliExamplesRegistry.Set(
 			command,
-			"devprojex mcp connect . --client claude-code --mode live",
-			"devprojex mcp connect . --client cursor --mode standard",
+			"devprojex mcp connect . --client claude-code",
+			"devprojex mcp connect . --client cursor --mode live",
 			"devprojex mcp connect . --client vscode --print",
-			"devprojex mcp connect . --client codex --open");
+			"devprojex mcp connect . --client codex --replace --open");
 		command.SetAction((parseResult, cancellationToken) =>
 			CommandExecution.RunAsync(
 				environment,
@@ -460,19 +463,18 @@ public sealed class DevProjexCommandTree
 							return CommandLineExitCodes.Success;
 						}
 
-						var result = await services.McpConnectionService
-							.ConnectAsync(request, cancellationToken)
+						var result = await ConnectMcpClientAsync(services, request, cancellationToken)
 							.ConfigureAwait(false);
 						var openClient = parseResult.GetValue(open);
 						if (!openClient || !result.Succeeded)
-							return WriteMcpConnectionResult(result, includeNextCommand: !openClient);
+							return WriteMcpConnectionResult(result, includeNextCommand: !openClient, services, request);
 
 						var launchResult = await services.McpClientLaunchService
 							.OpenAsync(new McpClientLaunchRequest(connectionClient, request.ProjectRoot), cancellationToken)
 							.ConfigureAwait(false);
 						if (launchResult.Succeeded)
 						{
-							WriteMcpConnectionResult(result, includeNextCommand: false);
+							WriteMcpConnectionResult(result, includeNextCommand: false, services, request);
 							TerminalTextEscaping.WriteSingleLine(
 								environment.Output,
 								_localization.Format("Mcp.Open.Succeeded", DisplayConnectionClient(connectionClient)));
@@ -493,14 +495,55 @@ public sealed class DevProjexCommandTree
 		return command;
 	}
 
-	private int WriteMcpConnectionResult(McpConnectionResult result, bool includeNextCommand)
+	/// <summary>
+	/// Codex keeps one global devprojex entry, so pointing it at another project replaces the entry
+	/// every other project relied on. The command line has no dialog; --replace is the confirmation.
+	/// </summary>
+	private async Task<McpConnectionResult> ConnectMcpClientAsync(
+		TerminalServices services,
+		McpConnectionRequest request,
+		CancellationToken cancellationToken)
+	{
+		if (request.Client != McpConnectionClient.Codex ||
+			services.McpConnectionService is not IMcpConnectionReplacementService replacementService)
+		{
+			return await services.McpConnectionService.ConnectAsync(request, cancellationToken).ConfigureAwait(false);
+		}
+
+		var inspection = await replacementService.InspectAsync(request, cancellationToken).ConfigureAwait(false);
+		if (!inspection.RequiresProjectReplacement || string.IsNullOrWhiteSpace(inspection.ExistingProjectRoot))
+			return await services.McpConnectionService.ConnectAsync(request, cancellationToken).ConfigureAwait(false);
+		if (!request.ReplaceExistingFields)
+		{
+			return new McpConnectionResult(
+				McpConnectionStatus.InvalidConfiguration,
+				_localization.Format(
+					"Mcp.Connect.Codex.ReplaceWithFlag",
+					inspection.ExistingProjectRoot,
+					request.ProjectRoot));
+		}
+
+		return await replacementService
+			.ReplaceAsync(request, inspection.ExistingProjectRoot, cancellationToken)
+			.ConfigureAwait(false);
+	}
+
+	private int WriteMcpConnectionResult(
+		McpConnectionResult result,
+		bool includeNextCommand,
+		TerminalServices services,
+		McpConnectionRequest request)
 	{
 		var successfulOutput = result.Status is
 			McpConnectionStatus.Connected or
 			McpConnectionStatus.Updated or
 			McpConnectionStatus.ManualConfiguration;
 		var writer = successfulOutput ? environment.Output : environment.Error;
-		TerminalTextEscaping.WriteSingleLine(writer, result.UserMessage);
+		// A message can carry several sentences on separate lines; each is still escaped on its own.
+		foreach (var line in result.UserMessage.Split('\n'))
+			TerminalTextEscaping.WriteSingleLine(writer, line.TrimEnd('\r'));
+		if (successfulOutput)
+			WriteMcpConnectionSummary(writer, services, request);
 		if (includeNextCommand && result.Succeeded && !string.IsNullOrWhiteSpace(result.NextStep))
 		{
 			TerminalTextEscaping.WriteSingleLine(writer, result.NextStep);
@@ -510,6 +553,12 @@ public sealed class DevProjexCommandTree
 			TerminalTextEscaping.WriteSingleLine(
 				writer,
 				_localization.Format("Mcp.Connect.RunInProject", result.NextCommand));
+		}
+		if (result.Succeeded)
+		{
+			TerminalTextEscaping.WriteSingleLine(
+				writer,
+				_localization.Format("Mcp.Connect.RestartRunningSession", DisplayConnectionClient(request.Client)));
 		}
 		if (!string.IsNullOrWhiteSpace(result.CommandOutput))
 			System.Diagnostics.Trace.WriteLine($"MCP client command output: {result.CommandOutput}");
@@ -527,6 +576,47 @@ public sealed class DevProjexCommandTree
 			McpConnectionStatus.ManualConfiguration
 			? CommandLineExitCodes.Success
 			: CommandLineExitCodes.RuntimeError;
+	}
+
+	private void WriteMcpConnectionSummary(
+		TextWriter writer,
+		TerminalServices services,
+		McpConnectionRequest request)
+	{
+		TerminalTextEscaping.WriteSingleLine(
+			writer,
+			_localization.Format(
+				"Mcp.Connect.Summary",
+				DisplayConnectionClient(request.Client),
+				request.Mode == McpConnectionMode.Live ? "live" : "standard",
+				request.ProjectRoot));
+		if (request.Mode == McpConnectionMode.Live)
+			TerminalTextEscaping.WriteSingleLine(writer, DescribeLiveSelection(services, request.ProjectRoot));
+		if (request.Client == McpConnectionClient.Codex)
+			TerminalTextEscaping.WriteSingleLine(writer, L("Mcp.Connect.Codex.SingleEntry"));
+	}
+
+	private string DescribeLiveSelection(TerminalServices services, string projectRoot)
+	{
+		ProjectProfileLookupResult lookup;
+		try
+		{
+			lookup = services.LocalProfileStore.LookupProfile(projectRoot, TimeSpan.FromSeconds(1));
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+		{
+			return L("Mcp.Connect.LiveSelection.Unavailable");
+		}
+
+		return lookup.Status switch
+		{
+			ProjectProfileLookupStatus.Found when lookup.UpdatedUtc is { } saved => _localization.Format(
+				"Mcp.Connect.LiveSelection.Saved",
+				saved.UtcDateTime.ToString("yyyy-MM-dd HH:mm 'UTC'", CultureInfo.InvariantCulture)),
+			ProjectProfileLookupStatus.Found => L("Mcp.Connect.LiveSelection.SavedUndated"),
+			ProjectProfileLookupStatus.Missing => L("Mcp.Connect.LiveSelection.Missing"),
+			_ => L("Mcp.Connect.LiveSelection.Unavailable")
+		};
 	}
 
 	private static string DisplayConnectionClient(McpConnectionClient client) => client switch

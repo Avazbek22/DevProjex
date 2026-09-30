@@ -23,6 +23,12 @@ public static class McpConnectionFragmentGenerator
 {
 	public const string AppImageExtractAndRunVariable = "APPIMAGE_EXTRACT_AND_RUN";
 
+	/// <summary>
+	/// The project-folder variable Cursor and VS Code substitute in the arguments of a workspace
+	/// mcp.json, so a project file names its root without a machine-specific path.
+	/// </summary>
+	public const string WorkspaceFolderVariable = "${workspaceFolder}";
+
 	public static IReadOnlyDictionary<string, string> GetRequiredServerEnvironment()
 	{
 		var enabledByEnvironment = string.Equals(
@@ -63,6 +69,29 @@ public static class McpConnectionFragmentGenerator
 			McpConnectionClient.VsCode => BuildVsCode(mode, executablePath, projectRoot),
 			McpConnectionClient.Json => BuildJson(mode, executablePath, projectRoot),
 			_ => throw new ArgumentOutOfRangeException(nameof(client), client, null)
+		};
+	}
+
+	/// <summary>
+	/// The entry written into a project's own .cursor/mcp.json or .vscode/mcp.json. Both clients
+	/// document ${workspaceFolder} substitution there, so the root follows the folder the file lives
+	/// in; the executable path stays absolute because nothing on another machine can resolve it.
+	/// </summary>
+	public static string GenerateProjectFile(
+		McpConnectionClient client,
+		McpConnectionMode mode,
+		string executablePath)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(executablePath);
+		if (!IsAbsolutePath(executablePath))
+			throw new ArgumentException("The DevProjex executable path must be absolute.", nameof(executablePath));
+		ValidateSingleLine(executablePath, nameof(executablePath));
+
+		return client switch
+		{
+			McpConnectionClient.Cursor => BuildJson(mode, executablePath, WorkspaceFolderVariable),
+			McpConnectionClient.VsCode => BuildVsCode(mode, executablePath, WorkspaceFolderVariable),
+			_ => throw new ArgumentOutOfRangeException(nameof(client), client, "Only Cursor and VS Code read a project mcp.json.")
 		};
 	}
 
