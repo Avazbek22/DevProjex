@@ -3,6 +3,10 @@
 Choose the artifact that matches your operating system and CPU architecture from the
 GitHub release page.
 
+## Code signing
+
+Windows release binaries are signed through the SignPath Foundation program, starting with the first signed release. Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org). See the [code signing policy](Code-Signing-Policy.md) for what is signed and how.
+
 ## Windows
 
 - Download and run `DevProjex.v<version>.win-x64.exe` or

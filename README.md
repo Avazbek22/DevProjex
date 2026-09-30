@@ -361,3 +361,5 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 ## License (Apache-2.0) 📄
 
 DevProjex is licensed under the **Apache License 2.0** — free to use, modify, and distribute, with an explicit patent grant. Copyright (c) 2025–present Avazbek Olimov. See [LICENSE](LICENSE) for details.
+
+**Code signing:** Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org). See the [code signing policy](Docs/Code-Signing-Policy.md).
