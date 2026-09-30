@@ -23,6 +23,12 @@ internal sealed class McpBoundedLineTextWriter : TextWriter
 		_lines = new List<string>(maximumLines);
 	}
 
+	/// <summary>
+	/// The completed lines only. A character limit can stop inside a line; this drops that partial
+	/// line so a cut never ends in the middle of a name.
+	/// </summary>
+	public string CompleteLinesText => string.Join('\n', _lines);
+
 	public override Encoding Encoding => Encoding.UTF8;
 	public bool IsTruncated { get; private set; }
 	public bool CharacterLimitReached { get; private set; }

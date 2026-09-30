@@ -294,56 +294,66 @@ internal sealed class DevProjexMcpTools(
 				format,
 				MaximumTreeLines,
 				cancellationToken);
-			int? automaticDepth = depth is null &&
-								 format is TreeTextFormat.Ascii or TreeTextFormat.Markdown &&
-								 !depthFit.FullTreeFits &&
-								 depthFit.DeepestCompleteDepth >= 1
-				? depthFit.DeepestCompleteDepth
-				: null;
-			var effectiveDepth = depth ?? automaticDepth;
-			var renderedTree = effectiveDepth is null
-				? plan.ProjectedTree
-				: PruneToDepthWithCancellation(
-					plan.ProjectedTree,
-					effectiveDepth.Value,
-					cancellationToken);
-			using var treeWriter = new McpBoundedLineTextWriter(MaximumTreeLines, MaximumTreeCharacters);
-			try
+			// Line counts are known before rendering, so no depth deeper than this can fit; the
+			// character limit is only known by rendering, which stops at the limit.
+			var lineFittingDepth = depthFit.FullTreeFits ? depthFit.FullDepth : depthFit.DeepestCompleteDepth;
+			int? automaticDepth = null;
+			McpBoundedLineTextWriter? fittingWriter = null;
+			if (depth is null && format is TreeTextFormat.Ascii or TreeTextFormat.Markdown)
 			{
-				await Projects.TreeExportService.WriteFullTreeAsync(
-						treeWriter,
-						plan.SourceRoot,
-						renderedTree,
+				var fitting = await RenderDeepestFittingTreeAsync(
+						plan,
 						format,
-						displayRootPath: McpProjectService.IsPrivateDataHidden(plan)
-							? Projects.ResolveProtectedDocumentRoot(plan)
-							: McpProjectService.ResolveAddressDocumentRoot(plan),
-						cancellationToken: cancellationToken)
+						lineFittingDepth,
+						minimumDepth: 1,
+						depthFit.FullDepth,
+						cancellationToken)
 					.ConfigureAwait(false);
-			}
-			catch (McpLineLimitReachedException)
-			{
-				if (format is TreeTextFormat.Json or TreeTextFormat.Xml)
+				if (fitting is { } found)
 				{
-					var guidance = !depthFit.FullTreeFits
-						? $"pass max_depth: {depthFit.DeepestCompleteDepth} for a complete document, " +
-						  "or narrow paths, include_patterns, and exclude_patterns, then retry."
-						: "narrow paths, include_patterns, or exclude_patterns, then retry.";
-					throw new McpToolException(
-						McpErrorCodes.PayloadTruncated,
-						$"{McpErrorCodes.PayloadTruncated}: the {format.ToString().ToLowerInvariant()} tree exceeds " +
-						$"the {MaximumTreeLines}-line or {MaximumTreeCharacters}-character result limit; {guidance}");
+					fittingWriter = found.Writer;
+					automaticDepth = found.Depth < depthFit.FullDepth ? found.Depth : null;
 				}
+			}
+			using var treeWriter = fittingWriter ?? await RenderBoundedTreeAsync(
+					plan,
+					depth is null
+						? plan.ProjectedTree
+						: PruneToDepthWithCancellation(plan.ProjectedTree, depth.Value, cancellationToken),
+					format,
+					cancellationToken)
+				.ConfigureAwait(false);
+			if (treeWriter.IsTruncated && format is TreeTextFormat.Json or TreeTextFormat.Xml)
+			{
+				var renderedDepth = Math.Min(depth ?? depthFit.FullDepth, depthFit.FullDepth);
+				var suggestion = await RenderDeepestFittingTreeAsync(
+						plan,
+						format,
+						Math.Min(renderedDepth - 1, lineFittingDepth),
+						minimumDepth: 0,
+						depthFit.FullDepth,
+						cancellationToken)
+					.ConfigureAwait(false);
+				suggestion?.Writer.Dispose();
+				var guidance = suggestion is { } fits
+					? $"pass max_depth: {fits.Depth} for a complete document, " +
+					  "or narrow paths, include_patterns, and exclude_patterns, then retry."
+					: "narrow paths, include_patterns, or exclude_patterns, then retry.";
+				throw new McpToolException(
+					McpErrorCodes.PayloadTruncated,
+					$"{McpErrorCodes.PayloadTruncated}: the {format.ToString().ToLowerInvariant()} tree exceeds " +
+					$"the {MaximumTreeLines}-line or {MaximumTreeCharacters}-character result limit; {guidance}");
 			}
 
 			var treeTruncationNotice = treeWriter.IsTruncated
 				? "[Tree truncated at 2000 lines or 50000 characters. Narrow paths, include_patterns, exclude_patterns, or max_depth.]"
 				: automaticDepth is { } selectedDepth
-					? $"[Tree limited to depth {selectedDepth} of {depthFit.FullDepth} to fit {MaximumTreeLines} lines; " +
-					  "pass max_depth or include_patterns for a subtree.]"
+					? $"[Tree limited to depth {selectedDepth} of {depthFit.FullDepth} to fit {MaximumTreeLines} lines " +
+					  $"and {MaximumTreeCharacters} characters; pass max_depth or include_patterns for a subtree.]"
 					: null;
+			// A cut tree ends at its last complete line, so no name is ever returned half written.
 			return McpToolResults.TextSuccess(AppendTrustedNotices(
-				McpSpotlight.Wrap(treeWriter.Text),
+				McpSpotlight.Wrap(treeWriter.IsTruncated ? treeWriter.CompleteLinesText : treeWriter.Text),
 				treeTruncationNotice,
 				FormatTreeDepthNotice(plan, depth, paths),
 				McpTrustedDiagnosticFormatter.FormatWarnings(plan),
@@ -4950,6 +4960,69 @@ internal sealed class DevProjexMcpTools(
 
 	internal static TreeNodeDescriptor PruneToDepth(TreeNodeDescriptor node, int remainingDepth) =>
 		PruneToDepthWithCancellation(node, remainingDepth, CancellationToken.None);
+
+	/// <summary>
+	/// Renders one tree exactly as <c>get_tree</c> returns it into a writer bounded by the response
+	/// limits. Rendering stops at the first limit it reaches, which the writer records.
+	/// </summary>
+	private async Task<McpBoundedLineTextWriter> RenderBoundedTreeAsync(
+		ProjectContextPlan plan,
+		TreeNodeDescriptor tree,
+		TreeTextFormat format,
+		CancellationToken cancellationToken)
+	{
+		var writer = new McpBoundedLineTextWriter(MaximumTreeLines, MaximumTreeCharacters);
+		try
+		{
+			await Projects.TreeExportService.WriteFullTreeAsync(
+					writer,
+					plan.SourceRoot,
+					tree,
+					format,
+					displayRootPath: McpProjectService.IsPrivateDataHidden(plan)
+						? Projects.ResolveProtectedDocumentRoot(plan)
+						: McpProjectService.ResolveAddressDocumentRoot(plan),
+					cancellationToken: cancellationToken)
+				.ConfigureAwait(false);
+		}
+		catch (McpLineLimitReachedException)
+		{
+			// IsTruncated and CharacterLimitReached record which limit stopped the rendering.
+		}
+		catch
+		{
+			writer.Dispose();
+			throw;
+		}
+		return writer;
+	}
+
+	/// <summary>
+	/// Finds the deepest depth from <paramref name="startDepth"/> down to
+	/// <paramref name="minimumDepth"/> whose complete rendering fits both response limits, and keeps
+	/// that rendering so it is not produced twice. A rejected rendering stops at the limit it
+	/// crossed, so each attempt costs at most one response.
+	/// </summary>
+	private async Task<(int Depth, McpBoundedLineTextWriter Writer)?> RenderDeepestFittingTreeAsync(
+		ProjectContextPlan plan,
+		TreeTextFormat format,
+		int startDepth,
+		int minimumDepth,
+		int fullDepth,
+		CancellationToken cancellationToken)
+	{
+		for (var candidate = startDepth; candidate >= minimumDepth; candidate--)
+		{
+			var tree = candidate >= fullDepth
+				? plan.ProjectedTree
+				: PruneToDepthWithCancellation(plan.ProjectedTree, candidate, cancellationToken);
+			var writer = await RenderBoundedTreeAsync(plan, tree, format, cancellationToken).ConfigureAwait(false);
+			if (!writer.IsTruncated)
+				return (candidate, writer);
+			writer.Dispose();
+		}
+		return null;
+	}
 
 	internal static McpTreeDepthFit CalculateTreeDepthFit(
 		TreeNodeDescriptor root,

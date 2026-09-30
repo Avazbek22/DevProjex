@@ -3062,9 +3062,52 @@ public sealed partial class McpServerIntegrationTests
 		AssertTrustedTrailerOutsideSpotlight(
 			text,
 			"[Tree truncated at 2000 lines or 50000 characters. Narrow paths, include_patterns, exclude_patterns, or max_depth.]");
+		// The cut falls between entries, never inside a name.
+		var lastLine = ExtractSpotlightBody(Text(text)).ReplaceLineEndings("\n").TrimEnd('\n').Split('\n')[^1];
+		Assert.EndsWith(new string('x', 170) + ".txt", lastLine, StringComparison.Ordinal);
 		Assert.True(json.IsError);
 		Assert.Contains(McpErrorCodes.PayloadTruncated, Text(json), StringComparison.Ordinal);
 		Assert.Contains("50000-character result limit", Text(json), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task GetTreeChoosesADepthThatFitsTheCharacterLimitAsWellAsTheLineLimit()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		// 1,205 lines fit the line limit, but the long names need far more than 50,000 characters.
+		for (var directory = 0; directory < 4; directory++)
+		{
+			var folder = workspace.CreateDirectory($"project/d{directory}");
+			for (var file = 0; file < 300; file++)
+				File.WriteAllText(Path.Combine(folder, $"{file:D3}-{new string('n', 120)}.txt"), string.Empty);
+		}
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var automatic = await server.CallAsync("get_tree");
+		var json = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "json" });
+		var suggested = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "json", ["max_depth"] = 1 });
+
+		Assert.NotEqual(true, automatic.IsError);
+		var body = ExtractSpotlightBody(Text(automatic));
+		Assert.InRange(body.Length, 1, 50_000);
+		for (var directory = 0; directory < 4; directory++)
+			Assert.Contains($"d{directory}", body, StringComparison.Ordinal);
+		Assert.DoesNotContain(new string('n', 120), body, StringComparison.Ordinal);
+		AssertTrustedTrailerOutsideSpotlight(
+			automatic,
+			"[Tree limited to depth 1 of 2 to fit 2000 lines and 50000 characters; pass max_depth or include_patterns for a subtree.]");
+		Assert.DoesNotContain("[Tree truncated", Text(automatic), StringComparison.Ordinal);
+
+		Assert.True(json.IsError);
+		Assert.Contains("pass max_depth: 1 for a complete document", Text(json), StringComparison.Ordinal);
+		Assert.NotEqual(true, suggested.IsError);
+		using var document = JsonDocument.Parse(ExtractSpotlightBody(Text(suggested)));
+		Assert.Equal(JsonValueKind.Object, document.RootElement.ValueKind);
 	}
 
 	[Fact]
@@ -3109,7 +3152,7 @@ public sealed partial class McpServerIntegrationTests
 		Assert.DoesNotContain("File-000.txt", Text(automatic), StringComparison.Ordinal);
 		AssertTrustedTrailerOutsideSpotlight(
 			automatic,
-			"[Tree limited to depth 2 of 3 to fit 2000 lines; pass max_depth or include_patterns for a subtree.]");
+			"[Tree limited to depth 2 of 3 to fit 2000 lines and 50000 characters; pass max_depth or include_patterns for a subtree.]");
 
 		Assert.NotEqual(true, explicitDepth.IsError);
 		AssertTrustedTrailerOutsideSpotlight(

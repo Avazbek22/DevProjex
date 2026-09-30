@@ -1020,19 +1020,20 @@ Several known directories belong in one call: for example,
 selects all three subtrees without walking them separately.
 
 For `get_tree`, omitted `max_depth` on an oversized `text` or `markdown` result
-selects the deepest depth whose complete tree fits the 2,000-line limit and
-appends `[Tree limited to depth D of N to fit 2000 lines; pass max_depth or
-include_patterns for a subtree.]`. Node and format-header line counts are
-computed from the selected tree before rendering, so the response never stops
-mid-tree for the line limit. An independent 50,000-character cap bounds unusually
-long names; human-readable output then carries the same truncation notice. If depth 1 itself cannot fit,
-the original bounded response and `[Tree truncated at 2000 lines or 50000 characters ...]`
+selects the deepest depth whose complete tree fits both the 2,000-line and the
+50,000-character limits and appends `[Tree limited to depth D of N to fit 2000
+lines and 50000 characters; pass max_depth or include_patterns for a subtree.]`.
+Node and format-header line counts are computed from the selected tree before
+rendering; the character fit of a candidate depth is checked by rendering it
+exactly as it is returned, so the response never stops mid-tree. If depth 1 itself cannot fit,
+the bounded response and `[Tree truncated at 2000 lines or 50000 characters ...]`
 trailer remain. An explicit
 `max_depth` is the caller's choice and retains that same truncation behavior.
+A truncated human-readable tree ends at its last complete line, never inside a name.
 JSON and XML never return partial syntax: overflow remains
-`DPX-MCP-PAYLOAD-TRUNCATED`; line overflow names the largest `max_depth` that
-would produce a complete document, while character overflow asks the caller to
-narrow `paths` or patterns.
+`DPX-MCP-PAYLOAD-TRUNCATED` and names the largest `max_depth` below the rendered
+depth whose document fits both limits, or asks the caller to narrow `paths` or
+patterns when no depth does.
 The `text` tree writes its project address once, followed directly by the real
 top-level children; it does not repeat the project name as a synthetic tree node.
 Markdown tree Root values and node names escape active CommonMark, HTML, and

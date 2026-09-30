@@ -1389,7 +1389,7 @@ a trusted range notice; `start_line` past EOF and reversed ranges keep
 `DPX-MCP-INVALID-RANGE`. A caller that requires a prevalidated end must first
 learn the line count and send `end_line <= N`; there is no strict-range switch.
 Second, when `max_depth` is omitted and a complete human-readable tree exceeds
-2,000 lines, `get_tree` returns the deepest complete depth that fits. Passing an
+2,000 lines or 50,000 characters, `get_tree` returns the deepest complete depth that fits. Passing an
 explicit `max_depth` restores caller-selected depth and the prior line-truncation
 behavior; JSON/XML still fail rather than return partial syntax and now suggest
 a fitting depth. Third, uninspected entries in MCP `analyze.topFiles` gain the
