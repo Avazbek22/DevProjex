@@ -270,7 +270,7 @@ public sealed class SearchCommandHandler(
 					cancellationToken).ConfigureAwait(false);
 			}
 		}
-		else if (inspectedFiles.Count > 0)
+		else if (context is not null && inspectedFiles.Count > 0)
 		{
 			await using var searched = await services.SecretRedactionOutputPreparer
 				.ConsumeTransformedTextAsync(context, inspectedFiles, Consume, cancellationToken)
