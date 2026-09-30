@@ -57,6 +57,37 @@ public sealed partial class McpServerProcessTests
 		var project = workspace.CreateDirectory("project");
 		workspace.WriteFile(
 			"project/App.cs",
+			"namespace Sample;\npublic sealed class ExactNeedle\n{\n\tpublic int Run() => 1;\n}\n" +
+			"public sealed class Factory\n{\n\tpublic ExactNeedle Make() => new();\n}\n");
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			workspace.CreateDirectory("data"));
+
+		var text = Normalize(AllProcessText(await CallAsync(
+			server,
+			"search_project",
+			new Dictionary<string, object?>
+			{
+				["pattern"] = "ExactNeedle",
+				["context_lines"] = 0
+			})));
+
+		Assert.Contains("[Declaration body] shown=1/2 · other declarations=1.", text, StringComparison.Ordinal);
+		Assert.Contains(
+			"[Next read] Read only declarations needed for the task; batch known selections in one get_file call.",
+			text,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain("[Read declarations]", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("in full", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RealProcessSearchSaysNothingAboutReadingWhenTheOnlyDeclarationIsShownWhole()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile(
+			"project/App.cs",
 			"namespace Sample;\npublic sealed class ExactNeedle\n{\n\tpublic int Run() => 1;\n}\n");
 		await using var server = await ActualMcpProcess.StartAsync(
 			project,
@@ -71,12 +102,14 @@ public sealed partial class McpServerProcessTests
 				["context_lines"] = 0
 			})));
 
+		Assert.Contains("Best declaration body (1 of 1):", text, StringComparison.Ordinal);
 		Assert.Contains(
-			"[Next read] Read only declarations needed for the task; batch known selections in one get_file call.",
+			"[Declaration body] shown=1/1; no other declarations require a read.",
 			text,
 			StringComparison.Ordinal);
-		Assert.DoesNotContain("[Read declarations]", text, StringComparison.Ordinal);
-		Assert.DoesNotContain("in full", text, StringComparison.Ordinal);
+		Assert.Contains("[Search boundary] complete", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("[Next read]", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("[Search order]", text, StringComparison.Ordinal);
 	}
 
 	[Fact]

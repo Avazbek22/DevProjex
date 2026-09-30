@@ -310,16 +310,19 @@ public sealed class SearchCommandProcessTests
 		using var workspace = new TemporaryDirectory();
 		var completeProject = workspace.CreateDirectory("complete");
 		workspace.WriteFile("complete/empty.txt", "ordinary text");
+		// Text that does not fit the 64 MiB inspection budget leaves the search partial. Its
+		// leading bytes are text, which is all the budget can see before reading it.
 		var partialProject = workspace.CreateDirectory("partial");
 		workspace.WriteFile("partial/a.txt", "ordinary text");
-		var oversizedPath = workspace.WriteFile("partial/z.bin", string.Empty);
-		using (var oversized = new FileStream(oversizedPath, FileMode.Open, FileAccess.Write, FileShare.None))
-		{
-			oversized.SetLength(65L * 1024 * 1024);
-		}
+		CreateOversizedFile(workspace.WriteFile("partial/z.log", new string('a', 1024)));
+		// A binary file of the same size costs the budget nothing, so it does not.
+		var binaryProject = workspace.CreateDirectory("binary");
+		workspace.WriteFile("binary/a.txt", "ordinary text");
+		CreateOversizedFile(workspace.WriteFile("binary/z.bin", string.Empty));
 
 		var complete = Run(workspace, completeProject, "needle", "--format", format);
 		var partial = Run(workspace, partialProject, "needle", "--format", format);
+		var binary = Run(workspace, binaryProject, "needle", "--format", format);
 
 		Assert.Equal(0, complete.ExitCode);
 		Assert.Contains("[No matches]", complete.StandardOutput, StringComparison.Ordinal);
@@ -328,6 +331,16 @@ public sealed class SearchCommandProcessTests
 		Assert.Contains("[Search partial]", partial.StandardOutput, StringComparison.Ordinal);
 		Assert.DoesNotContain("[No matches]", partial.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("inspection-bytes", partial.StandardOutput, StringComparison.Ordinal);
+		Assert.Equal(0, binary.ExitCode);
+		Assert.Contains("[No matches]", binary.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("[Search boundary] complete", binary.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("inspection-bytes", binary.StandardOutput, StringComparison.Ordinal);
+
+		static void CreateOversizedFile(string path)
+		{
+			using var oversized = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.None);
+			oversized.SetLength(65L * 1024 * 1024);
+		}
 	}
 
 	[Theory]
@@ -436,6 +449,32 @@ public sealed class SearchCommandProcessTests
 			$"JSON output contained {result.StandardOutput.Length} characters.");
 		using var document = JsonDocument.Parse(result.StandardOutput);
 		Assert.Equal(pattern, document.RootElement.GetProperty("query").GetProperty("pattern").GetString());
+	}
+
+	[Fact]
+	public void QuotedLinesKeepTabsWhileControlCharactersStayEscaped()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile(
+			"project/src/tabs.go",
+			"package tabs\n\nfunc Run() {\n\tvalue :=\t\"needle\" // \u001B[31m\u2028tail\n}\n");
+
+		var text = Run(workspace, project, "needle", "--format", "text", "--search-body-chars", "off");
+		var json = Run(workspace, project, "needle", "--format", "json", "--search-body-chars", "off");
+
+		Assert.True(text.ExitCode == 0, text.StandardError + text.StandardOutput);
+		Assert.True(json.ExitCode == 0, json.StandardError + json.StandardOutput);
+		Assert.Contains(
+			"4:\tvalue :=\t\"needle\" // \\u001B[31m\\u2028tail",
+			text.StandardOutput,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain("\\t", text.StandardOutput, StringComparison.Ordinal);
+		using var document = JsonDocument.Parse(json.StandardOutput);
+		var match = Assert.Single(document.RootElement.GetProperty("matches").EnumerateArray());
+		Assert.Equal(
+			"\tvalue :=\t\"needle\" // \\u001B[31m\\u2028tail",
+			match.GetProperty("text").GetString());
 	}
 
 	private static string CreateProject(TemporaryDirectory workspace)

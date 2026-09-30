@@ -29,11 +29,8 @@ public sealed partial class McpServerProcessTests
 			$"The generated report still precedes the declaration:\n{slice}");
 		Assert.Contains("public void GetEffectiveLevel(", slice, StringComparison.Ordinal);
 
-		// The order in force is named, in a constant that carries nothing from the project.
-		Assert.Contains(
-			"[Search order] bounded evidence priority; canonical path and line break ties.",
-			slice,
-			StringComparison.Ordinal);
+		// The order is a fixed documented rule, so no response spends a line restating it.
+		Assert.DoesNotContain("[Search order]", slice, StringComparison.Ordinal);
 
 		// What was not shown is still counted and still reachable.
 		Assert.Contains("[Search observed] matches=5 · matching-files=4 within inspected sources", slice, StringComparison.Ordinal);
@@ -86,7 +83,7 @@ public sealed partial class McpServerProcessTests
 		var declaration = complete.IndexOf("src/Core/LevelOverrideMap.cs", StringComparison.Ordinal);
 		var report = complete.IndexOf("results/report.md", StringComparison.Ordinal);
 		Assert.True(declaration >= 0 && report > declaration, complete);
-		Assert.Contains("[Search order] bounded evidence priority", complete, StringComparison.Ordinal);
+		Assert.DoesNotContain("[Search order]", complete, StringComparison.Ordinal);
 		Assert.Contains("[Search boundary] complete · sources inspected=4/4 · matches retained=5/5 · " +
 						"matches written=5", complete, StringComparison.Ordinal);
 		Assert.DoesNotContain("[Search stored]", complete, StringComparison.Ordinal);

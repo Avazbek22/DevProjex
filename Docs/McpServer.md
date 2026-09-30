@@ -35,9 +35,10 @@ devprojex mcp --root /absolute/path/to/project --search-body-chars 3000
 ## Live Context
 
 `devprojex mcp --root /absolute/path/to/project --live` makes the local profile
-saved by the open DevProjex window the baseline for every call. The server rereads
-that profile on every tool invocation, so changing checked tree nodes or applied
-filters takes effect on the next call without restarting the MCP session. Three
+the DevProjex window last saved for the project the baseline for every call. The
+window does not need to be open. The server rereads that profile on every tool
+invocation, so changing checked tree nodes or applied filters in the window takes
+effect on the next call without restarting the MCP session. Three
 rules stay separate: Checked nodes are focus for selection-wide tools;
 extensions, ignores, Git scope, the root jail, allowlists, and mandatory secret
 protection remain the **access boundaries**; and **saved results** stay pinned to
@@ -47,7 +48,22 @@ to omitting `profile`; portable and standard profile selections fail with
 `DPX-MCP-INVALID-ARGUMENTS` because live mode has one selection source.
 
 Tree, search, pack, analysis, and dependency results stay inside the checked
-selection. A named `get_file` path that passes the effective filters may be read
+selection. When that focus covers fewer files than the effective filters allow,
+each of those responses adds one trusted line with counts only; it never names a
+file:
+
+```text
+[Live context] focus: 1 of 9 selectable files; 8 outside the focus were not searched; read any of them by name with get_file.
+```
+
+The verb follows the tool: `are not listed` for `get_tree`, `were not searched`
+for `search_project`, `were not measured` for `analyze`, `were not packed` for
+`pack_context`, and `were not traced` for `related_files`. With one file outside
+the focus the line ends `1 outside the focus was not searched; read it by name
+with get_file.` The line is omitted when the focus covers every selectable file
+and when no selection is saved.
+
+A named `get_file` path that passes the effective filters may be read
 outside that focus. Only files whose content was actually delivered count in the
 fixed trusted notice; requested-but-unavailable paths do not. The requested paths
 stay in the existing untrusted file headers:
@@ -60,10 +76,26 @@ A batch uses the same wording with its delivered-file count. At zero the line is
 omitted, and trusted text never repeats those paths.
 
 A scalar path hidden by the effective filters still returns
-`DPX-MCP-PATH-NOT-FOUND`. In a batched read, that range is reported as
+`DPX-MCP-PATH-NOT-FOUND`. When the server's startup filters alone would expose
+the file and only the saved window filters hide it, the error detail, which stays
+inside the untrusted-data block like every error detail, names that cause and its
+remedy:
+
+```text
+DPX-MCP-PATH-NOT-FOUND: file 'Dockerfile' is hidden by the saved window filters; change the filters in DevProjex or use a standard-mode server.
+```
+
+In a batched read, that range is reported as
 `unavailable — outside effective selection` while the remaining ranges continue.
+A live batch reports a range hidden only by the saved window filters as
+`unavailable — hidden by the saved window filters; change the filters in DevProjex
+or use a standard-mode server`, and a path that does not exist as
+`unavailable — DPX-MCP-PATH-NOT-FOUND`. The request index identifies the file;
+the reason never repeats its path.
+
 Every live response ends with the current per-root revision and, once a plan
-has been built at that revision, its selected file count. A response that builds
+has been built at that revision, the number of files in the saved selection and
+the UTC date the window saved it. A response that builds
 no plan, such as `read_pack` right after the selection changed, reports the
 revision alone. Without a saved window selection the count reads
 `files selected by server defaults`. A multi-root server identifies the root by a stable
@@ -71,8 +103,8 @@ ordinal in trusted text and places its project-controlled name in an untrusted
 data block:
 
 ```text
-[Live context] revision 16 · 128 files selected in the window
-[Live context] revision 16 · 128 files selected in the window · root 1 of 2
+[Live context] revision 16 · 128 files in the saved selection · saved 2026-09-12
+[Live context] revision 16 · 128 files in the saved selection · saved 2026-09-12 · root 1 of 2
 [Live context] revision 1 · 42 files selected by server defaults
 [Live context] revision 17
 
@@ -117,8 +149,13 @@ ordinary empty project:
 ```text
 [Live context] no window selection saved for this root; using server defaults.
 [Live context] no window selection saved for this root; using server defaults. If the DevProjex window runs on Windows, live context across WSL is not supported yet.
-[Live context] the window selects no files; tick files in the DevProjex window.
+[Live context] the saved selection has no checked files; tick files in the DevProjex window.
 ```
+
+The missing-selection explanation is sent once per session for each root, and
+again only after a saved selection has appeared and been removed. Every response
+in between still ends with the revision line and its
+`files selected by server defaults` count.
 
 If the saved profile is busy, the server retains the last successful snapshot,
 keeps its actual revision number, and adds:
@@ -168,8 +205,8 @@ notice then reports the revision mismatch without an unavailable next call.
 
 These trusted lines supplement rather than replace `[Search boundary]`,
 `[Resolution]`, `[Dependency partial parse]`, and `[Effective filters]`. Trusted
-live lines contain only fixed words, revision and count values, and fixed enum
-states. Root names, file and folder names, and paths remain inside the same
+live lines contain only fixed words, revision and count values, the saved date,
+and fixed enum states. Root names, file and folder names, and paths remain inside the same
 randomized untrusted-data boundary used for other project-controlled text.
 The server records a live-session heartbeat under the application state root in
 `live-sessions/<pid>.json`. Desktop and Terminal remove records whose process
@@ -567,22 +604,23 @@ can ignore it without changing any route or result.
 ### MCP catalog size
 
 Before a client asks anything about a project, it receives the tool schemas and server
-instructions. The measurements below describe data sent to the client on 2026-09-13.
-How much model context that data uses depends on the client and how it loads tools:
+instructions. The measurements below describe data sent to the client on 2026-09-30: the
+official C# client, as the connection-payload process test records it. How much model context
+that data uses depends on the client and how it loads tools:
 
 | Payload | Characters |
 |---|---:|
-| `tools/list` normalized result, default server | 26,953 |
-| `tools/list` C# client wire result, default server | 27,619 |
-| `tools/list` C# client wire result with per-call exclusions | 30,661 |
-| `instructions` | 1,145 |
+| `tools/list` C# client wire result, default server | 28,058 |
+| `tools/list` C# client wire result with per-call exclusions | 30,674 |
+| `instructions` | 1,175 |
 
 Removing the two output schemas reduced the default catalog from 42,370 characters at the
 base revision to 32,516 before the named batch-read selector and discovery hints were added.
-Concise descriptions now keep the final catalog at 26,953 characters without changing schema
-types, accepted values, bounds, or tool behavior. `pack_context` is the largest single tool at
-5,614 characters, including 4,737 characters of input schema. The `exclusions`
-parameter costs a flat 3,042 characters, 507 on each of the six tools that take it. A process
+Concise descriptions brought it below 28,000 characters without changing schema types,
+accepted values, bounds, or tool behavior; later additions such as the `search_project`
+`symbols` parameter bring the default catalog to 28,058. `pack_context` is the largest single
+tool at 5,824 characters, including 4,877 characters of input schema. The `exclusions`
+parameter costs a flat 2,616 characters, 436 on each of the six tools that take it. A process
 test holds the default `tools/list` result and the instructions under ceilings with deliberate
 headroom, and pins the exclusion parameter's cost as an exact difference, so a new parameter or
 description has to fit a budget rather than grow one silently.
@@ -592,9 +630,9 @@ description has to fit a budget rather than grow one silently.
 | `list_projects` | none | Session inventory used for profiles, active policy, or choosing among several projects: allowed local roots with 1-based index, path, name, type, and profiles, plus the server `baseline`. String metadata is protected before JSON serialization. If a name or path is masked, use its stable address for this process, such as `project: "#1"`. The profile database is read once per call and `profilesStatus` reports an unavailable bounded read. The baseline reports secret/private-data policy and the optional remote-host allowlist. With one local root, project tools accept an omitted `project` or `#0`; otherwise they accept a listed `#index`, a unique listed name, or its absolute path. On Windows the file-URI spelling `/C:/path` is read as `C:/path` before the same root checks. Remote projects are addressed by URL and are not added to this list. |
 | `get_tree` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `max_depth?`, `format?` | Effective tree in `markdown` (default), `text`, `json`, or `xml`; at most 2,000 lines and 50,000 characters. Its root label masks a supported local-user segment when Hide Private Data is effective. Select several directories in one call with a brace pattern such as `include_patterns: ["src/middleware/{powered-by,body-limit,bearer-auth}/**"]` instead of walking each directory separately. Without `max_depth`, a large human-readable tree uses the deepest complete depth that fits. |
 | `analyze` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `detail_by_pattern?`, `tracked_only?`, `git_scope?`, `top_files?`, `max_file_bytes?`, `max_tokens?`, `rank?`, `focus?` | File, character, and token metrics plus the requested largest files by tokens. `contentMetrics` separates measured transformed bodies from size-based estimates; `documentMetrics` models `pack_context` with `view=content`, `format=text`, relative file headings, and its Root line. Every ranked file carries `estimated`; an uninspected one also carries `uninspected: true`. The `topFiles` array has a 32,000-character aggregate budget; `topFilesTruncated` and `topFilesRemaining` make any omission explicit. With `max_tokens` the result also carries `admission`: which files that budget would admit, from the same greedy pass `pack_context` uses and without producing content. `rank` and `focus` order that admission and are invalid without `max_tokens`. |
-| `pack_context` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `detail_by_pattern?`, `tracked_only?`, `git_scope?`, `max_tokens?`, `rank?`, `focus?`, `max_file_bytes?`, `view?`, `format?` | Exact DevProjex context pipeline. `max_tokens` measures the safe transformed selection, applies the ordinary token admission order, and materializes only admitted content without changing the budget report. `rank: "importance"` opts into importance-aware admission and document order; `focus` seeds graph-hop order within it. `detail_by_pattern` overrides `detail` per file. `full` adds no transformations; transformations enabled by the active profile still apply. Inline through 50,000 characters; otherwise returns a `pack_id` valid until this server process exits. After restart, call `pack_context` again. |
+| `pack_context` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `detail_by_pattern?`, `tracked_only?`, `git_scope?`, `max_tokens?`, `rank?`, `focus?`, `max_file_bytes?`, `view?`, `format?`, `expand_related?` | Exact DevProjex context pipeline. `max_tokens` measures the safe transformed selection, applies the ordinary token admission order, and materializes only admitted content without changing the budget report. `rank: "importance"` opts into importance-aware admission and document order; `focus` seeds graph-hop order within it. `detail_by_pattern` overrides `detail` per file. `expand_related` packs its `seeds` together with their statically resolved neighbours, as described in [`pack_context.expand_related`](#pack_contextexpand_related). `full` adds no transformations; transformations enabled by the active profile still apply. Inline through 50,000 characters; otherwise returns a `pack_id` valid until this server process exits. After restart, call `pack_context` again. |
 | `read_pack` | `pack_id`, `start_line?`, `end_line?`, `start_column?` | Pages a stored result from `pack_context`, `search_project`, or `related_files`. Inclusive, 1-based line range; `start_column` continues within `start_line` using 1-based Unicode characters. At most 1,000 lines or 50,000 characters per call. An `end_line` after EOF is clamped and reported. A manual protection-policy change after storage fails with `DPX-MCP-STORED-PROTECTION-CHANGED` and requires rerunning the producing tool. If the current saved policy cannot be verified, `DPX-MCP-STORED-PROTECTION-UNAVAILABLE` fails closed until the selection becomes readable. A selection-only revision change keeps the stored page readable with its existing revision warning. Call the originating tool again after server restart or quota eviction. |
-| `search_project` | `project?`, `branch?`, `pattern`, `paths?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `symbols?`, `max_results?` | `symbols: true` is the declaration-name mode of CLI `search --symbols`: `pattern` names one or more declarations separated by `|`, and each alternative keeps its last word before any parameter list or type arguments, so `class Foo`, `type Foo|interface Foo` and `def foo(` all ask for their names. A qualified name is matched on its last segment and then narrowed to that declaration. Only declarations with those names match, never their uses; a pattern that names nothing is refused with `DPX-MCP-INVALID-ARGUMENTS`. Otherwise matches over safe transformed text, grouped by file: the relative path stands on its own line, then each line of the group is written as `line:text` for a match and `line-text` for context. Line numbers refer to that returned text after replacements. `search_project` matches file content only and never matches paths; use `get_tree` with `include_patterns` to find files by name. A bounded collector keeps stronger evidence from everything inspected instead of preserving arrival order. The returned match text is capped at 16,000 characters. Overlapping or adjacent context windows are merged and distinct groups use `--`. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200. The trusted `[Search boundary]` line distinguishes a complete result from every partial limit and reports inspected sources, encountered and retained matches, written matches, named declaration files, and continuation guidance. Actual text inserted by redaction never matches. |
+| `search_project` | `project?`, `branch?`, `pattern`, `paths?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `symbols?`, `max_results?` | `symbols: true` is the declaration-name mode of CLI `search --symbols`: `pattern` names one or more declarations separated by `|`, and each alternative keeps its last word before any parameter list or type arguments, so `class Foo`, `type Foo|interface Foo` and `def foo(` all ask for their names. A qualified name is matched on its last segment and then narrowed to that declaration. Only declarations with those names match, never their uses; a pattern that names nothing is refused with `DPX-MCP-INVALID-ARGUMENTS`. Otherwise matches over safe transformed text, grouped by file: the relative path stands on its own line, then each line of the group is written as `line:text` for a match and `line-text` for context. Quoted text keeps its tabs as tabs, so it copies back as code; any other control character, U+2028, or U+2029 is escaped as `\uXXXX` so each result line stays one physical line. Line numbers refer to that returned text after replacements. `search_project` matches file content only and never matches paths; use `get_tree` with `include_patterns` to find files by name. A bounded collector keeps stronger evidence from everything inspected instead of preserving arrival order. The returned match text is capped at 16,000 characters. Overlapping or adjacent context windows are merged and distinct groups use `--`. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200. The trusted `[Search boundary]` line distinguishes a complete result from every partial limit and reports inspected sources, encountered and retained matches, written matches, named declaration files, and continuation guidance. Actual text inserted by redaction never matches. |
 | `related_files` | `project?`, `branch?`, `path`, `direction?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `tracked_only?`, `git_scope?`, `max_file_bytes?` | Statically evidenced dependencies and dependents for one seed or up to 16 seeds. `direction` is `dependencies`, `dependents`, or `both` (default). The trusted `[Resolution]` line counts resolved, ambiguous, unresolved, and external edges for the call. Coverage distinguishes recognized supported languages from unsupported files and reports configuration diagnostics. Evidence protection consumes transformed sources one at a time under a cumulative 64 MiB source budget; sources outside that budget are not opened by this pass and their dynamic fragments become bounded generic reasons. Results larger than 50,000 characters use `read_pack`. |
 | `get_file` | `project?`, `branch?`, `profile?`, either `path` with `start_line?`, `end_line?`, `start_column?`, `symbol?`, or `requests` | Redacted text from one effective file or a batch of up to eight file requests and sixteen file selections. Every returned section starts with its path and returned line interval. A batch item with only `path` reads the whole file; `ranges` or `symbol` narrows it. Ranges are inclusive, each physical file is read and redacted once, overlaps merge, and every original range reports `ok`, `partial`, `not-returned`, or `unavailable` from its own returned coverage. Both forms share the 1,000-line/50,000-character limit. Coordinates refer to returned text after replacements. A non-empty file that cannot pass the 16 MiB mandatory-redaction boundary is withheld; the single form returns `DPX-MCP-PAYLOAD-TRUNCATED` and never returns an empty success, while batch output reports the count-only unavailable status. `profile` applies the same effective selection and transformations as `analyze` and `pack_context`. Markdown-escaped names copied from default `get_tree` are accepted (`\_` and other ASCII punctuation); use `format: "text"` to copy unescaped names. A `start_line` or `end_line` that holds several numbers, or an unknown range-like argument such as `start_range`, is refused with a pointer to the `requests` form; a directory `path` is refused with the `get_tree` call that lists it. |
 
@@ -663,6 +701,11 @@ dependency-engine status constants is repeated without a path in the trusted lin
 `[No facts] <constant>.`; file extensions and arbitrary project text never enter that line. A
 call with no resolved edges receives trusted `[No related files] in the effective
 selection.`; when unresolved references exist, that same line reports their count.
+Calls and static member uses are not edges, so an empty section is not evidence that
+nothing uses a file. Whenever a requested `Dependencies` or `Dependents` section of a
+seed with facts is empty, and on every call without resolved edges, the constant
+`[Related scope] calls and static member uses are not edges; find uses with
+search_project for the name.` follows as trusted text; it names nothing from the project.
 No trailer names a file hidden by the manifest. See
 [Dependencies.md](Dependencies.md) for evidence layers, statuses, resolver boundaries,
 limits, caching, and determinism.
@@ -924,7 +967,7 @@ Whenever a call
 does not return every match it encountered, it also reports
 `[Search observed] matches=N · matching-files=M within inspected sources` and
 `[N additional observed matches not shown]`. These counts are exact for sources that were actually inspected,
-not a claim about an uninspected suffix. A group cut only in its trailing context
+not a claim about sources that were not inspected. A group cut only in its trailing context
 lines withheld no match, so it receives the cap notice without an additional-match
 line. Trusted counts and constants remain outside the untrusted block; no path enters
 them. The selected uniquely addressable declaration body and its selector share this
@@ -945,6 +988,15 @@ does not make a search partial. A selection that contains only binary files is p
 with `limits=binary-sources`, because nothing in it was searchable. Files that could not
 be read as text for other reasons remain `limits=unscannable-sources`.
 
+One search decodes at most 64 MiB of source text. Only a file that would be decoded is
+charged: a file whose extension or leading bytes prove it binary costs nothing, and
+neither does a file past the 16 MiB mandatory-redaction boundary, which is reported
+as unscannable instead. The leading bytes are read only when the selection as a whole
+exceeds the budget, and only for files of at least 64 KiB. A file that does not fit
+what remains is skipped rather than ending inspection, so a later file that fits is
+still searched. Any such skip makes the result partial with `limits=inspection-bytes`,
+and `sources inspected=X/Y` counts exactly the files that were searched.
+
 A partial search places `[Search boundary] partial; retained matches are available
 below.` before the data, then uses the same detailed counters at the end and names
 the exact bound or bounds that applied. When every selected file was searched and
@@ -956,7 +1008,9 @@ closing counters and `limits=` stay the same. It emits exactly one primary next 
 the limiting condition. With a stored continuation that step is `[Next read] Call
 read_pack with the reported pack_id for the remaining retained matches.` When known
 declarations are the needed continuation it is `[Next read] Read only declarations
-needed for the task; batch known selections in one get_file call.` Consequently, a
+needed for the task; batch known selections in one get_file call.` A response with
+nothing left to read carries no `[Next read]` line: a complete search without listed
+declarations, or one whose only listed declaration is shown whole. Consequently, a
 complete zero-match response is evidence that the whole effective selection was
 searched, while a partial zero-match response is only evidence about its inspected
 sources.
@@ -1009,19 +1063,20 @@ Several known directories belong in one call: for example,
 selects all three subtrees without walking them separately.
 
 For `get_tree`, omitted `max_depth` on an oversized `text` or `markdown` result
-selects the deepest depth whose complete tree fits the 2,000-line limit and
-appends `[Tree limited to depth D of N to fit 2000 lines; pass max_depth or
-include_patterns for a subtree.]`. Node and format-header line counts are
-computed from the selected tree before rendering, so the response never stops
-mid-tree for the line limit. An independent 50,000-character cap bounds unusually
-long names; human-readable output then carries the same truncation notice. If depth 1 itself cannot fit,
-the original bounded response and `[Tree truncated at 2000 lines or 50000 characters ...]`
+selects the deepest depth whose complete tree fits both the 2,000-line and the
+50,000-character limits and appends `[Tree limited to depth D of N to fit 2000
+lines and 50000 characters; pass max_depth or include_patterns for a subtree.]`.
+Node and format-header line counts are computed from the selected tree before
+rendering; the character fit of a candidate depth is checked by rendering it
+exactly as it is returned, so the response never stops mid-tree. If depth 1 itself cannot fit,
+the bounded response and `[Tree truncated at 2000 lines or 50000 characters ...]`
 trailer remain. An explicit
 `max_depth` is the caller's choice and retains that same truncation behavior.
+A truncated human-readable tree ends at its last complete line, never inside a name.
 JSON and XML never return partial syntax: overflow remains
-`DPX-MCP-PAYLOAD-TRUNCATED`; line overflow names the largest `max_depth` that
-would produce a complete document, while character overflow asks the caller to
-narrow `paths` or patterns.
+`DPX-MCP-PAYLOAD-TRUNCATED` and names the largest `max_depth` below the rendered
+depth whose document fits both limits, or asks the caller to narrow `paths` or
+patterns when no depth does.
 The `text` tree writes its project address once, followed directly by the real
 top-level children; it does not repeat the project name as a synthetic tree node.
 Markdown tree Root values and node names escape active CommonMark, HTML, and
@@ -1192,10 +1247,13 @@ matched literally, because a silently empty result reads as "no such files".
 `analyze`, `pack_context`, and `search_project`. Its entries are literal paths;
 glob metacharacters have meaning only in the pattern parameters. A `paths` entry
 carrying no separator therefore names one entry directly in the project root, and
-matches nothing when a file of that name lives deeper. Every array
-parameter requires a JSON array: a bare string where an array is expected returns
-`DPX-MCP-INVALID-ARGUMENTS` naming the argument, for example
-`'paths' must be an array of strings.`, instead of a partial or empty result.
+matches nothing when a file of that name lives deeper. `paths`,
+`include_patterns`, and `exclude_patterns` also accept one bare string, read as a
+one-item array, so `paths: "src/router"` selects the same directory as
+`paths: ["src/router"]`. `exclusions` is the exception: it requires a JSON array, and a
+bare string returns `DPX-MCP-INVALID-ARGUMENTS` with `'exclusions' must be an array of
+strings.` Any other value type, such as a number, is refused with
+`DPX-MCP-INVALID-ARGUMENTS` naming the argument, instead of a partial or empty result.
 
 ### Finding a file by name
 
@@ -1332,11 +1390,8 @@ when the list was.
 
 The search chooses which compact match records to retain while transformed files
 stream past. A stronger late record can evict a weaker early record; the server does
-not keep an unbounded list and sort it afterward. The constant naming this rule is:
-
-```text
-[Search order] bounded evidence priority; canonical path and line break ties.
-```
+not keep an unbounded list and sort it afterward. This bounded evidence priority is a
+fixed rule, so it is documented here rather than restated in every response.
 
 Priority is the sum of soft signals: exact agreement between the pattern and an
 enclosing declaration name, an explicitly requested `paths` scope, breadth across
@@ -1459,6 +1514,9 @@ When declaration reads are the applicable continuation, one trusted constant clo
 ```text
 [Next read] Read only declarations needed for the task; batch known selections in one get_file call.
 ```
+
+It is left out when the only listed declaration's body is already shown whole, which
+`[Declaration body] shown=1/1; no other declarations require a read.` states instead.
 
 The list ships on every search that showed a hit, including a search the character
 cap cut, because a cut response is exactly when a caller would otherwise open a whole
@@ -1715,7 +1773,8 @@ path. Replace `/absolute/path/to/project` in the examples.
 Desktop's **MCP** menu, Terminal Workspace's `mcp connect` command, and
 `devprojex mcp connect` use one connection service and embed the absolute installed
 executable path. Desktop's selected submenu and the CLI `--mode` option select the
-mode. Terminal Workspace's `mcp connect` uses live mode by default and accepts an
+mode; the CLI defaults to `standard`, because live mode follows a selection saved
+by the DevProjex window. Terminal Workspace's `mcp connect` uses live mode by default and accepts an
 optional `live|standard` argument. The Store configuration uses the stable WindowsApps alias;
 winget and ZIP paths remain stable while their installation directory is unchanged;
 the macOS path remains stable while the `.app` bundle stays in place. AppImage
@@ -1742,9 +1801,23 @@ and writes a backup before the atomic update. It then checks the effective entry
 `codex mcp get devprojex --json`; a project `.codex/config.toml` override is reported
 and never rewritten.
 
+Codex keeps one global `devprojex` entry, and that entry carries a fixed `--root`,
+so it serves one project at a time. Connecting another project replaces it:
+Desktop and Terminal Workspace ask first and show both roots, and the CLI requires
+`--replace`. The root stays explicit because Codex documents `cwd` only as an
+optional setting and does not document which directory it starts a stdio server
+in when `cwd` is absent, so an entry without `--root` could serve an unexpected
+folder.
+
 **Open in Cursor** recreates the `devprojex` entry in `.cursor/mcp.json`;
 **Open in VS Code** does the same in `.vscode/mcp.json`, then each action opens
 the project through its URL scheme with its command-line launcher as a fallback.
+Both project files name the root as `${workspaceFolder}`, which Cursor and VS Code
+document for workspace `mcp.json` files, so the entry follows the folder that holds
+it. The executable path stays absolute and belongs to the computer that wrote the
+file; on another computer, connect again instead of reusing the file. `--print`
+and the manual fallback keep an absolute root, because that text may be pasted
+into a user-level configuration.
 Only the existing `sandboxEnabled` and `dev` fields are preserved in that entry;
 other existing fields, including `env`, `envFile`, and `cwd`, may be replaced or
 removed. Desktop and Terminal Workspace list those fields and require **Replace**
@@ -1783,19 +1856,29 @@ limited, request smaller file ranges.
 The CLI performs the connection by default:
 
 ```shell
-devprojex mcp connect /absolute/path/to/project --client claude-code --mode live
-devprojex mcp connect /absolute/path/to/project --client cursor --mode standard
-devprojex mcp connect /absolute/path/to/project --client codex --mode live --open
+devprojex mcp connect /absolute/path/to/project --client claude-code
+devprojex mcp connect /absolute/path/to/project --client cursor --mode live
+devprojex mcp connect /absolute/path/to/project --client codex --replace --open
 ```
 
-Clients are `claude-code`, `codex`, `cursor`, `vscode`, and `json`. The `json` client
+Clients are `claude-code`, `codex`, `cursor`, `vscode`, and `json`; the mode is
+`standard` unless `--mode live` is given. The `json` client
 always returns the manual configuration. Add `--print` to print the configuration
 without discovering a client, starting a process, or writing a project file. Add
 `--open` to open the selected client after a successful registration; without it the
 CLI only registers the server and prints the result. The manual-only `json` client
 rejects `--open`. For Cursor and VS Code, `--replace` explicitly confirms replacing
 additional fields in an existing `devprojex` entry; without it, the CLI leaves
-that entry unchanged and prints the affected field names.
+that entry unchanged and prints the affected field names. For Codex, `--replace`
+confirms pointing its single global entry at this project when it serves another
+one; without it, the CLI names both roots and changes nothing.
+
+A successful result states the client, the mode, and the project root. In live
+mode it also says whether the window has saved a selection for that root and when
+(UTC), or that the server uses its standard defaults until one is saved. A Codex
+result repeats that Codex serves one project at a time. Every successful
+registration ends with a reminder that a client session already running must be
+restarted to load the server.
 
 ### Claude Code
 

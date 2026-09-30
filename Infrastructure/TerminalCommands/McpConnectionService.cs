@@ -414,11 +414,10 @@ internal sealed class McpProjectConfigurationWriter
 		}
 
 		var replaced = servers.ContainsKey("devprojex");
-		var printable = McpConnectionFragmentGenerator.Generate(
+		var printable = McpConnectionFragmentGenerator.GenerateProjectFile(
 			request.Client,
 			request.Mode,
-			request.ExecutablePath,
-			projectRoot);
+			request.ExecutablePath);
 		var generatedRoot = JsonNode.Parse(printable)!.AsObject();
 		var generatedEntry = generatedRoot[containerName]!["devprojex"]!.AsObject();
 		IReadOnlyList<string> fieldsToReplace = [];
@@ -1091,6 +1090,12 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 				message,
 				Environment.NewLine,
 				_localization.Format("Mcp.Connect.ProjectEntryFieldsReplaced", fields));
+		// The root is written as the client's workspace variable, but the executable path is not
+		// portable; a committed file would point other machines at this one's installation.
+		message = string.Concat(
+			message,
+			Environment.NewLine,
+			_localization["Mcp.Connect.ProjectConfigurationMachinePath"]);
 		return new McpConnectionResult(
 			result.Replaced ? McpConnectionStatus.Updated : McpConnectionStatus.Connected,
 			message,

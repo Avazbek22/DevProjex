@@ -36,6 +36,37 @@ public sealed partial class McpServerProcessTests
 	}
 
 	[Fact]
+	public async Task RealProcessQuotesTabsAsTabsWhileControlCharactersStayEscaped()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("tabs-project");
+		workspace.WriteFile(
+			"tabs-project/src/tabs.go",
+			"package tabs\n\nfunc Run() {\n\tvalue :=\t\"needle\" // \u001B[31m\u2028tail\n\treturn\n}\n");
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			workspace.CreateDirectory("data"));
+
+		var text = Normalize(AllProcessText(await CallAsync(
+			server,
+			"search_project",
+			new Dictionary<string, object?> { ["pattern"] = "needle", ["context_lines"] = 1 })));
+
+		// A tab is code and copies back as code; a line break or an escape sequence would break the
+		// one-line-per-match layout or reach a terminal, so those stay escaped.
+		var listing = text[..text.IndexOf("Declarations found", StringComparison.Ordinal)];
+		Assert.Contains(
+			"\n4:\tvalue :=\t\"needle\" // \\u001B[31m\\u2028tail\n",
+			listing,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain("\\t", listing, StringComparison.Ordinal);
+		Assert.DoesNotContain('\u001B', listing);
+		// The context line after the match is printed once, in the listing or in the body that
+		// repeats it, which needs both to quote the tab the same way.
+		Assert.Equal(1, CountOccurrences(text, "\treturn\n"));
+	}
+
+	[Fact]
 	public async Task RealProcessDoesNotHeadAMergedGroupWithADeclarationItsFirstHitIsOutside()
 	{
 		using var workspace = new TemporaryDirectory();

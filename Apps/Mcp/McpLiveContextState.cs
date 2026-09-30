@@ -128,6 +128,8 @@ internal sealed class McpLiveContextState(
 				profile.Value is not { } current ||
 				current.Revision != state.Revision)
 				return;
+			if (state.SelectableFileCount is null || !ReferenceEquals(GetEffectiveTree(state), plan.EffectiveTree))
+				state.SelectableFileCount = CountFiles(plan.EffectiveTree);
 			state.EffectiveTree = new WeakReference<TreeNodeDescriptor>(plan.EffectiveTree);
 			state.PendingChange = ClassifyPendingChange(state.Root, state.PendingChange, plan.EffectiveTree);
 			state.SelectedFileCount = plan.IncludedFiles.Count;
@@ -146,6 +148,29 @@ internal sealed class McpLiveContextState(
 
 	public bool IsOutsideSelection(string projectRoot, string relativePath) =>
 		invocation.Value?.OutsidePaths.Contains(BuildPathIdentity(projectRoot, relativePath)) == true;
+
+	/// <summary>
+	/// Marks a named file that the server baseline would expose but the saved window filters hide,
+	/// so the refusal can name the one change that makes it readable.
+	/// </summary>
+	public void RecordHiddenByWindowFilters(string projectRoot, string relativePath)
+	{
+		invocation.Value?.HiddenByWindowFilterPaths.Add(BuildPathIdentity(projectRoot, relativePath));
+	}
+
+	public bool IsHiddenByWindowFilters(string projectRoot, string relativePath) =>
+		invocation.Value?.HiddenByWindowFilterPaths.Contains(BuildPathIdentity(projectRoot, relativePath)) == true;
+
+	/// <summary>
+	/// Records that this invocation answered from the whole live focus, so the response can say how
+	/// many selectable files the focus left out and how to reach them.
+	/// </summary>
+	public void RecordFocusUse(string projectRoot, McpLiveFocusUse use)
+	{
+		var active = invocation.Value;
+		if (active is not null)
+			active.FocusUses[PathUtility.Normalize(projectRoot)] = use;
+	}
 
 	public int CountDeliveredOutsideSelection(
 		string projectRoot,
@@ -270,13 +295,17 @@ internal sealed class McpLiveContextState(
 				var rootIndex = Array.FindIndex(
 					noticeRoots,
 					candidate => PathComparer.Default.Equals(candidate, root)) + 1;
+				McpLiveFocusUse? focusUse = active is not null && active.FocusUses.TryGetValue(root, out var use)
+					? use
+					: null;
 				AppendRootNotices(
 					notices,
 					untrustedDetails,
 					state,
 					noticeRoots.Length > 1,
 					rootIndex,
-					noticeRoots.Length);
+					noticeRoots.Length,
+					focusUse);
 			}
 		}
 		if (notices.Count == 0 && untrustedDetails.Count == 0)
@@ -307,6 +336,7 @@ internal sealed class McpLiveContextState(
 		{
 			var profile = ProjectSelectionProfileBuilder.Clone(lookup.Profile);
 			ApplySuccessfulSnapshot(state, profile, isMissing: false);
+			state.SavedUtc = lookup.UpdatedUtc;
 			state.ReadFailure = lookup.RecoveryStatus;
 			return;
 		}
@@ -354,6 +384,7 @@ internal sealed class McpLiveContextState(
 			var previousRevision = state.Revision;
 			state.Revision++;
 			state.SelectedFileCount = null;
+			state.SelectableFileCount = null;
 			state.SelectedFileRootRevision = null;
 			var frontierChanges = BuildFrontierChanges(state.Frontier, frontier);
 			state.PendingChange = ClassifyPendingChange(
@@ -367,6 +398,10 @@ internal sealed class McpLiveContextState(
 		state.Profile = profile;
 		state.IsMissing = isMissing;
 		state.HasSuccessfulSnapshot = true;
+		if (isMissing)
+			state.SavedUtc = null;
+		else
+			state.MissingNoticeDelivered = false;
 	}
 
 	private static string BuildFingerprint(ProjectSelectionProfile profile)
@@ -530,7 +565,8 @@ internal sealed class McpLiveContextState(
 		RootState state,
 		bool includeRoot,
 		int rootIndex,
-		int rootCount)
+		int rootCount,
+		McpLiveFocusUse? focusUse)
 	{
 		if (state.ReadFailure is not null)
 		{
@@ -538,16 +574,22 @@ internal sealed class McpLiveContextState(
 		}
 		else if (state.IsMissing)
 		{
-			var message = "[Live context] no window selection saved for this root; using server defaults.";
-			if (IsWslMount(state.Root))
+			// The state line below repeats on every response; this explanation is session news and is
+			// sent again only after a saved selection appeared and disappeared.
+			if (!state.MissingNoticeDelivered)
 			{
-				message += " If the DevProjex window runs on Windows, live context across WSL is not supported yet.";
+				var message = "[Live context] no window selection saved for this root; using server defaults.";
+				if (IsWslMount(state.Root))
+				{
+					message += " If the DevProjex window runs on Windows, live context across WSL is not supported yet.";
+				}
+				notices.Add(message);
+				state.MissingNoticeDelivered = true;
 			}
-			notices.Add(message);
 		}
 		else if (state.Profile?.SelectedPaths is { Count: 0 })
 		{
-			notices.Add("[Live context] the window selects no files; tick files in the DevProjex window.");
+			notices.Add("[Live context] the saved selection has no checked files; tick files in the DevProjex window.");
 		}
 
 		if (state.PendingChange is { } changed)
@@ -580,19 +622,75 @@ internal sealed class McpLiveContextState(
 		}
 
 		// The count is known only once a plan exists for this revision; a "0" before that reads as an
-		// empty window selection. Without a saved selection the files come from server defaults.
+		// empty saved selection. Without a saved selection the files come from server defaults. The
+		// selection is a saved profile, not an open window, so the line says when it was saved.
 		var count = state.SelectedFileCount is { } selected
-			? $" · {selected.ToString(CultureInfo.InvariantCulture)} files selected " +
-			  (state.IsMissing ? "by server defaults" : "in the window")
+			? state.IsMissing
+				? $" · {selected.ToString(CultureInfo.InvariantCulture)} files selected by server defaults"
+				: $" · {selected.ToString(CultureInfo.InvariantCulture)} files in the saved selection" +
+				  (state.SavedUtc is { } saved
+					  ? " · saved " + saved.UtcDateTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+					  : string.Empty)
 			: string.Empty;
 		var rootSuffix = includeRoot ? $" · root {rootIndex} of {rootCount}" : string.Empty;
 		notices.Add($"[Live context] revision {state.Revision}{count}{rootSuffix}");
+		if (focusUse is { } use && FormatFocusNotice(state, use) is { } focusNotice)
+			notices.Add(focusNotice);
 		if (includeRoot)
 		{
 			untrustedDetails.Add(
 				$"Live context root {rootIndex} name:" + Environment.NewLine +
 				McpTextEscaping.EscapeSingleLine(McpRootRegistry.GetProjectName(state.Root)));
 		}
+	}
+
+	/// <summary>
+	/// Checked items are the focus and the window filters are the ceiling, so a selection-wide answer
+	/// covers only part of what the agent may read. Counts only: names stay out of trusted text.
+	/// </summary>
+	private static string? FormatFocusNotice(RootState state, McpLiveFocusUse use)
+	{
+		if (state.IsMissing ||
+			state.SelectedFileCount is not { } focus ||
+			state.SelectableFileCount is not { } selectable ||
+			focus >= selectable)
+		{
+			return null;
+		}
+
+		var outside = selectable - focus;
+		var single = outside == 1;
+		var verb = use switch
+		{
+			McpLiveFocusUse.Tree => single ? "is not listed" : "are not listed",
+			McpLiveFocusUse.Search => single ? "was not searched" : "were not searched",
+			McpLiveFocusUse.Analysis => single ? "was not measured" : "were not measured",
+			McpLiveFocusUse.Pack => single ? "was not packed" : "were not packed",
+			McpLiveFocusUse.Related => single ? "was not traced" : "were not traced",
+			_ => throw new ArgumentOutOfRangeException(nameof(use), use, null)
+		};
+		return $"[Live context] focus: {focus.ToString(CultureInfo.InvariantCulture)} of " +
+			   $"{selectable.ToString(CultureInfo.InvariantCulture)} selectable files; " +
+			   $"{outside.ToString(CultureInfo.InvariantCulture)} outside the focus {verb}; " +
+			   (single ? "read it by name with get_file." : "read any of them by name with get_file.");
+	}
+
+	private static int CountFiles(TreeNodeDescriptor root)
+	{
+		var count = 0;
+		var pending = new Stack<TreeNodeDescriptor>();
+		pending.Push(root);
+		while (pending.TryPop(out var node))
+		{
+			if (!node.IsDirectory)
+			{
+				count++;
+				continue;
+			}
+			foreach (var child in node.Children)
+				pending.Push(child);
+		}
+		return count;
 	}
 
 	private static string FormatReadFailure(RootState state)
@@ -661,6 +759,9 @@ internal sealed class McpLiveContextState(
 		public bool HasSuccessfulSnapshot { get; set; }
 		public ProjectProfileLookupStatus? ReadFailure { get; set; }
 		public int? SelectedFileCount { get; set; }
+		public int? SelectableFileCount { get; set; }
+		public DateTimeOffset? SavedUtc { get; set; }
+		public bool MissingNoticeDelivered { get; set; }
 		public McpRootMonitorStamp? SelectedFileRootRevision { get; set; }
 		public WeakReference<TreeNodeDescriptor>? EffectiveTree { get; set; }
 		public PendingChange? PendingChange { get; set; }
@@ -672,6 +773,8 @@ internal sealed class McpLiveContextState(
 			new(PathComparer.Default);
 		public HashSet<string> Roots { get; } = new(PathComparer.Default);
 		public HashSet<string> OutsidePaths { get; } = new(StringComparer.Ordinal);
+		public HashSet<string> HiddenByWindowFilterPaths { get; } = new(StringComparer.Ordinal);
+		public Dictionary<string, McpLiveFocusUse> FocusUses { get; } = new(PathComparer.Default);
 		public List<string> AdditionalNotices { get; } = [];
 	}
 
@@ -699,6 +802,16 @@ internal sealed class McpLiveContextState(
 	private sealed record PendingChange(int PreviousRevision, IReadOnlyList<FrontierChange> Changes);
 
 	private sealed record StoredResultPolicy(int ProtectionRevision);
+}
+
+/// <summary>What a selection-wide tool did with the live focus; it picks the verb of the focus notice.</summary>
+internal enum McpLiveFocusUse
+{
+	Tree,
+	Search,
+	Analysis,
+	Pack,
+	Related
 }
 
 internal sealed record McpLiveProfileSnapshot(

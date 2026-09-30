@@ -54,12 +54,14 @@ public sealed partial class McpServerProcessTests
 			static pair => pair.Key,
 			static pair => ContractMetadataCharacters(pair.Value),
 			StringComparer.Ordinal);
+		// The pack ceiling includes the 18-character " · saved YYYY-MM-DD" suffix of the live revision
+		// line; the other responses already fit under their ceilings with it.
 		var baseline = new Dictionary<string, int>(StringComparer.Ordinal)
 		{
 			["get_tree"] = 329,
 			["search_project"] = 582,
 			["get_file"] = 102,
-			["pack_context"] = 153
+			["pack_context"] = 171
 		};
 		Assert.True(
 			metadataCharacters.All(pair => pair.Value <= baseline[pair.Key]),

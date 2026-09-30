@@ -45,10 +45,6 @@ internal sealed class DevProjexMcpTools(
 	private const string ReadDeclarationsNotice =
 		"[Next read] Read only declarations needed for the task; batch known selections in one get_file call.";
 	private const int MaximumDeclarationsReported = 20;
-	// Named because a caller that sees part of a result is entitled to know what decided which part.
-	// A constant: the order is a rule, not a property of this project's files.
-	private const string SearchOrderNotice =
-		"[Search order] bounded evidence priority; canonical path and line break ties.";
 	// Closes a run of named hits when the next one belongs to nothing. A constant, not a name.
 	private static readonly string OutsideDeclarationHeader = $"in (no declaration){Environment.NewLine}";
 	// Asking for a file by name is the one request the selection vocabulary answers in a form a
@@ -61,6 +57,10 @@ internal sealed class DevProjexMcpTools(
 		"with '**/' to find it at any depth, or append '/**' to a directory to select its files. " +
 		"search_project matches file content, and paths selects a path that already exists.";
 	private const int MaximumNameSearchExtensionLength = 8;
+	// Calls and static member uses are documented as outside the dependency evidence, so an empty
+	// related section is not evidence that nothing uses a file. A constant: no name reaches it.
+	private const string RelatedScopeNotice =
+		"[Related scope] calls and static member uses are not edges; find uses with search_project for the name.";
 	private const string SearchContentCapNotice =
 		"[Search truncated] The returned text reached the 16000-character search cap.";
 	private const int MaximumAnalyzeTopFilesCharacters = 32_000;
@@ -292,62 +292,73 @@ internal sealed class DevProjexMcpTools(
 				exclusions: ParseExclusionsArgument(arguments),
 				tolerateMissingPaths: true).ConfigureAwait(false);
 			RecordPlan(plan);
+			liveContext?.RecordFocusUse(plan.SourceRoot, McpLiveFocusUse.Tree);
 			journal?.RecordFileCount(plan.IncludedFiles.Count);
 			var depthFit = CalculateTreeDepthFit(
 				plan.ProjectedTree,
 				format,
 				MaximumTreeLines,
 				cancellationToken);
-			int? automaticDepth = depth is null &&
-								 format is TreeTextFormat.Ascii or TreeTextFormat.Markdown &&
-								 !depthFit.FullTreeFits &&
-								 depthFit.DeepestCompleteDepth >= 1
-				? depthFit.DeepestCompleteDepth
-				: null;
-			var effectiveDepth = depth ?? automaticDepth;
-			var renderedTree = effectiveDepth is null
-				? plan.ProjectedTree
-				: PruneToDepthWithCancellation(
-					plan.ProjectedTree,
-					effectiveDepth.Value,
-					cancellationToken);
-			using var treeWriter = new McpBoundedLineTextWriter(MaximumTreeLines, MaximumTreeCharacters);
-			try
+			// Line counts are known before rendering, so no depth deeper than this can fit; the
+			// character limit is only known by rendering, which stops at the limit.
+			var lineFittingDepth = depthFit.FullTreeFits ? depthFit.FullDepth : depthFit.DeepestCompleteDepth;
+			int? automaticDepth = null;
+			McpBoundedLineTextWriter? fittingWriter = null;
+			if (depth is null && format is TreeTextFormat.Ascii or TreeTextFormat.Markdown)
 			{
-				await Projects.TreeExportService.WriteFullTreeAsync(
-						treeWriter,
-						plan.SourceRoot,
-						renderedTree,
+				var fitting = await RenderDeepestFittingTreeAsync(
+						plan,
 						format,
-						displayRootPath: McpProjectService.IsPrivateDataHidden(plan)
-							? Projects.ResolveProtectedDocumentRoot(plan)
-							: McpProjectService.ResolveAddressDocumentRoot(plan),
-						cancellationToken: cancellationToken)
+						lineFittingDepth,
+						minimumDepth: 1,
+						depthFit.FullDepth,
+						cancellationToken)
 					.ConfigureAwait(false);
-			}
-			catch (McpLineLimitReachedException)
-			{
-				if (format is TreeTextFormat.Json or TreeTextFormat.Xml)
+				if (fitting is { } found)
 				{
-					var guidance = !depthFit.FullTreeFits
-						? $"pass max_depth: {depthFit.DeepestCompleteDepth} for a complete document, " +
-						  "or narrow paths, include_patterns, and exclude_patterns, then retry."
-						: "narrow paths, include_patterns, or exclude_patterns, then retry.";
-					throw new McpToolException(
-						McpErrorCodes.PayloadTruncated,
-						$"{McpErrorCodes.PayloadTruncated}: the {format.ToString().ToLowerInvariant()} tree exceeds " +
-						$"the {MaximumTreeLines}-line or {MaximumTreeCharacters}-character result limit; {guidance}");
+					fittingWriter = found.Writer;
+					automaticDepth = found.Depth < depthFit.FullDepth ? found.Depth : null;
 				}
+			}
+			using var treeWriter = fittingWriter ?? await RenderBoundedTreeAsync(
+					plan,
+					depth is null
+						? plan.ProjectedTree
+						: PruneToDepthWithCancellation(plan.ProjectedTree, depth.Value, cancellationToken),
+					format,
+					cancellationToken)
+				.ConfigureAwait(false);
+			if (treeWriter.IsTruncated && format is TreeTextFormat.Json or TreeTextFormat.Xml)
+			{
+				var renderedDepth = Math.Min(depth ?? depthFit.FullDepth, depthFit.FullDepth);
+				var suggestion = await RenderDeepestFittingTreeAsync(
+						plan,
+						format,
+						Math.Min(renderedDepth - 1, lineFittingDepth),
+						minimumDepth: 0,
+						depthFit.FullDepth,
+						cancellationToken)
+					.ConfigureAwait(false);
+				suggestion?.Writer.Dispose();
+				var guidance = suggestion is { } fits
+					? $"pass max_depth: {fits.Depth} for a complete document, " +
+					  "or narrow paths, include_patterns, and exclude_patterns, then retry."
+					: "narrow paths, include_patterns, or exclude_patterns, then retry.";
+				throw new McpToolException(
+					McpErrorCodes.PayloadTruncated,
+					$"{McpErrorCodes.PayloadTruncated}: the {format.ToString().ToLowerInvariant()} tree exceeds " +
+					$"the {MaximumTreeLines}-line or {MaximumTreeCharacters}-character result limit; {guidance}");
 			}
 
 			var treeTruncationNotice = treeWriter.IsTruncated
 				? "[Tree truncated at 2000 lines or 50000 characters. Narrow paths, include_patterns, exclude_patterns, or max_depth.]"
 				: automaticDepth is { } selectedDepth
-					? $"[Tree limited to depth {selectedDepth} of {depthFit.FullDepth} to fit {MaximumTreeLines} lines; " +
-					  "pass max_depth or include_patterns for a subtree.]"
+					? $"[Tree limited to depth {selectedDepth} of {depthFit.FullDepth} to fit {MaximumTreeLines} lines " +
+					  $"and {MaximumTreeCharacters} characters; pass max_depth or include_patterns for a subtree.]"
 					: null;
+			// A cut tree ends at its last complete line, so no name is ever returned half written.
 			return McpToolResults.TextSuccess(AppendTrustedNotices(
-				McpSpotlight.Wrap(treeWriter.Text),
+				McpSpotlight.Wrap(treeWriter.IsTruncated ? treeWriter.CompleteLinesText : treeWriter.Text),
 				treeTruncationNotice,
 				FormatTreeDepthNotice(plan, depth, paths),
 				McpTrustedDiagnosticFormatter.FormatWarnings(plan),
@@ -404,6 +415,7 @@ internal sealed class DevProjexMcpTools(
 				includeOutputMetrics: false).ConfigureAwait(false);
 			var plan = Projects.ApplyDetailOverrides(selection.Plan, detailOverrides, cancellationToken);
 			RecordPlan(plan);
+			liveContext?.RecordFocusUse(plan.SourceRoot, McpLiveFocusUse.Analysis);
 			journal?.RecordFileCount(plan.IncludedFiles.Count);
 			operationProgress.Milestone(
 				10,
@@ -683,6 +695,7 @@ internal sealed class DevProjexMcpTools(
 					.ConfigureAwait(false);
 			}
 			RecordPlan(plan);
+			liveContext?.RecordFocusUse(plan.SourceRoot, McpLiveFocusUse.Pack);
 
 			var selectedFileCount = plan.IncludedFiles.Count;
 			var focusSeeds = focus is null
@@ -1069,9 +1082,9 @@ internal sealed class DevProjexMcpTools(
 				exclusions: ParseExclusionsArgument(arguments),
 				tolerateMissingPaths: true).ConfigureAwait(false);
 			RecordPlan(plan);
+			liveContext?.RecordFocusUse(plan.SourceRoot, McpLiveFocusUse.Search);
 			var totalMatches = 0;
 			var matchingFiles = 0;
-			var inspectedFiles = new List<string>(plan.IncludedFiles.Count);
 			var withheld = new StringBuilder();
 			var withheldByFile = new Dictionary<string, int>(StringComparer.Ordinal);
 			var withheldRanges = new Dictionary<string, List<ProjectContextFileLineRange>>(StringComparer.Ordinal);
@@ -1079,19 +1092,15 @@ internal sealed class DevProjexMcpTools(
 			var withheldStored = 0;
 			var storeHitMatchBound = false;
 			var storeHitCharacterBound = false;
-			long inspectedBytes = 0;
 			var inspectedSourceCount = 0;
-			foreach (var path in plan.IncludedFiles)
-			{
-				if (plan.EffectiveFileSizes?.TryGetValue(path, out var fileBytes) != true ||
-					fileBytes < 0 || fileBytes > MaximumSearchInspectedBytes - inspectedBytes)
-				{
-					break;
-				}
-				inspectedFiles.Add(path);
-				inspectedBytes += fileBytes;
-			}
-			var inspectionBudgetReached = inspectedFiles.Count < plan.IncludedFiles.Count;
+			var admission = McpSearchInspectionBudget.Admit(
+				plan.IncludedFiles,
+				path => plan.EffectiveFileSizes?.TryGetValue(path, out var fileBytes) == true ? fileBytes : (long?)null,
+				Projects.IsDecodedAsSearchText,
+				MaximumSearchInspectedBytes,
+				cancellationToken);
+			var inspectedFiles = admission.Files;
+			var inspectionBudgetReached = admission.BudgetReached;
 			var candidates = new McpSearchCandidateCollector(
 				MaximumStoredSearchMatches,
 				MaximumStoredSearchCharacters);
@@ -1312,7 +1321,11 @@ internal sealed class DevProjexMcpTools(
 				symbols.Declarations,
 				declarationPreview,
 				declarationReadContext);
-			var declarationsListed = declarationSection.DeclarationsListed;
+			// A lone declaration whose body is already shown whole leaves nothing to read.
+			var declarationsToRead = declarationSection.DeclarationsListed &&
+									 !(declarationSection.BodyWritten &&
+									   symbols.Declarations.Count == 1 &&
+									   declarationPreview?.RemainingLines == 0);
 			// What the response could not carry is kept in the session, so the way forward is to
 			// page what this scan already found rather than to run the same scan again.
 			var storedSearch = withheld.Length == 0
@@ -1396,7 +1409,6 @@ internal sealed class DevProjexMcpTools(
 						  " not searched as text.",
 					McpTrustedDiagnosticFormatter.FormatWarnings(plan),
 					noMatches,
-					ordered.Count == 0 ? null : SearchOrderNotice,
 					FormatDeclarationBodyNotice(declarationSection, symbols.Declarations.Count),
 					FormatStoredSearchNotice(
 						storedSearch,
@@ -1408,7 +1420,7 @@ internal sealed class DevProjexMcpTools(
 					searchTotalsNotice,
 					FormatSearchBoundaryNotice(boundary, storedSearch is not null),
 					resultGroupTruncated ? SearchContentCapNotice : null,
-					FormatSearchNextRead(boundary, storedSearch is not null, declarationsListed),
+					FormatSearchNextRead(boundary, storedSearch is not null, declarationsToRead),
 					SelectionNotices(
 						plan,
 						includeFilters: false,
@@ -1460,6 +1472,7 @@ internal sealed class DevProjexMcpTools(
 				includeOutputMetrics: false,
 				exclusions: ParseExclusionsArgument(arguments)).ConfigureAwait(false);
 			RecordPlan(plan);
+			liveContext?.RecordFocusUse(plan.SourceRoot, McpLiveFocusUse.Related);
 			var resolvedSeeds = Projects.ResolveRequestedFiles(plan, seeds, cancellationToken);
 			var relativeSeeds = resolvedSeeds
 				.Select(seed => McpProjectService.ToRelative(plan.SourceRoot, seed))
@@ -1492,6 +1505,10 @@ internal sealed class DevProjexMcpTools(
 					? "[No related files] in the effective selection."
 					: $"[No related files] in the effective selection; unresolved references={resolution.Unresolved.ToString(CultureInfo.InvariantCulture)}."
 				: null;
+			// An empty relation section reads as "nothing uses this" unless it says what an edge is.
+			var relatedScopeNotice = noRelatedNotice is not null || HasEmptyRelationSection(related.Seeds, direction)
+				? RelatedScopeNotice
+				: null;
 			var partialEvidenceNotice = protectedEvidence.UninspectedSources == 0
 				? null
 				: $"[Related evidence] partial · uninspected-sources={protectedEvidence.UninspectedSources.ToString(CultureInfo.InvariantCulture)}; " +
@@ -1504,7 +1521,8 @@ internal sealed class DevProjexMcpTools(
 				partialEvidenceNotice,
 				SelectionNotices(plan, includeFilters: true, selectionContext),
 				FormatSafeNoFactsNotice(related.Seeds),
-				noRelatedNotice);
+				noRelatedNotice,
+				relatedScopeNotice);
 			using var relatedBody = new StringWriter(CultureInfo.InvariantCulture);
 			var relatedRanges = new List<ProjectContextFileLineRange>();
 			WriteRelatedFiles(
@@ -1698,6 +1716,15 @@ internal sealed class DevProjexMcpTools(
 			.ToArray();
 	}
 
+	private static bool HasEmptyRelationSection(
+		IReadOnlyList<SeedRelatedFiles> seeds,
+		DependencyDirection direction) =>
+		seeds.Any(seed => seed.NoFactsReason is null &&
+						  ((direction is DependencyDirection.Dependencies or DependencyDirection.Both &&
+							seed.Dependencies.Count == 0) ||
+						   (direction is DependencyDirection.Dependents or DependencyDirection.Both &&
+							seed.Dependents.Count == 0)));
+
 	private static string FormatRelatedEvidenceReason(DependencyEdge edge, SourceSite site) =>
 		$"{RelatedEvidenceLabel(edge.Layer)} {edge.Reference} at line {site.Line.ToString(CultureInfo.InvariantCulture)}";
 
@@ -1866,10 +1893,12 @@ internal sealed class DevProjexMcpTools(
 			catch (McpToolException exception) when (exception.Code is
 				   McpErrorCodes.PathNotFound or McpErrorCodes.RootViolation)
 			{
+				// Standard batches keep the single fixed phrase. Live batches separate a filtered file
+				// from a missing one, because the window filters are the one thing the user can change.
 				resolvedRequests.Add(new McpResolvedFileReadRequest(
 					item,
 					PhysicalPath: null,
-					UnavailableReason: liveContext is null ? null : exception.Code));
+					UnavailableReason: liveContext is null ? null : exception.BatchReason ?? exception.Code));
 			}
 		}
 
@@ -2198,7 +2227,7 @@ internal sealed class DevProjexMcpTools(
 		foreach (var request in requests)
 		{
 			var reason = request.UnavailableReason ?? (request.PhysicalPath is null
-				? "outside effective selection"
+				? McpProjectService.OutsideEffectiveSelectionReason
 				: transformed.ContainsKey(request.PhysicalPath)
 					? null
 					: McpErrorCodes.PayloadTruncated);
@@ -4108,7 +4137,7 @@ internal sealed class DevProjexMcpTools(
 			var marker = text.IndexOf('-', line.Offset, end - line.Offset);
 			var lineEnd = end > line.Offset && text[end - 1] == '\r' ? end - 1 : end;
 			if (marker >= 0 && text.AsSpan(marker + 1, lineEnd - marker - 1)
-				.SequenceEqual(McpTextEscaping.EscapeSingleLine(bodyLines[bodyIndex]).AsSpan()))
+				.SequenceEqual(McpTextEscaping.EscapeSourceLine(bodyLines[bodyIndex]).AsSpan()))
 				reclaimable[bodyIndex] = line;
 		}
 
@@ -4520,11 +4549,11 @@ internal sealed class DevProjexMcpTools(
 	private static string? FormatSearchNextRead(
 		McpSearchBoundary boundary,
 		bool hasStoredContinuation,
-		bool declarationsListed)
+		bool declarationsToRead)
 	{
 		if (hasStoredContinuation)
 			return "[Next read] Call read_pack with the reported pack_id for the remaining retained matches.";
-		if (declarationsListed)
+		if (declarationsToRead)
 			return ReadDeclarationsNotice;
 		return boundary.IsComplete
 			? null
@@ -4957,6 +4986,69 @@ internal sealed class DevProjexMcpTools(
 	internal static TreeNodeDescriptor PruneToDepth(TreeNodeDescriptor node, int remainingDepth) =>
 		PruneToDepthWithCancellation(node, remainingDepth, CancellationToken.None);
 
+	/// <summary>
+	/// Renders one tree exactly as <c>get_tree</c> returns it into a writer bounded by the response
+	/// limits. Rendering stops at the first limit it reaches, which the writer records.
+	/// </summary>
+	private async Task<McpBoundedLineTextWriter> RenderBoundedTreeAsync(
+		ProjectContextPlan plan,
+		TreeNodeDescriptor tree,
+		TreeTextFormat format,
+		CancellationToken cancellationToken)
+	{
+		var writer = new McpBoundedLineTextWriter(MaximumTreeLines, MaximumTreeCharacters);
+		try
+		{
+			await Projects.TreeExportService.WriteFullTreeAsync(
+					writer,
+					plan.SourceRoot,
+					tree,
+					format,
+					displayRootPath: McpProjectService.IsPrivateDataHidden(plan)
+						? Projects.ResolveProtectedDocumentRoot(plan)
+						: McpProjectService.ResolveAddressDocumentRoot(plan),
+					cancellationToken: cancellationToken)
+				.ConfigureAwait(false);
+		}
+		catch (McpLineLimitReachedException)
+		{
+			// IsTruncated and CharacterLimitReached record which limit stopped the rendering.
+		}
+		catch
+		{
+			writer.Dispose();
+			throw;
+		}
+		return writer;
+	}
+
+	/// <summary>
+	/// Finds the deepest depth from <paramref name="startDepth"/> down to
+	/// <paramref name="minimumDepth"/> whose complete rendering fits both response limits, and keeps
+	/// that rendering so it is not produced twice. A rejected rendering stops at the limit it
+	/// crossed, so each attempt costs at most one response.
+	/// </summary>
+	private async Task<(int Depth, McpBoundedLineTextWriter Writer)?> RenderDeepestFittingTreeAsync(
+		ProjectContextPlan plan,
+		TreeTextFormat format,
+		int startDepth,
+		int minimumDepth,
+		int fullDepth,
+		CancellationToken cancellationToken)
+	{
+		for (var candidate = startDepth; candidate >= minimumDepth; candidate--)
+		{
+			var tree = candidate >= fullDepth
+				? plan.ProjectedTree
+				: PruneToDepthWithCancellation(plan.ProjectedTree, candidate, cancellationToken);
+			var writer = await RenderBoundedTreeAsync(plan, tree, format, cancellationToken).ConfigureAwait(false);
+			if (!writer.IsTruncated)
+				return (candidate, writer);
+			writer.Dispose();
+		}
+		return null;
+	}
+
 	internal static McpTreeDepthFit CalculateTreeDepthFit(
 		TreeNodeDescriptor root,
 		TreeTextFormat format,
@@ -5174,7 +5266,8 @@ internal sealed class DevProjexMcpTools(
 			var fullyEscaped = SingleLineTextEscaping.AppendBounded(
 				output,
 				content.AsSpan(line.Offset, line.Length),
-				Math.Max(0, remaining));
+				Math.Max(0, remaining),
+				preserveTabs: true);
 			if (!fullyEscaped)
 			{
 				return new McpSearchAppendResult(writtenMatches, Truncated: true);

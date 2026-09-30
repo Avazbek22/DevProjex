@@ -809,7 +809,7 @@ internal sealed partial class TerminalWorkspaceSession
 			isExpectedOutcome ? TerminalWorkspaceTheme.Dialog : TerminalWorkspaceTheme.Warning,
 			preferredWidth: 96,
 			preferredHeight: 20);
-		ShowTransientStatus(result.UserMessage, statusScheme);
+		ShowTransientStatus(result.UserMessage.Split('\n')[0].TrimEnd('\r'), statusScheme);
 	}
 
 	private string BuildMcpConnectionOutput(McpConnectionResult result) =>
@@ -819,9 +819,14 @@ internal sealed partial class TerminalWorkspaceSession
 		McpConnectionResult result,
 		LocalizationService localization)
 	{
+		// A message can carry several sentences on separate lines; each is still escaped on its own.
 		var sections = new List<string>
 		{
-			TerminalTextEscaping.EscapeSingleLine(result.UserMessage)
+			string.Join(
+				Environment.NewLine,
+				result.UserMessage
+					.Split('\n')
+					.Select(static line => TerminalTextEscaping.EscapeSingleLine(line.TrimEnd('\r'))))
 		};
 		if (result.Succeeded && !string.IsNullOrWhiteSpace(result.NextStep))
 		{

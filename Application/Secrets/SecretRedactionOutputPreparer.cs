@@ -186,6 +186,23 @@ public sealed class SecretRedactionOutputPreparer
 			progress: null,
 			consumer ?? throw new ArgumentNullException(nameof(consumer)));
 
+	/// <summary>
+	/// Tells, without decoding, whether <see cref="ConsumeTransformedTextAsync"/> would skip a source
+	/// rather than decode it: <see cref="FileContentClassification.TooLarge"/> past
+	/// <see cref="MaximumScannableFileBytes"/>, and otherwise the classification its extension or,
+	/// with <paramref name="probeContent"/>, its leading bytes already prove. Null means the source
+	/// would be decoded as text, which is what a text-inspection budget has to pay for.
+	/// </summary>
+	public FileContentClassification? ClassifyBeforeDecoding(string path, long sizeBytes, bool probeContent)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(path);
+		if (sizeBytes > MaximumScannableFileBytes)
+			return FileContentClassification.TooLarge;
+		return probeContent
+			? contentAnalyzer.ClassifyFromPrefix(path)
+			: contentAnalyzer.ClassifyWithoutReading(path);
+	}
+
 	private async Task<PreparedSecretRedactionOutput> PrepareCoreAsync(
 		ContentTransformationContext context,
 		IReadOnlyList<string> orderedFilePaths,

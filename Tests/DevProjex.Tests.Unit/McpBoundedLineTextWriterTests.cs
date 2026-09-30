@@ -46,6 +46,20 @@ public sealed class McpBoundedLineTextWriterTests
 	}
 
 	[Fact]
+	public void CompleteLinesTextDropsTheLineACharacterLimitCut()
+	{
+		using var writer = new McpBoundedLineTextWriter(
+			maximumLines: 10,
+			maximumCharacters: 12);
+
+		Assert.Throws<McpLineLimitReachedException>(() => writer.Write("first\nsecond-name\n"));
+
+		Assert.True(writer.CharacterLimitReached);
+		Assert.Equal("first\nsecond", writer.Text);
+		Assert.Equal("first", writer.CompleteLinesText);
+	}
+
+	[Fact]
 	public void ResponseSegmentLimitPreservesCompleteUnicodeScalarsAndMarker()
 	{
 		const string marker = "[truncated]";

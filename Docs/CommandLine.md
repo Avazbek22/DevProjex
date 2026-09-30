@@ -163,7 +163,9 @@ outside-focus notice. Without `--live`, server behavior is unchanged.
 claude-code|codex|cursor|vscode|json --mode live|standard [--replace]
 [--print|--open]` connects the selected client and prints a human-readable
 result. The project defaults to the current directory, the client to
-`claude-code`, and the mode to `live`.
+`claude-code`, and the mode to `standard`; `--mode live` registers a server that
+follows the selection the DevProjex window saved for the project. Desktop and
+Terminal Workspace keep their own explicit live and standard choices.
 
 Claude Code receives a project-local `claude mcp remove`/`mcp add` sequence.
 Codex receives the equivalent global `codex mcp` replacement. Cursor updates
@@ -175,7 +177,18 @@ If a command-line client is not installed or a connection fails, the result
 includes the manual command or configuration to use instead. For Cursor and
 VS Code, `--replace` confirms replacing additional fields in an existing
 `devprojex` entry; without it, the CLI leaves that entry unchanged and prints the
-affected field names.
+affected field names. Codex keeps one global `devprojex` entry with a fixed root,
+so it serves one project at a time; when that entry points at another project,
+`--replace` confirms moving it to this one, and without it the CLI names both
+roots and changes nothing. The Cursor and VS Code project files name the root as
+`${workspaceFolder}`; their executable path stays absolute, so the result notes
+that the file belongs to this computer.
+
+A successful result states the client, the mode, and the project root. In live
+mode it also says whether a selection is saved for that root and when (UTC), or
+that the server uses its standard defaults until one is saved. Every successful
+registration ends with a reminder that an already running client session must be
+restarted to load the server.
 
 Add `--open` to open the client after a successful registration. Claude Code
 and Codex open in a new terminal rooted at the project; Cursor and VS Code open
@@ -693,7 +706,9 @@ more declaration names separated by `|` (each alternative keeps its last word, s
 `class Foo` asks for `Foo`) while retaining the same source evidence and containing-
 declaration lookup, and is the same mode as MCP `search_project` with `symbols: true`.
 Selected binary files are counted as skipped rather than searched and do not make
-a search partial unless nothing else was selected. The two mode switches are mutually exclusive. Matching ignores
+a search partial unless nothing else was selected. They are not charged to the inspection
+budget, and a file that does not fit what remains of it is skipped while later files that
+fit are still searched. The two mode switches are mutually exclusive. Matching ignores
 case, as does the default MCP call, and returns two context lines around each match.
 
 Specific options are:
@@ -723,7 +738,9 @@ The selection options behave as described in
 content transformation.
 
 Text output keeps the MCP path-grouped evidence shape: `line:text` marks a matching
-line, `line-text` is context, and `in SYMBOL` names the containing declaration. A
+line, `line-text` is context, and `in SYMBOL` names the containing declaration. Quoted
+source text keeps its tabs, and JSON `text` values carry them as ordinary JSON tab
+escapes; other control characters, U+2028, and U+2029 remain escaped as `\uXXXX`. A
 bounded best declaration body follows when it is unique and enabled. `[Resolution]`
 counts shown matches whose containing declaration was named versus those with no
 declaration evidence; it never claims dependency resolution. `[Search boundary]`

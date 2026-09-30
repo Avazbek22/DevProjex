@@ -62,7 +62,7 @@ that produced a mix: unlike unchanged session notices, they describe that call's
 | Environment-controlled `file://` transport | Already corrected in `0133df97` | Both permission modes reject all six project-reading tools, an outside absolute file, and outside discovery |
 | Scalar `paths` | Already corrected in `10f5b4ec` | String and one-item list select the same directory; numeric input is rejected |
 | Name lookup through a tree | Already explained in `3ea12a05` | Recursive spelling returns files; root-only and content-query forms give the specific guidance |
-| Connection schema budget | Not reproduced within the current wire-character budget | Both modes and instructions satisfy unchanged caps and the exact 3,042-character difference |
+| Connection schema budget | Not reproduced within the current wire-character budget | Both modes and instructions satisfy unchanged caps and the exact 2,616-character difference |
 | Duplicate unchanged service notices | Already corrected in the memoization commits above | New, unchanged, changed, empty, failed, stored-pointer and partial-delivery responses are checked |
 
 Seventeen selected process cases pass, plus two integration cases that reject URL credentials and

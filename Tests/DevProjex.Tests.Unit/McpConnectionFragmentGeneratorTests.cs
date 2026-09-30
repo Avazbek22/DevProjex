@@ -72,6 +72,57 @@ public sealed class McpConnectionFragmentGeneratorTests
 		}
 	}
 
+	[Theory]
+	[InlineData((int)McpConnectionClient.Cursor, (int)McpConnectionMode.Live, "mcpServers", false)]
+	[InlineData((int)McpConnectionClient.Cursor, (int)McpConnectionMode.Standard, "mcpServers", false)]
+	[InlineData((int)McpConnectionClient.VsCode, (int)McpConnectionMode.Live, "servers", true)]
+	[InlineData((int)McpConnectionClient.VsCode, (int)McpConnectionMode.Standard, "servers", true)]
+	public void GenerateProjectFile_NamesTheRootThroughTheWorkspaceFolderVariable(
+		int clientValue,
+		int modeValue,
+		string container,
+		bool expectsType)
+	{
+		const string executable = @"C:\Program Files\DevProjex\DevProjex.exe";
+		var mode = (McpConnectionMode)modeValue;
+
+		var fragment = McpConnectionFragmentGenerator.GenerateProjectFile(
+			(McpConnectionClient)clientValue,
+			mode,
+			executable);
+
+		using var document = JsonDocument.Parse(fragment);
+		var server = document.RootElement.GetProperty(container).GetProperty("devprojex");
+		Assert.Equal(expectsType, server.TryGetProperty("type", out _));
+		Assert.Equal(executable, server.GetProperty("command").GetString());
+		Assert.Equal(
+			mode == McpConnectionMode.Live
+				? ["mcp", "--root", "${workspaceFolder}", "--live"]
+				: ["mcp", "--root", "${workspaceFolder}"],
+			server.GetProperty("args").EnumerateArray().Select(static value => value.GetString()).ToArray());
+	}
+
+	[Theory]
+	[InlineData((int)McpConnectionClient.ClaudeCode)]
+	[InlineData((int)McpConnectionClient.Codex)]
+	[InlineData((int)McpConnectionClient.Json)]
+	public void GenerateProjectFile_RejectsClientsWithoutAProjectFile(int clientValue)
+	{
+		Assert.Throws<ArgumentOutOfRangeException>(() => McpConnectionFragmentGenerator.GenerateProjectFile(
+			(McpConnectionClient)clientValue,
+			McpConnectionMode.Standard,
+			@"C:\Program Files\DevProjex\DevProjex.exe"));
+	}
+
+	[Fact]
+	public void GenerateProjectFile_RejectsARelativeExecutable()
+	{
+		Assert.Throws<ArgumentException>(() => McpConnectionFragmentGenerator.GenerateProjectFile(
+			McpConnectionClient.Cursor,
+			McpConnectionMode.Standard,
+			"devprojex"));
+	}
+
 	[Fact]
 	public void Generate_UsesThePublishedClientFormats()
 	{

@@ -179,6 +179,148 @@ public sealed partial class McpServerIntegrationTests
 		AssertMarkerOnlyInsideUntrustedData(diff, marker, "diff reference");
 	}
 
+	[Fact]
+	public async Task LiveFocusCoverageAndWindowFilterRefusalsStayCountOnly()
+	{
+		const string marker = "LIVE_FOCUS_SENTINEL_91c3";
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		Directory.CreateDirectory(Path.Combine(project, "src"));
+		var dotFolder = ".ci-" + marker;
+		Directory.CreateDirectory(Path.Combine(project, dotFolder));
+		var guide = "Guide-" + marker + ".md";
+		var extensionless = "Build" + marker;
+		File.WriteAllText(Path.Combine(project, "src", "App.cs"), "class App { Util Value = new(); } // focus-marker\n");
+		File.WriteAllText(Path.Combine(project, "src", "Util.cs"), "class Util { } // focus-marker\n");
+		File.WriteAllText(Path.Combine(project, guide), "focus-marker guide\n");
+		File.WriteAllText(Path.Combine(project, extensionless), "focus-marker build\n");
+		File.WriteAllText(Path.Combine(project, dotFolder, "pipeline.yml"), "focus-marker: ci\n");
+		new ProjectProfileStore(() => Path.Combine(workspace.Path, "app-data")).SaveProfile(
+			project,
+			new ProjectSelectionProfile(
+				[],
+				[],
+				[IgnoreOptionId.ExtensionlessFiles, IgnoreOptionId.DotFolders],
+				IgnoreOptionStates: new Dictionary<IgnoreOptionId, bool>
+				{
+					[IgnoreOptionId.ExtensionlessFiles] = true,
+					[IgnoreOptionId.DotFolders] = true
+				},
+				SelectedPaths: ["src/App.cs"]));
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path, live: true);
+
+		var focusCalls = new (string Tool, Dictionary<string, object?> Arguments, string Verb)[]
+		{
+			("get_tree", new Dictionary<string, object?> { ["format"] = "text" }, "are not listed"),
+			("search_project", new Dictionary<string, object?> { ["pattern"] = "focus-marker" }, "were not searched"),
+			("analyze", new Dictionary<string, object?>(), "were not measured"),
+			("pack_context", new Dictionary<string, object?>(), "were not packed"),
+			("related_files", new Dictionary<string, object?> { ["path"] = "src/App.cs" }, "were not traced")
+		};
+		foreach (var (tool, arguments, verb) in focusCalls)
+		{
+			var result = await server.CallAsync(tool, arguments);
+			Assert.NotEqual(true, result.IsError);
+			Assert.Contains(
+				$"[Live context] focus: 1 of 3 selectable files; 2 outside the focus {verb}; " +
+				"read any of them by name with get_file.",
+				AllText(result),
+				StringComparison.Ordinal);
+			Assert.DoesNotContain(marker, TrustedText(result), StringComparison.Ordinal);
+		}
+
+		var named = await server.CallAsync("get_file", new Dictionary<string, object?> { ["path"] = guide });
+		Assert.NotEqual(true, named.IsError);
+		Assert.DoesNotContain("focus:", AllText(named), StringComparison.Ordinal);
+
+		var scalar = await server.CallAsync("get_file", new Dictionary<string, object?> { ["path"] = extensionless });
+		Assert.True(scalar.IsError);
+		Assert.Contains(
+			$"DPX-MCP-PATH-NOT-FOUND: file '{extensionless}' is hidden by the saved window filters; " +
+			"change the filters in DevProjex or use a standard-mode server.",
+			AllText(scalar),
+			StringComparison.Ordinal);
+		Assert.DoesNotContain(marker, TrustedText(scalar), StringComparison.Ordinal);
+
+		var batch = await server.CallAsync("get_file", new Dictionary<string, object?>
+		{
+			["requests"] = new object[]
+			{
+				new { path = extensionless },
+				new { path = dotFolder + "/pipeline.yml" },
+				new { path = "missing.txt" },
+				new { path = guide }
+			}
+		});
+		var batchText = AllText(batch);
+		Assert.NotEqual(true, batch.IsError);
+		const string windowReason =
+			"hidden by the saved window filters; change the filters in DevProjex or use a standard-mode server";
+		Assert.Contains("1.1 — unavailable — " + windowReason, batchText, StringComparison.Ordinal);
+		Assert.Contains("2.1 — unavailable — " + windowReason, batchText, StringComparison.Ordinal);
+		Assert.Contains("3.1 — unavailable — DPX-MCP-PATH-NOT-FOUND", batchText, StringComparison.Ordinal);
+		Assert.Contains("focus-marker guide", batchText, StringComparison.Ordinal);
+		Assert.DoesNotContain(marker, TrustedText(batch), StringComparison.Ordinal);
+		Assert.DoesNotContain(windowReason, TrustedText(batch), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task LiveRefusalForAServerFilterKeepsTheGeneralReason()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		Directory.CreateDirectory(Path.Combine(project, "src"));
+		File.WriteAllText(Path.Combine(project, "src", "App.cs"), "class App {}\n");
+		File.WriteAllText(Path.Combine(project, "src", ".Hidden.cs"), "class Hidden {}\n");
+		new ProjectProfileStore(() => Path.Combine(workspace.Path, "app-data")).SaveProfile(
+			project,
+			new ProjectSelectionProfile([], [], [], SelectedPaths: ["src"]));
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			exclusions: [ProjectExclusion.DotFiles],
+			live: true);
+
+		var scalar = AllText(await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "src/.Hidden.cs" }));
+		var batch = AllText(await server.CallAsync("get_file", new Dictionary<string, object?>
+		{
+			["requests"] = new object[] { new { path = "src/.Hidden.cs" }, new { path = "src/App.cs" } }
+		}));
+
+		Assert.Contains("is not in the effective project selection", scalar, StringComparison.Ordinal);
+		Assert.DoesNotContain("saved window filters", scalar, StringComparison.Ordinal);
+		Assert.Contains("1.1 — unavailable — outside effective selection", batch, StringComparison.Ordinal);
+		Assert.DoesNotContain("saved window filters", batch, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task LiveMissingSelectionExplanationIsSentOncePerSession()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "App.cs"), "class App {}\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path, live: true);
+		const string explanation = "[Live context] no window selection saved for this root; using server defaults.";
+
+		var first = AllText(await server.CallAsync("get_tree"));
+		var second = AllText(await server.CallAsync("search_project", new Dictionary<string, object?> { ["pattern"] = "App" }));
+
+		Assert.Contains(explanation, first, StringComparison.Ordinal);
+		Assert.DoesNotContain(explanation, second, StringComparison.Ordinal);
+		Assert.Contains("[Live context] revision 1 · 1 files selected by server defaults", second, StringComparison.Ordinal);
+		Assert.DoesNotContain("focus:", second, StringComparison.Ordinal);
+	}
+
+	private static string TrustedText(CallToolResult result) =>
+		string.Join(
+			'\n',
+			result.Content.OfType<TextContentBlock>().Select(static block => Regex.Replace(
+				block.Text,
+				@"<untrusted-data-(?<nonce>[0-9a-f]{24})>\n[\s\S]*?\n</untrusted-data-\k<nonce>>",
+				string.Empty)));
+
 	private static void AssertMarkerOnlyInsideUntrustedData(
 		CallToolResult result,
 		string marker,

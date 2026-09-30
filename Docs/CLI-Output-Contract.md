@@ -30,6 +30,8 @@ carriage return, line feed, tab, other control characters, U+2028, and U+2029 as
 visible `\\r`, `\\n`, `\\t`, or `\\uXXXX` sequences. This keeps every reported
 path on one physical line and prevents terminal control injection. JSON and XML
 retain exact machine values and use their format-native escaping instead.
+Source lines quoted by `search` are the one exception for tab: a tab is part of the
+quoted code, cannot break the one-line layout, and is written unchanged.
 
 ## Terminal Modes
 

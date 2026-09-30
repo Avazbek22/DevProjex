@@ -122,7 +122,7 @@ public sealed partial class McpServerIntegrationTests
 			live: true);
 
 		var projects = AllText(await server.CallAsync("list_projects"));
-		Assert.Contains("[Live context] revision 1 · 2 files selected in the window", projects, StringComparison.Ordinal);
+		Assert.Contains("[Live context] revision 1 · 2 files in the saved selection", projects, StringComparison.Ordinal);
 
 		var tree = AllText(await server.CallAsync(
 			"get_tree",
@@ -190,7 +190,7 @@ public sealed partial class McpServerIntegrationTests
 
 		profileStore.SaveProfile(project, new ProjectSelectionProfile([], [], [], SelectedPaths: []));
 		var empty = AllText(await server.CallAsync("get_tree"));
-		Assert.Contains("[Live context] the window selects no files", empty, StringComparison.Ordinal);
+		Assert.Contains("[Live context] the saved selection has no checked files", empty, StringComparison.Ordinal);
 		Assert.DoesNotContain("Inside.cs", empty, StringComparison.Ordinal);
 		Assert.DoesNotContain("Outside.cs", empty, StringComparison.Ordinal);
 	}
@@ -346,11 +346,15 @@ public sealed partial class McpServerIntegrationTests
 			"get_tree",
 			new Dictionary<string, object?> { ["project"] = "second" }));
 
-		Assert.Contains("revision 1 · 1 files selected in the window · root 1 of 2", firstTree, StringComparison.Ordinal);
-		Assert.Contains("revision 1 · 0 files selected in the window · root 2 of 2", secondTree, StringComparison.Ordinal);
+		Assert.Matches(
+			@"revision 1 · 1 files in the saved selection · saved \d{4}-\d{2}-\d{2} · root 1 of 2",
+			firstTree);
+		Assert.Matches(
+			@"revision 1 · 0 files in the saved selection · saved \d{4}-\d{2}-\d{2} · root 2 of 2",
+			secondTree);
 		Assert.Contains("Live context root 1 name:" + Environment.NewLine + "first", firstTree, StringComparison.Ordinal);
 		Assert.Contains("Live context root 2 name:" + Environment.NewLine + "second", secondTree, StringComparison.Ordinal);
-		Assert.Contains("the window selects no files", secondTree, StringComparison.Ordinal);
+		Assert.Contains("the saved selection has no checked files", secondTree, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -378,7 +382,7 @@ public sealed partial class McpServerIntegrationTests
 
 				Assert.Contains("App.cs", tree, StringComparison.Ordinal);
 				Assert.DoesNotContain("AppTests.cs", tree, StringComparison.Ordinal);
-				Assert.Contains("[Live context] revision 1 · 1 files selected", tree, StringComparison.Ordinal);
+				Assert.Contains("[Live context] revision 1 · 1 files in the saved selection", tree, StringComparison.Ordinal);
 			}
 		}
 		finally
@@ -476,7 +480,7 @@ public sealed partial class McpServerIntegrationTests
 
 		Assert.Contains("AppTests.cs", tree, StringComparison.Ordinal);
 		Assert.DoesNotContain("src/App.cs", tree, StringComparison.Ordinal);
-		Assert.Contains("[Live context] revision 1 · 1 files selected in the window", tree, StringComparison.Ordinal);
+		Assert.Contains("[Live context] revision 1 · 1 files in the saved selection", tree, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -3062,9 +3066,52 @@ public sealed partial class McpServerIntegrationTests
 		AssertTrustedTrailerOutsideSpotlight(
 			text,
 			"[Tree truncated at 2000 lines or 50000 characters. Narrow paths, include_patterns, exclude_patterns, or max_depth.]");
+		// The cut falls between entries, never inside a name.
+		var lastLine = ExtractSpotlightBody(Text(text)).ReplaceLineEndings("\n").TrimEnd('\n').Split('\n')[^1];
+		Assert.EndsWith(new string('x', 170) + ".txt", lastLine, StringComparison.Ordinal);
 		Assert.True(json.IsError);
 		Assert.Contains(McpErrorCodes.PayloadTruncated, Text(json), StringComparison.Ordinal);
 		Assert.Contains("50000-character result limit", Text(json), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task GetTreeChoosesADepthThatFitsTheCharacterLimitAsWellAsTheLineLimit()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		// 1,205 lines fit the line limit, but the long names need far more than 50,000 characters.
+		for (var directory = 0; directory < 4; directory++)
+		{
+			var folder = workspace.CreateDirectory($"project/d{directory}");
+			for (var file = 0; file < 300; file++)
+				File.WriteAllText(Path.Combine(folder, $"{file:D3}-{new string('n', 120)}.txt"), string.Empty);
+		}
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var automatic = await server.CallAsync("get_tree");
+		var json = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "json" });
+		var suggested = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "json", ["max_depth"] = 1 });
+
+		Assert.NotEqual(true, automatic.IsError);
+		var body = ExtractSpotlightBody(Text(automatic));
+		Assert.InRange(body.Length, 1, 50_000);
+		for (var directory = 0; directory < 4; directory++)
+			Assert.Contains($"d{directory}", body, StringComparison.Ordinal);
+		Assert.DoesNotContain(new string('n', 120), body, StringComparison.Ordinal);
+		AssertTrustedTrailerOutsideSpotlight(
+			automatic,
+			"[Tree limited to depth 1 of 2 to fit 2000 lines and 50000 characters; pass max_depth or include_patterns for a subtree.]");
+		Assert.DoesNotContain("[Tree truncated", Text(automatic), StringComparison.Ordinal);
+
+		Assert.True(json.IsError);
+		Assert.Contains("pass max_depth: 1 for a complete document", Text(json), StringComparison.Ordinal);
+		Assert.NotEqual(true, suggested.IsError);
+		using var document = JsonDocument.Parse(ExtractSpotlightBody(Text(suggested)));
+		Assert.Equal(JsonValueKind.Object, document.RootElement.ValueKind);
 	}
 
 	[Fact]
@@ -3109,7 +3156,7 @@ public sealed partial class McpServerIntegrationTests
 		Assert.DoesNotContain("File-000.txt", Text(automatic), StringComparison.Ordinal);
 		AssertTrustedTrailerOutsideSpotlight(
 			automatic,
-			"[Tree limited to depth 2 of 3 to fit 2000 lines; pass max_depth or include_patterns for a subtree.]");
+			"[Tree limited to depth 2 of 3 to fit 2000 lines and 50000 characters; pass max_depth or include_patterns for a subtree.]");
 
 		Assert.NotEqual(true, explicitDepth.IsError);
 		AssertTrustedTrailerOutsideSpotlight(
@@ -7858,6 +7905,9 @@ public sealed partial class McpServerIntegrationTests
 			var prefix = index == 4 ? "needle-after-budget\n" : "clean\n";
 			File.WriteAllText(Path.Combine(project, $"Large{index}.txt"), prefix + new string('x', 14 * 1024 * 1024));
 		}
+		// The file that did not fit is skipped, not the end of inspection: a later file that fits
+		// is still searched.
+		File.WriteAllText(Path.Combine(project, "Small.txt"), "needle-after-budget in a file that fits\n");
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
 
 		var result = await server.CallAsync("search_project", new Dictionary<string, object?>
@@ -7870,8 +7920,47 @@ public sealed partial class McpServerIntegrationTests
 
 		Assert.NotEqual(true, result.IsError);
 		McpSearchOutputAssertions.DoesNotContainMatch(text, "Large4.txt", 1);
-		Assert.Contains("[Search boundary] partial · sources inspected=4/5", text, StringComparison.Ordinal);
+		McpSearchOutputAssertions.ContainsMatch(text, "Small.txt", 1);
+		Assert.Contains("[Search boundary] partial · sources inspected=5/6", text, StringComparison.Ordinal);
 		Assert.Contains("limits=inspection-bytes", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task SearchProjectDoesNotSpendTheTextBudgetOnLargeBinaryAssets()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		// Five assets with an extension no classifier knows, 70 MiB together, sort ahead of the
+		// only source. Their leading bytes prove they are binary, so they cost the budget nothing.
+		var asset = new byte[14 * 1024 * 1024];
+		asset[0] = 0x7F;
+		for (var index = 0; index < 5; index++)
+			File.WriteAllBytes(Path.Combine(project, $"asset-{index}.pak"), asset);
+		File.WriteAllText(
+			Path.Combine(project, "source-Router.cs"),
+			"public sealed class Router\n{\n    public int NeedleRoute() => 1;\n}\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync("search_project", new Dictionary<string, object?>
+		{
+			["pattern"] = "NeedleRoute",
+			["ignore_case"] = false,
+			["context_lines"] = 0
+		});
+		var text = Text(result);
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.Contains(
+			"\nsource-Router.cs\nin Router.NeedleRoute\n3:    public int NeedleRoute() => 1;\n",
+			text.ReplaceLineEndings("\n"),
+			StringComparison.Ordinal);
+		Assert.DoesNotContain("[No matches]", text, StringComparison.Ordinal);
+		Assert.Contains(
+			"[Search boundary] complete · sources inspected=1/6 · binary files skipped=5 ·",
+			text,
+			StringComparison.Ordinal);
+		Assert.Contains("[Search skipped] 5 selected binary files were not searched as text.", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("inspection-bytes", text, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -7922,6 +8011,46 @@ public sealed partial class McpServerIntegrationTests
 			StringComparison.Ordinal);
 		Assert.Contains("[No related files] in the effective selection; unresolved references=1.", text,
 			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RelatedFilesSaysWhatAnEmptySectionDoesNotCover()
+	{
+		const string scope =
+			"[Related scope] calls and static member uses are not edges; find uses with search_project for the name.";
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "tsconfig.json"),
+			"{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}\n");
+		File.WriteAllText(Path.Combine(project, "consumer.ts"), "import { value } from './provider.js';\nexport const doubled = value * 2;\n");
+		File.WriteAllText(Path.Combine(project, "provider.ts"), "export const value = 1;\n");
+		File.WriteAllText(Path.Combine(project, "standalone.ts"), "export const alone = 2;\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		async Task<string> RelatedAsync(string path, string direction) => Text(await server.CallAsync(
+			"related_files",
+			new Dictionary<string, object?> { ["path"] = path, ["direction"] = direction }));
+		var covered = await RelatedAsync("consumer.ts", "dependencies");
+		var partlyEmpty = await RelatedAsync("consumer.ts", "both");
+		var empty = await RelatedAsync("standalone.ts", "both");
+
+		Assert.Contains("provider.ts", covered, StringComparison.Ordinal);
+		Assert.DoesNotContain("[Related scope]", covered, StringComparison.Ordinal);
+
+		// Dependencies were found and nothing imports the consumer: the empty section still needs
+		// the reminder that a call is not an edge.
+		Assert.DoesNotContain("[No related files]", partlyEmpty, StringComparison.Ordinal);
+		Assert.Contains(scope, partlyEmpty, StringComparison.Ordinal);
+
+		Assert.Contains("[No related files] in the effective selection.", empty, StringComparison.Ordinal);
+		Assert.Contains(scope, empty, StringComparison.Ordinal);
+		foreach (var text in new[] { partlyEmpty, empty })
+		{
+			var trustedTail = text[(text.LastIndexOf("</untrusted-data-", StringComparison.Ordinal) + 1)..];
+			Assert.Contains(scope, trustedTail, StringComparison.Ordinal);
+			Assert.DoesNotContain("consumer", trustedTail, StringComparison.Ordinal);
+			Assert.DoesNotContain("standalone", trustedTail, StringComparison.Ordinal);
+		}
 	}
 
 	[Fact]

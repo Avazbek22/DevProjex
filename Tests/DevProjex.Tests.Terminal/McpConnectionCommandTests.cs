@@ -1,4 +1,5 @@
 using DevProjex.Kernel.Abstractions;
+using DevProjex.Infrastructure.ProjectProfiles;
 using DevProjex.Infrastructure.ResourceStore;
 using DevProjex.Infrastructure.TerminalCommands;
 
@@ -99,6 +100,26 @@ public sealed class McpConnectionCommandTests
 	}
 
 	[Fact]
+	public void TuiConnectionOutput_ShowsEachMessageLineWithoutEscapedLineBreaks()
+	{
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En);
+		var output = TerminalWorkspaceSession.BuildMcpConnectionOutput(
+			new McpConnectionResult(
+				McpConnectionStatus.Connected,
+				"Cursor: configuration was written to .cursor/mcp.json." + Environment.NewLine +
+				localization["Mcp.Connect.ProjectConfigurationMachinePath"]),
+			localization);
+
+		Assert.StartsWith(
+			"Cursor: configuration was written to .cursor/mcp.json." + Environment.NewLine +
+			localization["Mcp.Connect.ProjectConfigurationMachinePath"],
+			output,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain("\\r", output, StringComparison.Ordinal);
+		Assert.DoesNotContain("\\n", output, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void TuiConnectionOutput_ShowsAnIdeNextStepAsWritten()
 	{
 		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.Ru);
@@ -193,7 +214,7 @@ public sealed class McpConnectionCommandTests
 	}
 
 	[Fact]
-	public async Task Connect_DefaultExecutesTheClientWithLiveModeAndPrintsTheResult()
+	public async Task Connect_DefaultExecutesTheClientWithStandardModeAndPrintsTheResult()
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
@@ -214,15 +235,167 @@ public sealed class McpConnectionCommandTests
 		Assert.Equal(CommandLineExitCodes.Success, run.ExitCode);
 		var request = Assert.Single(connectionService.ConnectRequests);
 		Assert.Equal(McpConnectionClient.ClaudeCode, request.Client);
-		Assert.Equal(McpConnectionMode.Live, request.Mode);
+		Assert.Equal(McpConnectionMode.Standard, request.Mode);
 		Assert.Equal(Path.GetFullPath(project), request.ProjectRoot);
 		Assert.Equal(run.ExecutablePath, request.ExecutablePath);
-		Assert.Contains("Claude Code connected", run.Environment.StandardOutput, StringComparison.Ordinal);
-		Assert.Contains("Run claude in the project folder.", run.Environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Equal(
+			[
+				"Claude Code connected.",
+				$"Client: Claude Code · mode: standard · project: {Path.GetFullPath(project)}",
+				"Run claude in the project folder.",
+				"If a Claude Code session is already running, restart it to load this server."
+			],
+			OutputLines(run));
 		Assert.DoesNotContain("add: connected", run.Environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Empty(run.Environment.StandardError);
 		Assert.Empty(connectionService.PrintRequests);
 		Assert.Empty(run.LaunchService.Requests);
+	}
+
+	[Fact]
+	public async Task Connect_LiveModeStatesWhenTheSelectionWasSaved()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var store = new ProjectProfileStore(() => workspace.CreateDirectory("app-data"));
+		Assert.True(store.TrySaveProfile(
+			Path.GetFullPath(project),
+			new ProjectSelectionProfile([], [], [], SelectedPaths: ["src"]),
+			new DateTimeOffset(2026, 9, 12, 8, 5, 0, TimeSpan.Zero)));
+
+		var run = await RunAsync(
+			workspace,
+			new StubMcpConnectionService
+			{
+				Result = new McpConnectionResult(McpConnectionStatus.Connected, "Cursor connected.")
+			},
+			["mcp", "connect", project, "--client", "cursor", "--mode", "live", "--language", "en"]);
+
+		Assert.Equal(CommandLineExitCodes.Success, run.ExitCode);
+		var lines = OutputLines(run);
+		Assert.Contains($"Client: Cursor · mode: live · project: {Path.GetFullPath(project)}", lines);
+		Assert.Contains(
+			"Live mode follows the selection saved for this project on 2026-09-12 08:05 UTC: checked items set " +
+			"the agent's focus, and the window's filters limit what it can read.",
+			lines);
+		Assert.Equal("If a Cursor session is already running, restart it to load this server.", lines[^1]);
+	}
+
+	[Fact]
+	public async Task Connect_LiveModeWithoutASavedSelectionSaysTheServerUsesDefaults()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+
+		var run = await RunAsync(
+			workspace,
+			new StubMcpConnectionService
+			{
+				Result = new McpConnectionResult(McpConnectionStatus.Connected, "Claude Code connected.")
+			},
+			["mcp", "connect", project, "--mode", "live", "--language", "en"]);
+
+		Assert.Equal(CommandLineExitCodes.Success, run.ExitCode);
+		Assert.Contains(
+			"Live mode: no selection is saved for this project yet, so the server uses its standard defaults " +
+			"until you open the project in DevProjex.",
+			OutputLines(run));
+	}
+
+	[Fact]
+	public async Task Connect_StandardModeDoesNotDescribeALiveSelection()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+
+		var run = await RunAsync(
+			workspace,
+			new StubMcpConnectionService
+			{
+				Result = new McpConnectionResult(McpConnectionStatus.Connected, "Claude Code connected.")
+			},
+			["mcp", "connect", project, "--language", "en"]);
+
+		Assert.DoesNotContain("Live mode", run.Environment.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task Connect_CodexToAnotherProjectRequiresReplaceAndNamesBothRoots()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var previous = Path.GetFullPath(workspace.CreateDirectory("previous"));
+		var service = new ReplacementMcpConnectionService(previous);
+
+		var refused = await RunAsync(
+			workspace,
+			service,
+			["mcp", "connect", project, "--client", "codex", "--language", "en"]);
+
+		Assert.Equal(CommandLineExitCodes.RuntimeError, refused.ExitCode);
+		Assert.Empty(refused.Environment.StandardOutput);
+		Assert.Contains(
+			$"Codex is connected to {previous}. Codex keeps one global devprojex entry; run again with --replace " +
+			$"to point it at {Path.GetFullPath(project)}.",
+			refused.Environment.StandardError,
+			StringComparison.Ordinal);
+		Assert.Empty(service.ConnectRequests);
+		Assert.Empty(service.ReplaceRequests);
+
+		var replaced = await RunAsync(
+			workspace,
+			service,
+			["mcp", "connect", project, "--client", "codex", "--replace", "--language", "en"]);
+
+		Assert.Equal(CommandLineExitCodes.Success, replaced.ExitCode);
+		var replacement = Assert.Single(service.ReplaceRequests);
+		Assert.Equal(previous, replacement.ExpectedExistingProjectRoot);
+		Assert.Equal(Path.GetFullPath(project), replacement.Request.ProjectRoot);
+		Assert.Empty(service.ConnectRequests);
+		Assert.Contains(
+			"Codex keeps one global devprojex entry, so it serves one project at a time; connecting another " +
+			"project replaces it.",
+			OutputLines(replaced));
+	}
+
+	[Fact]
+	public async Task Connect_CodexForTheSameProjectConnectsWithoutReplace()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = Path.GetFullPath(workspace.CreateDirectory("project"));
+		var service = new ReplacementMcpConnectionService(project);
+
+		var run = await RunAsync(
+			workspace,
+			service,
+			["mcp", "connect", project, "--client", "codex", "--language", "en"]);
+
+		Assert.Equal(CommandLineExitCodes.Success, run.ExitCode);
+		Assert.Single(service.ConnectRequests);
+		Assert.Empty(service.ReplaceRequests);
+	}
+
+	[Fact]
+	public async Task Connect_MultilineResultMessageIsWrittenLineByLine()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+
+		var run = await RunAsync(
+			workspace,
+			new StubMcpConnectionService
+			{
+				Result = new McpConnectionResult(
+					McpConnectionStatus.Updated,
+					"VS Code: configuration was written to .vscode/mcp.json." + Environment.NewLine +
+					"The file belongs to this computer.")
+			},
+			["mcp", "connect", project, "--client", "vscode", "--language", "en"]);
+
+		var lines = OutputLines(run);
+		Assert.Equal("VS Code: configuration was written to .vscode/mcp.json.", lines[0]);
+		Assert.Equal("The file belongs to this computer.", lines[1]);
+		Assert.DoesNotContain("\\r\\n", run.Environment.StandardOutput, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -495,6 +668,49 @@ public sealed class McpConnectionCommandTests
 
 		var exitCode = await application.RunAsync(arguments, TestContext.Current.CancellationToken);
 		return new CommandRun(exitCode, environment, executablePath, launchService);
+	}
+
+	private static string[] OutputLines(CommandRun run) =>
+		run.Environment.StandardOutput.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
+
+	private sealed class ReplacementMcpConnectionService(string existingProjectRoot)
+		: IMcpConnectionService, IMcpConnectionReplacementService
+	{
+		public List<McpConnectionRequest> ConnectRequests { get; } = [];
+		public List<(McpConnectionRequest Request, string ExpectedExistingProjectRoot)> ReplaceRequests { get; } = [];
+
+		public Task<McpConnectionResult> ConnectAsync(
+			McpConnectionRequest request,
+			CancellationToken cancellationToken = default)
+		{
+			ConnectRequests.Add(request);
+			return Task.FromResult(new McpConnectionResult(McpConnectionStatus.Connected, "Codex connected."));
+		}
+
+		public string CreatePrintableConfiguration(McpConnectionRequest request) => "configuration";
+
+		public Task<McpConnectionInspection> InspectAsync(
+			McpConnectionRequest request,
+			CancellationToken cancellationToken = default) =>
+			Task.FromResult(new McpConnectionInspection(
+				Exists: true,
+				existingProjectRoot,
+				RequiresProjectReplacement: !string.Equals(
+					existingProjectRoot,
+					request.ProjectRoot,
+					StringComparison.OrdinalIgnoreCase)));
+
+		public Task<McpConnectionResult> ReplaceAsync(
+			McpConnectionRequest request,
+			string expectedExistingProjectRoot,
+			CancellationToken cancellationToken = default)
+		{
+			ReplaceRequests.Add((request, expectedExistingProjectRoot));
+			return Task.FromResult(new McpConnectionResult(
+				McpConnectionStatus.Updated,
+				"Codex updated.",
+				Replaced: true));
+		}
 	}
 
 	private sealed class StubMcpClientLaunchService : IMcpClientLaunchService

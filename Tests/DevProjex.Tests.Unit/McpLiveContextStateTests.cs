@@ -289,7 +289,7 @@ public sealed class McpLiveContextStateTests
 			var currentRevision = state.ReadProfile(temporary.Path).Revision;
 			Assert.True(state.HasSelectedFileCount(temporary.Path, currentRevision));
 			var response = Text(state.AppendNotices(new CallToolResult { Content = [] }));
-			Assert.Contains("revision 2 · 2 files selected", response, StringComparison.Ordinal);
+			Assert.Contains("revision 2 · 2 files in the saved selection", response, StringComparison.Ordinal);
 		}
 	}
 
@@ -562,9 +562,209 @@ public sealed class McpLiveContextStateTests
 		var response = Text(state.AppendNotices(McpToolResults.TextSuccess("ok")));
 
 		Assert.Contains(
-			"[Live context] the window selects no files; tick files in the DevProjex window.",
+			"[Live context] the saved selection has no checked files; tick files in the DevProjex window.",
 			response,
 			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void SavedSelectionLineStatesTheUtcSaveDateAndNeverClaimsAnOpenWindow()
+	{
+		using var temporary = new TemporaryDirectory();
+		var savedUtc = new DateTimeOffset(2026, 9, 13, 2, 30, 0, TimeSpan.FromHours(5));
+		var store = new SequenceProfileStore(
+			new ProjectProfileLookupResult(ProjectProfileLookupStatus.Found, Profile(["src"]), savedUtc));
+		var state = new McpLiveContextState(
+			new McpRootRegistry([temporary.Path]),
+			() => store,
+			TimeSpan.Zero);
+
+		using var invocation = state.BeginInvocation();
+		_ = state.ReadProfile(temporary.Path);
+		state.RecordPlan(temporary.Path, Plan(temporary.Path, 3));
+		var response = Text(state.AppendNotices(McpToolResults.TextSuccess("ok")));
+
+		Assert.Contains(
+			"[Live context] revision 1 · 3 files in the saved selection · saved 2026-09-12",
+			response,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain("in the window", response, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void SavedSelectionWithoutADateReportsOnlyTheCount()
+	{
+		using var temporary = new TemporaryDirectory();
+		var state = new McpLiveContextState(
+			new McpRootRegistry([temporary.Path]),
+			() => new SequenceProfileStore(Found(Profile(["src"]))),
+			TimeSpan.Zero);
+
+		using var invocation = state.BeginInvocation();
+		_ = state.ReadProfile(temporary.Path);
+		state.RecordPlan(temporary.Path, Plan(temporary.Path, 2));
+		var response = Text(state.AppendNotices(McpToolResults.TextSuccess("ok")));
+
+		Assert.Contains("[Live context] revision 1 · 2 files in the saved selection", response, StringComparison.Ordinal);
+		Assert.DoesNotContain("· saved", response, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void MissingProfileExplanationIsSentOnceAndAgainOnlyAfterTheStateChanges()
+	{
+		using var temporary = new TemporaryDirectory();
+		const string explanation = "[Live context] no window selection saved for this root; using server defaults.";
+		var missing = new ProjectProfileLookupResult(ProjectProfileLookupStatus.Missing, null);
+		var store = new SequenceProfileStore(missing, missing, Found(Profile(["src"])), missing, missing);
+		var state = new McpLiveContextState(
+			new McpRootRegistry([temporary.Path]),
+			() => store,
+			TimeSpan.Zero);
+
+		string NextResponse()
+		{
+			using var invocation = state.BeginInvocation();
+			_ = state.ReadProfile(temporary.Path);
+			state.RecordPlan(temporary.Path, Plan(temporary.Path, 4));
+			return Text(state.AppendNotices(McpToolResults.TextSuccess("ok")));
+		}
+
+		var first = NextResponse();
+		var repeated = NextResponse();
+		var saved = NextResponse();
+		var removed = NextResponse();
+		var afterRemoval = NextResponse();
+
+		Assert.Contains(explanation, first, StringComparison.Ordinal);
+		Assert.Contains("[Live context] revision 1 · 4 files selected by server defaults", first, StringComparison.Ordinal);
+		Assert.DoesNotContain(explanation, repeated, StringComparison.Ordinal);
+		Assert.Contains("[Live context] revision 1 · 4 files selected by server defaults", repeated, StringComparison.Ordinal);
+		Assert.DoesNotContain(explanation, saved, StringComparison.Ordinal);
+		Assert.Contains(explanation, removed, StringComparison.Ordinal);
+		Assert.DoesNotContain(explanation, afterRemoval, StringComparison.Ordinal);
+		Assert.Contains("[Live context] revision 3 · 4 files selected by server defaults", afterRemoval, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData((int)McpLiveFocusUse.Tree, "are not listed")]
+	[InlineData((int)McpLiveFocusUse.Search, "were not searched")]
+	[InlineData((int)McpLiveFocusUse.Analysis, "were not measured")]
+	[InlineData((int)McpLiveFocusUse.Pack, "were not packed")]
+	[InlineData((int)McpLiveFocusUse.Related, "were not traced")]
+	public void FocusNoticeReportsOnlyCountsWithTheVerbOfTheTool(int useValue, string verb)
+	{
+		using var temporary = new TemporaryDirectory();
+		var state = new McpLiveContextState(
+			new McpRootRegistry([temporary.Path]),
+			() => new SequenceProfileStore(Found(Profile(["src/File0.cs"]))),
+			TimeSpan.Zero);
+
+		using var invocation = state.BeginInvocation();
+		_ = state.ReadProfile(temporary.Path);
+		state.RecordPlan(temporary.Path, Plan(temporary.Path, 1, Tree(temporary.Path, 9)));
+		state.RecordFocusUse(temporary.Path, (McpLiveFocusUse)useValue);
+		var response = Text(state.AppendNotices(McpToolResults.TextSuccess("ok")));
+
+		Assert.Contains(
+			$"[Live context] focus: 1 of 9 selectable files; 8 outside the focus {verb}; " +
+			"read any of them by name with get_file.",
+			response,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain("File", response, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void FocusNoticeUsesTheSingularForOneFileOutsideTheFocus()
+	{
+		using var temporary = new TemporaryDirectory();
+		var state = new McpLiveContextState(
+			new McpRootRegistry([temporary.Path]),
+			() => new SequenceProfileStore(Found(Profile(["src"]))),
+			TimeSpan.Zero);
+
+		using var invocation = state.BeginInvocation();
+		_ = state.ReadProfile(temporary.Path);
+		state.RecordPlan(temporary.Path, Plan(temporary.Path, 8, Tree(temporary.Path, 9)));
+		state.RecordFocusUse(temporary.Path, McpLiveFocusUse.Search);
+		var response = Text(state.AppendNotices(McpToolResults.TextSuccess("ok")));
+
+		Assert.Contains(
+			"[Live context] focus: 8 of 9 selectable files; 1 outside the focus was not searched; " +
+			"read it by name with get_file.",
+			response,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void FocusNoticeIsOmittedWithoutASelectionWideToolFullCoverageOrASavedSelection()
+	{
+		using var temporary = new TemporaryDirectory();
+		var missing = new ProjectProfileLookupResult(ProjectProfileLookupStatus.Missing, null);
+		var store = new SequenceProfileStore(Found(Profile(["src"])), Found(Profile(["src"])), missing);
+		var state = new McpLiveContextState(
+			new McpRootRegistry([temporary.Path]),
+			() => store,
+			TimeSpan.Zero);
+
+		string Respond(int focusedFiles, bool selectionWide)
+		{
+			using var invocation = state.BeginInvocation();
+			_ = state.ReadProfile(temporary.Path);
+			state.RecordPlan(temporary.Path, Plan(temporary.Path, focusedFiles, Tree(temporary.Path, 9)));
+			if (selectionWide)
+				state.RecordFocusUse(temporary.Path, McpLiveFocusUse.Search);
+			return Text(state.AppendNotices(McpToolResults.TextSuccess("ok")));
+		}
+
+		Assert.DoesNotContain("focus:", Respond(1, selectionWide: false), StringComparison.Ordinal);
+		Assert.DoesNotContain("focus:", Respond(9, selectionWide: true), StringComparison.Ordinal);
+		Assert.DoesNotContain("focus:", Respond(1, selectionWide: true), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void ExplicitEmptyProfileReportsTheWholeCeilingOutsideTheFocus()
+	{
+		using var temporary = new TemporaryDirectory();
+		var state = new McpLiveContextState(
+			new McpRootRegistry([temporary.Path]),
+			() => new SequenceProfileStore(Found(Profile([]))),
+			TimeSpan.Zero);
+
+		using var invocation = state.BeginInvocation();
+		_ = state.ReadProfile(temporary.Path);
+		state.RecordPlan(temporary.Path, Plan(temporary.Path, 0, Tree(temporary.Path, 3)));
+		state.RecordFocusUse(temporary.Path, McpLiveFocusUse.Tree);
+		var response = Text(state.AppendNotices(McpToolResults.TextSuccess("ok")));
+
+		Assert.Contains(
+			"[Live context] the saved selection has no checked files; tick files in the DevProjex window.",
+			response,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"[Live context] focus: 0 of 3 selectable files; 3 outside the focus are not listed; " +
+			"read any of them by name with get_file.",
+			response,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void HiddenByWindowFiltersMarkLastsOnlyForItsInvocation()
+	{
+		using var temporary = new TemporaryDirectory();
+		var state = new McpLiveContextState(
+			new McpRootRegistry([temporary.Path]),
+			() => new SequenceProfileStore(Found(Profile(["src"]))),
+			TimeSpan.Zero);
+
+		using (state.BeginInvocation())
+		{
+			state.RecordHiddenByWindowFilters(temporary.Path, "Dockerfile");
+			Assert.True(state.IsHiddenByWindowFilters(temporary.Path, "Dockerfile"));
+			Assert.False(state.IsHiddenByWindowFilters(temporary.Path, "Makefile"));
+		}
+
+		using (state.BeginInvocation())
+			Assert.False(state.IsHiddenByWindowFilters(temporary.Path, "Dockerfile"));
 	}
 
 	[Fact]
@@ -618,7 +818,7 @@ public sealed class McpLiveContextStateTests
 		var response = Text(state.AppendNotices(McpToolResults.TextSuccess("invalid request")));
 
 		Assert.Contains("[Live context] revision 1", response, StringComparison.Ordinal);
-		Assert.DoesNotContain("files selected", response, StringComparison.Ordinal);
+		Assert.DoesNotContain("files in the saved selection", response, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -798,6 +998,22 @@ public sealed class McpLiveContextStateTests
 		GC.Collect();
 		GC.WaitForPendingFinalizers();
 		GC.Collect();
+	}
+
+	private static TreeNodeDescriptor Tree(string root, int fileCount)
+	{
+		var source = Path.Combine(root, "src");
+		var files = Enumerable.Range(0, fileCount)
+			.Select(index => new TreeNodeDescriptor(
+				$"File{index}.cs",
+				Path.Combine(source, $"File{index}.cs"),
+				false,
+				false,
+				"csharp",
+				[]))
+			.ToArray();
+		var folder = new TreeNodeDescriptor("src", source, true, false, "folder", files);
+		return new TreeNodeDescriptor("project", root, true, false, "folder", [folder]);
 	}
 
 	private static ProjectContextPlan Plan(
