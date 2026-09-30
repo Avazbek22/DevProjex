@@ -11,6 +11,26 @@ public sealed class SingleLineTextEscapingTests
 	}
 
 	[Fact]
+	public void QuotedSourceLineKeepsTabsAndEscapesEveryOtherSingleLineControl()
+	{
+		const string source = "\tif (a)\t{ }\r\n\u001b\u2028\u2029";
+
+		var escaped = SingleLineTextEscaping.Escape(source, preserveTabs: true);
+		var bounded = new StringBuilder();
+		var complete = SingleLineTextEscaping.AppendBounded(
+			bounded,
+			source.AsSpan(),
+			maximumAdditionalCharacters: escaped.Length,
+			preserveTabs: true);
+
+		Assert.Equal("\tif (a)\t{ }\\r\\n\\u001B\\u2028\\u2029", escaped);
+		Assert.Equal(escaped.Length, SingleLineTextEscaping.GetEscapedLength(source.AsSpan(), preserveTabs: true));
+		Assert.True(complete);
+		Assert.Equal(escaped, bounded.ToString());
+		Assert.Same("\tplain", SingleLineTextEscaping.Escape("\tplain", preserveTabs: true));
+	}
+
+	[Fact]
 	public void AppendBoundedStopsBeforePartialEscapeOrUnicodeScalar()
 	{
 		var escapedControl = new StringBuilder();

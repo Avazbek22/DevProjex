@@ -34,7 +34,8 @@ internal static class TerminalProjectSearchOutput
 			lines.Add(string.Empty);
 			foreach (var match in result.Matches)
 			{
-				// Match text arrives escaped by the shared search renderer; paths and names do not.
+				// Match text arrives escaped by the shared search renderer except for its tabs; paths
+				// and names arrive unescaped.
 				var location = TerminalTextEscaping.EscapeSingleLine(match.Path) + ":" +
 					match.Line.ToString(CultureInfo.InvariantCulture);
 				lines.Add(match.Declaration is { Length: > 0 } declaration
@@ -68,13 +69,8 @@ internal static class TerminalProjectSearchOutput
 		return string.Join('\n', lines);
 	}
 
-	// The shared renderer escapes tab indentation as a literal \t; indentation carries no
-	// meaning in a one-line match preview.
-	private static string TrimIndentation(string text)
-	{
-		var remaining = text.AsSpan().TrimStart();
-		while (remaining.StartsWith(@"\t", StringComparison.Ordinal))
-			remaining = remaining[2..].TrimStart();
-		return remaining.TrimEnd().ToString();
-	}
+	// Indentation carries no meaning in a one-line match preview. A tab left inside the text is
+	// shown escaped, because the view would otherwise draw it at a width of its own choosing.
+	private static string TrimIndentation(string text) =>
+		TerminalTextEscaping.EscapeSingleLine(text.AsSpan().Trim().ToString());
 }

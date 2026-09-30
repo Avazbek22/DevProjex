@@ -725,7 +725,9 @@ The selection options behave as described in
 content transformation.
 
 Text output keeps the MCP path-grouped evidence shape: `line:text` marks a matching
-line, `line-text` is context, and `in SYMBOL` names the containing declaration. A
+line, `line-text` is context, and `in SYMBOL` names the containing declaration. Quoted
+source text keeps its tabs, and JSON `text` values carry them as ordinary JSON tab
+escapes; other control characters, U+2028, and U+2029 remain escaped as `\uXXXX`. A
 bounded best declaration body follows when it is unique and enabled. `[Resolution]`
 counts shown matches whose containing declaration was named versus those with no
 declaration evidence; it never claims dependency resolution. `[Search boundary]`

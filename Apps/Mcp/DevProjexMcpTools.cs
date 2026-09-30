@@ -4103,7 +4103,7 @@ internal sealed class DevProjexMcpTools(
 			var marker = text.IndexOf('-', line.Offset, end - line.Offset);
 			var lineEnd = end > line.Offset && text[end - 1] == '\r' ? end - 1 : end;
 			if (marker >= 0 && text.AsSpan(marker + 1, lineEnd - marker - 1)
-				.SequenceEqual(McpTextEscaping.EscapeSingleLine(bodyLines[bodyIndex]).AsSpan()))
+				.SequenceEqual(McpTextEscaping.EscapeSourceLine(bodyLines[bodyIndex]).AsSpan()))
 				reclaimable[bodyIndex] = line;
 		}
 
@@ -5169,7 +5169,8 @@ internal sealed class DevProjexMcpTools(
 			var fullyEscaped = SingleLineTextEscaping.AppendBounded(
 				output,
 				content.AsSpan(line.Offset, line.Length),
-				Math.Max(0, remaining));
+				Math.Max(0, remaining),
+				preserveTabs: true);
 			if (!fullyEscaped)
 			{
 				return new McpSearchAppendResult(writtenMatches, Truncated: true);

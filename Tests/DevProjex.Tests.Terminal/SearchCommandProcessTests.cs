@@ -438,6 +438,32 @@ public sealed class SearchCommandProcessTests
 		Assert.Equal(pattern, document.RootElement.GetProperty("query").GetProperty("pattern").GetString());
 	}
 
+	[Fact]
+	public void QuotedLinesKeepTabsWhileControlCharactersStayEscaped()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile(
+			"project/src/tabs.go",
+			"package tabs\n\nfunc Run() {\n\tvalue :=\t\"needle\" // \u001B[31m\u2028tail\n}\n");
+
+		var text = Run(workspace, project, "needle", "--format", "text", "--search-body-chars", "off");
+		var json = Run(workspace, project, "needle", "--format", "json", "--search-body-chars", "off");
+
+		Assert.True(text.ExitCode == 0, text.StandardError + text.StandardOutput);
+		Assert.True(json.ExitCode == 0, json.StandardError + json.StandardOutput);
+		Assert.Contains(
+			"4:\tvalue :=\t\"needle\" // \\u001B[31m\\u2028tail",
+			text.StandardOutput,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain("\\t", text.StandardOutput, StringComparison.Ordinal);
+		using var document = JsonDocument.Parse(json.StandardOutput);
+		var match = Assert.Single(document.RootElement.GetProperty("matches").EnumerateArray());
+		Assert.Equal(
+			"\tvalue :=\t\"needle\" // \\u001B[31m\\u2028tail",
+			match.GetProperty("text").GetString());
+	}
+
 	private static string CreateProject(TemporaryDirectory workspace)
 	{
 		var project = workspace.CreateDirectory("project");

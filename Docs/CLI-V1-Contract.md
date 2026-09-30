@@ -1018,7 +1018,9 @@ values rather than reversible filesystem identifiers. Carriage return, line feed
 tab, other control characters, U+2028, and U+2029 are escaped as `\\r`, `\\n`,
 `\\t`, or `\\uXXXX`, so one filesystem entry cannot inject terminal control or
 forge another output line. Structured JSON and XML path/name values keep their
-exact machine-readable values and rely on their serializers for escaping.
+exact machine-readable values and rely on their serializers for escaping. Source
+lines quoted by `search` keep their tabs unchanged, because a tab is part of the
+quoted code and cannot forge a line.
 
 `--dry-run` performs source planning plus destination safety and conflict
 validation, creates no file, directory, ZIP, staging path, or parent directory,
