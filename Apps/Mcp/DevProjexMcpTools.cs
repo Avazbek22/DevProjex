@@ -293,7 +293,6 @@ internal sealed class DevProjexMcpTools(
 				tolerateMissingPaths: true).ConfigureAwait(false);
 			RecordPlan(plan);
 			liveContext?.RecordFocusUse(plan.SourceRoot, McpLiveFocusUse.Tree);
-			journal?.RecordFileCount(plan.IncludedFiles.Count);
 			var depthFit = CalculateTreeDepthFit(
 				plan.ProjectedTree,
 				format,
@@ -416,7 +415,6 @@ internal sealed class DevProjexMcpTools(
 			var plan = Projects.ApplyDetailOverrides(selection.Plan, detailOverrides, cancellationToken);
 			RecordPlan(plan);
 			liveContext?.RecordFocusUse(plan.SourceRoot, McpLiveFocusUse.Analysis);
-			journal?.RecordFileCount(plan.IncludedFiles.Count);
 			operationProgress.Milestone(
 				10,
 				$"scanning files {plan.IncludedFiles.Count}/{plan.IncludedFiles.Count}");
@@ -435,7 +433,7 @@ internal sealed class DevProjexMcpTools(
 					operationProgress.Measure("transforming content", 12, 59),
 				cancellationToken)
 				.ConfigureAwait(false);
-			journal?.RecordProtection(prepared.Snapshot);
+			// analyze returns metrics without file bodies, so none of these masks reach the client.
 			operationProgress.Milestone(
 				60,
 				$"transforming content {plan.IncludedFiles.Count}/{plan.IncludedFiles.Count}");

@@ -69,6 +69,43 @@ public sealed class McpAgentJournalTests
 	}
 
 	[Fact]
+	public async Task FilesDeliveredCountsOnlyDistinctPathsWhoseContentWasRecorded()
+	{
+		using var temporary = new TemporaryDirectory();
+		var root = temporary.CreateFolder("project");
+		var writer = new RecordingWriter();
+		await using var journal = new McpAgentJournal(
+			writer,
+			new McpRootRegistry([root]),
+			AgentJournalMode.Live,
+			AgentJournalToolSet.Full,
+			"5.2.0",
+			hidePrivateData: false,
+			pid: 48,
+			processStartUtc: new DateTimeOffset(2026, 9, 20, 1, 0, 0, TimeSpan.Zero));
+		await journal.StartAsync("sample-client", "1.0", TestContext.Current.CancellationToken);
+		using (journal.BeginCall("get_tree", new CallToolRequestParams { Name = "get_tree" }))
+			journal.Complete(McpToolResults.TextSuccess("src/ A.cs B.cs"));
+		using (journal.BeginCall("search_project", new CallToolRequestParams { Name = "search_project" }))
+		{
+			journal.RecordDeliveredPaths(root, ["src/A.cs", "src/A.cs"]);
+			journal.RecordDeliveredPaths(root, [Path.Combine(root, "src", "B.cs"), "src/A.cs"]);
+			journal.Complete(McpToolResults.TextSuccess("matches"));
+		}
+
+		await journal.DisposeAsync();
+
+		Assert.Equal(2, writer.Calls.Count);
+		var listing = writer.Calls[0];
+		Assert.Equal(0, listing.FilesDelivered);
+		Assert.Empty(listing.DeliveredPaths);
+		var search = writer.Calls[1];
+		Assert.Equal(2, search.FilesDelivered);
+		Assert.Equal(["src/A.cs", "src/B.cs"], search.DeliveredPaths);
+		Assert.Equal(2, Assert.Single(writer.Ended).Totals.FilesDelivered);
+	}
+
+	[Fact]
 	public async Task WriterFailureDoesNotEscapeIntoServerExecution()
 	{
 		using var temporary = new TemporaryDirectory();

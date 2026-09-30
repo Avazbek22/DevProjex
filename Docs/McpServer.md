@@ -407,6 +407,8 @@ session metadata, totals, delivered-path counts, and call rows, so a user can re
 evidence of what context was made available without retaining the returned file
 bodies. A delivered path is counted only when its text was actually returned, not
 when a stored result was merely prepared; `read_pack` accounts for the page it returns.
+`get_tree` and `analyze` name and measure files without returning their text, so they
+deliver no files and count no masked values.
 If a stored source disappears before its protection count is captured, the journal
 records `unavailable` and keeps that count unknown instead of reporting a false zero;
 known counts on the same page are still accumulated.

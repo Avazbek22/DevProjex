@@ -93,6 +93,18 @@ public sealed partial class McpServerIntegrationTests
 		Assert.Contains(calls, call => call.Tool == "get_file" && call.DeliveredPaths.Contains("Outside.cs"));
 		Assert.Equal(live, calls.Single(call => call.Tool == "get_file").Notices.Contains(AgentJournalNoticeCodes.OutsideSelection));
 		Assert.True(calls.Sum(static call => call.SecretsMasked) > 0);
+		Assert.True(calls.Single(call => call.Tool == "get_file").SecretsMasked > 0);
+		foreach (var listing in calls.Where(static call => call.Tool is "list_projects" or "get_tree" or "analyze"))
+		{
+			Assert.Equal(0, listing.FilesDelivered);
+			Assert.Empty(listing.DeliveredPaths);
+			Assert.Equal(0, listing.SecretsMasked);
+			Assert.Equal(0, listing.PrivateDataMasked);
+		}
+		Assert.All(calls, static call => Assert.Equal(
+			call.DeliveredPaths.Count + call.AdditionalDeliveredPaths,
+			call.FilesDelivered));
+		Assert.Equal(calls.Sum(static call => (long)call.FilesDelivered), session.Totals.FilesDelivered);
 	}
 
 	[Fact]
