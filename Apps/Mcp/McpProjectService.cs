@@ -19,6 +19,9 @@ internal sealed class McpProjectService(
 {
 	internal const int MaximumRequestedPaths = 256;
 	internal const int MaximumRequestedPathLength = 4096;
+	internal const string OutsideEffectiveSelectionReason = "outside effective selection";
+	internal const string HiddenByWindowFiltersReason =
+		"hidden by the saved window filters; change the filters in DevProjex or use a standard-mode server";
 	private const int MaximumCachedInventories = 8;
 	private const int MaximumCachedProjections = 16;
 	private const int MaximumRootMonitors = 8;
@@ -176,6 +179,7 @@ internal sealed class McpProjectService(
 				: exclusions ?? (string.IsNullOrEmpty(profile) ? ServerExclusions : null);
 		ProjectSelectionSpec selection;
 		int? liveProfileRevision = null;
+		var liveUsesSavedProfile = false;
 		if (liveContext is null)
 		{
 			selection = await services.SelectionResolver
@@ -203,6 +207,7 @@ internal sealed class McpProjectService(
 			}
 			if (liveSnapshot.Profile is { } localProfile)
 			{
+				liveUsesSavedProfile = true;
 				var local = ProjectSelectionAdapter.FromLegacyProfile(
 					localProfile,
 					ProjectProfileReference.Local);
@@ -280,10 +285,21 @@ internal sealed class McpProjectService(
 			rootRevisionBeforePlan == rootRevisionAfterPlan ? rootRevisionAfterPlan : null);
 		if (allowNamedPathsOutsideSelection && liveContext is not null)
 		{
+			var hiddenFiles = new List<string>();
 			plan = await ExpandNamedPathsOutsideSelectionAsync(
 				plan,
 				requested,
+				hiddenFiles,
 				cancellationToken).ConfigureAwait(false);
+			if (liveUsesSavedProfile && hiddenFiles.Count > 0)
+			{
+				await RecordFilesHiddenOnlyByWindowFiltersAsync(
+					projectRoot,
+					source.Identity,
+					baselineExclusions,
+					hiddenFiles,
+					cancellationToken).ConfigureAwait(false);
+			}
 		}
 		if ((trackedOnly || parsedScope is not null) && !plan.GitReadiness.HasRepositoryBoundary)
 		{
@@ -442,6 +458,7 @@ internal sealed class McpProjectService(
 	private async Task<ProjectContextPlan> ExpandNamedPathsOutsideSelectionAsync(
 		ProjectContextPlan plan,
 		RequestedPathSelection requested,
+		ICollection<string> hiddenFiles,
 		CancellationToken cancellationToken)
 	{
 		var visibleRequestedPaths = new List<string>(requested.Tokens.Count);
@@ -453,7 +470,10 @@ internal sealed class McpProjectService(
 				continue;
 			var state = ProjectContextPlanner.ClassifyPath(plan, path);
 			if (state == ProjectPathSelectionState.HiddenByFilters)
+			{
+				hiddenFiles.Add(path);
 				continue;
+			}
 			var relativePath = ToRelative(plan.SourceRoot, path);
 			visibleRequestedPaths.Add(relativePath);
 			if (state != ProjectPathSelectionState.OutsideSelection)
@@ -467,6 +487,55 @@ internal sealed class McpProjectService(
 		return await services.Planner
 			.ReprojectSelectionAsync(plan, visibleRequestedPaths, cancellationToken)
 			.ConfigureAwait(false);
+	}
+
+	/// <summary>
+	/// A named file the live filters hide is refused either way; what differs is the remedy. When the
+	/// server baseline alone would expose it, only the saved window filters stand in the way, and the
+	/// refusal says so. This runs only on that refusal path, so the extra plan costs nothing otherwise.
+	/// </summary>
+	private async Task RecordFilesHiddenOnlyByWindowFiltersAsync(
+		string projectRoot,
+		ProjectSourceIdentity? sourceIdentity,
+		IReadOnlyCollection<ProjectExclusion>? baselineExclusions,
+		IReadOnlyList<string> hiddenFiles,
+		CancellationToken cancellationToken)
+	{
+		ProjectContextPlan baseline;
+		try
+		{
+			var selection = await services.SelectionResolver
+				.ResolveAsync(
+					projectRoot,
+					ProjectProfileReference.Standard,
+					new ProjectSelectionSpec(
+						GitMode: ServerGitMode,
+						Exclusions: baselineExclusions,
+						HideSecrets: true,
+						HidePrivateData: hidePrivateData),
+					cancellationToken)
+				.ConfigureAwait(false);
+			baseline = await BuildBasePlanAsync(
+				new ProjectContextRequest(projectRoot, selection, sourceIdentity),
+				includeOutputMetrics: false,
+				allowInventoryReuse: true,
+				liveProfileRevision: null,
+				cancellationToken).ConfigureAwait(false);
+		}
+		catch (Exception exception) when (exception is
+			IOException or UnauthorizedAccessException or ProjectContextValidationException)
+		{
+			// Without a baseline the refusal keeps its general wording; it must not fail the read.
+			return;
+		}
+		if (baseline.HasErrors)
+			return;
+		foreach (var path in hiddenFiles)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (ProjectContextPlanner.ClassifyPath(baseline, path) != ProjectPathSelectionState.HiddenByFilters)
+				liveContext!.RecordHiddenByWindowFilters(projectRoot, ToRelative(projectRoot, path));
+		}
 	}
 
 	private async Task<ProjectContextPlan> BuildBasePlanAsync(
@@ -1332,13 +1401,26 @@ internal sealed class McpProjectService(
 			if (caseMismatch is not null)
 				throw caseMismatch;
 
+			if (liveContext?.IsHiddenByWindowFilters(plan.SourceRoot, ToRelative(plan.SourceRoot, physicalPath)) == true)
+			{
+				throw new McpToolException(
+					McpErrorCodes.PathNotFound,
+					$"{McpErrorCodes.PathNotFound}: file '{requestedPath}' is {HiddenByWindowFiltersReason}.")
+				{
+					BatchReason = HiddenByWindowFiltersReason
+				};
+			}
+
 			// Name the filters and who can widen them. A remedy that cannot work on this
 			// server — the old "repeat the selection arguments" — sends an agent in circles.
 			var remedy = McpEffectiveFilters.WideningHint(agentExclusions, liveContext is not null);
 			throw new McpToolException(
 				McpErrorCodes.PathNotFound,
 				$"{McpErrorCodes.PathNotFound}: file '{requestedPath}' is not in the effective project selection " +
-				$"(effective filters: {McpEffectiveFilters.Describe(plan)}). {remedy}");
+				$"(effective filters: {McpEffectiveFilters.Describe(plan)}). {remedy}")
+			{
+				BatchReason = OutsideEffectiveSelectionReason
+			};
 		}
 	}
 

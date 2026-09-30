@@ -127,7 +127,7 @@ public sealed partial class McpServerIntegrationTests
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path, live: true);
 
 		var initial = await server.CallAsync("list_projects");
-		Assert.Contains("1 files selected in the window", AllText(initial), StringComparison.Ordinal);
+		Assert.Contains("1 files in the saved selection", AllText(initial), StringComparison.Ordinal);
 		File.WriteAllText(Path.Combine(selected, "Second.cs"), "class Second;\n");
 
 		var refreshed = string.Empty;
@@ -135,11 +135,11 @@ public sealed partial class McpServerIntegrationTests
 		while (deadline.Elapsed < TimeSpan.FromSeconds(5))
 		{
 			refreshed = AllText(await server.CallAsync("list_projects"));
-			if (refreshed.Contains("2 files selected in the window", StringComparison.Ordinal))
+			if (refreshed.Contains("2 files in the saved selection", StringComparison.Ordinal))
 				break;
 			await Task.Delay(50, TestContext.Current.CancellationToken);
 		}
 
-		Assert.Contains("2 files selected in the window", refreshed, StringComparison.Ordinal);
+		Assert.Contains("2 files in the saved selection", refreshed, StringComparison.Ordinal);
 	}
 }

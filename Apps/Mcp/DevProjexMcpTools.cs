@@ -292,6 +292,7 @@ internal sealed class DevProjexMcpTools(
 				exclusions: ParseExclusionsArgument(arguments),
 				tolerateMissingPaths: true).ConfigureAwait(false);
 			RecordPlan(plan);
+			liveContext?.RecordFocusUse(plan.SourceRoot, McpLiveFocusUse.Tree);
 			journal?.RecordFileCount(plan.IncludedFiles.Count);
 			var depthFit = CalculateTreeDepthFit(
 				plan.ProjectedTree,
@@ -414,6 +415,7 @@ internal sealed class DevProjexMcpTools(
 				includeOutputMetrics: false).ConfigureAwait(false);
 			var plan = Projects.ApplyDetailOverrides(selection.Plan, detailOverrides, cancellationToken);
 			RecordPlan(plan);
+			liveContext?.RecordFocusUse(plan.SourceRoot, McpLiveFocusUse.Analysis);
 			journal?.RecordFileCount(plan.IncludedFiles.Count);
 			operationProgress.Milestone(
 				10,
@@ -693,6 +695,7 @@ internal sealed class DevProjexMcpTools(
 					.ConfigureAwait(false);
 			}
 			RecordPlan(plan);
+			liveContext?.RecordFocusUse(plan.SourceRoot, McpLiveFocusUse.Pack);
 
 			var selectedFileCount = plan.IncludedFiles.Count;
 			var focusSeeds = focus is null
@@ -1079,6 +1082,7 @@ internal sealed class DevProjexMcpTools(
 				exclusions: ParseExclusionsArgument(arguments),
 				tolerateMissingPaths: true).ConfigureAwait(false);
 			RecordPlan(plan);
+			liveContext?.RecordFocusUse(plan.SourceRoot, McpLiveFocusUse.Search);
 			var totalMatches = 0;
 			var matchingFiles = 0;
 			var withheld = new StringBuilder();
@@ -1468,6 +1472,7 @@ internal sealed class DevProjexMcpTools(
 				includeOutputMetrics: false,
 				exclusions: ParseExclusionsArgument(arguments)).ConfigureAwait(false);
 			RecordPlan(plan);
+			liveContext?.RecordFocusUse(plan.SourceRoot, McpLiveFocusUse.Related);
 			var resolvedSeeds = Projects.ResolveRequestedFiles(plan, seeds, cancellationToken);
 			var relativeSeeds = resolvedSeeds
 				.Select(seed => McpProjectService.ToRelative(plan.SourceRoot, seed))
@@ -1888,10 +1893,12 @@ internal sealed class DevProjexMcpTools(
 			catch (McpToolException exception) when (exception.Code is
 				   McpErrorCodes.PathNotFound or McpErrorCodes.RootViolation)
 			{
+				// Standard batches keep the single fixed phrase. Live batches separate a filtered file
+				// from a missing one, because the window filters are the one thing the user can change.
 				resolvedRequests.Add(new McpResolvedFileReadRequest(
 					item,
 					PhysicalPath: null,
-					UnavailableReason: liveContext is null ? null : exception.Code));
+					UnavailableReason: liveContext is null ? null : exception.BatchReason ?? exception.Code));
 			}
 		}
 
@@ -2220,7 +2227,7 @@ internal sealed class DevProjexMcpTools(
 		foreach (var request in requests)
 		{
 			var reason = request.UnavailableReason ?? (request.PhysicalPath is null
-				? "outside effective selection"
+				? McpProjectService.OutsideEffectiveSelectionReason
 				: transformed.ContainsKey(request.PhysicalPath)
 					? null
 					: McpErrorCodes.PayloadTruncated);

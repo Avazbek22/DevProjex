@@ -343,7 +343,7 @@ public sealed partial class McpServerProcessTests
 		var initialText = AllProcessText(initial);
 		Assert.Contains("Inside.cs", initialText, StringComparison.Ordinal);
 		Assert.DoesNotContain("Outside.cs", initialText, StringComparison.Ordinal);
-		Assert.Contains("[Live context] revision 1 · 1 files selected in the window", initialText, StringComparison.Ordinal);
+		Assert.Contains("[Live context] revision 1 · 1 files in the saved selection", initialText, StringComparison.Ordinal);
 
 		store.SaveProfile(project, new ProjectSelectionProfile([], [], [], SelectedPaths: ["docs"]));
 		var refreshed = await server.Client.CallToolAsync(
@@ -356,7 +356,7 @@ public sealed partial class McpServerProcessTests
 		Assert.Contains("docs/Outside.cs", refreshedText, StringComparison.Ordinal);
 		Assert.DoesNotContain("src/Inside.cs", refreshedText, StringComparison.Ordinal);
 		Assert.Contains("[Live context] changed since revision 1: +1 folder, -1 folder", refreshedText, StringComparison.Ordinal);
-		Assert.Contains("[Live context] revision 2 · 1 files selected in the window", refreshedText, StringComparison.Ordinal);
+		Assert.Contains("[Live context] revision 2 · 1 files in the saved selection", refreshedText, StringComparison.Ordinal);
 
 		var namedOutsideSelection = await server.Client.CallToolAsync(
 			"get_file",
@@ -458,7 +458,7 @@ public sealed partial class McpServerProcessTests
 		var initialText = AllProcessText(initial);
 		Assert.Contains("Inside.cs", initialText, StringComparison.Ordinal);
 		Assert.DoesNotContain("Outside.cs", initialText, StringComparison.Ordinal);
-		Assert.Contains("[Live context] revision 1 · 1 files selected in the window", initialText, StringComparison.Ordinal);
+		Assert.Contains("[Live context] revision 1 · 1 files in the saved selection", initialText, StringComparison.Ordinal);
 
 		await using (var held = new FileStream(
 			store.GetPath(),
@@ -492,7 +492,7 @@ public sealed partial class McpServerProcessTests
 				lockedText,
 				StringComparison.Ordinal);
 			Assert.Contains(
-				"[Live context] revision 1 · 1 files selected in the window",
+				"[Live context] revision 1 · 1 files in the saved selection",
 				lockedText,
 				StringComparison.Ordinal);
 			Assert.DoesNotContain("changed since revision", lockedText, StringComparison.Ordinal);
@@ -511,7 +511,7 @@ public sealed partial class McpServerProcessTests
 		Assert.DoesNotContain("Inside.cs", recoveredText, StringComparison.Ordinal);
 		Assert.DoesNotContain("could not be read", recoveredText, StringComparison.Ordinal);
 		Assert.Contains("[Live context] changed since revision 1: +1 folder, -1 folder", recoveredText, StringComparison.Ordinal);
-		Assert.Contains("[Live context] revision 2 · 1 files selected in the window", recoveredText, StringComparison.Ordinal);
+		Assert.Contains("[Live context] revision 2 · 1 files in the saved selection", recoveredText, StringComparison.Ordinal);
 	}
 
 	[Fact(Timeout = 60_000)]
@@ -546,7 +546,7 @@ public sealed partial class McpServerProcessTests
 			recoveredText,
 			StringComparison.Ordinal);
 		Assert.Contains(
-			"[Live context] revision 1 · 1 files selected in the window",
+			"[Live context] revision 1 · 1 files in the saved selection",
 			recoveredText,
 			StringComparison.Ordinal);
 
@@ -584,7 +584,7 @@ public sealed partial class McpServerProcessTests
 		var initialText = AllProcessText(initial);
 		Assert.Contains("Inside.cs", initialText, StringComparison.Ordinal);
 		Assert.DoesNotContain("Outside.cs", initialText, StringComparison.Ordinal);
-		Assert.Contains("[Live context] revision 1 · 1 files selected in the window", initialText, StringComparison.Ordinal);
+		Assert.Contains("[Live context] revision 1 · 1 files in the saved selection", initialText, StringComparison.Ordinal);
 
 		Assert.Equal(ProjectProfileClearStatus.Cleared, store.ClearAllProfiles());
 		var afterReset = await server.Client.CallToolAsync(

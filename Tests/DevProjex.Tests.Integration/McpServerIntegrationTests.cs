@@ -122,7 +122,7 @@ public sealed partial class McpServerIntegrationTests
 			live: true);
 
 		var projects = AllText(await server.CallAsync("list_projects"));
-		Assert.Contains("[Live context] revision 1 · 2 files selected in the window", projects, StringComparison.Ordinal);
+		Assert.Contains("[Live context] revision 1 · 2 files in the saved selection", projects, StringComparison.Ordinal);
 
 		var tree = AllText(await server.CallAsync(
 			"get_tree",
@@ -190,7 +190,7 @@ public sealed partial class McpServerIntegrationTests
 
 		profileStore.SaveProfile(project, new ProjectSelectionProfile([], [], [], SelectedPaths: []));
 		var empty = AllText(await server.CallAsync("get_tree"));
-		Assert.Contains("[Live context] the window selects no files", empty, StringComparison.Ordinal);
+		Assert.Contains("[Live context] the saved selection has no checked files", empty, StringComparison.Ordinal);
 		Assert.DoesNotContain("Inside.cs", empty, StringComparison.Ordinal);
 		Assert.DoesNotContain("Outside.cs", empty, StringComparison.Ordinal);
 	}
@@ -346,11 +346,15 @@ public sealed partial class McpServerIntegrationTests
 			"get_tree",
 			new Dictionary<string, object?> { ["project"] = "second" }));
 
-		Assert.Contains("revision 1 · 1 files selected in the window · root 1 of 2", firstTree, StringComparison.Ordinal);
-		Assert.Contains("revision 1 · 0 files selected in the window · root 2 of 2", secondTree, StringComparison.Ordinal);
+		Assert.Matches(
+			@"revision 1 · 1 files in the saved selection · saved \d{4}-\d{2}-\d{2} · root 1 of 2",
+			firstTree);
+		Assert.Matches(
+			@"revision 1 · 0 files in the saved selection · saved \d{4}-\d{2}-\d{2} · root 2 of 2",
+			secondTree);
 		Assert.Contains("Live context root 1 name:" + Environment.NewLine + "first", firstTree, StringComparison.Ordinal);
 		Assert.Contains("Live context root 2 name:" + Environment.NewLine + "second", secondTree, StringComparison.Ordinal);
-		Assert.Contains("the window selects no files", secondTree, StringComparison.Ordinal);
+		Assert.Contains("the saved selection has no checked files", secondTree, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -378,7 +382,7 @@ public sealed partial class McpServerIntegrationTests
 
 				Assert.Contains("App.cs", tree, StringComparison.Ordinal);
 				Assert.DoesNotContain("AppTests.cs", tree, StringComparison.Ordinal);
-				Assert.Contains("[Live context] revision 1 · 1 files selected", tree, StringComparison.Ordinal);
+				Assert.Contains("[Live context] revision 1 · 1 files in the saved selection", tree, StringComparison.Ordinal);
 			}
 		}
 		finally
@@ -476,7 +480,7 @@ public sealed partial class McpServerIntegrationTests
 
 		Assert.Contains("AppTests.cs", tree, StringComparison.Ordinal);
 		Assert.DoesNotContain("src/App.cs", tree, StringComparison.Ordinal);
-		Assert.Contains("[Live context] revision 1 · 1 files selected in the window", tree, StringComparison.Ordinal);
+		Assert.Contains("[Live context] revision 1 · 1 files in the saved selection", tree, StringComparison.Ordinal);
 	}
 
 	[Fact]

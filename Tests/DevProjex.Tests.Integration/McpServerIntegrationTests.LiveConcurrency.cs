@@ -61,8 +61,8 @@ public sealed partial class McpServerIntegrationTests
 			var listText = AllText(await list.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
 			Assert.False(listCompletedDuringSearch);
 			Assert.Contains("Old.cs", searchText, StringComparison.Ordinal);
-			Assert.Contains("[Live context] revision 1 · 1 files selected", searchText, StringComparison.Ordinal);
-			Assert.Contains("[Live context] revision 2 · 1 files selected", listText, StringComparison.Ordinal);
+			Assert.Contains("[Live context] revision 1 · 1 files in the saved selection", searchText, StringComparison.Ordinal);
+			Assert.Contains("[Live context] revision 2 · 1 files in the saved selection", listText, StringComparison.Ordinal);
 		}
 		finally
 		{
@@ -137,7 +137,7 @@ public sealed partial class McpServerIntegrationTests
 			var readText = AllText(await read.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
 			Assert.False(readCompletedDuringSearch);
 			Assert.Contains("Old.cs", searchText, StringComparison.Ordinal);
-			Assert.Contains("[Live context] revision 1 · 1 files selected", searchText, StringComparison.Ordinal);
+			Assert.Contains("[Live context] revision 1 · 1 files in the saved selection", searchText, StringComparison.Ordinal);
 			// read_pack builds no plan, so the new revision is reported without a selection count.
 			Assert.Matches(@"(?m)^\[Live context\] revision 2(?: · .*)?\r?$", readText);
 			Assert.DoesNotMatch(@"(?m)^\[Live context\] revision 1(?: · .*)?\r?$", readText);
