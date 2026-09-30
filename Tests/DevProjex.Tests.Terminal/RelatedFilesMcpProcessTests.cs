@@ -178,6 +178,46 @@ public sealed partial class McpServerProcessTests
 	}
 
 	[Fact]
+	public async Task RealProcessRelatedFilesNamesARelativePythonModuleAsWrittenAndNoPlaceholder()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("python-relative-project");
+		workspace.WriteFile("python-relative-project/pyproject.toml", "[project]\nname = \"fixture\"\n");
+		workspace.WriteFile("python-relative-project/pkg/__init__.py", string.Empty);
+		workspace.WriteFile("python-relative-project/pkg/types.py", "class Kind: pass\n");
+		workspace.WriteFile(
+			"python-relative-project/pkg/core.py",
+			"from . import types\nfrom .types import Kind\n\nvalue = types.Kind\n");
+		workspace.WriteFile("python-relative-project/README.md", "# Notes\n");
+		await using var server = await ActualMcpProcess.StartAsync(project, workspace.CreateDirectory("data"));
+
+		var relative = Assert.IsType<TextContentBlock>(Assert.Single((await CallAsync(
+			server,
+			"related_files",
+			new Dictionary<string, object?> { ["path"] = "pkg/core.py", ["direction"] = "dependencies" })).Content)).Text;
+		var unsupported = Assert.IsType<TextContentBlock>(Assert.Single((await CallAsync(
+			server,
+			"related_files",
+			new Dictionary<string, object?> { ["path"] = "README.md" })).Content)).Text;
+
+		Assert.Contains("pkg/types.py", relative, StringComparison.Ordinal);
+		Assert.Contains("import . at line 1", relative, StringComparison.Ordinal);
+		Assert.Contains("import .types at line 2", relative, StringComparison.Ordinal);
+		Assert.DoesNotContain("import  at", relative, StringComparison.Ordinal);
+
+		// A fixed engine status is stated once, in the trusted line, and never as a placeholder.
+		var closingBoundary = unsupported.LastIndexOf("</untrusted-data-", StringComparison.Ordinal);
+		Assert.True(closingBoundary >= 0, unsupported);
+		Assert.Contains("Seed: README.md", unsupported[..closingBoundary], StringComparison.Ordinal);
+		Assert.DoesNotContain("[No facts]", unsupported[..closingBoundary], StringComparison.Ordinal);
+		Assert.DoesNotContain("fixed dependency-engine status", unsupported, StringComparison.Ordinal);
+		Assert.Contains(
+			"[No facts] file language is not supported by the dependency engine yet.",
+			unsupported[closingBoundary..],
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task RealProcessRelatedFilesPreservesParsedImportSemantics()
 	{
 		using var workspace = new TemporaryDirectory();

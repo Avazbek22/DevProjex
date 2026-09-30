@@ -2940,12 +2940,15 @@ internal sealed class DevProjexMcpTools(
 			}
 			if (seed.NoFactsReason is { Length: > 0 })
 			{
-				StartLine();
-				output.Write("[No facts] ");
-				output.Write(IsSafeNoFactsReason(seed.NoFactsReason)
-						? "fixed dependency-engine status"
-						: McpTextEscaping.EscapeSingleLine(seed.NoFactsReason));
-				output.Write('.');
+				// A fixed engine status is stated once, in the trusted [No facts] line after this
+				// block; only a nonstandard explanation belongs here, next to the seed it explains.
+				if (!IsSafeNoFactsReason(seed.NoFactsReason))
+				{
+					StartLine();
+					output.Write("[No facts] ");
+					output.Write(McpTextEscaping.EscapeSingleLine(seed.NoFactsReason));
+					output.Write('.');
+				}
 				continue;
 			}
 			if (direction is DependencyDirection.Dependencies or DependencyDirection.Both)

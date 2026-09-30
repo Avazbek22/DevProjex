@@ -697,8 +697,8 @@ and the fixed response and stored-result limits still apply. `[Search scope] fil
 unresolved=K · external=E` counts the selected-direction edges considered for the call.
 A seed without facts is a successful empty result with
 its path and any nonstandard explanation inside the untrusted block. One of the six fixed
-dependency-engine status constants is repeated without a path in the trusted line
-`[No facts] <constant>.`; file extensions and arbitrary project text never enter that line. A
+dependency-engine status constants is stated instead, once and without a path, in the trusted
+line `[No facts] <constant>.`; file extensions and arbitrary project text never enter that line. A
 call with no resolved edges receives trusted `[No related files] in the effective
 selection.`; when unresolved references exist, that same line reports their count.
 Calls and static member uses are not edges, so an empty section is not evidence that
