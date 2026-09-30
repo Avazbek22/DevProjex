@@ -4634,6 +4634,7 @@ internal sealed class DevProjexMcpTools(
 			return null;
 
 		var hiddenCount = 0;
+		var hiddenDirectoryCount = 0;
 		var smallestHiddenDepth = int.MaxValue;
 		var largestSuggestedDepth = 0;
 		foreach (var path in paths!)
@@ -4657,12 +4658,25 @@ internal sealed class DevProjexMcpTools(
 				continue;
 
 			hiddenCount++;
+			if (isDirectory)
+				hiddenDirectoryCount++;
 			smallestHiddenDepth = Math.Min(smallestHiddenDepth, depth);
 			largestSuggestedDepth = Math.Max(largestSuggestedDepth, isDirectory ? depth + 2 : depth);
 		}
 
 		if (hiddenCount == 0)
 			return null;
+
+		// A file has nothing under it, so the directory wording would contradict itself: the
+		// useful depth is the one that shows the file.
+		if (hiddenDirectoryCount == 0)
+		{
+			return "[Tree depth] max_depth counts from the project root; " +
+				$"{hiddenCount.ToString(CultureInfo.InvariantCulture)} requested file(s) sit at depth " +
+				$"{smallestHiddenDepth.ToString(CultureInfo.InvariantCulture)} or deeper, so they are not shown. " +
+				$"Omit max_depth, or pass {largestSuggestedDepth.ToString(CultureInfo.InvariantCulture)} " +
+				"to show them.";
+		}
 
 		return "[Tree depth] max_depth counts from the project root; " +
 			$"{hiddenCount.ToString(CultureInfo.InvariantCulture)} requested path(s) sit at depth " +

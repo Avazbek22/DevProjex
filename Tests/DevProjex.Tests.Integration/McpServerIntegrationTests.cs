@@ -3239,6 +3239,45 @@ public sealed partial class McpServerIntegrationTests
 			"[Tree depth] max_depth counts from the project root; 1 requested path(s) sit at depth 3 " +
 			"or deeper, so nothing under them is shown. Omit max_depth, or pass 5 to show two levels " +
 			"below them.");
+
+		// A file has nothing under it: the trailer names the depth that shows the file itself.
+		var hiddenFile = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["paths"] = new[] { "src/main/java/org/app/App.java" },
+				["max_depth"] = 3
+			});
+		var shownFile = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["paths"] = new[] { "src/main/java/org/app/App.java" },
+				["max_depth"] = 6
+			});
+		var fileAndDirectory = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["paths"] = new[] { "src/main/java/org/app/App.java", "src/main/java" },
+				["max_depth"] = 3
+			});
+
+		Assert.NotEqual(true, hiddenFile.IsError);
+		AssertTrustedTrailerOutsideSpotlight(
+			hiddenFile,
+			"[Tree depth] max_depth counts from the project root; 1 requested file(s) sit at depth 6 " +
+			"or deeper, so they are not shown. Omit max_depth, or pass 6 to show them.");
+		Assert.DoesNotContain("levels below", AllText(hiddenFile), StringComparison.Ordinal);
+		Assert.NotEqual(true, shownFile.IsError);
+		Assert.Contains("App.java", ExtractSpotlightBody(Text(shownFile)), StringComparison.Ordinal);
+		Assert.DoesNotContain("[Tree depth]", AllText(shownFile), StringComparison.Ordinal);
+		Assert.NotEqual(true, fileAndDirectory.IsError);
+		AssertTrustedTrailerOutsideSpotlight(
+			fileAndDirectory,
+			"[Tree depth] max_depth counts from the project root; 2 requested path(s) sit at depth 3 " +
+			"or deeper, so nothing under them is shown. Omit max_depth, or pass 6 to show two levels " +
+			"below them.");
 	}
 
 	[Fact]

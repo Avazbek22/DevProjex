@@ -1052,7 +1052,10 @@ a directory entry whose own depth reaches `max_depth`, or a file entry deeper th
 `max_depth` — the response appends a `[Tree depth]` trailer stating how many
 entries are hidden, the shallowest depth among them, and a `max_depth` value that
 shows two levels below the deepest one; the trailer carries only counts, never the
-path itself.
+path itself. When every hidden entry is a file, which has nothing below it, the
+trailer instead says those files are not shown and gives the `max_depth` that shows
+them, as in `[Tree depth] max_depth counts from the project root; 1 requested file(s)
+sit at depth 6 or deeper, so they are not shown. Omit max_depth, or pass 6 to show them.`
 The three narrowing parameters compose in a fixed order and never widen each other:
 `paths` and the pattern arrays intersect to form the selection, and `max_depth`
 then prunes the rendering of that selection. Listing one directory therefore needs
