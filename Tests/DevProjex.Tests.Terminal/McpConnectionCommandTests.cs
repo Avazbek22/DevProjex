@@ -213,6 +213,69 @@ public sealed class McpConnectionCommandTests
 		Assert.Empty(environment.StandardError);
 	}
 
+	[Theory]
+	[InlineData(false, false)]
+	[InlineData(false, true)]
+	[InlineData(true, false)]
+	[InlineData(true, true)]
+	public async Task Connect_RefusesAMissingOrFileProjectBeforeAnyClientWork(bool pointAtFile, bool print)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = Path.GetFullPath(pointAtFile
+			? workspace.WriteFile("project.txt", "not a folder")
+			: Path.Combine(workspace.Path, "missing"));
+		var connectionService = new StubMcpConnectionService();
+		string[] arguments = print
+			? ["mcp", "connect", project, "--client", "cursor", "--print", "--language", "en"]
+			: ["mcp", "connect", project, "--client", "cursor", "--language", "en"];
+
+		var run = await RunAsync(workspace, connectionService, arguments);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, run.ExitCode);
+		Assert.Empty(run.Environment.StandardOutput);
+		Assert.Contains("DPX-PROJECT-NOT-FOUND", run.Environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains(
+			pointAtFile
+				? "The project path is a file, not a folder."
+				: "The project folder does not exist.",
+			run.Environment.StandardError,
+			StringComparison.Ordinal);
+		Assert.Contains($"path: {project}", run.Environment.StandardError, StringComparison.Ordinal);
+		Assert.Empty(connectionService.ConnectRequests);
+		Assert.Empty(connectionService.PrintRequests);
+		Assert.Empty(run.LaunchService.Requests);
+		Assert.Equal(!pointAtFile, !File.Exists(project) && !Directory.Exists(project));
+	}
+
+	[Fact]
+	public async Task Connect_MissingProjectMessageFollowsTheRequestedLanguage()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = Path.GetFullPath(Path.Combine(workspace.Path, "missing"));
+
+		var run = await RunAsync(
+			workspace,
+			new StubMcpConnectionService(),
+			["mcp", "connect", project, "--print", "--language", "ru"]);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, run.ExitCode);
+		Assert.Contains("Папка проекта не существует.", run.Environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains($"путь: {project}", run.Environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void TuiConnectionOutput_ShowsTheMissingProjectMessage()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = Path.GetFullPath(Path.Combine(workspace.Path, "gone"));
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En);
+		var refusal = Assert.IsType<McpConnectionResult>(McpConnectionProjectRoot.CreateRefusal(localization, project));
+
+		var output = TerminalWorkspaceSession.BuildMcpConnectionOutput(refusal, localization);
+
+		Assert.Equal("The project folder does not exist." + Environment.NewLine + project, output);
+	}
+
 	[Fact]
 	public async Task Connect_DefaultExecutesTheClientWithStandardModeAndPrintsTheResult()
 	{

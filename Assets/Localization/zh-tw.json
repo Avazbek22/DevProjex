@@ -257,6 +257,8 @@
   "Mcp.Connect.Codex.Connected": "Codex 已連接到專案。",
   "Mcp.Connect.Codex.Updated": "專案的 Codex 連接已更新。",
   "Mcp.Connect.RunInProject": "請在專案資料夾中執行 {0}。",
+  "Mcp.Connect.ProjectMissing": "專案資料夾不存在。",
+  "Mcp.Connect.ProjectNotDirectory": "專案路徑是檔案，不是資料夾。",
   "Mcp.Connect.ClientNotFound": "在 PATH 中找不到 {0}。請使用下方的手動設定。",
   "Mcp.Connect.ProjectConfigurationFailed": "{0}：無法更新專案設定：{1}",
   "Mcp.Connect.UnknownError": "未知錯誤。",

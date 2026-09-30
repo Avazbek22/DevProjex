@@ -165,7 +165,10 @@ claude-code|codex|cursor|vscode|json --mode live|standard [--replace]
 result. The project defaults to the current directory, the client to
 `claude-code`, and the mode to `standard`; `--mode live` registers a server that
 follows the selection the DevProjex window saved for the project. Desktop and
-Terminal Workspace keep their own explicit live and standard choices.
+Terminal Workspace keep their own explicit live and standard choices. Before any
+client work, and with or without `--print`, the command checks that `PROJECT` is an
+existing folder: a missing path or a path to a file fails with `DPX-PROJECT-NOT-FOUND`,
+a message naming the problem, and exit code `2`, and nothing is registered or printed.
 
 Claude Code receives a project-local `claude mcp remove`/`mcp add` sequence.
 Codex receives the equivalent global `codex mcp` replacement. Cursor updates

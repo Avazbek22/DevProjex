@@ -257,6 +257,8 @@
   "Mcp.Connect.Codex.Connected": "Codex жобаға қосылды.",
   "Mcp.Connect.Codex.Updated": "Жоба үшін Codex қосылымы жаңартылды.",
   "Mcp.Connect.RunInProject": "Жоба қалтасында {0} іске қосыңыз.",
+  "Mcp.Connect.ProjectMissing": "Жоба қалтасы жоқ.",
+  "Mcp.Connect.ProjectNotDirectory": "Жоба жолы қалта емес, файл.",
   "Mcp.Connect.ClientNotFound": "{0} PATH ішінен табылмады. Төмендегі қолмен конфигурацияны пайдаланыңыз.",
   "Mcp.Connect.ProjectConfigurationFailed": "{0}: жоба конфигурациясын жаңарту мүмкін болмады: {1}",
   "Mcp.Connect.UnknownError": "Белгісіз қате.",

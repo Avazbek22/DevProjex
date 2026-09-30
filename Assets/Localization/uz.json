@@ -257,6 +257,8 @@
   "Mcp.Connect.Codex.Connected": "Codex loyihaga ulandi.",
   "Mcp.Connect.Codex.Updated": "Loyiha uchun Codex ulanishi yangilandi.",
   "Mcp.Connect.RunInProject": "Loyiha jildida {0}ni ishga tushiring.",
+  "Mcp.Connect.ProjectMissing": "Loyiha jildi mavjud emas.",
+  "Mcp.Connect.ProjectNotDirectory": "Loyiha yo'li jild emas, fayl.",
   "Mcp.Connect.ClientNotFound": "{0} PATH ichida topilmadi. Quyidagi qo‘lda sozlamadan foydalaning.",
   "Mcp.Connect.ProjectConfigurationFailed": "{0}: loyiha sozlamasini yangilab bo‘lmadi: {1}",
   "Mcp.Connect.UnknownError": "Noma’lum xato.",

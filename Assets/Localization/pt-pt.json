@@ -257,6 +257,8 @@
     "Mcp.Connect.Codex.Connected": "O Codex está ligado ao projeto.",
     "Mcp.Connect.Codex.Updated": "A ligação do Codex ao projeto foi atualizada.",
     "Mcp.Connect.RunInProject": "Execute {0} na pasta do projeto.",
+    "Mcp.Connect.ProjectMissing": "A pasta do projeto não existe.",
+    "Mcp.Connect.ProjectNotDirectory": "O caminho do projeto é um ficheiro, não uma pasta.",
     "Mcp.Connect.ClientNotFound": "{0} não foi encontrado no PATH. Use a configuração manual abaixo.",
     "Mcp.Connect.ProjectConfigurationFailed": "{0}: não foi possível atualizar a configuração do projeto: {1}",
     "Mcp.Connect.UnknownError": "Erro desconhecido.",

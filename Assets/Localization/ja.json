@@ -257,6 +257,8 @@
   "Mcp.Connect.Codex.Connected": "Codex をプロジェクトに接続しました。",
   "Mcp.Connect.Codex.Updated": "プロジェクトの Codex 接続を更新しました。",
   "Mcp.Connect.RunInProject": "プロジェクト フォルダーで {0} を実行してください。",
+  "Mcp.Connect.ProjectMissing": "プロジェクト フォルダーが存在しません。",
+  "Mcp.Connect.ProjectNotDirectory": "プロジェクトのパスはフォルダーではなくファイルです。",
   "Mcp.Connect.ClientNotFound": "{0} が PATH に見つかりません。以下の手動構成を使用してください。",
   "Mcp.Connect.ProjectConfigurationFailed": "{0}: プロジェクト構成を更新できませんでした: {1}",
   "Mcp.Connect.UnknownError": "不明なエラーです。",

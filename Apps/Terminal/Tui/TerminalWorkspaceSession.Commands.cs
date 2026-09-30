@@ -586,6 +586,13 @@ internal sealed partial class TerminalWorkspaceSession
 			return InvalidCommandExecution();
 
 		var projectRoot = _state.Plan.SourceRoot;
+		if (McpConnectionProjectRoot.CreateRefusal(_services.Localization, Path.GetFullPath(projectRoot)) is
+			{ } refusal)
+		{
+			ShowMcpConnectionResult(refusal);
+			return TerminalWorkspaceCommandExecutionResult.Deferred();
+		}
+
 		if (command.McpAction == TerminalWorkspaceMcpAction.Print)
 		{
 			var mode = command.Text == "standard"

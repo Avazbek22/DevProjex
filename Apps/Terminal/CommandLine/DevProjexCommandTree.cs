@@ -442,55 +442,70 @@ public sealed class DevProjexCommandTree
 			CommandExecution.RunAsync(
 				environment,
 				_output.Get(parseResult),
-				() => RunWithServicesAsync(
-					parseResult,
-					async services =>
+				() =>
+				{
+					// A client must never be registered or printed for a root no server can open.
+					var projectRoot = Path.GetFullPath(parseResult.GetValue(project) ?? Directory.GetCurrentDirectory());
+					if (McpConnectionProjectRoot.DescribeProblem(_localization, projectRoot) is { } problem)
 					{
-						var executablePath = McpConnectionExecutablePathResolver.Resolve(
-							services.TerminalCommandSetupService.Probe(),
-							Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
-						var connectionClient = parseResult.GetValue(client);
-						var request = new McpConnectionRequest(
-							connectionClient,
-							parseResult.GetValue(mode),
-							executablePath,
-							Path.GetFullPath(parseResult.GetValue(project) ?? Directory.GetCurrentDirectory()),
-							ReplaceExistingFields: parseResult.GetValue(replace));
-						if (parseResult.GetValue(print))
-						{
-							environment.Output.WriteLine(
-								services.McpConnectionService.CreatePrintableConfiguration(request));
-							return CommandLineExitCodes.Success;
-						}
+						new ErrorRenderer(environment, _output.Get(parseResult), _localization).Write(new TerminalError(
+							McpConnectionProjectRoot.ErrorCode,
+							problem,
+							ExitCode: CommandLineExitCodes.UsageError,
+							ContextPath: projectRoot));
+						return Task.FromResult(CommandLineExitCodes.UsageError);
+					}
 
-						var result = await ConnectMcpClientAsync(services, request, cancellationToken)
-							.ConfigureAwait(false);
-						var openClient = parseResult.GetValue(open);
-						if (!openClient || !result.Succeeded)
-							return WriteMcpConnectionResult(result, includeNextCommand: !openClient, services, request);
-
-						var launchResult = await services.McpClientLaunchService
-							.OpenAsync(new McpClientLaunchRequest(connectionClient, request.ProjectRoot), cancellationToken)
-							.ConfigureAwait(false);
-						if (launchResult.Succeeded)
+					return RunWithServicesAsync(
+						parseResult,
+						async services =>
 						{
-							WriteMcpConnectionResult(result, includeNextCommand: false, services, request);
+							var executablePath = McpConnectionExecutablePathResolver.Resolve(
+								services.TerminalCommandSetupService.Probe(),
+								Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+							var connectionClient = parseResult.GetValue(client);
+							var request = new McpConnectionRequest(
+								connectionClient,
+								parseResult.GetValue(mode),
+								executablePath,
+								projectRoot,
+								ReplaceExistingFields: parseResult.GetValue(replace));
+							if (parseResult.GetValue(print))
+							{
+								environment.Output.WriteLine(
+									services.McpConnectionService.CreatePrintableConfiguration(request));
+								return CommandLineExitCodes.Success;
+							}
+
+							var result = await ConnectMcpClientAsync(services, request, cancellationToken)
+								.ConfigureAwait(false);
+							var openClient = parseResult.GetValue(open);
+							if (!openClient || !result.Succeeded)
+								return WriteMcpConnectionResult(result, includeNextCommand: !openClient, services, request);
+
+							var launchResult = await services.McpClientLaunchService
+								.OpenAsync(new McpClientLaunchRequest(connectionClient, request.ProjectRoot), cancellationToken)
+								.ConfigureAwait(false);
+							if (launchResult.Succeeded)
+							{
+								WriteMcpConnectionResult(result, includeNextCommand: false, services, request);
+								TerminalTextEscaping.WriteSingleLine(
+									environment.Output,
+									_localization.Format("Mcp.Open.Succeeded", DisplayConnectionClient(connectionClient)));
+								return CommandLineExitCodes.Success;
+							}
+
 							TerminalTextEscaping.WriteSingleLine(
-								environment.Output,
-								_localization.Format("Mcp.Open.Succeeded", DisplayConnectionClient(connectionClient)));
-							return CommandLineExitCodes.Success;
-						}
-
-						TerminalTextEscaping.WriteSingleLine(
-							environment.Error,
-							_localization.Format(
-								"Mcp.Open.FailedAfterConnection",
-								DisplayConnectionClient(connectionClient),
-								launchResult.ErrorMessage ?? L("Mcp.Connect.UnknownError")));
-						if (!string.IsNullOrWhiteSpace(launchResult.ManualCommand))
-							TerminalTextEscaping.WriteSingleLine(environment.Error, launchResult.ManualCommand);
-						return CommandLineExitCodes.RuntimeError;
-					}),
+								environment.Error,
+								_localization.Format(
+									"Mcp.Open.FailedAfterConnection",
+									DisplayConnectionClient(connectionClient),
+									launchResult.ErrorMessage ?? L("Mcp.Connect.UnknownError")));
+							if (!string.IsNullOrWhiteSpace(launchResult.ManualCommand))
+								TerminalTextEscaping.WriteSingleLine(environment.Error, launchResult.ManualCommand);
+							return CommandLineExitCodes.RuntimeError;
+						});
+				},
 				_localization));
 		return command;
 	}

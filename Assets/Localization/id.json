@@ -257,6 +257,8 @@
   "Mcp.Connect.Codex.Connected": "Codex terhubung ke proyek.",
   "Mcp.Connect.Codex.Updated": "Koneksi Codex untuk proyek telah diperbarui.",
   "Mcp.Connect.RunInProject": "Jalankan {0} di folder proyek.",
+  "Mcp.Connect.ProjectMissing": "Folder proyek tidak ada.",
+  "Mcp.Connect.ProjectNotDirectory": "Jalur proyek adalah file, bukan folder.",
   "Mcp.Connect.ClientNotFound": "{0} tidak ditemukan di PATH. Gunakan konfigurasi manual di bawah.",
   "Mcp.Connect.ProjectConfigurationFailed": "{0}: konfigurasi proyek tidak dapat diperbarui: {1}",
   "Mcp.Connect.UnknownError": "Kesalahan tidak dikenal.",

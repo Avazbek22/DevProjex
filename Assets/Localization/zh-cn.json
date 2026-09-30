@@ -257,6 +257,8 @@
   "Mcp.Connect.Codex.Connected": "Codex 已连接到项目。",
   "Mcp.Connect.Codex.Updated": "项目的 Codex 连接已更新。",
   "Mcp.Connect.RunInProject": "请在项目文件夹中运行 {0}。",
+  "Mcp.Connect.ProjectMissing": "项目文件夹不存在。",
+  "Mcp.Connect.ProjectNotDirectory": "项目路径是文件，不是文件夹。",
   "Mcp.Connect.ClientNotFound": "在 PATH 中找不到 {0}。请使用下方的手动配置。",
   "Mcp.Connect.ProjectConfigurationFailed": "{0}：无法更新项目配置：{1}",
   "Mcp.Connect.UnknownError": "未知错误。",

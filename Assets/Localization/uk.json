@@ -257,6 +257,8 @@
   "Mcp.Connect.Codex.Connected": "Codex підключено до проєкту.",
   "Mcp.Connect.Codex.Updated": "Підключення Codex до проєкту оновлено.",
   "Mcp.Connect.RunInProject": "Запустіть {0} у папці проєкту.",
+  "Mcp.Connect.ProjectMissing": "Папка проєкту не існує.",
+  "Mcp.Connect.ProjectNotDirectory": "Шлях проєкту вказує на файл, а не на папку.",
   "Mcp.Connect.ClientNotFound": "{0} не знайдено в PATH. Скористайтеся ручною конфігурацією нижче.",
   "Mcp.Connect.ProjectConfigurationFailed": "{0}: не вдалося оновити конфігурацію проєкту: {1}",
   "Mcp.Connect.UnknownError": "Невідома помилка.",

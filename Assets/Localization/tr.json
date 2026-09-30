@@ -257,6 +257,8 @@
   "Mcp.Connect.Codex.Connected": "Codex projeye bağlandı.",
   "Mcp.Connect.Codex.Updated": "Projenin Codex bağlantısı güncellendi.",
   "Mcp.Connect.RunInProject": "Proje klasöründe {0} çalıştırın.",
+  "Mcp.Connect.ProjectMissing": "Proje klasörü mevcut değil.",
+  "Mcp.Connect.ProjectNotDirectory": "Proje yolu bir klasör değil, dosya.",
   "Mcp.Connect.ClientNotFound": "{0} PATH'te bulunamadı. Aşağıdaki elle yapılandırmayı kullanın.",
   "Mcp.Connect.ProjectConfigurationFailed": "{0}: proje yapılandırması güncellenemedi: {1}",
   "Mcp.Connect.UnknownError": "Bilinmeyen hata.",

@@ -257,6 +257,8 @@
   "Mcp.Connect.Codex.Connected": "Codex ба лоиҳа пайваст шуд.",
   "Mcp.Connect.Codex.Updated": "Пайвасти Codex барои лоиҳа нав шуд.",
   "Mcp.Connect.RunInProject": "{0}-ро дар ҷузвдони лоиҳа оғоз кунед.",
+  "Mcp.Connect.ProjectMissing": "Ҷузвдони лоиҳа вуҷуд надорад.",
+  "Mcp.Connect.ProjectNotDirectory": "Роҳи лоиҳа файл аст, на ҷузвдон.",
   "Mcp.Connect.ClientNotFound": "{0} дар PATH ёфт нашуд. Танзимоти дастии зерро истифода баред.",
   "Mcp.Connect.ProjectConfigurationFailed": "{0}: танзимоти лоиҳаро нав кардан нашуд: {1}",
   "Mcp.Connect.UnknownError": "Хатои номаълум.",

@@ -1520,7 +1520,7 @@ public sealed class McpConnectionServiceTests
 	}
 
 	[Fact]
-	public async Task Connect_ProjectClient_MissingRootReturnsManualFallback()
+	public async Task Connect_ProjectClient_MissingRootIsRefusedWithoutAManualFallback()
 	{
 		using var temp = new TemporaryDirectory();
 		var missingRoot = Path.Combine(temp.Path, "missing-project");
@@ -1534,9 +1534,11 @@ public sealed class McpConnectionServiceTests
 				missingRoot),
 			TestContext.Current.CancellationToken);
 
-		Assert.Equal(McpConnectionStatus.InvalidConfiguration, result.Status);
-		Assert.True(result.RequiresManualConfiguration);
-		Assert.Contains("Resource unavailable", result.UserMessage, StringComparison.Ordinal);
+		// A configuration for a folder that does not exist would be useless, so none is offered.
+		Assert.Equal(McpConnectionStatus.ProjectNotFound, result.Status);
+		Assert.False(result.RequiresManualConfiguration);
+		Assert.Null(result.ManualConfiguration);
+		Assert.Equal($"The project folder does not exist.\n{Path.GetFullPath(missingRoot)}", result.UserMessage);
 		Assert.False(Directory.Exists(missingRoot));
 	}
 
@@ -1645,6 +1647,69 @@ public sealed class McpConnectionServiceTests
 		Assert.Contains("mcpServers", result.ManualConfiguration, StringComparison.Ordinal);
 		Assert.Contains(result.SuggestedConfigPaths!, path => path.Contains("APPDATA", StringComparison.Ordinal));
 		Assert.Contains(result.SuggestedConfigPaths!, path => path.Contains("Library/Application Support", StringComparison.Ordinal));
+	}
+
+	[Theory]
+	[InlineData(0, false)]
+	[InlineData(0, true)]
+	[InlineData(2, false)]
+	[InlineData(4, true)]
+	public async Task Connect_RefusesAMissingOrFileProjectRootBeforeAnyClientWork(
+		int clientValue,
+		bool pointAtFile)
+	{
+		using var temp = new TemporaryDirectory();
+		var projectRoot = Path.GetFullPath(pointAtFile
+			? temp.CreateFile("project.txt", "not a folder")
+			: Path.Combine(temp.Path, "missing"));
+		var runner = new RecordingProcessRunner();
+		var (service, _) = CreateCommandLineService(temp.Path, "claude", runner);
+
+		var result = await service.ConnectAsync(
+			Request(
+				(McpConnectionClient)clientValue,
+				McpConnectionMode.Standard,
+				Path.Combine(temp.Path, "DevProjex.exe"),
+				projectRoot),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(McpConnectionStatus.ProjectNotFound, result.Status);
+		Assert.False(result.Succeeded);
+		Assert.False(result.RequiresManualConfiguration);
+		Assert.Null(result.ManualConfiguration);
+		Assert.Empty(runner.Requests);
+		Assert.Equal(
+			pointAtFile
+				? $"The project path is a file, not a folder.\n{projectRoot}"
+				: $"The project folder does not exist.\n{projectRoot}",
+			result.UserMessage);
+		Assert.False(Directory.Exists(Path.Combine(projectRoot, ".cursor")));
+		Assert.False(Directory.Exists(Path.Combine(projectRoot, ".vscode")));
+	}
+
+	[Fact]
+	public void ProjectRootInspectionDistinguishesFoldersMissingPathsAndFiles()
+	{
+		using var temp = new TemporaryDirectory();
+		var file = temp.CreateFile("project.txt", "not a folder");
+		var missing = Path.Combine(temp.Path, "missing");
+		var localization = CreateLocalization();
+
+		Assert.Equal(McpConnectionProjectRootState.Directory, McpConnectionProjectRoot.Inspect(temp.Path));
+		Assert.Equal(McpConnectionProjectRootState.Missing, McpConnectionProjectRoot.Inspect(missing));
+		Assert.Equal(McpConnectionProjectRootState.NotDirectory, McpConnectionProjectRoot.Inspect(file));
+		Assert.Null(McpConnectionProjectRoot.DescribeProblem(localization, temp.Path));
+		Assert.Null(McpConnectionProjectRoot.CreateRefusal(localization, temp.Path));
+		Assert.Equal(
+			"The project folder does not exist.",
+			McpConnectionProjectRoot.DescribeProblem(localization, missing));
+		Assert.Equal(
+			"The project path is a file, not a folder.",
+			McpConnectionProjectRoot.DescribeProblem(localization, file));
+		var refusal = Assert.IsType<McpConnectionResult>(McpConnectionProjectRoot.CreateRefusal(localization, missing));
+		Assert.Equal(McpConnectionStatus.ProjectNotFound, refusal.Status);
+		Assert.Equal($"The project folder does not exist.\n{missing}", refusal.UserMessage);
+		Assert.Equal("DPX-PROJECT-NOT-FOUND", McpConnectionProjectRoot.ErrorCode);
 	}
 
 	private static (McpConnectionService Service, string ClientExecutable) CreateCommandLineService(
@@ -1818,6 +1883,8 @@ public sealed class McpConnectionServiceTests
 			["Mcp.Connect.ManualConfigurationRestart"] = "Restart Claude Desktop after applying the configuration",
 			["Mcp.Connect.Codex.ResponseHint"] = "Read smaller ranges when needed",
 			["Mcp.Connect.Codex.ProjectOverride"] = "A project configuration overrides the global registration",
+			["Mcp.Connect.ProjectMissing"] = "The project folder does not exist.",
+			["Mcp.Connect.ProjectNotDirectory"] = "The project path is a file, not a folder.",
 			["Desktop.Error.ResourceUnavailable"] = "Resource unavailable",
 			["Desktop.Error.InvalidData"] = "Invalid data",
 			["Desktop.Error.AccessDenied"] = "Access denied",
