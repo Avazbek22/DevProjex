@@ -735,10 +735,13 @@ public sealed partial class McpServerProcessTests
 			"search_project",
 			new Dictionary<string, object?> { ["pattern"] = "overload-marker", ["context_lines"] = 0 })));
 
-		Assert.Contains("App.cs P.App.Run 4-4", text, StringComparison.Ordinal);
+		// Both overloads share the printed name, so the one row carries both ranges and the notice
+		// names them for a ranged read.
+		Assert.Contains("App.cs P.App.Run 4-4, 5-5", text, StringComparison.Ordinal);
 		Assert.DoesNotContain("Best declaration body", text, StringComparison.Ordinal);
 		Assert.Contains(
-			"[Declaration body] omitted because the selected symbol is not unique in its file.",
+			"[Declaration body] omitted because the selected symbol names 2 declarations in its file, " +
+			"at lines 4-4, 5-5; read the one you need with get_file ranges.",
 			text,
 			StringComparison.Ordinal);
 	}
