@@ -8,10 +8,16 @@ namespace DevProjex.Kernel.Models;
 /// the exact caller-facing sentence, so every surface reports the same wording for the same mistake
 /// while keeping its own error code.
 /// </summary>
-public sealed class ProjectRelativeGlobException(string reason)
+public sealed class ProjectRelativeGlobException(string reason, bool isNegation = false)
 	: Exception($"invalid glob: {reason}")
 {
 	public string Reason { get; } = reason;
+
+	/// <summary>
+	/// The pattern was refused for its leading '!', so a caller that knows which list the pattern
+	/// came from can say where it belongs instead of the generic advice.
+	/// </summary>
+	public bool IsNegation { get; } = isNegation;
 }
 
 /// <summary>
@@ -24,6 +30,8 @@ public sealed class ProjectRelativeGlobException(string reason)
 public static class ProjectRelativeGlob
 {
 	public const int MaximumPatternLength = 512;
+
+	public const string NegationUnsupported = "negation ('!') is not supported";
 
 	// One brace group per file class is the realistic shape ("**/*.{ts,tsx}"); the caps keep a
 	// hostile nested group from compiling thousands of automata per call.
@@ -49,7 +57,8 @@ public static class ProjectRelativeGlob
 		if (pattern.StartsWith('!'))
 		{
 			throw new ProjectRelativeGlobException(
-				"negation ('!') is not supported; list the pattern in exclude_patterns instead");
+				$"{NegationUnsupported}; list the pattern in exclude_patterns instead",
+				isNegation: true);
 		}
 		if (pattern.Contains('[') || pattern.Contains(']'))
 		{

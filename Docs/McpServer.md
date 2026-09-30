@@ -1251,6 +1251,9 @@ lists alternatives (at most 64 per pattern, 1,024 per array after expansion).
 on every platform — copy names from `get_tree`. Negation (`!`) and character
 classes (`[...]`) are rejected with `DPX-MCP-INVALID-PATTERN` rather than
 matched literally, because a silently empty result reads as "no such files".
+A negated `include_patterns` entry is told to move to `exclude_patterns`; a negated
+`exclude_patterns` entry is told to drop the `!`, since that list already removes
+what it matches.
 `paths` contains existing project-relative files or directories for `get_tree`,
 `analyze`, `pack_context`, and `search_project`. Its entries are literal paths;
 glob metacharacters have meaning only in the pattern parameters. A `paths` entry

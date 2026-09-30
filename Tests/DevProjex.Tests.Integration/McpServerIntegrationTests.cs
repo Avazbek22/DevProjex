@@ -830,6 +830,19 @@ public sealed partial class McpServerIntegrationTests
 			Assert.StartsWith("DPX-MCP-INVALID-PATTERN", Text(rejected), StringComparison.Ordinal);
 			Assert.Contains(reason, Text(rejected), StringComparison.Ordinal);
 		}
+
+		// The advice follows the parameter: a negated exclusion is already where it belongs.
+		var negatedInclude = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["include_patterns"] = new[] { "!src/**" } });
+		var negatedExclude = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["exclude_patterns"] = new[] { "!src/**" } });
+		Assert.Contains("list the pattern in exclude_patterns instead", Text(negatedInclude), StringComparison.Ordinal);
+		Assert.True(negatedExclude.IsError);
+		Assert.StartsWith("DPX-MCP-INVALID-PATTERN", Text(negatedExclude), StringComparison.Ordinal);
+		Assert.Contains("write the pattern without '!'", Text(negatedExclude), StringComparison.Ordinal);
+		Assert.DoesNotContain("list the pattern in exclude_patterns", Text(negatedExclude), StringComparison.Ordinal);
 	}
 
 	[Fact]

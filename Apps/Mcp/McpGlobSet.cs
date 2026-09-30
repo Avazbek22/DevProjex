@@ -111,6 +111,14 @@ internal sealed class McpGlobSet
 		{
 			ProjectRelativeGlob.Validate(pattern);
 		}
+		catch (ProjectRelativeGlobException failure) when (failure.IsNegation && parameter == "exclude_patterns")
+		{
+			// The pattern already sits in the exclusion list; moving it there is not the fix.
+			throw Invalid(
+				parameter,
+				$"{ProjectRelativeGlob.NegationUnsupported}; write the pattern without '!', because " +
+				"exclude_patterns already removes what it matches");
+		}
 		catch (ProjectRelativeGlobException failure)
 		{
 			throw Invalid(parameter, failure.Reason);

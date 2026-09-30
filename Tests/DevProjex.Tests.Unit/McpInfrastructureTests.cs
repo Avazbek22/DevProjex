@@ -994,6 +994,32 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
+	public void GlobNegationRefusalAdvisesWhatFitsTheParameterItCameFrom()
+	{
+		var negation = Assert.Throws<ProjectRelativeGlobException>(() => ProjectRelativeGlob.Validate("!src/**"));
+		var include = Assert.Throws<McpToolException>(() => McpGlobSet.Create(["!src/**"], null));
+		var exclude = Assert.Throws<McpToolException>(() => McpGlobSet.Create(null, ["!src/**"]));
+		var otherExcludeFailure = Assert.Throws<McpToolException>(() => McpGlobSet.Create(null, ["[Ss]rc/**"]));
+
+		Assert.True(negation.IsNegation);
+		Assert.False(Assert.Throws<ProjectRelativeGlobException>(() => ProjectRelativeGlob.Validate("../x")).IsNegation);
+		Assert.Equal(McpErrorCodes.InvalidPattern, include.Code);
+		Assert.Contains(
+			"invalid 'include_patterns': negation ('!') is not supported; list the pattern in exclude_patterns instead.",
+			include.Message,
+			StringComparison.Ordinal);
+		Assert.Equal(McpErrorCodes.InvalidPattern, exclude.Code);
+		Assert.Contains(
+			"invalid 'exclude_patterns': negation ('!') is not supported; write the pattern without '!', " +
+			"because exclude_patterns already removes what it matches.",
+			exclude.Message,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain("list the pattern in exclude_patterns", exclude.Message, StringComparison.Ordinal);
+		Assert.Contains("character classes ('[...]') are not supported", otherExcludeFailure.Message,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void GlobStarStaysInsideOneSegmentAndMatchingIsCaseSensitive()
 	{
 		var rootOnly = McpGlobSet.Create(["*.cs"], null);
