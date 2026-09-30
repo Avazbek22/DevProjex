@@ -51,7 +51,7 @@ internal sealed class McpGlobSet
 	{
 		var normalized = PathUtility.NormalizeSeparators(relativePath);
 		return (_includes.Count == 0 || _includes.Any(regex => regex.IsMatch(normalized))) &&
-		       !_excludes.Any(regex => regex.IsMatch(normalized));
+			   !_excludes.Any(regex => regex.IsMatch(normalized));
 	}
 
 	public bool IncludesDirectory(string relativePath)
@@ -59,7 +59,7 @@ internal sealed class McpGlobSet
 		var normalized = PathUtility.NormalizeSeparators(relativePath).TrimEnd('/');
 		var subtreeBoundary = normalized + "/";
 		return (_includes.Count == 0 || MatchesPathOrSubtreeBoundary(_includes, normalized, subtreeBoundary)) &&
-		       !MatchesPathOrSubtreeBoundary(_excludes, normalized, subtreeBoundary);
+			   !MatchesPathOrSubtreeBoundary(_excludes, normalized, subtreeBoundary);
 	}
 
 	private static bool MatchesPathOrSubtreeBoundary(

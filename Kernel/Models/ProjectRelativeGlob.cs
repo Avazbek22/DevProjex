@@ -83,7 +83,7 @@ public static class ProjectRelativeGlob
 		}
 
 		var close = FindClosingBrace(pattern, open) ??
-		            throw new ProjectRelativeGlobException("unbalanced '{' in a brace group");
+					throw new ProjectRelativeGlobException("unbalanced '{' in a brace group");
 		var prefix = pattern[..open];
 		var suffix = pattern[(close + 1)..];
 		var alternatives = SplitTopLevel(pattern[(open + 1)..close]);

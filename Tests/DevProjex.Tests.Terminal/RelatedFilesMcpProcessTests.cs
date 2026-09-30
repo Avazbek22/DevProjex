@@ -504,7 +504,7 @@ public sealed partial class McpServerProcessTests
 		{
 			using var document = JsonDocument.Parse(message);
 			return document.RootElement.TryGetProperty("method", out var method) &&
-			       method.GetString() == NotificationMethods.ProgressNotification;
+				   method.GetString() == NotificationMethods.ProgressNotification;
 		});
 	}
 
@@ -534,6 +534,6 @@ public sealed partial class McpServerProcessTests
 		{
 			var normalized = line.TrimEnd('\r');
 			return normalized.StartsWith(prefix, StringComparison.Ordinal) &&
-			       normalized.Contains(fragment, StringComparison.Ordinal);
+				   normalized.Contains(fragment, StringComparison.Ordinal);
 		});
 }

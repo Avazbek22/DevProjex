@@ -547,10 +547,10 @@ public sealed class TreeExportService
 	private static void ValidateFormat(TreeTextFormat format)
 	{
 		if (format is not (
-			    TreeTextFormat.Ascii or
-			    TreeTextFormat.Json or
-			    TreeTextFormat.Xml or
-			    TreeTextFormat.Markdown))
+				TreeTextFormat.Ascii or
+				TreeTextFormat.Json or
+				TreeTextFormat.Xml or
+				TreeTextFormat.Markdown))
 		{
 			throw new ArgumentOutOfRangeException(nameof(format), format, null);
 		}
@@ -1207,7 +1207,7 @@ public sealed class TreeExportService
 		CancellationToken cancellationToken)
 	{
 		if (!includedPaths.Contains(root.FullPath) &&
-		    !HasIncludedChild(root.Children, includedPaths))
+			!HasIncludedChild(root.Children, includedPaths))
 		{
 			return string.Empty;
 		}
@@ -1230,7 +1230,7 @@ public sealed class TreeExportService
 		CancellationToken cancellationToken)
 	{
 		if (!includedPaths.Contains(root.FullPath) &&
-		    !HasIncludedChild(root.Children, includedPaths))
+			!HasIncludedChild(root.Children, includedPaths))
 		{
 			return string.Empty;
 		}
@@ -1305,7 +1305,7 @@ public sealed class TreeExportService
 		CancellationToken cancellationToken)
 	{
 		if (!includedPaths.Contains(root.FullPath) &&
-		    !HasIncludedChild(root.Children, includedPaths))
+			!HasIncludedChild(root.Children, includedPaths))
 		{
 			return string.Empty;
 		}

@@ -1944,8 +1944,8 @@ public sealed class DependencyFactsEngineIntegrationTests
 	public async Task TypeScriptPackageExports_NullTargetIsUnresolvedAndLegacyConfigIsExplicit()
 	{
 		using var fixture = new TemporaryDirectory();
-		var config = fixture.CreateFile("tsconfig.json", "{" + "\"compilerOptions\":{\"moduleResolution\":\"node10\",\"baseUrl\":\".\"}}" );
-		var package = fixture.CreateFile("package.json", "{" + "\"name\":\"self\",\"exports\":{\"./blocked\":null}}" );
+		var config = fixture.CreateFile("tsconfig.json", "{" + "\"compilerOptions\":{\"moduleResolution\":\"node10\",\"baseUrl\":\".\"}}");
+		var package = fixture.CreateFile("package.json", "{" + "\"name\":\"self\",\"exports\":{\"./blocked\":null}}");
 		var main = fixture.CreateFile("main.ts", "import value from \"self/blocked\";");
 		using var engine = CreateEngine();
 
@@ -2951,7 +2951,7 @@ public sealed class DependencyFactsEngineIntegrationTests
 	public async Task Cache_ReparsesOnlyChangedSourceAndReresolvesConfigurationWithoutParsing()
 	{
 		using var fixture = new TemporaryDirectory();
-		var config = fixture.CreateFile("tsconfig.json", "{" + "\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}" );
+		var config = fixture.CreateFile("tsconfig.json", "{" + "\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}");
 		var main = fixture.CreateFile("main.ts", "import { value } from \"alias\";");
 		var value = fixture.CreateFile("value.ts", "export const value = 1;");
 		using var engine = CreateEngine();
@@ -2959,7 +2959,7 @@ public sealed class DependencyFactsEngineIntegrationTests
 		_ = await engine.IndexAsync(fixture.Path, manifest,
 			cancellationToken: TestContext.Current.CancellationToken);
 
-		File.WriteAllText(config, "{" + "\"compilerOptions\":{\"moduleResolution\":\"bundler\",\"paths\":{\"alias\":[\"value.ts\"]}}}" );
+		File.WriteAllText(config, "{" + "\"compilerOptions\":{\"moduleResolution\":\"bundler\",\"paths\":{\"alias\":[\"value.ts\"]}}}");
 		var configured = await engine.IndexAsync(fixture.Path, manifest,
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Equal(0, configured.Metrics.ParsedFiles);
