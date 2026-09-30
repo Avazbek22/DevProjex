@@ -567,22 +567,23 @@ can ignore it without changing any route or result.
 ### MCP catalog size
 
 Before a client asks anything about a project, it receives the tool schemas and server
-instructions. The measurements below describe data sent to the client on 2026-09-13.
-How much model context that data uses depends on the client and how it loads tools:
+instructions. The measurements below describe data sent to the client on 2026-09-30: the
+official C# client, as the connection-payload process test records it. How much model context
+that data uses depends on the client and how it loads tools:
 
 | Payload | Characters |
 |---|---:|
-| `tools/list` normalized result, default server | 26,953 |
-| `tools/list` C# client wire result, default server | 27,619 |
-| `tools/list` C# client wire result with per-call exclusions | 30,661 |
-| `instructions` | 1,145 |
+| `tools/list` C# client wire result, default server | 28,058 |
+| `tools/list` C# client wire result with per-call exclusions | 30,674 |
+| `instructions` | 1,175 |
 
 Removing the two output schemas reduced the default catalog from 42,370 characters at the
 base revision to 32,516 before the named batch-read selector and discovery hints were added.
-Concise descriptions now keep the final catalog at 26,953 characters without changing schema
-types, accepted values, bounds, or tool behavior. `pack_context` is the largest single tool at
-5,614 characters, including 4,737 characters of input schema. The `exclusions`
-parameter costs a flat 3,042 characters, 507 on each of the six tools that take it. A process
+Concise descriptions brought it below 28,000 characters without changing schema types,
+accepted values, bounds, or tool behavior; later additions such as the `search_project`
+`symbols` parameter bring the default catalog to 28,058. `pack_context` is the largest single
+tool at 5,824 characters, including 4,877 characters of input schema. The `exclusions`
+parameter costs a flat 2,616 characters, 436 on each of the six tools that take it. A process
 test holds the default `tools/list` result and the instructions under ceilings with deliberate
 headroom, and pins the exclusion parameter's cost as an exact difference, so a new parameter or
 description has to fit a budget rather than grow one silently.
@@ -592,7 +593,7 @@ description has to fit a budget rather than grow one silently.
 | `list_projects` | none | Session inventory used for profiles, active policy, or choosing among several projects: allowed local roots with 1-based index, path, name, type, and profiles, plus the server `baseline`. String metadata is protected before JSON serialization. If a name or path is masked, use its stable address for this process, such as `project: "#1"`. The profile database is read once per call and `profilesStatus` reports an unavailable bounded read. The baseline reports secret/private-data policy and the optional remote-host allowlist. With one local root, project tools accept an omitted `project` or `#0`; otherwise they accept a listed `#index`, a unique listed name, or its absolute path. On Windows the file-URI spelling `/C:/path` is read as `C:/path` before the same root checks. Remote projects are addressed by URL and are not added to this list. |
 | `get_tree` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `max_depth?`, `format?` | Effective tree in `markdown` (default), `text`, `json`, or `xml`; at most 2,000 lines and 50,000 characters. Its root label masks a supported local-user segment when Hide Private Data is effective. Select several directories in one call with a brace pattern such as `include_patterns: ["src/middleware/{powered-by,body-limit,bearer-auth}/**"]` instead of walking each directory separately. Without `max_depth`, a large human-readable tree uses the deepest complete depth that fits. |
 | `analyze` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `detail_by_pattern?`, `tracked_only?`, `git_scope?`, `top_files?`, `max_file_bytes?`, `max_tokens?`, `rank?`, `focus?` | File, character, and token metrics plus the requested largest files by tokens. `contentMetrics` separates measured transformed bodies from size-based estimates; `documentMetrics` models `pack_context` with `view=content`, `format=text`, relative file headings, and its Root line. Every ranked file carries `estimated`; an uninspected one also carries `uninspected: true`. The `topFiles` array has a 32,000-character aggregate budget; `topFilesTruncated` and `topFilesRemaining` make any omission explicit. With `max_tokens` the result also carries `admission`: which files that budget would admit, from the same greedy pass `pack_context` uses and without producing content. `rank` and `focus` order that admission and are invalid without `max_tokens`. |
-| `pack_context` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `detail_by_pattern?`, `tracked_only?`, `git_scope?`, `max_tokens?`, `rank?`, `focus?`, `max_file_bytes?`, `view?`, `format?` | Exact DevProjex context pipeline. `max_tokens` measures the safe transformed selection, applies the ordinary token admission order, and materializes only admitted content without changing the budget report. `rank: "importance"` opts into importance-aware admission and document order; `focus` seeds graph-hop order within it. `detail_by_pattern` overrides `detail` per file. `full` adds no transformations; transformations enabled by the active profile still apply. Inline through 50,000 characters; otherwise returns a `pack_id` valid until this server process exits. After restart, call `pack_context` again. |
+| `pack_context` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `detail_by_pattern?`, `tracked_only?`, `git_scope?`, `max_tokens?`, `rank?`, `focus?`, `max_file_bytes?`, `view?`, `format?`, `expand_related?` | Exact DevProjex context pipeline. `max_tokens` measures the safe transformed selection, applies the ordinary token admission order, and materializes only admitted content without changing the budget report. `rank: "importance"` opts into importance-aware admission and document order; `focus` seeds graph-hop order within it. `detail_by_pattern` overrides `detail` per file. `expand_related` packs its `seeds` together with their statically resolved neighbours, as described in [`pack_context.expand_related`](#pack_contextexpand_related). `full` adds no transformations; transformations enabled by the active profile still apply. Inline through 50,000 characters; otherwise returns a `pack_id` valid until this server process exits. After restart, call `pack_context` again. |
 | `read_pack` | `pack_id`, `start_line?`, `end_line?`, `start_column?` | Pages a stored result from `pack_context`, `search_project`, or `related_files`. Inclusive, 1-based line range; `start_column` continues within `start_line` using 1-based Unicode characters. At most 1,000 lines or 50,000 characters per call. An `end_line` after EOF is clamped and reported. A manual protection-policy change after storage fails with `DPX-MCP-STORED-PROTECTION-CHANGED` and requires rerunning the producing tool. If the current saved policy cannot be verified, `DPX-MCP-STORED-PROTECTION-UNAVAILABLE` fails closed until the selection becomes readable. A selection-only revision change keeps the stored page readable with its existing revision warning. Call the originating tool again after server restart or quota eviction. |
 | `search_project` | `project?`, `branch?`, `pattern`, `paths?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `symbols?`, `max_results?` | `symbols: true` is the declaration-name mode of CLI `search --symbols`: `pattern` names one or more declarations separated by `|`, and each alternative keeps its last word before any parameter list or type arguments, so `class Foo`, `type Foo|interface Foo` and `def foo(` all ask for their names. A qualified name is matched on its last segment and then narrowed to that declaration. Only declarations with those names match, never their uses; a pattern that names nothing is refused with `DPX-MCP-INVALID-ARGUMENTS`. Otherwise matches over safe transformed text, grouped by file: the relative path stands on its own line, then each line of the group is written as `line:text` for a match and `line-text` for context. Quoted text keeps its tabs as tabs, so it copies back as code; any other control character, U+2028, or U+2029 is escaped as `\uXXXX` so each result line stays one physical line. Line numbers refer to that returned text after replacements. `search_project` matches file content only and never matches paths; use `get_tree` with `include_patterns` to find files by name. A bounded collector keeps stronger evidence from everything inspected instead of preserving arrival order. The returned match text is capped at 16,000 characters. Overlapping or adjacent context windows are merged and distinct groups use `--`. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200. The trusted `[Search boundary]` line distinguishes a complete result from every partial limit and reports inspected sources, encountered and retained matches, written matches, named declaration files, and continuation guidance. Actual text inserted by redaction never matches. |
 | `related_files` | `project?`, `branch?`, `path`, `direction?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `tracked_only?`, `git_scope?`, `max_file_bytes?` | Statically evidenced dependencies and dependents for one seed or up to 16 seeds. `direction` is `dependencies`, `dependents`, or `both` (default). The trusted `[Resolution]` line counts resolved, ambiguous, unresolved, and external edges for the call. Coverage distinguishes recognized supported languages from unsupported files and reports configuration diagnostics. Evidence protection consumes transformed sources one at a time under a cumulative 64 MiB source budget; sources outside that budget are not opened by this pass and their dynamic fragments become bounded generic reasons. Results larger than 50,000 characters use `read_pack`. |
@@ -1209,10 +1210,13 @@ matched literally, because a silently empty result reads as "no such files".
 `analyze`, `pack_context`, and `search_project`. Its entries are literal paths;
 glob metacharacters have meaning only in the pattern parameters. A `paths` entry
 carrying no separator therefore names one entry directly in the project root, and
-matches nothing when a file of that name lives deeper. Every array
-parameter requires a JSON array: a bare string where an array is expected returns
-`DPX-MCP-INVALID-ARGUMENTS` naming the argument, for example
-`'paths' must be an array of strings.`, instead of a partial or empty result.
+matches nothing when a file of that name lives deeper. `paths`,
+`include_patterns`, and `exclude_patterns` also accept one bare string, read as a
+one-item array, so `paths: "src/router"` selects the same directory as
+`paths: ["src/router"]`. `exclusions` is the exception: it requires a JSON array, and a
+bare string returns `DPX-MCP-INVALID-ARGUMENTS` with `'exclusions' must be an array of
+strings.` Any other value type, such as a number, is refused with
+`DPX-MCP-INVALID-ARGUMENTS` naming the argument, instead of a partial or empty result.
 
 ### Finding a file by name
 
