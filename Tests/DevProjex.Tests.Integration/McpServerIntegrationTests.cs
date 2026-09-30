@@ -7104,11 +7104,46 @@ public sealed partial class McpServerIntegrationTests
 		Assert.DoesNotContain(Secret, text, StringComparison.Ordinal);
 		Assert.Single(Regex.Matches(text, "File: Sensitive\\.txt").Cast<Match>());
 		Assert.Contains("Requests: 1.1, 2.1", text, StringComparison.Ordinal);
-		Assert.Contains("[Range clamped] requests=1.1, 2.1", text, StringComparison.Ordinal);
+		// Only 2.1 asked for lines past the end of the file; 1.1 ended inside it.
+		Assert.Contains("[Range clamped] requests=2.1;", text, StringComparison.Ordinal);
 		Assert.Contains("[Batch read] ok=3 · partial=0 · not-returned=0 · unavailable=0.", text,
 			StringComparison.Ordinal);
 		Assert.Equal(2, diagnostics.FullFileReads);
 		Assert.Equal(0, diagnostics.PreparedFilesMaterialized);
+	}
+
+	[Fact]
+	public async Task GetFileBatchReportsClampingOnlyForAnExplicitEndLineThatStillReturnedLines()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Whole.txt"), "alpha\nbeta\n");
+		File.WriteAllText(Path.Combine(project, "Short.txt"), "one\ntwo\nthree\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync("get_file", new Dictionary<string, object?>
+		{
+			["requests"] = new object[]
+			{
+				new { path = "Whole.txt" },
+				new { path = "Short.txt", ranges = new[] { new { start_line = 2, end_line = 999 } } },
+				new { path = "Short.txt", ranges = new[] { new { start_line = 50, end_line = 1200 } } }
+			}
+		});
+		var text = Text(result).Replace("\r\n", "\n", StringComparison.Ordinal);
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.Contains("3.1 — not-returned", text, StringComparison.Ordinal);
+		Assert.Contains("File: Short.txt\nRequests: 2.1\nStatus: ok\n", text, StringComparison.Ordinal);
+		Assert.Contains("File: Whole.txt\nRequests: 1.1\nStatus: ok\n", text, StringComparison.Ordinal);
+		// A whole-file read asked for no end line, and a range past the end returned nothing.
+		Assert.Single(Regex.Matches(text, Regex.Escape("[Range clamped]")).Cast<Match>());
+		Assert.Contains(
+			"[Range clamped] requests=2.1; end_line exceeded the file; returned through line 4.",
+			text,
+			StringComparison.Ordinal);
+		Assert.Contains("[Batch read] ok=2 · partial=0 · not-returned=1 · unavailable=0.", text,
+			StringComparison.Ordinal);
 	}
 
 	[Fact]

@@ -1580,7 +1580,12 @@ when only part intersects that coverage, `not-returned` when none intersects, or
 computed separately for every original range after overlap merging; one page status
 is never copied onto all merged inputs. Thus a page ending at line 992 reports
 `ok`, `partial`, and `not-returned` respectively for `1-100`, `50-1500`, and
-`1450-1600`. In live mode a path that disappeared since discovery
+`1450-1600`. A section header names only the ranges that section serves, so a range
+that starts after the last line is reported only as `not-returned`. The trusted
+`[Range clamped] requests=...; end_line exceeded the file; returned through line N.`
+trailer names only ranges whose explicit `end_line` passed the end of the file while
+the range still returned lines; a path-only whole-file read never reports clamping.
+In live mode a path that disappeared since discovery
 is an unavailable item rather than a failure for the whole batch. An unknown,
 ambiguous, or unsupported `symbol` is likewise reported only on its item, while
 syntactically invalid request records still reject the call before any read; an

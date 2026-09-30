@@ -2283,10 +2283,10 @@ internal sealed class DevProjexMcpTools(
 			}
 
 			var separator = sections.Length == 0 ? string.Empty : "\n\n";
-			var requestIds = string.Join(", ", deliveredRequests.Select(static range =>
-				$"{range.RequestIndex}.{range.RangeIndex}"));
+			// The budget reserves a header naming every candidate range; the written header can
+			// only be shorter, because it names just the ranges the page serves.
 			var escapedPath = McpTextEscaping.EscapeSingleLine(group.DisplayPath);
-			var headerPrefix = $"File: {escapedPath}\nRequests: {requestIds}\n";
+			var headerPrefix = $"File: {escapedPath}\nRequests: {FormatBatchRequestIds(deliveredRequests)}\n";
 			var headerLines = 4;
 			var availableLines = sectionBudgetLines - usedLines - (sections.Length == 0 ? 0 : 1) - headerLines;
 			var availableCharacters = sectionBudgetCharacters - sections.Length - separator.Length -
@@ -2325,11 +2325,27 @@ internal sealed class DevProjexMcpTools(
 				continue;
 			}
 
+			// Each merged range is judged against what the page really holds, so the header names
+			// only the ranges it serves and a range past the end of the file is not listed as read.
+			var deliveries = group.Ranges
+				.Select(range => (Range: range, Status: range.ClassifyDelivery(page)))
+				.ToArray();
+			var served = deliveries
+				.Where(static delivery => delivery.Status != McpGetFileRangeDeliveryStatus.NotReturned)
+				.Select(static delivery => delivery.Range)
+				.ToArray();
+			if (served.Length == 0)
+			{
+				foreach (var range in group.Ranges)
+					status[(range.RequestIndex, range.RangeIndex)] = "not-returned";
+				continue;
+			}
+
 			var sectionStatus = page.IsTruncated ? "partial" : "ok";
 			var header = FormatFileReadHeader(
 				escapedPath,
 				page,
-				requestIds,
+				FormatBatchRequestIds(served),
 				sectionStatus,
 				pathIsEscaped: true);
 			var section = separator + header + page.Text;
@@ -2347,9 +2363,9 @@ internal sealed class DevProjexMcpTools(
 					page.StartLine,
 					page.EndLine));
 			usedLines += CountResponseLines(section);
-			foreach (var range in group.Ranges)
+			foreach (var delivery in deliveries)
 			{
-				status[(range.RequestIndex, range.RangeIndex)] = range.ClassifyDelivery(page) switch
+				status[(delivery.Range.RequestIndex, delivery.Range.RangeIndex)] = delivery.Status switch
 				{
 					McpGetFileRangeDeliveryStatus.Ok => "ok",
 					McpGetFileRangeDeliveryStatus.Partial => "partial",
@@ -2367,10 +2383,20 @@ internal sealed class DevProjexMcpTools(
 					profile,
 					exclusions));
 			}
-			else if (page.TotalLines > 0 && group.EndLine > page.TotalLines)
+			else if (page.TotalLines > 0)
 			{
-				rangeNotices.Add(
-					$"[Range clamped] requests={requestIds}; end_line exceeded the file; returned through line {page.TotalLines}.");
+				// Only an explicit end_line can be clamped: a whole-file read asked for no end, and
+				// a range that starts after the last line returned nothing and is reported only
+				// as not returned.
+				var clamped = served
+					.Where(range => !range.IsWholeFile && range.EndLine > page.TotalLines)
+					.ToArray();
+				if (clamped.Length > 0)
+				{
+					rangeNotices.Add(
+						$"[Range clamped] requests={FormatBatchRequestIds(clamped)}; end_line exceeded the file; " +
+						$"returned through line {page.TotalLines}.");
+				}
 			}
 		}
 
@@ -2408,6 +2434,9 @@ internal sealed class DevProjexMcpTools(
 			.Distinct()
 			.Count();
 	}
+
+	private static string FormatBatchRequestIds(IEnumerable<McpGetFileRange> ranges) =>
+		string.Join(", ", ranges.Select(static range => $"{range.RequestIndex}.{range.RangeIndex}"));
 
 	private static string FormatBatchContinuation(
 		IReadOnlyList<McpResolvedFileReadRequest> requests,
