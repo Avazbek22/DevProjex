@@ -1876,6 +1876,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public string CopyFormatTooltip { get; private set; } = string.Empty;
     public string PreviewTooltip { get; private set; } = string.Empty;
     public string PreviewHideTreeTooltip { get; private set; } = string.Empty;
+    public string PreviewCloseText { get; private set; } = string.Empty;
+    public string FilterCloseText { get; private set; } = string.Empty;
+    public string SearchCloseText { get; private set; } = string.Empty;
+    public string PopoverCloseText { get; private set; } = string.Empty;
     public string PreviewModesLabel { get; private set; } = string.Empty;
     public string PreviewModeTree { get; private set; } = string.Empty;
     public string PreviewModeContent { get; private set; } = string.Empty;
@@ -2085,6 +2089,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         CopyFormatTooltip = _localization["CopyFormat.Tooltip"];
         PreviewTooltip = _localization["Preview.Tooltip"];
         PreviewHideTreeTooltip = _localization["Preview.HideTree.Tooltip"];
+        PreviewCloseText = _localization["Preview.Close"];
+        FilterCloseText = _localization["Filter.Close"];
+        SearchCloseText = _localization["Help.Help.CloseSearch"];
+        PopoverCloseText = _localization["Popover.Close"];
         PreviewModesLabel = _localization["Preview.Modes.Label"];
         PreviewModeTree = _localization["Preview.Mode.Tree"];
         PreviewModeContent = _localization["Preview.Mode.Content"];
@@ -2279,6 +2287,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(CopyFormatTooltip));
         RaisePropertyChanged(nameof(PreviewTooltip));
         RaisePropertyChanged(nameof(PreviewHideTreeTooltip));
+        RaisePropertyChanged(nameof(PreviewCloseText));
+        RaisePropertyChanged(nameof(FilterCloseText));
+        RaisePropertyChanged(nameof(SearchCloseText));
+        RaisePropertyChanged(nameof(PopoverCloseText));
         RaisePropertyChanged(nameof(PreviewModesLabel));
         RaisePropertyChanged(nameof(PreviewModeTree));
         RaisePropertyChanged(nameof(PreviewModeContent));

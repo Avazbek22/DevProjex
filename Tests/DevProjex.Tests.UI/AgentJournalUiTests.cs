@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Security;
 using System.Threading.Channels;
 using Avalonia.Automation;
+using Avalonia.Automation.Peers;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Styling;
@@ -248,6 +249,57 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 			manual.Close();
 			path.Close();
 			owner.Close();
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task JournalRowsAnnounceTheirVisibleCellsInsteadOfTheViewModelType()
+	{
+		var fixture = JournalFixture.Create(workspace.Project.RootPath);
+		var journal = new AgentJournalWindow(
+			new RecordingJournalReader(fixture.Sessions, fixture.Calls),
+			new RecordingFormatter(),
+			new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En),
+			workspace.Project.RootPath);
+		UiTestDriver.TrackTopLevelWindow(journal);
+		journal.Show();
+		try
+		{
+			await journal.RefreshAsync();
+			await WaitForJournalConditionAsync(
+				() => journal.ViewModel.Sessions.Count > 0 && journal.ViewModel.Calls.Count > 0,
+				"journal rows to load");
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+
+			foreach (var listName in new[] { "JournalSessionsList", "JournalCallsList" })
+			{
+				var list = Assert.IsType<ListBox>(journal.FindControl<ListBox>(listName));
+				var rows = list.GetVisualDescendants().OfType<ListBoxItem>().ToArray();
+				Assert.NotEmpty(rows);
+				foreach (var row in rows)
+				{
+					var expected = row.DataContext switch
+					{
+						AgentJournalSessionViewModel session => session.AccessibleName,
+						AgentJournalCallViewModel call => call.AccessibleName,
+						_ => throw new InvalidOperationException("Unexpected journal row.")
+					};
+					Assert.False(string.IsNullOrWhiteSpace(expected));
+					var name = ControlAutomationPeer.CreatePeerForElement(row).GetName();
+					Assert.Equal(expected, name);
+					Assert.DoesNotContain("ViewModel", name, StringComparison.Ordinal);
+				}
+			}
+
+			var firstCall = journal.ViewModel.Calls[0];
+			Assert.StartsWith(
+				$"{firstCall.Sequence} · {firstCall.Time} · {firstCall.Tool}",
+				firstCall.AccessibleName,
+				StringComparison.Ordinal);
+		}
+		finally
+		{
+			await UiTestDriver.CloseTopLevelWindowAsync(journal);
 		}
 	}
 

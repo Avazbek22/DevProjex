@@ -96,6 +96,11 @@
                  SelectedItem="{Binding SelectedSession, Mode=TwoWay}"
                  SelectionChanged="OnSessionSelectionChanged"
                  AutomationProperties.Name="{Binding WindowTitle}">
+          <ListBox.Styles>
+            <Style Selector="ListBoxItem" x:DataType="vm:AgentJournalSessionViewModel">
+              <Setter Property="AutomationProperties.Name" Value="{Binding AccessibleName}" />
+            </Style>
+          </ListBox.Styles>
           <ListBox.ItemTemplate>
             <DataTemplate x:DataType="vm:AgentJournalSessionViewModel">
               <Grid ColumnDefinitions="82,96,72,*,46,64,60,42,104,82" ColumnSpacing="4">
@@ -159,6 +164,11 @@
                  Classes="journal-list"
                  ItemsSource="{Binding Calls}"
                  AutomationProperties.Name="{Binding CallsText}">
+          <ListBox.Styles>
+            <Style Selector="ListBoxItem" x:DataType="vm:AgentJournalCallViewModel">
+              <Setter Property="AutomationProperties.Name" Value="{Binding AccessibleName}" />
+            </Style>
+          </ListBox.Styles>
           <ListBox.ItemTemplate>
             <DataTemplate x:DataType="vm:AgentJournalCallViewModel">
               <Grid ColumnDefinitions="28,50,96,*,54,84,62,58,44,104,120,54" ColumnSpacing="4">

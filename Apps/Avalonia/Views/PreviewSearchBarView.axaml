@@ -29,14 +29,17 @@
                 Content="▲"
                 Width="32"
                 ToolTip.Tip="{Binding SearchPreviousTooltip}"
+                AutomationProperties.Name="{Binding SearchPreviousTooltip}"
                 Click="OnSearchPrev" />
         <Button Name="PreviewSearchNextButton"
                 Content="▼"
                 Width="32"
                 ToolTip.Tip="{Binding SearchNextTooltip}"
+                AutomationProperties.Name="{Binding SearchNextTooltip}"
                 Click="OnSearchNext" />
         <Button Name="PreviewSearchCloseButton"
                 Content="✕"
+                AutomationProperties.Name="{Binding SearchCloseText}"
                 Width="32"
                 Click="OnSearchClose" />
       </StackPanel>
