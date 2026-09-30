@@ -17,6 +17,13 @@ public interface IFileContentAnalyzer
 	FileContentClassification? ClassifyWithoutReading(string path) => null;
 
 	/// <summary>
+	/// Returns a definitive classification available from path metadata or from the leading bytes
+	/// that a full read probes first, reading nothing past that probe. A null result means only a
+	/// full read can classify the file.
+	/// </summary>
+	FileContentClassification? ClassifyFromPrefix(string path) => ClassifyWithoutReading(path);
+
+	/// <summary>
 	/// Reads a file and preserves the reason why text content is unavailable.
 	/// Implementations should prefer this method for user-facing preview and export diagnostics.
 	/// </summary>

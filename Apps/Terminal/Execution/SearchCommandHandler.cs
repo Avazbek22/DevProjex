@@ -128,17 +128,23 @@ public sealed class SearchCommandHandler(
 			ToRegexPattern(request.Pattern, request.Mode, declarationNames),
 			ignoreCase: true);
 		var context = CreateTransformationContext(plan);
-		var inspectedFiles = new List<string>(plan.IncludedFiles.Count);
-		long inspectedBytes = 0;
-		foreach (var path in plan.IncludedFiles)
-		{
-			var fileBytes = ResolveFileSize(plan, path, recheckPlannedSize: context is not null);
-			if (fileBytes > maximumInspectedBytes - inspectedBytes)
-				break;
-			inspectedFiles.Add(path);
-			inspectedBytes += fileBytes;
-		}
-		var inspectionByteLimitReached = inspectedFiles.Count < plan.IncludedFiles.Count;
+		// Without a transformation the raw reader below decodes each admitted file itself and
+		// charges what it actually read; the pipeline has its own scannable limit and classifier.
+		var rawAnalyzer = context is null ? new FileContentAnalyzer() : null;
+		Func<string, long, bool, bool> isDecodedAsText = rawAnalyzer is { } analyzer
+			? (path, _, probeContent) => (probeContent
+				? analyzer.ClassifyFromPrefix(path)
+				: analyzer.ClassifyWithoutReading(path)) is null
+			: (path, size, probeContent) => services.SecretRedactionOutputPreparer
+				.ClassifyBeforeDecoding(path, size, probeContent) is null;
+		var admission = McpSearchInspectionBudget.Admit(
+			plan.IncludedFiles,
+			path => ResolveFileSize(plan, path, recheckPlannedSize: context is not null),
+			isDecodedAsText,
+			maximumInspectedBytes,
+			cancellationToken);
+		var inspectedFiles = admission.Files;
+		var inspectionByteLimitReached = admission.BudgetReached;
 
 		var candidates = new McpSearchCandidateCollector(MaximumStoredMatches, MaximumStoredCharacters);
 		var navigationByFile = new Dictionary<string, IReadOnlyList<NavigationDeclaration>>(StringComparer.Ordinal);
@@ -230,23 +236,23 @@ public sealed class SearchCommandHandler(
 			return ValueTask.CompletedTask;
 		}
 
-		if (context is null)
+		if (rawAnalyzer is not null)
 		{
-			var analyzer = new FileContentAnalyzer();
 			long inspectedActualBytes = 0;
 			foreach (var path in inspectedFiles)
 			{
 				cancellationToken.ThrowIfCancellationRequested();
-				var read = await analyzer.ReadClassifiedAsync(
+				var read = await rawAnalyzer.ReadClassifiedAsync(
 						path,
 						maximumInspectedBytes - inspectedActualBytes,
 						cancellationToken)
 					.ConfigureAwait(false);
+				// A file that grew past what is left of the budget is skipped like any file that
+				// does not fit; a later file that still fits is read.
 				if (read.Classification == FileContentClassification.TooLarge)
 				{
-					unscannableSources++;
 					inspectionByteLimitReached = true;
-					break;
+					continue;
 				}
 				if (read.Classification == FileContentClassification.Binary)
 				{

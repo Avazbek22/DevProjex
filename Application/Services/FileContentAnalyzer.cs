@@ -126,6 +126,29 @@ public sealed class FileContentAnalyzer :
 			: null;
 	}
 
+	public FileContentClassification? ClassifyFromPrefix(string path)
+	{
+		var known = ClassifyWithoutReading(path);
+		if (known is not null)
+			return known;
+
+		try
+		{
+			using var stream = _openSequentialRead(path, BinaryCheckBufferSize, SourceFileReadPolicy.Share, false);
+			if (stream.Length == 0)
+				return null;
+			return ReadPrefix(stream, CancellationToken.None).IsText
+				? null
+				: FileContentClassification.Binary;
+		}
+		catch (Exception exception) when (
+			exception is IOException or UnauthorizedAccessException or SecurityException)
+		{
+			// The full read reports the precise reason; the probe only proves binary content.
+			return null;
+		}
+	}
+
 	public ValueTask<FileContentReadResult> ReadClassifiedAsync(
 		string path,
 		long maxSizeForFullRead,

@@ -924,7 +924,7 @@ Whenever a call
 does not return every match it encountered, it also reports
 `[Search observed] matches=N · matching-files=M within inspected sources` and
 `[N additional observed matches not shown]`. These counts are exact for sources that were actually inspected,
-not a claim about an uninspected suffix. A group cut only in its trailing context
+not a claim about sources that were not inspected. A group cut only in its trailing context
 lines withheld no match, so it receives the cap notice without an additional-match
 line. Trusted counts and constants remain outside the untrusted block; no path enters
 them. The selected uniquely addressable declaration body and its selector share this
@@ -944,6 +944,15 @@ Binary files hold no text to search. Each skipped one is counted as
 does not make a search partial. A selection that contains only binary files is partial
 with `limits=binary-sources`, because nothing in it was searchable. Files that could not
 be read as text for other reasons remain `limits=unscannable-sources`.
+
+One search decodes at most 64 MiB of source text. Only a file that would be decoded is
+charged: a file whose extension or leading bytes prove it binary costs nothing, and
+neither does a file past the 16 MiB mandatory-redaction boundary, which is reported
+as unscannable instead. The leading bytes are read only when the selection as a whole
+exceeds the budget, and only for files of at least 64 KiB. A file that does not fit
+what remains is skipped rather than ending inspection, so a later file that fits is
+still searched. Any such skip makes the result partial with `limits=inspection-bytes`,
+and `sources inspected=X/Y` counts exactly the files that were searched.
 
 A partial search places `[Search boundary] partial; retained matches are available
 below.` before the data, then uses the same detailed counters at the end and names

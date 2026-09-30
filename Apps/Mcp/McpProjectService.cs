@@ -1234,6 +1234,13 @@ internal sealed class McpProjectService(
 				cancellationToken)
 			.ConfigureAwait(false);
 
+	/// <summary>
+	/// Whether <see cref="ConsumeSearchTextAsync"/> would decode the source as text, which is the
+	/// only work a search's inspection budget pays for.
+	/// </summary>
+	public bool IsDecodedAsSearchText(string path, long sizeBytes, bool probeContent) =>
+		services.OutputPreparer.ClassifyBeforeDecoding(path, sizeBytes, probeContent) is null;
+
 	public (string Text, SecretRedactionSnapshot Snapshot) RedactSyntheticText(
 		ProjectContextPlan plan,
 		string identityPath,

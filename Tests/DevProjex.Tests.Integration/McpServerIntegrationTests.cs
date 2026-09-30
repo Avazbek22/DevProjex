@@ -7858,6 +7858,9 @@ public sealed partial class McpServerIntegrationTests
 			var prefix = index == 4 ? "needle-after-budget\n" : "clean\n";
 			File.WriteAllText(Path.Combine(project, $"Large{index}.txt"), prefix + new string('x', 14 * 1024 * 1024));
 		}
+		// The file that did not fit is skipped, not the end of inspection: a later file that fits
+		// is still searched.
+		File.WriteAllText(Path.Combine(project, "Small.txt"), "needle-after-budget in a file that fits\n");
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
 
 		var result = await server.CallAsync("search_project", new Dictionary<string, object?>
@@ -7870,8 +7873,47 @@ public sealed partial class McpServerIntegrationTests
 
 		Assert.NotEqual(true, result.IsError);
 		McpSearchOutputAssertions.DoesNotContainMatch(text, "Large4.txt", 1);
-		Assert.Contains("[Search boundary] partial · sources inspected=4/5", text, StringComparison.Ordinal);
+		McpSearchOutputAssertions.ContainsMatch(text, "Small.txt", 1);
+		Assert.Contains("[Search boundary] partial · sources inspected=5/6", text, StringComparison.Ordinal);
 		Assert.Contains("limits=inspection-bytes", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task SearchProjectDoesNotSpendTheTextBudgetOnLargeBinaryAssets()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		// Five assets with an extension no classifier knows, 70 MiB together, sort ahead of the
+		// only source. Their leading bytes prove they are binary, so they cost the budget nothing.
+		var asset = new byte[14 * 1024 * 1024];
+		asset[0] = 0x7F;
+		for (var index = 0; index < 5; index++)
+			File.WriteAllBytes(Path.Combine(project, $"asset-{index}.pak"), asset);
+		File.WriteAllText(
+			Path.Combine(project, "source-Router.cs"),
+			"public sealed class Router\n{\n    public int NeedleRoute() => 1;\n}\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync("search_project", new Dictionary<string, object?>
+		{
+			["pattern"] = "NeedleRoute",
+			["ignore_case"] = false,
+			["context_lines"] = 0
+		});
+		var text = Text(result);
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.Contains(
+			"\nsource-Router.cs\nin Router.NeedleRoute\n3:    public int NeedleRoute() => 1;\n",
+			text.ReplaceLineEndings("\n"),
+			StringComparison.Ordinal);
+		Assert.DoesNotContain("[No matches]", text, StringComparison.Ordinal);
+		Assert.Contains(
+			"[Search boundary] complete · sources inspected=1/6 · binary files skipped=5 ·",
+			text,
+			StringComparison.Ordinal);
+		Assert.Contains("[Search skipped] 5 selected binary files were not searched as text.", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("inspection-bytes", text, StringComparison.Ordinal);
 	}
 
 	[Fact]

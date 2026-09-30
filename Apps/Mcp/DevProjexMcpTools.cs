@@ -1071,7 +1071,6 @@ internal sealed class DevProjexMcpTools(
 			RecordPlan(plan);
 			var totalMatches = 0;
 			var matchingFiles = 0;
-			var inspectedFiles = new List<string>(plan.IncludedFiles.Count);
 			var withheld = new StringBuilder();
 			var withheldByFile = new Dictionary<string, int>(StringComparer.Ordinal);
 			var withheldRanges = new Dictionary<string, List<ProjectContextFileLineRange>>(StringComparer.Ordinal);
@@ -1079,19 +1078,15 @@ internal sealed class DevProjexMcpTools(
 			var withheldStored = 0;
 			var storeHitMatchBound = false;
 			var storeHitCharacterBound = false;
-			long inspectedBytes = 0;
 			var inspectedSourceCount = 0;
-			foreach (var path in plan.IncludedFiles)
-			{
-				if (plan.EffectiveFileSizes?.TryGetValue(path, out var fileBytes) != true ||
-					fileBytes < 0 || fileBytes > MaximumSearchInspectedBytes - inspectedBytes)
-				{
-					break;
-				}
-				inspectedFiles.Add(path);
-				inspectedBytes += fileBytes;
-			}
-			var inspectionBudgetReached = inspectedFiles.Count < plan.IncludedFiles.Count;
+			var admission = McpSearchInspectionBudget.Admit(
+				plan.IncludedFiles,
+				path => plan.EffectiveFileSizes?.TryGetValue(path, out var fileBytes) == true ? fileBytes : (long?)null,
+				Projects.IsDecodedAsSearchText,
+				MaximumSearchInspectedBytes,
+				cancellationToken);
+			var inspectedFiles = admission.Files;
+			var inspectionBudgetReached = admission.BudgetReached;
 			var candidates = new McpSearchCandidateCollector(
 				MaximumStoredSearchMatches,
 				MaximumStoredSearchCharacters);

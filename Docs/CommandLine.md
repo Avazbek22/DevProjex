@@ -693,7 +693,9 @@ more declaration names separated by `|` (each alternative keeps its last word, s
 `class Foo` asks for `Foo`) while retaining the same source evidence and containing-
 declaration lookup, and is the same mode as MCP `search_project` with `symbols: true`.
 Selected binary files are counted as skipped rather than searched and do not make
-a search partial unless nothing else was selected. The two mode switches are mutually exclusive. Matching ignores
+a search partial unless nothing else was selected. They are not charged to the inspection
+budget, and a file that does not fit what remains of it is skipped while later files that
+fit are still searched. The two mode switches are mutually exclusive. Matching ignores
 case, as does the default MCP call, and returns two context lines around each match.
 
 Specific options are:

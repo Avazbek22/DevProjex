@@ -131,11 +131,48 @@ public sealed class SearchCommandBoundedReadTests
 		binaryOnly.Dispose();
 	}
 
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task BudgetSkipsOnlyWhatDoesNotFitAndNeverChargesBinaryAssets(bool hideSecrets)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var asset = Enumerable.Repeat((byte)'A', 300 * 1024).ToArray();
+		asset[16] = 0;
+		File.WriteAllBytes(Path.Combine(project, "a-scene.asset"), asset);
+		workspace.WriteFile("project/b-large.txt", new string('x', 200 * 1024));
+		workspace.WriteFile("project/c-large.txt", new string('y', 100 * 1024));
+		workspace.WriteFile("project/d-small.txt", "needle here\n");
+		var selection = ProjectSelectionSpec.Standard with { HideSecrets = hideSecrets };
+
+		using var document = await SearchAsync(
+			workspace,
+			project,
+			selection,
+			includeOnly: null,
+			maximumInspectedBytes: 256 * 1024);
+
+		// The 300 KiB asset is binary and costs nothing; b fits; c no longer fits and is skipped;
+		// d still fits after the skip and is searched.
+		var boundary = document.RootElement.GetProperty("searchBoundary");
+		Assert.False(boundary.GetProperty("complete").GetBoolean());
+		Assert.Equal(4, boundary.GetProperty("eligibleSources").GetInt32());
+		Assert.Equal(2, boundary.GetProperty("inspectedSources").GetInt32());
+		Assert.Equal(1, boundary.GetProperty("skippedBinarySources").GetInt32());
+		Assert.Equal(
+			["inspection-bytes"],
+			boundary.GetProperty("limits").EnumerateArray().Select(static limit => limit.GetString()));
+		var match = Assert.Single(document.RootElement.GetProperty("matches").EnumerateArray());
+		Assert.Equal("d-small.txt", match.GetProperty("path").GetString());
+	}
+
 	private static async Task<JsonDocument> SearchAsync(
 		TemporaryDirectory workspace,
 		string project,
 		ProjectSelectionSpec selection,
-		string? includeOnly)
+		string? includeOnly,
+		long maximumInspectedBytes = 1_024 * 1_024)
 	{
 		using var services = new TerminalServiceFactory(
 			() => workspace.CreateDirectory("app-data")).Create(AppLanguage.En);
@@ -158,7 +195,7 @@ public sealed class SearchCommandBoundedReadTests
 			.RenderSearchForPlanAsync(
 				plan,
 				request,
-				maximumInspectedBytes: 1_024 * 1_024,
+				maximumInspectedBytes,
 				cancellationToken: TestContext.Current.CancellationToken);
 		return JsonDocument.Parse(payload);
 	}
