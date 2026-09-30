@@ -206,7 +206,7 @@ devprojex mcp --root /path/to/project
 
 Connect from the Desktop **MCP → Live context** or **MCP → Standard** submenu,
 from Terminal Workspace with `mcp connect <client> [live|standard]`, or from the CLI with
-`devprojex mcp connect . --client <client>`. Desktop registers the selected server mode and
+`devprojex mcp connect . --client <client>` (standard mode unless `--mode live` is given). Desktop registers the selected server mode and
 opens Claude Code, Codex, Cursor, or VS Code; the chosen submenu controls whether
 the registration follows the checked tree. Terminal Workspace registers without
 opening another terminal, while the CLI opens the client only when `--open` is given.
@@ -215,8 +215,9 @@ VS Code receive a project-local `.cursor/mcp.json` or `.vscode/mcp.json`. Existi
 files are merged without changing other servers. Use `--print` when only a manual
 configuration fragment is needed.
 
-**Live context** connects an MCP session to the checked tree in an open DevProjex
-window through the shared local project profile. The compact **MCP** menu, between
+**Live context** makes the tree checked in the DevProjex window the agent's focus
+through the shared local project profile; the window's filters remain the limit of
+what it can read. The compact **MCP** menu, between
 File and Git, has **Live context**, **Standard**, **Journal**, and documentation
 entries. Live context uses `--live`; Standard does not follow the window selection.
 After a successful connection,

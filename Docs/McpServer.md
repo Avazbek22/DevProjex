@@ -35,9 +35,10 @@ devprojex mcp --root /absolute/path/to/project --search-body-chars 3000
 ## Live Context
 
 `devprojex mcp --root /absolute/path/to/project --live` makes the local profile
-saved by the open DevProjex window the baseline for every call. The server rereads
-that profile on every tool invocation, so changing checked tree nodes or applied
-filters takes effect on the next call without restarting the MCP session. Three
+the DevProjex window last saved for the project the baseline for every call. The
+window does not need to be open. The server rereads that profile on every tool
+invocation, so changing checked tree nodes or applied filters in the window takes
+effect on the next call without restarting the MCP session. Three
 rules stay separate: Checked nodes are focus for selection-wide tools;
 extensions, ignores, Git scope, the root jail, allowlists, and mandatory secret
 protection remain the **access boundaries**; and **saved results** stay pinned to
@@ -47,7 +48,22 @@ to omitting `profile`; portable and standard profile selections fail with
 `DPX-MCP-INVALID-ARGUMENTS` because live mode has one selection source.
 
 Tree, search, pack, analysis, and dependency results stay inside the checked
-selection. A named `get_file` path that passes the effective filters may be read
+selection. When that focus covers fewer files than the effective filters allow,
+each of those responses adds one trusted line with counts only; it never names a
+file:
+
+```text
+[Live context] focus: 1 of 9 selectable files; 8 outside the focus were not searched; read any of them by name with get_file.
+```
+
+The verb follows the tool: `are not listed` for `get_tree`, `were not searched`
+for `search_project`, `were not measured` for `analyze`, `were not packed` for
+`pack_context`, and `were not traced` for `related_files`. With one file outside
+the focus the line ends `1 outside the focus was not searched; read it by name
+with get_file.` The line is omitted when the focus covers every selectable file
+and when no selection is saved.
+
+A named `get_file` path that passes the effective filters may be read
 outside that focus. Only files whose content was actually delivered count in the
 fixed trusted notice; requested-but-unavailable paths do not. The requested paths
 stay in the existing untrusted file headers:
@@ -60,10 +76,26 @@ A batch uses the same wording with its delivered-file count. At zero the line is
 omitted, and trusted text never repeats those paths.
 
 A scalar path hidden by the effective filters still returns
-`DPX-MCP-PATH-NOT-FOUND`. In a batched read, that range is reported as
+`DPX-MCP-PATH-NOT-FOUND`. When the server's startup filters alone would expose
+the file and only the saved window filters hide it, the error detail, which stays
+inside the untrusted-data block like every error detail, names that cause and its
+remedy:
+
+```text
+DPX-MCP-PATH-NOT-FOUND: file 'Dockerfile' is hidden by the saved window filters; change the filters in DevProjex or use a standard-mode server.
+```
+
+In a batched read, that range is reported as
 `unavailable — outside effective selection` while the remaining ranges continue.
+A live batch reports a range hidden only by the saved window filters as
+`unavailable — hidden by the saved window filters; change the filters in DevProjex
+or use a standard-mode server`, and a path that does not exist as
+`unavailable — DPX-MCP-PATH-NOT-FOUND`. The request index identifies the file;
+the reason never repeats its path.
+
 Every live response ends with the current per-root revision and, once a plan
-has been built at that revision, its selected file count. A response that builds
+has been built at that revision, the number of files in the saved selection and
+the UTC date the window saved it. A response that builds
 no plan, such as `read_pack` right after the selection changed, reports the
 revision alone. Without a saved window selection the count reads
 `files selected by server defaults`. A multi-root server identifies the root by a stable
@@ -71,8 +103,8 @@ ordinal in trusted text and places its project-controlled name in an untrusted
 data block:
 
 ```text
-[Live context] revision 16 · 128 files selected in the window
-[Live context] revision 16 · 128 files selected in the window · root 1 of 2
+[Live context] revision 16 · 128 files in the saved selection · saved 2026-09-12
+[Live context] revision 16 · 128 files in the saved selection · saved 2026-09-12 · root 1 of 2
 [Live context] revision 1 · 42 files selected by server defaults
 [Live context] revision 17
 
@@ -117,8 +149,13 @@ ordinary empty project:
 ```text
 [Live context] no window selection saved for this root; using server defaults.
 [Live context] no window selection saved for this root; using server defaults. If the DevProjex window runs on Windows, live context across WSL is not supported yet.
-[Live context] the window selects no files; tick files in the DevProjex window.
+[Live context] the saved selection has no checked files; tick files in the DevProjex window.
 ```
+
+The missing-selection explanation is sent once per session for each root, and
+again only after a saved selection has appeared and been removed. Every response
+in between still ends with the revision line and its
+`files selected by server defaults` count.
 
 If the saved profile is busy, the server retains the last successful snapshot,
 keeps its actual revision number, and adds:
@@ -168,8 +205,8 @@ notice then reports the revision mismatch without an unavailable next call.
 
 These trusted lines supplement rather than replace `[Search boundary]`,
 `[Resolution]`, `[Dependency partial parse]`, and `[Effective filters]`. Trusted
-live lines contain only fixed words, revision and count values, and fixed enum
-states. Root names, file and folder names, and paths remain inside the same
+live lines contain only fixed words, revision and count values, the saved date,
+and fixed enum states. Root names, file and folder names, and paths remain inside the same
 randomized untrusted-data boundary used for other project-controlled text.
 The server records a live-session heartbeat under the application state root in
 `live-sessions/<pid>.json`. Desktop and Terminal remove records whose process
@@ -1736,7 +1773,8 @@ path. Replace `/absolute/path/to/project` in the examples.
 Desktop's **MCP** menu, Terminal Workspace's `mcp connect` command, and
 `devprojex mcp connect` use one connection service and embed the absolute installed
 executable path. Desktop's selected submenu and the CLI `--mode` option select the
-mode. Terminal Workspace's `mcp connect` uses live mode by default and accepts an
+mode; the CLI defaults to `standard`, because live mode follows a selection saved
+by the DevProjex window. Terminal Workspace's `mcp connect` uses live mode by default and accepts an
 optional `live|standard` argument. The Store configuration uses the stable WindowsApps alias;
 winget and ZIP paths remain stable while their installation directory is unchanged;
 the macOS path remains stable while the `.app` bundle stays in place. AppImage
@@ -1763,9 +1801,23 @@ and writes a backup before the atomic update. It then checks the effective entry
 `codex mcp get devprojex --json`; a project `.codex/config.toml` override is reported
 and never rewritten.
 
+Codex keeps one global `devprojex` entry, and that entry carries a fixed `--root`,
+so it serves one project at a time. Connecting another project replaces it:
+Desktop and Terminal Workspace ask first and show both roots, and the CLI requires
+`--replace`. The root stays explicit because Codex documents `cwd` only as an
+optional setting and does not document which directory it starts a stdio server
+in when `cwd` is absent, so an entry without `--root` could serve an unexpected
+folder.
+
 **Open in Cursor** recreates the `devprojex` entry in `.cursor/mcp.json`;
 **Open in VS Code** does the same in `.vscode/mcp.json`, then each action opens
 the project through its URL scheme with its command-line launcher as a fallback.
+Both project files name the root as `${workspaceFolder}`, which Cursor and VS Code
+document for workspace `mcp.json` files, so the entry follows the folder that holds
+it. The executable path stays absolute and belongs to the computer that wrote the
+file; on another computer, connect again instead of reusing the file. `--print`
+and the manual fallback keep an absolute root, because that text may be pasted
+into a user-level configuration.
 Only the existing `sandboxEnabled` and `dev` fields are preserved in that entry;
 other existing fields, including `env`, `envFile`, and `cwd`, may be replaced or
 removed. Desktop and Terminal Workspace list those fields and require **Replace**
@@ -1804,19 +1856,29 @@ limited, request smaller file ranges.
 The CLI performs the connection by default:
 
 ```shell
-devprojex mcp connect /absolute/path/to/project --client claude-code --mode live
-devprojex mcp connect /absolute/path/to/project --client cursor --mode standard
-devprojex mcp connect /absolute/path/to/project --client codex --mode live --open
+devprojex mcp connect /absolute/path/to/project --client claude-code
+devprojex mcp connect /absolute/path/to/project --client cursor --mode live
+devprojex mcp connect /absolute/path/to/project --client codex --replace --open
 ```
 
-Clients are `claude-code`, `codex`, `cursor`, `vscode`, and `json`. The `json` client
+Clients are `claude-code`, `codex`, `cursor`, `vscode`, and `json`; the mode is
+`standard` unless `--mode live` is given. The `json` client
 always returns the manual configuration. Add `--print` to print the configuration
 without discovering a client, starting a process, or writing a project file. Add
 `--open` to open the selected client after a successful registration; without it the
 CLI only registers the server and prints the result. The manual-only `json` client
 rejects `--open`. For Cursor and VS Code, `--replace` explicitly confirms replacing
 additional fields in an existing `devprojex` entry; without it, the CLI leaves
-that entry unchanged and prints the affected field names.
+that entry unchanged and prints the affected field names. For Codex, `--replace`
+confirms pointing its single global entry at this project when it serves another
+one; without it, the CLI names both roots and changes nothing.
+
+A successful result states the client, the mode, and the project root. In live
+mode it also says whether the window has saved a selection for that root and when
+(UTC), or that the server uses its standard defaults until one is saved. A Codex
+result repeats that Codex serves one project at a time. Every successful
+registration ends with a reminder that a client session already running must be
+restarted to load the server.
 
 ### Claude Code
 

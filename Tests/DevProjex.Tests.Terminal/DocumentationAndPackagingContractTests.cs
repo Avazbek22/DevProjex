@@ -146,8 +146,10 @@ public sealed class DocumentationAndPackagingContractTests
 		string[] liveContextOutputContracts =
 		[
 			"[Live context] 1 named file(s) returned outside the current focus; effective filters still apply.",
-			"[Live context] revision 16 · 128 files selected in the window",
-			"[Live context] revision 16 · 128 files selected in the window · root 1 of 2",
+			"[Live context] revision 16 · 128 files in the saved selection · saved 2026-09-12",
+			"[Live context] revision 16 · 128 files in the saved selection · saved 2026-09-12 · root 1 of 2",
+			"[Live context] focus: 1 of 9 selectable files; 8 outside the focus were not searched; read any of them by name with get_file.",
+			"DPX-MCP-PATH-NOT-FOUND: file 'Dockerfile' is hidden by the saved window filters; change the filters in DevProjex or use a standard-mode server.",
 			"[Live context] revision 1 · 42 files selected by server defaults",
 			"[Live context] changed since revision 14: +2 folders, -1 file",
 			"[Live context] changed since revision 14: +7 folders, -2 files · 5 names shown, 4 more",
@@ -156,7 +158,7 @@ public sealed class DocumentationAndPackagingContractTests
 			"[Live context] changed since revision 14: -1 folder, +all",
 			"[Live context] no window selection saved for this root; using server defaults.",
 			"[Live context] no window selection saved for this root; using server defaults. If the DevProjex window runs on Windows, live context across WSL is not supported yet.",
-			"[Live context] the window selects no files; tick files in the DevProjex window.",
+			"[Live context] the saved selection has no checked files; tick files in the DevProjex window.",
 			"[Live context] Saved selection is busy. Retry this call once.",
 			"[Live context] Saved selection is invalid or incompatible. Ask the user to repair it or update DevProjex; retry after that.",
 			"[Live context] pack built at revision 14.",
@@ -209,6 +211,16 @@ public sealed class DocumentationAndPackagingContractTests
 			"In a batched read, that range is reported as `unavailable — outside effective selection`",
 			normalizedServer,
 			StringComparison.Ordinal);
+		Assert.Contains(
+			"`unavailable — hidden by the saved window filters; change the filters in DevProjex or use a standard-mode server`",
+			normalizedServer,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"The missing-selection explanation is sent once per session for each root",
+			normalizedServer,
+			StringComparison.Ordinal);
+		Assert.Contains("the mode to `standard`", normalizedCommandLine, StringComparison.Ordinal);
+		Assert.Contains("`--replace` confirms moving it to this one", normalizedCommandLine, StringComparison.Ordinal);
 		Assert.Contains("writes the latest frontier after two seconds", normalizedTerminal, StringComparison.Ordinal);
 		Assert.Contains(
 			"A missing or null frontier starts with no check marks",

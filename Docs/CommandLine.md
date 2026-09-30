@@ -163,7 +163,9 @@ outside-focus notice. Without `--live`, server behavior is unchanged.
 claude-code|codex|cursor|vscode|json --mode live|standard [--replace]
 [--print|--open]` connects the selected client and prints a human-readable
 result. The project defaults to the current directory, the client to
-`claude-code`, and the mode to `live`.
+`claude-code`, and the mode to `standard`; `--mode live` registers a server that
+follows the selection the DevProjex window saved for the project. Desktop and
+Terminal Workspace keep their own explicit live and standard choices.
 
 Claude Code receives a project-local `claude mcp remove`/`mcp add` sequence.
 Codex receives the equivalent global `codex mcp` replacement. Cursor updates
@@ -175,7 +177,18 @@ If a command-line client is not installed or a connection fails, the result
 includes the manual command or configuration to use instead. For Cursor and
 VS Code, `--replace` confirms replacing additional fields in an existing
 `devprojex` entry; without it, the CLI leaves that entry unchanged and prints the
-affected field names.
+affected field names. Codex keeps one global `devprojex` entry with a fixed root,
+so it serves one project at a time; when that entry points at another project,
+`--replace` confirms moving it to this one, and without it the CLI names both
+roots and changes nothing. The Cursor and VS Code project files name the root as
+`${workspaceFolder}`; their executable path stays absolute, so the result notes
+that the file belongs to this computer.
+
+A successful result states the client, the mode, and the project root. In live
+mode it also says whether a selection is saved for that root and when (UTC), or
+that the server uses its standard defaults until one is saved. Every successful
+registration ends with a reminder that an already running client session must be
+restarted to load the server.
 
 Add `--open` to open the client after a successful registration. Claude Code
 and Codex open in a new terminal rooted at the project; Cursor and VS Code open
