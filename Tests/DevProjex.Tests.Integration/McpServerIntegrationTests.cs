@@ -8010,6 +8010,46 @@ public sealed partial class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task RelatedFilesSaysWhatAnEmptySectionDoesNotCover()
+	{
+		const string scope =
+			"[Related scope] calls and static member uses are not edges; find uses with search_project for the name.";
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "tsconfig.json"),
+			"{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}\n");
+		File.WriteAllText(Path.Combine(project, "consumer.ts"), "import { value } from './provider.js';\nexport const doubled = value * 2;\n");
+		File.WriteAllText(Path.Combine(project, "provider.ts"), "export const value = 1;\n");
+		File.WriteAllText(Path.Combine(project, "standalone.ts"), "export const alone = 2;\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		async Task<string> RelatedAsync(string path, string direction) => Text(await server.CallAsync(
+			"related_files",
+			new Dictionary<string, object?> { ["path"] = path, ["direction"] = direction }));
+		var covered = await RelatedAsync("consumer.ts", "dependencies");
+		var partlyEmpty = await RelatedAsync("consumer.ts", "both");
+		var empty = await RelatedAsync("standalone.ts", "both");
+
+		Assert.Contains("provider.ts", covered, StringComparison.Ordinal);
+		Assert.DoesNotContain("[Related scope]", covered, StringComparison.Ordinal);
+
+		// Dependencies were found and nothing imports the consumer: the empty section still needs
+		// the reminder that a call is not an edge.
+		Assert.DoesNotContain("[No related files]", partlyEmpty, StringComparison.Ordinal);
+		Assert.Contains(scope, partlyEmpty, StringComparison.Ordinal);
+
+		Assert.Contains("[No related files] in the effective selection.", empty, StringComparison.Ordinal);
+		Assert.Contains(scope, empty, StringComparison.Ordinal);
+		foreach (var text in new[] { partlyEmpty, empty })
+		{
+			var trustedTail = text[(text.LastIndexOf("</untrusted-data-", StringComparison.Ordinal) + 1)..];
+			Assert.Contains(scope, trustedTail, StringComparison.Ordinal);
+			Assert.DoesNotContain("consumer", trustedTail, StringComparison.Ordinal);
+			Assert.DoesNotContain("standalone", trustedTail, StringComparison.Ordinal);
+		}
+	}
+
+	[Fact]
 	public async Task LargeRelatedFilesResultSpillsIntoReadablePackStorage()
 	{
 		using var workspace = new TemporaryDirectory();

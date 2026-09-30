@@ -663,6 +663,11 @@ dependency-engine status constants is repeated without a path in the trusted lin
 `[No facts] <constant>.`; file extensions and arbitrary project text never enter that line. A
 call with no resolved edges receives trusted `[No related files] in the effective
 selection.`; when unresolved references exist, that same line reports their count.
+Calls and static member uses are not edges, so an empty section is not evidence that
+nothing uses a file. Whenever a requested `Dependencies` or `Dependents` section of a
+seed with facts is empty, and on every call without resolved edges, the constant
+`[Related scope] calls and static member uses are not edges; find uses with
+search_project for the name.` follows as trusted text; it names nothing from the project.
 No trailer names a file hidden by the manifest. See
 [Dependencies.md](Dependencies.md) for evidence layers, statuses, resolver boundaries,
 limits, caching, and determinism.

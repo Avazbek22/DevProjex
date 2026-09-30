@@ -57,6 +57,10 @@ internal sealed class DevProjexMcpTools(
 		"with '**/' to find it at any depth, or append '/**' to a directory to select its files. " +
 		"search_project matches file content, and paths selects a path that already exists.";
 	private const int MaximumNameSearchExtensionLength = 8;
+	// Calls and static member uses are documented as outside the dependency evidence, so an empty
+	// related section is not evidence that nothing uses a file. A constant: no name reaches it.
+	private const string RelatedScopeNotice =
+		"[Related scope] calls and static member uses are not edges; find uses with search_project for the name.";
 	private const string SearchContentCapNotice =
 		"[Search truncated] The returned text reached the 16000-character search cap.";
 	private const int MaximumAnalyzeTopFilesCharacters = 32_000;
@@ -1496,6 +1500,10 @@ internal sealed class DevProjexMcpTools(
 					? "[No related files] in the effective selection."
 					: $"[No related files] in the effective selection; unresolved references={resolution.Unresolved.ToString(CultureInfo.InvariantCulture)}."
 				: null;
+			// An empty relation section reads as "nothing uses this" unless it says what an edge is.
+			var relatedScopeNotice = noRelatedNotice is not null || HasEmptyRelationSection(related.Seeds, direction)
+				? RelatedScopeNotice
+				: null;
 			var partialEvidenceNotice = protectedEvidence.UninspectedSources == 0
 				? null
 				: $"[Related evidence] partial · uninspected-sources={protectedEvidence.UninspectedSources.ToString(CultureInfo.InvariantCulture)}; " +
@@ -1508,7 +1516,8 @@ internal sealed class DevProjexMcpTools(
 				partialEvidenceNotice,
 				SelectionNotices(plan, includeFilters: true, selectionContext),
 				FormatSafeNoFactsNotice(related.Seeds),
-				noRelatedNotice);
+				noRelatedNotice,
+				relatedScopeNotice);
 			using var relatedBody = new StringWriter(CultureInfo.InvariantCulture);
 			var relatedRanges = new List<ProjectContextFileLineRange>();
 			WriteRelatedFiles(
@@ -1701,6 +1710,15 @@ internal sealed class DevProjexMcpTools(
 			})
 			.ToArray();
 	}
+
+	private static bool HasEmptyRelationSection(
+		IReadOnlyList<SeedRelatedFiles> seeds,
+		DependencyDirection direction) =>
+		seeds.Any(seed => seed.NoFactsReason is null &&
+						  ((direction is DependencyDirection.Dependencies or DependencyDirection.Both &&
+							seed.Dependencies.Count == 0) ||
+						   (direction is DependencyDirection.Dependents or DependencyDirection.Both &&
+							seed.Dependents.Count == 0)));
 
 	private static string FormatRelatedEvidenceReason(DependencyEdge edge, SourceSite site) =>
 		$"{RelatedEvidenceLabel(edge.Layer)} {edge.Reference} at line {site.Line.ToString(CultureInfo.InvariantCulture)}";
