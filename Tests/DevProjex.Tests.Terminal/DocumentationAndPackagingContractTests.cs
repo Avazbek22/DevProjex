@@ -360,8 +360,13 @@ public sealed class DocumentationAndPackagingContractTests
 			server,
 			StringComparison.Ordinal);
 		Assert.Contains(
-			"[Search order] bounded evidence priority; canonical path and line break ties.",
-			server,
+			"fixed rule, so it is documented here rather than restated in every response",
+			normalized,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain("[Search order]", server, StringComparison.Ordinal);
+		Assert.Contains(
+			"A response with nothing left to read carries no `[Next read]` line",
+			normalized,
 			StringComparison.Ordinal);
 		Assert.Contains(
 			"No test, generated, snapshot, or unsupported-language category is excluded or categorically demoted",

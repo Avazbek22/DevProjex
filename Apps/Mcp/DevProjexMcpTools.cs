@@ -45,10 +45,6 @@ internal sealed class DevProjexMcpTools(
 	private const string ReadDeclarationsNotice =
 		"[Next read] Read only declarations needed for the task; batch known selections in one get_file call.";
 	private const int MaximumDeclarationsReported = 20;
-	// Named because a caller that sees part of a result is entitled to know what decided which part.
-	// A constant: the order is a rule, not a property of this project's files.
-	private const string SearchOrderNotice =
-		"[Search order] bounded evidence priority; canonical path and line break ties.";
 	// Closes a run of named hits when the next one belongs to nothing. A constant, not a name.
 	private static readonly string OutsideDeclarationHeader = $"in (no declaration){Environment.NewLine}";
 	// Asking for a file by name is the one request the selection vocabulary answers in a form a
@@ -1307,7 +1303,11 @@ internal sealed class DevProjexMcpTools(
 				symbols.Declarations,
 				declarationPreview,
 				declarationReadContext);
-			var declarationsListed = declarationSection.DeclarationsListed;
+			// A lone declaration whose body is already shown whole leaves nothing to read.
+			var declarationsToRead = declarationSection.DeclarationsListed &&
+									 !(declarationSection.BodyWritten &&
+									   symbols.Declarations.Count == 1 &&
+									   declarationPreview?.RemainingLines == 0);
 			// What the response could not carry is kept in the session, so the way forward is to
 			// page what this scan already found rather than to run the same scan again.
 			var storedSearch = withheld.Length == 0
@@ -1391,7 +1391,6 @@ internal sealed class DevProjexMcpTools(
 						  " not searched as text.",
 					McpTrustedDiagnosticFormatter.FormatWarnings(plan),
 					noMatches,
-					ordered.Count == 0 ? null : SearchOrderNotice,
 					FormatDeclarationBodyNotice(declarationSection, symbols.Declarations.Count),
 					FormatStoredSearchNotice(
 						storedSearch,
@@ -1403,7 +1402,7 @@ internal sealed class DevProjexMcpTools(
 					searchTotalsNotice,
 					FormatSearchBoundaryNotice(boundary, storedSearch is not null),
 					resultGroupTruncated ? SearchContentCapNotice : null,
-					FormatSearchNextRead(boundary, storedSearch is not null, declarationsListed),
+					FormatSearchNextRead(boundary, storedSearch is not null, declarationsToRead),
 					SelectionNotices(
 						plan,
 						includeFilters: false,
@@ -4515,11 +4514,11 @@ internal sealed class DevProjexMcpTools(
 	private static string? FormatSearchNextRead(
 		McpSearchBoundary boundary,
 		bool hasStoredContinuation,
-		bool declarationsListed)
+		bool declarationsToRead)
 	{
 		if (hasStoredContinuation)
 			return "[Next read] Call read_pack with the reported pack_id for the remaining retained matches.";
-		if (declarationsListed)
+		if (declarationsToRead)
 			return ReadDeclarationsNotice;
 		return boundary.IsComplete
 			? null

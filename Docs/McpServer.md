@@ -965,7 +965,9 @@ closing counters and `limits=` stay the same. It emits exactly one primary next 
 the limiting condition. With a stored continuation that step is `[Next read] Call
 read_pack with the reported pack_id for the remaining retained matches.` When known
 declarations are the needed continuation it is `[Next read] Read only declarations
-needed for the task; batch known selections in one get_file call.` Consequently, a
+needed for the task; batch known selections in one get_file call.` A response with
+nothing left to read carries no `[Next read]` line: a complete search without listed
+declarations, or one whose only listed declaration is shown whole. Consequently, a
 complete zero-match response is evidence that the whole effective selection was
 searched, while a partial zero-match response is only evidence about its inspected
 sources.
@@ -1341,11 +1343,8 @@ when the list was.
 
 The search chooses which compact match records to retain while transformed files
 stream past. A stronger late record can evict a weaker early record; the server does
-not keep an unbounded list and sort it afterward. The constant naming this rule is:
-
-```text
-[Search order] bounded evidence priority; canonical path and line break ties.
-```
+not keep an unbounded list and sort it afterward. This bounded evidence priority is a
+fixed rule, so it is documented here rather than restated in every response.
 
 Priority is the sum of soft signals: exact agreement between the pattern and an
 enclosing declaration name, an explicitly requested `paths` scope, breadth across
@@ -1468,6 +1467,9 @@ When declaration reads are the applicable continuation, one trusted constant clo
 ```text
 [Next read] Read only declarations needed for the task; batch known selections in one get_file call.
 ```
+
+It is left out when the only listed declaration's body is already shown whole, which
+`[Declaration body] shown=1/1; no other declarations require a read.` states instead.
 
 The list ships on every search that showed a hit, including a search the character
 cap cut, because a cut response is exactly when a caller would otherwise open a whole
