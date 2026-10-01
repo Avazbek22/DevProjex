@@ -250,11 +250,15 @@ internal static class AgentJournalPresentation
         _ => TimeSpan.FromMilliseconds(durationMs).ToString("g", CultureInfo.CurrentCulture)
     };
 
+    public static string FormatDuration(TimeSpan duration) =>
+        FormatDuration((long)duration.TotalMilliseconds);
+
+    // Session spans keep the millisecond precision of call durations; clock ticks add only noise.
     public static string FormatSessionDuration(AgentJournalSession session, DateTimeOffset now)
     {
         var end = session.EndedUtc ?? now;
         var duration = end >= session.StartedUtc ? end - session.StartedUtc : TimeSpan.Zero;
-        return duration.ToString("g", CultureInfo.CurrentCulture);
+        return FormatDuration(duration);
     }
 
     public static string FormatClient(string name, string version) =>
