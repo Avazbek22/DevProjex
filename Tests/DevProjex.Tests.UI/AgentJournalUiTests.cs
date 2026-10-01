@@ -1448,10 +1448,6 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 			"AgentJournal.Notice.Unavailable",
 			"AgentJournal.Notice.HistoryRecovered",
 			"AgentJournal.Notice.HistoryIncomplete",
-			"AgentActivity.Status.Calls.One",
-			"AgentActivity.Status.Calls.Few",
-			"AgentActivity.Status.Calls.Many",
-			"AgentActivity.Status.Calls.Other",
 			"AgentActivity.Tree.ToolTip"
 		};
 		var catalog = new JsonLocalizationCatalog();
