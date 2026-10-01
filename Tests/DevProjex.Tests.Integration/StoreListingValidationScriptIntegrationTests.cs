@@ -99,8 +99,8 @@ public sealed class StoreListingValidationScriptIntegrationTests
 
         Assert.NotEqual(0, result.ExitCode);
         Assert.Contains(
-            "GUI scene '6_Terminal_Workspace' is not declared in store-screenshots.json.",
-            result.StandardError + result.StandardOutput,
+            WithoutConsoleWrapping("GUI scene '6_Terminal_Workspace' is not declared in store-screenshots.json."),
+            WithoutConsoleWrapping(result.StandardError + result.StandardOutput),
             StringComparison.Ordinal);
     }
 
@@ -434,6 +434,11 @@ public sealed class StoreListingValidationScriptIntegrationTests
         Assert.NotEqual(0, result.ExitCode);
         Assert.Contains("SLP026", result.StandardError + result.StandardOutput, StringComparison.Ordinal);
     }
+
+    // PowerShell's concise error view wraps long messages to the console width and prefixes each
+    // continuation with "| " (macOS runners wrap at 80 columns), so compare without layout characters.
+    private static string WithoutConsoleWrapping(string text) =>
+        Regex.Replace(Regex.Replace(text, @"\x1B\[[0-9;]*m", string.Empty), @"[\s|]+", string.Empty);
 
     private static (int ExitCode, string StandardOutput, string StandardError) RunPowerShellScript(
         string scriptPath,
