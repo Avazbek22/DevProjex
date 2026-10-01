@@ -13,7 +13,7 @@ internal static class DesktopOpenRequestFactory
 		string? filter,
 		string? search,
 		ProjectSelectionSpec? selection,
-		AppLanguage language,
+		AppLanguage? language,
 		bool elevationAttempted) =>
 		new(
 			projectPath,
