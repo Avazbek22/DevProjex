@@ -16,7 +16,7 @@ Phím tắt:
 
 ### Menu ngữ cảnh
 Nhấp chuột phải vào một nút, hoặc nhấn {shift}F10 hay phím Menu trên nút đang có tiêu điểm:
-* Hiển thị trong File Explorer / Hiển thị trong Finder / Mở trong trình quản lý tập tin — hiển thị mục trong trình quản lý tệp của hệ thống; nhãn tương ứng với nền tảng hiện tại.
+* Hiển thị trong File Explorer / Hiển thị trong Finder / Mở trong trình quản lý tệp — hiển thị mục trong trình quản lý tệp của hệ thống; nhãn tương ứng với nền tảng hiện tại.
 * Sao chép đường dẫn đầy đủ — đường dẫn tuyệt đối của mục.
 * Sao chép đường dẫn tương đối — đường dẫn từ gốc dự án, bắt đầu bằng tên thư mục gốc, ví dụ `project/src/File.cs`.
 * Sao chép nội dung — đối với tệp: sao chép nội dung đã áp dụng các phép biến đổi nội dung, đúng như khi sao chép và xuất.
@@ -30,7 +30,7 @@ Nếu đường dẫn không còn tồn tại trên đĩa, việc mở mục tro
 * Cửa sổ mới — mở một phiên bản DevProjex độc lập mới
 * Gần đây — danh sách các thư mục cục bộ được mở gần đây
 * Làm mới — quét lại thư mục cục bộ và dựng lại cây (F5)
-* Xuất sang tập tin:
+* Xuất sang tệp:
   * Xuất cây
   * Xuất nội dung
   * Xuất cây và nội dung
@@ -79,7 +79,7 @@ Quy tắc:
 
 Mỗi mục hiển thị thư mục cha và tên dự án, ví dụ `Projects / App`.
 
-## 4) Khởi chạy từ thiết bị đầu cuối
+## 4) Khởi chạy từ terminal
 DevProjex cung cấp Terminal Workspace tương tác và các lệnh trực tiếp cho tập lệnh và CI.
 
 Nếu lệnh đã được thiết lập, hãy mở terminal và chạy:
@@ -117,7 +117,7 @@ Ghi chú:
 * các lệnh phân tích, tìm kiếm và xuất không sửa đổi tệp dự án — DevProjex hoạt động ở chế độ chỉ đọc.
 
 Nếu lệnh `devprojex` không hoạt động, hãy mở trong DevProjex:
-“Trợ giúp → Khởi chạy từ thiết bị đầu cuối”.
+“Trợ giúp → Khởi chạy từ terminal”.
 
 ## 5) Git
 “Git → Nhân bản kho lưu trữ...” nhân bản một kho vào bộ nhớ đệm của DevProjex rồi mở nó. Nhánh và Nhận thông tin cập nhật chỉ khả dụng cho các dự án được nhân bản theo cách này. Ứng dụng không chạm vào tệp của bạn — nó chỉ làm việc với bộ nhớ đệm.
@@ -312,9 +312,9 @@ Có sẵn ở bên phải:
 * Áp dụng cài đặt
 * Xử lý nội dung
 * Loại trừ
-* Các loại tập tin
+* Các loại tệp
 
-Các thay đổi trong “Loại trừ” và “Các loại tập tin” được giữ tạm trong bảng và áp dụng sau khi nhấp “Áp dụng cài đặt”.
+Các thay đổi trong “Loại trừ” và “Các loại tệp” được giữ tạm trong bảng và áp dụng sau khi nhấp “Áp dụng cài đặt”.
 
 Sau khi một hộp kiểm thay đổi, ứng dụng có thể cập nhật các tùy chọn khả dụng và số lượng của chúng ở chế độ nền. Cây kết quả chỉ được dựng lại sau khi nhấp “Áp dụng cài đặt”.
 
@@ -322,7 +322,7 @@ Nếu việc cập nhật tùy chọn khả dụng bị hủy bằng nút X trê
 
 Mỗi danh sách đều có nút chuyển Tất cả.
 
-Lưu ý về “Các loại tập tin”:
+Lưu ý về “Các loại tệp”:
 * danh sách này chỉ hiển thị các tệp có phần mở rộng;
 * các tệp không có phần mở rộng không được thêm vào danh sách này mà được điều khiển bởi một tùy chọn riêng trong “Loại trừ”.
 
@@ -367,9 +367,9 @@ Tùy theo nội dung dự án, các tùy chọn sau có thể được hiển th
 * Thư mục trống
 * Tệp trống
 * Thư mục ẩn
-* Tập tin ẩn
+* Tệp ẩn
 * Thư mục dấu chấm
-* Tập tin dấu chấm
+* Tệp dấu chấm
 * Tệp không có phần mở rộng
 
 Khi không thể áp dụng tính năng lọc Git, bộ chọn của GUI và các dòng nút chọn trên trục Git của TUI sẽ bị ẩn hoàn toàn: không có ranh giới kho Git và bộ lọc `.gitignore` không thể thay đổi cây hiện tại. Khi trục hiển thị bên ngoài kho Git, GUI chỉ cung cấp chế độ không lọc và `.gitignore`, còn TUI vô hiệu hóa các dòng cần kho Git. Trong kho Git có năm giá trị thông thường: không lọc, `.gitignore`, tệp được theo dõi, tệp đã đưa vào vùng đệm Git và tất cả thay đổi hiện tại; trong TUI, phạm vi `diff:<ref>..<ref>` đang hoạt động xuất hiện ở dòng thứ sáu. Chọn một giá trị sẽ thay thế chế độ Git hiện tại mà không thay đổi Bỏ qua thông minh hay các loại trừ cơ bản. Các tùy chọn khác xuất hiện khi quy tắc của chúng có thể thay đổi cây hiện tại, vì vậy danh sách có thể thay đổi sau khi bật/tắt một quy tắc hoặc loại tệp khác.
@@ -448,9 +448,9 @@ Bỏ qua thông minh có thể bị ẩn khi chế độ Git đã chọn đã ba
 Quy tắc phủ định Git bắt đầu bằng `!` chỉ hủy một kết quả Git. Nó không vô hiệu hóa Bỏ qua thông minh hay một quy tắc cơ bản.
 
 ### 12.8 Quy tắc cơ bản
-“Thư mục dấu chấm” và “Tập tin dấu chấm” kiểm tra tên mục: tên có bắt đầu bằng dấu chấm hay không.
+“Thư mục dấu chấm” và “Tệp dấu chấm” kiểm tra tên mục: tên có bắt đầu bằng dấu chấm hay không.
 
-“Thư mục ẩn” và “Tập tin ẩn” kiểm tra thuộc tính ẩn của hệ thống. Trên một số nền tảng, tên bắt đầu bằng dấu chấm và thuộc tính hệ thống có thể mô tả cùng một mục hoặc các mục khác nhau.
+“Thư mục ẩn” và “Tệp ẩn” kiểm tra thuộc tính ẩn của hệ thống. Trên một số nền tảng, tên bắt đầu bằng dấu chấm và thuộc tính hệ thống có thể mô tả cùng một mục hoặc các mục khác nhau.
 
 “Tệp trống” ẩn các tệp có kích thước 0 byte.
 
@@ -479,7 +479,7 @@ Nếu quá trình chuẩn bị cài đặt bị hủy, DevProjex đưa bảng v�
 
 ## 13) Cách tính cây và số liệu
 Kết quả phụ thuộc vào:
-* Các loại tập tin đã chọn
+* Các loại tệp đã chọn
 * Quy tắc loại trừ
 * Bộ lọc đang hoạt động
 * các nút cây đã đánh dấu (cho các thao tác dựa trên lựa chọn)

@@ -25,10 +25,10 @@ Klik kanan sebuah node, atau tekan {shift}F10 atau tombol Menu pada node yang se
 
 Jika jalur tidak lagi ada di disk, membuka item di pengelola file atau menyalin isinya akan menampilkan pesan kesalahan; penyalinan jalur tetap berfungsi.
 
-## 3) Berkas
+## 3) File
 * Buka folder... — membuka folder root ({mod}O)
-* Jendela baru — membuka instance DevProjex baru yang independen
-* Terkini — daftar folder lokal yang baru dibuka
+* Jendela baru — membuka instans DevProjex baru yang independen
+* Terbaru — daftar folder lokal yang baru dibuka
 * Segarkan — memindai ulang folder lokal dan membangun ulang pohon (F5)
 * Ekspor ke file:
   * Ekspor pohon
@@ -67,8 +67,8 @@ Aturan:
 * jika jalur tidak tersedia atau tidak ada, pemeriksaan akses yang sama seperti pada “Buka folder...” diterapkan;
 * item yang tidak didukung atau bukan lokal diabaikan.
 
-### Terkini
-Item “Berkas → Terkini” menampilkan riwayat folder lokal yang baru dibuka.
+### Terbaru
+Item “File → Terbaru” menampilkan riwayat folder lokal yang baru dibuka.
 
 Aturan:
 * hanya folder lokal yang ditambahkan ke daftar;
@@ -109,7 +109,7 @@ Catatan:
 * jalur yang mengandung spasi harus diapit tanda kutip;
 * `--git-mode` memilih `none`, `gitignore`, `tracked`, `staged`, `changes`, atau `diff:<ref>..<ref>`;
 * `--exclude` mengatur pengecualian biasa secara terpisah dari pemfilteran Git;
-* perintah analisis dan ekspor bersifat deterministik dan tidak membuka antarmuka desktop;
+* perintah analisis dan ekspor bersifat deterministik dan tidak membuka antarmuka Desktop;
 * `tui`, `open`, `analyze`, `search`, `tree`, dan kedua perintah `export` juga menerima URL repositori Git, dan `related` menerimanya melalui `--project`; hasil klon masuk ke cache terkelola (`devprojex cache`);
 * perintah memiliki alias dan flag pendek yang terdokumentasi — misalnya `export ctx`, `-f`, `-n`; `devprojex help` menampilkannya;
 * `analyze --findings` mencantumkan temuan penyamaran tanpa nilainya, dan `--fail-on-findings` mengembalikan kode keluar bukan nol untuk CI;
@@ -125,7 +125,7 @@ Jika perintah `devprojex` tidak berfungsi, buka di DevProjex:
 Cache disimpan di direktori cache sistem milik pengguna. Jalankan `devprojex doctor` untuk melihat jalur yang digunakan.
 
 * Cabang — menampilkan daftar cabang yang tersedia dengan cabang aktif ditandai; beralih cabang memperbarui pohon ke cabang yang dipilih. Jika cabang sudah ada secara lokal, peralihan dilakukan secara offline (tanpa pembaruan). Jika belum ada secara lokal, cabang akan diambil dan dibuat.
-* Dapatkan pembaruan — hanya memperbarui cabang saat ini: fetch lalu reset ke origin/<branch>. Untuk proyek Git Clone, F5 melakukan tindakan yang sama; perintah biasa “Berkas → Segarkan” dinonaktifkan.
+* Dapatkan pembaruan — hanya memperbarui cabang saat ini: fetch lalu reset ke origin/<branch>. Untuk proyek Git Clone, F5 melakukan tindakan yang sama; perintah biasa “File → Segarkan” dinonaktifkan.
 
 ### Jendela klon
 Di jendela Git Clone, daftar “Tautan terbaru” dapat muncul di bawah kolom URL.
@@ -312,9 +312,9 @@ Tersedia di sebelah kanan:
 * Terapkan pengaturan
 * Pemrosesan konten
 * Pengecualian
-* Jenis berkas
+* Jenis file
 
-Perubahan di “Pengecualian” dan “Jenis berkas” ditampung di panel dan diterapkan setelah mengklik “Terapkan pengaturan”.
+Perubahan di “Pengecualian” dan “Jenis file” ditampung di panel dan diterapkan setelah mengklik “Terapkan pengaturan”.
 
 Setelah kotak centang berubah, aplikasi dapat memperbarui opsi yang tersedia beserta jumlahnya di latar belakang. Pohon hasil baru dibangun ulang setelah mengklik “Terapkan pengaturan”.
 
@@ -322,7 +322,7 @@ Jika pembaruan opsi yang tersedia dibatalkan dengan tombol X di bilah status, pe
 
 Setiap daftar memiliki pengalih Semua.
 
-Catatan tentang “Jenis berkas”:
+Catatan tentang “Jenis file”:
 * daftar ini hanya menampilkan file yang memiliki ekstensi;
 * file tanpa ekstensi tidak ditambahkan ke daftar ini dan diatur oleh opsi terpisah di “Pengecualian”.
 
@@ -479,7 +479,7 @@ Jika persiapan pengaturan dibatalkan, DevProjex mengembalikan panel ke keadaan t
 
 ## 13) Cara pohon dan metrik dihitung
 Hasil bergantung pada:
-* Jenis berkas yang dipilih
+* Jenis file yang dipilih
 * Aturan pengecualian
 * Filter aktif
 * node pohon yang dicentang (untuk operasi berbasis pilihan)
@@ -515,7 +515,7 @@ Metrik isi:
 ### 13.3 Kapan penghitung diperbarui
 Penghitungan ulang dijalankan:
 * setelah membuka/menyegarkan proyek;
-* setelah menerapkan pengaturan (pengecualian dan jenis berkas);
+* setelah menerapkan pengaturan (pengecualian dan jenis file);
 * saat kotak centang pohon berubah (dengan debounce);
 * saat mengganti format pohon (untuk operasi yang menggunakan keluaran pohon);
 * saat penghitungan latar belakang dibatalkan, penghitung diatur ke 0 hingga penghitungan ulang berikutnya selesai.
@@ -565,7 +565,7 @@ Setel ulang data (Bantuan → Setel ulang data) menghapus profil parameter proye
 Tindakan ini juga menghapus sesi jurnal agen yang sudah selesai (bagian 19.3); sesi aktif tetap dipertahankan.
 
 Penting:
-* riwayat Terkini untuk folder lokal tidak dihapus;
+* riwayat Terbaru untuk folder lokal tidak dihapus;
 * riwayat repositori terbaru di jendela Git Clone tidak dihapus;
 * file dan folder di disk tidak diubah atau dihapus.
 
