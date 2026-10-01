@@ -80,7 +80,7 @@ Regole:
 Per ogni elemento vengono mostrati la cartella padre e il nome del progetto, ad esempio `Projects / App`.
 
 ## 4) Avvio dal terminale
-DevProjex offre uno spazio di lavoro interattivo nel terminale e comandi diretti per script e CI.
+DevProjex offre un’area di lavoro interattiva nel terminale e comandi diretti per script e CI.
 
 Se il comando è già configurato, apri un terminale ed esegui:
 `devprojex --help`
@@ -88,8 +88,8 @@ Se il comando è già configurato, apri un terminale ed esegui:
 Così vedrai i comandi e le opzioni di primo livello. Le opzioni e gli esempi di un singolo comando si mostrano con `devprojex help <command>`.
 
 Esempi:
-* `devprojex` — aprire lo spazio di lavoro interattivo del terminale. All’interno dello spazio di lavoro, le azioni si eseguono tramite la riga di comando `:` (ad esempio `:copy`, `:analyze`, `:branch`, `:language`); l’elenco completo dei comandi è disponibile nella guida integrata dello spazio di lavoro e nella documentazione del progetto.
-* `devprojex tui .` — aprire la cartella indicata direttamente nello spazio di lavoro del terminale.
+* `devprojex` — aprire l’area di lavoro interattiva del terminale. All’interno dell’area di lavoro, le azioni si eseguono tramite la riga di comando `:` (ad esempio `:copy`, `:analyze`, `:branch`, `:language`); l’elenco completo dei comandi è disponibile nella guida integrata dell’area di lavoro e nella documentazione del progetto.
+* `devprojex tui .` — aprire la cartella indicata direttamente nell’area di lavoro del terminale.
 * `devprojex open . --preview` — aprire la cartella corrente nell’anteprima Desktop.
 * `devprojex analyze . --format json` — analizzare il progetto corrente in formato JSON.
 * `devprojex tree .` — stampare l’albero del progetto nel terminale.
@@ -397,7 +397,7 @@ La ricerca delle aree di progetto è limitata, così che il caricamento di una g
 ### 12.3 Nascondi segreti
 «Nascondi segreti» è disattivato per impostazione predefinita. Analizza solo il testo selezionato e sostituisce ogni valore rilevato sul posto, conservando il file e il codice circostante. Quando è disattivato non viene eseguita alcuna scansione e non appare alcun contatore. Dopo la scansione della selezione corrente, l’etichetta mostra il numero di valori rilevati; se le decisioni «conserva» lasciano meno valori nascosti, mostra rilevati/nascosti, e l’indicatore ? della riga riporta entrambi i numeri.
 
-I valori mascherati sono evidenziati nell’anteprima. Fai clic su uno di essi per conservare invariata solo quell’occorrenza; {alt}↓ / {alt}↑ scorrono i valori rilevati e Enter attiva o disattiva quello corrente. Nello spazio di lavoro del terminale, `[` e `]` scorrono le occorrenze e `Enter` o `Space` attivano o disattivano quella corrente. La decisione vale per la sessione in anteprima, appunti, esportazione del contesto, copia in cartella e ZIP; non viene salvata nel profilo del progetto.
+I valori mascherati sono evidenziati nell’anteprima. Fai clic su uno di essi per conservare invariata solo quell’occorrenza; {alt}↓ / {alt}↑ scorrono i valori rilevati e Enter attiva o disattiva quello corrente. Nell’area di lavoro del terminale, `[` e `]` scorrono le occorrenze e `Enter` o `Space` attivano o disattivano quella corrente. La decisione vale per la sessione in anteprima, appunti, esportazione del contesto, copia in cartella e ZIP; non viene salvata nel profilo del progetto.
 
 Il menu contestuale dell’anteprima estende queste decisioni. Un clic destro su un’occorrenza rilevata consente di conservare — o nascondere di nuovo — in un’unica azione tutte le occorrenze della sua regola oppure tutte le occorrenze rilevate nello stesso file. Un clic destro su un valore selezionato nel contenuto di un file aggiunge un contrassegno manuale: «Nascondi … qui» nasconde solo quell’occorrenza per la sessione, «Nascondi sempre …» crea un contrassegno persistente per tutte le occorrenze del valore, e «Nascondi … come dato privato» crea un contrassegno persistente controllato da «Nascondi dati privati». «Rimuovi contrassegno» appare su un contrassegno manuale e lo elimina; un valore ancora riconosciuto dal rilevatore resta nascosto. Il valore manuale deve essere una singola riga da 8 a 512 caratteri selezionata nel contenuto del file. La creazione di un contrassegno attiva automaticamente l’opzione corrispondente. I contrassegni persistenti conservano solo un’identità del valore con chiave e la sua classe, mai il testo originale.
 
@@ -434,9 +434,9 @@ Il profilo integrato `standard` seleziona `gitignore` insieme a `smart-ignore`, 
 ### 12.6 Solo file tracciati da Git
 «Solo file tracciati da Git» costruisce la fase Git dell’albero dai file esistenti nell’albero di lavoro registrati in ogni indice Git leggibile. I file tracciati modificati e i nuovi file aggiunti all’indice restano inclusi; i file non tracciati vengono esclusi. Questo è l’albero di lavoro corrente, non un’istantanea storica di `HEAD` o di un repository remoto.
 
-Ogni repository viene risolto in modo indipendente: i repository adiacenti nella cartella aperta e i sottomoduli dichiarati usano ciascuno il proprio indice, e un repository figlio non eredita i percorsi tracciati dal repository padre o da uno adiacente. Un repository incorporato non dichiarato in `.gitmodules` resta opaco, come nella modalità `.gitignore`. Questa modalità richiede la CLI di Git; un indice vuoto ma leggibile è valido. Se lo spazio di lavoro del terminale (TUI) viene avviato in questa modalità e non è possibile caricare alcun indice applicabile, lo spazio di lavoro non viene aperto. Se la modalità viene selezionata interattivamente in uno spazio di lavoro TUI già aperto e non è possibile caricare alcun indice applicabile, la modifica viene rifiutata e resta attiva l’ultima modalità Git utilizzabile. Nella stessa situazione, i comandi diretti terminano con un errore di criterio o di verifica. DevProjex non passa mai silenziosamente a `.gitignore`. Quando è leggibile un altro indice applicabile, gli ambiti annidati non disponibili vengono esclusi con un avviso.
+Ogni repository viene risolto in modo indipendente: i repository adiacenti nella cartella aperta e i sottomoduli dichiarati usano ciascuno il proprio indice, e un repository figlio non eredita i percorsi tracciati dal repository padre o da uno adiacente. Un repository incorporato non dichiarato in `.gitmodules` resta opaco, come nella modalità `.gitignore`. Questa modalità richiede la CLI di Git; un indice vuoto ma leggibile è valido. Se l’area di lavoro del terminale (TUI) viene avviata in questa modalità e non è possibile caricare alcun indice applicabile, l’area di lavoro non viene aperta. Se la modalità viene selezionata interattivamente in un’area di lavoro TUI già aperta e non è possibile caricare alcun indice applicabile, la modifica viene rifiutata e resta attiva l’ultima modalità Git utilizzabile. Nella stessa situazione, i comandi diretti terminano con un errore di criterio o di verifica. DevProjex non passa mai silenziosamente a `.gitignore`. Quando è leggibile un altro indice applicabile, gli ambiti annidati non disponibili vengono esclusi con un avviso.
 
-In uno spazio di lavoro Desktop già aperto, la selezione esplicita resta visibile e fallisce in modo sicuro: output ed esportazione vengono bloccati se la verifica non riesce, mentre una disponibilità parziale consente di continuare con un avviso localizzato.
+In un’area di lavoro Desktop già aperta, la selezione esplicita resta visibile e fallisce in modo sicuro: output ed esportazione vengono bloccati se la verifica non riesce, mentre una disponibilità parziale consente di continuare con un avviso localizzato.
 
 Le modalità Git si escludono a vicenda; `none` disattiva il filtro Git. Le modalità temporanee `staged`, `changes` e `diff:<ref>..<ref>` non vengono salvate nei profili. Quando una modalità temporanea è attiva, il profilo locale del progetto della GUI conserva l’ultima modalità persistente abilitata, `gitignore` o `tracked`. `none` viene salvata solo se è attiva al momento del salvataggio. La TUI e la CLI rifiutano di salvare un profilo portabile mentre è attiva una modalità temporanea.
 
