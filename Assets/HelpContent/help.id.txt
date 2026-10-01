@@ -328,7 +328,7 @@ Catatan tentang “Jenis file”:
 
 Pemrosesan konten:
 * mengubah isi file teks yang dipilih tanpa mengubah pohon;
-* Sembunyikan informasi rahasia dan Sembunyikan data pribadi mengganti nilai yang terdeteksi (bagian 12.3 dan 12.4);
+* Sembunyikan rahasia dan Sembunyikan data pribadi mengganti nilai yang terdeteksi (bagian 12.3 dan 12.4);
 * Kompres kode mempertahankan deklarasi sambil memperpendek implementasi bernama di 14 bahasa;
 * Hapus komentar menghapus komentar dan komentar dokumentasi di 20 paket bahasa;
 * Hapus baris kosong menghapus baris yang hanya berisi spasi di paket yang sama sambil mempertahankan literal multibaris;
@@ -394,8 +394,8 @@ Beberapa penyimpanan dependensi dan direktori layanan dapat dikenali dari strukt
 
 Penemuan cakupan proyek dibatasi agar memuat folder pengguna yang besar tidak berubah menjadi analisis berulang penuh atas setiap direktori. Struktur biasa menggunakan penemuan dangkal, sedangkan monorepo yang dikenali ditelusuri lebih dalam. Setelah cakupan ditemukan, Abaikan dengan cerdas berlaku untuk seluruh subpohonnya tanpa batas kedalaman.
 
-### 12.3 Sembunyikan informasi rahasia
-“Sembunyikan informasi rahasia” nonaktif secara bawaan. Opsi ini hanya memindai konten teks yang dipilih dan mengganti setiap nilai yang terdeteksi di tempatnya, dengan tetap mempertahankan file dan kode di sekitarnya. Selama opsi nonaktif, tidak ada pemindaian dan tidak ada jumlah yang ditampilkan. Setelah pilihan saat ini dipindai, label menampilkan jumlah nilai yang terdeteksi; jika keputusan untuk membiarkan nilai apa adanya membuat nilai yang disembunyikan lebih sedikit, label menampilkan terdeteksi/disembunyikan, dan indikator ? pada baris tersebut melaporkan kedua jumlah itu.
+### 12.3 Sembunyikan rahasia
+“Sembunyikan rahasia” nonaktif secara bawaan. Opsi ini hanya memindai konten teks yang dipilih dan mengganti setiap nilai yang terdeteksi di tempatnya, dengan tetap mempertahankan file dan kode di sekitarnya. Selama opsi nonaktif, tidak ada pemindaian dan tidak ada jumlah yang ditampilkan. Setelah pilihan saat ini dipindai, label menampilkan jumlah nilai yang terdeteksi; jika keputusan untuk membiarkan nilai apa adanya membuat nilai yang disembunyikan lebih sedikit, label menampilkan terdeteksi/disembunyikan, dan indikator ? pada baris tersebut melaporkan kedua jumlah itu.
 
 Rentang yang disamarkan disorot di Pratinjau. Klik salah satunya untuk membiarkan hanya kemunculan itu apa adanya; {alt}↓ / {alt}↑ berpindah antar temuan dan Enter mengalihkan temuan aktif. Di Terminal Workspace, gunakan `[` dan `]` untuk berpindah antar kemunculan dan `Enter` atau `Space` untuk mengalihkan kemunculan aktif. Keputusan ini berlaku untuk Pratinjau, clipboard, ekspor konteks, salinan folder, dan ZIP selama sesi saat ini; keputusan tidak disimpan di profil proyek.
 
@@ -406,7 +406,7 @@ Salinan folder atau ZIP juga mengubah teks yang cocok dan mungkin tidak lagi dap
 Jumlah ini hanya melaporkan kecocokan aturan. Nol tidak berarti proyek aman. CLI menggunakan `--hide-secrets`; detail teknis dan batasannya ada di `Docs/HideSecrets.md`.
 
 ### 12.4 Sembunyikan data pribadi
-“Sembunyikan data pribadi” nonaktif secara bawaan. Opsi ini mendeteksi alamat email, alamat IP global, nama pengguna lokal di jalur, alamat MAC, dan nomor telepon internasional dalam file teks yang dipilih. Temuan menggunakan keputusan Pratinjau dan alur keluaran yang sama seperti Sembunyikan informasi rahasia; tanda manual yang dibuat dengan “Sembunyikan … sebagai data pribadi” termasuk dalam kelas ini dan mengikuti sakelar ini (bagian 12.3). Nama pengguna lokal di header jalur yang dihasilkan dan di root pohon disamarkan sebagai satu temuan bersama: penghitung menghitungnya sebagai satu nilai, indikator ? melaporkan apakah nilai itu disembunyikan atau ditampilkan, dan satu klik mengalihkan semua jalur yang disamarkan.
+“Sembunyikan data pribadi” nonaktif secara bawaan. Opsi ini mendeteksi alamat email, alamat IP global, nama pengguna lokal di jalur, alamat MAC, dan nomor telepon internasional dalam file teks yang dipilih. Temuan menggunakan keputusan Pratinjau dan alur keluaran yang sama seperti Sembunyikan rahasia; tanda manual yang dibuat dengan “Sembunyikan … sebagai data pribadi” termasuk dalam kelas ini dan mengikuti sakelar ini (bagian 12.3). Nama pengguna lokal di header jalur yang dihasilkan dan di root pohon disamarkan sebagai satu temuan bersama: penghitung menghitungnya sebagai satu nilai, indikator ? melaporkan apakah nilai itu disembunyikan atau ditampilkan, dan satu klik mengalihkan semua jalur yang disamarkan.
 
 Rentang dan host dokumentasi, nama pengguna CI yang umum, resolver DNS publik yang terkenal, dan rentang nomor telepon fiktif yang terdokumentasi tetap terlihat. Nol kecocokan bukan jaminan privasi. CLI menggunakan `--hide-private-data`; aturan lengkap dan batasan fase pertama ada di `Docs/HidePrivateData.md`.
 

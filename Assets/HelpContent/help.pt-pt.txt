@@ -368,8 +368,8 @@ Consoante o conteúdo do projeto, podem ser apresentadas as seguintes opções:
 * Ficheiros vazios
 * Pastas ocultas
 * Ficheiros ocultos
-* Pastas com ponto inicial
-* Ficheiros com ponto inicial
+* Pastas ponto
+* Ficheiros ponto
 * Ficheiros sem extensão
 
 O seletor da GUI e as linhas de opção do eixo Git na TUI ficam totalmente ocultos quando a filtragem Git não é aplicável: não há limite de repositório e o filtro `.gitignore` não pode alterar a árvore atual. Quando o eixo está visível fora de um repositório, a GUI oferece apenas «sem filtragem» e `.gitignore`, enquanto a TUI desativa as linhas que exigem um repositório. Dentro de um repositório Git, os cinco valores habituais são: sem filtragem, `.gitignore`, ficheiros controlados, ficheiros preparados e todas as alterações atuais; na TUI, um âmbito `diff:<ref>..<ref>` ativo aparece como sexta linha. Escolher um valor substitui o modo Git atual sem alterar o Smart Ignore nem as exclusões básicas. As restantes opções aparecem quando as respetivas regras podem alterar a árvore atual, pelo que a lista pode mudar depois de alterar outra regra ou um tipo de ficheiro.
@@ -431,8 +431,8 @@ O ficheiro local do repositório `.git/info/exclude` também é aplicado, com pr
 
 O perfil integrado `standard` seleciona `gitignore`, além de `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files` e `extensionless-files`.
 
-### 12.6 Apenas ficheiros controlados pelo Git
-«Apenas ficheiros controlados pelo Git» constrói a etapa Git da árvore a partir dos ficheiros existentes na árvore de trabalho registados em cada índice Git legível. Os ficheiros controlados modificados e os novos ficheiros preparados continuam incluídos; os ficheiros não controlados são excluídos. Esta é a árvore de trabalho atual, não uma captura histórica do `HEAD` nem de um repositório remoto.
+### 12.6 Apenas ficheiros controlados
+«Apenas ficheiros controlados» constrói a etapa Git da árvore a partir dos ficheiros existentes na árvore de trabalho registados em cada índice Git legível. Os ficheiros controlados modificados e os novos ficheiros preparados continuam incluídos; os ficheiros não controlados são excluídos. Esta é a árvore de trabalho atual, não uma captura histórica do `HEAD` nem de um repositório remoto.
 
 Cada repositório é resolvido de forma independente: os repositórios irmãos dentro da pasta aberta e os submódulos declarados usam cada um o seu próprio índice, e um repositório filho não herda os caminhos controlados do repositório pai nem de um irmão. Um repositório incorporado que não esteja declarado em `.gitmodules` continua opaco, tal como no modo `.gitignore`. Este modo requer a CLI do Git; um índice vazio, mas legível, é válido. Se o Terminal Workspace (TUI) for iniciado neste modo e nenhum índice aplicável puder ser carregado, o espaço de trabalho não é aberto. Se o modo for selecionado interativamente num espaço de trabalho TUI já aberto e nenhum índice aplicável puder ser carregado, a alteração é rejeitada e o último modo Git utilizável permanece ativo. Na mesma situação, os comandos diretos devolvem uma falha de política ou de verificação. O DevProjex nunca passa silenciosamente para `.gitignore`. Se outro índice aplicável puder ser lido, os âmbitos aninhados indisponíveis são excluídos com um aviso.
 
@@ -448,7 +448,7 @@ O Smart Ignore pode ficar oculto enquanto o modo Git selecionado já abranger to
 Uma regra de negação do Git que começa por `!` cancela apenas um resultado do Git. Não desativa o Smart Ignore nem uma regra básica.
 
 ### 12.8 Regras básicas
-«Pastas com ponto inicial» e «Ficheiros com ponto inicial» verificam o nome do item.
+«Pastas ponto» e «Ficheiros ponto» verificam se o nome do item começa por um ponto.
 
 «Pastas ocultas» e «Ficheiros ocultos» verificam o atributo oculto do sistema. Em algumas plataformas, um nome iniciado por ponto e o atributo do sistema podem descrever o mesmo item ou itens diferentes.
 

@@ -368,8 +368,8 @@ W zależności od zawartości projektu mogą być pokazywane następujące opcje
 * Puste pliki
 * Ukryte foldery
 * Ukryte pliki
-* Foldery z kropką na początku
-* Pliki z kropką na początku
+* Foldery kropkowe
+* Pliki kropkowe
 * Pliki bez rozszerzenia
 
 Selektor GUI i wiersze przełączników osi Git w TUI są całkowicie ukryte, gdy filtrowanie Git nie ma zastosowania: nie ma granicy repozytorium, a filtr `.gitignore` nie może zmienić bieżącego drzewa. Gdy oś jest widoczna poza repozytorium, GUI oferuje tylko brak filtrowania i `.gitignore`, a TUI wyłącza wiersze wymagające repozytorium. W repozytorium Git dostępnych jest pięć zwykłych wartości: brak filtrowania, `.gitignore`, pliki śledzone, pliki przygotowane w Git i wszystkie bieżące zmiany; w TUI aktywny zakres `diff:<ref>..<ref>` pojawia się jako szósty wiersz. Wybór wartości zastępuje bieżący tryb Git bez zmiany Inteligentnego ignorowania i podstawowych wykluczeń. Pozostałe opcje są pokazywane, gdy ich reguły mogą zmienić bieżące drzewo, więc lista może się zmienić po przełączeniu innej reguły lub typu pliku.
@@ -448,7 +448,7 @@ Inteligentne ignorowanie może pozostać ukryte, gdy wybrany tryb Git obejmuje j
 Reguła negacji Git zaczynająca się od `!` anuluje tylko wynik Git. Nie wyłącza Inteligentnego ignorowania ani reguły podstawowej.
 
 ### 12.8 Reguły podstawowe
-„Foldery z kropką na początku” i „Pliki z kropką na początku” sprawdzają nazwę elementu.
+„Foldery kropkowe” i „Pliki kropkowe” sprawdzają, czy nazwa elementu zaczyna się od kropki.
 
 „Ukryte foldery” i „Ukryte pliki” sprawdzają systemowy atrybut ukrycia. Na niektórych platformach nazwa zaczynająca się od kropki i atrybut systemowy mogą dotyczyć tego samego elementu albo różnych elementów.
 

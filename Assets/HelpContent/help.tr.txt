@@ -431,8 +431,8 @@ Deponun yerel `.git/info/exclude` dosyası da kökteki `.gitignore` dosyasından
 
 Yerleşik `standard` profili, `gitignore` ile birlikte `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files` ve `extensionless-files` seçeneklerini seçer.
 
-### 12.6 Yalnızca izlenen Git dosyaları
-“Yalnızca izlenen Git dosyaları”, ağacın Git aşamasını okunabilen her Git dizininde kayıtlı, çalışma ağacında var olan dosyalardan oluşturur. Değiştirilmiş izlenen dosyalar ve hazırlanmış (staged) eklemeler dahil kalır; izlenmeyen dosyalar hariç tutulur. Bu, geçerli çalışma ağacıdır; `HEAD`'in veya uzak bir deponun geçmiş anlık görüntüsü değildir.
+### 12.6 İzlenen Git dosyaları
+“İzlenen Git dosyaları”, ağacın Git aşamasını okunabilen her Git dizininde kayıtlı, çalışma ağacında var olan dosyalardan oluşturur. Değiştirilmiş izlenen dosyalar ve hazırlanmış (staged) eklemeler dahil kalır; izlenmeyen dosyalar hariç tutulur. Bu, geçerli çalışma ağacıdır; `HEAD`'in veya uzak bir deponun geçmiş anlık görüntüsü değildir.
 
 Her depo bağımsız olarak çözümlenir: açılan klasördeki kardeş depolar ve bildirilmiş alt modüller kendi dizinlerini kullanır; alt depo, izlenen yolları üst veya kardeş depodan devralmaz. `.gitmodules` içinde bildirilmemiş gömülü bir depo, `.gitignore` modunda olduğu gibi kapalı kalır. Bu mod Git CLI gerektirir; okunabilir boş bir dizin geçerlidir. Terminal Çalışma Alanı (TUI) bu modda başlarsa ve uygulanabilir bir dizin yüklenemezse çalışma alanı açılmaz. Mod, açık bir TUI çalışma alanında etkileşimli olarak seçilirse ve uygulanabilir bir dizin yüklenemezse değişiklik reddedilir ve son kullanılabilir Git modu etkin kalır. Aynı durumda doğrudan komutlar bir ilke veya denetim hatası döndürür. DevProjex hiçbir zaman sessizce `.gitignore` moduna geri dönmez. Uygulanabilir başka bir dizin okunabiliyorsa kullanılamayan iç içe kapsamlar bir uyarıyla hariç tutulur.
 
