@@ -924,8 +924,9 @@ mark binary entries with metadata.
 For `--view content`, human-readable text and Markdown write one `Root: ...`
 line followed by project-relative file headings. A repository URL source uses its
 safe URL for the Root line instead of the managed checkout path. `tree-content`
-keeps relative content headings. JSON and XML keep their existing machine root
-and file-path representation.
+keeps relative content headings. JSON and XML keep the absolute `project.root` and
+name every file, token-budget entry, and ranking entry by its project-relative `/`
+path in every view, exactly as `tree-content` does.
 
 `--max-tokens N` limits included file content to an estimated token budget of at
 least 1. The estimate is one token per four transformed characters, rounded up

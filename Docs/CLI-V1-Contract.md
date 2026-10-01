@@ -681,7 +681,9 @@ transformation state and never widens the selection.
 For human-readable text and Markdown, `--view content` writes one `Root: ...`
 line and project-relative file headings. Remote sources use the safe repository
 URL as Root. `tree-content` retains relative content headings. Context JSON and
-XML keep their existing machine root and file-path representation.
+XML keep the absolute `project.root` and name every file, token-budget entry, and
+ranking entry by its project-relative `/` path in every view, exactly as
+`tree-content` does.
 
 ### `export project`
 

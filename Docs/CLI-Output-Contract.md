@@ -624,7 +624,13 @@ The top-level shape is:
 ```
 
 Property order is deterministic where contract tests require it. Paths use `/`
-inside machine documents. A binary entry has `isBinary: true` and null content;
+inside machine documents. Every file path a context document writes is
+project-relative in every view (`tree`, `content`, and `tree-content`) and for local
+and remote sources alike: `files[].path`, `tokenBudget.largestSkippedFiles[].path`,
+and the ranking `top`, `skipped`, `seeds`, and `via` paths. The standard-error budget
+and ranking summaries name files the same way. `project.root` is the only property
+that carries the absolute project location; diagnostic paths keep their own
+representation. A binary entry has `isBinary: true` and null content;
 binary bytes are never inserted into AI context output.
 Context JSON and `tree --format json` escape only what JSON requires: a quote is
 written as `\"`, a backslash as `\\`, and control characters and characters outside

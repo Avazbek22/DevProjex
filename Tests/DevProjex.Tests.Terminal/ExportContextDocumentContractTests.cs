@@ -298,12 +298,105 @@ public sealed class ExportContextDocumentContractTests
 		}
 
 		Assert.Equal(reports["text"], reports["markdown"]);
+		Assert.Equal(reports["text"], reports["json"]);
 		Assert.Equal(reports["json"], reports["xml"]);
 		Assert.Contains("  A-large.txt (16 estimated tokens)", reports["text"], StringComparison.Ordinal);
-		Assert.Contains(
-			$"  {Path.Combine(workspace.Path, "A-large.txt")} (16 estimated tokens)",
-			reports["json"],
-			StringComparison.Ordinal);
+		Assert.DoesNotContain(workspace.Path, reports["json"], StringComparison.OrdinalIgnoreCase);
+	}
+
+	[Theory]
+	[InlineData("json")]
+	[InlineData("xml")]
+	public async Task ContentViewMachineDocumentsNameEveryFileProjectRelative(string format)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/src/Large.cs", "internal static class Large { }\n" + new string('/', 400) + "\n");
+		workspace.WriteFile("project/src/Small.cs", "class Small { }\n");
+		workspace.WriteFile("project/docs/Guide.md", "guide\n");
+		var environment = new TestTerminalEnvironment();
+
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(
+				workspace,
+				environment,
+				format,
+				projectPath: project,
+				maximumEstimatedTokens: 10,
+				view: "content",
+				rank: true));
+
+		var output = environment.StandardOutput;
+		string documentRoot;
+		string[] includedPaths;
+		string? largestSkippedPath;
+		if (format == "json")
+		{
+			using var document = JsonDocument.Parse(output);
+			var root = document.RootElement;
+			documentRoot = root.GetProperty("project").GetProperty("root").GetString()!;
+			includedPaths = root.GetProperty("files").EnumerateArray()
+				.Select(static file => file.GetProperty("path").GetString()!)
+				.ToArray();
+			largestSkippedPath = root.GetProperty("tokenBudget").GetProperty("largestSkippedFiles")[0]
+				.GetProperty("path").GetString();
+			var ranking = root.GetProperty("ranking");
+			Assert.Equal(
+				["docs/Guide.md", "src/Large.cs", "src/Small.cs"],
+				ranking.GetProperty("top").EnumerateArray()
+					.Select(static entry => entry.GetProperty("path").GetString())
+					.Order(StringComparer.Ordinal));
+			Assert.Equal(
+				["src/Large.cs"],
+				ranking.GetProperty("skipped").EnumerateArray()
+					.Select(static entry => entry.GetProperty("path").GetString()));
+		}
+		else
+		{
+			var document = XDocument.Parse(output);
+			documentRoot = document.Root!.Element("project")!.Element("root")!.Value;
+			includedPaths = document.Root.Element("files")!.Elements("file")
+				.Select(static file => file.Attribute("path")!.Value)
+				.ToArray();
+			largestSkippedPath = document.Root.Element("tokenBudget")!.Element("largestSkippedFiles")!
+				.Element("file")!.Attribute("path")?.Value;
+		}
+
+		Assert.Equal(["docs/Guide.md", "src/Small.cs"], includedPaths.Order(StringComparer.Ordinal));
+		Assert.Equal("src/Large.cs", largestSkippedPath);
+		// The absolute root appears once, as project.root, and never as a prefix of a file path.
+		Assert.True(Path.IsPathFullyQualified(documentRoot), documentRoot);
+		Assert.Equal(1, CountOccurrences(output, documentRoot));
+		Assert.Contains("[Skipped] src/Large.cs", environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("  src/Large.cs (", environment.StandardError, StringComparison.Ordinal);
+		Assert.DoesNotContain(project, environment.StandardError, StringComparison.OrdinalIgnoreCase);
+		Assert.DoesNotContain(documentRoot, environment.StandardError, StringComparison.OrdinalIgnoreCase);
+	}
+
+	[Theory]
+	[InlineData("json")]
+	[InlineData("xml")]
+	public async Task ContentViewMachineDocumentsMatchTheDefaultViewFilePaths(string format)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/src/nested/App.cs", "class App { }\n");
+		workspace.WriteFile("project/README.md", "readme\n");
+		var contentView = new TestTerminalEnvironment();
+		var defaultView = new TestTerminalEnvironment();
+
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(workspace, contentView, format, projectPath: project, view: "content"));
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(workspace, defaultView, format, projectPath: project));
+
+		Assert.Equal(["README.md", "src/nested/App.cs"], ReadMachineFilePaths(contentView.StandardOutput, format));
+		Assert.Equal(
+			ReadMachineFilePaths(defaultView.StandardOutput, format),
+			ReadMachineFilePaths(contentView.StandardOutput, format));
 	}
 
 	[Theory]
@@ -378,19 +471,26 @@ public sealed class ExportContextDocumentContractTests
 		var output = Encoding.UTF8.GetString(destination.ToArray());
 		var expected = RepositoryWebPathPresentationService.NormalizeForDisplay(repositoryUrl);
 		string? diagnosticPath;
+		string? serializedFilePath;
 		if (format == ProjectContextDocumentFormat.Json)
 		{
 			using var document = JsonDocument.Parse(output);
 			diagnosticPath = document.RootElement.GetProperty("diagnostics")[0]
 				.GetProperty("path").GetString();
+			serializedFilePath = document.RootElement.GetProperty("files")[0]
+				.GetProperty("path").GetString();
 		}
 		else
 		{
-			diagnosticPath = XDocument.Parse(output).Root!.Element("diagnostics")!
+			var document = XDocument.Parse(output);
+			diagnosticPath = document.Root!.Element("diagnostics")!
 				.Element("diagnostic")!.Attribute("path")?.Value;
+			serializedFilePath = document.Root.Element("files")!
+				.Element("file")!.Attribute("path")?.Value;
 		}
 
 		Assert.Equal(expected, diagnosticPath);
+		Assert.Equal("App.cs", serializedFilePath);
 		Assert.DoesNotContain(checkout, output, StringComparison.OrdinalIgnoreCase);
 	}
 
@@ -451,7 +551,7 @@ public sealed class ExportContextDocumentContractTests
 
 		var expectedPath = PathUtility.NormalizeSeparators(Path.GetFullPath(source));
 		Assert.Equal(expectedPath, diagnosticPath);
-		Assert.Equal(expectedPath, serializedFilePath);
+		Assert.Equal("App.cs", serializedFilePath);
 	}
 
 	[Theory]
@@ -1208,6 +1308,23 @@ public sealed class ExportContextDocumentContractTests
 		startInfo.Environment[InvocationEnvironment.InternalDataRootVariable] = dataRoot;
 		startInfo.Environment["DOTNET_NOLOGO"] = "1";
 		return TerminalTestProcess.Run(startInfo);
+	}
+
+	private static string[] ReadMachineFilePaths(string output, string format)
+	{
+		if (format == "json")
+		{
+			using var document = JsonDocument.Parse(output);
+			return document.RootElement.GetProperty("files").EnumerateArray()
+				.Select(static file => file.GetProperty("path").GetString()!)
+				.Order(StringComparer.Ordinal)
+				.ToArray();
+		}
+
+		return XDocument.Parse(output).Root!.Element("files")!.Elements("file")
+			.Select(static file => file.Attribute("path")!.Value)
+			.Order(StringComparer.Ordinal)
+			.ToArray();
 	}
 
 	private static int CountOccurrences(string value, string fragment)
