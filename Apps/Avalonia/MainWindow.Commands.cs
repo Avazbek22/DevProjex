@@ -272,8 +272,7 @@ public partial class MainWindow
                     this,
                     _localization["Dialog.TerminalCommand.Title"],
                     _localization["Dialog.TerminalCommand.ReconfigureSucceeded"],
-                    _localization["Dialog.OK"],
-                    height: 120);
+                    _localization["Dialog.OK"]);
             }
 
             return;
@@ -316,8 +315,7 @@ public partial class MainWindow
             _localization["Dialog.ResetSettings.Title"],
             _localization["Dialog.ResetSettings.Message"],
             _localization["Dialog.ResetSettings.Confirm"],
-            _localization["Dialog.Cancel"],
-            height: 180);
+            _localization["Dialog.Cancel"]);
 
         if (!confirmed)
         {

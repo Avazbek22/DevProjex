@@ -322,8 +322,7 @@ internal partial class AgentJournalWindow : Window
                 : _localization["AgentJournal.Clear.AllMessage"],
             _localization["AgentJournal.Clear"],
             _localization["Dialog.Cancel"],
-            width: 430,
-            height: 170);
+            width: 430);
         if (confirmed)
             await ClearScopeAsync(root, _lifetime.Token);
     }

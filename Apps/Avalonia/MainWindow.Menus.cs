@@ -190,8 +190,7 @@ public partial class MainWindow
                 _localization.Format("Dialog.RecentFolderUnavailable.Message", path),
                 _localization["Dialog.RecentFolderUnavailable.Remove"],
                 _localization["Dialog.RecentFolderUnavailable.Keep"],
-                width: 450,
-                height: 180);
+                width: 450);
 
             if (shouldRemove)
                 await RemoveRecentFolderAsync(path, lifetimeToken);
