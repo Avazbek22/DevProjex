@@ -37,15 +37,14 @@ internal static class TerminalCommandSetupDialog
 		};
 
 		var body = BuildContent(owner, localization, content, snapshot, isAutomaticPrompt, dontShowAgain, completion);
-		var dialog = DialogSurfaceFactory.CreateWindow(
+		var dialog = DialogSurfaceFactory.CreateContentSizedWindow(
+			owner,
 			content.Title,
 			themeVariant,
 			brushes,
 			body,
 			dimensions.Width,
-			dimensions.Height,
-			dimensions.MinWidth,
-			dimensions.MinHeight);
+			dimensions.MinWidth);
 
 		dialog.Closed += (_, _) =>
 		{
@@ -279,11 +278,11 @@ internal static class TerminalCommandSetupDialog
 	}
 }
 
+// Only the width is chosen per content: the height follows the text, so every language and
+// snapshot state gets exactly the room it needs.
 internal sealed record TerminalCommandDialogDimensions(
 	double Width,
-	double Height,
-	double MinWidth,
-	double MinHeight)
+	double MinWidth)
 {
 	public static TerminalCommandDialogDimensions ForContent(
 		bool isAutomaticPrompt,
@@ -292,13 +291,13 @@ internal sealed record TerminalCommandDialogDimensions(
 		if (isAutomaticPrompt)
 		{
 			return content.IsPathSetup
-				? new TerminalCommandDialogDimensions(600, 180, 540, 170)
-				: new TerminalCommandDialogDimensions(480, 180, 420, 170);
+				? new TerminalCommandDialogDimensions(600, 540)
+				: new TerminalCommandDialogDimensions(480, 420);
 		}
 
 		return IsCompactManualContent(content)
-			? new TerminalCommandDialogDimensions(500, 190, 420, 180)
-			: new TerminalCommandDialogDimensions(560, 320, 480, 280);
+			? new TerminalCommandDialogDimensions(500, 420)
+			: new TerminalCommandDialogDimensions(560, 480);
 	}
 
 	private static bool IsCompactManualContent(TerminalCommandDialogText content) =>
