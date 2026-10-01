@@ -201,6 +201,115 @@ public sealed class DependencyPythonAndConfigurationSemanticsIntegrationTests
 		Assert.Null(edge.Target);
 	}
 
+	[Theory]
+	[InlineData("fixture")]
+	[InlineData("src")]
+	public async Task TopLevelSrcPackageResolvesRelativeImportsFromTheImportingFile(string projectName)
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("pyproject.toml", $"[project]\nname = \"{projectName}\"");
+		var initializer = fixture.CreateFile("src/__init__.py", string.Empty);
+		var consumer = fixture.CreateFile("src/a.py", "from .b import greet\n\n\ndef call_it():\n    return greet()\n");
+		var target = fixture.CreateFile("src/b.py", "def greet():\n    return \"hi\"\n");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, initializer, consumer, target],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(result.Edges, item => item.Source == "src/a.py" && item.Reference == ".b");
+		Assert.Equal(ResolutionStatus.Resolved, edge.Status);
+		Assert.Equal("src/b.py", edge.Target);
+	}
+
+	[Fact]
+	public async Task TopLevelSrcPackageResolvesPackageAndNestedRelativeImports()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("pyproject.toml", "[project]\nname = \"fixture\"\nrequires-python = \">=3.12\"");
+		var initializer = fixture.CreateFile("src/__init__.py", string.Empty);
+		var util = fixture.CreateFile("src/util.py", "def compute_checksum(data):\n    return 0\n");
+		var legacyInitializer = fixture.CreateFile("src/legacy/__init__.py", string.Empty);
+		var legacy = fixture.CreateFile("src/legacy/old.py", "def legacy_sum(values):\n    return 0\n");
+		var reporting = fixture.CreateFile(
+			"src/reporting.py",
+			"from . import util\nfrom .legacy.old import legacy_sum\n");
+		var app = fixture.CreateFile("src/app.py", "def greet_user(name):\n    return name\n");
+		var test = fixture.CreateFile("tests/test_app.py", "from src.app import greet_user\n");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, initializer, util, legacyInitializer, legacy, reporting, app, test],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var package = Assert.Single(result.Edges, item => item.Source == "src/reporting.py" && item.Reference == ".");
+		Assert.Equal(ResolutionStatus.Resolved, package.Status);
+		Assert.Equal("src/util.py", package.Target);
+		var nested = Assert.Single(result.Edges, item =>
+			item.Source == "src/reporting.py" && item.Reference == ".legacy.old");
+		Assert.Equal(ResolutionStatus.Resolved, nested.Status);
+		Assert.Equal("src/legacy/old.py", nested.Target);
+		var absolute = Assert.Single(result.Edges, item => item.Source == "tests/test_app.py");
+		Assert.Equal(ResolutionStatus.Resolved, absolute.Status);
+		Assert.Equal("src/app.py", absolute.Target);
+	}
+
+	[Fact]
+	public async Task TopLevelSrcPackageStillRejectsRelativeImportsAboveItself()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("pyproject.toml", "[project]\nname = \"fixture\"");
+		var initializer = fixture.CreateFile("src/__init__.py", string.Empty);
+		var consumer = fixture.CreateFile("src/a.py", "from .. import target\n");
+		var target = fixture.CreateFile("target.py", "VALUE = 1\n");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, initializer, consumer, target],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(result.Edges, item => item.Source == "src/a.py");
+		Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
+		Assert.Null(edge.Target);
+		Assert.Contains("beyond the top-level package", Assert.Single(edge.Reasons), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task SrcLayoutPackagesKeepResolvingFromTheSrcRoot()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("pyproject.toml", "[project]\nname = \"click\"");
+		var initializer = fixture.CreateFile("src/click/__init__.py", "from .core import Command\n");
+		var core = fixture.CreateFile("src/click/core.py", "from .utils import echo\n\n\nclass Command:\n    pass\n");
+		var utils = fixture.CreateFile("src/click/utils.py", "def echo(message):\n    return message\n");
+		var test = fixture.CreateFile(
+			"tests/test_core.py",
+			"import click\nfrom click.core import Command\nfrom click import Command as Exported\n");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, initializer, core, utils, test],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var relative = Assert.Single(result.Edges, item => item.Source == "src/click/core.py" && item.Reference == ".utils");
+		Assert.Equal(ResolutionStatus.Resolved, relative.Status);
+		Assert.Equal("src/click/utils.py", relative.Target);
+		var reExport = Assert.Single(result.Edges, item =>
+			item.Source == "src/click/__init__.py" && item.Reference == ".core");
+		Assert.Equal(ResolutionStatus.Resolved, reExport.Status);
+		Assert.Equal("src/click/core.py", reExport.Target);
+		Assert.Contains(result.Edges, item => item.Source == "tests/test_core.py" && item.Reference == "click" &&
+			item.Status == ResolutionStatus.Resolved && item.Target == "src/click/__init__.py");
+		Assert.Contains(result.Edges, item => item.Source == "tests/test_core.py" && item.Reference == "click.core" &&
+			item.Status == ResolutionStatus.Resolved && item.Target == "src/click/core.py");
+		Assert.Contains(result.Edges, item => item.Source == "tests/test_core.py" && item.Reference == "click" &&
+			item.Status == ResolutionStatus.Resolved && item.Target == "src/click/core.py");
+	}
+
 	[Fact]
 	public async Task LastUnconditionalReExportBindingWins()
 	{

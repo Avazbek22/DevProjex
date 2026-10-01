@@ -3645,14 +3645,22 @@ public sealed partial class DependencyFactsEngine : IDisposable
 
 		private string ComputePythonModule(FileFacts source)
 		{
-			var root = PythonRootPrefixes(source)
+			var roots = PythonRootPrefixes(source)
 				.Where(prefix => prefix.Length == 0 || source.Path.StartsWith(prefix + '/', StringComparison.Ordinal))
 				.OrderByDescending(static prefix => prefix.Length)
-				.FirstOrDefault();
+				.ToArray();
+			// A root that holds __init__.py is a regular package of an enclosing root (a top-level
+			// src/ package, for example), so its modules keep the package name and relative imports
+			// inside it resolve from the importing file's location.
+			var root = roots.FirstOrDefault(prefix => !IsPythonRegularPackageDirectory(prefix)) ?? roots.LastOrDefault();
 			var relative = root is { Length: > 0 } ? source.Path[(root.Length + 1)..] : source.Path;
 			var computed = Path.ChangeExtension(relative, null)!.Replace('/', '.').Replace('\\', '.');
 			return computed.EndsWith(".__init__", StringComparison.Ordinal) ? computed[..^".__init__".Length] : computed;
 		}
+
+		private bool IsPythonRegularPackageDirectory(string directory) =>
+			directory.Length > 0 &&
+			(_files.ContainsKey(directory + "/__init__.py") || _files.ContainsKey(directory + "/__init__.pyi"));
 
 		private static IReadOnlySet<string> BuildDirectoryPrefixes(IEnumerable<FileFacts> files)
 		{
