@@ -876,6 +876,10 @@ Its `PROJECT` argument may be a local directory or repository URL. `-q` selects 
 cannot be combined with an explicit `--verbosity`; `--plain` conflicts with
 `--color always`.
 
+JSON writes `{ "rootPath": ..., "tree": ... }` and XML writes a compact
+`<t r="...">` element of `d` directories and `f` files; both shapes are described in
+[CLI-Output-Contract.md](CLI-Output-Contract.md#tree-json-and-xml).
+
 Text trees write the project path once and then start directly with its real
 children. They do not repeat the project name as a synthetic top-level node.
 `--plain` changes only the connectors to their ASCII equivalents.

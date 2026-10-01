@@ -296,6 +296,7 @@ the JSON document itself is never truncated.
     "encounteredMatches": 1,
     "retainedMatches": 1,
     "writtenMatches": 1,
+    "omittedMatches": 0,
     "namedDeclarationFiles": 1,
     "limits": []
   }
@@ -323,6 +324,12 @@ hold no text to search: they do not make a search partial, except when they are 
 whole selection, which is partial with the `binary-sources` limit. An empty `matches` array is meaningful only together with
 that boundary: a complete empty search and a partial search of no readable sources
 are different results. `writtenMatches` is the number of entries in `matches`.
+`omittedMatches` is `encounteredMatches` minus `writtenMatches` (never negative):
+matches observed in inspected sources that the document does not list. Whenever it
+is greater than zero, text and Markdown add
+`[Search observed] matches=N · matching-files=M within inspected sources`, where `N`
+is `encounteredMatches` and `M` counts the inspected files with at least one match.
+Both counts cover inspected sources only, never sources the boundary left unread.
 When matches were observed but no complete matching line fits, text and Markdown
 emit `[Matches omitted]`; when selected sources were left uninspected, an otherwise
 empty result emits `[Search partial]`. Neither state is described as `[No matches]`.
@@ -368,7 +375,15 @@ stay on stderr. The shape is:
     "extractionFailed": 0,
     "unsupportedLanguages": {},
     "cSharpErrorNodeKinds": {},
-    "partialParseDiagnostics": []
+    "extractionFailedFiles": [],
+    "partialParseDiagnostics": [],
+    "configurationDiagnostics": [
+      {
+        "path": "tsconfig.json",
+        "problem": "corrupt",
+        "affectedScopes": 1
+      }
+    ]
   },
   "resolution": {
     "resolved": 1,
@@ -398,6 +413,15 @@ unsupported-language and C# error-node dictionaries use stable ordinal keys.
 facts remained usable. Each item contains `path`, `droppedConstructs`, bounded `ranges` with
 one-based `startLine`/`endLine`, and `rangesTruncated`. Text output reports the same data as
 `[Dependency partial parse] path=... · dropped=N · lines=...`.
+`extractionFailedFiles` lists, in ordinal order, the project-relative path of every
+manifest file whose facts could not be extracted; its length equals
+`extractionFailed`. `configurationDiagnostics` lists dependency configuration files,
+such as `tsconfig.json`, that could not be used for resolution. Each entry has the
+project-relative `path`, `problem` (the lowercase configuration state: `missing`,
+`corrupt`, or `unsupportedsemantics`), and `affectedScopes`, the number of resolution
+scopes that depend on that file. Text output reports at most eight of each as
+`[Dependency extraction failed] path=...` and
+`[Dependency configuration] affected-scopes=N · problem=... · path=...`.
 `resolution` reports `resolved`, `ambiguous`, `unresolved`, and `external` evidence groups for every
 seed section emitted at the requested depth and direction. Text output carries the same values in `[Resolution]`; consequently an
 empty related-file list does not imply that every observed reference was resolved.
@@ -408,6 +432,57 @@ code `3`, and writes no partial related-files document.
 Git mode, exclusions, and file-size limit. No field can contain a file or candidate
 outside that manifest. See [Dependencies.md](Dependencies.md) for the evidence and
 resolution semantics.
+
+## Tree JSON and XML
+
+`tree --format json` writes one object with two properties: `rootPath`, the absolute
+project path with `/` separators (the safe repository URL for a remote source), and
+`tree`, the effective tree below that root:
+
+```json
+{
+  "rootPath": "/workspace/app",
+  "tree": {
+    "docs": [
+      "guide.md"
+    ],
+    "src": {
+      "nested": [
+        "util.cs"
+      ],
+      "/": [
+        "app.cs"
+      ]
+    },
+    "/": [
+      "README.md"
+    ]
+  }
+}
+```
+
+Each directory is a property named after it. A directory without subdirectories is
+an array of its file names; a directory with subdirectories is an object whose
+properties are those subdirectories and whose `"/"` property, present only when the
+directory has files, lists its own file names. The root follows the same rule
+inside `tree`. Directories precede the `"/"` file list, and both keep the tree's
+deterministic order. An empty directory is an empty array.
+
+`tree --format xml` writes the same tree as compact elements: the root element `t`
+carries the root in its `r` attribute, each directory is a `d` element named by its
+`n` attribute, and each file is an `f` element whose text is the file name:
+
+```xml
+<t r="/workspace/app">
+  <d n="docs">
+    <f>guide.md</f>
+  </d>
+  <f>README.md</f>
+</t>
+```
+
+Both forms contain names only: no file content, metrics, or diagnostics. Context
+documents with `--view tree` use the richer context tree described below.
 
 ## Recent and Cache JSON
 
