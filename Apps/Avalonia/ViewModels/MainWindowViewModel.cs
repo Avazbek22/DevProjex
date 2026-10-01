@@ -160,7 +160,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 	private string _selectionPersistenceStatusText = string.Empty;
 	private string _selectionPersistenceStatusHelpText = string.Empty;
     private bool _isAgentActivityEnabled;
-    private string _agentActivityText = string.Empty;
     private bool _statusPreviewSelectionVisible;
     private bool _statusProgressIsIndeterminate = true;
     private double _statusProgressValue;
@@ -552,26 +551,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             if (_isAgentActivityEnabled == value) return;
             _isAgentActivityEnabled = value;
             RaisePropertyChanged();
-            RaisePropertyChanged(nameof(AgentActivityVisible));
         }
     }
-
-    public string AgentActivityText
-    {
-        get => _agentActivityText;
-        private set
-        {
-            if (string.Equals(_agentActivityText, value, StringComparison.Ordinal)) return;
-            _agentActivityText = value;
-            RaisePropertyChanged();
-            RaisePropertyChanged(nameof(AgentActivityVisible));
-        }
-    }
-
-    public bool AgentActivityVisible =>
-        IsAgentActivityEnabled && !IsCompactModeEffective && !string.IsNullOrEmpty(AgentActivityText);
-
-    public void SetAgentActivityText(string? text) => AgentActivityText = text ?? string.Empty;
 
     public bool IsProjectLoadInProgress
     {
@@ -1215,7 +1196,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(TreeItemSpacing));
         RaisePropertyChanged(nameof(TreeItemPadding));
         RaisePropertyChanged(nameof(TreeTextMargin));
-        RaisePropertyChanged(nameof(AgentActivityVisible));
 		RaisePropertyChanged(nameof(SelectionPersistenceStatusVisible));
     }
 

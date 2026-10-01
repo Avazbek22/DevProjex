@@ -1085,7 +1085,7 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 	}
 
 	[AvaloniaFact]
-	public async Task AgentActivityShowsLiveStatusMarksDeliveredFilesAndClearsWithoutChangingTreeState()
+	public async Task AgentActivityMarksDeliveredFilesAndClearsWithoutChangingTreeState()
 	{
 		var fixture = JournalFixture.Create(workspace.Project.RootPath);
 		var reader = new RecordingJournalReader(fixture.Sessions, fixture.Calls);
@@ -1100,11 +1100,8 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 			var viewModel = UiTestDriver.GetViewModel(window);
 			await UiTestDriver.WaitForConditionAsync(
 				window,
-				() => viewModel.AgentActivityVisible &&
-					  viewModel.AgentActivityText.Contains(
-					  "Codex · search_project ·",
-					  StringComparison.Ordinal),
-				"live agent activity status");
+				() => reader.WatchStarts > 0,
+				"live agent activity watch to start");
 			Assert.Equal(0, reader.ReadReceiptCount);
 
 			var deliveredPath = Path.GetFullPath(Path.Combine(
@@ -1147,15 +1144,11 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 				() => deliveredNode.AgentDeliveryCount == 0 && readmeNode.AgentDeliveryCount == 1,
 				"a new live session to replace the previous delivery trace");
 
-			viewModel.IsCompactMode = true;
-			Assert.False(viewModel.AgentActivityVisible);
-			viewModel.IsCompactMode = false;
-			Assert.True(viewModel.AgentActivityVisible);
-
 			await UiTestDriver.RaiseMenuItemClickAsync(activity);
 			Assert.False(viewModel.IsAgentActivityEnabled);
-			Assert.False(viewModel.AgentActivityVisible);
 			Assert.Equal(0, deliveredNode.AgentDeliveryCount);
+			Assert.Equal(0, readmeNode.AgentDeliveryCount);
+			Assert.Equal(string.Empty, readmeNode.AgentDeliveryToolTip);
 			Assert.Equal(checkedBefore, deliveredNode.IsChecked);
 		}
 		finally
@@ -1165,7 +1158,102 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 	}
 
 	[AvaloniaFact]
-	public async Task AgentActivityFiltersLatestCallByProjectRootWhileAdvancingTheSessionCursor()
+	public async Task AgentActivityMarksDeliveredFilesWithoutAddingStatusBarText()
+	{
+		var fixture = JournalFixture.Create(workspace.Project.RootPath);
+		var reader = new RecordingJournalReader(fixture.Sessions, fixture.Calls);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			workspace.Project,
+			configureServices: services => services with { AgentJournalReader = reader });
+
+		try
+		{
+			var viewModel = UiTestDriver.GetViewModel(window);
+			var activity = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "AgentActivityMenuItem");
+			await UiTestDriver.RaiseMenuItemClickAsync(activity);
+			Assert.True(viewModel.IsAgentActivityEnabled);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => reader.WatchStarts > 0,
+				"live agent activity watch to start");
+
+			var deliveredPath = Path.GetFullPath(Path.Combine(
+				workspace.Project.RootPath,
+				"src",
+				"AppHost",
+				"Program.cs"));
+			var deliveredNode = Assert.Single(
+				viewModel.TreeNodes.SelectMany(static root => root.Flatten()),
+				node => PathComparer.Default.Equals(node.FullPath, deliveredPath));
+			deliveredNode.EnsureParentsExpanded();
+			reader.AppendCall(fixture.LiveSession.Id, fixture.SecondCall);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => FindDeliveryMarker(window, deliveredNode) is not null,
+				"the delivery marker to appear in the tree");
+
+			var marker = FindDeliveryMarker(window, deliveredNode)!;
+			Assert.Equal(1, deliveredNode.AgentDeliveryCount);
+			Assert.Equal("Agent received 1 times", deliveredNode.AgentDeliveryToolTip);
+			Assert.Equal(deliveredNode.AgentDeliveryToolTip, ToolTip.GetTip(marker));
+
+			var statusStrip = Assert.Single(
+				window.GetVisualDescendants().OfType<Border>(),
+				static border => border.Classes.Contains("status-strip"));
+			Assert.True(statusStrip.IsEffectivelyVisible);
+			Assert.DoesNotContain(
+				statusStrip.GetVisualDescendants().OfType<Control>(),
+				static control => control.Name == "AgentActivityStatusText");
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => CollectVisibleStatusStripTexts(statusStrip).Length > 0,
+				"the status bar to show its regular metrics");
+			var statusTexts = CollectVisibleStatusStripTexts(statusStrip);
+			Assert.All(
+				new[]
+				{
+					fixture.LiveSession.ClientName,
+					fixture.SecondCall.Tool,
+					fixture.Calls[fixture.LiveSession.Id][0].Tool,
+					viewModel.MenuViewAgentActivity,
+					deliveredNode.AgentDeliveryToolTip
+				},
+				fragment => Assert.DoesNotContain(
+					statusTexts,
+					text => text.Contains(fragment, StringComparison.OrdinalIgnoreCase)));
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	private static TextBlock? FindDeliveryMarker(MainWindow window, TreeNodeViewModel node) =>
+		window.GetVisualDescendants()
+			.OfType<TextBlock>()
+			.FirstOrDefault(textBlock =>
+				ReferenceEquals(textBlock.DataContext, node) &&
+				textBlock.IsEffectivelyVisible &&
+				string.Equals(textBlock.Text, "✦", StringComparison.Ordinal));
+
+	private static string[] CollectVisibleStatusStripTexts(Border statusStrip) =>
+		statusStrip.GetVisualDescendants()
+			.OfType<Control>()
+			.Where(static control => control.IsEffectivelyVisible)
+			.SelectMany(static control => new[]
+			{
+				(control as TextBlock)?.Text,
+				(control as DevProjex.Avalonia.Controls.StatusMetricWaveText)?.Label,
+				(control as DevProjex.Avalonia.Controls.StatusMetricWaveText)?.Text,
+				AutomationProperties.GetName(control),
+				AutomationProperties.GetHelpText(control)
+			})
+			.Where(static text => !string.IsNullOrWhiteSpace(text))
+			.Select(static text => text!)
+			.ToArray();
+
+	[AvaloniaFact]
+	public async Task AgentActivityMarksOnlyProjectRootDeliveriesWhileAdvancingTheSessionCursor()
 	{
 		var fixture = JournalFixture.Create(workspace.Project.RootPath);
 		var otherRoot = Path.Combine(workspace.Project.RootPath, "other-root");
@@ -1195,7 +1283,7 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 			await UiTestDriver.RaiseMenuItemClickAsync(activity);
 			await UiTestDriver.WaitForConditionAsync(
 				window,
-				() => reader.WatchStarts > 0 && UiTestDriver.GetViewModel(window).AgentActivityVisible,
+				() => reader.WatchStarts > 0,
 				"root-aware activity watch to start");
 			var viewModel = UiTestDriver.GetViewModel(window);
 			var deliveredNode = Assert.Single(
@@ -1210,21 +1298,21 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 				Tool = "current-root-tool",
 				Arguments = new Dictionary<string, string> { ["path"] = "src/AppHost/Program.cs" }
 			};
+			// The same relative path under another root must not mark this project's file.
 			var otherCall = fixture.SecondCall with
 			{
 				Sequence = 3,
 				RootIndex = 1,
 				Tool = "other-root-tool",
-				Arguments = new Dictionary<string, string> { ["path"] = "foreign.cs" },
-				DeliveredPaths = ["foreign.cs"]
+				Arguments = new Dictionary<string, string> { ["path"] = "src/AppHost/Program.cs" },
+				DeliveredPaths = ["src/AppHost/Program.cs"]
 			};
 
 			reader.AppendCalls(currentCall, otherCall);
 			await UiTestDriver.WaitForConditionAsync(
 				window,
-				() => deliveredNode.AgentDeliveryCount == 1 &&
-					  viewModel.AgentActivityText.Contains("current-root-tool", StringComparison.Ordinal),
-				"current-root activity to win over the later foreign-root call");
+				() => deliveredNode.AgentDeliveryCount == 1,
+				"only the current-root call to mark the delivered file");
 			reader.NotifyChanged();
 			await UiTestDriver.WaitForConditionAsync(
 				window,
@@ -1232,7 +1320,7 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 				"activity cursor to be observed on the next read");
 
 			Assert.Equal(3, reader.AfterSequences[^1]);
-			Assert.DoesNotContain("other-root-tool", viewModel.AgentActivityText, StringComparison.Ordinal);
+			Assert.Equal(1, deliveredNode.AgentDeliveryCount);
 		}
 		finally
 		{
@@ -1265,7 +1353,7 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 					Path.Combine(workspace.Project.RootPath, "src", "AppHost", "Program.cs")));
 			await UiTestDriver.WaitForConditionAsync(
 				window,
-				() => reader.WatchStarts > 0 && viewModel.AgentActivityVisible,
+				() => reader.WatchStarts > 0,
 				"activity baseline to be captured");
 
 			reader.AppendCalls(fixture.SecondCall with { Sequence = 2 });
@@ -1360,17 +1448,6 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 			"AgentJournal.Notice.Unavailable",
 			"AgentJournal.Notice.HistoryRecovered",
 			"AgentJournal.Notice.HistoryIncomplete",
-			"AgentActivity.Status.Files",
-			"AgentActivity.Status.Tokens",
-			"AgentActivity.Status.Calls",
-			"AgentActivity.Status.Files.One",
-			"AgentActivity.Status.Files.Few",
-			"AgentActivity.Status.Files.Many",
-			"AgentActivity.Status.Files.Other",
-			"AgentActivity.Status.Tokens.One",
-			"AgentActivity.Status.Tokens.Few",
-			"AgentActivity.Status.Tokens.Many",
-			"AgentActivity.Status.Tokens.Other",
 			"AgentActivity.Status.Calls.One",
 			"AgentActivity.Status.Calls.Few",
 			"AgentActivity.Status.Calls.Many",
@@ -1389,29 +1466,6 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 		}
 	}
 
-	[Fact]
-	public void RussianAgentActivityUsesLocalizedPluralFormsAndCompactNumbers()
-	{
-		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.Ru);
-
-		Assert.Equal("2 файла", AgentActivityPresentation.FormatCount(
-			localization,
-			"AgentActivity.Status.Files",
-			2));
-		Assert.Equal("5 файлов", AgentActivityPresentation.FormatCount(
-			localization,
-			"AgentActivity.Status.Files",
-			5));
-		Assert.Equal("21 файл", AgentActivityPresentation.FormatCount(
-			localization,
-			"AgentActivity.Status.Files",
-			21));
-		Assert.Equal("1,2K токенов", AgentActivityPresentation.FormatCount(
-			localization,
-			"AgentActivity.Status.Tokens",
-			1_200));
-	}
-
 	[AvaloniaFact]
 	public async Task ReopeningProjectClearsPriorDeliveriesAndTracksOnlyLaterCalls()
 	{
@@ -1428,7 +1482,7 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 			var viewModel = UiTestDriver.GetViewModel(window);
 			await UiTestDriver.WaitForConditionAsync(
 				window,
-				() => viewModel.AgentActivityVisible &&
+				() => reader.WatchStarts > 0 &&
 					  viewModel.TreeNodes.SelectMany(static root => root.Flatten())
 						  .All(static node => node.AgentDeliveryCount == 0),
 				"the project-opening boundary to hide earlier deliveries");
@@ -1440,6 +1494,7 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 					.Any(static node => node.AgentDeliveryCount > 0),
 				"a delivery after the initial project opening");
 
+			var watchStartsBeforeReopen = reader.WatchStarts;
 			await UiTestDriver.OpenFolderAsync(
 				window,
 				workspace.Project.RootPath,
@@ -1447,7 +1502,7 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 				recordRecentFolder: false);
 			await UiTestDriver.WaitForConditionAsync(
 				window,
-				() => viewModel.AgentActivityVisible &&
+				() => reader.WatchStarts > watchStartsBeforeReopen &&
 					  viewModel.TreeNodes.SelectMany(static root => root.Flatten())
 						  .All(static node => node.AgentDeliveryCount == 0),
 				"project reopen to clear the previous delivery trace");
@@ -1594,7 +1649,7 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 						var viewModel = UiTestDriver.GetViewModel(window);
 						await UiTestDriver.WaitForConditionAsync(
 							window,
-							() => viewModel.AgentActivityVisible &&
+							() => reader.WatchStarts > 0 &&
 								  viewModel.TreeNodes.SelectMany(static root => root.Flatten())
 									  .Any(static node => node.AgentDeliveryCount > 0),
 							"agent activity snapshot state");

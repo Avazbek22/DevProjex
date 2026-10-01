@@ -224,26 +224,6 @@ internal static class AgentJournalPresentation
         _ => value.ToString("N0", CultureInfo.CurrentCulture)
     };
 
-    public static string FormatNumber(long value, AppLanguage language)
-    {
-        CultureInfo culture;
-        try
-        {
-            culture = CultureInfo.GetCultureInfo(AppLanguageUtility.ToCode(language));
-        }
-        catch (CultureNotFoundException)
-        {
-            culture = CultureInfo.CurrentCulture;
-        }
-
-        return value switch
-        {
-            >= 1_000_000 => (value / 1_000_000d).ToString("0.#M", culture),
-            >= 1_000 => (value / 1_000d).ToString("0.#K", culture),
-            _ => value.ToString("N0", culture)
-        };
-    }
-
     public static string FormatDuration(long durationMs) => durationMs switch
     {
         < 1_000 => $"{durationMs.ToString(CultureInfo.CurrentCulture)} ms",
@@ -280,18 +260,4 @@ internal static class AgentJournalPresentation
 
     private static string CollapseLine(string value) =>
         string.Join(' ', value.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries));
-}
-
-internal static class AgentActivityPresentation
-{
-    public static string FormatCount(
-        LocalizationService localization,
-        string key,
-        long count)
-    {
-        var plural = LocalizationPluralRules.ResolveCategory(localization.CurrentLanguage, count);
-        return localization.Format(
-            $"{key}.{plural}",
-            AgentJournalPresentation.FormatNumber(count, localization.CurrentLanguage));
-    }
 }
