@@ -56,7 +56,7 @@ public sealed class ErrorHeaderLocalizationTests
 	[InlineData("DPX-CLI-UNKNOWN-OPTION", "analyze|.|--bogus-option")]
 	[InlineData("DPX-CLI-UNKNOWN-COMMAND", "help|nonsense")]
 	[InlineData("DPX-CLI-MISSING-VALUE", "export|project|--as")]
-	[InlineData("DPX-CLI-LEGACY-SYNTAX", "--path|.")]
+	[InlineData("DPX-CLI-LEGACY-SYNTAX", "--path|.|--report|-")]
 	[InlineData("DPX-CLI-JOURNAL-SESSION-REQUIRED", "mcp|log|.|--format|markdown")]
 	[InlineData("DPX-CLI-JOURNAL-NOT-FOUND", "mcp|log|.|--last")]
 	[InlineData("DPX-CLI-PROFILE-NOT-FOUND", "profile|validate|missing-profile.json")]
