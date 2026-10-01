@@ -226,7 +226,7 @@ public sealed class TerminalSelectionEvolutionPtyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("(•) No Git filtering", optimistic, StringComparison.Ordinal);
 		Assert.Contains("( ) Use .gitignore", optimistic, StringComparison.Ordinal);
-		Assert.Contains("[ ] Smart ignore", optimistic, StringComparison.Ordinal);
+		Assert.Contains("[ ] Smart Ignore", optimistic, StringComparison.Ordinal);
 		Assert.Contains("[ ] Empty folders", optimistic, StringComparison.Ordinal);
 		Assert.DoesNotContain("Processing request", optimistic, StringComparison.Ordinal);
 
@@ -245,7 +245,7 @@ public sealed class TerminalSelectionEvolutionPtyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("(•) No Git filtering", completed, StringComparison.Ordinal);
 		Assert.Contains("( ) Use .gitignore", completed, StringComparison.Ordinal);
-		Assert.Contains("[ ] Smart ignore", completed, StringComparison.Ordinal);
+		Assert.Contains("[ ] Smart Ignore", completed, StringComparison.Ordinal);
 		Assert.Contains("[ ] Empty folders", completed, StringComparison.Ordinal);
 		Assert.Contains("[ ] Empty files", completed, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);

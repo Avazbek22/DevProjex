@@ -150,7 +150,7 @@ Works with any language, repository, or project structure.
 
 ## Project Copy Export 📦
 
-Use **File → Export Project → To Folder…** or **To ZIP Archive…** to create a separate copy of your current selection.
+Use **File → Export project → To folder…** or **To ZIP archive…** to create a separate copy of your current selection.
 
 Project copies respect your chosen root folders, file types, ignore rules, and checked items. If nothing is checked, the whole current tree is exported. Directory structure, binary files, and included empty folders are preserved.
 

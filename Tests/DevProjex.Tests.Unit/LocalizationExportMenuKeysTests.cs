@@ -109,7 +109,7 @@ public sealed class LocalizationExportMenuKeysTests
 		var english = ReadKeyValues(File.ReadAllText(Path.Combine(localizationDir, "en.json")));
 		var russian = ReadKeyValues(File.ReadAllText(Path.Combine(localizationDir, "ru.json")));
 
-		Assert.Equal("Export Project", english["Menu.File.ExportProjectCopy"]);
+		Assert.Equal("Export project", english["Menu.File.ExportProjectCopy"]);
 		Assert.Equal("Экспорт проекта", russian["Menu.File.ExportProjectCopy"]);
 		Assert.Equal(
 			"Exports the selected project files and folders to a separate folder. Applies the current selection and processing settings without modifying the source project.",
@@ -132,9 +132,9 @@ public sealed class LocalizationExportMenuKeysTests
 		var english = ReadKeyValues(File.ReadAllText(Path.Combine(localizationDir, "en.json")));
 		var russian = ReadKeyValues(File.ReadAllText(Path.Combine(localizationDir, "ru.json")));
 
-		Assert.Equal("Export Project", english["Status.Operation.ExportingProjectCopy"]);
+		Assert.Equal("Export project", english["Status.Operation.ExportingProjectCopy"]);
 		Assert.Equal("Экспорт проекта", russian["Status.Operation.ExportingProjectCopy"]);
-		Assert.Equal("Export Project: {0}/{1}", english["Status.Operation.ExportingProjectCopy.Progress"]);
+		Assert.Equal("Export project: {0}/{1}", english["Status.Operation.ExportingProjectCopy.Progress"]);
 		Assert.Equal("Экспорт проекта: {0}/{1}", russian["Status.Operation.ExportingProjectCopy.Progress"]);
 	}
 

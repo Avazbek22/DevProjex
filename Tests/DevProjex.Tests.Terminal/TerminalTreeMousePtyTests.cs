@@ -143,7 +143,7 @@ public sealed class TerminalTreeMousePtyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		await terminal.WaitForScreenAsync(
-			"[x] Smart ignore",
+			"[x] Smart Ignore",
 			cancellationToken: TestContext.Current.CancellationToken);
 		var initial = await WaitForStableScreenAsync(
 			terminal,
@@ -164,14 +164,14 @@ public sealed class TerminalTreeMousePtyTests
 		initial = await terminal.WaitForScreenAsync(
 			"[ ] Hide secrets",
 			cancellationToken: TestContext.Current.CancellationToken);
-		var (smartColumn, smartRow) = FindVisibleCell(initial, "[x] Smart ignore", 1);
+		var (smartColumn, smartRow) = FindVisibleCell(initial, "[x] Smart Ignore", 1);
 		Assert.True(smartColumn >= 0 && smartRow >= 0);
 		await terminal.SendMouseClickAsync(
 			smartColumn,
 			smartRow,
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"[ ] Smart ignore",
+			"[ ] Smart Ignore",
 			cancellationToken: TestContext.Current.CancellationToken);
 		var exclusionChanged = await WaitForStableScreenAsync(
 			terminal,
@@ -197,7 +197,7 @@ public sealed class TerminalTreeMousePtyTests
 			TestContext.Current.CancellationToken);
 		Assert.Contains("( ) Use .gitignore", gitDisabled, StringComparison.Ordinal);
 		Assert.Contains("( ) Tracked Git files only", gitDisabled, StringComparison.Ordinal);
-		Assert.Contains("[ ] Smart ignore", gitDisabled, StringComparison.Ordinal);
+		Assert.Contains("[ ] Smart Ignore", gitDisabled, StringComparison.Ordinal);
 
 		var (trackedColumn, trackedRow) = FindVisibleCell(
 			gitDisabled,
@@ -247,7 +247,7 @@ public sealed class TerminalTreeMousePtyTests
 			exclusionAllRow,
 			cancellationToken: TestContext.Current.CancellationToken);
 		var allExclusionsEnabled = await terminal.WaitForScreenAsync(
-			"[x] Smart ignore",
+			"[x] Smart Ignore",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("[x] All", allExclusionsEnabled, StringComparison.Ordinal);
 		await terminal.SendMouseClickAsync(
@@ -262,7 +262,7 @@ public sealed class TerminalTreeMousePtyTests
 			exclusionAllRow,
 			cancellationToken: TestContext.Current.CancellationToken);
 		gitChanged = await terminal.WaitForScreenAsync(
-			"[x] Smart ignore",
+			"[x] Smart Ignore",
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		var (extensionAllColumn, extensionAllRow) = FindVisibleCell(

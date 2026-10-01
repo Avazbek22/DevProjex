@@ -16,8 +16,8 @@
 │                                 │ Exclusions: 8  [X]        :set <option> <value>                                         │                                 ││
 │                                 │ File types: All (3)  [T]  :type <.ext> [<.ext>...] <on|off>                             │                                 ││
 │                                 │ Export context  [E]       :export context [format] [path]                               │                                 ││
-│                                 │ To Folder…  [Z]           :export folder <path>                                         │                                 ││
-│                                 │ To ZIP Archive…  [Shift…  :export zip <path>                                            │                                 ││
+│                                 │ To folder…  [Z]           :export folder <path>                                         │                                 ││
+│                                 │ To ZIP archive…  [Shift…  :export zip <path>                                            │                                 ││
 │                                 │ Export settings...  [P]   :profile save [name]                                          │                                 ││
 │                                 │ Open Desktop  [G]                                                                       │                                 ││
 │                                 │ Details                                                                                 │─────────────────────────────────┘│

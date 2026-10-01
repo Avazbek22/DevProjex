@@ -419,7 +419,7 @@ public sealed class TerminalSettingsPanelPtyTests
 		Assert.DoesNotContain("> PROJECT TREE", exclusionsFocused, StringComparison.Ordinal);
 		await terminal.SendSpaceAsync(TestContext.Current.CancellationToken);
 		await WaitForPanelContainsAsync(terminal, "Exclusions", "File types", "[ ] All");
-		var exclusionsCleared = await WaitForStableScreenAsync(terminal, "[ ] Smart ignore");
+		var exclusionsCleared = await WaitForStableScreenAsync(terminal, "[ ] Smart Ignore");
 		Assert.Contains(uncheckedRoot, exclusionsCleared, StringComparison.Ordinal);
 
 		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
@@ -462,14 +462,14 @@ public sealed class TerminalSettingsPanelPtyTests
 		await terminal.SendAsync("M", TestContext.Current.CancellationToken);
 		var tracked = await WaitForStableScreenAsync(terminal, "(•) Tracked Git files only");
 		Assert.Contains("( ) Use .gitignore", tracked, StringComparison.Ordinal);
-		Assert.Contains("dot folders (1)", tracked, StringComparison.OrdinalIgnoreCase);
-		Assert.Contains("dot files (1)", tracked, StringComparison.OrdinalIgnoreCase);
+		Assert.Contains("Dot folders (1)", tracked, StringComparison.OrdinalIgnoreCase);
+		Assert.Contains("Dot files (1)", tracked, StringComparison.OrdinalIgnoreCase);
 
 		await terminal.SendAsync("M", TestContext.Current.CancellationToken);
 		var staged = await WaitForStableScreenAsync(terminal, "No visible items");
 		Assert.Contains("(•) Staged Git files", staged, StringComparison.Ordinal);
 		Assert.Contains("( ) Tracked Git files only", staged, StringComparison.Ordinal);
-		Assert.DoesNotContain("Smart ignore", staged, StringComparison.Ordinal);
+		Assert.DoesNotContain("Smart Ignore", staged, StringComparison.Ordinal);
 		Assert.DoesNotContain("Dot folders (", staged, StringComparison.Ordinal);
 		Assert.DoesNotContain("Dot files (", staged, StringComparison.Ordinal);
 		Assert.DoesNotContain("Extensionless files (", staged, StringComparison.Ordinal);
@@ -478,7 +478,7 @@ public sealed class TerminalSettingsPanelPtyTests
 		await terminal.SendAsync("M", TestContext.Current.CancellationToken);
 		var changes = await WaitForStableScreenAsync(terminal, "(•) Current Git changes");
 		Assert.Contains("No visible items", changes, StringComparison.Ordinal);
-		Assert.DoesNotContain("Smart ignore", changes, StringComparison.Ordinal);
+		Assert.DoesNotContain("Smart Ignore", changes, StringComparison.Ordinal);
 		Assert.DoesNotContain("Dot folders (", changes, StringComparison.Ordinal);
 		Assert.DoesNotContain("Dot files (", changes, StringComparison.Ordinal);
 		Assert.DoesNotContain("Extensionless files (", changes, StringComparison.Ordinal);
@@ -497,7 +497,7 @@ public sealed class TerminalSettingsPanelPtyTests
 			"Project refreshed.",
 			timeout: TimeSpan.FromSeconds(30),
 			cancellationToken: TestContext.Current.CancellationToken);
-		var scoped = await WaitForStableScreenAsync(terminal, "dot folders (1)");
+		var scoped = await WaitForStableScreenAsync(terminal, "Dot folders (1)");
 		Assert.Contains("[x] All (1)", scoped, StringComparison.Ordinal);
 		Assert.DoesNotContain("Dot files (", scoped, StringComparison.Ordinal);
 		Assert.DoesNotContain("Extensionless files (", scoped, StringComparison.Ordinal);
@@ -534,7 +534,7 @@ public sealed class TerminalSettingsPanelPtyTests
 		await terminal.SendAsync(":set dot-folders off\r", TestContext.Current.CancellationToken);
 		var revealed = await WaitForAppliedCommandAsync(
 			terminal,
-			"dot folders: disabled",
+			"Dot folders: disabled",
 			"Staged.cs");
 		Assert.Contains("[x] .cs", revealed, StringComparison.Ordinal);
 		Assert.Contains("[ ] All (1)", revealed, StringComparison.Ordinal);
@@ -544,7 +544,7 @@ public sealed class TerminalSettingsPanelPtyTests
 		await terminal.SendAsync(":set dot-folders on\r", TestContext.Current.CancellationToken);
 		var hiddenAgain = await WaitForAppliedCommandAsync(
 			terminal,
-			"dot folders: enabled",
+			"Dot folders: enabled",
 			"No visible items");
 		Assert.DoesNotContain("Staged.cs", hiddenAgain, StringComparison.Ordinal);
 
@@ -664,7 +664,7 @@ public sealed class TerminalSettingsPanelPtyTests
 		RunGit(project.Path, "add", "--", "AddedAfterOpen.cs");
 
 		await terminal.SendAsync(":set dot-folders off\r", TestContext.Current.CancellationToken);
-		await WaitForAppliedCommandAsync(terminal, "dot folders: disabled", "AddedAfterOpen.cs");
+		await WaitForAppliedCommandAsync(terminal, "Dot folders: disabled", "AddedAfterOpen.cs");
 		await terminal.SendAsync(":set git staged\r", TestContext.Current.CancellationToken);
 		var staged = await WaitForAppliedCommandAsync(
 			terminal,
@@ -706,7 +706,7 @@ public sealed class TerminalSettingsPanelPtyTests
 			await terminal.SendAsync(":set dot-folders off\r", TestContext.Current.CancellationToken);
 			await WaitForAppliedCommandAsync(
 				terminal,
-				"dot folders: disabled",
+				"Dot folders: disabled",
 				"VisibleAfterRepositoryRemoval.cs");
 			var refreshed = await WaitForStableScreenAsync(
 				terminal,
@@ -796,7 +796,7 @@ public sealed class TerminalSettingsPanelPtyTests
 			await terminal.SendAsync(":set dot-folders off\r", TestContext.Current.CancellationToken);
 			await WaitForAppliedCommandAsync(
 				terminal,
-				"dot folders: disabled",
+				"Dot folders: disabled",
 				"PARAMETERS");
 			var parameters = await WaitForStableScreenAsync(
 				terminal,
@@ -842,7 +842,7 @@ public sealed class TerminalSettingsPanelPtyTests
 		await terminal.SendAsync(":set dot-folders off\r", TestContext.Current.CancellationToken);
 		var individuallyRevealed = await WaitForAppliedCommandAsync(
 			terminal,
-			"dot folders: disabled",
+			"Dot folders: disabled",
 			".scoped");
 		Assert.Contains("(•) diff: HEAD~1..HEAD", individuallyRevealed, StringComparison.Ordinal);
 
@@ -1216,14 +1216,14 @@ public sealed class TerminalSettingsPanelPtyTests
 		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
 		var exclusionsCleared = await WaitForStableScreenAsync(terminal, "(•) Use .gitignore");
 		Assert.Contains("( ) No Git filtering", exclusionsCleared, StringComparison.Ordinal);
-		Assert.Contains("[ ] Smart ignore", exclusionsCleared, StringComparison.Ordinal);
+		Assert.Contains("[ ] Smart Ignore", exclusionsCleared, StringComparison.Ordinal);
 		Assert.Contains("[ ] .cs", exclusionsCleared, StringComparison.Ordinal);
 
 		await terminal.SendUpAsync(TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		await WaitForPanelContainsAsync(terminal, "Exclusions", "File types", "[x] All");
 		var exclusionsRestored = await WaitForStableScreenAsync(terminal, "(•) Use .gitignore");
-		Assert.Contains("[x] Smart ignore", exclusionsRestored, StringComparison.Ordinal);
+		Assert.Contains("[x] Smart Ignore", exclusionsRestored, StringComparison.Ordinal);
 		Assert.Contains("[ ] .cs", exclusionsRestored, StringComparison.Ordinal);
 
 		await ExitAsync(terminal);
@@ -1305,13 +1305,13 @@ public sealed class TerminalSettingsPanelPtyTests
 			terminal,
 			"Exclusions",
 			"File types",
-			"[ ] Smart ignore");
+			"[ ] Smart Ignore");
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		await WaitForPanelContainsAsync(
 			terminal,
 			"Exclusions",
 			"File types",
-			"[x] Smart ignore");
+			"[x] Smart Ignore");
 
 		await terminal.SendAsync("T", TestContext.Current.CancellationToken);
 		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
