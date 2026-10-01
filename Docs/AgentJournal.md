@@ -33,7 +33,10 @@ result size, delivered files, masking counters, notices, and stable error code.
 client: its whole text, a line range, a page of a stored result, search match lines,
 or a declaration body. Naming a file in a listing, as `get_tree` does, or measuring
 it, as `analyze` does, delivers nothing, and preparing or retaining a stored pack
-does not count as delivery either. A `read_pack` call records the paths represented
+does not count as delivery either. `related_files` quotes the reference text of each
+relation it lists, so it delivers the file that text comes from: the seed for a listed
+dependency and each listed dependent. Dependency targets, and a seed with no listed
+relations, are only named. A `read_pack` call records the paths represented
 by its returned page. A call counts each delivered file once; the session total adds
 the calls together, so a file returned by three calls counts three times, while the
 receipt's delivered-path table lists each file once with its number of calls. Masked
@@ -94,7 +97,8 @@ status bar. When it is enabled for an open project with a live session, files
 delivered during the latest live session receive a `✦` marker in the tree. Its
 tooltip reports how many calls delivered that path, for example "Agent received
 3 times". A `get_tree` or `analyze` call delivers no files and therefore adds no
-marker. The marker never changes filters or checkboxes. The trace is cleared when
+marker; a `related_files` call marks only the files whose reference text it quoted.
+The marker never changes filters or checkboxes. The trace is cleared when
 a newer live session starts, when the live session ends, when Agent activity is
 turned off, and when the project is reopened; calls made after reopening create a
 new trace.

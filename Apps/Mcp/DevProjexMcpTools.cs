@@ -1572,10 +1572,7 @@ internal sealed class DevProjexMcpTools(
 				journal?.RecordProtection(protectedBody.Snapshot);
 				journal?.RecordDeliveredPaths(
 					plan.SourceRoot,
-					related.Seeds.SelectMany(static seed =>
-						new[] { seed.Seed }
-							.Concat(seed.Dependencies.Select(static file => file.Path))
-							.Concat(seed.Dependents.Select(static file => file.Path))));
+					relatedRanges.Select(static range => range.Path));
 				return McpToolResults.TextSuccess(inline.Text, advertiseLargeResult: true);
 			}
 
@@ -2926,6 +2923,9 @@ internal sealed class DevProjexMcpTools(
 			currentLine++;
 		}
 
+		// recordPath receives the file whose text a line quotes: a relation line quotes the
+		// reference text of the edge's source, which is the seed for a dependency and the listed
+		// file for a dependent. Seed headers and dependency targets are only named.
 		foreach (var seed in result.Seeds)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
@@ -2934,7 +2934,6 @@ internal sealed class DevProjexMcpTools(
 				StartLine();
 				output.Write("Seed: ");
 				output.Write(McpTextEscaping.EscapeSingleLine(seed.Seed));
-				recordPath?.Invoke(seed.Seed, currentLine);
 			}
 			if (seed.NoFactsReason is { Length: > 0 })
 			{
@@ -2956,7 +2955,7 @@ internal sealed class DevProjexMcpTools(
 					"Dependencies",
 					seed.Dependencies,
 					cancellationToken,
-					file => recordPath?.Invoke(file.Path, currentLine));
+					_ => recordPath?.Invoke(seed.Seed, currentLine));
 			if (direction is DependencyDirection.Dependents or DependencyDirection.Both)
 				WriteRelatedSection(
 					output,

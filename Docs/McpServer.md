@@ -409,6 +409,8 @@ bodies. A delivered path is counted only when its text was actually returned, no
 when a stored result was merely prepared; `read_pack` accounts for the page it returns.
 `get_tree` and `analyze` name and measure files without returning their text, so they
 deliver no files and count no masked values.
+`related_files` delivers only the files whose reference text its evidence quotes: the
+seed for a listed dependency and each listed dependent; dependency targets are only named.
 If a stored source disappears before its protection count is captured, the journal
 records `unavailable` and keeps that count unknown instead of reporting a false zero;
 known counts on the same page are still accumulated.
