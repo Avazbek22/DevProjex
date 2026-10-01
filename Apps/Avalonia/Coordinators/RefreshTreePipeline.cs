@@ -61,6 +61,8 @@ internal sealed class RefreshTreePipeline(IRefreshTreePipelineHost host) : IDisp
             }
 
             linkedToken.ThrowIfCancellationRequested();
+			if (!host.IsTreeRefreshInputCurrent(input))
+				return TreeRefreshOutcome.StaleInput;
 			if (host.TryHandleGitScopeDiagnostics(result))
 				return TreeRefreshOutcome.Skipped;
 

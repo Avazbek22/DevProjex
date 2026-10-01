@@ -102,6 +102,19 @@ internal sealed class AsyncOperationCoordinator : IDisposable
 		CancelAndDispose(state);
 	}
 
+	// Unlike Cancel, the operation stays registered, so its owner still sees itself as
+	// current while it unwinds (for example, to leave a loading screen) and completes it.
+	public void RequestCancel(WorkspaceOperationKind kind)
+	{
+		try
+		{
+			GetSource(kind)?.Cancel();
+		}
+		catch (ObjectDisposedException)
+		{
+		}
+	}
+
 	public void Dispose()
 	{
 		OperationState[] states;

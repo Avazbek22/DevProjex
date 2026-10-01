@@ -20,6 +20,7 @@ public sealed class MainWindowTreeContextMenuUiTests(UiWorkspaceFixture workspac
 		{
 			var tree = window.FindControl<TreeView>("ProjectTree")!;
 			var root = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
+			root.IsChecked = false;
 			root.IsExpanded = true;
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 8);
 			var file = root.Children.Single(node => node.DisplayName == "README.md");

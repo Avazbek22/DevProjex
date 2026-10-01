@@ -97,15 +97,37 @@ public sealed class DesktopCommandHandler(
 		return CommandLineExitCodes.Success;
 	}
 
-	public async Task<int> ListAsync(
+	public Task<int> ListAsync(
 		bool json,
 		TerminalOutputOptions outputOptions,
 		TimeSpan timeout,
+		CancellationToken cancellationToken) =>
+		ListAsync(json, outputOptions, timeout, _client.ListAsync, cancellationToken);
+
+	internal async Task<int> ListAsync(
+		bool json,
+		TerminalOutputOptions outputOptions,
+		TimeSpan timeout,
+		Func<CancellationToken, Task<IReadOnlyList<DesktopInstanceRegistration>>> listInstances,
 		CancellationToken cancellationToken)
 	{
-		var instances = await _client.ListAsync(cancellationToken)
-			.WaitAsync(timeout, cancellationToken)
-			.ConfigureAwait(false);
+		using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+		timeoutSource.CancelAfter(timeout);
+		IReadOnlyList<DesktopInstanceRegistration> instances;
+		try
+		{
+			instances = await listInstances(timeoutSource.Token)
+				.WaitAsync(timeoutSource.Token)
+				.ConfigureAwait(false);
+		}
+		catch (OperationCanceledException exception) when (
+			timeoutSource.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+		{
+			throw new DesktopControlException(
+				"DPX-DESKTOP-TIMEOUT",
+				"The desktop instance list did not complete before the timeout.",
+				innerException: exception);
+		}
 		if (json)
 		{
 			environment.Output.WriteLine(JsonSerializer.Serialize(

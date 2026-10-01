@@ -47,10 +47,10 @@ public sealed class StoreListingImportFolderIntegrationTests
 
         string[] guiDirectories =
         [
-            "1_Main",
-            "2_Loaded_Project",
-            "3_Tree_Preview",
-            "4_Filter_Preview",
+            "1_Tree_Preview",
+            "2_Live_Context",
+            "3_Mcp_Menu",
+            "4_Agent_Journal",
             "5_Tree_Preview_Settings"
         ];
         foreach (var directory in guiDirectories)
@@ -73,14 +73,106 @@ public sealed class StoreListingImportFolderIntegrationTests
 
         var document = StoreListingCsvDocument.Load(StoreListingPaths.GetImportCsvPath(repositoryRoot));
         var localeColumns = StoreListingPaths.GetLocaleColumns(document.Headers);
-        for (var index = 0; index < tuiDirectories.Length; index++)
+        string[] slotDirectories = [.. guiDirectories, .. tuiDirectories];
+        for (var index = 0; index < slotDirectories.Length; index++)
         {
-            var row = document.RowsByField[$"DesktopScreenshot{index + 6}"];
+            var row = document.RowsByField[$"DesktopScreenshot{index + 1}"];
             foreach (var locale in localeColumns)
             {
                 var languageCode = ResolveAppLanguageCode(locale, languageCodes);
-                var expectedPath = $"ImportFolder/Screenshots/{tuiDirectories[index]}/{languageCode}.png";
+                var expectedPath = $"ImportFolder/Screenshots/{slotDirectories[index]}/{languageCode}.png";
                 Assert.Equal(expectedPath, row.GetValue(locale));
+            }
+        }
+
+        var retiredDirectories = Directory
+            .EnumerateDirectories(screenshotRoot)
+            .Select(Path.GetFileName)
+            .Except(slotDirectories, StringComparer.Ordinal)
+            .ToArray();
+        Assert.Empty(retiredDirectories);
+    }
+
+    [Fact]
+    public void ImportFolder_CaptionsDescribeTheAgentScenesInEnglishAndRussian()
+    {
+        var document = StoreListingCsvDocument.Load(StoreListingPaths.GetImportCsvPath(RepoRoot.Value));
+        var expectedCaptions = new Dictionary<int, (string English, string Russian)>
+        {
+            [1] = (
+                "Preview project structure and file contents before export",
+                "Предпросмотр структуры проекта и содержимого файлов перед экспортом"),
+            [2] = (
+                "Live Context: your AI agent follows the checkboxes, and ✦ marks the files it received",
+                "Live Context: ИИ-агент следует за галочками, а значок ✦ отмечает файлы, которые он получил"),
+            [3] = (
+                "Connect an AI agent in one step: Claude Code, Codex, Cursor, VS Code",
+                "Подключение ИИ-агента в один шаг: Claude Code, Codex, Cursor, VS Code"),
+            [4] = (
+                "Agent journal: which files and how many tokens each AI client received",
+                "Журнал агента: какие файлы и сколько токенов получил каждый ИИ-клиент")
+        };
+
+        foreach (var (slot, (english, russian)) in expectedCaptions)
+        {
+            var row = document.RowsByField[$"DesktopScreenshotCaption{slot}"];
+            Assert.Equal(english, row.GetValue("en-us"));
+            Assert.Equal(english, row.GetValue("en"));
+            Assert.Equal(russian, row.GetValue("ru"));
+            Assert.Equal(russian, row.GetValue("ru-ru"));
+        }
+    }
+
+    [Fact]
+    public void ImportFolder_GuiSceneCaptionsAreTranslatedForEveryLocale()
+    {
+        var document = StoreListingCsvDocument.Load(StoreListingPaths.GetImportCsvPath(RepoRoot.Value));
+        var localeColumns = StoreListingPaths.GetLocaleColumns(document.Headers);
+        var untranslatedTerms = new Dictionary<int, string[]>
+        {
+            [1] = [],
+            [2] = ["Live Context"],
+            [3] = ["Claude Code", "Codex", "Cursor", "VS Code"],
+            [4] = []
+        };
+
+        foreach (var (slot, terms) in untranslatedTerms)
+        {
+            var row = document.RowsByField[$"DesktopScreenshotCaption{slot}"];
+            var english = row.GetValue("en-us");
+            foreach (var locale in localeColumns)
+            {
+                var caption = row.GetValue(locale);
+                Assert.False(string.IsNullOrWhiteSpace(caption), $"{locale}/{slot}");
+                Assert.True(caption.Length <= 200, $"{locale}/{slot} has {caption.Length} characters.");
+                if (!locale.StartsWith("en", StringComparison.Ordinal))
+                    Assert.NotEqual(english, caption);
+                Assert.All(terms, term => Assert.Contains(term, caption, StringComparison.Ordinal));
+            }
+        }
+    }
+
+    [Fact]
+    public void StoreListingCsvFiles_ShareTheScreenshotCaptions()
+    {
+        var storeListingRoot = StoreListingPaths.GetStoreListingRoot(RepoRoot.Value);
+        var import = StoreListingCsvDocument.Load(StoreListingPaths.GetImportCsvPath(RepoRoot.Value));
+        var localeColumns = StoreListingPaths.GetLocaleColumns(import.Headers);
+        foreach (var fileName in new[] { "text-only-import.csv", "listingData-9NDQ3NQ5M354.csv" })
+        {
+            var document = StoreListingCsvDocument.Load(Path.Combine(storeListingRoot, fileName));
+            for (var slot = 1; slot <= 10; slot++)
+            {
+                var field = $"DesktopScreenshotCaption{slot}";
+                foreach (var locale in localeColumns)
+                {
+                    Assert.True(
+                        string.Equals(
+                            import.RowsByField[field].GetValue(locale),
+                            document.RowsByField[field].GetValue(locale),
+                            StringComparison.Ordinal),
+                        $"{fileName}: {field}/{locale}");
+                }
             }
         }
     }
@@ -287,7 +379,7 @@ public sealed class StoreListingImportFolderIntegrationTests
     public void ImportFolder_FeatureSummaryAdvertisesBothGitAwareFilteringModes()
     {
         var document = StoreListingCsvDocument.Load(StoreListingPaths.GetImportCsvPath(RepoRoot.Value));
-        var feature = document.RowsByField["Feature7"];
+        var feature = document.RowsByField["Feature11"];
         var expectedValues = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["en-us"] = "Smart Ignore, .gitignore, and Git-tracked mode",

@@ -13,6 +13,7 @@ public partial class MainWindow
         StoreScreenshotCaptureRequest request,
         CancellationToken cancellationToken)
     {
+        var stage = "startup";
         try
         {
             // Store assets intentionally use the product's strongest calibrated presentation.
@@ -31,9 +32,7 @@ public partial class MainWindow
                 "window-positioned",
                 cancellationToken);
 
-            await WaitForStoreCaptureVisualsAsync(cancellationToken);
-            await CaptureStoreSceneAsync(request, 1, "Main", cancellationToken);
-
+            stage = "open-project";
             if (!await TryOpenFolderAsync(
                     request.ProjectPath,
                     fromDialog: false,
@@ -46,26 +45,39 @@ public partial class MainWindow
             await _postLoadVisualReadyTask.WaitAsync(cancellationToken);
             await _selectionCoordinator.WaitForPendingRefreshesAsync();
             await _workspacePresentation.SettingsAnimationTask.WaitAsync(cancellationToken);
-            await WaitForStoreCaptureVisualsAsync(cancellationToken);
-            await CaptureStoreSceneAsync(request, 2, "Loaded_Project", cancellationToken);
 
+            stage = "tree-preview";
             _viewModel.SettingsVisible = false;
             await AnimateSettingsPanelAsync(show: false);
             _viewModel.SelectedPreviewContentMode = PreviewContentMode.TreeAndContent;
             await _previewWorkspaceController.OpenAsync();
-            await WaitForStoreCaptureVisualsAsync(cancellationToken);
-            await CaptureStoreSceneAsync(request, 3, "Tree_Preview", cancellationToken);
+            await CaptureStoreSceneAsync(request, 1, "Tree_Preview", cancellationToken);
 
+            // The settings scene is captured before any agent session starts, so it keeps the
+            // plain project state without the Live context title suffix or delivery markers.
+            stage = "settings";
             await _previewWorkspaceController.SwitchModeAsync(PreviewContentMode.Tree);
             _viewModel.SettingsVisible = true;
             await AnimateSettingsPanelAsync(show: true);
-            await _searchFilterController.ApplyStartupFilterAsync("app");
-            await WaitForStoreCaptureVisualsAsync(cancellationToken);
-            await CaptureStoreSceneAsync(request, 4, "Filter_Preview", cancellationToken);
-
-            await _searchFilterController.CloseFilterAsync(focusTree: false);
-            await WaitForStoreCaptureVisualsAsync(cancellationToken);
             await CaptureStoreSceneAsync(request, 5, "Tree_Preview_Settings", cancellationToken);
+
+            stage = "live-context";
+            var deliveryMarker = await PrepareStoreLiveContextSceneAsync(request, cancellationToken);
+            await CaptureStoreSceneAsync(request, 2, "Live_Context", cancellationToken);
+
+            stage = "mcp-menu";
+            await OpenStoreMcpMenuAsync(deliveryMarker, cancellationToken);
+            await CaptureStoreSceneAsync(request, 3, "Mcp_Menu", cancellationToken);
+
+            stage = "agent-journal";
+            var journalWindow = await OpenStoreAgentJournalAsync(cancellationToken);
+            await CaptureStoreSceneAsync(
+                request,
+                4,
+                "Agent_Journal",
+                cancellationToken,
+                foregroundWindow: journalWindow);
+            journalWindow.Close();
 
             WriteStoreCaptureState(request, "complete.json", new
             {
@@ -77,16 +89,19 @@ public partial class MainWindow
         {
             WriteStoreCaptureState(request, "failure.json", new
             {
-                code = "DPX-STORE-CAPTURE-CANCELED"
+                code = "DPX-STORE-CAPTURE-CANCELED",
+                stage
             });
         }
         catch (Exception exception)
         {
-            // This private protocol deliberately reports only the exception type. Capture
-            // sessions can reference local paths, which must not leak into generated assets.
+            // This private protocol deliberately reports only the exception type and a fixed
+            // stage name. Capture sessions can reference local paths, which must not leak into
+            // generated assets.
             WriteStoreCaptureState(request, "failure.json", new
             {
                 code = "DPX-STORE-CAPTURE-FAILED",
+                stage,
                 exceptionType = exception.GetType().Name
             });
         }
@@ -100,9 +115,12 @@ public partial class MainWindow
         StoreScreenshotCaptureRequest request,
         int index,
         string name,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Window? foregroundWindow = null)
     {
         await WaitForStoreCaptureVisualsAsync(cancellationToken);
+        if (foregroundWindow is not null)
+            await WaitForStoreCaptureTopLevelFrameAsync(foregroundWindow, cancellationToken);
         var stem = $"{index:D2}-{name}";
         WriteStoreCaptureState(request, $"ready-{stem}.json", new
         {
@@ -111,7 +129,10 @@ public partial class MainWindow
             projectLoaded = _viewModel.IsProjectLoaded,
             previewOpen = _viewModel.IsPreviewMode,
             settingsOpen = _viewModel.SettingsVisible,
-            filter = _viewModel.NameFilter
+            filter = _viewModel.NameFilter,
+            // The controller re-activates the main window before each frame unless the scene
+            // is presented by one of its owned windows, which then keeps the foreground.
+            foreground = foregroundWindow is null ? "main" : "owned"
         });
         await WaitForStoreCaptureMarkerAsync(
             request,
@@ -123,7 +144,9 @@ public partial class MainWindow
         CancellationToken cancellationToken)
     {
         var timeoutAt = DateTimeOffset.UtcNow + TimeSpan.FromMinutes(2);
-        while (!IsSessionMetricsIdle())
+        while (!IsSessionMetricsIdle() ||
+               IsBackgroundMetricsActive() ||
+               IsStoreCaptureStatusMetricAnimating())
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (DateTimeOffset.UtcNow >= timeoutAt)
@@ -137,6 +160,21 @@ public partial class MainWindow
         await YieldUiAsync(DispatcherPriority.Render);
         await TryWaitForRenderedCompositionBatchAsync(cancellationToken);
     }
+
+    // Store media must not date itself, so capture mode drops the version from the window title.
+    private string ApplyStoreCaptureTitlePolicy(string title) =>
+        _startupOptions.StoreScreenshotCapture is null ? title : RemoveTitleVersion(title);
+
+    private static string RemoveTitleVersion(string title) =>
+        title.StartsWith(MainWindowViewModel.BaseTitle, StringComparison.Ordinal)
+            ? MainWindowViewModel.ProductName + title[MainWindowViewModel.BaseTitle.Length..]
+            : title;
+
+    // Status metrics roll their digits after every recalculation. A frame taken mid-roll shows
+    // glyphs at different baselines, so captures wait until both strips are at rest.
+    private bool IsStoreCaptureStatusMetricAnimating() =>
+        StatusTreeMetricsWave.IsAnimationActive ||
+        StatusContentMetricsWave.IsAnimationActive;
 
     private static async Task WaitForStoreCaptureMarkerAsync(
         StoreScreenshotCaptureRequest request,

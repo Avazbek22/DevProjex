@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 3,
+  "profiles": {
+    "${PROJECT_ROOT}": {
+      "selectedRootFolders": [
+        "src"
+      ],
+      "selectedExtensions": [
+        ".cs"
+      ],
+      "selectedIgnoreOptions": [],
+      "rootFolderStates": {
+        "src": true,
+        "docs": false
+      },
+      "extensionStates": {
+        ".cs": true,
+        ".md": false
+      },
+      "ignoreOptionStates": {},
+      "selectedPaths": [
+        "src/Inside.cs"
+      ],
+      "updatedUtc": "2026-09-01T00:00:00+00:00"
+    }
+  }
+}

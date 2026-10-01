@@ -333,6 +333,7 @@ function Try-GetPrNumberFromUrl([string]$prUrl) {
 
 function Try-UpdatePrChecklist(
     [string]$prNumber,
+    [string]$packageIdentifier,
     [bool]$installTestExecuted
 ) {
     if ([string]::IsNullOrWhiteSpace($prNumber)) {
@@ -345,24 +346,28 @@ function Try-UpdatePrChecklist(
     }
 
     try {
-        $body = gh pr view $prNumber -R microsoft/winget-pkgs --json body -q .body
+        # gh returns one string per line in PowerShell; joining keeps the template's line structure.
+        $body = (@(gh pr view $prNumber -R microsoft/winget-pkgs --json body -q .body) -join "`n")
         if ([string]::IsNullOrWhiteSpace($body)) {
             Write-Warning "PR body is empty. Skipping checklist update."
             return
         }
 
-        # Mark only items that script can assert.
+        # Mark only items that the script can assert. Stable fragments keep this working when the
+        # upstream template rewords its sentences or bumps the schema version.
         $updated = $body
-        $updated = [regex]::Replace($updated, '- \[ \] This PR only modifies one \(1\) manifest', '- [x] This PR only modifies one (1) manifest')
-        $updated = [regex]::Replace($updated, '- \[ \] Have you validated your manifest locally with winget validate --manifest <path>\?', '- [x] Have you validated your manifest locally with winget validate --manifest <path>?')
-        $updated = [regex]::Replace($updated, '- \[ \] Does your manifest conform to the 1\.10 schema\?', '- [x] Does your manifest conform to the 1.10 schema?')
-
+        $updated = Set-ChecklistItemChecked -body $updated -fragment "only modifies one (1) manifest"
+        $updated = Set-ChecklistItemChecked -body $updated -fragment "winget validate --manifest"
+        $updated = Set-ChecklistItemChecked -body $updated -fragment "schema"
         if ($installTestExecuted) {
-            $updated = [regex]::Replace($updated, '- \[ \] Have you tested your manifest locally with winget install --manifest <path>\?', '- [x] Have you tested your manifest locally with winget install --manifest <path>?')
+            $updated = Set-ChecklistItemChecked -body $updated -fragment "winget install --manifest"
+        }
+        if (Test-NoOtherOpenPullRequest -prNumber $prNumber -packageIdentifier $packageIdentifier) {
+            $updated = Set-ChecklistItemChecked -body $updated -fragment "other open"
         }
 
         if ($updated -ne $body) {
-            gh pr edit $prNumber -R microsoft/winget-pkgs --body $updated | Out-Null
+            Invoke-GhWithBodyFile -arguments @("pr", "edit", $prNumber, "-R", "microsoft/winget-pkgs") -body $updated
         }
     }
     catch {
@@ -370,12 +375,57 @@ function Try-UpdatePrChecklist(
     }
 }
 
+function Set-ChecklistItemChecked([string]$body, [string]$fragment) {
+    $pattern = '(?im)^(\s*)- \[ \] (.*' + [regex]::Escape($fragment) + '.*)$'
+    return [regex]::Replace($body, $pattern, '$1- [x] $2')
+}
+
+function Test-NoOtherOpenPullRequest([string]$prNumber, [string]$packageIdentifier) {
+    try {
+        $numbers = @(gh pr list -R microsoft/winget-pkgs --state open --search "$packageIdentifier in:title" --json number -q ".[].number")
+        return @($numbers | Where-Object { "$_" -ne $prNumber }).Count -eq 0
+    }
+    catch {
+        return $false
+    }
+}
+
+function Invoke-GhWithBodyFile([string[]]$arguments, [string]$body) {
+    # Passing multi-line text through a file keeps newlines and backticks intact on Windows.
+    $bodyFile = [System.IO.Path]::GetTempFileName()
+    try {
+        [System.IO.File]::WriteAllText($bodyFile, $body, (New-Object System.Text.UTF8Encoding($false)))
+        gh @arguments --body-file $bodyFile | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "gh $($arguments -join ' ') failed with exit code $LASTEXITCODE."
+        }
+    }
+    finally {
+        Remove-Item -LiteralPath $bodyFile -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Get-ManifestSchemaVersion([string]$manifestRoot, [string]$packageIdentifier) {
+    $versionManifest = Join-Path $manifestRoot "$packageIdentifier.yaml"
+    if (-not (Test-Path -LiteralPath $versionManifest)) {
+        return "unknown"
+    }
+
+    $value = Get-YamlTopLevelValue -lines @(Get-Content -LiteralPath $versionManifest) -fieldName "ManifestVersion"
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        return "unknown"
+    }
+
+    return $value
+}
+
 function Try-PostPrComment(
     [string]$prNumber,
     [string]$packageIdentifier,
     [string]$packageVersion,
     [string[]]$installerUrls,
-    [bool]$installTestExecuted
+    [bool]$installTestExecuted,
+    [string]$manifestSchemaVersion
 ) {
     if ([string]::IsNullOrWhiteSpace($prNumber)) {
         return
@@ -386,20 +436,22 @@ function Try-PostPrComment(
         return
     }
 
-    $testedLine = if ($installTestExecuted) { "- Local install test: PASS (`winget install --manifest`)"} else { "- Local install test: SKIPPED" }
-    $installerLines = ($installerUrls | ForEach-Object { "- Installer: $_" }) -join [Environment]::NewLine
-    $comment = @"
-Automated update summary:
-- Package: $packageIdentifier
-- Version: $packageVersion
-$installerLines
-- Local validation: PASS (`winget validate --manifest`)
-$testedLine
-- Manifest schema: 1.10
-"@
+    # Single-quoted templates keep the Markdown backticks; PowerShell would treat them as escapes.
+    $testedLine = if ($installTestExecuted) { '- Local install test: PASS (`winget install --manifest`)' } else { '- Local install test: SKIPPED' }
+    $lines = New-Object System.Collections.Generic.List[string]
+    [void]$lines.Add('Automated update summary:')
+    [void]$lines.Add("- Package: $packageIdentifier")
+    [void]$lines.Add("- Version: $packageVersion")
+    foreach ($installerUrl in $installerUrls) {
+        [void]$lines.Add("- Installer: $installerUrl")
+    }
+    [void]$lines.Add('- Local validation: PASS (`winget validate --manifest`)')
+    [void]$lines.Add($testedLine)
+    [void]$lines.Add("- Manifest schema: $manifestSchemaVersion")
+    $comment = $lines -join "`n"
 
     try {
-        gh pr comment $prNumber -R microsoft/winget-pkgs --body $comment | Out-Null
+        Invoke-GhWithBodyFile -arguments @("pr", "comment", $prNumber, "-R", "microsoft/winget-pkgs") -body $comment
     }
     catch {
         Write-Warning "Failed to post PR comment automatically: $($_.Exception.Message)"
@@ -511,8 +563,9 @@ $prUrl = Try-ExtractPrUrl -text $submitOutput
 $prNumber = Try-GetPrNumberFromUrl -prUrl $prUrl
 
 if (-not [string]::IsNullOrWhiteSpace($prNumber)) {
-    Try-UpdatePrChecklist -prNumber $prNumber -installTestExecuted $installTestExecuted
-    Try-PostPrComment -prNumber $prNumber -packageIdentifier $PackageIdentifier -packageVersion $packageVersion -installerUrls @($installerEntries.Url) -installTestExecuted $installTestExecuted
+    $manifestSchemaVersion = Get-ManifestSchemaVersion -manifestRoot $manifestRoot -packageIdentifier $PackageIdentifier
+    Try-UpdatePrChecklist -prNumber $prNumber -packageIdentifier $PackageIdentifier -installTestExecuted $installTestExecuted
+    Try-PostPrComment -prNumber $prNumber -packageIdentifier $PackageIdentifier -packageVersion $packageVersion -installerUrls @($installerEntries.Url) -installTestExecuted $installTestExecuted -manifestSchemaVersion $manifestSchemaVersion
 }
 
 Write-Step "Completed"

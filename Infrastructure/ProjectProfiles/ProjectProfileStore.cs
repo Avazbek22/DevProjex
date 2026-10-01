@@ -9,11 +9,13 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 	IProjectProfileStore,
 	IPersistentSecretMarkStore
 {
-	private const int CurrentSchemaVersion = 3;
+	private const int CurrentSchemaVersion = 4;
+	private const int CurrentSelectedPathsSemanticsVersion = 1;
 	private const string FolderName = "DevProjex";
 	private const string FileName = "project-profiles.json";
 	private static readonly DateTimeOffset MaximumSafeProfileTimestamp = DateTimeOffset.MaxValue.AddDays(-1);
 	private static readonly TimeSpan ClearLockTimeout = TimeSpan.FromMilliseconds(200);
+	private const int IdentityPrefixBytes = 4 * 1024;
 
 	private static readonly JsonSerializerOptions SerializerOptions = new()
 	{
@@ -23,13 +25,17 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
 	};
 
-    private readonly object _sync = new();
-    private readonly Func<string> _appDataPathProvider =
-	    appDataPathProvider ?? UserDataPathResolver.GetConfigurationRoot;
+	private readonly object _sync = new();
+	private readonly Func<string> _appDataPathProvider =
+		appDataPathProvider ?? UserDataPathResolver.GetConfigurationRoot;
 	private readonly PersistentSecretMarkStore _persistentMarks = new(
 		appDataPathProvider ?? UserDataPathResolver.GetConfigurationRoot);
+	private ProfileReadSnapshot? _readSnapshot;
+	private long _documentParseCount;
 
-    public bool EnsureStorageExists()
+	internal long DocumentParseCount => Interlocked.Read(ref _documentParseCount);
+
+	public bool EnsureStorageExists()
 	{
 		lock (_sync)
 		{
@@ -39,7 +45,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 
 			using var _ = heldLock;
 			if (HasOversizedDocument(fileSet) ||
-			    JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
+				JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
 				return false;
 			return EnsureStorageExistsCore(fileSet);
 		}
@@ -85,12 +91,23 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		=> TrySaveProfileWithResult(localProjectPath, profile).Succeeded;
 
 	public bool TrySaveProfile(string localProjectPath, ProjectSelectionProfile profile, DateTimeOffset updatedUtc)
-		=> TrySaveProfileWithResult(localProjectPath, profile, updatedUtc).Succeeded;
+		=> TrySaveProfileWithResultCore(localProjectPath, profile, updatedUtc).Succeeded;
 
 	public ProjectProfileSaveResult TrySaveProfileWithResult(
 		string localProjectPath,
 		ProjectSelectionProfile profile) =>
-		TrySaveProfileWithResult(localProjectPath, profile, DateTimeOffset.UtcNow);
+		TrySaveProfileWithResultCore(localProjectPath, profile, DateTimeOffset.UtcNow);
+
+	public ProjectProfileSaveResult TrySaveProfileWithResult(
+		string localProjectPath,
+		ProjectSelectionProfile profile,
+		DateTimeOffset? expectedUpdatedUtc) =>
+		TrySaveProfileWithResultCore(
+			localProjectPath,
+			profile,
+			DateTimeOffset.UtcNow,
+			expectedUpdatedUtc,
+			enforceExpectedVersion: true);
 
 	public ProjectProfileBatchSaveResult TrySaveProfilesWithResult(
 		IReadOnlyList<ProjectProfileSaveRequest> requests,
@@ -116,7 +133,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 				continue;
 
 			if (!preparedByPath.TryGetValue(normalizedPath, out var previous) ||
-			    previous.UpdatedUtc <= normalizedUpdatedUtc)
+				previous.UpdatedUtc <= normalizedUpdatedUtc)
 			{
 				preparedByPath[normalizedPath] = new PreparedProfileWrite(
 					normalizedPath,
@@ -143,20 +160,21 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 
 			using var _ = heldLock;
 			if (HasOversizedDocument(fileSet) ||
-			    JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
+				JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
 			{
 				return new ProjectProfileBatchSaveResult([]);
 			}
 
-			var db = LoadInternal(fileSet, persistRecovery: false);
+			if (!TryLoadForMutation(fileSet, out var db))
+				return new ProjectProfileBatchSaveResult([]);
 			db.SchemaVersion = CurrentSchemaVersion;
 			var alreadySaved = new List<string>();
 			var changedPaths = new List<string>();
 			foreach (var write in preparedByPath.Values)
 			{
 				if (db.Profiles.TryGetValue(write.NormalizedPath, out var existing) &&
-				    existing is not null &&
-				    existing.UpdatedUtc > write.UpdatedUtc)
+					existing is not null &&
+					existing.UpdatedUtc > write.UpdatedUtc)
 				{
 					alreadySaved.Add(write.NormalizedPath);
 					continue;
@@ -182,10 +200,12 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		}
 	}
 
-	private ProjectProfileSaveResult TrySaveProfileWithResult(
+	private ProjectProfileSaveResult TrySaveProfileWithResultCore(
 		string localProjectPath,
 		ProjectSelectionProfile profile,
-		DateTimeOffset updatedUtc)
+		DateTimeOffset updatedUtc,
+		DateTimeOffset? expectedUpdatedUtc = null,
+		bool enforceExpectedVersion = false)
 	{
 		if (!TryNormalizePath(localProjectPath, out var normalizedPath))
 			return new ProjectProfileSaveResult(Succeeded: false, WasTruncated: false);
@@ -203,18 +223,27 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 
 			using var _ = heldLock;
 			if (HasOversizedDocument(fileSet) ||
-			    JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
+				JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
 				return new ProjectProfileSaveResult(Succeeded: false, WasTruncated: false);
-			var db = LoadInternal(fileSet);
+			if (!TryLoadForMutation(fileSet, out var db))
+				return new ProjectProfileSaveResult(Succeeded: false, WasTruncated: false);
 			db.SchemaVersion = CurrentSchemaVersion;
+			var hasExisting = db.Profiles.TryGetValue(normalizedPath, out var existing) && existing is not null;
+			if (enforceExpectedVersion &&
+				(hasExisting != expectedUpdatedUtc.HasValue ||
+				 hasExisting && NormalizeProfileTimestamp(existing!.UpdatedUtc) !=
+				 NormalizeProfileTimestamp(expectedUpdatedUtc!.Value)))
+			{
+				return new ProjectProfileSaveResult(ProjectProfileSaveStatus.Conflict);
+			}
 
 			// A delayed retry from another window/process must not stomp a newer profile revision.
 			// The caller-provided timestamp reflects when the profile became user-approved.
-			if (db.Profiles.TryGetValue(normalizedPath, out var existing) &&
-				existing is not null &&
-				existing.UpdatedUtc > normalizedUpdatedUtc)
+			if (hasExisting && existing!.UpdatedUtc > normalizedUpdatedUtc)
 			{
-				return new ProjectProfileSaveResult(Succeeded: true, WasTruncated: false);
+				return enforceExpectedVersion
+					? new ProjectProfileSaveResult(ProjectProfileSaveStatus.Conflict)
+					: new ProjectProfileSaveResult(Succeeded: true, WasTruncated: false);
 			}
 
 			db.Profiles[normalizedPath] = persistedProfile;
@@ -227,7 +256,10 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 
 	public ProjectProfileClearStatus ClearAllProfiles()
 	{
-		ProjectProfileClearStatus selectionStatus;
+		var markStatus = _persistentMarks.ClearAll();
+		if (markStatus != ProjectProfileClearStatus.Cleared)
+			return markStatus;
+
 		lock (_sync)
 		{
 			try
@@ -241,28 +273,25 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 				}
 				catch (IOException)
 				{
-					return ProjectProfileClearStatus.Busy;
+					return ProjectProfileClearStatus.Partial;
 				}
 
 				using var _ = heldLock;
 				if (HasOversizedDocument(fileSet))
-					return ProjectProfileClearStatus.Failed;
+					return ProjectProfileClearStatus.Partial;
 				if (JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
-					return ProjectProfileClearStatus.FutureSchema;
+					return ProjectProfileClearStatus.Partial;
 
+				InvalidateReadSnapshot();
 				File.Delete(fileSet.PrimaryPath);
 				File.Delete(fileSet.BackupPath);
-				selectionStatus = ProjectProfileClearStatus.Cleared;
+				return ProjectProfileClearStatus.Cleared;
 			}
 			catch
 			{
-				selectionStatus = ProjectProfileClearStatus.Failed;
+				return ProjectProfileClearStatus.Partial;
 			}
 		}
-
-		return selectionStatus == ProjectProfileClearStatus.Cleared
-			? _persistentMarks.ClearAll()
-			: selectionStatus;
 	}
 
 	private static void PrepareStorageDirectoryForClear(JsonStoreFileSet fileSet)
@@ -277,6 +306,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		string localProjectPath,
 		TimeSpan lockTimeout)
 	{
+		ArgumentOutOfRangeException.ThrowIfLessThan(lockTimeout, TimeSpan.Zero);
 		if (!TryNormalizePath(localProjectPath, out var normalizedPath))
 		{
 			return new ProjectProfileLookupResult(
@@ -284,10 +314,21 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 				null);
 		}
 
-		lock (_sync)
+		var startedTimestamp = Stopwatch.GetTimestamp();
+		if (!Monitor.TryEnter(_sync, lockTimeout))
+		{
+			return new ProjectProfileLookupResult(
+				ProjectProfileLookupStatus.TemporarilyUnavailable,
+				null);
+		}
+
+		try
 		{
 			var fileSet = GetFileSet();
-			if (!CrossProcessFileLock.TryAcquire(fileSet, lockTimeout, out var heldLock))
+			if (!CrossProcessFileLock.TryAcquire(
+					fileSet,
+					RemainingTimeout(startedTimestamp, lockTimeout),
+					out var heldLock))
 			{
 				return new ProjectProfileLookupResult(
 					ProjectProfileLookupStatus.TemporarilyUnavailable,
@@ -301,56 +342,112 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 					ProjectProfileLookupStatus.InvalidStorage,
 					null);
 			}
-			if (JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
+			var documents = LoadReadSnapshot(fileSet);
+			var primaryStatus = documents.Primary.Status;
+			var primaryDb = documents.Primary.Database;
+			var primaryRequiresRewrite = documents.Primary.RequiresRewrite;
+			var backupStatus = documents.Backup.Status;
+			var backupDb = documents.Backup.Database;
+			var backupRequiresRewrite = documents.Backup.RequiresRewrite;
+			if (primaryStatus == ProfileDocumentLoadStatus.FutureSchema ||
+				backupStatus == ProfileDocumentLoadStatus.FutureSchema)
 			{
 				return new ProjectProfileLookupResult(
 					ProjectProfileLookupStatus.UnsupportedFutureSchema,
 					null);
 			}
-			if (TryLoadFromPath(fileSet.PrimaryPath, out var primaryDb, out var primaryRequiresRewrite))
+			if (primaryStatus == ProfileDocumentLoadStatus.TemporarilyUnavailable)
 			{
-				if (primaryRequiresRewrite)
+				return new ProjectProfileLookupResult(
+					ProjectProfileLookupStatus.TemporarilyUnavailable,
+					null);
+			}
+			if (primaryStatus == ProfileDocumentLoadStatus.Loaded)
+			{
+				if (primaryRequiresRewrite && !primaryDb.ContainsInvalidEntries)
 					TrySaveInternal(fileSet, primaryDb);
-				return ResolveLookup(primaryDb, normalizedPath, fileSet, lockTimeout);
+				var primaryLookup = ResolveLookup(
+					primaryDb,
+					normalizedPath,
+					fileSet,
+					RemainingTimeout(startedTimestamp, lockTimeout));
+				if (primaryLookup.Status == ProjectProfileLookupStatus.InvalidStorage &&
+					backupStatus == ProfileDocumentLoadStatus.Loaded)
+				{
+					var recovered = ResolveLookup(
+						backupDb,
+						normalizedPath,
+						fileSet,
+						RemainingTimeout(startedTimestamp, lockTimeout));
+					if (recovered.Status == ProjectProfileLookupStatus.Found)
+						return recovered with { RecoveryStatus = primaryLookup.Status };
+				}
+				return primaryLookup;
 			}
-
-			if (TryLoadFromPath(
-				    fileSet.BackupPath,
-				    out var backupDb,
-				    out var backupRequiresRewrite))
+			if (backupStatus == ProfileDocumentLoadStatus.TemporarilyUnavailable)
 			{
-				TrySaveInternal(fileSet, backupDb);
-				return ResolveLookup(backupDb, normalizedPath, fileSet, lockTimeout);
+				return new ProjectProfileLookupResult(
+					ProjectProfileLookupStatus.TemporarilyUnavailable,
+					null);
 			}
-
+			if (backupStatus == ProfileDocumentLoadStatus.Loaded)
+			{
+				if (!backupDb.ContainsInvalidEntries)
+					TrySaveInternal(fileSet, backupDb);
+				var recovered = ResolveLookup(
+					backupDb,
+					normalizedPath,
+					fileSet,
+					RemainingTimeout(startedTimestamp, lockTimeout));
+				return recovered.Status is ProjectProfileLookupStatus.Found or ProjectProfileLookupStatus.Missing
+					? recovered with { RecoveryStatus = ProjectProfileLookupStatus.InvalidStorage }
+					: recovered;
+			}
 			var status = File.Exists(fileSet.PrimaryPath) || File.Exists(fileSet.BackupPath)
 				? ProjectProfileLookupStatus.InvalidStorage
 				: ProjectProfileLookupStatus.Missing;
 			return new ProjectProfileLookupResult(status, null);
 		}
+		finally
+		{
+			Monitor.Exit(_sync);
+		}
 	}
 
-	public bool TryDeleteProfile(string localProjectPath)
+	private static TimeSpan RemainingTimeout(long startedTimestamp, TimeSpan budget)
+	{
+		var remaining = budget - Stopwatch.GetElapsedTime(startedTimestamp);
+		return remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero;
+	}
+
+	public bool TryDeleteProfile(string localProjectPath) =>
+		TryDeleteProfileWithResult(localProjectPath) == ProjectProfileDeleteStatus.Deleted;
+
+	public ProjectProfileDeleteStatus TryDeleteProfileWithResult(string localProjectPath)
 	{
 		if (!TryNormalizePath(localProjectPath, out var normalizedPath))
-			return false;
+			return ProjectProfileDeleteStatus.Failed;
+		if (!_persistentMarks.DeleteProject(normalizedPath, TimeSpan.FromSeconds(5)))
+			return ProjectProfileDeleteStatus.Failed;
 
-		var selectionDeleted = false;
 		lock (_sync)
 		{
 			var fileSet = GetFileSet();
 			if (!CrossProcessFileLock.TryAcquire(fileSet, out var heldLock))
-				return false;
+				return ProjectProfileDeleteStatus.Partial;
 
 			using var _ = heldLock;
 			if (HasOversizedDocument(fileSet) ||
-			    JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
-				return false;
-			var db = LoadInternal(fileSet);
-			selectionDeleted = !db.Profiles.Remove(normalizedPath) || TrySaveInternal(fileSet, db);
+				JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
+				return ProjectProfileDeleteStatus.Partial;
+			if (!TryLoadForMutation(fileSet, out var db))
+				return ProjectProfileDeleteStatus.Partial;
+			if (!db.Profiles.Remove(normalizedPath))
+				return ProjectProfileDeleteStatus.Deleted;
+			return TrySaveInternal(fileSet, db)
+				? ProjectProfileDeleteStatus.Deleted
+				: ProjectProfileDeleteStatus.Partial;
 		}
-
-		return selectionDeleted && _persistentMarks.DeleteProject(normalizedPath, TimeSpan.FromSeconds(5));
 	}
 
 	public string GetPath()
@@ -364,6 +461,12 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		JsonStoreFileSet selectionFileSet,
 		TimeSpan lockTimeout)
 	{
+		if (database.InvalidProfilePaths.Contains(normalizedPath))
+		{
+			return new ProjectProfileLookupResult(
+				ProjectProfileLookupStatus.InvalidStorage,
+				null);
+		}
 		if (!database.Profiles.TryGetValue(normalizedPath, out var entry) || entry is null)
 		{
 			return new ProjectProfileLookupResult(
@@ -388,7 +491,11 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 
 		return new ProjectProfileLookupResult(
 			ProjectProfileLookupStatus.Found,
-			ToProfile(entry, marks.Snapshot.Marks));
+			ToProfile(entry, marks.Snapshot.Marks),
+			NormalizeProfileTimestamp(entry.UpdatedUtc))
+		{
+			PersistentMarks = marks.Snapshot
+		};
 	}
 
 	private static ProjectProfileLookupStatus MapMarkStoreStatus(PersistentSecretMarkStoreStatus status) =>
@@ -438,18 +545,58 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		return CreateDefaultDb();
 	}
 
+	private bool TryLoadForMutation(JsonStoreFileSet fileSet, out ProjectProfileDb database)
+	{
+		var primaryStatus = LoadFromPath(fileSet.PrimaryPath, out database, out _);
+		if (primaryStatus == ProfileDocumentLoadStatus.Loaded)
+			return !database.ContainsInvalidEntries;
+		if (primaryStatus == ProfileDocumentLoadStatus.TemporarilyUnavailable)
+			return false;
+
+		var backupStatus = LoadFromPath(fileSet.BackupPath, out database, out _);
+		if (backupStatus == ProfileDocumentLoadStatus.Loaded)
+			return !database.ContainsInvalidEntries;
+		if (backupStatus == ProfileDocumentLoadStatus.TemporarilyUnavailable)
+			return false;
+		if (File.Exists(fileSet.PrimaryPath) || File.Exists(fileSet.BackupPath))
+		{
+			database = null!;
+			return false;
+		}
+
+		database = CreateDefaultDb();
+		return true;
+	}
+
 	private bool EnsureStorageExistsCore(JsonStoreFileSet fileSet)
 	{
-		if (TryLoadFromPath(fileSet.PrimaryPath, out var primaryDb, out var primaryRequiresRewrite))
+		var primaryStatus = LoadFromPath(
+			fileSet.PrimaryPath,
+			out var primaryDb,
+			out var primaryRequiresRewrite);
+		if (primaryStatus == ProfileDocumentLoadStatus.Loaded)
 		{
+			if (primaryDb.ContainsInvalidEntries)
+				return false;
 			if (primaryRequiresRewrite || !File.Exists(fileSet.BackupPath))
 				return TrySaveInternal(fileSet, primaryDb);
 
 			return true;
 		}
+		if (primaryStatus is ProfileDocumentLoadStatus.TemporarilyUnavailable or
+			ProfileDocumentLoadStatus.FutureSchema)
+			return false;
 
-		if (TryLoadFromPath(fileSet.BackupPath, out var backupDb, out _))
+		var backupStatus = LoadFromPath(fileSet.BackupPath, out var backupDb, out _);
+		if (backupStatus == ProfileDocumentLoadStatus.Loaded)
+		{
+			if (backupDb.ContainsInvalidEntries)
+				return false;
 			return TrySaveInternal(fileSet, backupDb);
+		}
+		if (backupStatus is ProfileDocumentLoadStatus.TemporarilyUnavailable or
+			ProfileDocumentLoadStatus.FutureSchema)
+			return false;
 
 		if (File.Exists(fileSet.PrimaryPath) || File.Exists(fileSet.BackupPath))
 			return false;
@@ -461,12 +608,99 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 
 	private bool TrySaveInternal(JsonStoreFileSet fileSet, ProjectProfileDb db)
 	{
+		InvalidateReadSnapshot();
 		return JsonStorePersistence.TryWriteAtomic(
 			fileSet,
 			db,
 			SerializerOptions,
 			ProjectProfileStorageLimits.MaximumJsonBytes);
 	}
+
+	private ProfileReadSnapshot LoadReadSnapshot(JsonStoreFileSet fileSet)
+	{
+		var primaryBefore = TryCaptureDocumentIdentity(fileSet.PrimaryPath);
+		var backupBefore = TryCaptureDocumentIdentity(fileSet.BackupPath);
+		if (primaryBefore is { } primaryIdentity &&
+			backupBefore is { } backupIdentity &&
+			_readSnapshot is { } cached &&
+			PathComparer.Default.Equals(cached.PrimaryPath, fileSet.PrimaryPath) &&
+			PathComparer.Default.Equals(cached.BackupPath, fileSet.BackupPath) &&
+			cached.PrimaryIdentity == primaryIdentity &&
+			cached.BackupIdentity == backupIdentity)
+		{
+			return cached;
+		}
+
+		var primary = LoadReadDocument(fileSet.PrimaryPath, primaryBefore);
+		var backup = LoadReadDocument(fileSet.BackupPath, backupBefore);
+		var primaryAfter = TryCaptureDocumentIdentity(fileSet.PrimaryPath);
+		var backupAfter = TryCaptureDocumentIdentity(fileSet.BackupPath);
+		var loaded = new ProfileReadSnapshot(
+			fileSet.PrimaryPath,
+			fileSet.BackupPath,
+			primaryAfter ?? DocumentIdentity.Unavailable,
+			backupAfter ?? DocumentIdentity.Unavailable,
+			primary,
+			backup);
+		_readSnapshot = primaryBefore is { } stablePrimaryBefore &&
+			backupBefore is { } stableBackupBefore &&
+			primaryAfter is { } stablePrimaryAfter &&
+			backupAfter is { } stableBackupAfter &&
+			stablePrimaryBefore == stablePrimaryAfter &&
+			stableBackupBefore == stableBackupAfter
+				? loaded
+				: null;
+		return loaded;
+	}
+
+	private ReadDocument LoadReadDocument(string path, DocumentIdentity? identity)
+	{
+		var status = LoadFromPath(path, out var database, out var requiresRewrite);
+		if (identity is { Exists: true })
+			Interlocked.Increment(ref _documentParseCount);
+		return new ReadDocument(status, database, requiresRewrite);
+	}
+
+	private static DocumentIdentity? TryCaptureDocumentIdentity(string path)
+	{
+		try
+		{
+			var info = new FileInfo(path);
+			info.Refresh();
+			if (!info.Exists)
+				return DocumentIdentity.Missing;
+
+			using var stream = new FileStream(
+				path,
+				FileMode.Open,
+				FileAccess.Read,
+				FileShare.ReadWrite | FileShare.Delete,
+				IdentityPrefixBytes,
+				FileOptions.SequentialScan);
+			Span<byte> prefix = stackalloc byte[IdentityPrefixBytes];
+			var read = stream.Read(prefix);
+			var hash = 14695981039346656037UL;
+			for (var index = 0; index < read; index++)
+			{
+				hash ^= prefix[index];
+				hash *= 1099511628211UL;
+			}
+			return new DocumentIdentity(
+				Available: true,
+				Exists: true,
+				stream.Length,
+				info.LastWriteTimeUtc.Ticks,
+				info.CreationTimeUtc.Ticks,
+				read,
+				hash);
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+		{
+			return null;
+		}
+	}
+
+	private void InvalidateReadSnapshot() => _readSnapshot = null;
 
 	private static ProjectProfileDb CreateDefaultDb()
 	{
@@ -481,6 +715,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 	{
 		db.SchemaVersion = CurrentSchemaVersion;
 		db.Profiles ??= new Dictionary<string, PersistedProjectProfile>(PathComparer.Default);
+		db.InvalidProfilePaths ??= new HashSet<string>(PathComparer.Default);
 
 		var normalized = new Dictionary<string, PersistedProjectProfile>(PathComparer.Default);
 		foreach (var (key, value) in db.Profiles)
@@ -510,8 +745,10 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			ProjectTreePathIdentity.CanonicalComparer);
 		profile.ExtensionStates = NormalizeStringStateDictionary(profile.ExtensionStates, StringComparer.OrdinalIgnoreCase);
 		profile.IgnoreOptionStates ??= [];
-		profile.SelectedPaths ??= [];
 		profile.MarkedSecrets ??= [];
+		if (profile.SelectedPathsSemanticsVersion == 0 && profile.SelectedPaths is { Count: 0 })
+			profile.SelectedPaths = null;
+		profile.SelectedPathsSemanticsVersion = CurrentSelectedPathsSemanticsVersion;
 
 		profile.SelectedRootFolders = profile.SelectedRootFolders
 			.Where(IsValidStoredPath)
@@ -527,17 +764,20 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			.Distinct()
 			.Take(Enum.GetValues<IgnoreOptionId>().Length)
 			.ToList();
-		profile.SelectedPaths = profile.SelectedPaths
-			.Where(IsValidStoredPath)
-			.Select(PathUtility.NormalizeSeparators)
-			.Distinct(ProjectTreePathIdentity.CanonicalComparer)
-			.OrderBy(static item => item, ProjectTreePathIdentity.CanonicalComparer)
-			.Take(ProjectProfileStorageLimits.MaximumSelectionItemsPerCollection)
-			.ToList();
+		if (profile.SelectedPaths is not null)
+		{
+			profile.SelectedPaths = profile.SelectedPaths
+				.Where(IsValidStoredPath)
+				.Select(PathUtility.NormalizeSeparators)
+				.Distinct(ProjectTreePathIdentity.CanonicalComparer)
+				.OrderBy(static item => item, ProjectTreePathIdentity.CanonicalComparer)
+				.Take(ProjectProfileStorageLimits.MaximumSelectionItemsPerCollection)
+				.ToList();
+		}
 		profile.MarkedSecrets = NormalizeMarkedSecrets(profile.MarkedSecrets);
 
 		if (sourceSchemaVersion < 3 &&
-		    !profile.IgnoreOptionStates.ContainsKey(IgnoreOptionId.SmartIgnore))
+			!profile.IgnoreOptionStates.ContainsKey(IgnoreOptionId.SmartIgnore))
 		{
 			var gitIgnoreWasEnabled = profile.IgnoreOptionStates.TryGetValue(
 				IgnoreOptionId.UseGitIgnore,
@@ -613,7 +853,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		ReconcileSelectedStringValues(selectedExtensions, extensionStates, StringComparer.OrdinalIgnoreCase);
 		ReconcileSelectedIgnoreOptions(selectedIgnoreOptions, ignoreOptionStates);
 		NormalizeGitFilteringState(selectedIgnoreOptions, ignoreOptionStates);
-		var selectedPaths = (profile.SelectedPaths ?? [])
+		var selectedPaths = profile.SelectedPaths?
 			.Where(IsValidStoredPath)
 			.Select(PathUtility.NormalizeSeparators)
 			.Distinct(ProjectTreePathIdentity.CanonicalComparer)
@@ -622,12 +862,12 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			.ToList();
 
 		wasTruncated = selectedRootFolders.Count > ProjectProfileStorageLimits.MaximumSelectionItemsPerCollection ||
-		               selectedExtensions.Count > ProjectProfileStorageLimits.MaximumSelectionItemsPerCollection ||
-		               selectedPaths.Count > ProjectProfileStorageLimits.MaximumSelectionItemsPerCollection ||
-		               rootFolderStatesTruncated ||
-		               extensionStatesTruncated ||
-		               rootFolderStates.Count > ProjectProfileStorageLimits.MaximumSelectionItemsPerCollection ||
-		               extensionStates.Count > ProjectProfileStorageLimits.MaximumSelectionItemsPerCollection;
+					   selectedExtensions.Count > ProjectProfileStorageLimits.MaximumSelectionItemsPerCollection ||
+					   selectedPaths is { Count: > ProjectProfileStorageLimits.MaximumSelectionItemsPerCollection } ||
+					   rootFolderStatesTruncated ||
+					   extensionStatesTruncated ||
+					   rootFolderStates.Count > ProjectProfileStorageLimits.MaximumSelectionItemsPerCollection ||
+					   extensionStates.Count > ProjectProfileStorageLimits.MaximumSelectionItemsPerCollection;
 
 		return new PersistedProjectProfile
 		{
@@ -638,6 +878,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			ExtensionStates = extensionStates,
 			IgnoreOptionStates = ignoreOptionStates,
 			SelectedPaths = selectedPaths,
+			SelectedPathsSemanticsVersion = CurrentSelectedPathsSemanticsVersion,
 			MarkedSecrets = null,
 			UpdatedUtc = NormalizeProfileTimestamp(updatedUtc)
 		};
@@ -680,7 +921,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			RootFolderStates: rootStates,
 			ExtensionStates: extensionStates,
 			IgnoreOptionStates: ignoreStates,
-			SelectedPaths: profile.SelectedPaths.ToArray(),
+			SelectedPaths: profile.SelectedPaths?.ToArray(),
 			MarkedSecrets: marks.ToArray());
 	}
 
@@ -712,10 +953,10 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		out MarkedSecretProfileEntry normalized)
 	{
 		if (mark is null ||
-		    !Enum.IsDefined(mark.Class) ||
-		    !PersistentSecretIdentity.IsSupported(mark.H) ||
-		    mark.Length is < MarkedSecretValueNormalizer.MinimumLength or
-			    > MarkedSecretValueNormalizer.MaximumLength)
+			!Enum.IsDefined(mark.Class) ||
+			!PersistentSecretIdentity.IsSupported(mark.H) ||
+			mark.Length is < MarkedSecretValueNormalizer.MinimumLength or
+				> MarkedSecretValueNormalizer.MaximumLength)
 		{
 			normalized = null!;
 			return false;
@@ -740,7 +981,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 				return false;
 			}
 			if (relativePath.Length == 0 ||
-			    relativePath.Length > ProjectProfileStorageLimits.MaximumMarkedSecretPathLength)
+				relativePath.Length > ProjectProfileStorageLimits.MaximumMarkedSecretPathLength)
 			{
 				normalized = null!;
 				return false;
@@ -912,13 +1153,19 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		}
 	}
 
-	private static bool TryLoadFromPath(string path, out ProjectProfileDb db, out bool requiresRewrite)
+	private static bool TryLoadFromPath(string path, out ProjectProfileDb db, out bool requiresRewrite) =>
+		LoadFromPath(path, out db, out requiresRewrite) == ProfileDocumentLoadStatus.Loaded;
+
+	private static ProfileDocumentLoadStatus LoadFromPath(
+		string path,
+		out ProjectProfileDb db,
+		out bool requiresRewrite)
 	{
 		db = CreateDefaultDb();
 		requiresRewrite = false;
 
 		if (!File.Exists(path))
-			return false;
+			return ProfileDocumentLoadStatus.Missing;
 
 		try
 		{
@@ -933,20 +1180,32 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 				new JsonDocumentOptions { MaxDepth = 64 },
 				out var document))
 			{
-				return false;
+				return ProfileDocumentLoadStatus.Invalid;
 			}
 			using (document)
 			{
+				if (IsFutureSchema(document.RootElement))
+					return ProfileDocumentLoadStatus.FutureSchema;
 				if (!TryParseDatabase(document.RootElement, out db, out requiresRewrite))
-					return false;
-				return true;
+					return ProfileDocumentLoadStatus.Invalid;
+				return ProfileDocumentLoadStatus.Loaded;
 			}
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+		{
+			return ProfileDocumentLoadStatus.TemporarilyUnavailable;
 		}
 		catch
 		{
-			return false;
+			return ProfileDocumentLoadStatus.Invalid;
 		}
 	}
+
+	private static bool IsFutureSchema(JsonElement root) =>
+		root.ValueKind == JsonValueKind.Object &&
+		root.TryGetProperty("schemaVersion", out var schema) &&
+		(schema.TryGetInt64(out var signed) && signed > CurrentSchemaVersion ||
+		 schema.TryGetUInt64(out var unsigned) && unsigned > CurrentSchemaVersion);
 
 	private static bool IsValidStoredString(string? value) =>
 		!string.IsNullOrWhiteSpace(value) &&
@@ -968,13 +1227,15 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			return false;
 
 		var sourceSchemaVersion = root.TryGetProperty("schemaVersion", out var schemaElement) &&
-		                          schemaElement.TryGetInt32(out var parsedSchema)
+								  schemaElement.TryGetInt32(out var parsedSchema)
 			? parsedSchema
 			: 0;
 		if (sourceSchemaVersion > CurrentSchemaVersion)
 			return false;
 		if (!root.TryGetProperty("profiles", out var profilesElement))
 		{
+			if (sourceSchemaVersion == CurrentSchemaVersion)
+				return false;
 			requiresRewrite = sourceSchemaVersion != CurrentSchemaVersion;
 			return true;
 		}
@@ -982,11 +1243,20 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			return false;
 
 		var profiles = new Dictionary<string, PersistedProjectProfile>(PathComparer.Default);
+		var invalidProfilePaths = new HashSet<string>(PathComparer.Default);
+		var containsInvalidEntries = false;
 		foreach (var property in profilesElement.EnumerateObject())
 		{
-			if (!TryNormalizePath(property.Name, out var normalizedPath) ||
-			    !TryParseProfile(property.Value, sourceSchemaVersion, out var profile))
+			if (!TryNormalizePath(property.Name, out var normalizedPath))
 			{
+				containsInvalidEntries = true;
+				requiresRewrite = true;
+				continue;
+			}
+			if (!TryParseProfile(property.Value, sourceSchemaVersion, out var profile))
+			{
+				containsInvalidEntries = true;
+				invalidProfilePaths.Add(normalizedPath);
 				requiresRewrite = true;
 				continue;
 			}
@@ -998,13 +1268,50 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			new ProjectProfileDb
 			{
 				SchemaVersion = sourceSchemaVersion,
-				Profiles = profiles
+				Profiles = profiles,
+				InvalidProfilePaths = invalidProfilePaths,
+				ContainsInvalidEntries = containsInvalidEntries
 			},
 			sourceSchemaVersion);
 		PruneProfiles(database);
 		requiresRewrite |= sourceSchemaVersion != CurrentSchemaVersion ||
-		                   profiles.Count != database.Profiles.Count;
+						   profiles.Count != database.Profiles.Count;
 		return true;
+	}
+
+	private sealed record ProfileReadSnapshot(
+		string PrimaryPath,
+		string BackupPath,
+		DocumentIdentity PrimaryIdentity,
+		DocumentIdentity BackupIdentity,
+		ReadDocument Primary,
+		ReadDocument Backup);
+
+	private sealed record ReadDocument(
+		ProfileDocumentLoadStatus Status,
+		ProjectProfileDb Database,
+		bool RequiresRewrite);
+
+	private readonly record struct DocumentIdentity(
+		bool Available,
+		bool Exists,
+		long Length,
+		long LastWriteUtcTicks,
+		long CreationUtcTicks,
+		int PrefixLength,
+		ulong PrefixHash)
+	{
+		public static DocumentIdentity Missing { get; } = new(true, false, 0, 0, 0, 0, 0);
+		public static DocumentIdentity Unavailable { get; } = new(false, false, 0, 0, 0, 0, 0);
+	}
+
+	private enum ProfileDocumentLoadStatus
+	{
+		Missing,
+		Loaded,
+		Invalid,
+		FutureSchema,
+		TemporarilyUnavailable
 	}
 
 	private static bool TryParseProfile(
@@ -1025,10 +1332,12 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			var parsed = node.Deserialize<PersistedProjectProfile>(SerializerOptions);
 			if (parsed is null)
 				return false;
+			if (parsed.SelectedPathsSemanticsVersion is < 0 or > CurrentSelectedPathsSemanticsVersion)
+				return false;
 
 			var marks = new List<MarkedSecretProfileEntry>();
 			if (element.TryGetProperty("markedSecrets", out var marksElement) &&
-			    marksElement.ValueKind == JsonValueKind.Array)
+				marksElement.ValueKind == JsonValueKind.Array)
 			{
 				var markCount = 0;
 				foreach (var markElement in marksElement.EnumerateArray())

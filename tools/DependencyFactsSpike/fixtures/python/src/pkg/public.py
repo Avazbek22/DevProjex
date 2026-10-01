@@ -1,0 +1,2 @@
+class Exported:
+    pass

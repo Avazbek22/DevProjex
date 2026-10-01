@@ -23,6 +23,32 @@ public sealed class CiTestRunnerContractTests
 		}
 	}
 
+	[Fact]
+	public void ReleaseTestStepsRequireExecutedResultsAndPreserveNativeFailures()
+	{
+		var workflow = File.ReadAllText(Path.Combine(FindRepositoryRoot(), ".github", "workflows", "release-validate.yml"));
+		var markers = new[]
+		{
+			"Published Single-File Extraction Contract",
+			"Published Completion Native Shell Integration",
+			"Nested-Mount Destination Safety Gate (Linux x64)",
+			"Portable Launcher Smoke (Windows)",
+			"Portable Launcher ConPTY TUI Smoke (Windows)",
+			"Published Native PTY TUI Smoke (Unix)"
+		};
+		Assert.Equal(markers.Length, workflow.Split("dotnet test ", StringSplitOptions.None).Length - 1);
+		foreach (var marker in markers)
+		{
+			var step = ExtractStep(workflow, $"      - name: {marker}\n");
+			Assert.Contains("trx;LogFileName=", step, StringComparison.Ordinal);
+			Assert.Contains("--results-directory", step, StringComparison.Ordinal);
+			Assert.Contains("$LASTEXITCODE -ne 0", step, StringComparison.Ordinal);
+			Assert.Contains("./Scripts/ci/Test-ExecutedTests.ps1", step, StringComparison.Ordinal);
+			Assert.Contains("-ResultsPath", step, StringComparison.Ordinal);
+			Assert.Contains("-JobName", step, StringComparison.Ordinal);
+		}
+	}
+
 	private static string ExtractStep(string workflow, string marker)
 	{
 		var normalized = workflow.Replace("\r\n", "\n", StringComparison.Ordinal);

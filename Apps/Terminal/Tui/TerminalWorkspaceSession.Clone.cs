@@ -39,7 +39,6 @@ internal sealed partial class TerminalWorkspaceSession
 			L(_clonePhaseKey),
 			repositoryName,
 			L("Terminal.Tui.Clone.ValidatingUrl"));
-		_operationProgress.ApplyLayout(_terminalWidth, _terminalHeight);
 		var tooSmall = CreateTooSmallLabel();
 		_loadingViews = new LoadingViewGraph(tooSmall);
 		_root.Add(heading, _operationProgress.View, tooSmall);

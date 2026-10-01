@@ -101,7 +101,8 @@ public sealed class TreeAndContentExportService(
 			contentPathMapper,
 			transformationContext,
 			displayRootPath: null,
-			outputPathRedaction: outputPathRedaction).ConfigureAwait(false);
+			outputPathRedaction: outputPathRedaction,
+			projectRoot: rootPath).ConfigureAwait(false);
 		var content = contentResult.Text;
 		if (string.IsNullOrWhiteSpace(content))
 			return tree;

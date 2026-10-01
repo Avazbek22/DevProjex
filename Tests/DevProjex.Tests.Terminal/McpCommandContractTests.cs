@@ -34,11 +34,66 @@ public sealed class McpCommandContractTests
 
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
 		Assert.Contains("devprojex mcp", environment.StandardOutput, StringComparison.Ordinal);
-		Assert.Contains("--root", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("-r, --root <PATH>", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("-x, --exclude <NAME>", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("--hide-private-data", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("--allow-remote", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("--live", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("--git-mode", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("--exclude", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("--unrestricted", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("--allow-agent-exclusions", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("Run the local read-only MCP stdio server.", environment.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("hide-secrets")]
+	[InlineData("hide-private-data")]
+	[InlineData("nonsense")]
+	public async Task McpServerBaselineRejectsUnknownAndRedactionExclusions(string exclusion)
+	{
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(environment).RunAsync(
+			["mcp", "--exclude", exclusion, "--language", "en"],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("Unknown exclusion", environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("dot-files")]
+	[InlineData("default")]
+	public async Task McpServerBaselineRejectsNoneCombinedWithAnotherExclusion(string other)
+	{
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(environment).RunAsync(
+			["mcp", "--exclude", "none", "--exclude", other, "--language", "en"],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("cannot be combined", environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("--exclude", "dot-files")]
+	[InlineData("--exclude", "none")]
+	[InlineData("--git-mode", "tracked")]
+	public async Task McpServerRejectsUnrestrictedCombinedWithBaselineFlags(string flag, string value)
+	{
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(environment).RunAsync(
+			["mcp", "--unrestricted", flag, value, "--language", "en"],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("--unrestricted cannot be combined", environment.StandardError, StringComparison.Ordinal);
 	}
 
 	[Theory]
@@ -80,6 +135,93 @@ public sealed class McpCommandContractTests
 	}
 
 	[Fact]
+	public async Task McpUnrestrictedComposesWithAgentDelegationAtParseTime()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var environment = new TestTerminalEnvironment();
+		using var cancellation = new CancellationTokenSource();
+		cancellation.Cancel();
+
+		// A canceled exit (not a usage error) proves the flag pair parses:
+		// the documented full-reach recipe must never become a conflict.
+		var exitCode = await new TerminalApplication(environment).RunAsync(
+			["mcp", "--root", project, "--unrestricted", "--allow-agent-exclusions", "--language", "en"],
+			cancellation.Token);
+
+		Assert.Equal(CommandLineExitCodes.Canceled, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("DPX-CLI-CANCELED", environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task McpUnrestrictedRejectsARepeatedValueGracefully()
+	{
+		var environment = new TestTerminalEnvironment();
+
+		// Validators run before arity validation; a repeated value must surface as a
+		// normal parse error, never as an unhandled exception.
+		var exitCode = await new TerminalApplication(environment).RunAsync(
+			["mcp", "--unrestricted", "true", "--unrestricted", "false", "--language", "en"],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("--unrestricted accepts only one value.", environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("true", true)]
+	[InlineData("on", true)]
+	[InlineData("ON", true)]
+	[InlineData("false", false)]
+	[InlineData("off", false)]
+	public async Task McpUnrestrictedAcceptsAnOptionalBooleanValue(string value, bool enabled)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var environment = new TestTerminalEnvironment();
+		using var cancellation = new CancellationTokenSource();
+		cancellation.Cancel();
+
+		// An enabled value conflicts with --exclude; a disabled one leaves the baseline
+		// flags usable, so the canceled startup proves the value was accepted.
+		var exitCode = await new TerminalApplication(environment).RunAsync(
+			["mcp", "-r", project, "--unrestricted", value, "--exclude", "none", "--language", "en"],
+			cancellation.Token);
+
+		Assert.Empty(environment.StandardOutput);
+		if (enabled)
+		{
+			Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+			Assert.Contains("--unrestricted cannot be combined", environment.StandardError, StringComparison.Ordinal);
+		}
+		else
+		{
+			Assert.Equal(CommandLineExitCodes.Canceled, exitCode);
+			Assert.Contains("DPX-CLI-CANCELED", environment.StandardError, StringComparison.Ordinal);
+		}
+	}
+
+	[Fact]
+	public async Task McpRootAndExcludeAcceptTheSelectionShortAliases()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var environment = new TestTerminalEnvironment();
+		using var cancellation = new CancellationTokenSource();
+		cancellation.Cancel();
+
+		var exitCode = await new TerminalApplication(environment).RunAsync(
+			["mcp", "-r", project, "-x", "default", "-x", "dot-folders", "--language", "en"],
+			cancellation.Token);
+
+		Assert.Equal(CommandLineExitCodes.Canceled, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.DoesNotContain("DPX-CLI-UNKNOWN-OPTION", environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task McpCancellationUsesTheCliCanceledExitContract()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -115,6 +257,10 @@ public sealed class McpCommandContractTests
 			Assert.False(string.IsNullOrWhiteSpace(document.RootElement.GetProperty("Terminal.Command.Mcp").GetString()));
 			Assert.False(string.IsNullOrWhiteSpace(document.RootElement.GetProperty("Terminal.Option.McpRoot").GetString()));
 			Assert.False(string.IsNullOrWhiteSpace(document.RootElement.GetProperty("Terminal.Option.McpGitMode").GetString()));
+			Assert.False(string.IsNullOrWhiteSpace(document.RootElement.GetProperty("Terminal.Option.McpExclude").GetString()));
+			Assert.False(string.IsNullOrWhiteSpace(document.RootElement.GetProperty("Terminal.Option.McpUnrestricted").GetString()));
+			Assert.False(string.IsNullOrWhiteSpace(document.RootElement.GetProperty("Terminal.Option.McpAgentExclusions").GetString()));
+			Assert.False(string.IsNullOrWhiteSpace(document.RootElement.GetProperty("Terminal.Validation.UnrestrictedConflict").GetString()));
 		});
 
 		var solution = File.ReadAllText(Path.Combine(repository, "DevProjex.sln"));

@@ -1,3 +1,5 @@
+using DevProjex.Application.Ranking;
+using DevProjex.Terminal.Execution;
 using Terminal.Gui.Input;
 
 namespace DevProjex.Terminal.Tui;
@@ -7,17 +9,23 @@ internal enum TerminalWorkspaceCommandVerb
 	Set,
 	All,
 	Type,
+	Select,
 	View,
 	Format,
 	Search,
+	Grep,
 	Filter,
 	Export,
 	Copy,
 	Analyze,
+	Related,
+	Reveal,
 	Branch,
 	Update,
 	Recent,
+	Open,
 	Profile,
+	Mcp,
 	Refresh,
 	Language,
 	Diagnostics,
@@ -54,13 +62,19 @@ internal enum TerminalWorkspaceCommandGrammar
 	ToggleOption,
 	ToggleGroup,
 	ToggleTypes,
+	Select,
 	View,
 	Format,
 	Text,
 	Export,
 	Copy,
 	OptionalText,
+	RequiredText,
 	Profile,
+	McpConnection,
+	Related,
+	Grep,
+	ProjectPath,
 	Language,
 	Help,
 	None
@@ -75,7 +89,22 @@ internal sealed record TerminalWorkspaceCommand(
 	ProjectContextDocumentFormat? Format = null,
 	ProjectCopyExportFormat? ProjectExportFormat = null,
 	string? Text = null,
-	string? Destination = null);
+	string? Destination = null,
+	int? Depth = null,
+	TerminalWorkspaceMcpAction McpAction = TerminalWorkspaceMcpAction.Print,
+	SearchMode SearchMode = SearchMode.Text,
+	int? MaximumResults = null,
+	long? MaximumEstimatedTokens = null,
+	ProjectContextRank? Rank = null);
+
+internal enum TerminalWorkspaceMcpAction
+{
+	Print,
+	Connect,
+	ShowLog,
+	ExportLog,
+	ClearLog
+}
 
 internal enum TerminalWorkspaceCommandErrorCode
 {
@@ -86,14 +115,17 @@ internal enum TerminalWorkspaceCommandErrorCode
 	UnexpectedArgument,
 	UnknownToken,
 	InvalidValue,
-	UnknownLanguage
+	UnknownLanguage,
+	UnavailableVerb,
+	InvalidOption
 }
 
 internal sealed record TerminalWorkspaceCommandError(
 	TerminalWorkspaceCommandErrorCode Code,
 	int Position,
 	string? Value,
-	IReadOnlyList<string> Candidates);
+	IReadOnlyList<string> Candidates,
+	string? MessageKey = null);
 
 internal readonly record struct TerminalWorkspaceCommandParseResult(
 	TerminalWorkspaceCommand? Command,
@@ -111,7 +143,10 @@ internal readonly record struct TerminalWorkspaceCommandParseResult(
 internal sealed record TerminalWorkspaceCommandParseContext(
 	IReadOnlyList<string> AvailableExtensions,
 	IReadOnlySet<TerminalWorkspaceCommandVerb>? AllowedVerbs = null,
-	string? WorkingDirectory = null)
+	string? WorkingDirectory = null,
+	string? ProfileDirectory = null,
+	IReadOnlyList<string>? KnownProjectPaths = null,
+	IReadOnlyList<string>? KnownProjectFiles = null)
 {
 	public static TerminalWorkspaceCommandParseContext Empty { get; } = new([]);
 	public IReadOnlyList<string> VerbTokens => AllowedVerbs is null
@@ -168,6 +203,13 @@ internal static class TerminalWorkspaceCommandCatalog
 			"type .cs on",
 			static (session, command) => session.ExecuteTypeCommand(command)),
 		Define(
+			TerminalWorkspaceCommandVerb.Select,
+			TerminalWorkspaceCommandGrammar.Select,
+			"select",
+			"select <path|glob> [<path|glob>...] <on|off>",
+			"select src/**/*.cs on",
+			static (session, command) => session.ExecuteSelectCommand(command)),
+		Define(
 			TerminalWorkspaceCommandVerb.View,
 			TerminalWorkspaceCommandGrammar.View,
 			"view",
@@ -189,6 +231,13 @@ internal static class TerminalWorkspaceCommandCatalog
 			"search TODO",
 			static (session, command) => session.ExecuteSearchCommand(command)),
 		Define(
+			TerminalWorkspaceCommandVerb.Grep,
+			TerminalWorkspaceCommandGrammar.Grep,
+			"grep",
+			"grep <pattern> [--regex|--symbols] [--max <1..200>]",
+			"grep Configure --symbols",
+			static (session, command) => session.ExecuteGrepCommand(command)),
+		Define(
 			TerminalWorkspaceCommandVerb.Filter,
 			TerminalWorkspaceCommandGrammar.Text,
 			"filter",
@@ -199,15 +248,16 @@ internal static class TerminalWorkspaceCommandCatalog
 			TerminalWorkspaceCommandVerb.Export,
 			TerminalWorkspaceCommandGrammar.Export,
 			"export",
-			"export <context|zip|folder> ...",
-			"export context markdown context.md",
+			"export context [text|markdown|json|xml] [path] [--max-tokens <N>] [--rank importance] | " +
+			"export <zip|folder> <path>",
+			"export context markdown ../context.md",
 			static (session, command) => session.ExecuteExportCommand(command)),
 		Define(
 			TerminalWorkspaceCommandVerb.Copy,
 			TerminalWorkspaceCommandGrammar.Copy,
 			"copy",
-			"copy [tree|content|tree-content] [text|markdown|json|xml]",
-			"copy content markdown",
+			"copy [tree|content|tree-content] [text|markdown|json|xml] [--max-tokens <N>] [--rank importance]",
+			"copy json --max-tokens 8000",
 			static (session, command) => session.ExecuteCopyCommand(command)),
 		Define(
 			TerminalWorkspaceCommandVerb.Analyze,
@@ -216,6 +266,20 @@ internal static class TerminalWorkspaceCommandCatalog
 			"analyze",
 			"analyze",
 			static (session, command) => session.ExecuteAnalyzeCommand(command)),
+		Define(
+			TerminalWorkspaceCommandVerb.Related,
+			TerminalWorkspaceCommandGrammar.Related,
+			"related",
+			"related <path> [--direction <dependencies|dependents|both>] [--depth <1..10>]",
+			"related src/App.cs --direction dependencies --depth 2",
+			static (session, command) => session.ExecuteRelatedCommand(command)),
+		Define(
+			TerminalWorkspaceCommandVerb.Reveal,
+			TerminalWorkspaceCommandGrammar.ProjectPath,
+			"reveal",
+			"reveal <path>",
+			"reveal src/App.cs",
+			static (session, command) => session.ExecuteRevealCommand(command)),
 		Define(
 			TerminalWorkspaceCommandVerb.Branch,
 			TerminalWorkspaceCommandGrammar.OptionalText,
@@ -241,12 +305,28 @@ internal static class TerminalWorkspaceCommandCatalog
 			static (session, command) => session.ExecuteRecentCommand(command),
 			TerminalWorkspaceCommandAvailability.Always),
 		Define(
+			TerminalWorkspaceCommandVerb.Open,
+			TerminalWorkspaceCommandGrammar.RequiredText,
+			"open",
+			"open <path|url>",
+			"open \"../Sample Project\"",
+			static (session, command) => session.ExecuteOpenCommand(command),
+			TerminalWorkspaceCommandAvailability.Always),
+		Define(
 			TerminalWorkspaceCommandVerb.Profile,
 			TerminalWorkspaceCommandGrammar.Profile,
 			"profile",
-			"profile save [name]",
-			"profile save \"Review Settings\"",
+			"profile save [name] | profile load <name|path> | profile show | profile reset",
+			"profile show",
 			static (session, command) => session.ExecuteProfileCommand(command)),
+		Define(
+			TerminalWorkspaceCommandVerb.Mcp,
+			TerminalWorkspaceCommandGrammar.McpConnection,
+			"mcp",
+			"mcp [client] [live|standard] | mcp connect <client> | mcp log [session <id>|last] | " +
+			"mcp log export <path> [markdown|json] [session <id>|last] | mcp log clear",
+			"mcp codex live",
+			static (session, command) => session.ExecuteMcpCommand(command)),
 		Define(
 			TerminalWorkspaceCommandVerb.Refresh,
 			TerminalWorkspaceCommandGrammar.None,

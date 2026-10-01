@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 3,
+  "profiles": {
+    "${PROJECT_ROOT}": {
+      "selectedRootFolders": [],
+      "selectedExtensions": [],
+      "selectedIgnoreOptions": [],
+      "rootFolderStates": {},
+      "extensionStates": {},
+      "ignoreOptionStates": {},
+      "selectedPaths": [],
+      "updatedUtc": "2026-09-01T00:00:00+00:00"
+    }
+  }
+}

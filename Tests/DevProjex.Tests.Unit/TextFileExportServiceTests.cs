@@ -1,3 +1,5 @@
+using DevProjex.Application.Preview;
+
 namespace DevProjex.Tests.Unit;
 
 public sealed class TextFileExportServiceTests
@@ -121,6 +123,33 @@ public sealed class TextFileExportServiceTests
 
 		await Assert.ThrowsAnyAsync<OperationCanceledException>(
 			() => service.WriteAsync(stream, new string('a', 1024), cts.Token));
+	}
+
+	[Theory]
+	[InlineData(false, "replacement")]
+	[InlineData(false, "")]
+	[InlineData(true, "replacement")]
+	[InlineData(true, "")]
+	public async Task WriteAsync_AlreadyCanceled_PreservesExistingContentAndPosition(
+		bool exportDocument,
+		string replacement)
+	{
+		var service = new TextFileExportService();
+		var originalBytes = Encoding.UTF8.GetBytes("existing export");
+		await using var stream = new MemoryStream(originalBytes.ToArray());
+		stream.Position = 3;
+		using var document = new InMemoryPreviewTextDocument(replacement);
+		using var cancellation = new CancellationTokenSource();
+		cancellation.Cancel();
+
+		var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => exportDocument
+			? service.WriteAsync(stream, document, cancellation.Token)
+			: service.WriteAsync(stream, replacement, cancellation.Token));
+
+		Assert.Equal(cancellation.Token, exception.CancellationToken);
+		Assert.Equal(originalBytes, stream.ToArray());
+		Assert.Equal(3, stream.Position);
+		Assert.True(stream.CanWrite);
 	}
 
 	private static bool StartsWithUtf8Bom(byte[] bytes)

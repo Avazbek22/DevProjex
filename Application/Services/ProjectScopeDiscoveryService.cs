@@ -335,11 +335,30 @@ public sealed class ProjectScopeDiscoveryService(
 		var now = _utcNowProvider();
 		lock (_scopeCacheSync)
 		{
+			if (allCurrent)
+			{
+				foreach (var candidate in candidates)
+				{
+					if (!_scopeCache.TryGetValue(candidate.Key, out var currentNode) ||
+					    !ReferenceEquals(currentNode, candidate.Value))
+					{
+						// Validation of a retired entry cannot certify a concurrent reload.
+						return false;
+					}
+				}
+			}
+
 			if (!allCurrent)
 			{
 				_scopeCacheGeneration = unchecked(_scopeCacheGeneration + 1);
 				_latestDiscoverySequences.Clear();
 				_rootFactsProvider.Invalidate(normalizedRoot, includeDescendants: true);
+				foreach (var cacheKey in _scopeCache.Keys.ToArray())
+				{
+					if (IsCacheKeyForRoot(cacheKey, normalizedRoot))
+						RemoveScopeCacheEntry(cacheKey);
+				}
+				return false;
 			}
 
 			foreach (var candidate in candidates)
@@ -350,21 +369,12 @@ public sealed class ProjectScopeDiscoveryService(
 					continue;
 				}
 
-				if (!allCurrent)
-				{
-					RemoveScopeCacheEntry(candidate.Key);
-					continue;
-				}
-
 				var refreshed = currentNode.Value with { CachedAtUtc = now };
 				currentNode.Value = refreshed;
 				_scopeCacheLru.Remove(currentNode);
 				_scopeCacheLru.AddFirst(currentNode);
 			}
 		}
-
-		if (!allCurrent)
-			return false;
 
 		return true;
 	}

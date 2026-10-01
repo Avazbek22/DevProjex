@@ -103,6 +103,84 @@ public static class ExportOutputMetricsCalculator
 		return accumulator.ToMetrics();
 	}
 
+	public static AnalyzeOutputMetrics FromOrderedContentFilesForAnalysis(
+		IReadOnlyList<ContentFileMetrics> ordered,
+		IReadOnlyList<string> selectedPaths,
+		string sourceRoot,
+		string documentRoot)
+	{
+		ArgumentNullException.ThrowIfNull(ordered);
+		ArgumentNullException.ThrowIfNull(selectedPaths);
+		ArgumentException.ThrowIfNullOrWhiteSpace(sourceRoot);
+		ArgumentException.ThrowIfNullOrWhiteSpace(documentRoot);
+
+		var measuredFiles = 0;
+		long measuredLines = 0;
+		long measuredCharacters = 0;
+		var estimatedFiles = 0;
+		long estimatedCharacters = 0;
+		var metricsByPath = new Dictionary<string, ContentFileMetrics>(
+			ordered.Count,
+			ProjectTreePathIdentity.CanonicalComparer);
+		foreach (var file in ordered)
+		{
+			if (string.IsNullOrEmpty(file.Path))
+				continue;
+			metricsByPath.TryAdd(file.Path, file);
+
+			var normalizedCharacters = Math.Max(0L, (long)file.CharCount - file.CrLfPairCount);
+			if (file.IsEstimated)
+			{
+				estimatedFiles++;
+				estimatedCharacters = SaturatingAdd(estimatedCharacters, normalizedCharacters);
+			}
+			else
+			{
+				measuredFiles++;
+				measuredLines = SaturatingAdd(
+					measuredLines,
+					normalizedCharacters == 0 ? 0 : Math.Max(1, file.LineCount));
+				measuredCharacters = SaturatingAdd(measuredCharacters, normalizedCharacters);
+			}
+
+		}
+
+		var document = new PackTextMetricsAccumulator();
+		document.Append(ContextRootPresentation.FormatLine(documentRoot));
+		foreach (var path in selectedPaths)
+		{
+			if (string.IsNullOrEmpty(path))
+				continue;
+
+			document.Append("\n\n");
+			var relativePath = PathUtility.GetPortableRelativePath(sourceRoot, path);
+			document.Append(SingleLineTextEscaping.Escape(relativePath));
+			document.Append(":\n\n");
+			if (metricsByPath.TryGetValue(path, out var file))
+				document.Append(file);
+		}
+
+		var documentMetrics = document.Complete();
+		return new AnalyzeOutputMetrics(
+			new AnalyzeContentMetrics(
+				new AnalyzeMeasuredContentMetrics(
+					measuredFiles,
+					measuredLines,
+					measuredCharacters,
+					EstimateTokens(measuredCharacters)),
+				new AnalyzeEstimatedContentMetrics(
+					estimatedFiles,
+					estimatedCharacters,
+					EstimateTokens(estimatedCharacters))),
+			new AnalyzeDocumentMetrics(
+				"content",
+				"text",
+				documentMetrics.Lines,
+				documentMetrics.Chars,
+				documentMetrics.Tokens,
+				estimatedFiles > 0 || measuredFiles + estimatedFiles != selectedPaths.Count));
+	}
+
 	/// <summary>
 	/// Accumulates clipboard-style content metrics without forcing callers to build
 	/// a temporary <see cref="List{T}"/> for large status-bar recalculations.
@@ -290,6 +368,101 @@ public static class ExportOutputMetricsCalculator
 
 	private static long EstimateTokens(long chars) =>
 		chars <= 0 ? 0 : (chars / 4) + (chars % 4 == 0 ? 0 : 1);
+
+	private static long SaturatingAdd(long left, long right) =>
+		left > long.MaxValue - right ? long.MaxValue : left + right;
+
+	private struct PackTextMetricsAccumulator
+	{
+		private long _characters;
+		private long _lineBreaks;
+		private long _trailingLineBreakCharacters;
+		private long _trailingLineBreaks;
+
+		public void Append(string text)
+		{
+			if (string.IsNullOrEmpty(text))
+				return;
+
+			var stats = GetNormalizedTextStats(text.AsSpan());
+			var trailingLineBreaks = CountTrailingLineBreaks(text.AsSpan());
+			Append(
+				stats.NormalizedChars,
+				stats.LineBreaks,
+				trailingLineBreaks,
+				trailingLineBreaks);
+		}
+
+		public void Append(ContentFileMetrics file)
+		{
+			var normalizedCharacters = Math.Max(0L, (long)file.CharCount - file.CrLfPairCount);
+			var lineBreaks = Math.Max(0, file.LineCount - 1);
+			Append(
+				normalizedCharacters,
+				lineBreaks,
+				Math.Max(0, file.TrailingNewlineLineBreaks),
+				Math.Max(0, file.TrailingNewlineLineBreaks));
+		}
+
+		public ExportOutputMetrics Complete()
+		{
+			var characters = Math.Max(0, _characters - _trailingLineBreakCharacters);
+			if (characters == 0)
+				return ExportOutputMetrics.Empty;
+
+			var lineBreaks = Math.Max(0, _lineBreaks - _trailingLineBreaks);
+			return new ExportOutputMetrics(
+				lineBreaks + 1,
+				characters,
+				EstimateTokens(characters));
+		}
+
+		private void Append(
+			long characters,
+			long lineBreaks,
+			long trailingLineBreakCharacters,
+			long trailingLineBreaks)
+		{
+			_characters = SaturatingAdd(_characters, characters);
+			_lineBreaks = SaturatingAdd(_lineBreaks, lineBreaks);
+			if (characters == trailingLineBreakCharacters)
+			{
+				_trailingLineBreakCharacters = SaturatingAdd(
+					_trailingLineBreakCharacters,
+					trailingLineBreakCharacters);
+				_trailingLineBreaks = SaturatingAdd(_trailingLineBreaks, trailingLineBreaks);
+				return;
+			}
+
+			_trailingLineBreakCharacters = trailingLineBreakCharacters;
+			_trailingLineBreaks = trailingLineBreaks;
+		}
+
+		private static int CountTrailingLineBreaks(ReadOnlySpan<char> text)
+		{
+			var count = 0;
+			for (var index = text.Length - 1; index >= 0; index--)
+			{
+				if (text[index] == '\n')
+				{
+					count++;
+					if (index > 0 && text[index - 1] == '\r')
+						index--;
+					continue;
+				}
+
+				if (text[index] == '\r')
+				{
+					count++;
+					continue;
+				}
+
+				break;
+			}
+
+			return count;
+		}
+	}
 
 	private static NormalizedTextStats GetNormalizedTextStats(ReadOnlySpan<char> text)
 	{
@@ -648,3 +821,30 @@ public readonly record struct ExportOutputMetrics(long Lines, long Chars, long T
 {
 	public static ExportOutputMetrics Empty { get; } = new(0, 0, 0);
 }
+
+public readonly record struct AnalyzeOutputMetrics(
+	AnalyzeContentMetrics ContentOnly,
+	AnalyzeDocumentMetrics Document);
+
+public readonly record struct AnalyzeContentMetrics(
+	AnalyzeMeasuredContentMetrics Measured,
+	AnalyzeEstimatedContentMetrics Estimated);
+
+public readonly record struct AnalyzeMeasuredContentMetrics(
+	int Files,
+	long Lines,
+	long Characters,
+	long Tokens);
+
+public readonly record struct AnalyzeEstimatedContentMetrics(
+	int Files,
+	long Characters,
+	long Tokens);
+
+public readonly record struct AnalyzeDocumentMetrics(
+	string View,
+	string Format,
+	long Lines,
+	long Characters,
+	long Tokens,
+	bool IsEstimated);

@@ -89,6 +89,18 @@ public sealed class GitConfigPathComparisonSemanticsResolver
 		}
 
 		var resolved = _repositorySemanticsResolver(repositoryRoot, gitMetadataPath);
+		if (!resolved.IsAuthoritative)
+		{
+			// A failure to read is cached, and while it is cached every caller of this repository is
+			// told the settings are unavailable without anything looking again. That is the right
+			// trade for a repository that genuinely cannot be read, and the wrong one for a single
+			// miss: a clone that has just finished writing its metadata loses every call made in the
+			// next few seconds. So the read is attempted once more before the answer is believed. A
+			// repository that is genuinely unreadable costs one extra read and then backs off as
+			// before; a momentary miss costs nothing beyond that read.
+			resolved = _repositorySemanticsResolver(repositoryRoot, gitMetadataPath);
+		}
+
 		lock (_cacheSync)
 		{
 			if (cacheGeneration != _cacheGeneration ||
@@ -152,13 +164,6 @@ public sealed class GitConfigPathComparisonSemanticsResolver
 		semantics = default;
 		if (!TryRunGit(
 				repositoryRoot,
-				[
-					"config",
-					"--show-scope",
-					"--type=bool",
-					"--get-regexp",
-					"^core\\.(repositoryformatversion|ignorecase|precomposeunicode)$"
-				],
 				out var output,
 				out var exitCode))
 		{
@@ -218,7 +223,6 @@ public sealed class GitConfigPathComparisonSemanticsResolver
 
 	internal static bool TryRunGit(
 		string repositoryRoot,
-		IReadOnlyList<string> arguments,
 		out string standardOutput,
 		out int exitCode,
 		string? executable = null)
@@ -229,7 +233,7 @@ public sealed class GitConfigPathComparisonSemanticsResolver
 		{
 			using var process = new Process
 			{
-				StartInfo = CreateGitStartInfo(repositoryRoot, arguments, executable)
+				StartInfo = CreateGitStartInfo(repositoryRoot, executable)
 			};
 			if (!process.Start())
 				return false;
@@ -312,20 +316,16 @@ public sealed class GitConfigPathComparisonSemanticsResolver
 
 	private static ProcessStartInfo CreateGitStartInfo(
 		string repositoryRoot,
-		IReadOnlyList<string> arguments,
 		string? executable)
 	{
-		var allArguments = new string[arguments.Count + 2];
-		allArguments[0] = "-C";
-		allArguments[1] = repositoryRoot;
-		for (var index = 0; index < arguments.Count; index++)
-			allArguments[index + 2] = arguments[index];
-		var startInfo = GitProcessStartInfoFactory.Create(
-			repositoryRoot,
-			allArguments,
-			executable: executable);
-		startInfo.Environment["GIT_OPTIONAL_LOCKS"] = "0";
-		return startInfo;
+		return executable is null
+			? GitProcessStartInfoFactory.Create(
+				repositoryRoot,
+				GitProcessOperation.ReadConfigValue(GitConfigReadKind.PathComparisonSemantics))
+			: GitProcessStartInfoFactory.CreateForTesting(
+				repositoryRoot,
+				GitProcessOperation.ReadConfigValue(GitConfigReadKind.PathComparisonSemantics),
+				executable);
 	}
 
 	private static bool TryFindNearestRepositoryBoundary(

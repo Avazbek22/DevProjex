@@ -23,8 +23,15 @@ internal sealed class McpBoundedLineTextWriter : TextWriter
 		_lines = new List<string>(maximumLines);
 	}
 
+	/// <summary>
+	/// The completed lines only. A character limit can stop inside a line; this drops that partial
+	/// line so a cut never ends in the middle of a name.
+	/// </summary>
+	public string CompleteLinesText => string.Join('\n', _lines);
+
 	public override Encoding Encoding => Encoding.UTF8;
 	public bool IsTruncated { get; private set; }
+	public bool CharacterLimitReached { get; private set; }
 	public string Text
 	{
 		get
@@ -98,14 +105,14 @@ internal sealed class McpBoundedLineTextWriter : TextWriter
 
 			_previousWasCarriageReturn = false;
 			if (_lines.Count >= _maximumLines)
-				ThrowLimitReached();
+				ThrowLimitReached(characterLimit: false);
 			var scalarLength = char.IsHighSurrogate(character) &&
-			                   index + 1 < characters.Length &&
-			                   char.IsLowSurrogate(characters[index + 1])
+							   index + 1 < characters.Length &&
+							   char.IsLowSurrogate(characters[index + 1])
 				? 2
 				: 1;
 			if (_charactersWritten > _maximumCharacters - scalarLength)
-				ThrowLimitReached();
+				ThrowLimitReached(characterLimit: true);
 			_currentLine.Append(character);
 			_charactersWritten++;
 			if (scalarLength == 2)
@@ -119,18 +126,19 @@ internal sealed class McpBoundedLineTextWriter : TextWriter
 	private void CompleteLine()
 	{
 		if (_lines.Count >= _maximumLines)
-			ThrowLimitReached();
+			ThrowLimitReached(characterLimit: false);
 		if (_charactersWritten >= _maximumCharacters)
-			ThrowLimitReached();
+			ThrowLimitReached(characterLimit: true);
 
 		_lines.Add(_currentLine.ToString());
 		_currentLine.Clear();
 		_charactersWritten++;
 	}
 
-	private void ThrowLimitReached()
+	private void ThrowLimitReached(bool characterLimit)
 	{
 		IsTruncated = true;
+		CharacterLimitReached = characterLimit;
 		throw new McpLineLimitReachedException();
 	}
 }

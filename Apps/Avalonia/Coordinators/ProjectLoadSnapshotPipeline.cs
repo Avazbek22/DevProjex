@@ -8,6 +8,7 @@ internal sealed class ProjectLoadSnapshotPipeline(IProjectLoadSnapshotPipelineHo
         string currentPath,
         bool preserveTreeState,
 		PersistentSecretMarksSnapshot? persistentMarks,
+		ProjectProfileTreeSelection? profileTreeSelection,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(currentPath))
@@ -75,7 +76,8 @@ internal sealed class ProjectLoadSnapshotPipeline(IProjectLoadSnapshotPipelineHo
 				treeBuild.Inventory,
 				treeBuild.GitScopePresentation,
 				treeRoot,
-				persistentMarks),
+				persistentMarks,
+				profileTreeSelection),
             cancellationToken);
     }
 }

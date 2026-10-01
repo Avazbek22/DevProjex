@@ -55,7 +55,7 @@ internal sealed class ProjectTextOutputPipeline(
 		if (mode is not (ProjectTextOutputMode.Content or ProjectTextOutputMode.TreeAndContent))
 			throw new ArgumentOutOfRangeException(nameof(mode), mode, "Unsupported project text output mode.");
 
-		var files = ResolveContentFiles(snapshot);
+		var files = ResolveContentFiles(snapshot, cancellationToken);
 		var contentOnly = mode == ProjectTextOutputMode.Content;
 		var contentDocument = await BuildContentDocumentAsync(
 			files,
@@ -124,7 +124,8 @@ internal sealed class ProjectTextOutputPipeline(
 				displayPathMapper,
 				snapshot.RedactionContext,
 				displayRootPath,
-				outputPathRedaction),
+				outputPathRedaction,
+				snapshot.RootPath),
 			cancellationToken).ConfigureAwait(false);
 	}
 
@@ -168,14 +169,15 @@ internal sealed class ProjectTextOutputPipeline(
 		OutputPathRedactionDecision? outputPathRedaction,
         CancellationToken cancellationToken)
     {
-        var files = ResolveContentFiles(snapshot);
+        var files = ResolveContentFiles(snapshot, cancellationToken);
 		var content = await contentExport.BuildAsync(
 				files,
 				cancellationToken,
 				TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(snapshot.RootPath),
 				snapshot.RedactionContext,
 				displayRootPath: ResolveContentRoot(snapshot),
-				outputPathRedaction: outputPathRedaction)
+				outputPathRedaction: outputPathRedaction,
+				projectRoot: snapshot.RootPath)
             .ConfigureAwait(false);
 
 		return new ProjectTextOutputResult(content, files.Count);
@@ -233,22 +235,26 @@ internal sealed class ProjectTextOutputPipeline(
             : tree;
     }
 
-    private static IReadOnlyList<string> ResolveContentFiles(ProjectTextOutputSnapshot snapshot)
+    private static IReadOnlyList<string> ResolveContentFiles(
+        ProjectTextOutputSnapshot snapshot,
+        CancellationToken cancellationToken)
     {
         snapshot = NormalizeSelection(snapshot);
         if (snapshot.SelectedPaths.Count > 0)
         {
-            return ProjectTreeSelectionProjection.BuildOrderedSelectedFilePaths(
+            return ProjectTreeSelectionProjection.BuildOrderedSelectedFilePathsWithCancellation(
                 snapshot.Root,
                 snapshot.SelectedPaths,
-                ensureExists: true);
+                ensureExists: true,
+                cancellationToken);
         }
 
         return snapshot.OrderedFilePaths ??
-               ProjectTreeSelectionProjection.BuildOrderedSelectedFilePaths(
+               ProjectTreeSelectionProjection.BuildOrderedSelectedFilePathsWithCancellation(
                    snapshot.Root,
                    snapshot.SelectedPaths,
-                   ensureExists: false);
+                   ensureExists: false,
+                   cancellationToken);
     }
 
     private static ProjectTextOutputSnapshot NormalizeSelection(

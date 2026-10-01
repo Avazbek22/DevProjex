@@ -1,0 +1,1363 @@
+{
+  "baselineRevision": "dfcaff70e7407457378aee07a29f158aad0306c5",
+  "comparisonRevision": "0ec72b78",
+  "date": "2026-09-23",
+  "environment": "Windows; .NET SDK 10.0.401/runtime 10.0.12; Release; serialized MSBuild",
+  "workload": "Frozen DevProjex working tree, including pending regression/probe/report files. Same physical target for both versions; default GUI selection, compression/redaction disabled.",
+  "boundary": "SelectionSyncCoordinator default snapshot, inventory projection, selection publication, and MetricsPipeline through background publication. Excludes window construction, profile persistence, animation gates, and first paint.",
+  "methodology": "Two independent processes per version, 31 consecutive loads each. Per-process Run 0 reported separately; pooled median of all 60 Run 1..30 observations. Filesystem cache was not purged. Harness uses historical InvalidateCaches for baseline and RefreshDiscoveryCaches for comparison.",
+  "summary": {
+    "rowsPerVersion": 62,
+    "fileVersionOpenCounts": {
+      "baseline": 10419,
+      "comparison": 5853,
+      "constantInAll62RunsPerVersion": true
+    },
+    "baselineCold": [
+      1052.2072,
+      906.1383
+    ],
+    "currentCold": [
+      834.8240000000001,
+      765.9538
+    ],
+    "warmFields": [
+      {
+        "field": "SelectionMilliseconds",
+        "baseline": 215.92489999999998,
+        "current": 64.12705
+      },
+      {
+        "field": "ProjectionMilliseconds",
+        "baseline": 34.753150000000005,
+        "current": 21.73355
+      },
+      {
+        "field": "MetricsScanMilliseconds",
+        "baseline": 37.73465,
+        "current": 27.877299999999998
+      },
+      {
+        "field": "MetricsPublicationMilliseconds",
+        "baseline": 103.59255,
+        "current": 58.4953
+      },
+      {
+        "field": "TotalBackendMilliseconds",
+        "baseline": 355.97159999999997,
+        "current": 147.9872
+      },
+      {
+        "field": "TotalBackendAllocatedBytes",
+        "baseline": 164001744,
+        "current": 38615824
+      }
+    ],
+    "invariants": {
+      "Files": 2712,
+      "InventoryEntries": 2997,
+      "GitMode": "RespectGitIgnore",
+      "IgnoreOptions": [
+        "UseGitIgnore",
+        "EmptyFolders",
+        "DotFolders",
+        "DotFiles",
+        "ExtensionlessFiles"
+      ],
+      "PublishedMetrics": {
+        "TreeLines": 2981,
+        "TreeChars": 121200,
+        "TreeTokens": 30300,
+        "ContentLines": 688380,
+        "ContentChars": 27075656,
+        "ContentTokens": 6768914
+      },
+      "FullFileReads": 2283,
+      "FullFileReadBytes": 28407252
+    },
+    "equality": [
+      {
+        "field": "Files",
+        "all124Equal": true
+      },
+      {
+        "field": "InventoryEntries",
+        "all124Equal": true
+      },
+      {
+        "field": "GitMode",
+        "all124Equal": true
+      },
+      {
+        "field": "IgnoreOptions",
+        "all124Equal": true
+      },
+      {
+        "field": "PublishedMetrics",
+        "all124Equal": true
+      },
+      {
+        "field": "FullFileReads",
+        "all124Equal": true
+      },
+      {
+        "field": "FullFileReadBytes",
+        "all124Equal": true
+      }
+    ]
+  },
+  "samples": {
+    "baseline": [
+      [
+        {
+          "Run": 0,
+          "SelectionMilliseconds": 741.0777,
+          "ProjectionMilliseconds": 172.1681,
+          "SelectionPublicationMilliseconds": 6.6708,
+          "MetricsScanMilliseconds": 70.2429,
+          "MetricsPublicationMilliseconds": 132.2906,
+          "TotalBackendMilliseconds": 1052.2072,
+          "TotalBackendAllocatedBytes": 195370416
+        },
+        {
+          "Run": 1,
+          "SelectionMilliseconds": 473.3183,
+          "ProjectionMilliseconds": 148.2146,
+          "SelectionPublicationMilliseconds": 0.21,
+          "MetricsScanMilliseconds": 42.5664,
+          "MetricsPublicationMilliseconds": 108.682,
+          "TotalBackendMilliseconds": 730.4249000000001,
+          "TotalBackendAllocatedBytes": 189899328
+        },
+        {
+          "Run": 2,
+          "SelectionMilliseconds": 459.2442,
+          "ProjectionMilliseconds": 183.1955,
+          "SelectionPublicationMilliseconds": 0.1342,
+          "MetricsScanMilliseconds": 39.1755,
+          "MetricsPublicationMilliseconds": 106.7372,
+          "TotalBackendMilliseconds": 749.3111,
+          "TotalBackendAllocatedBytes": 192878792
+        },
+        {
+          "Run": 3,
+          "SelectionMilliseconds": 231.9836,
+          "ProjectionMilliseconds": 41.2924,
+          "SelectionPublicationMilliseconds": 0.1548,
+          "MetricsScanMilliseconds": 44.7726,
+          "MetricsPublicationMilliseconds": 103.1173,
+          "TotalBackendMilliseconds": 376.54810000000003,
+          "TotalBackendAllocatedBytes": 159870368
+        },
+        {
+          "Run": 4,
+          "SelectionMilliseconds": 215.2957,
+          "ProjectionMilliseconds": 44.3815,
+          "SelectionPublicationMilliseconds": 0.1219,
+          "MetricsScanMilliseconds": 46.098,
+          "MetricsPublicationMilliseconds": 116.964,
+          "TotalBackendMilliseconds": 376.7631,
+          "TotalBackendAllocatedBytes": 159791824
+        },
+        {
+          "Run": 5,
+          "SelectionMilliseconds": 241.2456,
+          "ProjectionMilliseconds": 34.4201,
+          "SelectionPublicationMilliseconds": 0.1024,
+          "MetricsScanMilliseconds": 41.476,
+          "MetricsPublicationMilliseconds": 119.4016,
+          "TotalBackendMilliseconds": 395.16970000000003,
+          "TotalBackendAllocatedBytes": 154553376
+        },
+        {
+          "Run": 6,
+          "SelectionMilliseconds": 199.8569,
+          "ProjectionMilliseconds": 45.7808,
+          "SelectionPublicationMilliseconds": 0.1341,
+          "MetricsScanMilliseconds": 38.3379,
+          "MetricsPublicationMilliseconds": 109.7884,
+          "TotalBackendMilliseconds": 355.5602,
+          "TotalBackendAllocatedBytes": 151658408
+        },
+        {
+          "Run": 7,
+          "SelectionMilliseconds": 215.9486,
+          "ProjectionMilliseconds": 34.7199,
+          "SelectionPublicationMilliseconds": 0.0959,
+          "MetricsScanMilliseconds": 38.5825,
+          "MetricsPublicationMilliseconds": 118.6212,
+          "TotalBackendMilliseconds": 369.3856,
+          "TotalBackendAllocatedBytes": 167929848
+        },
+        {
+          "Run": 8,
+          "SelectionMilliseconds": 207.6227,
+          "ProjectionMilliseconds": 30.9288,
+          "SelectionPublicationMilliseconds": 0.0968,
+          "MetricsScanMilliseconds": 43.9818,
+          "MetricsPublicationMilliseconds": 101.8065,
+          "TotalBackendMilliseconds": 340.4548,
+          "TotalBackendAllocatedBytes": 165422184
+        },
+        {
+          "Run": 9,
+          "SelectionMilliseconds": 188.5296,
+          "ProjectionMilliseconds": 47.6721,
+          "SelectionPublicationMilliseconds": 0.1222,
+          "MetricsScanMilliseconds": 39.4177,
+          "MetricsPublicationMilliseconds": 103.5048,
+          "TotalBackendMilliseconds": 339.82869999999997,
+          "TotalBackendAllocatedBytes": 160028696
+        },
+        {
+          "Run": 10,
+          "SelectionMilliseconds": 214.1257,
+          "ProjectionMilliseconds": 30.4131,
+          "SelectionPublicationMilliseconds": 0.1051,
+          "MetricsScanMilliseconds": 37.7636,
+          "MetricsPublicationMilliseconds": 118.0732,
+          "TotalBackendMilliseconds": 362.71709999999996,
+          "TotalBackendAllocatedBytes": 161182672
+        },
+        {
+          "Run": 11,
+          "SelectionMilliseconds": 224.0932,
+          "ProjectionMilliseconds": 31.0105,
+          "SelectionPublicationMilliseconds": 0.0981,
+          "MetricsScanMilliseconds": 40.4668,
+          "MetricsPublicationMilliseconds": 106.9323,
+          "TotalBackendMilliseconds": 362.1341,
+          "TotalBackendAllocatedBytes": 165933048
+        },
+        {
+          "Run": 12,
+          "SelectionMilliseconds": 222.1473,
+          "ProjectionMilliseconds": 31.3248,
+          "SelectionPublicationMilliseconds": 0.1183,
+          "MetricsScanMilliseconds": 38.4823,
+          "MetricsPublicationMilliseconds": 102.9719,
+          "TotalBackendMilliseconds": 356.56230000000005,
+          "TotalBackendAllocatedBytes": 161185736
+        },
+        {
+          "Run": 13,
+          "SelectionMilliseconds": 215.9012,
+          "ProjectionMilliseconds": 37.1302,
+          "SelectionPublicationMilliseconds": 0.0956,
+          "MetricsScanMilliseconds": 36.0185,
+          "MetricsPublicationMilliseconds": 105.8927,
+          "TotalBackendMilliseconds": 359.0197,
+          "TotalBackendAllocatedBytes": 158215224
+        },
+        {
+          "Run": 14,
+          "SelectionMilliseconds": 211.9672,
+          "ProjectionMilliseconds": 39.6072,
+          "SelectionPublicationMilliseconds": 0.176,
+          "MetricsScanMilliseconds": 34.2501,
+          "MetricsPublicationMilliseconds": 95.8946,
+          "TotalBackendMilliseconds": 347.645,
+          "TotalBackendAllocatedBytes": 152739560
+        },
+        {
+          "Run": 15,
+          "SelectionMilliseconds": 207.8837,
+          "ProjectionMilliseconds": 31.8032,
+          "SelectionPublicationMilliseconds": 0.1737,
+          "MetricsScanMilliseconds": 35.9332,
+          "MetricsPublicationMilliseconds": 100.1622,
+          "TotalBackendMilliseconds": 340.0228,
+          "TotalBackendAllocatedBytes": 164597296
+        },
+        {
+          "Run": 16,
+          "SelectionMilliseconds": 198.4779,
+          "ProjectionMilliseconds": 35.128,
+          "SelectionPublicationMilliseconds": 0.097,
+          "MetricsScanMilliseconds": 35.0248,
+          "MetricsPublicationMilliseconds": 122.4271,
+          "TotalBackendMilliseconds": 356.13,
+          "TotalBackendAllocatedBytes": 160587768
+        },
+        {
+          "Run": 17,
+          "SelectionMilliseconds": 188.5951,
+          "ProjectionMilliseconds": 33.0269,
+          "SelectionPublicationMilliseconds": 0.0883,
+          "MetricsScanMilliseconds": 34.7316,
+          "MetricsPublicationMilliseconds": 99.757,
+          "TotalBackendMilliseconds": 321.4673,
+          "TotalBackendAllocatedBytes": 163994792
+        },
+        {
+          "Run": 18,
+          "SelectionMilliseconds": 211.8352,
+          "ProjectionMilliseconds": 33.0156,
+          "SelectionPublicationMilliseconds": 0.1132,
+          "MetricsScanMilliseconds": 34.0478,
+          "MetricsPublicationMilliseconds": 110.8492,
+          "TotalBackendMilliseconds": 355.8132,
+          "TotalBackendAllocatedBytes": 167696040
+        },
+        {
+          "Run": 19,
+          "SelectionMilliseconds": 180.9692,
+          "ProjectionMilliseconds": 37.4429,
+          "SelectionPublicationMilliseconds": 0.1088,
+          "MetricsScanMilliseconds": 37.2979,
+          "MetricsPublicationMilliseconds": 90.2548,
+          "TotalBackendMilliseconds": 308.77570000000003,
+          "TotalBackendAllocatedBytes": 163263352
+        },
+        {
+          "Run": 20,
+          "SelectionMilliseconds": 213.0669,
+          "ProjectionMilliseconds": 35.3861,
+          "SelectionPublicationMilliseconds": 0.1217,
+          "MetricsScanMilliseconds": 34.2404,
+          "MetricsPublicationMilliseconds": 106.7893,
+          "TotalBackendMilliseconds": 355.36400000000003,
+          "TotalBackendAllocatedBytes": 167755432
+        },
+        {
+          "Run": 21,
+          "SelectionMilliseconds": 218.1533,
+          "ProjectionMilliseconds": 34.7864,
+          "SelectionPublicationMilliseconds": 0.1102,
+          "MetricsScanMilliseconds": 33.7595,
+          "MetricsPublicationMilliseconds": 100.6443,
+          "TotalBackendMilliseconds": 353.6942,
+          "TotalBackendAllocatedBytes": 164008696
+        },
+        {
+          "Run": 22,
+          "SelectionMilliseconds": 183.3582,
+          "ProjectionMilliseconds": 31.3345,
+          "SelectionPublicationMilliseconds": 0.0843,
+          "MetricsScanMilliseconds": 33.9633,
+          "MetricsPublicationMilliseconds": 94.5091,
+          "TotalBackendMilliseconds": 309.28610000000003,
+          "TotalBackendAllocatedBytes": 168738480
+        },
+        {
+          "Run": 23,
+          "SelectionMilliseconds": 211.3728,
+          "ProjectionMilliseconds": 31.6321,
+          "SelectionPublicationMilliseconds": 0.0784,
+          "MetricsScanMilliseconds": 33.6337,
+          "MetricsPublicationMilliseconds": 96.5069,
+          "TotalBackendMilliseconds": 339.5902,
+          "TotalBackendAllocatedBytes": 168872808
+        },
+        {
+          "Run": 24,
+          "SelectionMilliseconds": 198.3824,
+          "ProjectionMilliseconds": 39.1643,
+          "SelectionPublicationMilliseconds": 0.1022,
+          "MetricsScanMilliseconds": 41.4541,
+          "MetricsPublicationMilliseconds": 100.9755,
+          "TotalBackendMilliseconds": 338.6244,
+          "TotalBackendAllocatedBytes": 177881688
+        },
+        {
+          "Run": 25,
+          "SelectionMilliseconds": 176.0156,
+          "ProjectionMilliseconds": 31.9546,
+          "SelectionPublicationMilliseconds": 0.092,
+          "MetricsScanMilliseconds": 36.0483,
+          "MetricsPublicationMilliseconds": 101.5139,
+          "TotalBackendMilliseconds": 309.5761,
+          "TotalBackendAllocatedBytes": 171993600
+        },
+        {
+          "Run": 26,
+          "SelectionMilliseconds": 216.0674,
+          "ProjectionMilliseconds": 33.2798,
+          "SelectionPublicationMilliseconds": 0.1693,
+          "MetricsScanMilliseconds": 40.1209,
+          "MetricsPublicationMilliseconds": 106.6436,
+          "TotalBackendMilliseconds": 356.1601,
+          "TotalBackendAllocatedBytes": 169697272
+        },
+        {
+          "Run": 27,
+          "SelectionMilliseconds": 227.3752,
+          "ProjectionMilliseconds": 35.3022,
+          "SelectionPublicationMilliseconds": 0.1236,
+          "MetricsScanMilliseconds": 38.1329,
+          "MetricsPublicationMilliseconds": 105.8601,
+          "TotalBackendMilliseconds": 368.66110000000003,
+          "TotalBackendAllocatedBytes": 160371392
+        },
+        {
+          "Run": 28,
+          "SelectionMilliseconds": 204.8018,
+          "ProjectionMilliseconds": 32.7687,
+          "SelectionPublicationMilliseconds": 0.0802,
+          "MetricsScanMilliseconds": 37.2934,
+          "MetricsPublicationMilliseconds": 118.5197,
+          "TotalBackendMilliseconds": 356.1704,
+          "TotalBackendAllocatedBytes": 157448328
+        },
+        {
+          "Run": 29,
+          "SelectionMilliseconds": 188.2581,
+          "ProjectionMilliseconds": 32.939,
+          "SelectionPublicationMilliseconds": 0.0741,
+          "MetricsScanMilliseconds": 39.1671,
+          "MetricsPublicationMilliseconds": 102.4739,
+          "TotalBackendMilliseconds": 323.7451,
+          "TotalBackendAllocatedBytes": 166931520
+        },
+        {
+          "Run": 30,
+          "SelectionMilliseconds": 212.6878,
+          "ProjectionMilliseconds": 30.7384,
+          "SelectionPublicationMilliseconds": 0.0889,
+          "MetricsScanMilliseconds": 35.9332,
+          "MetricsPublicationMilliseconds": 97.8728,
+          "TotalBackendMilliseconds": 341.3879,
+          "TotalBackendAllocatedBytes": 159887400
+        }
+      ],
+      [
+        {
+          "Run": 0,
+          "SelectionMilliseconds": 690.6347,
+          "ProjectionMilliseconds": 54.5028,
+          "SelectionPublicationMilliseconds": 6.2779,
+          "MetricsScanMilliseconds": 71.3547,
+          "MetricsPublicationMilliseconds": 154.7229,
+          "TotalBackendMilliseconds": 906.1383,
+          "TotalBackendAllocatedBytes": 193451504
+        },
+        {
+          "Run": 1,
+          "SelectionMilliseconds": 320.6548,
+          "ProjectionMilliseconds": 38.778,
+          "SelectionPublicationMilliseconds": 0.1803,
+          "MetricsScanMilliseconds": 39.9743,
+          "MetricsPublicationMilliseconds": 104.7276,
+          "TotalBackendMilliseconds": 464.3407,
+          "TotalBackendAllocatedBytes": 180591320
+        },
+        {
+          "Run": 2,
+          "SelectionMilliseconds": 292.9882,
+          "ProjectionMilliseconds": 36.6512,
+          "SelectionPublicationMilliseconds": 0.122,
+          "MetricsScanMilliseconds": 42.7331,
+          "MetricsPublicationMilliseconds": 104.1535,
+          "TotalBackendMilliseconds": 433.91490000000005,
+          "TotalBackendAllocatedBytes": 171869744
+        },
+        {
+          "Run": 3,
+          "SelectionMilliseconds": 286.8469,
+          "ProjectionMilliseconds": 36.6953,
+          "SelectionPublicationMilliseconds": 0.1304,
+          "MetricsScanMilliseconds": 42.9365,
+          "MetricsPublicationMilliseconds": 116.9317,
+          "TotalBackendMilliseconds": 440.60429999999997,
+          "TotalBackendAllocatedBytes": 164699032
+        },
+        {
+          "Run": 4,
+          "SelectionMilliseconds": 263.0608,
+          "ProjectionMilliseconds": 41.529,
+          "SelectionPublicationMilliseconds": 0.1246,
+          "MetricsScanMilliseconds": 46.0771,
+          "MetricsPublicationMilliseconds": 126.5014,
+          "TotalBackendMilliseconds": 431.21579999999994,
+          "TotalBackendAllocatedBytes": 168767928
+        },
+        {
+          "Run": 5,
+          "SelectionMilliseconds": 351.2859,
+          "ProjectionMilliseconds": 34.1781,
+          "SelectionPublicationMilliseconds": 0.1175,
+          "MetricsScanMilliseconds": 46.296,
+          "MetricsPublicationMilliseconds": 104.0484,
+          "TotalBackendMilliseconds": 489.6299000000001,
+          "TotalBackendAllocatedBytes": 172089224
+        },
+        {
+          "Run": 6,
+          "SelectionMilliseconds": 313.8196,
+          "ProjectionMilliseconds": 33.3731,
+          "SelectionPublicationMilliseconds": 0.1594,
+          "MetricsScanMilliseconds": 42.7938,
+          "MetricsPublicationMilliseconds": 102.9223,
+          "TotalBackendMilliseconds": 450.2744,
+          "TotalBackendAllocatedBytes": 158728088
+        },
+        {
+          "Run": 7,
+          "SelectionMilliseconds": 297.4398,
+          "ProjectionMilliseconds": 41.562,
+          "SelectionPublicationMilliseconds": 0.1093,
+          "MetricsScanMilliseconds": 38.6752,
+          "MetricsPublicationMilliseconds": 107.594,
+          "TotalBackendMilliseconds": 446.7051,
+          "TotalBackendAllocatedBytes": 154864704
+        },
+        {
+          "Run": 8,
+          "SelectionMilliseconds": 302.3629,
+          "ProjectionMilliseconds": 31.4518,
+          "SelectionPublicationMilliseconds": 0.1296,
+          "MetricsScanMilliseconds": 36.6559,
+          "MetricsPublicationMilliseconds": 98.6578,
+          "TotalBackendMilliseconds": 432.6021,
+          "TotalBackendAllocatedBytes": 170021872
+        },
+        {
+          "Run": 9,
+          "SelectionMilliseconds": 307.5891,
+          "ProjectionMilliseconds": 36.8903,
+          "SelectionPublicationMilliseconds": 0.1128,
+          "MetricsScanMilliseconds": 39.3817,
+          "MetricsPublicationMilliseconds": 119.4075,
+          "TotalBackendMilliseconds": 463.99969999999996,
+          "TotalBackendAllocatedBytes": 160219584
+        },
+        {
+          "Run": 10,
+          "SelectionMilliseconds": 224.0957,
+          "ProjectionMilliseconds": 32.3053,
+          "SelectionPublicationMilliseconds": 0.1624,
+          "MetricsScanMilliseconds": 40.399,
+          "MetricsPublicationMilliseconds": 97.8697,
+          "TotalBackendMilliseconds": 354.43309999999997,
+          "TotalBackendAllocatedBytes": 165411464
+        },
+        {
+          "Run": 11,
+          "SelectionMilliseconds": 202.3719,
+          "ProjectionMilliseconds": 39.4461,
+          "SelectionPublicationMilliseconds": 0.0917,
+          "MetricsScanMilliseconds": 37.0226,
+          "MetricsPublicationMilliseconds": 101.5784,
+          "TotalBackendMilliseconds": 343.48810000000003,
+          "TotalBackendAllocatedBytes": 163670128
+        },
+        {
+          "Run": 12,
+          "SelectionMilliseconds": 216.2643,
+          "ProjectionMilliseconds": 33.8179,
+          "SelectionPublicationMilliseconds": 0.0919,
+          "MetricsScanMilliseconds": 40.2684,
+          "MetricsPublicationMilliseconds": 115.8283,
+          "TotalBackendMilliseconds": 366.0024,
+          "TotalBackendAllocatedBytes": 160578200
+        },
+        {
+          "Run": 13,
+          "SelectionMilliseconds": 218.2453,
+          "ProjectionMilliseconds": 30.6689,
+          "SelectionPublicationMilliseconds": 0.0924,
+          "MetricsScanMilliseconds": 40.2419,
+          "MetricsPublicationMilliseconds": 106.5915,
+          "TotalBackendMilliseconds": 355.5981,
+          "TotalBackendAllocatedBytes": 154987536
+        },
+        {
+          "Run": 14,
+          "SelectionMilliseconds": 231.5265,
+          "ProjectionMilliseconds": 34.0167,
+          "SelectionPublicationMilliseconds": 0.1082,
+          "MetricsScanMilliseconds": 35.913,
+          "MetricsPublicationMilliseconds": 88.9055,
+          "TotalBackendMilliseconds": 354.55690000000004,
+          "TotalBackendAllocatedBytes": 163873080
+        },
+        {
+          "Run": 15,
+          "SelectionMilliseconds": 229.3498,
+          "ProjectionMilliseconds": 31.8288,
+          "SelectionPublicationMilliseconds": 0.0873,
+          "MetricsScanMilliseconds": 37.7057,
+          "MetricsPublicationMilliseconds": 111.1149,
+          "TotalBackendMilliseconds": 372.3808,
+          "TotalBackendAllocatedBytes": 164491064
+        },
+        {
+          "Run": 16,
+          "SelectionMilliseconds": 202.2388,
+          "ProjectionMilliseconds": 36.1134,
+          "SelectionPublicationMilliseconds": 0.0854,
+          "MetricsScanMilliseconds": 36.0947,
+          "MetricsPublicationMilliseconds": 99.206,
+          "TotalBackendMilliseconds": 337.6436,
+          "TotalBackendAllocatedBytes": 160614552
+        },
+        {
+          "Run": 17,
+          "SelectionMilliseconds": 182.4877,
+          "ProjectionMilliseconds": 46.4045,
+          "SelectionPublicationMilliseconds": 0.1056,
+          "MetricsScanMilliseconds": 35.9089,
+          "MetricsPublicationMilliseconds": 111.2399,
+          "TotalBackendMilliseconds": 340.2377,
+          "TotalBackendAllocatedBytes": 169240856
+        },
+        {
+          "Run": 18,
+          "SelectionMilliseconds": 226.8575,
+          "ProjectionMilliseconds": 36.9935,
+          "SelectionPublicationMilliseconds": 0.0876,
+          "MetricsScanMilliseconds": 35.251,
+          "MetricsPublicationMilliseconds": 122.0206,
+          "TotalBackendMilliseconds": 385.9592,
+          "TotalBackendAllocatedBytes": 164647272
+        },
+        {
+          "Run": 19,
+          "SelectionMilliseconds": 220.8413,
+          "ProjectionMilliseconds": 31.7036,
+          "SelectionPublicationMilliseconds": 0.0978,
+          "MetricsScanMilliseconds": 35.1689,
+          "MetricsPublicationMilliseconds": 86.6752,
+          "TotalBackendMilliseconds": 339.3179,
+          "TotalBackendAllocatedBytes": 169551120
+        },
+        {
+          "Run": 20,
+          "SelectionMilliseconds": 198.7495,
+          "ProjectionMilliseconds": 32.932,
+          "SelectionPublicationMilliseconds": 0.0995,
+          "MetricsScanMilliseconds": 35.5159,
+          "MetricsPublicationMilliseconds": 101.7749,
+          "TotalBackendMilliseconds": 333.55590000000007,
+          "TotalBackendAllocatedBytes": 160169752
+        },
+        {
+          "Run": 21,
+          "SelectionMilliseconds": 237.8134,
+          "ProjectionMilliseconds": 30.9342,
+          "SelectionPublicationMilliseconds": 0.0991,
+          "MetricsScanMilliseconds": 38.1037,
+          "MetricsPublicationMilliseconds": 87.3111,
+          "TotalBackendMilliseconds": 356.1578,
+          "TotalBackendAllocatedBytes": 162688656
+        },
+        {
+          "Run": 22,
+          "SelectionMilliseconds": 212.113,
+          "ProjectionMilliseconds": 34.7981,
+          "SelectionPublicationMilliseconds": 0.1274,
+          "MetricsScanMilliseconds": 37.046,
+          "MetricsPublicationMilliseconds": 91.1195,
+          "TotalBackendMilliseconds": 338.158,
+          "TotalBackendAllocatedBytes": 168568592
+        },
+        {
+          "Run": 23,
+          "SelectionMilliseconds": 195.1495,
+          "ProjectionMilliseconds": 35.798,
+          "SelectionPublicationMilliseconds": 0.1008,
+          "MetricsScanMilliseconds": 36.4159,
+          "MetricsPublicationMilliseconds": 108.8552,
+          "TotalBackendMilliseconds": 339.9035,
+          "TotalBackendAllocatedBytes": 160592920
+        },
+        {
+          "Run": 24,
+          "SelectionMilliseconds": 215.0277,
+          "ProjectionMilliseconds": 35.156,
+          "SelectionPublicationMilliseconds": 0.0805,
+          "MetricsScanMilliseconds": 38.6226,
+          "MetricsPublicationMilliseconds": 90.6295,
+          "TotalBackendMilliseconds": 340.8937,
+          "TotalBackendAllocatedBytes": 162848048
+        },
+        {
+          "Run": 25,
+          "SelectionMilliseconds": 214.1684,
+          "ProjectionMilliseconds": 35.9241,
+          "SelectionPublicationMilliseconds": 0.0971,
+          "MetricsScanMilliseconds": 36.6155,
+          "MetricsPublicationMilliseconds": 103.6803,
+          "TotalBackendMilliseconds": 353.86990000000003,
+          "TotalBackendAllocatedBytes": 156513448
+        },
+        {
+          "Run": 26,
+          "SelectionMilliseconds": 227.174,
+          "ProjectionMilliseconds": 35.4233,
+          "SelectionPublicationMilliseconds": 0.0866,
+          "MetricsScanMilliseconds": 35.1042,
+          "MetricsPublicationMilliseconds": 94.0047,
+          "TotalBackendMilliseconds": 356.6886,
+          "TotalBackendAllocatedBytes": 168210632
+        },
+        {
+          "Run": 27,
+          "SelectionMilliseconds": 208.4519,
+          "ProjectionMilliseconds": 32.8398,
+          "SelectionPublicationMilliseconds": 0.0907,
+          "MetricsScanMilliseconds": 33.9014,
+          "MetricsPublicationMilliseconds": 97.4121,
+          "TotalBackendMilliseconds": 338.79449999999997,
+          "TotalBackendAllocatedBytes": 165720160
+        },
+        {
+          "Run": 28,
+          "SelectionMilliseconds": 233.0293,
+          "ProjectionMilliseconds": 38.8308,
+          "SelectionPublicationMilliseconds": 0.0709,
+          "MetricsScanMilliseconds": 34.4145,
+          "MetricsPublicationMilliseconds": 99.0745,
+          "TotalBackendMilliseconds": 371.0055,
+          "TotalBackendAllocatedBytes": 154742928
+        },
+        {
+          "Run": 29,
+          "SelectionMilliseconds": 188.1654,
+          "ProjectionMilliseconds": 33.8279,
+          "SelectionPublicationMilliseconds": 0.1029,
+          "MetricsScanMilliseconds": 35.5068,
+          "MetricsPublicationMilliseconds": 102.5043,
+          "TotalBackendMilliseconds": 324.6005,
+          "TotalBackendAllocatedBytes": 165895072
+        },
+        {
+          "Run": 30,
+          "SelectionMilliseconds": 236.2359,
+          "ProjectionMilliseconds": 32.5528,
+          "SelectionPublicationMilliseconds": 0.1084,
+          "MetricsScanMilliseconds": 38.9107,
+          "MetricsPublicationMilliseconds": 103.9496,
+          "TotalBackendMilliseconds": 372.84670000000006,
+          "TotalBackendAllocatedBytes": 155108568
+        }
+      ]
+    ],
+    "comparison": [
+      [
+        {
+          "Run": 0,
+          "SelectionMilliseconds": 593.272,
+          "ProjectionMilliseconds": 117.3405,
+          "SelectionPublicationMilliseconds": 6.4048,
+          "MetricsScanMilliseconds": 70.7923,
+          "MetricsPublicationMilliseconds": 117.8067,
+          "TotalBackendMilliseconds": 834.8240000000001,
+          "TotalBackendAllocatedBytes": 130168664
+        },
+        {
+          "Run": 1,
+          "SelectionMilliseconds": 156.7349,
+          "ProjectionMilliseconds": 57.5243,
+          "SelectionPublicationMilliseconds": 0.1595,
+          "MetricsScanMilliseconds": 34.8995,
+          "MetricsPublicationMilliseconds": 60.9571,
+          "TotalBackendMilliseconds": 275.3758,
+          "TotalBackendAllocatedBytes": 48501304
+        },
+        {
+          "Run": 2,
+          "SelectionMilliseconds": 115.1138,
+          "ProjectionMilliseconds": 51.6609,
+          "SelectionPublicationMilliseconds": 0.1518,
+          "MetricsScanMilliseconds": 35.085,
+          "MetricsPublicationMilliseconds": 62.7937,
+          "TotalBackendMilliseconds": 229.7202,
+          "TotalBackendAllocatedBytes": 41426960
+        },
+        {
+          "Run": 3,
+          "SelectionMilliseconds": 64.5121,
+          "ProjectionMilliseconds": 22.9226,
+          "SelectionPublicationMilliseconds": 0.1214,
+          "MetricsScanMilliseconds": 28.3096,
+          "MetricsPublicationMilliseconds": 49.3429,
+          "TotalBackendMilliseconds": 136.899,
+          "TotalBackendAllocatedBytes": 39151464
+        },
+        {
+          "Run": 4,
+          "SelectionMilliseconds": 60.7588,
+          "ProjectionMilliseconds": 28.8833,
+          "SelectionPublicationMilliseconds": 0.1241,
+          "MetricsScanMilliseconds": 32.6971,
+          "MetricsPublicationMilliseconds": 68.942,
+          "TotalBackendMilliseconds": 158.70819999999998,
+          "TotalBackendAllocatedBytes": 38182672
+        },
+        {
+          "Run": 5,
+          "SelectionMilliseconds": 61.0814,
+          "ProjectionMilliseconds": 21.9811,
+          "SelectionPublicationMilliseconds": 0.1285,
+          "MetricsScanMilliseconds": 28.731,
+          "MetricsPublicationMilliseconds": 58.3569,
+          "TotalBackendMilliseconds": 141.5479,
+          "TotalBackendAllocatedBytes": 41444704
+        },
+        {
+          "Run": 6,
+          "SelectionMilliseconds": 67.5972,
+          "ProjectionMilliseconds": 21.6418,
+          "SelectionPublicationMilliseconds": 0.1417,
+          "MetricsScanMilliseconds": 27.7681,
+          "MetricsPublicationMilliseconds": 60.8808,
+          "TotalBackendMilliseconds": 150.2615,
+          "TotalBackendAllocatedBytes": 35705624
+        },
+        {
+          "Run": 7,
+          "SelectionMilliseconds": 92.4461,
+          "ProjectionMilliseconds": 25.7089,
+          "SelectionPublicationMilliseconds": 0.1586,
+          "MetricsScanMilliseconds": 35.548,
+          "MetricsPublicationMilliseconds": 70.2993,
+          "TotalBackendMilliseconds": 188.61290000000002,
+          "TotalBackendAllocatedBytes": 42273176
+        },
+        {
+          "Run": 8,
+          "SelectionMilliseconds": 67.9342,
+          "ProjectionMilliseconds": 21.5463,
+          "SelectionPublicationMilliseconds": 0.126,
+          "MetricsScanMilliseconds": 33.5281,
+          "MetricsPublicationMilliseconds": 64.3795,
+          "TotalBackendMilliseconds": 153.986,
+          "TotalBackendAllocatedBytes": 37837280
+        },
+        {
+          "Run": 9,
+          "SelectionMilliseconds": 66.3401,
+          "ProjectionMilliseconds": 29.2001,
+          "SelectionPublicationMilliseconds": 0.1013,
+          "MetricsScanMilliseconds": 29.124,
+          "MetricsPublicationMilliseconds": 63.6204,
+          "TotalBackendMilliseconds": 159.2619,
+          "TotalBackendAllocatedBytes": 36562312
+        },
+        {
+          "Run": 10,
+          "SelectionMilliseconds": 78.469,
+          "ProjectionMilliseconds": 18.2701,
+          "SelectionPublicationMilliseconds": 0.1054,
+          "MetricsScanMilliseconds": 30.8618,
+          "MetricsPublicationMilliseconds": 69.2569,
+          "TotalBackendMilliseconds": 166.1014,
+          "TotalBackendAllocatedBytes": 37985432
+        },
+        {
+          "Run": 11,
+          "SelectionMilliseconds": 88.5935,
+          "ProjectionMilliseconds": 19.1856,
+          "SelectionPublicationMilliseconds": 0.1258,
+          "MetricsScanMilliseconds": 28.3792,
+          "MetricsPublicationMilliseconds": 58.6891,
+          "TotalBackendMilliseconds": 166.594,
+          "TotalBackendAllocatedBytes": 37761784
+        },
+        {
+          "Run": 12,
+          "SelectionMilliseconds": 70.5689,
+          "ProjectionMilliseconds": 25.4543,
+          "SelectionPublicationMilliseconds": 0.0999,
+          "MetricsScanMilliseconds": 27.4063,
+          "MetricsPublicationMilliseconds": 58.6242,
+          "TotalBackendMilliseconds": 154.7473,
+          "TotalBackendAllocatedBytes": 35612752
+        },
+        {
+          "Run": 13,
+          "SelectionMilliseconds": 75.1647,
+          "ProjectionMilliseconds": 22.8548,
+          "SelectionPublicationMilliseconds": 0.1475,
+          "MetricsScanMilliseconds": 30.4234,
+          "MetricsPublicationMilliseconds": 68.2325,
+          "TotalBackendMilliseconds": 166.3995,
+          "TotalBackendAllocatedBytes": 39313360
+        },
+        {
+          "Run": 14,
+          "SelectionMilliseconds": 72.8098,
+          "ProjectionMilliseconds": 22.6542,
+          "SelectionPublicationMilliseconds": 0.1202,
+          "MetricsScanMilliseconds": 29.0793,
+          "MetricsPublicationMilliseconds": 67.5248,
+          "TotalBackendMilliseconds": 163.10899999999998,
+          "TotalBackendAllocatedBytes": 36279928
+        },
+        {
+          "Run": 15,
+          "SelectionMilliseconds": 77.189,
+          "ProjectionMilliseconds": 21.623,
+          "SelectionPublicationMilliseconds": 0.1768,
+          "MetricsScanMilliseconds": 29.7115,
+          "MetricsPublicationMilliseconds": 68.4299,
+          "TotalBackendMilliseconds": 167.4187,
+          "TotalBackendAllocatedBytes": 39077568
+        },
+        {
+          "Run": 16,
+          "SelectionMilliseconds": 84.7835,
+          "ProjectionMilliseconds": 25.7283,
+          "SelectionPublicationMilliseconds": 0.1075,
+          "MetricsScanMilliseconds": 29.0628,
+          "MetricsPublicationMilliseconds": 58.597,
+          "TotalBackendMilliseconds": 169.21630000000002,
+          "TotalBackendAllocatedBytes": 36438408
+        },
+        {
+          "Run": 17,
+          "SelectionMilliseconds": 66.9628,
+          "ProjectionMilliseconds": 30.5245,
+          "SelectionPublicationMilliseconds": 0.1072,
+          "MetricsScanMilliseconds": 27.9274,
+          "MetricsPublicationMilliseconds": 63.1447,
+          "TotalBackendMilliseconds": 160.7392,
+          "TotalBackendAllocatedBytes": 43189824
+        },
+        {
+          "Run": 18,
+          "SelectionMilliseconds": 66.8166,
+          "ProjectionMilliseconds": 21.8253,
+          "SelectionPublicationMilliseconds": 0.1329,
+          "MetricsScanMilliseconds": 28.49,
+          "MetricsPublicationMilliseconds": 79.3464,
+          "TotalBackendMilliseconds": 168.1212,
+          "TotalBackendAllocatedBytes": 41160408
+        },
+        {
+          "Run": 19,
+          "SelectionMilliseconds": 61.3092,
+          "ProjectionMilliseconds": 20.7506,
+          "SelectionPublicationMilliseconds": 0.1052,
+          "MetricsScanMilliseconds": 27.5717,
+          "MetricsPublicationMilliseconds": 53.8164,
+          "TotalBackendMilliseconds": 135.9814,
+          "TotalBackendAllocatedBytes": 34439208
+        },
+        {
+          "Run": 20,
+          "SelectionMilliseconds": 58.1249,
+          "ProjectionMilliseconds": 18.5743,
+          "SelectionPublicationMilliseconds": 0.1104,
+          "MetricsScanMilliseconds": 35.4776,
+          "MetricsPublicationMilliseconds": 72.4435,
+          "TotalBackendMilliseconds": 149.2531,
+          "TotalBackendAllocatedBytes": 34245408
+        },
+        {
+          "Run": 21,
+          "SelectionMilliseconds": 60.0518,
+          "ProjectionMilliseconds": 19.0895,
+          "SelectionPublicationMilliseconds": 0.1314,
+          "MetricsScanMilliseconds": 28.7059,
+          "MetricsPublicationMilliseconds": 74.0214,
+          "TotalBackendMilliseconds": 153.29410000000001,
+          "TotalBackendAllocatedBytes": 41401032
+        },
+        {
+          "Run": 22,
+          "SelectionMilliseconds": 58.644,
+          "ProjectionMilliseconds": 20.4641,
+          "SelectionPublicationMilliseconds": 0.1164,
+          "MetricsScanMilliseconds": 27.1005,
+          "MetricsPublicationMilliseconds": 56.4132,
+          "TotalBackendMilliseconds": 135.6377,
+          "TotalBackendAllocatedBytes": 37268760
+        },
+        {
+          "Run": 23,
+          "SelectionMilliseconds": 63.5992,
+          "ProjectionMilliseconds": 20.6314,
+          "SelectionPublicationMilliseconds": 0.0953,
+          "MetricsScanMilliseconds": 28.2708,
+          "MetricsPublicationMilliseconds": 49.0607,
+          "TotalBackendMilliseconds": 133.3866,
+          "TotalBackendAllocatedBytes": 36185944
+        },
+        {
+          "Run": 24,
+          "SelectionMilliseconds": 60.7783,
+          "ProjectionMilliseconds": 21.4907,
+          "SelectionPublicationMilliseconds": 0.1958,
+          "MetricsScanMilliseconds": 29.0028,
+          "MetricsPublicationMilliseconds": 68.4864,
+          "TotalBackendMilliseconds": 150.95120000000003,
+          "TotalBackendAllocatedBytes": 39298288
+        },
+        {
+          "Run": 25,
+          "SelectionMilliseconds": 60.1034,
+          "ProjectionMilliseconds": 32.3466,
+          "SelectionPublicationMilliseconds": 0.1032,
+          "MetricsScanMilliseconds": 24.3244,
+          "MetricsPublicationMilliseconds": 75.0833,
+          "TotalBackendMilliseconds": 167.6365,
+          "TotalBackendAllocatedBytes": 41670368
+        },
+        {
+          "Run": 26,
+          "SelectionMilliseconds": 58.3031,
+          "ProjectionMilliseconds": 20.8066,
+          "SelectionPublicationMilliseconds": 0.1006,
+          "MetricsScanMilliseconds": 24.0612,
+          "MetricsPublicationMilliseconds": 54.7038,
+          "TotalBackendMilliseconds": 133.91410000000002,
+          "TotalBackendAllocatedBytes": 40753880
+        },
+        {
+          "Run": 27,
+          "SelectionMilliseconds": 59.1184,
+          "ProjectionMilliseconds": 20.7654,
+          "SelectionPublicationMilliseconds": 0.0972,
+          "MetricsScanMilliseconds": 22.9509,
+          "MetricsPublicationMilliseconds": 40.1023,
+          "TotalBackendMilliseconds": 120.08330000000001,
+          "TotalBackendAllocatedBytes": 38340584
+        },
+        {
+          "Run": 28,
+          "SelectionMilliseconds": 52.1319,
+          "ProjectionMilliseconds": 18.492,
+          "SelectionPublicationMilliseconds": 0.0854,
+          "MetricsScanMilliseconds": 24.5564,
+          "MetricsPublicationMilliseconds": 47.4126,
+          "TotalBackendMilliseconds": 118.12190000000001,
+          "TotalBackendAllocatedBytes": 38858856
+        },
+        {
+          "Run": 29,
+          "SelectionMilliseconds": 67.319,
+          "ProjectionMilliseconds": 21.3217,
+          "SelectionPublicationMilliseconds": 0.0829,
+          "MetricsScanMilliseconds": 23.2081,
+          "MetricsPublicationMilliseconds": 51.5903,
+          "TotalBackendMilliseconds": 140.3139,
+          "TotalBackendAllocatedBytes": 38666840
+        },
+        {
+          "Run": 30,
+          "SelectionMilliseconds": 54.5111,
+          "ProjectionMilliseconds": 18.7214,
+          "SelectionPublicationMilliseconds": 0.1352,
+          "MetricsScanMilliseconds": 25.5016,
+          "MetricsPublicationMilliseconds": 58.7682,
+          "TotalBackendMilliseconds": 132.1359,
+          "TotalBackendAllocatedBytes": 36646728
+        }
+      ],
+      [
+        {
+          "Run": 0,
+          "SelectionMilliseconds": 550.0406,
+          "ProjectionMilliseconds": 115.1226,
+          "SelectionPublicationMilliseconds": 6.3014,
+          "MetricsScanMilliseconds": 55.866,
+          "MetricsPublicationMilliseconds": 94.4892,
+          "TotalBackendMilliseconds": 765.9538,
+          "TotalBackendAllocatedBytes": 128279256
+        },
+        {
+          "Run": 1,
+          "SelectionMilliseconds": 158.6301,
+          "ProjectionMilliseconds": 76.7404,
+          "SelectionPublicationMilliseconds": 0.1493,
+          "MetricsScanMilliseconds": 35.2549,
+          "MetricsPublicationMilliseconds": 69.636,
+          "TotalBackendMilliseconds": 305.1558,
+          "TotalBackendAllocatedBytes": 47549960
+        },
+        {
+          "Run": 2,
+          "SelectionMilliseconds": 109.1338,
+          "ProjectionMilliseconds": 41.2944,
+          "SelectionPublicationMilliseconds": 0.103,
+          "MetricsScanMilliseconds": 28.1421,
+          "MetricsPublicationMilliseconds": 48.5454,
+          "TotalBackendMilliseconds": 199.0766,
+          "TotalBackendAllocatedBytes": 49987544
+        },
+        {
+          "Run": 3,
+          "SelectionMilliseconds": 68.1859,
+          "ProjectionMilliseconds": 27.0897,
+          "SelectionPublicationMilliseconds": 0.0956,
+          "MetricsScanMilliseconds": 28.0428,
+          "MetricsPublicationMilliseconds": 54.4323,
+          "TotalBackendMilliseconds": 149.80349999999999,
+          "TotalBackendAllocatedBytes": 33858368
+        },
+        {
+          "Run": 4,
+          "SelectionMilliseconds": 66.9073,
+          "ProjectionMilliseconds": 35.4805,
+          "SelectionPublicationMilliseconds": 0.1022,
+          "MetricsScanMilliseconds": 32.4346,
+          "MetricsPublicationMilliseconds": 66.9543,
+          "TotalBackendMilliseconds": 169.4443,
+          "TotalBackendAllocatedBytes": 31346488
+        },
+        {
+          "Run": 5,
+          "SelectionMilliseconds": 64.0951,
+          "ProjectionMilliseconds": 24.5138,
+          "SelectionPublicationMilliseconds": 0.1432,
+          "MetricsScanMilliseconds": 36.1756,
+          "MetricsPublicationMilliseconds": 58.41,
+          "TotalBackendMilliseconds": 147.1621,
+          "TotalBackendAllocatedBytes": 34861664
+        },
+        {
+          "Run": 6,
+          "SelectionMilliseconds": 69.3703,
+          "ProjectionMilliseconds": 24.9924,
+          "SelectionPublicationMilliseconds": 0.1389,
+          "MetricsScanMilliseconds": 32.7574,
+          "MetricsPublicationMilliseconds": 58.6847,
+          "TotalBackendMilliseconds": 153.18630000000002,
+          "TotalBackendAllocatedBytes": 31927944
+        },
+        {
+          "Run": 7,
+          "SelectionMilliseconds": 62.4226,
+          "ProjectionMilliseconds": 25.8154,
+          "SelectionPublicationMilliseconds": 0.1276,
+          "MetricsScanMilliseconds": 28.5754,
+          "MetricsPublicationMilliseconds": 45.5892,
+          "TotalBackendMilliseconds": 133.9548,
+          "TotalBackendAllocatedBytes": 30592672
+        },
+        {
+          "Run": 8,
+          "SelectionMilliseconds": 65.2554,
+          "ProjectionMilliseconds": 25.5642,
+          "SelectionPublicationMilliseconds": 0.1094,
+          "MetricsScanMilliseconds": 27.0054,
+          "MetricsPublicationMilliseconds": 46.069,
+          "TotalBackendMilliseconds": 136.998,
+          "TotalBackendAllocatedBytes": 39040736
+        },
+        {
+          "Run": 9,
+          "SelectionMilliseconds": 65.3088,
+          "ProjectionMilliseconds": 41.7303,
+          "SelectionPublicationMilliseconds": 0.127,
+          "MetricsScanMilliseconds": 27.5085,
+          "MetricsPublicationMilliseconds": 59.3172,
+          "TotalBackendMilliseconds": 166.48329999999999,
+          "TotalBackendAllocatedBytes": 36872144
+        },
+        {
+          "Run": 10,
+          "SelectionMilliseconds": 77.4734,
+          "ProjectionMilliseconds": 27.7224,
+          "SelectionPublicationMilliseconds": 0.1284,
+          "MetricsScanMilliseconds": 30.179,
+          "MetricsPublicationMilliseconds": 62.9366,
+          "TotalBackendMilliseconds": 168.2608,
+          "TotalBackendAllocatedBytes": 30402512
+        },
+        {
+          "Run": 11,
+          "SelectionMilliseconds": 78.6744,
+          "ProjectionMilliseconds": 23.5382,
+          "SelectionPublicationMilliseconds": 0.1045,
+          "MetricsScanMilliseconds": 30.2517,
+          "MetricsPublicationMilliseconds": 64.574,
+          "TotalBackendMilliseconds": 166.8911,
+          "TotalBackendAllocatedBytes": 37224968
+        },
+        {
+          "Run": 12,
+          "SelectionMilliseconds": 64.1393,
+          "ProjectionMilliseconds": 19.4167,
+          "SelectionPublicationMilliseconds": 0.1087,
+          "MetricsScanMilliseconds": 26.7294,
+          "MetricsPublicationMilliseconds": 52.3547,
+          "TotalBackendMilliseconds": 136.01940000000002,
+          "TotalBackendAllocatedBytes": 39700888
+        },
+        {
+          "Run": 13,
+          "SelectionMilliseconds": 64.0989,
+          "ProjectionMilliseconds": 19.1558,
+          "SelectionPublicationMilliseconds": 0.0931,
+          "MetricsScanMilliseconds": 27.5983,
+          "MetricsPublicationMilliseconds": 53.7398,
+          "TotalBackendMilliseconds": 137.0876,
+          "TotalBackendAllocatedBytes": 39727464
+        },
+        {
+          "Run": 14,
+          "SelectionMilliseconds": 60.928,
+          "ProjectionMilliseconds": 18.7428,
+          "SelectionPublicationMilliseconds": 0.1013,
+          "MetricsScanMilliseconds": 26.0974,
+          "MetricsPublicationMilliseconds": 54.9852,
+          "TotalBackendMilliseconds": 134.7573,
+          "TotalBackendAllocatedBytes": 36323424
+        },
+        {
+          "Run": 15,
+          "SelectionMilliseconds": 57.2247,
+          "ProjectionMilliseconds": 22.3562,
+          "SelectionPublicationMilliseconds": 0.1141,
+          "MetricsScanMilliseconds": 28.2249,
+          "MetricsPublicationMilliseconds": 55.4477,
+          "TotalBackendMilliseconds": 135.1427,
+          "TotalBackendAllocatedBytes": 40426032
+        },
+        {
+          "Run": 16,
+          "SelectionMilliseconds": 64.7449,
+          "ProjectionMilliseconds": 19.6182,
+          "SelectionPublicationMilliseconds": 0.1233,
+          "MetricsScanMilliseconds": 27.8272,
+          "MetricsPublicationMilliseconds": 49.4348,
+          "TotalBackendMilliseconds": 133.9212,
+          "TotalBackendAllocatedBytes": 38179568
+        },
+        {
+          "Run": 17,
+          "SelectionMilliseconds": 62.3924,
+          "ProjectionMilliseconds": 19.4929,
+          "SelectionPublicationMilliseconds": 0.0936,
+          "MetricsScanMilliseconds": 27.7914,
+          "MetricsPublicationMilliseconds": 57.6035,
+          "TotalBackendMilliseconds": 139.5824,
+          "TotalBackendAllocatedBytes": 43426632
+        },
+        {
+          "Run": 18,
+          "SelectionMilliseconds": 61.7617,
+          "ProjectionMilliseconds": 27.0293,
+          "SelectionPublicationMilliseconds": 0.1306,
+          "MetricsScanMilliseconds": 27.5689,
+          "MetricsPublicationMilliseconds": 59.8907,
+          "TotalBackendMilliseconds": 148.8123,
+          "TotalBackendAllocatedBytes": 38625176
+        },
+        {
+          "Run": 19,
+          "SelectionMilliseconds": 64.1148,
+          "ProjectionMilliseconds": 17.1573,
+          "SelectionPublicationMilliseconds": 0.0904,
+          "MetricsScanMilliseconds": 26.5026,
+          "MetricsPublicationMilliseconds": 54.6999,
+          "TotalBackendMilliseconds": 136.0624,
+          "TotalBackendAllocatedBytes": 35928128
+        },
+        {
+          "Run": 20,
+          "SelectionMilliseconds": 54.4094,
+          "ProjectionMilliseconds": 19.5381,
+          "SelectionPublicationMilliseconds": 0.1067,
+          "MetricsScanMilliseconds": 25.8971,
+          "MetricsPublicationMilliseconds": 61.294,
+          "TotalBackendMilliseconds": 135.3482,
+          "TotalBackendAllocatedBytes": 39504208
+        },
+        {
+          "Run": 21,
+          "SelectionMilliseconds": 72.6097,
+          "ProjectionMilliseconds": 20.8058,
+          "SelectionPublicationMilliseconds": 0.1178,
+          "MetricsScanMilliseconds": 26.9206,
+          "MetricsPublicationMilliseconds": 58.5806,
+          "TotalBackendMilliseconds": 152.1139,
+          "TotalBackendAllocatedBytes": 31241096
+        },
+        {
+          "Run": 22,
+          "SelectionMilliseconds": 55.1598,
+          "ProjectionMilliseconds": 21.4589,
+          "SelectionPublicationMilliseconds": 0.0846,
+          "MetricsScanMilliseconds": 26.0448,
+          "MetricsPublicationMilliseconds": 44.1192,
+          "TotalBackendMilliseconds": 120.82249999999999,
+          "TotalBackendAllocatedBytes": 39001016
+        },
+        {
+          "Run": 23,
+          "SelectionMilliseconds": 60.5247,
+          "ProjectionMilliseconds": 17.888,
+          "SelectionPublicationMilliseconds": 0.0862,
+          "MetricsScanMilliseconds": 25.4134,
+          "MetricsPublicationMilliseconds": 56.5752,
+          "TotalBackendMilliseconds": 135.07410000000002,
+          "TotalBackendAllocatedBytes": 42540008
+        },
+        {
+          "Run": 24,
+          "SelectionMilliseconds": 77.9209,
+          "ProjectionMilliseconds": 18.4021,
+          "SelectionPublicationMilliseconds": 0.1377,
+          "MetricsScanMilliseconds": 23.511,
+          "MetricsPublicationMilliseconds": 44.1071,
+          "TotalBackendMilliseconds": 140.5678,
+          "TotalBackendAllocatedBytes": 35872568
+        },
+        {
+          "Run": 25,
+          "SelectionMilliseconds": 61.6228,
+          "ProjectionMilliseconds": 29.9198,
+          "SelectionPublicationMilliseconds": 0.1011,
+          "MetricsScanMilliseconds": 24.0077,
+          "MetricsPublicationMilliseconds": 55.235,
+          "TotalBackendMilliseconds": 146.87869999999998,
+          "TotalBackendAllocatedBytes": 34351936
+        },
+        {
+          "Run": 26,
+          "SelectionMilliseconds": 56.9213,
+          "ProjectionMilliseconds": 22.6125,
+          "SelectionPublicationMilliseconds": 0.091,
+          "MetricsScanMilliseconds": 25.7796,
+          "MetricsPublicationMilliseconds": 40.7563,
+          "TotalBackendMilliseconds": 120.3811,
+          "TotalBackendAllocatedBytes": 38606472
+        },
+        {
+          "Run": 27,
+          "SelectionMilliseconds": 56.2413,
+          "ProjectionMilliseconds": 18.5076,
+          "SelectionPublicationMilliseconds": 0.0922,
+          "MetricsScanMilliseconds": 22.9808,
+          "MetricsPublicationMilliseconds": 47.6349,
+          "TotalBackendMilliseconds": 122.47600000000001,
+          "TotalBackendAllocatedBytes": 43456560
+        },
+        {
+          "Run": 28,
+          "SelectionMilliseconds": 57.1078,
+          "ProjectionMilliseconds": 22.7972,
+          "SelectionPublicationMilliseconds": 0.1525,
+          "MetricsScanMilliseconds": 24.6538,
+          "MetricsPublicationMilliseconds": 55.1981,
+          "TotalBackendMilliseconds": 135.25560000000002,
+          "TotalBackendAllocatedBytes": 42600680
+        },
+        {
+          "Run": 29,
+          "SelectionMilliseconds": 53.0675,
+          "ProjectionMilliseconds": 19.0554,
+          "SelectionPublicationMilliseconds": 0.0909,
+          "MetricsScanMilliseconds": 23.2042,
+          "MetricsPublicationMilliseconds": 47.7074,
+          "TotalBackendMilliseconds": 119.9212,
+          "TotalBackendAllocatedBytes": 44116632
+        },
+        {
+          "Run": 30,
+          "SelectionMilliseconds": 54.2908,
+          "ProjectionMilliseconds": 18.4174,
+          "SelectionPublicationMilliseconds": 0.1129,
+          "MetricsScanMilliseconds": 24.7638,
+          "MetricsPublicationMilliseconds": 50.2781,
+          "TotalBackendMilliseconds": 123.0992,
+          "TotalBackendAllocatedBytes": 42333872
+        }
+      ]
+    ]
+  }
+}

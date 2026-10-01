@@ -1,4 +1,5 @@
 using DevProjex.Application.Secrets;
+using DevProjex.Application.Compression;
 
 namespace DevProjex.Application.Services;
 
@@ -76,7 +77,12 @@ public sealed record ProjectCopyExportResult(
 	int CreatedDirectoryCount,
 	long BytesWritten,
 	int RedactedValueCount = 0,
-	IReadOnlyList<UnscannableFile>? UnscannableFiles = null);
+	IReadOnlyList<UnscannableFile>? UnscannableFiles = null,
+	CodeCompressionSnapshot? CompressionSnapshot = null);
+
+public sealed record ProjectCopyExportPreflightResult(
+	IReadOnlyList<UnscannableFile> UnscannableFiles,
+	CodeCompressionSnapshot? CompressionSnapshot = null);
 
 public sealed record ProjectCopyExportProgress(
 	int ProcessedEntryCount,
@@ -107,4 +113,9 @@ public sealed class ProjectCopyExportException(
 {
 	public ProjectCopyExportError Error { get; } = error;
 	public string? PathContext { get; } = pathContext;
+}
+
+internal static class ProjectCopyExportTestHooks
+{
+	internal static AsyncLocal<Action?> AfterFirstSourceRead { get; } = new();
 }

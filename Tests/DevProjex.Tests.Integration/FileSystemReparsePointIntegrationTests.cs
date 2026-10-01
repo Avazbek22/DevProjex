@@ -1,10 +1,95 @@
 using DevProjex.Application.Context;
+using DevProjex.Application.Compression;
 using DevProjex.Application.Secrets;
 
 namespace DevProjex.Tests.Integration;
 
 public sealed class FileSystemReparsePointIntegrationTests
 {
+	[Fact]
+	public async Task SelectedPathThroughAliasOutsideRoot_IsReportedAsMissing()
+	{
+		using var temp = new TemporaryDirectory();
+		var projectRoot = temp.CreateDirectory("selected-project");
+		var outside = temp.CreateDirectory("selected-outside");
+		temp.CreateFile("selected-outside/secret.txt", "outside");
+		var aliasPath = Path.Combine(projectRoot, "linked");
+		var aliasCreated = OperatingSystem.IsWindows()
+			? TryCreateDirectoryJunction(aliasPath, outside)
+			: TryCreateDirectorySymlink(aliasPath, outside);
+		if (!aliasCreated)
+			Assert.Skip("Directory aliases are unavailable in this test environment.");
+
+		var plan = await new ProjectContextPlanner(CreateProjectAnalysisService())
+			.BuildAsync(
+				new ProjectContextRequest(
+					projectRoot,
+					new ProjectSelectionSpec(
+						SelectedPaths: ["linked/secret.txt"],
+						GitMode: GitFilteringMode.None,
+						Exclusions: [])),
+				TestContext.Current.CancellationToken);
+
+		Assert.Empty(plan.IncludedFiles);
+		var warning = Assert.Single(plan.Diagnostics);
+		Assert.Equal("DPX-SELECTION-PATH-MISSING", warning.Code);
+		Assert.Equal("linked/secret.txt", warning.Path);
+	}
+
+	[Fact]
+	public async Task PreparedPassThroughFile_ReplacedByDirectoryAlias_DoesNotReadTheExternalTarget()
+	{
+		const string externalContent = "prepared-pass-through-must-not-read-external-content";
+		using var temp = new TemporaryDirectory();
+		var projectRoot = temp.CreateDirectory("prepared-project");
+		var sourcePath = temp.CreateFile("prepared-project/src/visible.txt", "original content");
+		var sourceDirectory = Path.GetDirectoryName(sourcePath)!;
+		var externalDirectory = temp.CreateDirectory("prepared-outside");
+		temp.CreateFile("prepared-outside/visible.txt", externalContent);
+		var plan = await new ProjectContextPlanner(CreateProjectAnalysisService())
+			.BuildAsync(
+				new ProjectContextRequest(
+					projectRoot,
+					new ProjectSelectionSpec(
+						GitMode: GitFilteringMode.None,
+						Exclusions: [])),
+				TestContext.Current.CancellationToken);
+
+		var analyzer = new FileContentAnalyzer();
+		using var session = new SecretRedactionSession(new PassThroughDetector());
+		await using var prepared = await new SecretRedactionOutputPreparer(analyzer).PrepareAsync(
+			new ContentTransformationContext(
+				Compression: null,
+				Redaction: new SecretRedactionContext(projectRoot, session)),
+			plan.IncludedFiles,
+			TestContext.Current.CancellationToken);
+
+		Directory.Delete(sourceDirectory, recursive: true);
+		var aliasCreated = OperatingSystem.IsWindows()
+			? TryCreateDirectoryJunction(sourceDirectory, externalDirectory)
+			: TryCreateDirectorySymlink(sourceDirectory, externalDirectory);
+		if (!aliasCreated)
+			Assert.Skip("Directory aliases are unavailable in this test environment.");
+
+		using var destination = new MemoryStream();
+		await new ProjectContextDocumentService(
+				new TreeExportService(),
+				new PreparedSecretFileContentAnalyzer(analyzer, prepared))
+			.WriteCompleteAsync(
+				plan,
+				ProjectContextView.Content,
+				ProjectContextDocumentFormat.Json,
+				destination,
+				TestContext.Current.CancellationToken);
+
+		var document = Encoding.UTF8.GetString(destination.ToArray());
+		using var json = JsonDocument.Parse(document);
+		var file = Assert.Single(json.RootElement.GetProperty("files").EnumerateArray());
+		Assert.NotEqual("text", file.GetProperty("classification").GetString());
+		Assert.Equal(JsonValueKind.Null, file.GetProperty("content").ValueKind);
+		Assert.DoesNotContain(externalContent, document, StringComparison.Ordinal);
+	}
+
 	[Fact]
 	public async Task ContextExport_SourceReplacedByFilesystemAlias_DoesNotReadTheExternalTarget()
 	{
@@ -189,8 +274,8 @@ public sealed class FileSystemReparsePointIntegrationTests
 		Directory.CreateDirectory(Path.Combine(temp.Path, "real", "nested"));
 
 		if (!TryCreateDirectorySymlink(
-			    Path.Combine(temp.Path, "real", "nested", "linked-external"),
-			    Path.Combine(temp.Path, "external")))
+				Path.Combine(temp.Path, "real", "nested", "linked-external"),
+				Path.Combine(temp.Path, "external")))
 		{
 			Assert.Skip("Directory symbolic links are unavailable in this test environment.");
 		}
@@ -224,8 +309,8 @@ public sealed class FileSystemReparsePointIntegrationTests
 		using var temp = new TemporaryDirectory();
 
 		if (!TryCreateDanglingDirectorySymlink(
-			    Path.Combine(temp.Path, "dangling"),
-			    Path.Combine(temp.Path, "missing-target")))
+				Path.Combine(temp.Path, "dangling"),
+				Path.Combine(temp.Path, "missing-target")))
 		{
 			Assert.Skip("Dangling directory symbolic links are unavailable in this test environment.");
 		}
@@ -255,8 +340,8 @@ public sealed class FileSystemReparsePointIntegrationTests
 		temp.CreateFile("target/generated.ts", "export {}");
 
 		if (!TryCreateDirectoryJunction(
-			    Path.Combine(temp.Path, "junction"),
-			    Path.Combine(temp.Path, "target")))
+				Path.Combine(temp.Path, "junction"),
+				Path.Combine(temp.Path, "target")))
 		{
 			Assert.Skip("The test environment did not allow creating a Windows junction.");
 		}
@@ -288,8 +373,8 @@ public sealed class FileSystemReparsePointIntegrationTests
 		temp.CreateFile("runtime.log", "ignored root log");
 
 		if (!TryCreateFileSymlink(
-			    Path.Combine(temp.Path, ".gitignore"),
-			    Path.Combine(temp.Path, "gitignore-target")))
+				Path.Combine(temp.Path, ".gitignore"),
+				Path.Combine(temp.Path, "gitignore-target")))
 		{
 			Assert.Skip("File symbolic links are unavailable in this test environment.");
 		}
@@ -395,13 +480,24 @@ public sealed class FileSystemReparsePointIntegrationTests
 			CancellationToken cancellationToken = default) => [];
 	}
 
+	private sealed class PassThroughDetector : ISecretDetector
+	{
+		public bool ShouldInspectPath(string repositoryRelativePath) => false;
+
+		public IReadOnlyList<DetectedSecret> Detect(
+			string repositoryRelativePath,
+			string content,
+			CancellationToken cancellationToken = default) =>
+			throw new InvalidOperationException("A pass-through file must not reach the detector.");
+	}
+
 	private static bool TryCreateDirectorySymlink(string linkPath, string targetPath)
 	{
 		try
 		{
 			Directory.CreateSymbolicLink(linkPath, targetPath);
 			return Directory.Exists(linkPath) &&
-			       File.GetAttributes(linkPath).HasFlag(FileAttributes.ReparsePoint);
+				   File.GetAttributes(linkPath).HasFlag(FileAttributes.ReparsePoint);
 		}
 		catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
 		{
@@ -495,8 +591,8 @@ public sealed class FileSystemReparsePointIntegrationTests
 			}
 
 			return process.ExitCode == 0 &&
-			       Directory.Exists(linkPath) &&
-			       File.GetAttributes(linkPath).HasFlag(FileAttributes.ReparsePoint);
+				   Directory.Exists(linkPath) &&
+				   File.GetAttributes(linkPath).HasFlag(FileAttributes.ReparsePoint);
 		}
 		catch
 		{

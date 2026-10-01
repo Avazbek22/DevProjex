@@ -1,5 +1,6 @@
 namespace DevProjex.Tests.Unit;
 
+using System.Diagnostics;
 using DevProjex.Application.Compression;
 using DevProjex.Application.Secrets;
 using DevProjex.Infrastructure.ProjectProfiles;
@@ -7,6 +8,104 @@ using DevProjex.Infrastructure.Secrets;
 
 public sealed class SelectedContentExportServiceTests
 {
+	[Theory]
+	[InlineData(false, true)]
+	[InlineData(true, true)]
+	[InlineData(true, false)]
+	public async Task BuildAsync_DoesNotReadASelectedDirectoryLinkOutsideTheProject(
+		bool hideSecrets,
+		bool passProjectRoot)
+	{
+		using var workspace = new TemporaryDirectory();
+		var projectRoot = workspace.CreateFolder("project");
+		var externalDirectory = workspace.CreateFolder("external");
+		_ = workspace.CreateFile("external/private.txt", "external private content");
+		var linkedDirectory = Path.Combine(projectRoot, "linked");
+		CreateDirectoryLinkOrSkip(linkedDirectory, externalDirectory);
+		var selectedPath = Path.Combine(linkedDirectory, "private.txt");
+		using var redactionSession = new SecretRedactionSession(new EmptySecretDetector());
+		var transformation = hideSecrets
+			? ContentTransformationContext.For(
+				compression: null,
+				new SecretRedactionContext(projectRoot, redactionSession))
+			: null;
+		var service = new SelectedContentExportService(new FileContentAnalyzer());
+
+		try
+		{
+			if (hideSecrets)
+			{
+				await Assert.ThrowsAsync<SecretDetectionException>(() => service.BuildAsync(
+					[selectedPath],
+					TestContext.Current.CancellationToken,
+					Path.GetFileName,
+					transformation,
+					projectRoot: passProjectRoot ? projectRoot : null));
+			}
+			else
+			{
+				var output = await service.BuildAsync(
+					[selectedPath],
+					TestContext.Current.CancellationToken,
+					Path.GetFileName,
+					projectRoot: projectRoot);
+				Assert.Equal(string.Empty, output);
+			}
+		}
+		finally
+		{
+			Directory.Delete(linkedDirectory);
+		}
+	}
+
+	private static void CreateDirectoryLinkOrSkip(string linkPath, string targetPath)
+	{
+		if (!OperatingSystem.IsWindows())
+		{
+			try
+			{
+				Directory.CreateSymbolicLink(linkPath, targetPath);
+				return;
+			}
+			catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException)
+			{
+				Assert.Skip($"Directory symbolic links are unavailable: {exception.GetType().Name}.");
+			}
+		}
+
+		using var process = new Process
+		{
+			StartInfo = new ProcessStartInfo("cmd.exe")
+			{
+				UseShellExecute = false,
+				CreateNoWindow = true,
+				RedirectStandardOutput = true,
+				RedirectStandardError = true
+			}
+		};
+		process.StartInfo.ArgumentList.Add("/c");
+		process.StartInfo.ArgumentList.Add("mklink");
+		process.StartInfo.ArgumentList.Add("/J");
+		process.StartInfo.ArgumentList.Add(linkPath);
+		process.StartInfo.ArgumentList.Add(targetPath);
+		try
+		{
+			process.Start();
+			if (!process.WaitForExit(TimeSpan.FromSeconds(5)))
+			{
+				process.Kill(entireProcessTree: true);
+				process.WaitForExit(TimeSpan.FromSeconds(5));
+				Assert.Skip("Windows junction creation timed out.");
+			}
+			if (process.ExitCode != 0 || !Directory.Exists(linkPath))
+				Assert.Skip("The test environment did not allow creating a Windows junction.");
+		}
+		catch (Exception exception) when (exception is InvalidOperationException or IOException or System.ComponentModel.Win32Exception)
+		{
+			Assert.Skip($"Windows junction creation is unavailable: {exception.GetType().Name}.");
+		}
+	}
+
 	[Fact]
 	public async Task BuildAsync_WithRootHeader_WritesRootOnceAndUsesRelativeFileHeaders()
 	{

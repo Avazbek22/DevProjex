@@ -1,9 +1,11 @@
 using DevProjex.Infrastructure.Elevation;
 using DevProjex.Infrastructure.FileSystem;
 using DevProjex.Infrastructure.Git;
+using DevProjex.Infrastructure.LiveContext;
 using DevProjex.Infrastructure.ProjectProfiles;
 using DevProjex.Infrastructure.RecentProjects;
 using DevProjex.Infrastructure.AppInstances;
+using DevProjex.Infrastructure.AgentJournal;
 using DevProjex.Infrastructure.Persistence;
 using DevProjex.Infrastructure.SmartIgnore;
 using DevProjex.Infrastructure.ThemePresets;
@@ -11,21 +13,60 @@ using DevProjex.Infrastructure.TerminalCommands;
 using DevProjex.Infrastructure.Updates;
 using DevProjex.Infrastructure.Secrets;
 using DevProjex.Infrastructure.Compression;
+using DevProjex.Terminal.DesktopControl;
 
 namespace DevProjex.Avalonia.Services;
 
 public static class AvaloniaCompositionRoot
 {
     public static AvaloniaAppServices CreateDefault(DesktopStartupOptions options)
-        => CreateDefault(options, appDataPathProvider: null);
+        => CreateDefault(
+            options,
+            ResolveAppDataPathProvider(options.StoreScreenshotCapture));
+
+    internal static AvaloniaAppServices CreateAfterMigrationAdmission(DesktopStartupOptions options)
+        => CreateDefaultCore(
+            options,
+            ResolveAppDataPathProvider(options.StoreScreenshotCapture),
+            migrationAdmitted: true);
 
     public static AvaloniaAppServices CreateDefault(
         DesktopStartupOptions options,
         Func<string>? appDataPathProvider)
+        => CreateDefaultCore(options, appDataPathProvider, migrationAdmitted: false);
+
+    private static AvaloniaAppServices CreateDefaultCore(
+        DesktopStartupOptions options,
+        Func<string>? appDataPathProvider,
+        bool migrationAdmitted)
     {
         ArgumentNullException.ThrowIfNull(options);
+        if (appDataPathProvider is null && !migrationAdmitted)
+        {
+            var status = StoreUserDataMigrationAdmission.Run();
+            if (!StoreUserDataMigrationAdmission.IsReady(status))
+                throw new StoreUserDataMigrationUnavailableException(status);
+        }
         var language = options.OpenRequest?.Language ?? AppLanguageUtility.DetectSystemLanguage();
         return CreateDefaultCore(language, options.EffectiveSessionMetrics, appDataPathProvider);
+    }
+
+    internal static Func<string>? ResolveAppDataPathProvider(
+        StoreScreenshotCaptureRequest? storeCaptureRequest,
+        Func<string, string?>? environmentProvider = null)
+    {
+        if (storeCaptureRequest is not null)
+        {
+            var captureRoot = Path.GetFullPath(storeCaptureRequest.AppDataDirectory);
+            return () => captureRoot;
+        }
+
+        var candidate = (environmentProvider ?? Environment.GetEnvironmentVariable)(
+            UserDataPathResolver.InternalDataRootVariable);
+        var isolatedRoot = UserDataPathResolver.ResolveInternalDataRoot(candidate);
+        if (isolatedRoot is null)
+            return null;
+        return () => isolatedRoot;
     }
 
     private static AvaloniaAppServices CreateDefaultCore(
@@ -96,6 +137,21 @@ public static class AvaloniaCompositionRoot
             fileContentAnalyzer);
         var terminalCommandSetupService = new TerminalCommandSetupService();
         var localAppDataProvider = appDataPathProvider ?? UserDataPathResolver.GetStateRoot;
+        var liveSessionRegistry = new LiveSessionRegistry(localAppDataProvider);
+        IAgentJournalReader agentJournalReader;
+        try
+        {
+            agentJournalReader = new AgentJournalStore(
+                localAppDataProvider,
+                activeSessionProvider: () => liveSessionRegistry.ReadActive());
+        }
+        catch (Exception exception) when (exception is
+                   IOException or UnauthorizedAccessException or System.Security.SecurityException or
+                   ArgumentException or NotSupportedException)
+        {
+            Trace.TraceWarning("Agent journal storage is unavailable: {0}", exception.GetType().Name);
+            agentJournalReader = new UnavailableAgentJournalReader();
+        }
         var sessionMetricsRecorder = sessionMetrics.Enabled
             ? new SessionMetricsRecorder(sessionMetrics, localAppDataProvider)
             : SessionMetricsRecorder.Disabled;
@@ -120,6 +176,8 @@ public static class AvaloniaCompositionRoot
         var repoCacheService = new RepoCacheService();
         var zipDownloadService = new ZipDownloadService();
         var applicationUpdateService = new GitHubReleaseUpdateService();
+        var mcpConnectionService = new McpConnectionService(localization);
+        var mcpClientLaunchService = new McpClientLaunchService(localization);
         ITaskbarProgressService taskbarProgressService = OperatingSystem.IsWindows()
             ? new WindowsTaskbarProgressService()
             : new NoopTaskbarProgressService();
@@ -157,11 +215,17 @@ public static class AvaloniaCompositionRoot
             FileContentAnalyzer: fileContentAnalyzer,
             ProjectAnalysisService: projectAnalysisService,
             ApplicationUpdateService: applicationUpdateService,
+            McpConnectionService: mcpConnectionService,
+            McpClientLaunchService: mcpClientLaunchService,
             TerminalCommandSetupService: terminalCommandSetupService,
             TaskbarProgressService: taskbarProgressService,
             SessionMetricsRecorder: sessionMetricsRecorder,
-			SecretRedactionSession: secretRedactionSession,
-			CodeCompressionSession: codeCompressionSession,
-			ProjectPathLauncher: projectPathLauncher);
+            SecretRedactionSession: secretRedactionSession,
+            CodeCompressionSession: codeCompressionSession,
+            ProjectPathLauncher: projectPathLauncher,
+            LiveSessionRegistry: liveSessionRegistry,
+            AgentJournalReader: agentJournalReader,
+            AgentJournalReceiptFormatter: new AgentJournalReceiptFormatter(),
+            AgentActivityPreferenceStore: new AgentActivityPreferenceStore(localAppDataProvider));
     }
 }

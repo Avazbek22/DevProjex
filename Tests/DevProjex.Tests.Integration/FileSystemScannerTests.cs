@@ -76,7 +76,7 @@ public sealed class FileSystemScannerTests
 	}
 
 	[Fact]
-	public void GetRootFolderNames_ExcludedRootFolderName_DoesNotChangeNestedIgnoreSemantics()
+	public void GetRootFolderNames_GitBoundaryHoldsAtEveryDepthRegardlessOfRootExclusion()
 	{
 		using var temp = new TemporaryDirectory();
 		temp.CreateFile(".git/objects/pack.dat", "metadata");
@@ -97,13 +97,15 @@ public sealed class FileSystemScannerTests
 			rules,
 			TestContext.Current.CancellationToken);
 
+		// The .git administrative boundary is a product rule at every depth, not an
+		// effect of the root-name exclusion: nested .git content stays out too.
 		Assert.Equal(["src"], roots.Value);
-		Assert.Contains(".txt", nestedExtensions.Value);
+		Assert.DoesNotContain(".txt", nestedExtensions.Value);
 		Assert.Contains(".cs", nestedExtensions.Value);
 	}
 
 	[Fact]
-	public void GetRootFolderNames_WithoutExplicitExclusion_KeepsDotGitAvailable()
+	public void GetRootFolderNames_WithoutExplicitExclusion_StillExcludesTheGitBoundary()
 	{
 		using var temp = new TemporaryDirectory();
 		temp.CreateDirectory(".git");
@@ -116,7 +118,7 @@ public sealed class FileSystemScannerTests
 			rules,
 			TestContext.Current.CancellationToken);
 
-		Assert.Equal([".git", "src"], roots.Value);
+		Assert.Equal(["src"], roots.Value);
 	}
 
 	// Verifies CanReadRoot returns true for accessible directories.

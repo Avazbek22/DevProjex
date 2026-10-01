@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Interactivity;
 using DevProjex.Avalonia.Services;
 
@@ -13,7 +14,7 @@ public sealed class MessageDialogBehaviorTests
         var content = InvokeBuildContent("Saved", "Close");
         var panel = Assert.IsType<DockPanel>(content);
 
-        Assert.Equal("Saved", Assert.Single(panel.Children.OfType<TextBlock>()).Text);
+        Assert.Equal("Saved", ExtractMessage(panel).Text);
         Assert.Equal("Close", Assert.Single(panel.Children.OfType<Button>()).Content);
     }
 
@@ -57,6 +58,72 @@ public sealed class MessageDialogBehaviorTests
         Assert.False(result);
     }
 
+    [AvaloniaFact]
+    public void BuildConfirmationContent_ScrollableMessageUsesScrollViewer()
+    {
+        var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var content = InvokeBuildConfirmationContent("Long message", "Confirm", "Cancel", completion);
+
+        var panel = Assert.IsType<DockPanel>(content);
+        var scrollViewer = Assert.Single(panel.Children.OfType<ScrollViewer>());
+        Assert.Equal("Long message", Assert.IsType<TextBlock>(scrollViewer.Content).Text);
+        Assert.Equal(ScrollBarVisibility.Auto, scrollViewer.VerticalScrollBarVisibility);
+        Assert.Equal(ScrollBarVisibility.Disabled, scrollViewer.HorizontalScrollBarVisibility);
+    }
+
+    [AvaloniaFact]
+    public void CreateConfirmationWindow_LiveContextVariant_SizesToLongLocalizedContent()
+    {
+        var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var window = MessageDialog.CreateConfirmationWindow(
+            owner: null,
+            title: "Schutz geheimer Daten deaktivieren?",
+            message: "Die verbundene Sitzung folgt diesem Fenster. Nach dem Anwenden kann sie geheime Daten in ausgewählten Dateien sehen.",
+            confirmButtonText: "Anwenden",
+            cancelButtonText: "Abbrechen",
+            width: 520,
+            completion: completion);
+
+        try
+        {
+            Assert.Equal(SizeToContent.Height, window.SizeToContent);
+            Assert.True(double.IsNaN(window.Height));
+            var panel = Assert.IsType<DockPanel>(window.Content);
+            panel.Measure(new Size(520, double.PositiveInfinity));
+            Assert.True(panel.DesiredSize.Height > 0);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void CreateConfirmationWindow_KeepsRequestedWidthAndCapsContentHeight()
+    {
+        var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var window = MessageDialog.CreateConfirmationWindow(
+            owner: null,
+            title: "Confirm",
+            message: "Continue?",
+            confirmButtonText: "Continue",
+            cancelButtonText: "Cancel",
+            width: 450,
+            completion: completion);
+
+        try
+        {
+            Assert.Equal(SizeToContent.Height, window.SizeToContent);
+            Assert.True(double.IsNaN(window.Height));
+            Assert.Equal(450, window.Width);
+            Assert.Equal(DialogSurfaceFactory.ContentSizedFallbackMaxHeight, window.MaxHeight);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
     private static Control InvokeBuildConfirmationContent(
         string message,
         string confirmButtonText,
@@ -89,11 +156,14 @@ public sealed class MessageDialogBehaviorTests
     {
         var panel = Assert.IsType<DockPanel>(content);
         var buttonPanel = Assert.Single(panel.Children.OfType<StackPanel>());
-        var message = Assert.Single(panel.Children.OfType<TextBlock>());
+        var message = ExtractMessage(panel);
 
         var buttons = buttonPanel.Children.OfType<Button>().ToArray();
         Assert.Equal(2, buttons.Length);
 
         return (buttons[0], buttons[1], message);
     }
+
+    private static TextBlock ExtractMessage(DockPanel panel) =>
+        Assert.IsType<TextBlock>(Assert.Single(panel.Children.OfType<ScrollViewer>()).Content);
 }

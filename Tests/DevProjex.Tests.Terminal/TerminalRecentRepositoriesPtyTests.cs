@@ -58,7 +58,16 @@ public sealed partial class TerminalRecentRepositoriesPtyTests
 
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		var workspace = await terminal.WaitForStableScreenAsync(
-			required: "RepositoryMarker.cs",
+			readiness: static screen =>
+				screen.Contains("PROJECT TREE", StringComparison.Ordinal) &&
+				screen.Contains("PARAMETERS", StringComparison.Ordinal) &&
+				screen.Contains("RepositoryMarker.cs", StringComparison.Ordinal),
+			readinessDescription:
+				"waiting for PROJECT TREE + PARAMETERS + RepositoryMarker.cs",
+			timelineState: static screen =>
+				$"tree={screen.Contains("PROJECT TREE", StringComparison.Ordinal)} " +
+				$"parameters={screen.Contains("PARAMETERS", StringComparison.Ordinal)} " +
+				$"marker={screen.Contains("RepositoryMarker.cs", StringComparison.Ordinal)}",
 			timeout: TimeSpan.FromSeconds(30),
 			cancellationToken: TestContext.Current.CancellationToken);
 

@@ -321,12 +321,13 @@
           "src/scanner.c"
         ]
       },
-      "sourcePatches": [
+      "sourcePatchArtifacts": [
         {
-          "path": "src/scanner.c",
+          "artifactPath": "tools/grammars/patches/tree-sitter-yaml-v0.7.2-serialization-boundary.patch",
           "description": "Require space for the complete indentation entry before serializing it.",
-          "oldText": "for (; typ_itr != typ_end && size < TREE_SITTER_SERIALIZATION_BUFFER_SIZE; ++typ_itr, ++len_itr) {",
-          "newText": "for (; typ_itr != typ_end && size + 2 * sizeof(int16_t) <= TREE_SITTER_SERIALIZATION_BUFFER_SIZE; ++typ_itr, ++len_itr) {"
+          "sha256": "e2843a09a8c9aadd229dfb6e3d24628c00f13eb60a2034a8bb127d8e650ca5b5",
+          "targetPath": "src/scanner.c",
+          "resultSha256": "74884f44fb927ca63a9c37e375f2cd316f524eb680d71a1b6915bf7fddaa1234"
         }
       ],
       "toolchain": {

@@ -1,0 +1,8 @@
+{
+  "name": "fixture",
+  "type": "module",
+  "exports": {
+    ".": "./src/main.ts",
+    "./blocked": null
+  }
+}

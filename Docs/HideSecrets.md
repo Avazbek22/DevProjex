@@ -2,10 +2,12 @@
 
 Hide Secrets and [Hide private data](HidePrivateData.md) share one redaction pipeline and
 one set of Preview decisions. Overlapping findings are rendered as non-overlapping segments with
-an ordered candidate stack. Keeping a secret finding changes that whole occurrence across all of
-its fragments, while text still covered by non-kept private-data findings remains redacted. The
-original segment appears only after every candidate in its stack is kept. The full overlap
-contract is described in [HidePrivateData.md](HidePrivateData.md).
+an ordered candidate stack. Their replacement coverage is the union of every valid finding; rule
+priority chooses the label for a segment, never removes an uncovered tail of another finding.
+Keeping a secret finding changes that whole occurrence across all of its fragments, while text
+still covered by non-kept private-data findings remains redacted. The original segment appears
+only after every candidate in its stack is kept. The full overlap contract is described in
+[HidePrivateData.md](HidePrivateData.md).
 
 **Smart Secrets** is DevProjex's local, deterministic credential-detection engine.
 **Hide Secrets** is the opt-in switch that applies its decisions to produced output.
@@ -76,9 +78,14 @@ DevProjex ships a reviewed managed port of the default Gitleaks
 - the one path-only PKCS#12 rule is intentionally excluded because a filename or
   opaque binary payload cannot be redacted in place;
 - keyword prescreening limits which bounded regular expressions inspect a file;
-- entropy thresholds and upstream allowlists preserve the pinned rule semantics;
-- `gitleaks:allow` suppresses findings on that line;
+- entropy thresholds preserve the pinned rule semantics, while reviewed export-policy overrides
+  are versioned separately from the pinned source;
+- inline markers such as `gitleaks:allow` in project content do not suppress findings;
 - expressions use the managed non-backtracking .NET engine with a timeout.
+
+Redaction exceptions are controlled only by the operator through DevProjex
+configuration. File content is untrusted input and cannot exempt itself from
+redaction in GUI, CLI, or MCP output.
 
 ### Scope-aware configuration rules
 
@@ -111,6 +118,27 @@ URIs on RFC 2606 documentation hosts (`example.com`, `example.net`,
 TLDs) are not redacted. `localhost` is intentionally still inspected because
 development credentials can be real secrets.
 
+A connection-string match requires one complete region of at least two
+`key=value` pairs and an existing connection signal such as `Server`, `Host`, or
+`Database`. ADO.NET regions use semicolons, JDBC and URI query regions use
+ampersands, and libpq keyword/value regions use single spaces. A region may start
+at the beginning of a line, inside a quoted host-language literal, at a JDBC or
+URI anchor, or after one of the already protected HTTP header names: `Cookie`,
+`Set-Cookie`, `Authorization`, and `Proxy-Authorization`. Other header-like or
+call-expression text does not open a region. Unquoted call punctuation invalidates
+the whole region, and a password replacement cannot extend beyond its region.
+
+Structured value boundaries follow the recognized file format instead of one shared delimiter
+rule. Dotenv comments begin only outside quotes; ADO.NET pairs use semicolons while JDBC query
+parameters use ampersands; JSON property names are decoded and sensitive arrays are visited by
+scalar element; YAML quoted and block scalars follow their own boundaries; XML text and CDATA
+inherit a sensitive element; Python prefixes and triple quotes are recognized; Dockerfile
+continuations and escape directives form logical instructions; `.netrc` is read as a token stream;
+and npm authentication keys are recognized after an optional registry scope. Delimiters, quote
+marks, container punctuation, comments, and adjacent non-sensitive fields stay outside replacement
+spans. In `settings.py`, direct `os.environ[...]` lookups remain references, while a literal default
+passed to `os.getenv` or `os.environ.get` is treated as the sensitive fallback value.
+
 The structured tier reuses Smart Ignore's project-scope resolver and root facts.
 The nearest marked project owns its descendants, so stack-specific vocabulary
 does not leak between sibling or nested projects in a monorepo. Ordinary source
@@ -119,6 +147,9 @@ shaped credentials in source remain covered by Gitleaks rules.
 
 References and placeholders such as `${DB_PASSWORD}`, `$(DbPassword)`,
 `%DB_PASSWORD%`, `{{ secret }}`, `<password>`, and empty values are not redacted.
+For `${...}`, this exception applies only to a complete simple reference. Default expressions such
+as `${DB_PASSWORD:-literal}`, error expressions, nested expressions, escaped references, and text
+with a suffix are composite values and remain subject to redaction under a sensitive key.
 Common template values such as `changeme`, `your-password-here`, `replace_me`,
 `placeholder`, `null`, `none`, `your-api-key-here`-style templates, and repeated
 non-numeric characters are also ignored. These checks match whole values or
@@ -142,6 +173,13 @@ does not bundle or launch Gitleaks and has no native scanning dependency.
 Attribution is recorded in
 [`THIRD-PARTY-NOTICES.md`](../THIRD-PARTY-NOTICES.md).
 
+Two reviewed export-policy differences apply after that verified snapshot is loaded. The upstream
+boolean expression is scoped to the whole candidate value, so `true`, `false`, and `null` remain
+examples without suppressing provider-shaped values that merely contain those words. Upstream path
+allowlists remain noise controls for `generic-api-key` and entropy-only candidates. A selected text
+file is still inspected by rules with a fixed provider prefix, including lock, vendor, and SVG
+paths; selecting text for export is not evidence that its contents are safe.
+
 ## Text, binary files, and limits
 
 Only selected text files are inspected. Binary files are not scanned and pass
@@ -159,11 +197,28 @@ Detection errors and regex timeouts still stop the operation on every surface. T
 was never inspected is never emitted, an uninspected file is never passed off as
 inspected, and a file left out of a copy is always named.
 
-The count scan stores compact spans, rule ids, file fingerprints, and hashed value
-identities in a bounded LRU cache. It does not retain complete source or redacted
-strings. Changed files are rescanned individually; unchanged files reuse their
-findings. Full transformed content is produced lazily for Preview or export, and
-temporary data is removed after completion or cancellation.
+The count scan stores compact spans, rule ids, file fingerprints, transform identities, and hashed
+value identities in a bounded LRU cache. It does not retain complete source or redacted strings.
+Changed files are rescanned individually; unchanged source and transformation results reuse their
+findings. When code transformations change the text, detection runs on the immutable source and on
+the transformed result. Retained source findings are projected through the transform map and their
+coverage is merged with findings created by the transformed text. An identity transform scans only
+once. Full transformed content is produced lazily for Preview or export, and temporary data is
+removed after completion or cancellation.
+
+The implementation avoids work that cannot affect those decisions. Provider-rule values are
+materialized only for accepted findings; line context is built only for line-target allowlists
+after entropy checks; path allowlists and immutable stopword search tables are reused. Preparation
+passes detection entries forward, measures materialized transformed text while writing it, and
+keeps only compact raw/effective metrics between compression prewarm and the Desktop metrics pass.
+These execution shortcuts preserve authoritative regex matches, complete finding coverage,
+replacement offsets, scan limits, and the fail-closed treatment of unreadable content.
+
+Performance investigations can opt into `ContentPipelineDiagnostics`. Its operation-local counters
+include secondary provider-regex runs, line-index builds, rejected-match line contexts, plan
+applications, and transformed-content-only measurement passes. Diagnostics remain inactive unless
+a measurement scope is explicitly opened. The reproducible detector and line-index harness is in
+`tools/Benchmarks/Secrets`; it is not part of the application or release payload.
 
 ## Folder and ZIP copies
 

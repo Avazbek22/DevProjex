@@ -6,12 +6,25 @@ internal readonly record struct McpTextLineRange(
 	int Length);
 
 internal sealed record McpSearchMatchContext(
-	int MatchLineNumber,
-	IReadOnlyList<McpTextLineRange> Lines);
+	IReadOnlyList<int> MatchLineNumbers,
+	IReadOnlyList<McpTextLineRange> Lines,
+	bool StartsNewGroup)
+{
+	public int MatchLineNumber => MatchLineNumbers[0];
+}
 
 internal sealed record McpSearchTextScanResult(
 	int TotalMatches,
-	IReadOnlyList<McpSearchMatchContext> Matches);
+	IReadOnlyList<McpSearchMatchContext> Matches,
+	long ProtectedRangeComparisons);
+
+internal readonly record struct McpSearchStreamResult(
+	int TotalMatches,
+	long ProtectedRangeComparisons);
+
+internal readonly record struct McpSearchAppendResult(
+	int WrittenMatches,
+	bool Truncated);
 
 internal static class McpSearchTextScanner
 {
@@ -20,22 +33,60 @@ internal static class McpSearchTextScanner
 		McpSearchRegex regex,
 		int contextLines,
 		int maximumStoredMatches,
+		CancellationToken cancellationToken) =>
+		Scan(content, regex, contextLines, maximumStoredMatches, [], cancellationToken);
+
+	public static McpSearchTextScanResult Scan(
+		string content,
+		McpSearchRegex regex,
+		int contextLines,
+		int maximumStoredMatches,
+		IReadOnlyList<TransformedTextRange> protectedRanges,
+		CancellationToken cancellationToken)
+	{
+		ArgumentOutOfRangeException.ThrowIfNegative(maximumStoredMatches);
+		var stored = new List<McpSearchMatchContext>(maximumStoredMatches);
+		var result = ScanEach(
+			content,
+			regex,
+			contextLines,
+			protectedRanges,
+			match =>
+			{
+				if (stored.Count < maximumStoredMatches)
+					stored.Add(match);
+			},
+			cancellationToken);
+		return new McpSearchTextScanResult(
+			result.TotalMatches,
+			MergeContexts(stored),
+			result.ProtectedRangeComparisons);
+	}
+
+	public static McpSearchStreamResult ScanEach(
+		string content,
+		McpSearchRegex regex,
+		int contextLines,
+		IReadOnlyList<TransformedTextRange> protectedRanges,
+		Action<McpSearchMatchContext> consume,
 		CancellationToken cancellationToken)
 	{
 		ArgumentNullException.ThrowIfNull(content);
 		ArgumentNullException.ThrowIfNull(regex);
+		ArgumentNullException.ThrowIfNull(protectedRanges);
+		ArgumentNullException.ThrowIfNull(consume);
 		ArgumentOutOfRangeException.ThrowIfNegative(contextLines);
-		ArgumentOutOfRangeException.ThrowIfNegative(maximumStoredMatches);
 		cancellationToken.ThrowIfCancellationRequested();
 		if (content.Length == 0)
-			return new McpSearchTextScanResult(0, []);
+			return new McpSearchStreamResult(0, 0);
 
 		var previous = contextLines == 0
 			? null
 			: new Queue<McpTextLineRange>(contextLines);
-		var active = new List<PendingMatch>(Math.Min(contextLines + 1, maximumStoredMatches));
-		var stored = new List<PendingMatch>(maximumStoredMatches);
+		var active = new List<PendingMatch>(contextLines + 1);
 		var totalMatches = 0;
+		var protectedRangeIndex = 0;
+		long protectedRangeComparisons = 0;
 
 		void ProcessLine(McpTextLineRange line)
 		{
@@ -45,23 +96,31 @@ internal static class McpSearchTextScanner
 				pending.Lines.Add(line);
 				pending.RemainingContextLines--;
 				if (pending.RemainingContextLines == 0)
+				{
 					active.RemoveAt(index);
+					consume(pending.ToContext());
+				}
 			}
 
-			if (regex.IsMatch(content, line.Offset, line.Length))
+			if (regex.IsMatch(
+					content,
+					line.Offset,
+					line.Length,
+					protectedRanges,
+					ref protectedRangeIndex,
+					ref protectedRangeComparisons,
+					cancellationToken))
 			{
 				totalMatches++;
-				if (stored.Count < maximumStoredMatches)
-				{
-					var lines = previous is null
-						? new List<McpTextLineRange>(1)
-						: new List<McpTextLineRange>(previous);
-					lines.Add(line);
-					var pending = new PendingMatch(line.LineNumber, lines, contextLines);
-					stored.Add(pending);
-					if (contextLines > 0)
-						active.Add(pending);
-				}
+				var lines = previous is null
+					? new List<McpTextLineRange>(1)
+					: new List<McpTextLineRange>(previous);
+				lines.Add(line);
+				var pending = new PendingMatch(line.LineNumber, lines, contextLines);
+				if (contextLines > 0)
+					active.Add(pending);
+				else
+					consume(pending.ToContext());
 			}
 
 			if (previous is null)
@@ -86,14 +145,41 @@ internal static class McpSearchTextScanner
 			lineStart = index + 1;
 		}
 		ProcessLine(new McpTextLineRange(lineNumber, lineStart, content.Length - lineStart));
+		foreach (var pending in active)
+			consume(pending.ToContext());
 
-		return new McpSearchTextScanResult(
-			totalMatches,
-			stored
-				.Select(static match => new McpSearchMatchContext(
-					match.MatchLineNumber,
-					match.Lines.ToArray()))
-				.ToArray());
+		return new McpSearchStreamResult(totalMatches, protectedRangeComparisons);
+	}
+
+	private static IReadOnlyList<McpSearchMatchContext> MergeContexts(IReadOnlyList<McpSearchMatchContext> matches)
+	{
+		if (matches.Count == 0)
+			return [];
+
+		var merged = new List<McpSearchMatchContext>(matches.Count);
+		var lineNumbers = new List<int> { matches[0].MatchLineNumber };
+		var lines = new List<McpTextLineRange>(matches[0].Lines);
+		for (var index = 1; index < matches.Count; index++)
+		{
+			var match = matches[index];
+			var lastLine = lines[^1].LineNumber;
+			if (match.Lines[0].LineNumber <= lastLine + 1)
+			{
+				lineNumbers.Add(match.MatchLineNumber);
+				foreach (var line in match.Lines)
+				{
+					if (line.LineNumber > lastLine)
+						lines.Add(line);
+				}
+				continue;
+			}
+
+			merged.Add(new McpSearchMatchContext(lineNumbers.ToArray(), lines.ToArray(), merged.Count > 0));
+			lineNumbers = [match.MatchLineNumber];
+			lines = new List<McpTextLineRange>(match.Lines);
+		}
+		merged.Add(new McpSearchMatchContext(lineNumbers.ToArray(), lines.ToArray(), merged.Count > 0));
+		return merged;
 	}
 
 	private sealed class PendingMatch(
@@ -104,5 +190,7 @@ internal static class McpSearchTextScanner
 		public int MatchLineNumber { get; } = matchLineNumber;
 		public List<McpTextLineRange> Lines { get; } = lines;
 		public int RemainingContextLines { get; set; } = remainingContextLines;
+
+		public McpSearchMatchContext ToContext() => new([MatchLineNumber], Lines.ToArray(), false);
 	}
 }

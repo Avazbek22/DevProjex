@@ -82,6 +82,30 @@ public sealed class ProjectRootFactsProviderTests
 		Assert.False(facts.HasMarkerFile("src/App.cs"));
 	}
 
+	[Fact]
+	public void BuildFromEntries_SecurityFailureAfterPartialEnumeration_DiscardsPartialFacts()
+	{
+		using var directory = new TemporaryDirectory();
+		var facts = ProjectRootFactsProvider.BuildFromEntries(
+			directory.Path,
+			Entries(),
+			TestContext.Current.CancellationToken);
+
+		Assert.True(facts.Exists);
+		Assert.False(facts.IsAccessible);
+		Assert.False(facts.HasMarkerFile("package.json"));
+
+		IEnumerable<ProjectRootFactsProvider.ProjectRootEntry> Entries()
+		{
+			yield return new ProjectRootFactsProvider.ProjectRootEntry(
+				"package.json",
+				Path.Combine(directory.Path, "package.json"),
+				IsDirectory: false,
+				IsReparsePoint: false);
+			throw new System.Security.SecurityException("Directory access was revoked during enumeration.");
+		}
+	}
+
 	#pragma warning disable xUnit1051 // This test verifies a caller-owned cancellation token.
 	[Fact]
 	public void GetWithCancellation_PreCancelledRequestDoesNotBuildOrPopulateCache()

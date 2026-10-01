@@ -28,13 +28,10 @@ public sealed class DesktopControlPaths(Func<string>? dataRootProvider = null)
 
 	private static string ResolveDataRoot()
 	{
-		var isolatedRoot = Environment.GetEnvironmentVariable(
-			InvocationEnvironment.InternalDataRootVariable);
-		if (!string.IsNullOrWhiteSpace(isolatedRoot) &&
-		    Path.IsPathFullyQualified(isolatedRoot))
-		{
-			return Path.GetFullPath(isolatedRoot);
-		}
+		var isolatedRoot = UserDataPathResolver.ResolveInternalDataRoot(
+			Environment.GetEnvironmentVariable(InvocationEnvironment.InternalDataRootVariable));
+		if (isolatedRoot is not null)
+			return isolatedRoot;
 
 		var xdgRuntime = Environment.GetEnvironmentVariable("XDG_RUNTIME_DIR");
 		if (!OperatingSystem.IsWindows() &&

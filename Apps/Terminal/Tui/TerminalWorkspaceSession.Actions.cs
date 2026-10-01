@@ -51,7 +51,8 @@ internal sealed partial class TerminalWorkspaceSession
 {
 	private const int WideControlsWidth = 38;
 	private const int ContentControlsFrameHeight = 7;
-	private const int AggregateFramePaddingColumns = 3;
+	// Terminal.Gui hides a vertical scrollbar whose viewport is a single row.
+	private const int MinimumVisibleFilterRows = 2;
 	private const int AggregateTrailingBorderColumns = 3;
 
 	private WorkspaceControlViewGraph? ControlViews => _workspaceViews?.Controls;
@@ -133,29 +134,39 @@ internal sealed partial class TerminalWorkspaceSession
 		var collapsedControls = new TerminalLiteralLabel
 		{
 			X = 1,
-			Y = 0,
+			Y = _options.Plain ? 1 : 0,
 			Width = Dim.Fill(1),
 			Height = 1,
 			Visible = false,
 			SchemeName = TerminalWorkspaceTheme.Secondary
 		};
+		controlsFrame.MouseEvent += (_, mouse) => HandleCollapsedControlsPointer(collapsedControls, mouse);
+		if (controlsFrame.Border.View is { } controlsBorder)
+			controlsBorder.MouseEvent += (_, mouse) => HandleCollapsedControlsPointer(collapsedControls, mouse);
 		var (contentControlsFrame, contentControls) = CreateControlSection(
 			NormalizeControlTitle(L("Settings.Secrets.Title")),
 			TerminalControlSection.Content,
-			showVerticalScrollBar: false);
+			showVerticalScrollBar: true);
 		var contentAllControl = AddAggregateControl(
 			contentControlsFrame,
 			contentControls,
 			TerminalControlSection.Content);
-		contentControlsFrame.Y = _options.Plain ? 1 : 0;
-		contentControlsFrame.Height = ContentControlsFrameHeight;
+		var contentTop = _options.Plain ? 1 : 0;
+		var minimumFilterFrameHeight = (_options.Plain ? 1 : 2) + MinimumVisibleFilterRows;
+		contentControlsFrame.Y = contentTop;
+		contentControlsFrame.Height = Dim.Func(_ => ResolveContentControlsFrameHeight(
+			controlsFrame.Viewport.Height - contentTop,
+			minimumFilterFrameHeight));
 
+		// Terminal.Gui refuses focus to a view whose SuperView cannot take focus, so the
+		// Exclusions and File Types lists are reachable only through a focusable host.
 		var filterControlsHost = new View
 		{
 			X = 0,
 			Y = Pos.Bottom(contentControlsFrame),
 			Width = Dim.Fill(),
-			Height = Dim.Fill()
+			Height = Dim.Fill(),
+			CanFocus = true
 		};
 		var (exclusionControlsFrame, exclusionControls) = CreateControlSection(
 			NormalizeControlTitle(L("Terminal.Tui.Exclusions")),
@@ -196,6 +207,33 @@ internal sealed partial class TerminalWorkspaceSession
 			exclusionControls,
 			extensionAllControl,
 			extensionControls);
+	}
+
+	// Content Processing gives up rows on very low terminals so Exclusions and File Types
+	// keep enough rows to show their overflow scrollbars.
+	internal static int ResolveContentControlsFrameHeight(
+		int availableHeight,
+		int minimumFilterFrameHeight) =>
+		Math.Clamp(
+			availableHeight - 2 * minimumFilterFrameHeight,
+			minimumFilterFrameHeight,
+			ContentControlsFrameHeight);
+
+	private void HandleCollapsedControlsPointer(View collapsedControls, Mouse mouse)
+	{
+		if (!collapsedControls.Visible)
+			return;
+		if (TerminalPointerInput.IsPress(mouse.Flags))
+		{
+			mouse.Handled = true;
+			_application.Invoke(() => FocusPane(TerminalWorkspacePane.Controls));
+		}
+		else if (mouse.Flags.HasFlag(MouseFlags.LeftButtonReleased))
+		{
+			// The frame's default release binding would move focus onto the collapsed
+			// frame, which has no visible control to receive keys.
+			mouse.Handled = true;
+		}
 	}
 
 	private (FrameView Frame, TerminalParameterListView List) CreateControlSection(
@@ -274,14 +312,29 @@ internal sealed partial class TerminalWorkspaceSession
 			_activePane = TerminalWorkspacePane.Controls;
 			_activeControlSection = section;
 			_activeAggregateControlSection = section;
+			GetControlFocusTarget(section, aggregateIsActive: true)?.SetFocus();
 			UpdateWorkspaceFocus();
 		};
 		aggregate.HasFocusChanged += (_, _) => UpdateWorkspaceFocus();
 		aggregate.CommandLineRequested += (_, _) => OpenCommandLine();
 		if (onBorder)
+		{
 			frame.Border.View!.Add(aggregate);
-		else
-			frame.Add(aggregate);
+			return aggregate;
+		}
+
+		// A borderless frame draws no title, so the title leads the aggregate row instead.
+		var title = new TerminalLiteralLabel
+		{
+			X = 0,
+			Y = 0,
+			Height = 1,
+			Text = frame.Title,
+			SchemeName = TerminalWorkspaceTheme.Secondary
+		};
+		frame.TitleChanged += (_, _) => title.Text = frame.Title;
+		aggregate.X = Pos.Right(title);
+		frame.Add(title, aggregate);
 		return aggregate;
 	}
 
@@ -447,7 +500,7 @@ internal sealed partial class TerminalWorkspaceSession
 			for (var index = 0; index < rows.Count; index++)
 			{
 				if (rows[index].IsEnabled &&
-				    string.Equals(rows[index].Key, selectedKey, StringComparison.Ordinal))
+					string.Equals(rows[index].Key, selectedKey, StringComparison.Ordinal))
 				{
 					return index;
 				}
@@ -577,13 +630,13 @@ internal sealed partial class TerminalWorkspaceSession
 			ResolveControlLabelWidth(markerColumns: 4),
 			_environment.SupportsUnicode && !_options.Plain);
 
-	private int ResolveControlLabelWidth(int markerColumns)
-	{
-		var panelWidth = _layoutMode == TerminalWorkspaceLayoutMode.Wide
+	private int ResolveControlLabelWidth(int markerColumns) =>
+		Math.Max(4, ResolveControlsPanelWidth() - markerColumns - 4);
+
+	private int ResolveControlsPanelWidth() =>
+		_layoutMode == TerminalWorkspaceLayoutMode.Wide
 			? WideControlsWidth
 			: Math.Max(1, _terminalWidth);
-		return Math.Max(4, panelWidth - markerColumns - 4);
-	}
 
 	private void TrackSelectedControl(TerminalControlSection section)
 	{
@@ -657,12 +710,16 @@ internal sealed partial class TerminalWorkspaceSession
 		TerminalAggregateControl? aggregate)
 	{
 		var aggregateColumns = aggregate?.Text.GetColumns() ?? 0;
-		var maxColumns = Math.Max(
-			4,
-			WideControlsWidth - aggregateColumns - AggregateFramePaddingColumns - 4);
+		var panelWidth = ResolveControlsPanelWidth();
+		// A mini-panel spans the controls panel inside its border. Its title needs the corner
+		// and both title caps ("┌┤" and "├") to the left of the aggregate anchored on the right.
+		// Plain mode has no frames and prints the title and the aggregate side by side.
+		var maxColumns = aggregate?.IsOnBorder == false
+			? panelWidth - aggregateColumns
+			: panelWidth - 2 - aggregateColumns - AggregateTrailingBorderColumns - 3;
 		return TerminalFrameTitle.Fit(
 			value,
-			maxColumns,
+			Math.Max(4, maxColumns),
 			_environment.SupportsUnicode && !_options.Plain);
 	}
 
@@ -686,10 +743,19 @@ internal sealed partial class TerminalWorkspaceSession
 		GetControlSection(_activeControlSection).List;
 
 	private View? ActiveControlView =>
-		IsAggregateControlFocused(_activeControlSection) ||
-		_activeAggregateControlSection == _activeControlSection
-			? (View?)GetAggregateControlSection(_activeControlSection).List ?? ActiveControlList
-			: ActiveControlList;
+		GetControlFocusTarget(
+			_activeControlSection,
+			IsAggregateControlFocused(_activeControlSection) ||
+			_activeAggregateControlSection == _activeControlSection);
+
+	// An "All" control drawn on a frame border belongs to the border adornment, which
+	// Terminal.Gui never focuses. Its section list then holds keyboard focus while the
+	// aggregate remains the active row, so the Parameters pane really owns the keyboard.
+	private View? GetControlFocusTarget(TerminalControlSection section, bool aggregateIsActive) =>
+		aggregateIsActive &&
+		GetAggregateControlSection(section).List is { IsOnBorder: false } aggregate
+			? aggregate
+			: GetControlSection(section).List;
 
 	private bool IsAggregateControlFocused(TerminalControlSection section) =>
 		GetAggregateControlSection(section).List?.HasFocus == true;
@@ -702,12 +768,9 @@ internal sealed partial class TerminalWorkspaceSession
 			_activePane = TerminalWorkspacePane.Controls;
 			ApplyWorkspaceLayout();
 		}
-		var target = (View?)GetAggregateControlSection(section).List ??
-		             GetControlSection(section).List;
-		_activeAggregateControlSection = GetAggregateControlSection(section).List is null
-			? null
-			: section;
-		target?.SetFocus();
+		var hasAggregate = GetAggregateControlSection(section).List is not null;
+		_activeAggregateControlSection = hasAggregate ? section : null;
+		GetControlFocusTarget(section, hasAggregate)?.SetFocus();
 		// Layout and focus notifications can report the previously focused list while a
 		// single-pane transition is being completed. The requested section is authoritative.
 		_activePane = TerminalWorkspacePane.Controls;
@@ -813,6 +876,8 @@ internal sealed partial class TerminalWorkspaceSession
 				string.Empty,
 				commandSyntax: TerminalWorkspaceCommandCatalog.Get(
 					TerminalWorkspaceCommandVerb.Copy).Syntax,
+				isAvailable: () => IsRepositoryExportAllowed(
+					Volatile.Read(ref _repositoryStateInconsistent) != 0),
 				execute: () => CopyCurrentContext(new TerminalWorkspaceCommand(
 					TerminalWorkspaceCommandCatalog.Get(TerminalWorkspaceCommandVerb.Copy)))),
 			CreateAction(
@@ -821,7 +886,7 @@ internal sealed partial class TerminalWorkspaceSession
 				"Terminal.Tui.Exclusions",
 				"Terminal.Tui.Action.FocusExclusions.Description",
 				"X",
-				FormatExclusions(selection.Exclusions ?? []),
+				FormatExclusions(),
 				TerminalWorkspaceCommandCatalog.Get(TerminalWorkspaceCommandVerb.Set).Syntax,
 				execute: () => FocusControlSection(TerminalControlSection.Exclusions)),
 			CreateAction(
@@ -842,16 +907,18 @@ internal sealed partial class TerminalWorkspaceSession
 				"Terminal.Command.ExportContext",
 				"E",
 				commandSyntax: "export context [format] [path]",
-				isAvailable: () => !HasActiveOperation,
+				isAvailable: () => !HasActiveOperation && IsRepositoryExportAllowed(
+					Volatile.Read(ref _repositoryStateInconsistent) != 0),
 				execute: () => ExportContext()),
 			CreateAction(
 				TerminalWorkspaceActionKind.ExportFolder,
 				"Terminal.Tui.Export",
 				"Menu.File.ExportProjectCopy.Folder",
 				"Menu.File.ExportProjectCopy.Folder.Help",
-				"Z",
+				"z",
 				commandSyntax: "export folder <path>",
-				isAvailable: () => !HasActiveOperation,
+				isAvailable: () => !HasActiveOperation && IsRepositoryExportAllowed(
+					Volatile.Read(ref _repositoryStateInconsistent) != 0),
 				execute: () => ExportProject(ProjectCopyExportFormat.Folder)),
 			CreateAction(
 				TerminalWorkspaceActionKind.ExportZip,
@@ -860,7 +927,8 @@ internal sealed partial class TerminalWorkspaceSession
 				"Menu.File.ExportProjectCopy.Zip.Help",
 				"Shift+Z",
 				commandSyntax: "export zip <path>",
-				isAvailable: () => !HasActiveOperation,
+				isAvailable: () => !HasActiveOperation && IsRepositoryExportAllowed(
+					Volatile.Read(ref _repositoryStateInconsistent) != 0),
 				execute: () => ExportProject(ProjectCopyExportFormat.Zip)),
 			CreateAction(
 				TerminalWorkspaceActionKind.SaveProfile,
@@ -868,8 +936,7 @@ internal sealed partial class TerminalWorkspaceSession
 				"Terminal.Tui.SaveProfile",
 				"Terminal.Command.ProfileExport",
 				"P",
-				commandSyntax: TerminalWorkspaceCommandCatalog.Get(
-					TerminalWorkspaceCommandVerb.Profile).Syntax,
+				commandSyntax: "profile save [name]",
 				execute: () => SaveProfile()),
 			CreateAction(
 				TerminalWorkspaceActionKind.OpenDesktop,
@@ -995,11 +1062,13 @@ internal sealed partial class TerminalWorkspaceSession
 			? GitScopeSelection.ToToken(mode, GetDisplayedSettingsSelection().GitDiffRange)
 			: L(ProjectPresentationCatalog.Get(mode).LabelKey);
 
-	private string FormatExclusions(IReadOnlyCollection<ProjectExclusion> exclusions)
+	// Counts the rows the Exclusions panel shows, as its collapsed summary does.
+	private string FormatExclusions()
 	{
-		var pathExclusionCount = ProjectPresentationCatalog.Exclusions.Count(
-			descriptor => exclusions.Contains(descriptor.RequireId()));
-		return pathExclusionCount.ToString("N0", CultureInfo.CurrentCulture);
+		var counts = _exclusionControlRows is { } rows ? CountExclusionAxis(rows) : (Selected: 0, Total: 0);
+		return counts.Total == 0
+			? 0.ToString("N0", CultureInfo.CurrentCulture)
+			: FormatSelectionCount(counts.Selected, counts.Total);
 	}
 
 	private string FormatSelectionCount(int selected, int available) =>
@@ -1059,13 +1128,13 @@ internal sealed partial class TerminalWorkspaceSession
 				ApplyContentTransformation(transformation, row.IsSelected != true);
 				return;
 			case TerminalParameterRowKind.Exclusion when row.Exclusion is { } exclusion:
-				{
-					var values = (GetDisplayedSettingsSelection().Exclusions ?? []).ToHashSet();
-					if (!values.Add(exclusion))
-						values.Remove(exclusion);
-					ApplyExclusions(values);
-					return;
-				}
+			{
+				var values = (GetDisplayedSettingsSelection().Exclusions ?? []).ToHashSet();
+				if (!values.Add(exclusion))
+					values.Remove(exclusion);
+				ApplyExclusions(values);
+				return;
+			}
 			case TerminalParameterRowKind.ToggleAllExtensions:
 				ApplyExtensions(
 					row.IsSelected == true
@@ -1073,15 +1142,15 @@ internal sealed partial class TerminalWorkspaceSession
 						: _state?.Plan.AvailableExtensions ?? []);
 				return;
 			case TerminalParameterRowKind.Extension when row.Value is { } extension:
-				{
-					var values = (GetDisplayedSettingsSelection().Extensions ??
-					              _state?.Plan.SelectedExtensions ?? [])
-						.ToHashSet(StringComparer.OrdinalIgnoreCase);
-					if (!values.Add(extension))
-						values.Remove(extension);
-					ApplyExtensions(values);
-					return;
-				}
+			{
+				var values = (GetDisplayedSettingsSelection().Extensions ??
+							  _state?.Plan.SelectedExtensions ?? [])
+					.ToHashSet(StringComparer.OrdinalIgnoreCase);
+				if (!values.Add(extension))
+					values.Remove(extension);
+				ApplyExtensions(values);
+				return;
+			}
 		}
 	}
 
@@ -1150,6 +1219,8 @@ internal sealed partial class TerminalWorkspaceSession
 			return;
 		if (!originatedFromCommandLine)
 			PreserveControlFocusForOperation(TerminalControlSection.Content);
+		if (optionId == IgnoreOptionId.CompressCode)
+			_compressionUnavailableNotified = false;
 		var selection = SetContentTransformation(EnsureSettingsDraft(), optionId, enabled);
 		PublishOptimisticSettings(selection, originatedFromCommandLine);
 	}
@@ -1162,6 +1233,7 @@ internal sealed partial class TerminalWorkspaceSession
 			return;
 		if (!originatedFromCommandLine)
 			PreserveControlFocusForOperation(TerminalControlSection.Content);
+		_compressionUnavailableNotified = false;
 		var selection = EnsureSettingsDraft() with
 		{
 			HideSecrets = enabled,
@@ -1221,6 +1293,7 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		_settingsDraftSelection = selection;
 		_settingsDraftOriginatedFromCommandLine = originatedFromCommandLine;
+		SignalSettingsRefreshStateChanged();
 		RefreshContextControls();
 		_controlsFrame?.SetNeedsDraw();
 		_application.LayoutAndDraw();
@@ -1233,6 +1306,7 @@ internal sealed partial class TerminalWorkspaceSession
 		_settingsDraftExtensionStates = null;
 		_settingsDraftPreferredGitMode = null;
 		_settingsDraftOriginatedFromCommandLine = false;
+		SignalSettingsRefreshStateChanged();
 	}
 
 	private static ProjectSelectionSpec SetContentTransformation(
@@ -1274,7 +1348,7 @@ internal sealed partial class TerminalWorkspaceSession
 			_ => GitFilteringMode.None
 		};
 		if (!HasGitRepository() && next is GitFilteringMode.TrackedFilesOnly or
-		    GitFilteringMode.Staged or GitFilteringMode.Changes)
+			GitFilteringMode.Staged or GitFilteringMode.Changes)
 		{
 			next = GitFilteringMode.None;
 		}
@@ -1313,18 +1387,20 @@ internal sealed partial class TerminalWorkspaceSession
 			preferredHeight,
 			14,
 			Math.Max(14, _application.Screen.Height - 2));
-		using var dialog = CreateDialog(L("Terminal.Tui.ActionPalette"), width, height);
+		var title = L("Terminal.Tui.ActionPalette");
+		using var dialog = CreateDialog(title, width, height);
+		var top = AddPlainDialogTitle(dialog, title);
 		var prompt = new TerminalLiteralLabel
 		{
 			X = 1,
-			Y = 0,
+			Y = top,
 			Text = L("Terminal.Tui.ActionPalette.Search"),
 			SchemeName = TerminalWorkspaceTheme.Secondary
 		};
 		var input = new TextField
 		{
 			X = 1,
-			Y = 1,
+			Y = top + 1,
 			Width = Dim.Fill(1),
 			SchemeName = TerminalWorkspaceTheme.List
 		};
@@ -1332,7 +1408,7 @@ internal sealed partial class TerminalWorkspaceSession
 		var list = new ListView
 		{
 			X = 1,
-			Y = 3,
+			Y = top + 3,
 			Width = Dim.Fill(1),
 			Height = Dim.Fill(6),
 			SchemeName = TerminalWorkspaceTheme.List
@@ -1356,7 +1432,10 @@ internal sealed partial class TerminalWorkspaceSession
 			var filter = input.Text?.ToString() ?? string.Empty;
 			var filtered = items
 				.Where(item => item.IsAvailable())
-				.Where(item => MatchesPaletteFilter(item, filter))
+				.Select(item => (Item: item, Rank: RankPaletteMatch(item, filter)))
+				.Where(static match => match.Rank is not null)
+				.OrderBy(static match => match.Rank)
+				.Select(static match => match.Item)
 				.ToArray();
 			var rowWidth = Math.Max(20, width - 6);
 			var titleWidth = Math.Clamp(
@@ -1424,11 +1503,11 @@ internal sealed partial class TerminalWorkspaceSession
 			}
 		};
 		list.ValueChanged += (_, _) => UpdateDetail();
-		list.Accepted += (_, _) => Accept();
+		TerminalInteractiveView.OnAccept(list, Accept);
 		dialog.Add(prompt, input, list, detail);
 		dialog.AddButton(CreateDialogButton(L("Terminal.Tui.Back")));
 		var execute = CreateDialogButton(L("Terminal.Tui.ActionPalette.Run"));
-		execute.Accepted += (_, _) => Accept();
+		TerminalInteractiveView.OnAccept(execute, Accept);
 		dialog.AddButton(execute);
 		Refresh();
 		RunOverlay(dialog, input);
@@ -1483,12 +1562,7 @@ internal sealed partial class TerminalWorkspaceSession
 			"Terminal.Tui.Action.ClearSearch.Description",
 			"Esc",
 			isAvailable: () => _preview?.SearchQuery.Length > 0,
-			execute: () =>
-			{
-				CancelPreviewSearch(clearQuery: true);
-				_preview?.ClearSearch();
-				UpdatePanelTitles();
-			}));
+			execute: () => ClearPreviewSearch()));
 		actions.Add(CreateAction(
 			TerminalWorkspaceActionKind.Quit,
 			"Terminal.Tui.Source",
@@ -1535,7 +1609,7 @@ internal sealed partial class TerminalWorkspaceSession
 			return [];
 		return BuildWelcomeActions(_welcomeContext)
 			.Select(action => new TerminalPaletteItem(
-				$"welcome.palette.{action.Kind}",
+				BuildWelcomePaletteItemId(action),
 				L("Terminal.Tui.Actions"),
 				action.Title,
 				action.Description,
@@ -1544,19 +1618,22 @@ internal sealed partial class TerminalWorkspaceSession
 				null,
 				null,
 				static () => true,
-				() => ActivateWelcomeAction(action.Kind)))
-			.Append(new TerminalPaletteItem(
-				"welcome.palette.open-profile",
-				L("Terminal.Tui.Actions"),
-				L("Terminal.Tui.Welcome.OpenProfile"),
-				L("Terminal.Tui.Welcome.OpenProfile.Description"),
-				string.Empty,
-				null,
-				null,
-				null,
-				static () => true,
-				OpenPortableProfile))
+				() => ActivateWelcomeAction(action)))
 			.ToArray();
+	}
+
+	private static string BuildWelcomePaletteItemId(TerminalWelcomeAction action)
+	{
+		if (action.Kind != TerminalWelcomeActionKind.RecentProject)
+			return $"welcome.palette.{action.Kind}";
+
+		var canonicalIdentity = action.Value is { Length: > 0 } path
+			? PathUtility.NormalizeForCacheKey(path)
+			: action.Title;
+		var digest = Convert.ToHexString(
+			System.Security.Cryptography.SHA256.HashData(
+				System.Text.Encoding.UTF8.GetBytes(canonicalIdentity)));
+		return $"welcome.palette.{action.Kind}.{digest}";
 	}
 
 	private static string? ResolvePaletteCommandId(string? syntax)
@@ -1582,36 +1659,44 @@ internal sealed partial class TerminalWorkspaceSession
 		return $"{item.Category}{PanelSeparator}{item.Title}{value}{syntax}\n{item.Description}";
 	}
 
-	private static bool MatchesPaletteFilter(TerminalPaletteItem item, string filter)
+	// Whole-word matches rank ahead of scattered letters, so a word typed in full finds the
+	// action that names it before an action whose long syntax contains the same letters in order.
+	// Returns null when the filter does not match at all; equal ranks keep the catalog order.
+	internal static int? RankPaletteMatch(TerminalPaletteItem item, string filter)
 	{
-		if (string.IsNullOrWhiteSpace(filter))
-			return true;
+		var query = filter.Trim();
+		if (query.Length == 0)
+			return 0;
+		if (item.Title.Contains(query, StringComparison.CurrentCultureIgnoreCase))
+			return 0;
 		var searchable = string.Join(
 			' ',
 			item.Title,
 			item.Description,
 			item.CommandSyntax ?? string.Empty);
+		if (searchable.Contains(query, StringComparison.CurrentCultureIgnoreCase))
+			return 1;
 		var candidateIndex = 0;
-		foreach (var character in filter.Where(static character => !char.IsWhiteSpace(character)))
+		foreach (var character in query.Where(static character => !char.IsWhiteSpace(character)))
 		{
 			candidateIndex = searchable.IndexOf(
 				character.ToString(),
 				candidateIndex,
 				StringComparison.CurrentCultureIgnoreCase);
 			if (candidateIndex < 0)
-				return false;
+				return null;
 			candidateIndex++;
 		}
-		return true;
+		return 2;
 	}
 
-	private void ActivateWelcomeAction(TerminalWelcomeActionKind kind)
+	private void ActivateWelcomeAction(TerminalWelcomeAction action)
 	{
 		if (_welcomeRows is null || _welcomeList is null)
 			return;
 		for (var index = 0; index < _welcomeRows.Count; index++)
 		{
-			if (_welcomeRows[index].Action.Kind != kind)
+			if (_welcomeRows[index].Action != action)
 				continue;
 			_welcomeList.SelectedItem = index;
 			ActivateWelcomeSelection();
@@ -1663,6 +1748,7 @@ internal sealed partial class TerminalWorkspaceSession
 			L("Terminal.Tui.Analyze"),
 			async token =>
 			{
+				await AwaitLatestSettingsRefreshAsync(token).ConfigureAwait(false);
 				var plan = await _controller.BuildCurrentPlanAsync(_state, token)
 					.ConfigureAwait(false);
 				var warnings = plan.Diagnostics.Count(static diagnostic =>
@@ -1683,17 +1769,23 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		if (_state is null)
 			return;
+		if (!EnsureRepositoryExportAllowed(originatedFromCommandLine: true))
+			return;
 		var view = command.View ?? _previewView;
 		var format = command.Format ?? _format;
+		var budget = TerminalContextBudget.From(command);
 		TrackActiveOperation(RunOperationAsync(
 			L("Terminal.Tui.Command.Copy.Title"),
 			async token =>
 			{
-				var payload = await _controller.BuildCopyPayloadAsync(
+				await AwaitLatestSettingsRefreshAsync(token).ConfigureAwait(false);
+				var (payload, tokenBudget) = await _controller.BuildCopyPayloadWithBudgetAsync(
 						_state,
 						view,
 						format,
-						token)
+						budget,
+						token,
+						plain: _options.Plain)
 					.ConfigureAwait(false);
 				if (payload is null)
 				{
@@ -1709,11 +1801,14 @@ internal sealed partial class TerminalWorkspaceSession
 							? "DPX-TUI-CLIPBOARD-PAYLOAD-TOO-LARGE"
 							: "DPX-TUI-CLIPBOARD-UNAVAILABLE");
 				}
-				return string.Format(
+				var copied = string.Format(
 					CultureInfo.CurrentCulture,
 					L("Terminal.Tui.Command.Copy.Result"),
 					L(ProjectPresentationCatalog.Get(view).LabelKey),
 					payload.Length);
+				return tokenBudget is null
+					? copied
+					: $"{copied}\n{TerminalContextBudget.FormatReport(tokenBudget, _services.Localization)}";
 			},
 			originatedFromCommandLine: true,
 			cornerProgressLabel: L("Terminal.Tui.Progress.BuildingPreview")));
@@ -1744,6 +1839,13 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		if (_state is null)
 			return;
+		if (!_services.HostCapabilities.HasDesktopApplication)
+		{
+			ShowError(
+				"DPX-DESKTOP-NOT-INCLUDED",
+				L("Terminal.Error.DesktopNotIncluded"));
+			return;
+		}
 		TrackActiveOperation(RunOperationAsync(
 			L("Terminal.Tui.Welcome.OpenDesktop"),
 			async token =>
@@ -1789,13 +1891,19 @@ internal sealed partial class TerminalWorkspaceSession
 			L("Terminal.Tui.Action.GetUpdates"),
 			async token =>
 			{
-				var updated = await _services.GitRepositoryService
-					.PullUpdatesAsync(state.Plan.SourceRoot, cancellationToken: token)
+				var updated = await RunPostRepositoryMutationRefreshAsync(
+					cancellationToken => _services.GitRepositoryService.PullUpdatesAsync(
+						state.Plan.SourceRoot,
+						cancellationToken: cancellationToken),
+					cancellationToken => BuildAndApplyStructuralRefreshAsync(
+						state,
+						refreshRequest,
+						cancellationToken),
+					SetRepositoryStateInconsistent,
+					token)
 					.ConfigureAwait(false);
 				if (!updated)
 					throw new TerminalWorkspaceOperationException("DPX-TUI-GIT-UPDATE-FAILED");
-				await BuildAndApplyStructuralRefreshAsync(state, refreshRequest, token)
-					.ConfigureAwait(false);
 				return L("Terminal.Tui.RepositoryUpdated");
 			},
 			modalProgress: true,
@@ -1837,20 +1945,42 @@ internal sealed partial class TerminalWorkspaceSession
 						throw new TerminalWorkspaceOperationException("DPX-TUI-GIT-BRANCH-NOT-FOUND");
 					return null;
 				}
-				var switched = await _services.GitRepositoryService
-					.SwitchBranchAsync(
-						state.Plan.SourceRoot,
-						selected,
-						cancellationToken: token)
+				var switched = await RunPostRepositoryMutationRefreshAsync(
+						cancellationToken => _services.GitRepositoryService.SwitchBranchAsync(
+							state.Plan.SourceRoot,
+							selected,
+							cancellationToken: cancellationToken),
+						cancellationToken => BuildAndApplyStructuralRefreshAsync(
+							state,
+							refreshRequest,
+							cancellationToken),
+						SetRepositoryStateInconsistent,
+						token)
 					.ConfigureAwait(false);
 				if (!switched)
 					throw new TerminalWorkspaceOperationException("DPX-TUI-GIT-BRANCH-FAILED");
-				await BuildAndApplyStructuralRefreshAsync(state, refreshRequest, token)
-					.ConfigureAwait(false);
 				return $"{L("Terminal.Tui.RecentRepositories.Branch")}: {selected}";
 			},
 			modalProgress: true,
 			originatedFromCommandLine: originatedFromCommandLine));
+	}
+
+	internal static async Task<bool> RunPostRepositoryMutationRefreshAsync(
+		Func<CancellationToken, Task<bool>> checkout,
+		Func<CancellationToken, Task> refresh,
+		Action<bool> setRepositoryStateInconsistent,
+		CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(checkout);
+		ArgumentNullException.ThrowIfNull(refresh);
+		ArgumentNullException.ThrowIfNull(setRepositoryStateInconsistent);
+
+		var switched = await checkout(cancellationToken).ConfigureAwait(false);
+		// A failed reset or checkout may have already changed part of the cached worktree.
+		setRepositoryStateInconsistent(true);
+		await refresh(CancellationToken.None).ConfigureAwait(false);
+		setRepositoryStateInconsistent(false);
+		return switched;
 	}
 
 	private async Task BuildAndApplyStructuralRefreshAsync(
@@ -1858,21 +1988,47 @@ internal sealed partial class TerminalWorkspaceSession
 		TerminalStructuralRefreshRequest request,
 		CancellationToken cancellationToken)
 	{
-		var result = await _controller
-			.BuildStructuralRefreshAsync(request, cancellationToken)
-			.ConfigureAwait(false);
-		var gitCliAvailable = await ResolveGitCliAvailabilityAsync(result.Plan, cancellationToken)
-			.ConfigureAwait(false);
-		cancellationToken.ThrowIfCancellationRequested();
-		await InvokeAsync(() =>
+		while (true)
 		{
-			if (_stopping || !ReferenceEquals(_state, state))
-				return false;
+			cancellationToken.ThrowIfCancellationRequested();
+			var result = await _controller
+				.BuildStructuralRefreshAsync(request, cancellationToken)
+				.ConfigureAwait(false);
+			var gitCliAvailable = await ResolveGitCliAvailabilityAsync(result.Plan, cancellationToken)
+				.ConfigureAwait(false);
+			cancellationToken.ThrowIfCancellationRequested();
+			TerminalStructuralRefreshRequest? retryRequest = null;
+			var applied = await InvokeAsync(() =>
+			{
+				if (_stopping ||
+					cancellationToken.IsCancellationRequested ||
+					!ReferenceEquals(_state, state))
+				{
+					return false;
+				}
 
-			_gitCliAvailable = gitCliAvailable;
-			TerminalWorkspaceController.ApplyStructuralRefresh(state, result);
-			return true;
-		}).ConfigureAwait(false);
+				if (!TerminalWorkspaceController.ApplyStructuralRefresh(state, result))
+				{
+					retryRequest = _controller.CaptureStructuralRefresh(
+						state,
+						state.BuildSelection(),
+						_preferredGitMode);
+					return false;
+				}
+
+				_gitCliAvailable = gitCliAvailable;
+				return true;
+			}).ConfigureAwait(false);
+			if (retryRequest is not null)
+			{
+				request = retryRequest;
+				continue;
+			}
+			if (!applied)
+				throw new OperationCanceledException();
+			SetRepositoryStateInconsistent(false);
+			return;
+		}
 	}
 
 	private async Task<bool> ResolveGitCliAvailabilityAsync(
@@ -1880,7 +2036,7 @@ internal sealed partial class TerminalWorkspaceSession
 		CancellationToken cancellationToken)
 	{
 		if (!plan.GitReadiness.HasRepositoryBoundary &&
-		    !GitRepositoryBoundaryProbe.ExistsAtOrAbove(plan.SourceRoot))
+			!GitRepositoryBoundaryProbe.ExistsAtOrAbove(plan.SourceRoot))
 		{
 			return false;
 		}
@@ -1904,8 +2060,8 @@ internal sealed partial class TerminalWorkspaceSession
 	private void FocusPane(TerminalWorkspacePane pane)
 	{
 		var redrawMovedFrames = _layoutMode == TerminalWorkspaceLayoutMode.Split &&
-		                        (_activePane == TerminalWorkspacePane.Controls) !=
-		                        (pane == TerminalWorkspacePane.Controls);
+								(_activePane == TerminalWorkspacePane.Controls) !=
+								(pane == TerminalWorkspacePane.Controls);
 		_activePane = pane;
 		ApplyWorkspaceLayout();
 		var view = pane switch

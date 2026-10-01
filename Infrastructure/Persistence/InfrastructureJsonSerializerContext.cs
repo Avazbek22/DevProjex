@@ -1,5 +1,6 @@
 using DevProjex.Infrastructure.ProjectProfiles;
 using DevProjex.Infrastructure.RecentProjects;
+using DevProjex.Infrastructure.LiveContext;
 using DevProjex.Infrastructure.ThemePresets;
 using DevProjex.Infrastructure.Updates;
 
@@ -12,4 +13,5 @@ namespace DevProjex.Infrastructure.Persistence;
 [JsonSerializable(typeof(UpdateCheckSettings))]
 [JsonSerializable(typeof(ThemeSettingsDocument))]
 [JsonSerializable(typeof(GitHubLatestReleaseResponse))]
+[JsonSerializable(typeof(LiveSessionRecord))]
 internal sealed partial class InfrastructureJsonSerializerContext : JsonSerializerContext;

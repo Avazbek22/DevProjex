@@ -64,7 +64,7 @@ public sealed class TerminalApplication
 			TerminalLanguageResolver.Resolve(arguments, environment.Variables));
 		if (LegacyCliSyntaxDetector.TryDetect(arguments, out var migration))
 		{
-			runtimeEnvironment.Error.WriteLine("error[DPX-CLI-LEGACY-SYNTAX]:");
+			runtimeEnvironment.Error.WriteLine(TerminalErrorHeader.Format(localization, "DPX-CLI-LEGACY-SYNTAX"));
 			runtimeEnvironment.Error.WriteLine(localization["Terminal.Error.LegacySyntax"]);
 			runtimeEnvironment.Error.WriteLine(localization["Terminal.Label.NewCommand"]);
 			foreach (var line in CliArgumentVectorFormatter
@@ -121,20 +121,23 @@ public sealed class TerminalApplication
 				_ => throw new ArgumentOutOfRangeException()
 			};
 			runtimeEnvironment.Error.WriteLine(
-				$"error[{code}]: " +
+				$"{TerminalErrorHeader.Format(localization, code)} " +
 				localization.Format(
 					messageKey,
 					inputIntegrityError.SymbolName));
 			runtimeEnvironment.Error.WriteLine(localization["Terminal.Hint.Help"]);
 			return CommandLineExitCodes.UsageError;
 		}
-		if (parseResult.Errors.Count > 0 || parseResult.UnmatchedTokens.Count > 0)
+		if (parseResult.Errors.Count > 0 ||
+		    parseResult.UnmatchedTokens.Count > 0 ||
+		    GetOptionLikeProjectTokens(parseResult).Count > 0)
 		{
 			var errors = PresentParseErrors(parseResult, localization);
 			foreach (var error in errors)
 			{
 				runtimeEnvironment.Error.WriteLine(
-					$"error[{error.Code}]: {TerminalTextEscaping.EscapeSingleLine(error.Message)}");
+					$"{TerminalErrorHeader.Format(localization, error.Code)} " +
+					TerminalTextEscaping.EscapeSingleLine(error.Message));
 			}
 			if (TryBuildSuggestion(root, parseResult, out var suggestion))
 				runtimeEnvironment.Error.WriteLine(localization.Format("Terminal.Hint.DidYouMean", suggestion));
@@ -164,13 +167,13 @@ public sealed class TerminalApplication
 		catch (OperationCanceledException)
 		{
 			runtimeEnvironment.Error.WriteLine(
-				$"error[DPX-CLI-CANCELED]: {localization["Terminal.Error.Canceled"]}");
+				$"{TerminalErrorHeader.Format(localization, "DPX-CLI-CANCELED")} {localization["Terminal.Error.Canceled"]}");
 			return CommandLineExitCodes.Canceled;
 		}
 		catch (Exception exception) when (exception is not TerminalBrokenPipeException)
 		{
 			runtimeEnvironment.Error.WriteLine(
-				$"error[DPX-CLI-UNEXPECTED]: {localization["Terminal.Error.Unexpected"]}");
+				$"{TerminalErrorHeader.Format(localization, "DPX-CLI-UNEXPECTED")} {localization["Terminal.Error.Unexpected"]}");
 			if (IsDiagnosticVerbosity(parseResult))
 			{
 				runtimeEnvironment.Error.WriteLine(
@@ -223,6 +226,7 @@ public sealed class TerminalApplication
 		}
 
 		var presented = new List<PresentedParseError>();
+		var unexpectedArguments = new Queue<string>(parseResult.UnmatchedTokens);
 		foreach (var error in parseResult.Errors)
 		{
 			PresentedParseError item;
@@ -235,17 +239,19 @@ public sealed class TerminalApplication
 						"Terminal.Error.MissingValue",
 						optionName));
 			}
-			else
+			else if (error.Message.StartsWith(LocalizedParseError.Prefix, StringComparison.Ordinal))
 			{
 				var localized = LocalizedParseError.Resolve(error.Message, localization);
 				var explicitCode = LocalizedParseError.ResolveCode(error.Message);
 				item = explicitCode is not null
 					? new PresentedParseError(explicitCode, localized)
 					: new PresentedParseError(
-						error.Message.StartsWith(LocalizedParseError.Prefix, StringComparison.Ordinal)
-							? "DPX-CLI-INVALID-VALUE"
-							: "DPX-CLI-INVALID-SYNTAX",
+						"DPX-CLI-INVALID-VALUE",
 						localization.Format("Terminal.Error.InvalidSyntax", localized));
+			}
+			else
+			{
+				item = DescribeParserError(error, unexpectedArguments, localization);
 			}
 
 			if (!presented.Contains(item))
@@ -260,6 +266,48 @@ public sealed class TerminalApplication
 		}
 
 		return presented;
+	}
+
+	// System.CommandLine words its own errors in the process UI culture rather than the
+	// selected language, so each known shape is described again with the symbol it concerns.
+	private static PresentedParseError DescribeParserError(
+		ParseError error,
+		Queue<string> unexpectedArguments,
+		LocalizationService localization)
+	{
+		switch (error.SymbolResult)
+		{
+			case ArgumentResult { Tokens.Count: 0, Parent: CommandResult } missing:
+				return new PresentedParseError(
+					"DPX-CLI-MISSING-VALUE",
+					localization.Format("Terminal.Error.MissingArgument", missing.Argument.Name));
+			case ArgumentResult { Tokens.Count: > 0 } argument:
+				return new PresentedParseError(
+					"DPX-CLI-INVALID-VALUE",
+					localization.Format(
+						"Terminal.Error.InvalidOptionValue",
+						argument.Argument.Name,
+						argument.Tokens[0].Value));
+			case OptionResult option when option.Tokens.Count > option.Option.Arity.MaximumNumberOfValues:
+				return new PresentedParseError(
+					"DPX-CLI-INVALID-SYNTAX",
+					localization.Format("Terminal.Error.OptionSingleValue", option.Option.Name));
+			case OptionResult { Tokens.Count: > 0 } option:
+				return new PresentedParseError(
+					"DPX-CLI-INVALID-VALUE",
+					localization.Format(
+						"Terminal.Error.InvalidOptionValue",
+						option.Option.Name,
+						option.Tokens[0].Value));
+			case CommandResult when unexpectedArguments.TryDequeue(out var argument):
+				return new PresentedParseError(
+					"DPX-CLI-INVALID-SYNTAX",
+					localization.Format("Terminal.Error.UnexpectedArgument", argument));
+			default:
+				return new PresentedParseError(
+					"DPX-CLI-INVALID-SYNTAX",
+					localization["Terminal.Error.ParserRejected"]);
+		}
 	}
 
 	private static bool IsMissingOptionValue(ParseError error) =>
@@ -285,7 +333,7 @@ public sealed class TerminalApplication
 		ParseResult parseResult,
 		out string option)
 	{
-		option = GetUnmatchedTokensBeforeDelimiter(parseResult)
+		option = GetUnrecognizedTokensBeforeDelimiter(parseResult)
 			.Select(static token => token.Value)
 			.FirstOrDefault(static value =>
 				value != "-" &&
@@ -378,6 +426,71 @@ public sealed class TerminalApplication
 		return result;
 	}
 
+	private static IReadOnlyList<Token> GetUnrecognizedTokensBeforeDelimiter(
+		ParseResult parseResult)
+	{
+		var unmatched = GetUnmatchedTokensBeforeDelimiter(parseResult);
+		var optionLikeProjects = GetOptionLikeProjectTokens(parseResult);
+		if (optionLikeProjects.Count == 0)
+			return unmatched;
+
+		var unrecognized = new HashSet<Token>(
+			unmatched.Concat(optionLikeProjects),
+			ReferenceEqualityComparer.Instance);
+		return parseResult.Tokens
+			.Where(unrecognized.Contains)
+			.ToArray();
+	}
+
+	// PROJECT is optional, so the parser binds an unknown option such as `tree --bogus` to it.
+	// A dash-prefixed PROJECT before `--` is therefore reported as an unknown option; real
+	// paths that start with a dash stay reachable after `--` or as `./-name`, and a lone `-`
+	// remains a value.
+	private static IReadOnlyList<Token> GetOptionLikeProjectTokens(ParseResult parseResult)
+	{
+		var delimiterIndex = -1;
+		for (var index = 0; index < parseResult.Tokens.Count; index++)
+		{
+			if (parseResult.Tokens[index].Type == TokenType.DoubleDash)
+			{
+				delimiterIndex = index;
+				break;
+			}
+		}
+
+		var result = new List<Token>();
+		foreach (var child in parseResult.CommandResult.Children)
+		{
+			if (child is not ArgumentResult { Argument.Name: DevProjexCommandTree.ProjectArgumentName } project)
+				continue;
+			foreach (var token in project.Tokens)
+			{
+				if (token.Value.Length < 2 || token.Value[0] != '-')
+					continue;
+				if (delimiterIndex >= 0 &&
+				    IndexOfToken(parseResult.Tokens, token) > delimiterIndex)
+				{
+					continue;
+				}
+
+				result.Add(token);
+			}
+		}
+
+		return result;
+	}
+
+	private static int IndexOfToken(IReadOnlyList<Token> tokens, Token token)
+	{
+		for (var index = 0; index < tokens.Count; index++)
+		{
+			if (ReferenceEquals(tokens[index], token))
+				return index;
+		}
+
+		return -1;
+	}
+
 	private static void CollectMatchedTokens(
 		CommandResult commandResult,
 		ISet<Token> matchedTokens)
@@ -399,19 +512,9 @@ public sealed class TerminalApplication
 	}
 
 	private TerminalServiceFactory CreateDefaultServiceFactory()
-	{
-		if (!environment.Variables.TryGetValue(
-			    InvocationEnvironment.InternalDataRootVariable,
-			    out var value) ||
-		    string.IsNullOrWhiteSpace(value) ||
-		    !Path.IsPathFullyQualified(value))
-		{
-			return new TerminalServiceFactory();
-		}
-
-		var dataRoot = Path.GetFullPath(value);
-		return new TerminalServiceFactory(() => dataRoot);
-	}
+		=> TerminalServiceFactory.FromEnvironment(
+			environment.Variables,
+			TerminalHostCapabilities.Desktop);
 
 	private static bool IsImplicitTuiInvocation(IReadOnlyList<string> arguments)
 	{
@@ -430,7 +533,7 @@ public sealed class TerminalApplication
 		out string suggestion)
 	{
 		suggestion = string.Empty;
-		var unmatchedTokens = GetUnmatchedTokensBeforeDelimiter(parseResult);
+		var unmatchedTokens = GetUnrecognizedTokensBeforeDelimiter(parseResult);
 		if (unmatchedTokens.Count == 0)
 			return false;
 
@@ -468,7 +571,12 @@ public sealed class TerminalApplication
 			var optionToken = token.Split('=', 2)[0];
 			if (knownOptions.Contains(optionToken, StringComparer.Ordinal))
 				continue;
-			var option = FindClosest(optionToken, knownOptions);
+			// Every short option is one edit away from every other one (`-v` from `-?`), so a
+			// short token is only matched when it differs from a known one by letter case.
+			var option = optionToken.Length == 2 && optionToken[1] != '-'
+				? knownOptions.FirstOrDefault(candidate =>
+					string.Equals(candidate, optionToken, StringComparison.OrdinalIgnoreCase))
+				: FindClosest(optionToken, knownOptions);
 			if (option is null)
 				continue;
 			var prefix = string.Join(' ', commandPath);

@@ -1,8 +1,8 @@
  DevProjex Terminal · CombatRepository [main]
  file:///<ORIGIN_ROOT>/CombatRepository
 ┌┤> PROJECT TREE├─────────────────────────────────────┐┌┤  CONTEXT PREVIEW · Tree + content · ASCII├───────────────────┐
-│v [x] CombatRepository                               ││CombatRepository                                               │
-│    [x] CloneMarker.cs                               ││└── CloneMarker.cs                                             │
+│v [ ] CombatRepository                               ││CombatRepository                                               │
+│    [ ] CloneMarker.cs                               ││└── CloneMarker.cs                                             │
 │                                                     ││                                                               │
 │                                                     ││                                                               │
 │                                                     ││CloneMarker.cs:                                                │
@@ -20,11 +20,11 @@
 │                                                     ││                                                               │
 │                                                     ││                                                               │
 │                                                     ││                                                               │
-│                                                     ││                                                               │
-│                                                     ││                                                               │
-│                                                     ││                                                               │
 │                                                     ││ Files 1/1 · CloneMarker.cs  |  Lines 1-7/7                    │
 └─────────────────────────────────────────────────────┘└───────────────────────────────────────────────────────────────┘
 
+┌┤  PARAMETERS├────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ Content 0/5 · Exclusions 2/2 · File types 1/1                                                                        │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
  Files 1 · Folders 1 · 36 B · ~<TOKENS> tokens · Warnings 0 · Errors 0
- Up/Down Navigate   Enter Expand   Space Toggle   / Search   Tab/F6 Preview   Ctrl+P Actions   ? Help
+ Space Toggle   Shift+←/→ Collapse/expand all   Ctrl+A/U Select all/none   R Reveal   : Commands

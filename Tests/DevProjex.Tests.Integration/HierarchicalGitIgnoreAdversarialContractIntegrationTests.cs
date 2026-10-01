@@ -132,7 +132,8 @@ public sealed class HierarchicalGitIgnoreAdversarialContractIntegrationTests
 			nativeIgnored.SetEquals(applicationIgnored),
 			$"Native-only=[{string.Join(", ", nativeIgnored.Except(applicationIgnored))}]; " +
 			$"Application-only=[{string.Join(", ", applicationIgnored.Except(nativeIgnored))}]");
-		Assert.Equal(64, observation.ScopeCount);
+		// The repository boundary is retained even without a root .gitignore.
+		Assert.Equal(65, observation.ScopeCount);
 	}
 
 	[Fact]
@@ -162,7 +163,8 @@ public sealed class HierarchicalGitIgnoreAdversarialContractIntegrationTests
 			nativeIgnored.SetEquals(applicationIgnored),
 			$"Native-only=[{string.Join(", ", nativeIgnored.Except(applicationIgnored))}]; " +
 			$"Application-only=[{string.Join(", ", applicationIgnored.Except(nativeIgnored))}]");
-		Assert.Equal(15, observation.ScopeCount);
+		// The repository boundary is retained even without a root .gitignore.
+		Assert.Equal(16, observation.ScopeCount);
 	}
 
 	[Fact]
@@ -184,7 +186,8 @@ public sealed class HierarchicalGitIgnoreAdversarialContractIntegrationTests
 
 		Assert.Equal(1, observation.ScopeCount);
 		AssertHidden(observation, "repo/drop.tmp");
-		AssertVisible(observation, "repo/visible.local");
+		// Repository-local excludes now participate in the existing GitIgnore controller.
+		AssertHidden(observation, "repo/visible.local");
 		AssertVisible(observation, "repo/visible.txt");
 	}
 
@@ -219,7 +222,8 @@ public sealed class HierarchicalGitIgnoreAdversarialContractIntegrationTests
 			CreateTraversalRules());
 
 		Assert.Empty(nativeIgnored);
-		Assert.Equal(0, observation.ScopeCount);
+		// The skipped symbolic rule source does not remove the repository boundary.
+		Assert.Equal(1, observation.ScopeCount);
 		AssertVisible(observation, "repo/drop.tmp");
 	}
 

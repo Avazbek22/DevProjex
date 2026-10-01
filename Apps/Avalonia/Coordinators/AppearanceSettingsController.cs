@@ -31,6 +31,7 @@ internal sealed class AppearanceSettingsController(
     private ThemePresetEffect _currentEffect = ThemePresetEffect.Transparent;
     private bool _wasThemePopoverOpen;
     private int _applyingPresetDepth;
+    private ViewSettingsChanges _pendingViewSettingsChanges;
 
     public AppViewSettings ViewSettings =>
         _userSettings.ViewSettings ?? new AppViewSettings();
@@ -44,13 +45,14 @@ internal sealed class AppearanceSettingsController(
             userSettingsStore.LoadForStartup(StartupStoreLockTimeout);
         ApplySavedLanguagePreference(ViewSettings);
 
-        _themeSettings =
-            themeSettingsStore.LoadForStartup(StartupStoreLockTimeout);
+        var themeLoad = themeSettingsStore.LoadForStartupWithStatus(StartupStoreLockTimeout);
+        _themeSettings = themeLoad.Document;
         _themeSession =
             new ThemePresetSession(
                 themeSettingsStore,
                 _themeSettings,
-                ResolveSystemTheme());
+                ResolveSystemTheme(),
+                startupStoreTemporarilyUnavailable: themeLoad.TemporarilyUnavailable);
         NormalizeSessionEffectForPlatform(_themeSession.CurrentPreset);
 
         _currentThemeMode = _themeSession.CurrentMode;
@@ -86,10 +88,20 @@ internal sealed class AppearanceSettingsController(
         themeBrushes.UpdateTransparencyEffect();
     }
 
-    public void MarkPresetDirty()
+    public void MarkPresetDirty(string? propertyName)
     {
-        if (!IsApplyingPreset)
-            _themeSession?.MarkDirty();
+        if (IsApplyingPreset)
+            return;
+
+        var field = propertyName switch
+        {
+            nameof(MainWindowViewModel.BackgroundTransparency) => ThemePresetFields.BackgroundTransparency,
+            nameof(MainWindowViewModel.PanelContrast) => ThemePresetFields.PanelContrast,
+            nameof(MainWindowViewModel.MenuTransparency) => ThemePresetFields.MenuTransparency,
+            nameof(MainWindowViewModel.BorderVisibility) => ThemePresetFields.BorderVisibility,
+            _ => ThemePresetFields.None
+        };
+        _themeSession?.MarkDirty(field);
     }
 
     public void HandleThemePopoverStateChange()
@@ -135,28 +147,28 @@ internal sealed class AppearanceSettingsController(
 
         viewModel.IsCompactMode = !viewModel.IsCompactMode;
         workspace.UpdateCompactModeVisualState();
-        SaveCurrentViewSettings();
+        SaveCurrentViewSettings(ViewSettingsChanges.CompactMode);
     }
 
     public void ToggleTreeExpansionAnimation()
     {
         viewModel.IsTreeExpansionAnimationEnabled =
             !viewModel.IsTreeExpansionAnimationEnabled;
-        SaveCurrentViewSettings();
+        SaveCurrentViewSettings(ViewSettingsChanges.TreeExpansionAnimation);
     }
 
     public void ToggleStatusMetricsAnimation()
     {
         viewModel.IsStatusMetricsAnimationEnabled =
             !viewModel.IsStatusMetricsAnimationEnabled;
-        SaveCurrentViewSettings();
+        SaveCurrentViewSettings(ViewSettingsChanges.StatusMetricsAnimation);
     }
 
     public void ToggleToolAnimation()
     {
         viewModel.IsToolAnimationEnabled =
             !viewModel.IsToolAnimationEnabled;
-        SaveCurrentViewSettings();
+        SaveCurrentViewSettings(ViewSettingsChanges.ToolAnimation);
     }
 
     public void ToggleThemePopover()
@@ -188,7 +200,7 @@ internal sealed class AppearanceSettingsController(
         {
             PreferredLanguage = localization.CurrentLanguage
         };
-        userSettingsStore.TryPersistViewSettings(_userSettings);
+        PersistViewSettingsChanges(ViewSettingsChanges.PreferredLanguage);
     }
 
     public void SetLanguageForCurrentSession(AppLanguage language)
@@ -200,18 +212,21 @@ internal sealed class AppearanceSettingsController(
         {
             IsTerminalCommandPromptDismissed = true
         };
-        userSettingsStore.TryPersistViewSettings(_userSettings);
+        PersistViewSettingsChanges(ViewSettingsChanges.TerminalPromptDismissed);
     }
 
-    public void ResetThemeSettings()
+    public bool ResetThemeSettings()
     {
+        if (!themeSettingsStore.TryResetToDefaults(out var resetDocument))
+            return false;
+
         var resetViewSettings = new AppViewSettings
         {
             IsTerminalCommandPromptDismissed =
                 ViewSettings.IsTerminalCommandPromptDismissed
         };
         _userSettings.ViewSettings = resetViewSettings;
-        userSettingsStore.TryPersistViewSettings(_userSettings);
+        var viewSettingsPersisted = PersistViewSettingsChanges(ViewSettingsChanges.Resettable);
         ApplyViewSettings(resetViewSettings);
 
         var resetLanguage =
@@ -222,7 +237,6 @@ internal sealed class AppearanceSettingsController(
             viewModel.UpdateLocalization();
         }
 
-        var resetDocument = themeSettingsStore.ResetToDefaults();
         var resetSession =
             new ThemePresetSession(
                 themeSettingsStore,
@@ -247,6 +261,7 @@ internal sealed class AppearanceSettingsController(
         ApplyPresetValues(preset);
         themeBrushes.UpdateTransparencyEffect();
         themeBrushes.UpdateDynamicThemeBrushes();
+        return viewSettingsPersisted;
     }
 
     public void PersistPendingChanges()
@@ -391,8 +406,11 @@ internal sealed class AppearanceSettingsController(
             session.Persist(CreateCurrentThemePreset());
     }
 
-    private void SaveCurrentViewSettings()
+    private void SaveCurrentViewSettings(ViewSettingsChanges changes = ViewSettingsChanges.None)
     {
+        if (changes == ViewSettingsChanges.None && _pendingViewSettingsChanges == ViewSettingsChanges.None)
+            return;
+
         var current = ViewSettings;
         _userSettings.ViewSettings = new AppViewSettings
         {
@@ -407,7 +425,70 @@ internal sealed class AppearanceSettingsController(
                 current.IsTerminalCommandPromptDismissed,
             PreferredLanguage = current.PreferredLanguage
         };
-        userSettingsStore.TryPersistViewSettings(_userSettings);
+        PersistViewSettingsChanges(changes);
+    }
+
+    private bool PersistViewSettingsChanges(ViewSettingsChanges changes)
+    {
+        _pendingViewSettingsChanges |= changes;
+        var pendingChanges = _pendingViewSettingsChanges;
+        var requested = ViewSettings;
+        if (!userSettingsStore.TryPersistViewSettings(
+                _userSettings,
+                latest => MergeViewSettings(latest, requested, pendingChanges)))
+        {
+            return false;
+        }
+
+        _pendingViewSettingsChanges = ViewSettingsChanges.None;
+        var persisted = ViewSettings;
+        if (viewModel.IsCompactMode != persisted.IsCompactMode ||
+            viewModel.IsTreeExpansionAnimationEnabled != persisted.IsTreeExpansionAnimationEnabled ||
+            viewModel.IsStatusMetricsAnimationEnabled != persisted.IsStatusMetricsAnimationEnabled ||
+            viewModel.IsToolAnimationEnabled != persisted.IsToolAnimationEnabled)
+        {
+            ApplyViewSettings(persisted);
+        }
+
+        if ((pendingChanges & ViewSettingsChanges.PreferredLanguage) == 0 &&
+            requested.PreferredLanguage != persisted.PreferredLanguage)
+        {
+            ApplySavedLanguagePreference(persisted);
+        }
+        return true;
+    }
+
+    private static AppViewSettings MergeViewSettings(
+        AppViewSettings latest,
+        AppViewSettings requested,
+        ViewSettingsChanges changes) => latest with
+    {
+        IsCompactMode = (changes & ViewSettingsChanges.CompactMode) != 0
+            ? requested.IsCompactMode : latest.IsCompactMode,
+        IsTreeExpansionAnimationEnabled = (changes & ViewSettingsChanges.TreeExpansionAnimation) != 0
+            ? requested.IsTreeExpansionAnimationEnabled : latest.IsTreeExpansionAnimationEnabled,
+        IsStatusMetricsAnimationEnabled = (changes & ViewSettingsChanges.StatusMetricsAnimation) != 0
+            ? requested.IsStatusMetricsAnimationEnabled : latest.IsStatusMetricsAnimationEnabled,
+        IsToolAnimationEnabled = (changes & ViewSettingsChanges.ToolAnimation) != 0
+            ? requested.IsToolAnimationEnabled : latest.IsToolAnimationEnabled,
+        IsTerminalCommandPromptDismissed = (changes & ViewSettingsChanges.TerminalPromptDismissed) != 0
+            ? requested.IsTerminalCommandPromptDismissed : latest.IsTerminalCommandPromptDismissed,
+        PreferredLanguage = (changes & ViewSettingsChanges.PreferredLanguage) != 0
+            ? requested.PreferredLanguage : latest.PreferredLanguage
+    };
+
+    [Flags]
+    private enum ViewSettingsChanges
+    {
+        None = 0,
+        CompactMode = 1,
+        TreeExpansionAnimation = 2,
+        StatusMetricsAnimation = 4,
+        ToolAnimation = 8,
+        TerminalPromptDismissed = 16,
+        PreferredLanguage = 32,
+        Resettable = CompactMode | TreeExpansionAnimation | StatusMetricsAnimation |
+                     ToolAnimation | PreferredLanguage
     }
 
     private ThemePresetEffect GetSelectedEffectMode()
@@ -472,6 +553,6 @@ internal sealed class AppearanceSettingsController(
             isMicaSupported);
         return normalizedEffect == session.CurrentEffect
             ? currentPreset
-            : session.SelectEffect(normalizedEffect, currentPreset);
+            : session.SelectEffect(normalizedEffect, currentPreset, explicitSelection: false);
     }
 }

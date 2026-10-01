@@ -1,4 +1,5 @@
 using System.Buffers;
+using DevProjex.Application.Diagnostics;
 
 namespace DevProjex.Application.Context;
 
@@ -60,6 +61,7 @@ internal sealed class CancellationBoundWriteStream(
 			.WriteAsync(buffer, offset, count, cancellationToken)
 			.GetAwaiter()
 			.GetResult();
+		ContentPipelineDiagnostics.RecordDocumentWrite(count);
 	}
 
 	public override void Write(ReadOnlySpan<byte> buffer)
@@ -83,6 +85,7 @@ internal sealed class CancellationBoundWriteStream(
 						cancellationToken)
 					.GetAwaiter()
 					.GetResult();
+				ContentPipelineDiagnostics.RecordDocumentWrite(chunkLength);
 				buffer = buffer[chunkLength..];
 			}
 		}
@@ -92,22 +95,24 @@ internal sealed class CancellationBoundWriteStream(
 		}
 	}
 
-	public override Task WriteAsync(
+	public override async Task WriteAsync(
 		byte[] buffer,
 		int offset,
 		int count,
 		CancellationToken ignoredCancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
-		return destination.WriteAsync(buffer, offset, count, cancellationToken);
+		await destination.WriteAsync(buffer, offset, count, cancellationToken).ConfigureAwait(false);
+		ContentPipelineDiagnostics.RecordDocumentWrite(count);
 	}
 
-	public override ValueTask WriteAsync(
+	public override async ValueTask WriteAsync(
 		ReadOnlyMemory<byte> buffer,
 		CancellationToken ignoredCancellationToken = default)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
-		return destination.WriteAsync(buffer, cancellationToken);
+		await destination.WriteAsync(buffer, cancellationToken).ConfigureAwait(false);
+		ContentPipelineDiagnostics.RecordDocumentWrite(buffer.Length);
 	}
 
 	protected override void Dispose(bool disposing)

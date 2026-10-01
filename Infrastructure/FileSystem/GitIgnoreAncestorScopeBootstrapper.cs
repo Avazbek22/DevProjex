@@ -49,13 +49,22 @@ internal static class GitIgnoreAncestorScopeBootstrapper
 		foreach (var scopePath in scopePaths)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			var loadResult = loadSession.LoadWithCancellation(
+			var loadResult = PathComparer.Default.Equals(scopePath, repositoryRootPath)
+				? loadSession.LoadRepositoryScope(scopePath, Path.Combine(scopePath, ".git"),
+					Path.Combine(scopePath, ".gitignore"), cancellationToken)
+				: loadSession.LoadWithCancellation(
 				scopePath,
 				Path.Combine(scopePath, ".gitignore"),
 				cancellationToken);
 			lastStatus = loadResult.Status;
 			if (loadResult.Status == GitIgnoreMatcherLoadStatus.ReadFailure)
 			{
+				if (loadResult.Matcher is { IsRepositoryBoundary: true } boundary)
+				{
+					activeContext = activeContext.WithAncestorScope(boundary, normalizedScanRoot);
+					candidateContext = candidateContext.WithAncestorScope(boundary, normalizedScanRoot);
+					discoveredMatchers?.Add(boundary);
+				}
 				return new GitIgnoreAncestorScopeBootstrapResult(
 					activeContext,
 					candidateContext,

@@ -55,7 +55,16 @@ public sealed record ContentTransformationContext(
 			Compression?.BeginOutput(selection),
 			// The redaction cache is keyed on the text that was scanned, and compression decides what
 			// that text is. Without this, toggling the checkbox would reuse offsets from the other one.
-			Redaction?.BeginOutput(selection, Compression?.TransformIdentity ?? string.Empty));
+			// Under a mixed detail policy the operation-wide value identifies the selection snapshot,
+			// while each file's own cache lookups use the resolver: two calls that share a default
+			// level and differ only in which files an override claims transform the same file
+			// differently, and the metadata-only lookup does not compare transformed text.
+			Redaction?.BeginOutput(
+				selection,
+				Compression?.TransformIdentity ?? string.Empty,
+				Compression is { Policy: not null } perFile
+					? perFile.TransformIdentityForFullPath
+					: null));
 
 	internal ContentTransformationScope BeginOutputFromOwnedOrderedUnique(
 		string[] orderedFilePaths,

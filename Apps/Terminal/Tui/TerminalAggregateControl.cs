@@ -8,8 +8,8 @@ namespace DevProjex.Terminal.Tui;
 
 internal sealed class TerminalAggregateControl : Label
 {
-	private readonly TerminalPointerEventDeduplicator _pointerEvents = new();
 	private bool _isActive;
+	private bool _isEnabled = true;
 
 	public TerminalAggregateControl(bool isOnBorder)
 	{
@@ -18,20 +18,23 @@ internal sealed class TerminalAggregateControl : Label
 		Height = 1;
 		HotKeySpecifier = new Rune('\uffff');
 		PreserveTrailingSpaces = true;
+		// OnMouseEvent owns pointer input; the label's default binding would activate on release.
+		MouseBindings.Clear(Command.Activate);
 	}
 
 	public event EventHandler? SelectionToggleRequested;
 	public event EventHandler? InteractionStarted;
 	public event EventHandler? CommandLineRequested;
 	public bool IsOnBorder { get; }
+	private string Leading => IsOnBorder ? " " : "  ";
 
 	public void SetRow(TerminalParameterRow row)
 	{
 		ArgumentNullException.ThrowIfNull(row);
 		var marker = row.IsSelected == true ? "[x]" : "[ ]";
-		var leading = IsOnBorder ? " " : "  ";
 		var trailing = IsOnBorder ? " " : string.Empty;
-		var text = $"{leading}{marker} {row.Label}{trailing}";
+		var text = $"{Leading}{marker} {row.Label}{trailing}";
+		_isEnabled = row.IsEnabled;
 		Text = text;
 		Width = text.GetColumns();
 		SetNeedsDraw();
@@ -54,22 +57,35 @@ internal sealed class TerminalAggregateControl : Label
 
 	protected override bool OnDrawingContent(DrawContext? context)
 	{
-		SetAttributeForRole(_isActive ? VisualRole.Focus : VisualRole.ReadOnly);
+		SetAttributeForRole(!_isEnabled
+			? VisualRole.Disabled
+			: _isActive ? VisualRole.Focus : VisualRole.ReadOnly);
 		AddStr(0, 0, Text);
 		return true;
 	}
 
 	protected override bool OnMouseEvent(Mouse mouse)
 	{
-		var pressed = mouse.Flags.HasFlag(MouseFlags.LeftButtonPressed);
-		var clicked = mouse.Flags.HasFlag(MouseFlags.LeftButtonClicked);
-		if (!pressed && !clicked)
+		if (TerminalPointerInput.IsMotion(mouse.Flags))
+			return true;
+		if (!mouse.Flags.HasFlag(MouseFlags.LeftButtonPressed) &&
+			!mouse.Flags.HasFlag(MouseFlags.LeftButtonClicked))
+		{
 			return base.OnMouseEvent(mouse);
+		}
+		if (!TerminalPointerInput.IsPress(mouse.Flags))
+			return true;
 
 		SetFocus();
 		InteractionStarted?.Invoke(this, EventArgs.Empty);
-		if (_pointerEvents.ShouldHandle(pressed, 0, 0))
+		if (IsMarkerColumn(mouse.Position?.X))
 			SelectionToggleRequested?.Invoke(this, EventArgs.Empty);
 		return true;
 	}
+
+	// Only the "[x]" marker toggles; a click on the label just focuses the control.
+	internal bool IsMarkerColumn(int? column) =>
+		column is { } value &&
+		value >= Leading.Length &&
+		value < Leading.Length + TerminalParameterRow.MarkerColumns;
 }

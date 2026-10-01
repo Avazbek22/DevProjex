@@ -275,11 +275,13 @@ public sealed class ExportProjectCommandContractTests
 	[InlineData("--compress-code")]
 	[InlineData("--strip-comments")]
 	[InlineData("--strip-blank-lines")]
-	public async Task DryRunAnnouncesNoticeForEveryCodeTransformation(string option)
+	public async Task DryRunAnnouncesNoticeWhenEachCodeTransformationChangesContent(string option)
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
-		workspace.WriteFile("project/app.cs", "// note\nclass App { void Run() { } }\n");
+		workspace.WriteFile(
+			"project/app.cs",
+			"// note\n\nclass App { void Run() { Console.WriteLine(\"run\"); } }\n");
 		var output = Path.Combine(workspace.CreateDirectory("output"), "submission");
 		var environment = new TestTerminalEnvironment();
 
@@ -295,6 +297,61 @@ public sealed class ExportProjectCommandContractTests
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
 		Assert.Contains("intentionally not a byte-for-byte copy", environment.StandardError, StringComparison.Ordinal);
 		Assert.False(Path.Exists(output));
+	}
+
+	[Theory]
+	[InlineData("--compress-code")]
+	[InlineData("--strip-comments")]
+	[InlineData("--strip-blank-lines")]
+	public async Task DryRunDoesNotAnnounceNoticeWhenTransformationIsANoOp(string option)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/app.cs", "class App { void Run() { } }\n");
+		var output = Path.Combine(workspace.CreateDirectory("output"), "submission");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			project,
+			output,
+			"folder",
+			environment,
+			"--dry-run",
+			"--language", "en",
+			option);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.DoesNotContain("intentionally not a byte-for-byte copy", environment.StandardError, StringComparison.Ordinal);
+		Assert.False(Path.Exists(output));
+	}
+
+	[Fact]
+	public async Task DryRunAndRealExportBothRejectSelectedReservedNoticeCollision()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile(
+			"project/app.cs",
+			"const string token = \"ghp_a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL\";");
+		workspace.WriteFile(
+			$"project/{ProjectCopyExportService.TransformationNoticeFileName}",
+			"source notice");
+		var outputRoot = workspace.CreateDirectory("output");
+		foreach (var dryRun in new[] { true, false })
+		{
+			var output = Path.Combine(outputRoot, dryRun ? "dry" : "real");
+			var environment = new TestTerminalEnvironment();
+			var arguments = new List<string> { "--hide-secrets" };
+			if (dryRun)
+				arguments.Add("--dry-run");
+
+			var exitCode = await RunAsync(project, output, "folder", environment, arguments.ToArray());
+
+			Assert.Equal(CommandLineExitCodes.PolicyFailure, exitCode);
+			Assert.Contains("DPX-EXPORT-RESERVED-NAME", environment.StandardError, StringComparison.Ordinal);
+			Assert.False(Path.Exists(output));
+			Assert.Empty(Directory.EnumerateFileSystemEntries(outputRoot, ".devprojex-*.tmp"));
+		}
 	}
 
 	[Fact]

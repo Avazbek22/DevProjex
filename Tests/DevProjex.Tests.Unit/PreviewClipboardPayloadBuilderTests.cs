@@ -51,6 +51,21 @@ public sealed class PreviewClipboardPayloadBuilderTests
     }
 
     [Fact]
+    public void BuildFullDocumentPayload_FileBackedCrLfDocument_NormalizesEachLineEndingOnce()
+    {
+        var firstLine = new string('x', 500_000);
+        var builder = new PreviewDocumentBuilder(new StubFileContentAnalyzer(
+            new Dictionary<string, TextFileContent?>()));
+        using var document = builder.CreateDocumentWithMetrics(
+            firstLine + "\r\nsecond\nthird\rfourth").Document;
+
+        Assert.IsType<FileBackedPreviewTextDocument>(document);
+        Assert.Equal(
+            string.Join(Environment.NewLine, firstLine, "second", "third\rfourth"),
+            PreviewClipboardPayloadBuilder.BuildFullDocumentPayload(document));
+    }
+
+    [Fact]
     public void BuildSectionPayload_ReturnsOnlyRequestedSection()
     {
         const string documentText = "alpha.txt:\n\u00A0\nalpha\nbeta\n\u00A0\n\u00A0\nbeta.txt:\n\u00A0\ngamma";

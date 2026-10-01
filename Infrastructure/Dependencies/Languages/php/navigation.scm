@@ -1,0 +1,10 @@
+(namespace_definition) @navigation.module
+(class_declaration) @navigation.type
+(interface_declaration) @navigation.type
+(trait_declaration) @navigation.type
+(enum_declaration) @navigation.type
+(function_definition) @navigation.function
+(method_declaration) @navigation.method
+(property_element) @navigation.field
+(const_element) @navigation.field
+(enum_case) @navigation.field

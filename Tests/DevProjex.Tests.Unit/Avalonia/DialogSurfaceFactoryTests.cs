@@ -45,6 +45,35 @@ public sealed class DialogSurfaceFactoryTests
     }
 
     [AvaloniaFact]
+    public void CreateWindow_WithoutFixedHeight_SizesToItsContent()
+    {
+        var content = new TextBlock
+        {
+            Text = "A wrapped dialog message that determines the required window height.",
+            TextWrapping = TextWrapping.Wrap
+        };
+        var brushes = new DialogSurfaceBrushes(Brushes.White, Brushes.White, Brushes.Gray);
+
+        var window = DialogSurfaceFactory.CreateWindow(
+            "Dialog",
+            ThemeVariant.Default,
+            brushes,
+            content,
+            width: 420,
+            height: null);
+
+        try
+        {
+            Assert.Equal(SizeToContent.Height, window.SizeToContent);
+            Assert.True(double.IsNaN(window.Height));
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void ResolveBrushes_UsesSolidFallbackAndOpaquePanelColor()
     {
         var app = global::Avalonia.Application.Current;

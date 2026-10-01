@@ -1,0 +1,572 @@
+{
+  "baseProductSha": "1faac5c637a31e500bc09ef6ce9a63cff605051a",
+  "resolverProductSha": "ab7b2b27dde0349b9286e8c83f6ba4026cda70fd",
+  "bash": [
+    {
+      "id": "bash-it",
+      "commit": "4725d29db8c0ac8c21df47664b28539f3b8fce94",
+      "languages": [
+        "Bash"
+      ],
+      "before": {
+        "files": 343,
+        "withFacts": 232,
+        "failed": 2,
+        "declarations": 941,
+        "edges": {
+          "Unresolved": 97
+        },
+        "edgeHash": "9BB8375F5B645FA342D4294C16148392C4A1385B210542B7177CCEEE7BC78E1A",
+        "factsHash": "46100D55B11CF1D90774B743B8BE6F1A9FBEC1B88F73FFE01D9D5CC18EF59EA6"
+      },
+      "after": {
+        "files": 343,
+        "withFacts": 232,
+        "failed": 2,
+        "declarations": 941,
+        "edges": {
+          "Unresolved": 97
+        },
+        "edgeHash": "A9E300F067B206F03476AA35BEEEC024B9C6CF92A651761B56CA369274061208",
+        "factsHash": "5D03BB59EC2D608C7DE7050CD751C5572350FCDE714D8A0CEC1E932203CDAC05"
+      },
+      "samples": [
+        {
+          "path": "bash_it.sh",
+          "navigationUnchanged": true
+        },
+        {
+          "path": "completion/available/system.completion.bash",
+          "navigationUnchanged": true
+        },
+        {
+          "path": "plugins/available/rbenv.plugin.bash",
+          "navigationUnchanged": true
+        }
+      ],
+      "sourceSitesUnchanged": true
+    },
+    {
+      "id": "bats-core",
+      "commit": "2341486183f0b00a6e420770e1f2148758d29377",
+      "languages": [
+        "Bash"
+      ],
+      "before": {
+        "files": 52,
+        "withFacts": 39,
+        "failed": 0,
+        "declarations": 152,
+        "edges": {
+          "Unresolved": 9
+        },
+        "edgeHash": "C2EAE5066556C91B757D54ECEE7595A37AED993C419558EAC5AC5970054A39FC",
+        "factsHash": "59EBAE777600ED0DDF77A963C95310851B3554FCDEB4BBE37954CCFEB44BEF2C"
+      },
+      "after": {
+        "files": 52,
+        "withFacts": 39,
+        "failed": 0,
+        "declarations": 152,
+        "edges": {
+          "Unresolved": 9
+        },
+        "edgeHash": "C2EAE5066556C91B757D54ECEE7595A37AED993C419558EAC5AC5970054A39FC",
+        "factsHash": "59EBAE777600ED0DDF77A963C95310851B3554FCDEB4BBE37954CCFEB44BEF2C"
+      },
+      "samples": [
+        {
+          "path": "contrib/release.sh",
+          "navigationUnchanged": true
+        },
+        {
+          "path": "lib/bats-core/test_functions.bash",
+          "navigationUnchanged": true
+        },
+        {
+          "path": "lib/bats-core/tracing.bash",
+          "navigationUnchanged": true
+        }
+      ],
+      "sourceSitesUnchanged": true
+    },
+    {
+      "id": "git",
+      "commit": "339ab2a8f14c0c304ae2f28df1a859f3d2cf610c",
+      "languages": [
+        "Bash"
+      ],
+      "before": {
+        "files": 1305,
+        "withFacts": 1226,
+        "failed": 10,
+        "declarations": 2088,
+        "edges": {
+          "Unresolved": 343,
+          "Resolved": 1132
+        },
+        "edgeHash": "3AD1FC938247DAAA0E29E0FFAC14410F2D5CF9693DF54B10D2641710E96E88AC",
+        "factsHash": "513A42E0385D89474828022D43C5539A1F359D477BFAC99A4177F04A2132EBD0"
+      },
+      "after": {
+        "files": 1305,
+        "withFacts": 1226,
+        "failed": 10,
+        "declarations": 2088,
+        "edges": {
+          "Unresolved": 1475
+        },
+        "edgeHash": "0473397BB518F2758B74B9CB22EE7353AB1C1BA691D6C865B7B641470F70A361",
+        "factsHash": "4C1FFF76CC40B7DF5E3186EAA0DAEA74801A1E2DFDFE5F2E6E08F459FF805118"
+      },
+      "samples": [
+        {
+          "path": "ci/run-build-and-tests.sh",
+          "navigationUnchanged": true
+        },
+        {
+          "path": "ci/test-documentation.sh",
+          "navigationUnchanged": true
+        },
+        {
+          "path": "t/t0000-basic.sh",
+          "navigationUnchanged": true
+        }
+      ],
+      "sourceSitesUnchanged": true
+    },
+    {
+      "id": "nvm",
+      "commit": "a4f801ed72d71b945a5c0e1b28a40eab581e7e94",
+      "languages": [
+        "Bash"
+      ],
+      "before": {
+        "files": 6,
+        "withFacts": 6,
+        "failed": 0,
+        "declarations": 169,
+        "edges": {
+          "Unresolved": 3
+        },
+        "edgeHash": "F55B50827D7F2417AE4D8D5B8B74964B2E28E34D3F4D0C141A43B61E6DC4D6B9",
+        "factsHash": "0A623532CFBA53DCEB5975A94286B69A05EE30A15117C5F66DDBB15CF782B5B8"
+      },
+      "after": {
+        "files": 6,
+        "withFacts": 6,
+        "failed": 0,
+        "declarations": 169,
+        "edges": {
+          "Unresolved": 3
+        },
+        "edgeHash": "B79168D175831ACFDFBAC556B7CA583CB225EDA23F3ACC0CA99977878623B66F",
+        "factsHash": "925EF10D1356EF9441E2D097A6F09FC848C1A489FB0A061A1FC6575E970901B0"
+      },
+      "samples": [
+        {
+          "path": "install.sh",
+          "navigationUnchanged": true
+        },
+        {
+          "path": "nvm.sh",
+          "navigationUnchanged": true
+        },
+        {
+          "path": "test/common.sh",
+          "navigationUnchanged": true
+        }
+      ],
+      "sourceSitesUnchanged": true
+    }
+  ],
+  "controls": [
+    {
+      "id": "cats",
+      "commit": "f0c5f1b450b3250db4f6b819ebd9db4d583843bd",
+      "languages": [
+        "Scala"
+      ],
+      "edgesBefore": {
+        "Unresolved": 12265,
+        "Resolved": 3984,
+        "Ambiguous": 94
+      },
+      "edgesAfter": {
+        "Unresolved": 12265,
+        "Resolved": 3984,
+        "Ambiguous": 94
+      },
+      "edgeHashBefore": "8E83017F6CAE264B68C01F39977FE3ABCF891B89CD91D42227384EBEA1453E84",
+      "edgeHashAfter": "8E83017F6CAE264B68C01F39977FE3ABCF891B89CD91D42227384EBEA1453E84",
+      "factsHashBefore": "9C96D844975ACE05B2340CF992A7208708AE473EE0C0004BA5D8BC03EBEC9B40",
+      "factsHashAfter": "9C96D844975ACE05B2340CF992A7208708AE473EE0C0004BA5D8BC03EBEC9B40",
+      "identical": true
+    },
+    {
+      "id": "client-golang",
+      "commit": "3f5d6801b95618d04d5057edb1724b02aae69082",
+      "languages": [
+        "go"
+      ],
+      "edgesBefore": {
+        "Unresolved": 875,
+        "Resolved": 563
+      },
+      "edgesAfter": {
+        "Unresolved": 875,
+        "Resolved": 563
+      },
+      "edgeHashBefore": "C237F3969D661FCA1F9CF6A93161724374A002F3B5F43E6D6F16D4820035B896",
+      "edgeHashAfter": "C237F3969D661FCA1F9CF6A93161724374A002F3B5F43E6D6F16D4820035B896",
+      "factsHashBefore": "945F73DD4E2861662AD09B9EC98A6112D9172CCF5700F13B96EF026E5CC33837",
+      "factsHashAfter": "945F73DD4E2861662AD09B9EC98A6112D9172CCF5700F13B96EF026E5CC33837",
+      "identical": true
+    },
+    {
+      "id": "curl",
+      "commit": "04bfe8fbbf552a3baf38c629bf9dd59916b3c559",
+      "languages": [
+        "c",
+        "cpp"
+      ],
+      "edgesBefore": {
+        "Unresolved": 7668,
+        "Resolved": 2895,
+        "Ambiguous": 1
+      },
+      "edgesAfter": {
+        "Unresolved": 7668,
+        "Resolved": 2895,
+        "Ambiguous": 1
+      },
+      "edgeHashBefore": "A44FAE3666E2FECEB4B7EE72C3A324F8DB189DAEE8880ED7BD8AECC869FF2535",
+      "edgeHashAfter": "A44FAE3666E2FECEB4B7EE72C3A324F8DB189DAEE8880ED7BD8AECC869FF2535",
+      "factsHashBefore": "83B775906069AF93818FAC2A1F12610D4DA70E8AF85B33BC454D4714C08154B6",
+      "factsHashAfter": "83B775906069AF93818FAC2A1F12610D4DA70E8AF85B33BC454D4714C08154B6",
+      "identical": true
+    },
+    {
+      "id": "express",
+      "commit": "53d4a0d606c0388f764f192b306ce0e90200e7e8",
+      "languages": [
+        "javascript"
+      ],
+      "edgesBefore": {
+        "Unresolved": 435,
+        "Resolved": 18
+      },
+      "edgesAfter": {
+        "Unresolved": 435,
+        "Resolved": 18
+      },
+      "edgeHashBefore": "B6D74F9F603D22EDE24854FD267B46455D3C26DA44E8F969F31BA2D9A89B1235",
+      "edgeHashAfter": "B6D74F9F603D22EDE24854FD267B46455D3C26DA44E8F969F31BA2D9A89B1235",
+      "factsHashBefore": "D527211A909726EA945653DD15AD35ABA25BF61075AE30C93888F3886AAF8859",
+      "factsHashAfter": "D527211A909726EA945653DD15AD35ABA25BF61075AE30C93888F3886AAF8859",
+      "identical": true
+    },
+    {
+      "id": "fmt",
+      "commit": "e5d13d826f4266de65d2463dc3bff4ff3d25221e",
+      "languages": [
+        "c",
+        "cpp"
+      ],
+      "edgesBefore": {
+        "Unresolved": 5694,
+        "Resolved": 364,
+        "Ambiguous": 1
+      },
+      "edgesAfter": {
+        "Unresolved": 5694,
+        "Resolved": 364,
+        "Ambiguous": 1
+      },
+      "edgeHashBefore": "DD29141F7963E27302E8A0304F0C204CDAA37A844B413F2BC69C709CE15EFF68",
+      "edgeHashAfter": "DD29141F7963E27302E8A0304F0C204CDAA37A844B413F2BC69C709CE15EFF68",
+      "factsHashBefore": "255211D9068986B157D29EB643AA6D81325030205D9B50E8495D5D1AFE7EE896",
+      "factsHashAfter": "255211D9068986B157D29EB643AA6D81325030205D9B50E8495D5D1AFE7EE896",
+      "identical": true
+    },
+    {
+      "id": "guzzle",
+      "commit": "93939470950a9b11e2e84204166ef5e048c55fe4",
+      "languages": [
+        "php"
+      ],
+      "edgesBefore": {
+        "Unresolved": 1149,
+        "Resolved": 723
+      },
+      "edgesAfter": {
+        "Unresolved": 1149,
+        "Resolved": 723
+      },
+      "edgeHashBefore": "7DFE120550BA4647186F61B8597F5115439B19E16DBC580C1C2E6C61EAB0D1AF",
+      "edgeHashAfter": "7DFE120550BA4647186F61B8597F5115439B19E16DBC580C1C2E6C61EAB0D1AF",
+      "factsHashBefore": "E370B337B024B52208F38FE439585C4E42C6667612A361DB76B049E7CFD067FD",
+      "factsHashAfter": "E370B337B024B52208F38FE439585C4E42C6667612A361DB76B049E7CFD067FD",
+      "identical": true
+    },
+    {
+      "id": "libuv",
+      "commit": "5152db2cbfeb5582e9c27c5ea1dba2cd9e10759b",
+      "languages": [
+        "c",
+        "cpp"
+      ],
+      "edgesBefore": {
+        "Unresolved": 4194,
+        "Resolved": 561,
+        "Ambiguous": 8
+      },
+      "edgesAfter": {
+        "Unresolved": 4194,
+        "Resolved": 561,
+        "Ambiguous": 8
+      },
+      "edgeHashBefore": "458AFF6F2DA44C44EB26C7A43CA7AB93B69D437C5E5C04A347266A713DA1DFD2",
+      "edgeHashAfter": "458AFF6F2DA44C44EB26C7A43CA7AB93B69D437C5E5C04A347266A713DA1DFD2",
+      "factsHashBefore": "815C24CF3D82CEEEB3480FE4DD446A38B965A02BC1599E074344BEFFA82AA039",
+      "factsHashAfter": "815C24CF3D82CEEEB3480FE4DD446A38B965A02BC1599E074344BEFFA82AA039",
+      "identical": true
+    },
+    {
+      "id": "okio",
+      "commit": "e8dad1a9a86b96b04e51aa941e834b400114667c",
+      "languages": [
+        "kotlin"
+      ],
+      "edgesBefore": {
+        "Unresolved": 2651,
+        "Resolved": 1599
+      },
+      "edgesAfter": {
+        "Unresolved": 2651,
+        "Resolved": 1599
+      },
+      "edgeHashBefore": "7E6CAE02A8A4A3846D51A9E6EA2FAC02B9DC6A74289B130ACAA4C1D1BCCDC352",
+      "edgeHashAfter": "7E6CAE02A8A4A3846D51A9E6EA2FAC02B9DC6A74289B130ACAA4C1D1BCCDC352",
+      "factsHashBefore": "85C88651855B57D7E011D5000E80B8756C660FED55C8BF2361E670E40F18270F",
+      "factsHashAfter": "85C88651855B57D7E011D5000E80B8756C660FED55C8BF2361E670E40F18270F",
+      "identical": true
+    },
+    {
+      "id": "openssl",
+      "commit": "0893a62353583343eb712adef6debdfbe597c227",
+      "languages": [
+        "c",
+        "cpp"
+      ],
+      "edgesBefore": {
+        "Unresolved": 26106,
+        "Resolved": 1330
+      },
+      "edgesAfter": {
+        "Unresolved": 26106,
+        "Resolved": 1330
+      },
+      "edgeHashBefore": "671AA206B250BFBF90E13147133171ADB0331D4AB4ED8D9DF42BD78355A3893D",
+      "edgeHashAfter": "671AA206B250BFBF90E13147133171ADB0331D4AB4ED8D9DF42BD78355A3893D",
+      "factsHashBefore": "114294783DA473D73598FC6A06926C44E8D67487C552588A113887D9098AE8DE",
+      "factsHashAfter": "114294783DA473D73598FC6A06926C44E8D67487C552588A113887D9098AE8DE",
+      "identical": true
+    },
+    {
+      "id": "ox",
+      "commit": "9cddca4fc4b9d0e71cd1b1aacfaba1aefc008d13",
+      "languages": [
+        "Scala"
+      ],
+      "edgesBefore": {
+        "Unresolved": 2585,
+        "Resolved": 430
+      },
+      "edgesAfter": {
+        "Unresolved": 2585,
+        "Resolved": 430
+      },
+      "edgeHashBefore": "C8A2A9C2D56E4ECA9EF6A5BB16849E8127C9A0CB495AFB68FC914E6321A8F332",
+      "edgeHashAfter": "C8A2A9C2D56E4ECA9EF6A5BB16849E8127C9A0CB495AFB68FC914E6321A8F332",
+      "factsHashBefore": "FD2ED5DBE1D07CDB5BEA6FC0F96133DCA1990CF19E7920094507C08CAE046BE0",
+      "factsHashAfter": "FD2ED5DBE1D07CDB5BEA6FC0F96133DCA1990CF19E7920094507C08CAE046BE0",
+      "identical": true
+    },
+    {
+      "id": "protobuf",
+      "commit": "7fcfd66022455635fa29af92987cdc0967efd4f3",
+      "languages": [
+        "c",
+        "cpp"
+      ],
+      "edgesBefore": {
+        "Unresolved": 41340,
+        "Resolved": 3064,
+        "Ambiguous": 147
+      },
+      "edgesAfter": {
+        "Unresolved": 41340,
+        "Resolved": 3064,
+        "Ambiguous": 147
+      },
+      "edgeHashBefore": "4D3958A9558CCEF990331A81DF6814042B6A49B016DA470D810392AE4358CB43",
+      "edgeHashAfter": "4D3958A9558CCEF990331A81DF6814042B6A49B016DA470D810392AE4358CB43",
+      "factsHashBefore": "B57103C80D50CD3F6B6F939E8CEFBBC8AD7C3875FAD73BF4A92B13C150B5F23D",
+      "factsHashAfter": "B57103C80D50CD3F6B6F939E8CEFBBC8AD7C3875FAD73BF4A92B13C150B5F23D",
+      "identical": true
+    },
+    {
+      "id": "pydantic",
+      "commit": "ba830dc07550dd7a11f167cbf8b8b707712cd88e",
+      "languages": [
+        "python"
+      ],
+      "edgesBefore": {
+        "Unresolved": 3370,
+        "Ambiguous": 571,
+        "External": 1647,
+        "Resolved": 1455
+      },
+      "edgesAfter": {
+        "Unresolved": 3370,
+        "Ambiguous": 571,
+        "External": 1647,
+        "Resolved": 1455
+      },
+      "edgeHashBefore": "8D04C5B62BA6250A2DD5CC52DAB0009CB81D7BBCD5D9FBFBA275BA191758CE24",
+      "edgeHashAfter": "8D04C5B62BA6250A2DD5CC52DAB0009CB81D7BBCD5D9FBFBA275BA191758CE24",
+      "factsHashBefore": "9A9693247B6E09824A875A30199ACB8F9F21FDAC3EC0DC48DCD7D7E0FDCD86D9",
+      "factsHashAfter": "9A9693247B6E09824A875A30199ACB8F9F21FDAC3EC0DC48DCD7D7E0FDCD86D9",
+      "identical": true
+    },
+    {
+      "id": "react-hook-form",
+      "commit": "28334faa6105b0475060592c6bf27dca87e3941e",
+      "languages": [
+        "tsx"
+      ],
+      "edgesBefore": {
+        "Unresolved": 1568,
+        "External": 218,
+        "Resolved": 42
+      },
+      "edgesAfter": {
+        "Unresolved": 1568,
+        "External": 218,
+        "Resolved": 42
+      },
+      "edgeHashBefore": "DB8EA6538E7D377848DEF94A2EC4AB1CAFD5549F9C2A0B7C2A89E824051DFD0D",
+      "edgeHashAfter": "DB8EA6538E7D377848DEF94A2EC4AB1CAFD5549F9C2A0B7C2A89E824051DFD0D",
+      "factsHashBefore": "56773848C55EF17963DF27F39CA0D6764CBCB90F9B5B8990010826D60E54A82B",
+      "factsHashAfter": "56773848C55EF17963DF27F39CA0D6764CBCB90F9B5B8990010826D60E54A82B",
+      "identical": true
+    },
+    {
+      "id": "ripgrep",
+      "commit": "3fce3b5bb0236da2df6d99672afb8a719642eca7",
+      "languages": [
+        "Rust"
+      ],
+      "edgesBefore": {
+        "Unresolved": 1700,
+        "Resolved": 819,
+        "Ambiguous": 1
+      },
+      "edgesAfter": {
+        "Unresolved": 1700,
+        "Resolved": 819,
+        "Ambiguous": 1
+      },
+      "edgeHashBefore": "3753AFC9E37E5B6A7B144E30D0CA4050EFF6FDCA3FD9640DE31F52027ED007A0",
+      "edgeHashAfter": "3753AFC9E37E5B6A7B144E30D0CA4050EFF6FDCA3FD9640DE31F52027ED007A0",
+      "factsHashBefore": "7FC1A830DBEA82CAF7732DEC634120C3E6E2AB7FD1D2D9019CB955D5D701AE3D",
+      "factsHashAfter": "7FC1A830DBEA82CAF7732DEC634120C3E6E2AB7FD1D2D9019CB955D5D701AE3D",
+      "identical": true
+    },
+    {
+      "id": "serilog",
+      "commit": "49b5339ce85385dc52d4d8e8f2b8308becf23506",
+      "languages": [
+        "csharp"
+      ],
+      "edgesBefore": {
+        "External": 710,
+        "Resolved": 655,
+        "Unresolved": 358
+      },
+      "edgesAfter": {
+        "External": 710,
+        "Resolved": 655,
+        "Unresolved": 358
+      },
+      "edgeHashBefore": "13C7C1400175528C1CB8F8E179CD5A0BBBE23EAAB0C48FF2C38451045D9EE778",
+      "edgeHashAfter": "13C7C1400175528C1CB8F8E179CD5A0BBBE23EAAB0C48FF2C38451045D9EE778",
+      "factsHashBefore": "B0D558EA4B36B31B7F17EEE96EB67901F9D31C85C55E475523829E3B43B04DAB",
+      "factsHashAfter": "B0D558EA4B36B31B7F17EEE96EB67901F9D31C85C55E475523829E3B43B04DAB",
+      "identical": true
+    },
+    {
+      "id": "sinatra",
+      "commit": "cb22afd7902b566b6eaba6c4ea89739494a65d12",
+      "languages": [
+        "ruby"
+      ],
+      "edgesBefore": {
+        "Unresolved": 836,
+        "Resolved": 313
+      },
+      "edgesAfter": {
+        "Unresolved": 836,
+        "Resolved": 313
+      },
+      "edgeHashBefore": "DE5AD48F97F36301A45DE519BF87F53CD5242DA0812549994FC36B7843FA1AD5",
+      "edgeHashAfter": "DE5AD48F97F36301A45DE519BF87F53CD5242DA0812549994FC36B7843FA1AD5",
+      "factsHashBefore": "FBD26898859ECE525E22426B158B05405634C6909365A13A0B3BA15C3397D866",
+      "factsHashAfter": "FBD26898859ECE525E22426B158B05405634C6909365A13A0B3BA15C3397D866",
+      "identical": true
+    },
+    {
+      "id": "spring-petclinic",
+      "commit": "818c4136ea971c21674525f9053de0d9c7ad8cfe",
+      "languages": [
+        "java"
+      ],
+      "edgesBefore": {
+        "Unresolved": 721,
+        "Resolved": 116
+      },
+      "edgesAfter": {
+        "Unresolved": 721,
+        "Resolved": 116
+      },
+      "edgeHashBefore": "05C8A1FA2409CE7A0C98380A5C0A86599FE712858A0E05681753C3D7321B9473",
+      "edgeHashAfter": "05C8A1FA2409CE7A0C98380A5C0A86599FE712858A0E05681753C3D7321B9473",
+      "factsHashBefore": "CFD2E18D04DA18031968A80A1BB17964FADF504A23340BE5AEDD1967067A0CF0",
+      "factsHashAfter": "CFD2E18D04DA18031968A80A1BB17964FADF504A23340BE5AEDD1967067A0CF0",
+      "identical": true
+    },
+    {
+      "id": "zod",
+      "commit": "12e6272746eb79c9713f4818e85a15231bd368b6",
+      "languages": [
+        "typescript"
+      ],
+      "edgesBefore": {
+        "External": 232,
+        "Resolved": 643,
+        "Unresolved": 5821
+      },
+      "edgesAfter": {
+        "External": 232,
+        "Resolved": 643,
+        "Unresolved": 5821
+      },
+      "edgeHashBefore": "8DC443DCCCFA4E38A94B011D2986547A7D4767E26342FA8BF2F9A870A295CA9E",
+      "edgeHashAfter": "8DC443DCCCFA4E38A94B011D2986547A7D4767E26342FA8BF2F9A870A295CA9E",
+      "factsHashBefore": "0697720EAF8F84AE9FC343AFB3BC19E6DDACFC14DD40C10464352252BE78DDD8",
+      "factsHashAfter": "0697720EAF8F84AE9FC343AFB3BC19E6DDACFC14DD40C10464352252BE78DDD8",
+      "identical": true
+    }
+  ]
+}

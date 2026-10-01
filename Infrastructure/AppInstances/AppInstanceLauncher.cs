@@ -34,7 +34,7 @@ public sealed class AppInstanceLauncher : IAppInstanceLauncher
 
     internal static AppInstanceLaunchContext BuildCurrentContext()
     {
-        var processPath = Environment.ProcessPath;
+        var processPath = ProcessEntryPointResolver.ResolveSelfLaunchPath();
         var entryAssemblyPath = ProcessEntryPointResolver.ResolveManagedAssemblyPath();
         var workingDirectory = ResolveWorkingDirectory(processPath);
 

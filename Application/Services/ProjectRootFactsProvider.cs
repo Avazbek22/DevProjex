@@ -202,12 +202,38 @@ public sealed class ProjectRootFactsProvider
 		if (!FileSystemRootEntryPolicy.IsPhysicalDirectory(rootPath))
 			return ProjectRootFacts.Inaccessible(rootPath);
 
+		try
+		{
+			return BuildFromEntries(rootPath, EnumerateTopLevelEntries(rootPath), cancellationToken);
+		}
+		catch (UnauthorizedAccessException)
+		{
+			return ProjectRootFacts.Inaccessible(rootPath);
+		}
+		catch (System.Security.SecurityException)
+		{
+			return ProjectRootFacts.Inaccessible(rootPath);
+		}
+		catch (IOException)
+		{
+			return ProjectRootFacts.Inaccessible(rootPath);
+		}
+	}
+
+	internal static ProjectRootFacts BuildFromEntries(
+		string rootPath,
+		IEnumerable<ProjectRootEntry> entries,
+		CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(entries);
+		cancellationToken.ThrowIfCancellationRequested();
+
 		var files = new List<ProjectRootFileFact>();
 		var directories = new List<ProjectRootDirectoryFact>();
 
 		try
 		{
-			foreach (var entry in EnumerateTopLevelEntries(rootPath))
+			foreach (var entry in entries)
 			{
 				cancellationToken.ThrowIfCancellationRequested();
 				if (entry.IsDirectory)
@@ -233,6 +259,10 @@ public sealed class ProjectRootFactsProvider
 			}
 		}
 		catch (UnauthorizedAccessException)
+		{
+			return ProjectRootFacts.Inaccessible(rootPath);
+		}
+		catch (System.Security.SecurityException)
 		{
 			return ProjectRootFacts.Inaccessible(rootPath);
 		}
@@ -502,7 +532,7 @@ public sealed class ProjectRootFactsProvider
 	private static bool IsSameOrDescendantPath(string candidatePath, string rootPath)
 		=> PathUtility.IsPathInside(candidatePath, rootPath);
 
-	private readonly record struct ProjectRootEntry(
+	internal readonly record struct ProjectRootEntry(
 		string Name,
 		string FullPath,
 		bool IsDirectory,

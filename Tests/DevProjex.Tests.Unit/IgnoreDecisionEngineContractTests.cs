@@ -201,6 +201,27 @@ public sealed class IgnoreDecisionEngineContractTests
 		Assert.Equal(expected, IgnoreRuleSemantics.IsExtensionlessFileName(name));
 	}
 
+	[Fact]
+	public void EvaluateGitIgnore_GitAdministrativeArea_IsExcludedWithEveryFilterOff()
+	{
+		var rules = CreateRules();
+
+		var evaluation = rules.EvaluateGitIgnore(@"C:\repo\.git", isDirectory: true, ".git");
+
+		Assert.True(evaluation.IsIgnored);
+		Assert.False(evaluation.ShouldTraverseIgnoredDirectory);
+		Assert.Equal(
+			IgnoreDecisionOwner.GitIgnore,
+			IgnoreDecisionEngine.EvaluateDirectory(@"C:\repo\.git", ".git", isHidden: true, rules, evaluation).Owner);
+
+		// Control: an ordinary dot folder stays visible when every filter is off.
+		var dotted = rules.EvaluateGitIgnore(@"C:\repo\.idea", isDirectory: true, ".idea");
+		Assert.False(dotted.IsIgnored);
+		Assert.Equal(
+			IgnoreDecisionOwner.None,
+			IgnoreDecisionEngine.EvaluateDirectory(@"C:\repo\.idea", ".idea", isHidden: true, rules, dotted).Owner);
+	}
+
 	private static IgnoreRules CreateRules(
 		bool ignoreHiddenFolders = false,
 		bool ignoreHiddenFiles = false,

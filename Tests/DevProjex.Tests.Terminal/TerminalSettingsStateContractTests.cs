@@ -33,6 +33,52 @@ public sealed class TerminalSettingsStateContractTests
 	}
 
 	[Fact]
+	public void NewPathsInheritSelectionOnlyFromExactFrontierAncestors()
+	{
+		var availablePaths = new[]
+		{
+			"src/new.cs",
+			"src/nested/new.cs",
+			"srcx/new.cs",
+			"Src/new.cs",
+			"other/new.cs"
+		};
+
+		var evolution = TerminalWorkspaceController.ReconcilePathSelection(
+			availablePaths,
+			new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer),
+			new Dictionary<string, bool>(ProjectTreePathIdentity.CanonicalComparer),
+			["src/./"]);
+
+		Assert.Equal(
+			["src/nested/new.cs", "src/new.cs"],
+			evolution.SelectedItems.Order(StringComparer.Ordinal));
+	}
+
+	[Fact]
+	public void RootFrontierSelectsNewPathsAndEmptyFrontierDoesNot()
+	{
+		var availablePaths = new[] { "src/new.cs", "other/new.cs" };
+		var previous = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
+		var knownStates = new Dictionary<string, bool>(ProjectTreePathIdentity.CanonicalComparer);
+
+		var wholeTree = TerminalWorkspaceController.ReconcilePathSelection(
+			availablePaths,
+			previous,
+			knownStates,
+			["."]);
+		var empty = TerminalWorkspaceController.ReconcilePathSelection(
+			availablePaths,
+			previous,
+			knownStates,
+			[]);
+
+		Assert.Equal(availablePaths.Order(StringComparer.Ordinal),
+			wholeTree.SelectedItems.Order(StringComparer.Ordinal));
+		Assert.Empty(empty.SelectedItems);
+	}
+
+	[Fact]
 	public void ChangingOnlyTheDiffRangeRequiresAFullStructuralRefresh()
 	{
 		var baseline = ProjectSelectionSpec.Standard with
@@ -573,7 +619,7 @@ public sealed class TerminalSettingsStateContractTests
 			TestContext.Current.CancellationToken);
 
 		Assert.Single(state.Plan.IncludedFiles);
-		state.SelectNone();
+		state.RestoreSelectedRelativePaths([]);
 		await controller.ReprojectSelectionAsync(
 			state,
 			TestContext.Current.CancellationToken);
@@ -596,8 +642,8 @@ public sealed class TerminalSettingsStateContractTests
 		await controller.ReprojectSelectionAsync(
 			state,
 			TestContext.Current.CancellationToken);
-		Assert.Empty(state.Plan.IncludedFiles);
-		Assert.True(state.IsEffectiveRootUnchecked);
+		Assert.Single(state.Plan.IncludedFiles);
+		Assert.False(state.IsEffectiveRootUnchecked);
 	}
 
 	[Fact]
@@ -620,6 +666,7 @@ public sealed class TerminalSettingsStateContractTests
 			workspace.Path,
 			ProjectProfileReference.Standard,
 			TestContext.Current.CancellationToken);
+		state.SelectAll();
 
 		var hiddenIndex = state.VisibleRows
 			.Select((row, index) => (row, index))
@@ -653,6 +700,70 @@ public sealed class TerminalSettingsStateContractTests
 			path => Path.GetFileName(path) == "new.cs");
 		Assert.False(state.PathOptionStates["hidden.cs"]);
 		Assert.True(state.PathOptionStates["new.cs"]);
+	}
+
+	[Fact]
+	public async Task ExtensionFilterThatHidesCheckedPathsRestoresThemWhenReversed()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		workspace.WriteFile("README.md", "# Readme\n");
+		workspace.WriteFile("src/a.cs", "internal sealed class A { }");
+		workspace.WriteFile("src/b.cs", "internal sealed class B { }");
+		var (controller, state) = await OpenAsync(workspace.Path, appData.Path);
+		using (state)
+		{
+			state.SetSelection(["README.md", "src/a.cs"], selected: true);
+			await controller.ReprojectSelectionAsync(state, TestContext.Current.CancellationToken);
+
+			await controller.SetExtensionsAsync(state, [".md"], TestContext.Current.CancellationToken);
+			Assert.Equal(["README.md"], IncludedRelativePaths(state));
+			Assert.Equal(["README.md", "src/a.cs"], state.BuildSelectedPathFrontier());
+
+			await controller.SetExtensionsAsync(
+				state,
+				[".cs", ".md"],
+				TestContext.Current.CancellationToken);
+			Assert.Equal(["README.md", "src/a.cs"], IncludedRelativePaths(state));
+			Assert.Equal(["README.md", "src/a.cs"], state.BuildSelection().SelectedPaths);
+		}
+	}
+
+	[Fact]
+	public async Task MomentaryGitScopeThatHidesTheCheckedSubtreeRestoresItOnReturn()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		workspace.WriteFile("README.md", "# Readme\n");
+		workspace.WriteFile("src/a.cs", "internal sealed class A { }");
+		workspace.WriteFile("src/b.cs", "internal sealed class B { }");
+		workspace.WriteFile("z.txt", "baseline\n");
+		RunGit(workspace.Path, "init", "--quiet");
+		RunGit(workspace.Path, "config", "user.email", "terminal-tests@devprojex.local");
+		RunGit(workspace.Path, "config", "user.name", "DevProjex Terminal Tests");
+		RunGit(workspace.Path, "add", "--all");
+		RunGit(workspace.Path, "commit", "--quiet", "-m", "Initial project");
+		workspace.WriteFile("z.txt", "changed\n");
+		var (controller, state) = await OpenAsync(workspace.Path, appData.Path);
+		using (state)
+		{
+			state.SetSelection(["src"], selected: true);
+			await controller.ReprojectSelectionAsync(state, TestContext.Current.CancellationToken);
+
+			await controller.SetGitModeAsync(
+				state,
+				GitFilteringMode.Changes,
+				TestContext.Current.CancellationToken);
+			Assert.Empty(state.Plan.IncludedFiles);
+			Assert.Equal(["src"], state.BuildSelection().SelectedPaths);
+
+			await controller.SetGitModeAsync(
+				state,
+				GitFilteringMode.RespectGitIgnore,
+				TestContext.Current.CancellationToken);
+			Assert.Equal(["src/a.cs", "src/b.cs"], IncludedRelativePaths(state));
+			Assert.Equal(["src"], state.BuildSelection().SelectedPaths);
+		}
 	}
 
 	[Fact]
@@ -820,20 +931,30 @@ public sealed class TerminalSettingsStateContractTests
 			static path => Path.GetFileName(path) is "Sibling.xyz" or ".scope-noise" or "Empty.txt");
 	}
 
+	private static Task<(TerminalWorkspaceController Controller, TerminalWorkspaceState State)>
+		OpenAsync(TemporaryDirectory workspace) =>
+		OpenAsync(workspace.Path, workspace.CreateDirectory("app-data"));
+
 	private static async Task<(TerminalWorkspaceController Controller, TerminalWorkspaceState State)>
-		OpenAsync(TemporaryDirectory workspace)
+		OpenAsync(string projectPath, string appDataPath)
 	{
-		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+		var services = new TerminalServiceFactory(() => appDataPath)
 			.Create(AppLanguage.En);
 		var controller = new TerminalWorkspaceController(
 			services,
 			new TestTerminalEnvironment());
 		var state = await controller.OpenAsync(
-			workspace.Path,
+			projectPath,
 			ProjectProfileReference.Standard,
 			TestContext.Current.CancellationToken);
 		return (controller, state);
 	}
+
+	private static IReadOnlyList<string> IncludedRelativePaths(TerminalWorkspaceState state) =>
+		state.Plan.IncludedFiles
+			.Select(path => PathUtility.GetPortableRelativePath(state.Plan.SourceRoot, path))
+			.Order(StringComparer.Ordinal)
+			.ToArray();
 
 	private static void RunGit(string workingDirectory, params string[] arguments)
 	{

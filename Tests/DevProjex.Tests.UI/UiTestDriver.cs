@@ -135,7 +135,12 @@ internal static class UiTestDriver
         // teardown does not race app work that would still be running for a real user.
         await WaitForSelectionRefreshIdleAsync(window, TimeSpan.FromSeconds(10));
         window.Close();
-        await window.ShutdownCompletion.WaitAsync(TimeSpan.FromSeconds(10));
+        await WaitForConditionAsync(
+            window,
+            () => window.ShutdownCompletion.IsCompleted,
+            "window shutdown",
+            TimeSpan.FromSeconds(10));
+        await window.ShutdownCompletion;
         await WaitForSettledFramesAsync(frameCount: 2);
         UntrackTopLevelWindow(window);
         if (cleanupAppData)
@@ -1183,6 +1188,26 @@ internal static class UiTestDriver
 		Assert.True(item.IsVisible);
 		Assert.True(item.IsEnabled);
 		await RaiseMenuItemClickAsync(item);
+	}
+
+	public static (bool Rule, bool File) GetBulkRedactionMenuVisibility(
+		VirtualizedPreviewTextControl textControl,
+		string occurrenceId)
+	{
+		var document = textControl.Document;
+		Assert.NotNull(document);
+		var redaction = document!.Redactions.First(span =>
+			string.Equals(span.OccurrenceId, occurrenceId, StringComparison.Ordinal));
+		InvokeRequiredPrivateMethod(textControl, "EnsureContextMenu");
+		var contextField = textControl.GetType().GetField(
+			"_contextDetectorRedaction",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(contextField);
+		contextField!.SetValue(textControl, redaction);
+		InvokeRequiredPrivateMethod(textControl, "PrepareBulkSecretMenuItems");
+		return (
+			GetRequiredPrivateField<MenuItem>(textControl, "_bulkRuleRedactionMenuItem").IsVisible,
+			GetRequiredPrivateField<MenuItem>(textControl, "_bulkFileRedactionMenuItem").IsVisible);
 	}
 
 	public static async Task RequestRedactionToggleAsync(MainWindow window, string occurrenceId)

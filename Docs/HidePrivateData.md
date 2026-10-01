@@ -40,7 +40,10 @@ full local path or repository web path. When Hide private data is enabled, only 
 username segment in each local header is replaced with `[local-user-1]`, for example
 `C:\Users\[local-user-1]\project\src\app.cs` or
 `/home/[local-user-1]/project/src/app.cs`. Tree and Tree + Content output keep their native
-layout: the root appears once in the tree and content headers remain relative.
+layout: the root appears once in the tree and content headers remain relative. Context
+documents apply the same mask to their displayed root (`Root:` in text/Markdown and
+`root` in JSON/XML) and to absolute diagnostic paths. Relative paths and the rest of
+each local path remain visible.
 
 Generated username masks in file headers and tree roots share one synthetic `local-user`
 occurrence for the whole output. Preview highlights that occurrence like a detected value;
@@ -283,7 +286,7 @@ explicit `--hide-private-data false` overrides a saved portable profile. Termina
 exposes the same transformation in Parameters and through `:set hide-private-data on|off`;
 its preview, context export, and project-copy paths use the same redaction session.
 For MCP, `devprojex mcp --hide-private-data` enables private-data redaction for the whole
-server process; it is off by default, tool calls and profiles cannot change it, and secret
-redaction remains mandatory in both modes.
+server process; it is off by default. A saved local profile can also enable it in live mode,
+but tool calls cannot turn either policy off. Secret redaction remains mandatory in both modes.
 `analyze --findings` lists private-data findings by rule id, `private-data` category, relative
 path, and one-based source line — never the detected value.

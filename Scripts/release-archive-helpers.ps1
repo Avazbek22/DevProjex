@@ -242,11 +242,16 @@ function ConvertFrom-UstarOctal([byte[]]$header, [int]$offset, [int]$length) {
 
 function Read-UstarGzipArchive(
     [string]$archivePath,
-    [string[]]$captureEntryNames = @()
+    [string[]]$captureEntryNames = @(),
+    [string[]]$hashEntryNames = @()
 ) {
     $capturedNames = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
     foreach ($captureName in $captureEntryNames) {
         [void]$capturedNames.Add($captureName)
+    }
+    $hashedNames = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
+    foreach ($hashName in $hashEntryNames) {
+        [void]$hashedNames.Add($hashName)
     }
 
     $entries = New-Object 'System.Collections.Generic.List[object]'
@@ -287,11 +292,32 @@ function Read-UstarGzipArchive(
                 $size = ConvertFrom-UstarOctal -header $header -offset 124 -length 12
                 $typeFlag = [char]$header[156]
                 $capturedBytes = $null
+                $sha256 = $null
                 if ($size -gt 0 -and $capturedNames.Contains($name)) {
                     if ($size -gt [int]::MaxValue) {
                         throw "Captured USTAR entry is too large: '$name'."
                     }
                     $capturedBytes = Read-StreamBlock -stream $gzipStream -length ([int]$size)
+                }
+                elseif ($size -gt 0 -and $hashedNames.Contains($name)) {
+                    $hasher = [System.Security.Cryptography.IncrementalHash]::CreateHash(
+                        [System.Security.Cryptography.HashAlgorithmName]::SHA256)
+                    try {
+                        $buffer = [byte[]]::new(1024 * 1024)
+                        [long]$remaining = $size
+                        while ($remaining -gt 0) {
+                            $read = $gzipStream.Read($buffer, 0, [int][Math]::Min($buffer.Length, $remaining))
+                            if ($read -le 0) {
+                                throw "Unexpected end of USTAR entry '$name' in '$archivePath'."
+                            }
+                            $hasher.AppendData($buffer, 0, $read)
+                            $remaining -= $read
+                        }
+                        $sha256 = ([System.BitConverter]::ToString($hasher.GetHashAndReset()) -replace '-', '').ToLowerInvariant()
+                    }
+                    finally {
+                        $hasher.Dispose()
+                    }
                 }
                 elseif ($size -gt 0) {
                     Skip-StreamBytes -stream $gzipStream -count $size
@@ -308,6 +334,7 @@ function Read-UstarGzipArchive(
                     Size = $size
                     IsDirectory = ($typeFlag -eq [char]'5')
                     Bytes = $capturedBytes
+                    Sha256 = $sha256
                 })
             }
         }

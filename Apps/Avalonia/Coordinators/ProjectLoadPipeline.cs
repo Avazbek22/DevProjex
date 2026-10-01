@@ -12,13 +12,13 @@ internal sealed class ProjectLoadPipeline(
 	private bool _disposed;
 	private bool _loadGateDisposed;
 
-    public async Task OpenFolderAsync(
+    public async Task<bool> OpenFolderAsync(
         string path,
         bool fromDialog,
         bool recordRecentFolder)
     {
 		if (!TryEnterCall())
-			return;
+			return false;
 
 		var gateEntered = false;
 		try
@@ -28,12 +28,12 @@ internal sealed class ProjectLoadPipeline(
 			await _loadGate.WaitAsync();
 			gateEntered = true;
 			if (IsDisposed())
-				return;
+				return false;
 
 			if (requestId != Volatile.Read(ref _latestRequestId))
-				return;
+				return false;
 
-			await OpenFolderCoreAsync(path, fromDialog, recordRecentFolder);
+			return await OpenFolderCoreAsync(path, fromDialog, recordRecentFolder);
 		}
 		finally
 		{
@@ -43,7 +43,7 @@ internal sealed class ProjectLoadPipeline(
 		}
 	}
 
-	private async Task OpenFolderCoreAsync(
+	private async Task<bool> OpenFolderCoreAsync(
 		string path,
 		bool fromDialog,
 		bool recordRecentFolder)
@@ -89,7 +89,7 @@ internal sealed class ProjectLoadPipeline(
 			{
 				host.TryApplyActiveProjectLoadCancellationFallback();
 				statusOperations.Complete(statusOperationId);
-				return;
+				return false;
 			}
 
 			host.ClearProjectLoadCancellation();
@@ -101,6 +101,7 @@ internal sealed class ProjectLoadPipeline(
                 host.ReleaseCurrentRepositorySession();
 
             statusOperations.Complete(statusOperationId);
+			return true;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -112,6 +113,7 @@ internal sealed class ProjectLoadPipeline(
             }
 
             statusOperations.Complete(statusOperationId);
+			return published;
         }
         catch
         {

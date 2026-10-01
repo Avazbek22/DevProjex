@@ -46,6 +46,8 @@ public partial class MainWindow : IProjectLoadPipelineHost
         _viewModel.IsProjectLoaded = true;
         _viewModel.SettingsVisible = true;
         _viewModel.SearchVisible = false;
+        if (_viewModel.IsAgentActivityEnabled)
+            RefreshAgentActivityPresentation();
 
         if (!fromDialog)
             return;

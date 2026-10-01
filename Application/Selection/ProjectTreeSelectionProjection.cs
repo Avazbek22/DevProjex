@@ -157,7 +157,7 @@ public static class ProjectTreeSelectionProjection
 
 			var parentIndex = pending.Count - 1;
 			var parent = pending[parentIndex];
-			parent.AddChild(projectedNode);
+			parent.AddChild(projectedNode, includedPaths.Count);
 			pending[parentIndex] = parent;
 		}
 
@@ -280,8 +280,9 @@ public static class ProjectTreeSelectionProjection
 		public TreeNodeDescriptor Node { get; } = node;
 		public int NextChildIndex { get; set; }
 
-		public void AddChild(TreeNodeDescriptor child) =>
-			(_children ??= new List<TreeNodeDescriptor>(Node.Children.Count)).Add(child);
+		public void AddChild(TreeNodeDescriptor child, int includedNodeCount) =>
+			// A sparse projection must not retain capacity for every unselected sibling.
+			(_children ??= new List<TreeNodeDescriptor>(Math.Min(Node.Children.Count, includedNodeCount))).Add(child);
 
 		public TreeNodeDescriptor Complete() =>
 			!Node.IsDirectory || Node.Children.Count == 0

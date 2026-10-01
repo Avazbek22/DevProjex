@@ -216,6 +216,205 @@ public sealed class RepoCacheServiceCleanupTests : IDisposable
     }
 
     [Fact]
+    public void LinkedStagingRootCannotReceiveACloneOutsideTheCache()
+    {
+        const string repositoryUrl = "https://example.com/owner/repo.git";
+        var outsidePath = _testCacheRoot + "-staging-outside";
+        var sentinelPath = Path.Combine(outsidePath, "sentinel.txt");
+        var stagingRoot = Path.Combine(_testCacheRoot, ".staging");
+        Directory.CreateDirectory(_testCacheRoot);
+        Directory.CreateDirectory(outsidePath);
+        File.WriteAllText(sentinelPath, "keep");
+
+        try
+        {
+            if (!TryCreateDirectoryLink(stagingRoot, outsidePath))
+                Assert.Skip("The platform does not permit creating a directory link for this safety test.");
+
+            Assert.Throws<IOException>(() => _service.CreateRepositoryStagingDirectory(repositoryUrl));
+            Assert.Equal(new[] { "sentinel.txt" }, Directory.GetFileSystemEntries(outsidePath)
+                .Select(Path.GetFileName)
+                .ToArray());
+            Assert.Equal("keep", File.ReadAllText(sentinelPath));
+        }
+        finally
+        {
+            if (Directory.Exists(stagingRoot))
+                Directory.Delete(stagingRoot);
+            if (Directory.Exists(outsidePath))
+                Directory.Delete(outsidePath, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void LinkedStagingEntryCannotPublishAnExternalRepository()
+    {
+        const string repositoryUrl = "https://example.com/owner/repo.git";
+        var outsidePath = _testCacheRoot + "-repository-outside";
+        var sentinelPath = Path.Combine(outsidePath, "sentinel.txt");
+        var stagingRoot = Path.Combine(_testCacheRoot, ".staging");
+        var linkedEntry = Path.Combine(stagingRoot, "linked-repository");
+        Directory.CreateDirectory(stagingRoot);
+        Directory.CreateDirectory(Path.Combine(outsidePath, ".git"));
+        File.WriteAllText(sentinelPath, "keep");
+        string? publishedPath = null;
+
+        try
+        {
+            if (!TryCreateDirectoryLink(linkedEntry, outsidePath))
+                Assert.Skip("The platform does not permit creating a directory link for this safety test.");
+
+            Assert.Throws<InvalidOperationException>(() =>
+                publishedPath = _service.PublishRepositoryDirectory(linkedEntry, repositoryUrl));
+            Assert.Equal("keep", File.ReadAllText(sentinelPath));
+            Assert.Null(_service.FindIndexedRepository(repositoryUrl));
+        }
+        finally
+        {
+            if (Directory.Exists(linkedEntry))
+                Directory.Delete(linkedEntry);
+            if (publishedPath is not null && Directory.Exists(publishedPath) &&
+                File.GetAttributes(publishedPath).HasFlag(FileAttributes.ReparsePoint))
+            {
+                Directory.Delete(publishedPath);
+            }
+            if (Directory.Exists(outsidePath))
+                Directory.Delete(outsidePath, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void LinkedStagingAncestorCannotMoveAnExternalRepository()
+    {
+        const string repositoryUrl = "https://example.com/owner/repo.git";
+        var outsidePath = _testCacheRoot + "-nested-outside";
+        var externalRepository = Path.Combine(outsidePath, "repository");
+        var sentinelPath = Path.Combine(externalRepository, "sentinel.txt");
+        var stagingRoot = Path.Combine(_testCacheRoot, ".staging");
+        var linkedAncestor = Path.Combine(stagingRoot, "linked-parent");
+        Directory.CreateDirectory(stagingRoot);
+        Directory.CreateDirectory(Path.Combine(externalRepository, ".git"));
+        File.WriteAllText(sentinelPath, "keep");
+
+        try
+        {
+            if (!TryCreateDirectoryLink(linkedAncestor, outsidePath))
+                Assert.Skip("The platform does not permit creating a directory link for this safety test.");
+
+            Assert.Throws<InvalidOperationException>(() =>
+                _service.PublishRepositoryDirectory(
+                    Path.Combine(linkedAncestor, "repository"),
+                    repositoryUrl));
+            Assert.Equal("keep", File.ReadAllText(sentinelPath));
+            Assert.Null(_service.FindIndexedRepository(repositoryUrl));
+        }
+        finally
+        {
+            if (Directory.Exists(linkedAncestor))
+                Directory.Delete(linkedAncestor);
+            if (Directory.Exists(outsidePath))
+                Directory.Delete(outsidePath, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void LinkedTrashPathCannotDeleteExternalDirectoriesOnStartup(bool linkStagingRoot)
+    {
+        var outsidePath = _testCacheRoot + "-trash-cleanup-outside";
+        var stagingRoot = Path.Combine(_testCacheRoot, ".staging");
+        var trashRoot = Path.Combine(stagingRoot, ".trash");
+        var linkedPath = linkStagingRoot ? stagingRoot : trashRoot;
+        var externalTrashRoot = linkStagingRoot ? Path.Combine(outsidePath, ".trash") : outsidePath;
+        var sentinelPath = Path.Combine(externalTrashRoot, "foreign", "sentinel.txt");
+        Directory.CreateDirectory(Path.GetDirectoryName(linkedPath)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(sentinelPath)!);
+        File.WriteAllText(sentinelPath, "keep");
+
+        try
+        {
+            if (!TryCreateDirectoryLink(linkedPath, outsidePath))
+                Assert.Skip("The platform does not permit creating a directory link for this safety test.");
+
+            _service.CleanupStaleCacheOnStartup();
+
+            Assert.Equal("keep", File.ReadAllText(sentinelPath));
+        }
+        finally
+        {
+            if (Directory.Exists(linkedPath))
+                Directory.Delete(linkedPath);
+            if (Directory.Exists(outsidePath))
+                Directory.Delete(outsidePath, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void LinkedTrashPathCannotMoveUnindexedCacheContainer()
+    {
+        var outsidePath = _testCacheRoot + "-trash-removal-outside";
+        var trashRoot = Path.Combine(_testCacheRoot, ".staging", ".trash");
+        var unindexedPath = Path.Combine(_testCacheRoot, "unindexed-repository");
+        var sentinelPath = Path.Combine(outsidePath, "sentinel.txt");
+        Directory.CreateDirectory(Path.GetDirectoryName(trashRoot)!);
+        Directory.CreateDirectory(unindexedPath);
+        Directory.CreateDirectory(outsidePath);
+        File.WriteAllText(sentinelPath, "keep");
+
+        try
+        {
+            if (!TryCreateDirectoryLink(trashRoot, outsidePath))
+                Assert.Skip("The platform does not permit creating a directory link for this safety test.");
+
+            var result = _service.ClearAllCacheWithResult();
+
+            Assert.Equal(new CacheClearResult(0, 0, 1), result);
+            Assert.True(Directory.Exists(unindexedPath));
+            Assert.Equal("keep", File.ReadAllText(sentinelPath));
+        }
+        finally
+        {
+            if (Directory.Exists(trashRoot))
+                Directory.Delete(trashRoot);
+            if (Directory.Exists(outsidePath))
+                Directory.Delete(outsidePath, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void LinkedTrashPathCannotMoveStagingDirectory()
+    {
+        var outsidePath = _testCacheRoot + "-trash-staging-outside";
+        var stagingPath = _service.CreateRepositoryStagingDirectory("https://example.com/owner/repo.git");
+        var trashRoot = Path.Combine(_testCacheRoot, ".staging", ".trash");
+        var sentinelPath = Path.Combine(outsidePath, "sentinel.txt");
+        Directory.CreateDirectory(outsidePath);
+        File.WriteAllText(sentinelPath, "keep");
+
+        try
+        {
+            if (!TryCreateDirectoryLink(trashRoot, outsidePath))
+                Assert.Skip("The platform does not permit creating a directory link for this safety test.");
+
+            _service.DeleteRepositoryDirectory(stagingPath);
+
+            Assert.True(Directory.Exists(stagingPath));
+            Assert.Equal(new[] { "sentinel.txt" }, Directory.GetFileSystemEntries(outsidePath)
+                .Select(Path.GetFileName)
+                .ToArray());
+            Assert.Equal("keep", File.ReadAllText(sentinelPath));
+        }
+        finally
+        {
+            if (Directory.Exists(trashRoot))
+                Directory.Delete(trashRoot);
+            if (Directory.Exists(outsidePath))
+                Directory.Delete(outsidePath, recursive: true);
+        }
+    }
+
+    [Fact]
     public void ClearAllCache_RemovesAllCachedRepositories()
     {
         // Arrange

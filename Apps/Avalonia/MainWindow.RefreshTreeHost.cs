@@ -6,6 +6,8 @@ namespace DevProjex.Avalonia;
 
 public partial class MainWindow : IRefreshTreePipelineHost
 {
+    private BuildTreeResult? _selectionPersistenceTree;
+
     MainWindowViewModel IRefreshTreePipelineHost.ViewModel => _viewModel;
 
     TreeRefreshInput? IRefreshTreePipelineHost.CaptureTreeRefreshInput(bool preserveCheckedPaths)
@@ -69,9 +71,9 @@ public partial class MainWindow : IRefreshTreePipelineHost
 
     void IRefreshTreePipelineHost.BeforeInteractiveFilterRefresh()
     {
-        // A filter projects a new graph from the in-memory baseline. Stop metrics that still
-        // reference the previous full graph before that graph becomes eligible for collection.
-        _metrics.CancelAndDiscardBackgroundCalculation();
+        // A name filter changes only the tree projection and its aggregate totals. Per-file facts
+        // remain reusable because each entry is independently guarded by its source identity.
+        _metrics.InvalidateSelectionProjection();
     }
 
     BuildTreeSnapshotResult IRefreshTreePipelineHost.BuildTree(TreeRefreshInput input, CancellationToken cancellationToken) =>
@@ -83,7 +85,7 @@ public partial class MainWindow : IRefreshTreePipelineHost
     bool IRefreshTreePipelineHost.TryHandleRootAccessDenied(TreeRefreshInput input, BuildTreeResult result) =>
         result.RootAccessDenied &&
         PathComparer.Default.Equals(_currentPath, input.CurrentPath) &&
-        TryElevateAndRestart(input.CurrentPath);
+        HandleBackgroundRootAccessDenied(input.CurrentPath);
 
 	void IRefreshTreePipelineHost.ReportIncompleteTreeScan() =>
 		_toastService.Show(_localization["Scan.Error.Incomplete"]);
@@ -162,6 +164,8 @@ public partial class MainWindow : IRefreshTreePipelineHost
             _lastInteractiveFilterUsedInMemory = usedInMemoryFilter;
         UpdateCurrentTreeInventory(input, result, interactiveFilter, usedInMemoryFilter);
         _metrics.InvalidateComputedCaches();
+        if (string.IsNullOrWhiteSpace(input.NameFilter))
+            _selectionPersistenceTree = result.Tree;
 
         if (!interactiveFilter)
         {
@@ -228,6 +232,9 @@ public partial class MainWindow : IRefreshTreePipelineHost
 
         if (!interactiveFilter)
             ReapplyActiveTreeQueryPresentation();
+
+		if (completedFilterSelectionTransfer && selectionRestore.Applied)
+			PublishTreeSelectionChange();
 
         if (!interactiveFilter)
         {

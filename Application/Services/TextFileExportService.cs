@@ -6,7 +6,7 @@ public sealed class TextFileExportService
 	{
 		ArgumentNullException.ThrowIfNull(stream);
 		ArgumentNullException.ThrowIfNull(content);
-		PrepareDestination(stream);
+		PrepareDestination(stream, cancellationToken);
 
 		await AppendAsync(stream, content, cancellationToken).ConfigureAwait(false);
 		await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
@@ -42,16 +42,17 @@ public sealed class TextFileExportService
 	{
 		ArgumentNullException.ThrowIfNull(stream);
 		ArgumentNullException.ThrowIfNull(document);
-		PrepareDestination(stream);
+		PrepareDestination(stream, cancellationToken);
 
 		await document.WriteToAsync(stream, cancellationToken).ConfigureAwait(false);
 		await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
 	}
 
-	private static void PrepareDestination(Stream stream)
+	private static void PrepareDestination(Stream stream, CancellationToken cancellationToken)
 	{
 		if (!stream.CanWrite)
 			throw new InvalidOperationException("Target stream must be writable.");
+		cancellationToken.ThrowIfCancellationRequested();
 
 		// Reset seekable streams to avoid stale bytes when overriding existing files.
 		if (stream.CanSeek)

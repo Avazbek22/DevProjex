@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using DevProjex.Infrastructure.Persistence;
 
 namespace DevProjex.Terminal.CommandLine;
 
@@ -29,7 +30,7 @@ public sealed class InvocationEnvironment : ITerminalEnvironment
 	private const int DefaultTerminalHeight = 24;
 	public const string TerminalHostVariable = "DEVPROJEX_TERMINAL_HOST";
 	public const string DesktopRequestVariable = "DEVPROJEX_DESKTOP_REQUEST_FILE";
-	internal const string InternalDataRootVariable = "DEVPROJEX_INTERNAL_DATA_ROOT";
+	internal const string InternalDataRootVariable = UserDataPathResolver.InternalDataRootVariable;
 	private readonly TextWriter _output;
 	private readonly TextWriter _error;
 	private Stream? _rawInput;
@@ -224,7 +225,8 @@ public sealed class InvocationEnvironment : ITerminalEnvironment
 			["DEVPROJEX_VERBOSITY"] = Environment.GetEnvironmentVariable("DEVPROJEX_VERBOSITY"),
 			["DEVPROJEX_LANGUAGE"] = Environment.GetEnvironmentVariable("DEVPROJEX_LANGUAGE"),
 			[TerminalHostVariable] = Environment.GetEnvironmentVariable(TerminalHostVariable),
-			[InternalDataRootVariable] = Environment.GetEnvironmentVariable(InternalDataRootVariable)
+			[InternalDataRootVariable] = UserDataPathResolver.ResolveInternalDataRoot(
+				Environment.GetEnvironmentVariable(InternalDataRootVariable))
 		};
 }
 

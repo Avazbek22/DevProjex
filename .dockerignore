@@ -1,0 +1,12 @@
+.git
+.github
+.idea
+.vs
+.vscode
+**/bin
+**/obj
+artifacts
+publish
+TestResults
+Tests
+Docs

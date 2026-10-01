@@ -3,6 +3,7 @@
              xmlns:vm="using:DevProjex.Avalonia.ViewModels"
              x:Class="DevProjex.Avalonia.Views.SettingsPanelView"
              Name="SettingsPanelViewRoot"
+             MinWidth="285"
              x:DataType="vm:MainWindowViewModel"
              x:CompileBindings="True">
   <UserControl.Styles>
@@ -256,6 +257,12 @@
                    ScrollViewer.IsScrollInertiaEnabled="True"
                    ScrollViewer.VerticalScrollBarVisibility="Auto"
                    ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+            <ListBox.Styles>
+              <!-- Without a name the automation peer reports the view model type. -->
+              <Style Selector="ListBoxItem" x:DataType="vm:IgnoreOptionViewModel">
+                <Setter Property="AutomationProperties.Name" Value="{Binding Label}" />
+              </Style>
+            </ListBox.Styles>
             <ListBox.ItemsPanel>
               <ItemsPanelTemplate>
                 <VirtualizingStackPanel />
@@ -313,6 +320,11 @@
 					   SelectionMode="Multiple"
 					   ScrollViewer.VerticalScrollBarVisibility="Disabled"
 					   ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+			  <ListBox.Styles>
+				<Style Selector="ListBoxItem" x:DataType="vm:IgnoreOptionViewModel">
+				  <Setter Property="AutomationProperties.Name" Value="{Binding Label}" />
+				</Style>
+			  </ListBox.Styles>
 			  <ListBox.ItemsPanel>
 				<ItemsPanelTemplate>
 				  <VirtualizingStackPanel />
@@ -327,7 +339,10 @@
 				  <Grid ColumnDefinitions="*,6,16" HorizontalAlignment="Left">
 					<CheckBox Grid.Column="0"
 							  Classes="list-item settings-list-entry"
-							  IsChecked="{Binding IsChecked, Mode=TwoWay}">
+							  IsChecked="{Binding IsChecked, Mode=TwoWay}"
+							  ToolTip.Tip="{Binding HelpText}"
+							  AutomationProperties.Name="{Binding Label}"
+							  AutomationProperties.HelpText="{Binding HelpText}">
 					  <!-- The Fluent CheckBox presenter inherits TextWrapping="Wrap" into its
 					       content, so NoWrap is forced here to keep the row on one line and let
 					       CharacterEllipsis trim instead of wrapping. -->

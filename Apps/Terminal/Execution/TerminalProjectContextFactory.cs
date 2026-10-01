@@ -41,24 +41,15 @@ public sealed class TerminalProjectContextFactory(
 		bool includeContentOutputMetrics = true,
 		IReadOnlyDictionary<string, bool>? knownExtensionStates = null,
 		IReadOnlyCollection<string>? repositoryScopeFullPaths = null,
-		string? repositorySourceUrl = null)
+		string? repositorySourceUrl = null,
+		bool applyMarkedSecrets = true)
 	{
-		var markedSecrets = ProjectSelectionMarkedSecretsResolver.Resolve(selection);
+		var markedSecrets = ProjectSelectionMarkedSecretsResolver.Resolve(selection).ToArray();
 		if (await secretRedactionSession
 			    .EnsurePersistentIdentityReadyAsync(markedSecrets, cancellationToken)
 			    .ConfigureAwait(false) != PersistentSecretIdentityAvailability.Ready)
 		{
 			throw new SecretDetectionException("The persistent secret identity key is unavailable.");
-		}
-		if (selection.ProfileSource?.Kind == ProjectProfileSourceKind.Local)
-		{
-			secretRedactionSession.ReplacePersistentMarks(
-				projectPath,
-				new PersistentSecretMarksSnapshot(0, markedSecrets));
-		}
-		else
-		{
-			secretRedactionSession.ReplaceMarkedSecrets(markedSecrets);
 		}
 		var sourceIdentity = await sourceIdentityResolver
 			.ResolveAsync(projectPath, knownIdentity, cancellationToken)
@@ -93,7 +84,7 @@ public sealed class TerminalProjectContextFactory(
 		else if (!includeContentOutputMetrics)
 		{
 			plan = await planner
-				.BuildWithTreeMetricsAsync(request, cancellationToken)
+				.BuildWithTreeMetricsAsync(request, captureIgnoreImpactCounts, cancellationToken)
 				.ConfigureAwait(false);
 		}
 		else if (captureIgnoreImpactCounts)
@@ -107,7 +98,7 @@ public sealed class TerminalProjectContextFactory(
 			plan = await planner.BuildAsync(request, cancellationToken).ConfigureAwait(false);
 		}
 
-		return await GitScopeFilter
+		plan = await GitScopeFilter
 			.ApplyAsync(
 				planner,
 				plan,
@@ -118,5 +109,32 @@ public sealed class TerminalProjectContextFactory(
 				cancellationToken,
 				resolvedDiffRange)
 			.ConfigureAwait(false);
+		cancellationToken.ThrowIfCancellationRequested();
+		if (applyMarkedSecrets)
+			ApplyMarkedSecretsCore(projectPath, selection, markedSecrets);
+		return plan;
+	}
+
+	internal void ApplyMarkedSecrets(string projectPath, ProjectSelectionSpec selection) =>
+		ApplyMarkedSecretsCore(
+			projectPath,
+			selection,
+			ProjectSelectionMarkedSecretsResolver.Resolve(selection).ToArray());
+
+	private void ApplyMarkedSecretsCore(
+		string projectPath,
+		ProjectSelectionSpec selection,
+		IReadOnlyCollection<MarkedSecretProfileEntry> markedSecrets)
+	{
+		if (selection.ProfileSource?.Kind == ProjectProfileSourceKind.Local)
+		{
+			secretRedactionSession.ReplacePersistentMarks(
+				projectPath,
+				new PersistentSecretMarksSnapshot(0, markedSecrets));
+		}
+		else
+		{
+			secretRedactionSession.ReplaceMarkedSecrets(markedSecrets);
+		}
 	}
 }

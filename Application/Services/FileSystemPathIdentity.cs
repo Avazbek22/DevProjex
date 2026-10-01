@@ -7,6 +7,11 @@ internal readonly record struct FileSystemPathLocation(
 	string NamespaceId,
 	string CanonicalPath);
 
+internal readonly record struct FileSystemHandleIdentity(
+	ulong Device,
+	ulong NodeLow,
+	ulong NodeHigh);
+
 internal readonly record struct FileSystemPathIdentity(
 	ulong Device,
 	ulong Node)
@@ -17,6 +22,7 @@ internal readonly record struct FileSystemPathIdentity(
 	private const uint WindowsBackupSemantics = 0x02000000;
 	private const uint WindowsVolumeNameNt = 0x2;
 	private const int LinuxCurrentWorkingDirectory = -100;
+	private const int LinuxAtEmptyPath = 0x1000;
 	private const int LinuxOpenCloseOnExec = 0x00080000;
 	private const int LinuxOpenPath = 0x00200000;
 	private const uint LinuxBasicStats = 0x000007ff;
@@ -24,10 +30,34 @@ internal readonly record struct FileSystemPathIdentity(
 	private const ushort DarwinAttributeBitmapCount = 5;
 	private const uint DarwinCommonDeviceId = 0x00000002;
 	private const uint DarwinCommonFileId = 0x02000000;
+	private const uint DarwinReturnRealDevice = 0x00000200;
 	private const int DarwinOpenReadOnly = 0;
 	private const int DarwinOpenCloseOnExec = 0x01000000;
 	private const int DarwinGetPathWithoutFirmlink = 102;
 	private const int DarwinPathBufferLength = 1024;
+	private const int WindowsFileIdInfoClass = 0x12;
+	private const uint WindowsFileIdInfoSize = 24;
+
+	public static bool TryReadHandle(
+		SafeFileHandle handle,
+		out FileSystemHandleIdentity identity)
+	{
+		ArgumentNullException.ThrowIfNull(handle);
+		if (handle.IsInvalid || handle.IsClosed)
+		{
+			identity = default;
+			return false;
+		}
+		if (OperatingSystem.IsWindows())
+			return TryReadWindowsHandle(handle, out identity);
+		if (OperatingSystem.IsLinux())
+			return TryReadLinuxHandle(handle, out identity);
+		if (OperatingSystem.IsMacOS())
+			return TryReadDarwinHandle(handle, out identity);
+
+		identity = default;
+		return false;
+	}
 
 	public static bool TryRead(string path, out FileSystemPathIdentity identity)
 	{
@@ -163,6 +193,39 @@ internal readonly record struct FileSystemPathIdentity(
 		return true;
 	}
 
+	private static bool TryReadWindowsHandle(
+		SafeFileHandle handle,
+		out FileSystemHandleIdentity identity)
+	{
+		try
+		{
+			if (!GetFileInformationByHandleEx(
+				    handle,
+				    WindowsFileIdInfoClass,
+				    out var information,
+				    WindowsFileIdInfoSize) ||
+			    (information.FileIdLow | information.FileIdHigh) == 0)
+			{
+				identity = default;
+				return false;
+			}
+
+			identity = new FileSystemHandleIdentity(
+				information.VolumeSerialNumber,
+				information.FileIdLow,
+				information.FileIdHigh);
+			return true;
+		}
+		catch (Exception exception) when (exception is
+			       DllNotFoundException or
+			       EntryPointNotFoundException or
+			       ObjectDisposedException)
+		{
+			identity = default;
+			return false;
+		}
+	}
+
 	private static bool TryReadWindowsLocation(
 		string path,
 		out FileSystemPathLocation location)
@@ -238,6 +301,50 @@ internal readonly record struct FileSystemPathIdentity(
 		{
 			identity = default;
 			return false;
+		}
+	}
+
+	private static bool TryReadLinuxHandle(
+		SafeFileHandle handle,
+		out FileSystemHandleIdentity identity)
+	{
+		var addedReference = false;
+		try
+		{
+			handle.DangerousAddRef(ref addedReference);
+			var descriptor = checked((int)handle.DangerousGetHandle());
+			if (Statx(
+				    descriptor,
+				    string.Empty,
+				    LinuxAtEmptyPath,
+				    LinuxBasicStats,
+				    out var status) != 0 ||
+			    (status.Mask & LinuxStatxInode) == 0 ||
+			    status.Inode == 0)
+			{
+				identity = default;
+				return false;
+			}
+
+			identity = new FileSystemHandleIdentity(
+				((ulong)status.DeviceMajor << 32) | status.DeviceMinor,
+				status.Inode,
+				0);
+			return true;
+		}
+		catch (Exception exception) when (exception is
+			       DllNotFoundException or
+			       EntryPointNotFoundException or
+			       ObjectDisposedException or
+			       OverflowException)
+		{
+			identity = default;
+			return false;
+		}
+		finally
+		{
+			if (addedReference)
+				handle.DangerousRelease();
 		}
 	}
 
@@ -489,6 +596,62 @@ internal readonly record struct FileSystemPathIdentity(
 		}
 	}
 
+	private static bool TryReadDarwinHandle(
+		SafeFileHandle handle,
+		out FileSystemHandleIdentity identity)
+	{
+		var attributes = new DarwinAttributeList
+		{
+			BitmapCount = DarwinAttributeBitmapCount,
+			CommonAttributes = DarwinCommonDeviceId | DarwinCommonFileId
+		};
+		var buffer = Marshal.AllocHGlobal(24);
+		var addedReference = false;
+		try
+		{
+			handle.DangerousAddRef(ref addedReference);
+			var descriptor = checked((int)handle.DangerousGetHandle());
+			if (FGetAttrList(
+				    descriptor,
+				    ref attributes,
+				    buffer,
+				    24,
+				    (nuint)DarwinReturnRealDevice) != 0 ||
+			    Marshal.ReadInt32(buffer) is < 16 or > 24)
+			{
+				identity = default;
+				return false;
+			}
+
+			var fileId = unchecked((ulong)Marshal.ReadInt64(buffer, 8));
+			if (fileId == 0)
+			{
+				identity = default;
+				return false;
+			}
+			identity = new FileSystemHandleIdentity(
+				unchecked((uint)Marshal.ReadInt32(buffer, 4)),
+				fileId,
+				0);
+			return true;
+		}
+		catch (Exception exception) when (exception is
+			       DllNotFoundException or
+			       EntryPointNotFoundException or
+			       ObjectDisposedException or
+			       OverflowException)
+		{
+			identity = default;
+			return false;
+		}
+		finally
+		{
+			if (addedReference)
+				handle.DangerousRelease();
+			Marshal.FreeHGlobal(buffer);
+		}
+	}
+
 	private static bool TryReadDarwinLocation(
 		string path,
 		out FileSystemPathLocation location)
@@ -682,6 +845,14 @@ internal readonly record struct FileSystemPathIdentity(
 		public uint FileIndexLow;
 	}
 
+	[StructLayout(LayoutKind.Sequential)]
+	private struct WindowsFileIdInformation
+	{
+		public ulong VolumeSerialNumber;
+		public ulong FileIdLow;
+		public ulong FileIdHigh;
+	}
+
 	[DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
 	private static extern SafeFileHandle CreateFile(
 		string fileName,
@@ -697,6 +868,14 @@ internal readonly record struct FileSystemPathIdentity(
 	private static extern bool GetFileInformationByHandle(
 		SafeFileHandle handle,
 		out WindowsFileInformation information);
+
+	[DllImport("kernel32.dll", SetLastError = true)]
+	[return: MarshalAs(UnmanagedType.Bool)]
+	private static extern bool GetFileInformationByHandleEx(
+		SafeFileHandle handle,
+		int informationClass,
+		out WindowsFileIdInformation information,
+		uint bufferSize);
 
 	[DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
 	private static extern uint GetFinalPathNameByHandle(
@@ -728,6 +907,14 @@ internal readonly record struct FileSystemPathIdentity(
 		IntPtr buffer,
 		nuint bufferSize,
 		uint options);
+
+	[DllImport("libc", EntryPoint = "fgetattrlist", SetLastError = true)]
+	private static extern int FGetAttrList(
+		int fileDescriptor,
+		ref DarwinAttributeList attributes,
+		IntPtr buffer,
+		nuint bufferSize,
+		nuint options);
 
 	[DllImport("libc", EntryPoint = "open", SetLastError = true)]
 	private static extern int DarwinOpen(

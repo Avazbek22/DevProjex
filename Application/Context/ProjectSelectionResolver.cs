@@ -24,6 +24,30 @@ public sealed class ProjectSelectionResolver(
 				cancellationToken).ConfigureAwait(false),
 			_ => throw new ArgumentOutOfRangeException(nameof(profile), profile.Kind, null)
 		};
+		return ResolveBaseline(baseline, profile, overrides);
+	}
+
+	internal ProjectSelectionSpec ResolveLocalSnapshot(
+		ProjectSelectionProfile profile,
+		ProjectSelectionSpec overrides)
+	{
+		ArgumentNullException.ThrowIfNull(profile);
+		ArgumentNullException.ThrowIfNull(overrides);
+
+		var snapshot = ProjectSelectionProfileBuilder.Clone(profile);
+		var source = ProjectProfileReference.Local;
+		var baseline = ProjectSelectionAdapter.FromLegacyProfile(snapshot, source) with
+		{
+			LocalProfileState = new LocalProjectSelectionState(snapshot)
+		};
+		return ResolveBaseline(baseline, source, overrides);
+	}
+
+	private static ProjectSelectionSpec ResolveBaseline(
+		ProjectSelectionSpec baseline,
+		ProjectProfileReference profile,
+		ProjectSelectionSpec overrides)
+	{
 
 		var (resolvedExclusions, hideSecrets) = ResolveExclusions(baseline, overrides);
 		var resolved = baseline with
@@ -42,7 +66,14 @@ public sealed class ProjectSelectionResolver(
 			CompressCode = overrides.CompressCode ?? baseline.CompressCode,
 			StripComments = overrides.StripComments ?? baseline.StripComments,
 			StripBlankLines = overrides.StripBlankLines ?? baseline.StripBlankLines,
-			ProfileSource = profile
+			ProfileSource = profile,
+			// Recorded before the call-level toggles are merged in. Both the MCP tools and the
+			// command line reach this one resolver, so per-file detail overrides get the same
+			// definition of "what the profile mandates" on either surface.
+			ProfileContentKinds = CodeTransformIdentity.Resolve(
+				baseline.CompressCode == true,
+				baseline.StripComments == true,
+				baseline.StripBlankLines == true)
 		};
 		var applyProfileValues = profile.Kind != ProjectProfileSourceKind.Local;
 		resolved = resolved with
@@ -95,12 +126,12 @@ public sealed class ProjectSelectionResolver(
 					RootsOverridden = overrides.Roots is not null,
 					ExtensionsOverridden = overrides.Extensions is not null,
 					IgnoreOptionsOverridden = overrides.GitMode is not null ||
-					                          overrides.Exclusions is not null ||
-					                          overrides.HideSecrets is not null ||
-					                          overrides.HidePrivateData is not null ||
-					                          overrides.CompressCode is not null ||
-						                          overrides.StripComments is not null ||
-						                          overrides.StripBlankLines is not null
+											  overrides.Exclusions is not null ||
+											  overrides.HideSecrets is not null ||
+											  overrides.HidePrivateData is not null ||
+											  overrides.CompressCode is not null ||
+												  overrides.StripComments is not null ||
+												  overrides.StripBlankLines is not null
 				}
 			};
 		}
@@ -114,10 +145,9 @@ public sealed class ProjectSelectionResolver(
 	{
 		var selected = overrides.Exclusions ?? baseline.Exclusions;
 		var legacyHideSecrets = selected?.Contains(ProjectExclusion.HideSecrets) == true;
-		var hideSecrets = overrides.HideSecrets ??
-		                  (overrides.Exclusions is not null
-			                  ? legacyHideSecrets
-			                  : baseline.HideSecrets ?? legacyHideSecrets);
+		var hideSecrets = overrides.HideSecrets ?? baseline.HideSecrets ?? legacyHideSecrets;
+		if (overrides.HideSecrets is null && legacyHideSecrets)
+			hideSecrets = true;
 		var pathExclusions = selected?
 			.Where(static exclusion => exclusion != ProjectExclusion.HideSecrets)
 			.OrderBy(static exclusion => (int)exclusion)
@@ -142,17 +172,34 @@ public sealed class ProjectSelectionResolver(
 
 	private ProjectSelectionSpec ResolveLocal(string projectPath)
 	{
-		if (!localProfileStore.TryLoadProfile(projectPath, out var profile))
-		{
-			throw new ProjectContextValidationException(
-				"DPX-CLI-PROFILE-NOT-FOUND",
-				"No local profile exists for this project.");
-		}
+		var lookup = localProfileStore.LookupProfile(projectPath, TimeSpan.FromSeconds(5));
+		if (lookup.Status != ProjectProfileLookupStatus.Found || lookup.Profile is null)
+			throw CreateLocalProfileFailure(lookup.Status);
 
-		var snapshot = ProjectSelectionProfileBuilder.Clone(profile);
+		var snapshot = ProjectSelectionProfileBuilder.Clone(lookup.Profile);
 		return ProjectSelectionAdapter.FromLegacyProfile(snapshot, ProjectProfileReference.Local) with
 		{
 			LocalProfileState = new LocalProjectSelectionState(snapshot)
 		};
 	}
+
+	private static ProjectContextValidationException CreateLocalProfileFailure(
+		ProjectProfileLookupStatus status) => status switch
+		{
+			ProjectProfileLookupStatus.Missing => new ProjectContextValidationException(
+				"DPX-CLI-PROFILE-NOT-FOUND",
+				"No local profile exists for this project."),
+			ProjectProfileLookupStatus.TemporarilyUnavailable => new ProjectContextValidationException(
+				"DPX-CLI-PROFILE-BUSY",
+				"The local profile store is temporarily unavailable; retry the command."),
+			ProjectProfileLookupStatus.InvalidStorage => new ProjectContextValidationException(
+				"DPX-CLI-PROFILE-CORRUPT",
+				"The local profile store is corrupt and must be recovered before use."),
+			ProjectProfileLookupStatus.UnsupportedFutureSchema => new ProjectContextValidationException(
+				"DPX-CLI-PROFILE-FUTURE-SCHEMA",
+				"The local profile store was written by a newer incompatible version."),
+			_ => new ProjectContextValidationException(
+				"DPX-CLI-PROFILE-INVALID",
+				"The local profile request is invalid.")
+		};
 }

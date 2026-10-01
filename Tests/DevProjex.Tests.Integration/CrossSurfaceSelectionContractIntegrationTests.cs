@@ -97,6 +97,8 @@ public sealed class CrossSurfaceSelectionContractIntegrationTests
 				"source files/services/api/dist/contracts.json",
 				"source files/src/-leading.cs",
 				"source files/src/Program.cs",
+				// The first repository now owns its scope; workspace-level rules do not leak inside.
+				"source files/src/ignored-by-git.cs",
 				"source files/src/файл.cs",
 				"source files/src/文档.md",
 				"кириллица/src/данные.cs",
@@ -123,7 +125,6 @@ public sealed class CrossSurfaceSelectionContractIntegrationTests
 			"source files/dist/manifest.json",
 			"source files/services/api/obj/project.assets.json",
 			"source files/src/empty.cs",
-			"source files/src/ignored-by-git.cs",
 			"source files/src/notes.tmp",
 			"кириллица/.venv/leak.cs",
 			"文档/target/leak.md",

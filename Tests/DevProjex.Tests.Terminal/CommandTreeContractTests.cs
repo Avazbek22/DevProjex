@@ -14,7 +14,7 @@ public sealed class CommandTreeContractTests
 		Assert.Equal(
 			[
 				"analyze", "cache", "completion", "doctor", "export", "help", "mcp", "open", "profile",
-				"recent", "tree", "tui", "ui"
+				"recent", "related", "search", "tree", "tui", "ui"
 			],
 			root.Subcommands
 				.Where(static command => !command.Hidden)
@@ -221,6 +221,30 @@ public sealed class CommandTreeContractTests
 	}
 
 	[Fact]
+	public async Task RussianSearchAndMcpHelpDescribeTheirOwnOptionsInRussian()
+	{
+		var searchEnvironment = new TestTerminalEnvironment { Width = 100 };
+		var searchExitCode = await new TerminalApplication(searchEnvironment).RunAsync(
+			["search", "--help", "--language", "ru"],
+			TestContext.Current.CancellationToken);
+		var mcpEnvironment = new TestTerminalEnvironment { Width = 100 };
+		var mcpExitCode = await new TerminalApplication(mcpEnvironment).RunAsync(
+			["mcp", "--help", "--language", "ru"],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, searchExitCode);
+		Assert.Contains("Искать в содержимом выбранных файлов", searchEnvironment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("имя символа", searchEnvironment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("Searches selected project content", searchEnvironment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("Interpret PATTERN", searchEnvironment.StandardOutput, StringComparison.Ordinal);
+		Assert.Equal(CommandLineExitCodes.Success, mcpExitCode);
+		Assert.Contains("базовый live-контекст", mcpEnvironment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("удалённые Git-хосты", mcpEnvironment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("Use the DevProjex window selection", mcpEnvironment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("remote Git hosts", mcpEnvironment.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task LocalizedValidatorKeepsItsSpecificMessage()
 	{
 		var environment = new TestTerminalEnvironment();
@@ -291,6 +315,7 @@ public sealed class CommandTreeContractTests
 	{
 		var root = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();
 		var analyze = root.Subcommands.Single(static command => command.Name == "analyze");
+		var related = root.Subcommands.Single(static command => command.Name == "related");
 		var tree = root.Subcommands.Single(static command => command.Name == "tree");
 		var export = root.Subcommands.Single(static command => command.Name == "export");
 		var context = export.Subcommands.Single(static command => command.Name == "context");
@@ -300,6 +325,8 @@ public sealed class CommandTreeContractTests
 		var open = root.Subcommands.Single(static command => command.Name == "open");
 
 		Assert.Contains(analyze.Options, static option => option.Name == "--max-file-bytes");
+		Assert.Contains(related.Options, static option => option.Name == "--max-file-bytes");
+		Assert.Contains(related.Options, static option => option.Name == "--depth");
 		Assert.Contains(tree.Options, static option => option.Name == "--max-file-bytes");
 		Assert.Contains(context.Options, static option => option.Name == "--max-file-bytes");
 		Assert.DoesNotContain(project.Options, static option => option.Name == "--max-file-bytes");
@@ -327,6 +354,28 @@ public sealed class CommandTreeContractTests
 		var parseResult = root.Parse(["open", "--last"]);
 
 		Assert.Empty(parseResult.Errors);
+	}
+
+	[Fact]
+	public void OpenForwardsOnlyATypedLanguageSoTheSavedDesktopLanguageWins()
+	{
+		var environment = new TestTerminalEnvironment
+		{
+			Variables = new Dictionary<string, string?> { ["DEVPROJEX_LANGUAGE"] = "de" }
+		};
+		var root = new DevProjexCommandTree(environment).Build();
+		var language = Assert.IsAssignableFrom<Option<AppLanguage>>(
+			root.Options.Single(static option => option.Name == "--language"));
+		var untyped = root.Parse(["open", "."]);
+
+		Assert.Equal(AppLanguage.De, untyped.GetValue(language));
+		Assert.Null(DevProjexCommandTree.GetExplicitLanguage(untyped, language));
+		Assert.Equal(
+			AppLanguage.Ru,
+			DevProjexCommandTree.GetExplicitLanguage(root.Parse(["open", ".", "--language", "ru"]), language));
+		Assert.Equal(
+			AppLanguage.Ru,
+			DevProjexCommandTree.GetExplicitLanguage(root.Parse(["--language", "ru", "open", "."]), language));
 	}
 
 	[Fact]

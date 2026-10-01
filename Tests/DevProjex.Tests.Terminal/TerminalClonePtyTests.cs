@@ -8,6 +8,80 @@ namespace DevProjex.Tests.Terminal;
 public sealed class TerminalClonePtyTests
 {
 	[Fact(Timeout = 120_000)]
+	public async Task ExplicitHttpsNetworkProfileOpensARealRemoteInTerminalWorkspace()
+	{
+		if (!string.Equals(
+			    Environment.GetEnvironmentVariable("DEVPROJEX_INTERNAL_HTTPS_TUI_PROBE"),
+			    "1",
+			    StringComparison.Ordinal))
+		{
+			Assert.Skip("Set DEVPROJEX_INTERNAL_HTTPS_TUI_PROBE=1 for the opt-in real-network probe.");
+			return;
+		}
+
+		using var welcomeDirectory = new TemporaryDirectory();
+		welcomeDirectory.WriteFile("notes.txt", "HTTPS clone probe");
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			welcomeDirectory.Path,
+			["--language", "en"],
+			columns: 120,
+			rows: 30,
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Choose a workspace action",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await StartCloneAsync(
+			terminal,
+			"https://github.com/octocat/Hello-World",
+			TestContext.Current.CancellationToken);
+		var workspace = await terminal.WaitForStableScreenAsync(
+			required: "DevProjex Terminal · Hello-World",
+			timeout: TimeSpan.FromSeconds(60),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains("Hello-World", workspace, StringComparison.Ordinal);
+		Assert.Contains("https://github.com/octocat/Hello-World", workspace, StringComparison.Ordinal);
+		Assert.False(terminal.HasExited);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(
+				cancellationToken: TestContext.Current.CancellationToken));
+	}
+
+	[Fact(Timeout = 120_000)]
+	public async Task ClonePromptOpensALocalFolderInPlace()
+	{
+		using var welcomeDirectory = new TemporaryDirectory();
+		welcomeDirectory.WriteFile("notes.txt", "local folder in the clone prompt");
+		var folder = welcomeDirectory.CreateDirectory("LocalSource");
+		welcomeDirectory.WriteFile("LocalSource/LocalSourceMarker.cs", "class LocalSourceMarker { }");
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			welcomeDirectory.Path,
+			["--language", "en"],
+			columns: 120,
+			rows: 30,
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Choose a workspace action",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await StartCloneAsync(terminal, folder, TestContext.Current.CancellationToken);
+		var workspace = await terminal.WaitForScreenAsync(
+			"LocalSourceMarker.cs",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.DoesNotContain("DPX-TUI-CLONE-FAILED", workspace, StringComparison.Ordinal);
+		Assert.DoesNotContain("file:///", workspace, StringComparison.Ordinal);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(
+				cancellationToken: TestContext.Current.CancellationToken));
+	}
+
+	[Fact(Timeout = 120_000)]
 	public async Task SshCloneCannotPromptThroughTheParentPty()
 	{
 		if (OperatingSystem.IsWindows())
@@ -23,12 +97,13 @@ public sealed class TerminalClonePtyTests
 		var batchMarker = Path.Combine(
 			fakeTransportRoot.Path,
 			"batch-mode-observed");
+		var escapedBatchMarker = batchMarker.Replace("'", "'\"'\"'", StringComparison.Ordinal);
 		File.WriteAllText(
 			fakeSsh,
 			"#!/bin/sh\n" +
 			"case \" $* \" in\n" +
 			"  *\" -o BatchMode=yes \"*)\n" +
-			"    printf '%s' batch > \"$DPX_FAKE_SSH_BATCH_MARKER\"\n" +
+			$"    printf '%s' batch > '{escapedBatchMarker}'\n" +
 			"    exit 73\n" +
 			"    ;;\n" +
 			"esac\n" +
@@ -54,7 +129,6 @@ public sealed class TerminalClonePtyTests
 			environment: new Dictionary<string, string>
 			{
 				["PATH"] = fakeBin + Path.PathSeparator + inheritedPath,
-				["DPX_FAKE_SSH_BATCH_MARKER"] = batchMarker,
 				["GIT_SSH_COMMAND"] = "interactive-user-override",
 				["GIT_SSH_VARIANT"] = "simple"
 			},
@@ -113,7 +187,8 @@ public sealed class TerminalClonePtyTests
 			["--language", "en"],
 			columns: 120,
 			rows: 30,
-			cancellationToken: TestContext.Current.CancellationToken);
+			cancellationToken: TestContext.Current.CancellationToken,
+			allowFileGitTransport: true);
 
 		await terminal.WaitForScreenAsync(
 			"Choose a workspace action",
@@ -135,10 +210,27 @@ public sealed class TerminalClonePtyTests
 			workspace,
 			StringComparison.Ordinal);
 
-		await terminal.SendAsync("3", TestContext.Current.CancellationToken);
-		var preview = await terminal.WaitForScreenAsync(
-			"internal sealed class PublishedCloneMarker",
+		// The tree can appear while the clone's follow-up work is still running, and the workspace
+		// rejects keys with a busy hint until it ends; the view key is idempotent, so repeat it.
+		await terminal.WaitForStableScreenAsync(
+			required: "PublishedCloneMarker.cs",
+			timeout: TimeSpan.FromSeconds(30),
 			cancellationToken: TestContext.Current.CancellationToken);
+		string? preview = null;
+		for (var attempt = 0; attempt < 3 && preview is null; attempt++)
+		{
+			await terminal.SendAsync("3", TestContext.Current.CancellationToken);
+			try
+			{
+				preview = await terminal.WaitForScreenAsync(
+					"internal sealed class PublishedCloneMarker",
+					timeout: TimeSpan.FromSeconds(10),
+					cancellationToken: TestContext.Current.CancellationToken);
+			}
+			catch (TimeoutException) when (attempt < 2)
+			{
+			}
+		}
 		Assert.Contains("PublishedCloneMarker.cs", preview, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 
@@ -170,7 +262,8 @@ public sealed class TerminalClonePtyTests
 			["--language", "en"],
 			columns: 120,
 			rows: 30,
-			cancellationToken: TestContext.Current.CancellationToken);
+			cancellationToken: TestContext.Current.CancellationToken,
+			allowFileGitTransport: true);
 		await terminal.WaitForScreenAsync(
 			"Choose a workspace action",
 			cancellationToken: TestContext.Current.CancellationToken);
@@ -199,7 +292,10 @@ public sealed class TerminalClonePtyTests
 			"NewView.qml",
 			timeout: TimeSpan.FromSeconds(30),
 			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendAsync("M", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenWithoutAsync(
+			"Repository updated and project context rebuilt.",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync("T", TestContext.Current.CancellationToken);
 		var parameters = await terminal.WaitForScreenAsync(
 			"[x] .qml",
 			timeout: TimeSpan.FromSeconds(30),
@@ -241,7 +337,8 @@ public sealed class TerminalClonePtyTests
 			["--language", "en"],
 			columns: 120,
 			rows: 30,
-			cancellationToken: TestContext.Current.CancellationToken);
+			cancellationToken: TestContext.Current.CancellationToken,
+			allowFileGitTransport: true);
 		await terminal.WaitForScreenAsync(
 			"Choose a workspace action",
 			cancellationToken: TestContext.Current.CancellationToken);
@@ -265,13 +362,16 @@ public sealed class TerminalClonePtyTests
 			timeout: TimeSpan.FromSeconds(30),
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.DoesNotContain("MainOnly.cs", feature, StringComparison.Ordinal);
+		await terminal.WaitForScreenWithoutAsync(
+			"Branch: feature",
+			cancellationToken: TestContext.Current.CancellationToken);
 
 		await terminal.SendAsync("3", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"internal sealed class FeatureOnly",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.False(terminal.HasExited);
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(
@@ -314,7 +414,8 @@ public sealed class TerminalClonePtyTests
 			["--language", "en"],
 			columns: 120,
 			rows: 30,
-			cancellationToken: TestContext.Current.CancellationToken);
+			cancellationToken: TestContext.Current.CancellationToken,
+			allowFileGitTransport: true);
 
 		await terminal.WaitForScreenAsync(
 			"Choose a workspace action",
@@ -423,7 +524,8 @@ public sealed class TerminalClonePtyTests
 			},
 			cancellationToken: TestContext.Current.CancellationToken,
 			initializeDataRoot: dataRoot => internalDataRoot = dataRoot,
-			useProgressCheckpointHost: true);
+			useProgressCheckpointHost: true,
+			allowFileGitTransport: true);
 
 		await terminal.WaitForScreenAsync(
 			"Choose a workspace action",
@@ -509,6 +611,80 @@ public sealed class TerminalClonePtyTests
 			originRoot.Path,
 			welcomeDirectory.Path);
 
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(
+				cancellationToken: TestContext.Current.CancellationToken));
+	}
+
+	[Fact(Timeout = 120_000)]
+	public async Task CloneProgressFollowsTerminalResize()
+	{
+		using var originRoot = new TemporaryDirectory();
+		var origin = originRoot.CreateDirectory("ResizeRepository");
+		File.WriteAllText(
+			Path.Combine(origin, "ResizeMarker.cs"),
+			"internal sealed class ResizeMarker {}",
+			new UTF8Encoding(false));
+		InitializeGitRepository(origin);
+		using var welcomeDirectory = new TemporaryDirectory();
+		welcomeDirectory.WriteFile("notes.txt", "markerless directory");
+		string? internalDataRoot = null;
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			welcomeDirectory.Path,
+			["--language", "en"],
+			columns: 120,
+			rows: 30,
+			environment: new Dictionary<string, string>
+			{
+				[TerminalProgressCheckpointProtocol.PhasesVariable] = "clone-connecting"
+			},
+			cancellationToken: TestContext.Current.CancellationToken,
+			initializeDataRoot: dataRoot => internalDataRoot = dataRoot,
+			useProgressCheckpointHost: true,
+			allowFileGitTransport: true);
+
+		await terminal.WaitForScreenAsync(
+			"Choose a workspace action",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await StartCloneAsync(
+			terminal,
+			new Uri(origin).AbsoluteUri,
+			TestContext.Current.CancellationToken);
+		await WaitForFileAsync(
+			Path.Combine(
+				internalDataRoot!,
+				TerminalProgressCheckpointProtocol.DirectoryName,
+				TerminalProgressCheckpointProtocol.GetReachedFileName("clone-connecting")),
+			TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Starting the existing Git clone engine.",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.ResizeAsync(72, 24, TestContext.Current.CancellationToken);
+		await WaitUntilAsync(
+			() => ShowsWholeCloneProgressFrame(terminal.CaptureScreen()),
+			TestContext.Current.CancellationToken);
+
+		await terminal.ResizeAsync(59, 19, TestContext.Current.CancellationToken);
+		await terminal.WaitForStableScreenAsync(
+			"Terminal too small",
+			forbidden: "Cloning repository",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.ResizeAsync(120, 30, TestContext.Current.CancellationToken);
+		await WaitUntilAsync(
+			() => terminal.CaptureScreen() is var screen &&
+				ShowsWholeCloneProgressFrame(screen) &&
+				!screen.Contains("Terminal too small", StringComparison.Ordinal),
+			TestContext.Current.CancellationToken);
+
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await WaitForStableScreenAsync(
+			terminal,
+			"Operation canceled",
+			TestContext.Current.CancellationToken);
+		Assert.False(terminal.HasExited);
 		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
@@ -687,6 +863,18 @@ public sealed class TerminalClonePtyTests
 		}
 
 		return Convert.ToHexString(hash.GetHashAndReset());
+	}
+
+	private static bool ShowsWholeCloneProgressFrame(string screen)
+	{
+		var rows = screen.Split('\n').Select(static row => row.TrimStart()).ToArray();
+		return rows.Any(static row =>
+				row.StartsWith("┌┤Cloning repository", StringComparison.Ordinal) &&
+				row.EndsWith('┐')) &&
+			rows.Any(static row =>
+				row.StartsWith("│  Esc or Ctrl+C cancels this operation", StringComparison.Ordinal) &&
+				row.EndsWith('│')) &&
+			rows.Any(static row => row.StartsWith('└') && row.EndsWith('┘'));
 	}
 
 	private static async Task WaitForFileAsync(

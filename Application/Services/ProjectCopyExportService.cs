@@ -13,6 +13,15 @@ public sealed class ProjectCopyExportService(
 {
 	private const int CopyBufferSize = 128 * 1024;
 	private const int MaximumConcurrentFolderCopies = 8;
+	private const UnixFileMode PrivateDirectoryMode =
+		UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+	private const UnixFileMode PrivateFileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+	private const UnixFileMode PortableFileMode =
+		UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead;
+	private const UnixFileMode PermissionBits =
+		UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+		UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute |
+		UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute;
 
 	/// <summary>
 	/// Named so it sorts to the top of a listing and cannot collide with a source file. It is never
@@ -21,6 +30,28 @@ public sealed class ProjectCopyExportService(
 	public const string TransformationNoticeFileName = "DEVPROJEX-NOTICE.txt";
 	private const int CleanupAttemptCount = 6;
 	private const int CleanupInitialDelayMilliseconds = 25;
+	internal const string SourceChangedDuringCopyMessage = "A source file changed during copy.";
+	internal const string SensitiveMetadataMessage =
+		"Protected project copy metadata contains sensitive data. No project copy was created.";
+
+	public async Task<ProjectCopyExportPreflightResult> PreflightAsync(
+		ProjectCopyExportRequest request,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(request);
+		var plan = planBuilder.Build(request, cancellationToken);
+		await ValidateProtectedMetadataAsync(plan, request, cancellationToken).ConfigureAwait(false);
+		ValidateSources(plan, cancellationToken);
+		await using var prepared = request.RedactSecrets || request.RedactPrivateData || request.CompressCode ||
+		                           request.StripComments || request.StripBlankLines
+			? await PrepareRedactedOutputAsync(plan, request, cancellationToken).ConfigureAwait(false)
+			: null;
+		var transformationNotice = BuildTransformationNotice(prepared, plan, request.NoticeText);
+		ValidateTransformationNoticeCollision(plan, transformationNotice);
+		return new ProjectCopyExportPreflightResult(
+			prepared?.UnscannableFiles ?? [],
+			prepared?.CompressionSnapshot);
+	}
 
 	public async Task<ProjectCopyExportResult> ExportAsync(
 		ProjectCopyExportRequest request,
@@ -31,6 +62,7 @@ public sealed class ProjectCopyExportService(
 		try
 		{
 			var plan = planBuilder.Build(request, cancellationToken);
+			await ValidateProtectedMetadataAsync(plan, request, cancellationToken).ConfigureAwait(false);
 			ValidateDestination(plan.ProjectRootPath, request.DestinationPath, request.Format);
 
 			ValidateSources(plan, cancellationToken);
@@ -104,6 +136,7 @@ public sealed class ProjectCopyExportService(
 		try
 		{
 			var plan = planBuilder.Build(request, cancellationToken);
+			await ValidateProtectedMetadataAsync(plan, request, cancellationToken).ConfigureAwait(false);
 			ValidateSources(plan, cancellationToken);
 			await using var prepared = request.RedactSecrets || request.RedactPrivateData || request.CompressCode ||
 			                           request.StripComments || request.StripBlankLines
@@ -126,7 +159,8 @@ public sealed class ProjectCopyExportService(
 				plan.DirectoryCount,
 				result.BytesWritten,
 				prepared?.Snapshot?.RedactedCount ?? 0,
-				prepared?.UnscannableFiles ?? []);
+				prepared?.UnscannableFiles ?? [],
+				prepared?.CompressionSnapshot);
 		}
 		catch (Exception exception) when (exception is not OperationCanceledException and not ProjectCopyExportException)
 		{
@@ -146,6 +180,58 @@ public sealed class ProjectCopyExportService(
 				IOException => ExportFailure(ProjectCopyExportError.IoFailure, exception),
 				_ => ExportFailure(ProjectCopyExportError.UnexpectedFailure, exception)
 			};
+		}
+	}
+
+	private async Task ValidateProtectedMetadataAsync(
+		ProjectCopyExportPlan plan,
+		ProjectCopyExportRequest request,
+		CancellationToken cancellationToken)
+	{
+		var context = CreateRedactionContext(plan.ProjectRootPath, request);
+		if (context is null)
+			return;
+
+		try
+		{
+			await context.EnsureWarmUpAsync(cancellationToken).ConfigureAwait(false);
+			var scope = context.Session.CreateDetectorScope(plan.ProjectRootPath, context.Features);
+			var inspectionBudget = new SecretFileInspectionBudget();
+			var relativeProbePath = ".devprojex-export-metadata.txt";
+			var fullProbePath = Path.Combine(plan.ProjectRootPath, relativeProbePath);
+			if (ContainsSensitiveData(request.ProjectName) ||
+			    ContainsSensitiveData(plan.ProjectName) ||
+			    plan.Entries.Any(entry => ContainsSensitiveData(entry.RelativePath)))
+			{
+				throw new ProjectCopyExportException(
+					ProjectCopyExportError.SecretDetectionFailed,
+					SensitiveMetadataMessage);
+			}
+
+			bool ContainsSensitiveData(string value)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				return scope.Detect(
+					fullProbePath,
+					relativeProbePath,
+					value.AsSpan(),
+					inspectionBudget,
+					cancellationToken).Count > 0;
+			}
+		}
+		catch (OperationCanceledException)
+		{
+			throw;
+		}
+		catch (ProjectCopyExportException)
+		{
+			throw;
+		}
+		catch (Exception)
+		{
+			throw new ProjectCopyExportException(
+				ProjectCopyExportError.SecretDetectionFailed,
+				SensitiveMetadataMessage);
 		}
 	}
 
@@ -204,9 +290,7 @@ public sealed class ProjectCopyExportService(
 		if (transformationNotice is null)
 			return;
 
-		var sourceNoticePath = Path.Combine(plan.ProjectRootPath, TransformationNoticeFileName);
-		if (!Path.Exists(sourceNoticePath) &&
-		    !plan.Entries.Any(static entry =>
+		if (!plan.Entries.Any(static entry =>
 			    PathComparer.Default.Equals(entry.RelativePath, TransformationNoticeFileName)))
 		{
 			return;
@@ -267,7 +351,7 @@ public sealed class ProjectCopyExportService(
 			CreateRedactionContext(plan.ProjectRootPath, request));
 		return context is null
 			? null
-			: await preparer.PrepareAsync(context, files, cancellationToken).ConfigureAwait(false);
+			: await preparer.PrepareForProjectCopyAsync(context, files, cancellationToken).ConfigureAwait(false);
 	}
 
 	private static string ResolveUnscannableReason(
@@ -276,6 +360,7 @@ public sealed class ProjectCopyExportService(
 	{
 		FileContentClassification.TooLarge => noticeText.TooLargeReason,
 		FileContentClassification.Unreadable => noticeText.UnreadableReason,
+		FileContentClassification.AccessDenied => noticeText.UnreadableReason,
 		FileContentClassification.UnsupportedEncoding => noticeText.UnsupportedEncodingReason,
 		_ => throw new ArgumentOutOfRangeException(nameof(classification), classification, null)
 	};
@@ -383,13 +468,21 @@ public sealed class ProjectCopyExportService(
 
 		try
 		{
-			Directory.CreateDirectory(stagingPath);
+			CreatePrivateDirectory(stagingPath);
+			ValidateStagingDirectory(stagingPath, stagingPath);
 			ValidateDestinationOutsideSource(plan.ProjectRootPath, stagingPath);
 			foreach (var directory in plan.Entries.Where(static entry => entry.IsDirectory))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
 				var destination = ResolveDestinationPath(stagingPath, directory.RelativePath);
-				Directory.CreateDirectory(destination);
+				if (!PathComparer.Default.Equals(destination, stagingPath))
+				{
+					ValidateStagingDirectory(stagingPath, Path.GetDirectoryName(destination)!);
+					if (AtomicFileCommit.DestinationEntryExists(destination))
+						throw UnsafeDestination($"A staging directory entry already exists: {destination}");
+					CreatePrivateDirectory(destination);
+					ValidateStagingDirectory(stagingPath, destination);
+				}
 				processedEntries++;
 				ReportProgress(progress, processedEntries, totalEntries, bytesWritten);
 			}
@@ -415,13 +508,16 @@ public sealed class ProjectCopyExportService(
 			cancellationToken.ThrowIfCancellationRequested();
 			if (transformationNotice is { } notice)
 			{
-				await File.WriteAllTextAsync(
-						Path.Combine(stagingPath, TransformationNoticeFileName),
-						notice,
-						new UTF8Encoding(false),
-						cancellationToken)
-					.ConfigureAwait(false);
+				var noticePath = Path.Combine(stagingPath, TransformationNoticeFileName);
+				ValidateStagingDirectory(stagingPath, stagingPath);
+				await using (var noticeStream = OpenDestinationFile(noticePath))
+				await using (var noticeWriter = new StreamWriter(noticeStream, new UTF8Encoding(false)))
+					await noticeWriter.WriteAsync(notice.AsMemory(), cancellationToken).ConfigureAwait(false);
+				ValidateStagingDirectory(stagingPath, stagingPath);
+				SetFinalUnixMode(noticePath, PortableFileMode);
 			}
+			ValidateStagedDirectories(plan, stagingPath);
+			ApplyFinalFolderModes(plan, stagingPath);
 
 			var finalPath = destinationMode == ProjectCopyDestinationMode.Exact
 				? MoveStagingDirectoryToExactPath(
@@ -447,7 +543,8 @@ public sealed class ProjectCopyExportService(
 				plan.DirectoryCount,
 				bytesWritten,
 				prepared?.Snapshot?.RedactedCount ?? 0,
-				prepared?.UnscannableFiles ?? []);
+				prepared?.UnscannableFiles ?? [],
+				prepared?.CompressionSnapshot);
 		}
 		catch (Exception exception)
 		{
@@ -502,7 +599,10 @@ public sealed class ProjectCopyExportService(
 			requestedDestinationDirectory);
 		EnsureDestinationDirectoryExists(destinationDirectory);
 		destinationDirectory = ResolveSafeDestinationOutsideSource(plan.ProjectRootPath, destinationDirectory);
-		var destinationPath = Path.Combine(destinationDirectory, Path.GetFileName(requestedDestinationPath));
+		var requestedFileName = Path.GetFileName(requestedDestinationPath);
+		var destinationPath = destinationMode == ProjectCopyDestinationMode.AutomaticName
+			? ResolveAvailableZipPath(destinationDirectory, requestedFileName)
+			: Path.Combine(destinationDirectory, requestedFileName);
 		ValidateDestinationOutsideSource(plan.ProjectRootPath, destinationPath);
 		if (destinationMode == ProjectCopyDestinationMode.Exact &&
 		    conflictPolicy == ProjectCopyConflictPolicy.Fail)
@@ -530,6 +630,7 @@ public sealed class ProjectCopyExportService(
 					var entryName = BuildZipEntryName(plan.ProjectName, directory.RelativePath, isDirectory: true);
 					var entry = archive.CreateEntry(entryName, CompressionLevel.NoCompression);
 					TrySetZipLastWriteTime(entry, directory.SourcePath);
+					SetZipUnixMode(entry, directory.SourcePath, isDirectory: true);
 					processedEntries++;
 					ReportProgress(progress, processedEntries, totalEntries, bytesWritten);
 				}
@@ -547,6 +648,7 @@ public sealed class ProjectCopyExportService(
 					var entryName = BuildZipEntryName(plan.ProjectName, file.RelativePath, isDirectory: false);
 					var entry = archive.CreateEntry(entryName, CompressionLevel.Optimal);
 					TrySetZipLastWriteTime(entry, file.SourcePath);
+					SetZipUnixMode(entry, file.SourcePath, isDirectory: false);
 					var preparedFile = prepared?.GetFile(file.SourcePath);
 					var contentPath = preparedFile?.ContentPath ?? file.SourcePath;
 					await using var source = OpenValidatedSourceFile(
@@ -554,9 +656,10 @@ public sealed class ProjectCopyExportService(
 						file.SourcePath,
 						contentPath,
 						preparedFile);
+					var sourceIdentity = CapturePassThroughSourceIdentity(preparedFile, source);
 					await using var destination = entry.Open();
 					var copiedBytes = await CopyStreamAsync(source, destination, buffer, cancellationToken).ConfigureAwait(false);
-					ValidatePreparedSourceVersion(preparedFile, source);
+					ValidateSourceVersion(preparedFile, source, sourceIdentity);
 					bytesWritten += copiedBytes;
 					processedEntries++;
 					processedFiles++;
@@ -571,6 +674,7 @@ public sealed class ProjectCopyExportService(
 					var noticeEntry = archive.CreateEntry(
 						BuildZipEntryName(plan.ProjectName, TransformationNoticeFileName, isDirectory: false),
 						CompressionLevel.Optimal);
+					SetZipUnixMode(noticeEntry, PortableFileMode, isDirectory: false);
 					await using var noticeStream = noticeEntry.Open();
 					await using var noticeWriter = new StreamWriter(noticeStream, new UTF8Encoding(false));
 					await noticeWriter.WriteAsync(notice.AsMemory(), cancellationToken).ConfigureAwait(false);
@@ -578,22 +682,32 @@ public sealed class ProjectCopyExportService(
 			}
 
 			cancellationToken.ThrowIfCancellationRequested();
-			ValidateDestinationOutsideSource(plan.ProjectRootPath, stagingPath);
-			ValidateDestinationOutsideSource(plan.ProjectRootPath, destinationPath);
-			cancellationToken.ThrowIfCancellationRequested();
-			try
+			while (true)
 			{
-				var overwrite = destinationMode == ProjectCopyDestinationMode.AutomaticName ||
-				                conflictPolicy == ProjectCopyConflictPolicy.ReplaceAtomically;
-				CommitZipArchive(stagingPath, destinationPath, overwrite);
-			}
-			catch (IOException exception) when (AtomicFileCommit.DestinationEntryExists(destinationPath))
-			{
-				throw DestinationConflict(
-					ResolveReportedDestinationPath(
-						requestedDestinationPath,
-						destinationPath),
-					exception);
+				ValidateDestinationOutsideSource(plan.ProjectRootPath, stagingPath);
+				ValidateDestinationOutsideSource(plan.ProjectRootPath, destinationPath);
+				cancellationToken.ThrowIfCancellationRequested();
+				try
+				{
+					var overwrite = destinationMode == ProjectCopyDestinationMode.Exact &&
+					                conflictPolicy == ProjectCopyConflictPolicy.ReplaceAtomically;
+					CommitZipArchive(stagingPath, destinationPath, overwrite);
+					break;
+				}
+				catch (IOException exception) when (AtomicFileCommit.DestinationEntryExists(destinationPath))
+				{
+					if (destinationMode == ProjectCopyDestinationMode.AutomaticName)
+					{
+						destinationPath = ResolveAvailableZipPath(destinationDirectory, requestedFileName);
+						continue;
+					}
+
+					throw DestinationConflict(
+						ResolveReportedDestinationPath(
+							requestedDestinationPath,
+							destinationPath),
+						exception);
+				}
 			}
 			var reportedPath = ResolveReportedDestinationPath(requestedDestinationPath, destinationPath);
 			return new ProjectCopyExportResult(
@@ -602,7 +716,8 @@ public sealed class ProjectCopyExportService(
 				plan.DirectoryCount,
 				bytesWritten,
 				prepared?.Snapshot?.RedactedCount ?? 0,
-				prepared?.UnscannableFiles ?? []);
+				prepared?.UnscannableFiles ?? [],
+				prepared?.CompressionSnapshot);
 		}
 		catch (Exception exception)
 		{
@@ -657,6 +772,7 @@ public sealed class ProjectCopyExportService(
 				var entryName = BuildZipEntryName(plan.ProjectName, directory.RelativePath, isDirectory: true);
 				var entry = archive.CreateEntry(entryName, CompressionLevel.NoCompression);
 				TrySetZipLastWriteTime(entry, directory.SourcePath);
+				SetZipUnixMode(entry, directory.SourcePath, isDirectory: true);
 				processedEntries++;
 				ReportProgress(progress, processedEntries, totalEntries, bytesWritten);
 			}
@@ -674,6 +790,7 @@ public sealed class ProjectCopyExportService(
 				var entryName = BuildZipEntryName(plan.ProjectName, file.RelativePath, isDirectory: false);
 				var entry = archive.CreateEntry(entryName, CompressionLevel.Optimal);
 				TrySetZipLastWriteTime(entry, file.SourcePath);
+				SetZipUnixMode(entry, file.SourcePath, isDirectory: false);
 				var preparedFile = prepared?.GetFile(file.SourcePath);
 				var contentPath = preparedFile?.ContentPath ?? file.SourcePath;
 				await using var source = OpenValidatedSourceFile(
@@ -681,10 +798,11 @@ public sealed class ProjectCopyExportService(
 					file.SourcePath,
 					contentPath,
 					preparedFile);
+				var sourceIdentity = CapturePassThroughSourceIdentity(preparedFile, source);
 				await using var entryDestination = entry.Open();
 				var copiedBytes = await CopyStreamAsync(source, entryDestination, buffer, cancellationToken)
 					.ConfigureAwait(false);
-				ValidatePreparedSourceVersion(preparedFile, source);
+				ValidateSourceVersion(preparedFile, source, sourceIdentity);
 				bytesWritten += copiedBytes;
 				processedEntries++;
 				processedFiles++;
@@ -699,6 +817,7 @@ public sealed class ProjectCopyExportService(
 				var noticeEntry = archive.CreateEntry(
 					BuildZipEntryName(plan.ProjectName, TransformationNoticeFileName, isDirectory: false),
 					CompressionLevel.Optimal);
+				SetZipUnixMode(noticeEntry, PortableFileMode, isDirectory: false);
 				await using var noticeStream = noticeEntry.Open();
 				await using var noticeWriter = new StreamWriter(noticeStream, new UTF8Encoding(false));
 				await noticeWriter.WriteAsync(notice.AsMemory(), cancellationToken).ConfigureAwait(false);
@@ -1292,11 +1411,25 @@ public sealed class ProjectCopyExportService(
 		}
 	}
 
-	private static string ResolveAvailableDirectoryPath(string parentPath, string baseName)
+	private static string ResolveAvailableDirectoryPath(string parentPath, string baseName) =>
+		ResolveAvailableDestinationPath(parentPath, baseName, string.Empty);
+
+	private static string ResolveAvailableZipPath(string parentPath, string fileName) =>
+		ResolveAvailableDestinationPath(
+			parentPath,
+			Path.GetFileNameWithoutExtension(fileName),
+			Path.GetExtension(fileName));
+
+	private static string ResolveAvailableDestinationPath(
+		string parentPath,
+		string baseName,
+		string extension)
 	{
 		for (var suffix = 1; ; suffix++)
 		{
-			var name = suffix == 1 ? baseName : $"{baseName} ({suffix})";
+			var name = suffix == 1
+				? baseName + extension
+				: $"{baseName} ({suffix}){extension}";
 			var candidate = Path.Combine(parentPath, name);
 			if (!AtomicFileCommit.DestinationEntryExists(candidate))
 				return candidate;
@@ -1427,7 +1560,8 @@ public sealed class ProjectCopyExportService(
 			return default;
 
 		var destination = ResolveDestinationPath(stagingPath, file.RelativePath);
-		Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+		var destinationDirectory = Path.GetDirectoryName(destination)!;
+		ValidateStagingDirectory(stagingPath, destinationDirectory);
 		var preparedFile = prepared?.GetFile(file.SourcePath);
 		var contentPath = preparedFile?.ContentPath ?? file.SourcePath;
 		var copiedBytes = await CopyFileAsync(
@@ -1438,7 +1572,9 @@ public sealed class ProjectCopyExportService(
 			destination,
 			buffer,
 			cancellationToken).ConfigureAwait(false);
+		ValidateStagingDirectory(stagingPath, destinationDirectory);
 		TryCopyLastWriteTime(file.SourcePath, destination);
+		SetFinalUnixMode(destination, GetSafeUnixMode(file.SourcePath, isDirectory: false));
 		return new FolderCopyEntryResult(true, copiedBytes);
 	}
 
@@ -1498,9 +1634,10 @@ public sealed class ProjectCopyExportService(
 			originalSourcePath,
 			contentPath,
 			preparedFile);
+		var sourceIdentity = CapturePassThroughSourceIdentity(preparedFile, source);
 		await using var destination = OpenDestinationFile(destinationPath);
 		var copiedBytes = await CopyStreamAsync(source, destination, buffer, cancellationToken).ConfigureAwait(false);
-		ValidatePreparedSourceVersion(preparedFile, source);
+		ValidateSourceVersion(preparedFile, source, sourceIdentity);
 		return copiedBytes;
 	}
 
@@ -1573,11 +1710,17 @@ public sealed class ProjectCopyExportService(
 		CancellationToken cancellationToken)
 	{
 		long copiedBytes = 0;
+		var firstRead = true;
 		while (true)
 		{
 			var read = await source.ReadAsync(buffer.AsMemory(0, CopyBufferSize), cancellationToken).ConfigureAwait(false);
 			if (read == 0)
 				return copiedBytes;
+			if (firstRead)
+			{
+				firstRead = false;
+				ProjectCopyExportTestHooks.AfterFirstSourceRead.Value?.Invoke();
+			}
 
 			await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
 			copiedBytes += read;
@@ -1592,13 +1735,45 @@ public sealed class ProjectCopyExportService(
 		CopyBufferSize,
 		FileOptions.Asynchronous | FileOptions.SequentialScan);
 
-	private static FileStream OpenDestinationFile(string path) => new(
-		path,
-		FileMode.CreateNew,
-		FileAccess.Write,
-		FileShare.None,
-		CopyBufferSize,
-		FileOptions.Asynchronous | FileOptions.SequentialScan);
+	private static FileStream OpenDestinationFile(string path)
+	{
+		var options = new FileStreamOptions
+		{
+			Mode = FileMode.CreateNew,
+			Access = FileAccess.Write,
+			Share = FileShare.None,
+			BufferSize = CopyBufferSize,
+			Options = FileOptions.Asynchronous | FileOptions.SequentialScan
+		};
+		if (!OperatingSystem.IsWindows())
+			options.UnixCreateMode = PrivateFileMode;
+		return new FileStream(path, options);
+	}
+
+	private static FileContentIdentity? CapturePassThroughSourceIdentity(
+		PreparedSecretFile? preparedFile,
+		FileStream source)
+	{
+		if (preparedFile is not null)
+			return null;
+		return FileContentIdentity.TryCapture(source) ??
+		       throw SourceUnavailable(SourceChangedDuringCopyMessage);
+	}
+
+	private static void ValidateSourceVersion(
+		PreparedSecretFile? preparedFile,
+		FileStream source,
+		FileContentIdentity? passThroughIdentity)
+	{
+		ValidatePreparedSourceVersion(preparedFile, source);
+		if (preparedFile is not null)
+			return;
+		if (passThroughIdentity is not { } expected ||
+		    FileContentIdentity.TryCapture(source) != expected)
+		{
+			throw SourceUnavailable(SourceChangedDuringCopyMessage);
+		}
+	}
 
 	private static string BuildZipEntryName(string projectName, string relativePath, bool isDirectory)
 	{
@@ -1651,6 +1826,95 @@ public sealed class ProjectCopyExportService(
 		{
 			// ZIP timestamps have a narrower supported range than filesystem timestamps.
 		}
+	}
+
+	private static void CreatePrivateDirectory(string path)
+	{
+		Directory.CreateDirectory(path);
+		if (!OperatingSystem.IsWindows())
+			File.SetUnixFileMode(path, PrivateDirectoryMode);
+	}
+
+	private static void ValidateStagedDirectories(ProjectCopyExportPlan plan, string stagingPath)
+	{
+		ValidateStagingDirectory(stagingPath, stagingPath);
+		foreach (var directory in plan.Entries.Where(static entry => entry.IsDirectory))
+		{
+			var destination = ResolveDestinationPath(stagingPath, directory.RelativePath);
+			ValidateStagingDirectory(stagingPath, destination);
+		}
+	}
+
+	private static void ValidateStagingDirectory(string stagingPath, string directoryPath)
+	{
+		if (!PathUtility.IsPathInside(directoryPath, stagingPath))
+			throw UnsafeDestination($"A staging directory escapes the export directory: {directoryPath}");
+
+		var currentPath = stagingPath;
+		ValidateStagingDirectorySegment(currentPath);
+		var relativePath = Path.GetRelativePath(stagingPath, directoryPath);
+		if (relativePath == ".")
+			return;
+
+		foreach (var segment in relativePath.Split(
+			         [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+			         StringSplitOptions.RemoveEmptyEntries))
+		{
+			currentPath = Path.Combine(currentPath, segment);
+			ValidateStagingDirectorySegment(currentPath);
+		}
+	}
+
+	private static void ValidateStagingDirectorySegment(string path)
+	{
+		FileAttributes attributes;
+		try
+		{
+			attributes = File.GetAttributes(path);
+		}
+		catch (Exception exception) when (exception is
+			       IOException or UnauthorizedAccessException or NotSupportedException)
+		{
+			throw UnsafeDestination($"A staging directory cannot be inspected safely: {path}", exception);
+		}
+
+		if ((attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != FileAttributes.Directory)
+			throw UnsafeDestination($"A staging directory is not an ordinary directory: {path}");
+	}
+
+	private static void ApplyFinalFolderModes(ProjectCopyExportPlan plan, string stagingPath)
+	{
+		if (OperatingSystem.IsWindows())
+			return;
+		foreach (var directory in plan.Entries.Where(static entry => entry.IsDirectory)
+		         .OrderByDescending(static entry => entry.RelativePath.Length))
+		{
+			var destination = ResolveDestinationPath(stagingPath, directory.RelativePath);
+			SetFinalUnixMode(destination, GetSafeUnixMode(directory.SourcePath, isDirectory: true));
+		}
+		SetFinalUnixMode(stagingPath, GetSafeUnixMode(plan.ProjectRootPath, isDirectory: true));
+	}
+
+	private static UnixFileMode GetSafeUnixMode(string sourcePath, bool isDirectory)
+	{
+		if (OperatingSystem.IsWindows())
+			return isDirectory ? PrivateDirectoryMode : PrivateFileMode;
+		return File.GetUnixFileMode(sourcePath) & PermissionBits;
+	}
+
+	private static void SetFinalUnixMode(string path, UnixFileMode mode)
+	{
+		if (!OperatingSystem.IsWindows())
+			File.SetUnixFileMode(path, mode & PermissionBits);
+	}
+
+	private static void SetZipUnixMode(ZipArchiveEntry entry, string sourcePath, bool isDirectory) =>
+		SetZipUnixMode(entry, GetSafeUnixMode(sourcePath, isDirectory), isDirectory);
+
+	private static void SetZipUnixMode(ZipArchiveEntry entry, UnixFileMode mode, bool isDirectory)
+	{
+		var fileType = isDirectory ? 0x4000 : 0x8000;
+		entry.ExternalAttributes = unchecked((fileType | (int)(mode & PermissionBits)) << 16);
 	}
 
 	private static async Task DeleteStagingDirectoryAsync(string path)

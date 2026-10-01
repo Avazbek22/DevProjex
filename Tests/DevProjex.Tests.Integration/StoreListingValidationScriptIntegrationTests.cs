@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using DevProjex.Tests.Shared.StoreListing;
 
 namespace DevProjex.Tests.Integration;
@@ -50,6 +51,197 @@ public sealed class StoreListingValidationScriptIntegrationTests
             "TUI capture language 'xx' has no application localization catalog.",
             result.StandardError + result.StandardOutput,
             StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GenerateStoreScreenshots_PlanOnly_ResolvesTargetedLanguagesScenesAndAgentSessions()
+    {
+        var result = RunPowerShellScript(
+            Path.Combine(RepoRoot.Value, "Scripts", "generate-store-screenshots.ps1"),
+            ["-PlanOnly", "-Languages", "ru,en"]);
+
+        Assert.True(
+            result.ExitCode == 0,
+            $"GUI capture planning failed.{Environment.NewLine}STDOUT:{Environment.NewLine}{result.StandardOutput}{Environment.NewLine}STDERR:{Environment.NewLine}{result.StandardError}");
+        Assert.Contains("Application captures: en, ru", result.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains(
+            "GUI scenes: Tree_Preview, Live_Context, Mcp_Menu, Agent_Journal, Tree_Preview_Settings",
+            result.StandardOutput,
+            StringComparison.Ordinal);
+        Assert.Contains("Agent sessions: claude-code, codex, claude-code", result.StandardOutput, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("3_Mcp_Menu", "GUI scenes: Mcp_Menu")]
+    [InlineData("3", "GUI scenes: Mcp_Menu")]
+    [InlineData("agent_journal,1", "GUI scenes: Tree_Preview, Agent_Journal")]
+    public void GenerateStoreScreenshots_PlanOnly_SelectsScenesByDirectoryIndexOrName(
+        string scenes,
+        string expectedLine)
+    {
+        var result = RunPowerShellScript(
+            Path.Combine(RepoRoot.Value, "Scripts", "generate-store-screenshots.ps1"),
+            ["-PlanOnly", "-Languages", "ru,en", "-Scenes", scenes]);
+
+        Assert.True(
+            result.ExitCode == 0,
+            $"GUI capture planning failed.{Environment.NewLine}STDOUT:{Environment.NewLine}{result.StandardOutput}{Environment.NewLine}STDERR:{Environment.NewLine}{result.StandardError}");
+        Assert.Contains("Application captures: en, ru", result.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains(expectedLine + Environment.NewLine, result.StandardOutput, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GenerateStoreScreenshots_PlanOnly_RejectsUnknownScene()
+    {
+        var result = RunPowerShellScript(
+            Path.Combine(RepoRoot.Value, "Scripts", "generate-store-screenshots.ps1"),
+            ["-PlanOnly", "-Scenes", "6_Terminal_Workspace"]);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains(
+            WithoutConsoleWrapping("GUI scene '6_Terminal_Workspace' is not declared in store-screenshots.json."),
+            WithoutConsoleWrapping(result.StandardError + result.StandardOutput),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void StoreGuiCapture_AcknowledgesUnselectedScenesWithoutSavingThem()
+    {
+        var script = File.ReadAllText(Path.Combine(RepoRoot.Value, "Scripts", "generate-store-screenshots.ps1"));
+        var skipIndex = script.IndexOf("$SelectedScenes | Where-Object", StringComparison.Ordinal);
+        var saveIndex = script.IndexOf("Save-DesktopRegion $captureRegion $destination", StringComparison.Ordinal);
+
+        Assert.True(skipIndex > 0, "The capture loop must check the scene selection.");
+        Assert.True(saveIndex > skipIndex, "Unselected scenes must be acknowledged before any pixels are saved.");
+        var skipBlock = script[skipIndex..saveIndex];
+        Assert.Contains("captured-$stem", skipBlock, StringComparison.Ordinal);
+        Assert.Contains("continue", skipBlock, StringComparison.Ordinal);
+        Assert.Contains("New-ContactSheet $screenshotRoot $captureLanguages $captureScenes", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GenerateStoreScreenshots_PlanOnly_RejectsUnknownLanguage()
+    {
+        var result = RunPowerShellScript(
+            Path.Combine(RepoRoot.Value, "Scripts", "generate-store-screenshots.ps1"),
+            ["-PlanOnly", "-Languages", "xx"]);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains(
+            "GUI capture language 'xx' has no application localization catalog.",
+            result.StandardError + result.StandardOutput,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void StoreGuiScreenshotManifest_MatchesTheScenesTheCaptureModeProduces()
+    {
+        using var document = JsonDocument.Parse(File.ReadAllText(Path.Combine(
+            RepoRoot.Value,
+            "Packaging",
+            "Windows",
+            "StoreListing",
+            "store-screenshots.json")));
+        var captureSource = string.Join(
+            Environment.NewLine,
+            Directory
+                .EnumerateFiles(Path.Combine(RepoRoot.Value, "Apps", "Avalonia"), "MainWindow.StoreScreenshot*.cs")
+                .Select(File.ReadAllText));
+
+        var scenes = document.RootElement.GetProperty("scenes").EnumerateArray().ToArray();
+        Assert.Equal([1, 2, 3, 4, 5], scenes.Select(scene => scene.GetProperty("index").GetInt32()));
+        foreach (var scene in scenes)
+        {
+            var index = scene.GetProperty("index").GetInt32();
+            var name = scene.GetProperty("name").GetString()!;
+            Assert.Equal($"{index}_{name}", scene.GetProperty("directory").GetString());
+            Assert.Matches(
+                new Regex($@"CaptureStoreSceneAsync\(\s*request,\s*{index},\s*""{Regex.Escape(name)}"""),
+                captureSource);
+        }
+    }
+
+    [Fact]
+    public void StoreGuiAgentSessions_ReferenceExistingProjectPaths()
+    {
+        // The capture project is a snapshot of this repository, so a renamed file would only
+        // surface as a failed scripted MCP call in the middle of a desktop capture run.
+        using var document = JsonDocument.Parse(File.ReadAllText(Path.Combine(
+            RepoRoot.Value,
+            "Packaging",
+            "Windows",
+            "StoreListing",
+            "store-screenshots.json")));
+        var agentSessions = document.RootElement.GetProperty("agentSessions");
+        var referencedPaths = agentSessions
+            .GetProperty("liveSelection")
+            .EnumerateArray()
+            .Select(static path => path.GetString()!)
+            .ToList();
+        var sessions = agentSessions.GetProperty("earlier").EnumerateArray()
+            .Append(agentSessions.GetProperty("live"))
+            .ToArray();
+        foreach (var session in sessions)
+        {
+            Assert.False(string.IsNullOrWhiteSpace(session.GetProperty("clientName").GetString()));
+            var calls = session.GetProperty("calls").EnumerateArray().ToArray();
+            Assert.NotEmpty(calls);
+            foreach (var arguments in calls.Select(static call => call.GetProperty("arguments")))
+                CollectArgumentPaths(arguments, referencedPaths);
+        }
+
+        Assert.Equal("claude-code", agentSessions.GetProperty("live").GetProperty("clientName").GetString());
+        Assert.NotEmpty(referencedPaths);
+        foreach (var relativePath in referencedPaths)
+        {
+            var fullPath = StoreListingPaths.CombineRelativePath(RepoRoot.Value, relativePath);
+            Assert.True(
+                File.Exists(fullPath) || Directory.Exists(fullPath),
+                $"Store capture agent session path does not exist: {relativePath}");
+        }
+    }
+
+    [Fact]
+    public void StoreGuiCapture_RunsScriptedMcpSessionsOnlyInsideTheIsolatedDataRoot()
+    {
+        var captureScript = File.ReadAllText(Path.Combine(
+            RepoRoot.Value,
+            "Scripts",
+            "generate-store-screenshots.ps1"));
+
+        Assert.Contains(
+            "$startInfo.EnvironmentVariables[\"DEVPROJEX_INTERNAL_DATA_ROOT\"] = $DataRoot",
+            captureScript,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "$startInfo.EnvironmentVariables[\"DEVPROJEX_INTERNAL_DATA_ROOT\"] = $appData",
+            captureScript,
+            StringComparison.Ordinal);
+        Assert.Contains("\"mcp --root \"", captureScript, StringComparison.Ordinal);
+        Assert.DoesNotContain("mcp connect", captureScript, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("OnMcpConnect", captureScript, StringComparison.Ordinal);
+    }
+
+    private static void CollectArgumentPaths(JsonElement element, List<string> paths)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                foreach (var property in element.EnumerateObject())
+                {
+                    if (property.Name == "path" && property.Value.ValueKind == JsonValueKind.String)
+                        paths.Add(property.Value.GetString()!);
+                    else if (property.Name == "paths")
+                        paths.AddRange(property.Value.EnumerateArray().Select(static path => path.GetString()!));
+                    else
+                        CollectArgumentPaths(property.Value, paths);
+                }
+                break;
+            case JsonValueKind.Array:
+                foreach (var item in element.EnumerateArray())
+                    CollectArgumentPaths(item, paths);
+                break;
+        }
     }
 
     [Fact]
@@ -242,6 +434,11 @@ public sealed class StoreListingValidationScriptIntegrationTests
         Assert.NotEqual(0, result.ExitCode);
         Assert.Contains("SLP026", result.StandardError + result.StandardOutput, StringComparison.Ordinal);
     }
+
+    // PowerShell's concise error view wraps long messages to the console width and prefixes each
+    // continuation with "| " (macOS runners wrap at 80 columns), so compare without layout characters.
+    private static string WithoutConsoleWrapping(string text) =>
+        Regex.Replace(Regex.Replace(text, @"\x1B\[[0-9;]*m", string.Empty), @"[\s|]+", string.Empty);
 
     private static (int ExitCode, string StandardOutput, string StandardError) RunPowerShellScript(
         string scriptPath,

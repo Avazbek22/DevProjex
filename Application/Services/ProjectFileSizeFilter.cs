@@ -18,6 +18,7 @@ public static class ProjectFileSizeFilter
 		var selected = new List<string>(plan.IncludedFiles.Count);
 		var excludedFiles = 0;
 		long excludedBytes = 0;
+		long includedBytes = 0;
 		foreach (var path in plan.IncludedFiles)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
@@ -25,6 +26,7 @@ public static class ProjectFileSizeFilter
 			if (size <= maximumFileBytes.Value)
 			{
 				selected.Add(PathUtility.GetPortableRelativePath(plan.SourceRoot, path));
+				includedBytes = SaturatingAdd(includedBytes, size);
 				continue;
 			}
 
@@ -36,7 +38,7 @@ public static class ProjectFileSizeFilter
 			excludedFiles,
 			excludedBytes);
 		if (excludedFiles == 0)
-			return plan with { FileSizeFilter = summary };
+			return plan with { FileSizeFilter = summary, IncludedBytes = includedBytes };
 		AppendPreexistingEmptyDirectories(plan, selected, cancellationToken);
 
 		ProjectContextPlan narrowed;

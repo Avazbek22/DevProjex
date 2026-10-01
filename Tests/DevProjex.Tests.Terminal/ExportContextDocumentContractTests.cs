@@ -2,6 +2,10 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Xml.Linq;
+using DevProjex.Application.Diagnostics;
+using DevProjex.Application.Secrets;
+using DevProjex.Application.Services;
+using DevProjex.Kernel.Abstractions;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -44,6 +48,56 @@ public sealed class ExportContextDocumentContractTests
 			Path.Combine(workspace.Path, "docs", "Guide.md"),
 			result.StandardOutput,
 			OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void JsonExportsEscapeOnlyWhatJsonRequires()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var data = new TemporaryDirectory();
+		const string fileName = "R&D's Привет.txt";
+		const string content = "say \"hi\" <b>&amp;</b> it's Привет \u001B[0m\tend";
+		workspace.WriteFile(fileName, content);
+
+		var export = RunProcess(
+			data.Path,
+			"export", "context", workspace.Path,
+			"--view", "content",
+			"--format", "json",
+			"--git-mode", "none",
+			"--exclude", "none",
+			"--plain",
+			"--progress", "never",
+			"-o", "-");
+		var tree = RunProcess(
+			data.Path,
+			"tree", workspace.Path,
+			"--format", "json",
+			"--git-mode", "none",
+			"--exclude", "none",
+			"--progress", "never",
+			"-o", "-");
+
+		Assert.Equal(CommandLineExitCodes.Success, export.ExitCode);
+		Assert.Equal(CommandLineExitCodes.Success, tree.ExitCode);
+		using (var document = JsonDocument.Parse(export.StandardOutput))
+		{
+			var file = Assert.Single(document.RootElement.GetProperty("files").EnumerateArray());
+			Assert.Equal(content, file.GetProperty("content").GetString());
+		}
+		using (JsonDocument.Parse(tree.StandardOutput))
+		{
+		}
+		Assert.Contains(
+			"say \\\"hi\\\" <b>&amp;</b> it's Привет \\u001B[0m\\tend",
+			export.StandardOutput,
+			StringComparison.Ordinal);
+		Assert.Contains(fileName, tree.StandardOutput, StringComparison.Ordinal);
+		foreach (var output in new[] { export.StandardOutput, tree.StandardOutput })
+		{
+			foreach (var escape in new[] { "\\u0022", "\\u003C", "\\u0026", "\\u0027" })
+				Assert.DoesNotContain(escape, output, StringComparison.OrdinalIgnoreCase);
+		}
 	}
 
 	[Theory]
@@ -244,12 +298,105 @@ public sealed class ExportContextDocumentContractTests
 		}
 
 		Assert.Equal(reports["text"], reports["markdown"]);
+		Assert.Equal(reports["text"], reports["json"]);
 		Assert.Equal(reports["json"], reports["xml"]);
 		Assert.Contains("  A-large.txt (16 estimated tokens)", reports["text"], StringComparison.Ordinal);
-		Assert.Contains(
-			$"  {Path.Combine(workspace.Path, "A-large.txt")} (16 estimated tokens)",
-			reports["json"],
-			StringComparison.Ordinal);
+		Assert.DoesNotContain(workspace.Path, reports["json"], StringComparison.OrdinalIgnoreCase);
+	}
+
+	[Theory]
+	[InlineData("json")]
+	[InlineData("xml")]
+	public async Task ContentViewMachineDocumentsNameEveryFileProjectRelative(string format)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/src/Large.cs", "internal static class Large { }\n" + new string('/', 400) + "\n");
+		workspace.WriteFile("project/src/Small.cs", "class Small { }\n");
+		workspace.WriteFile("project/docs/Guide.md", "guide\n");
+		var environment = new TestTerminalEnvironment();
+
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(
+				workspace,
+				environment,
+				format,
+				projectPath: project,
+				maximumEstimatedTokens: 10,
+				view: "content",
+				rank: true));
+
+		var output = environment.StandardOutput;
+		string documentRoot;
+		string[] includedPaths;
+		string? largestSkippedPath;
+		if (format == "json")
+		{
+			using var document = JsonDocument.Parse(output);
+			var root = document.RootElement;
+			documentRoot = root.GetProperty("project").GetProperty("root").GetString()!;
+			includedPaths = root.GetProperty("files").EnumerateArray()
+				.Select(static file => file.GetProperty("path").GetString()!)
+				.ToArray();
+			largestSkippedPath = root.GetProperty("tokenBudget").GetProperty("largestSkippedFiles")[0]
+				.GetProperty("path").GetString();
+			var ranking = root.GetProperty("ranking");
+			Assert.Equal(
+				["docs/Guide.md", "src/Large.cs", "src/Small.cs"],
+				ranking.GetProperty("top").EnumerateArray()
+					.Select(static entry => entry.GetProperty("path").GetString())
+					.Order(StringComparer.Ordinal));
+			Assert.Equal(
+				["src/Large.cs"],
+				ranking.GetProperty("skipped").EnumerateArray()
+					.Select(static entry => entry.GetProperty("path").GetString()));
+		}
+		else
+		{
+			var document = XDocument.Parse(output);
+			documentRoot = document.Root!.Element("project")!.Element("root")!.Value;
+			includedPaths = document.Root.Element("files")!.Elements("file")
+				.Select(static file => file.Attribute("path")!.Value)
+				.ToArray();
+			largestSkippedPath = document.Root.Element("tokenBudget")!.Element("largestSkippedFiles")!
+				.Element("file")!.Attribute("path")?.Value;
+		}
+
+		Assert.Equal(["docs/Guide.md", "src/Small.cs"], includedPaths.Order(StringComparer.Ordinal));
+		Assert.Equal("src/Large.cs", largestSkippedPath);
+		// The absolute root appears once, as project.root, and never as a prefix of a file path.
+		Assert.True(Path.IsPathFullyQualified(documentRoot), documentRoot);
+		Assert.Equal(1, CountOccurrences(output, documentRoot));
+		Assert.Contains("[Skipped] src/Large.cs", environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("  src/Large.cs (", environment.StandardError, StringComparison.Ordinal);
+		Assert.DoesNotContain(project, environment.StandardError, StringComparison.OrdinalIgnoreCase);
+		Assert.DoesNotContain(documentRoot, environment.StandardError, StringComparison.OrdinalIgnoreCase);
+	}
+
+	[Theory]
+	[InlineData("json")]
+	[InlineData("xml")]
+	public async Task ContentViewMachineDocumentsMatchTheDefaultViewFilePaths(string format)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/src/nested/App.cs", "class App { }\n");
+		workspace.WriteFile("project/README.md", "readme\n");
+		var contentView = new TestTerminalEnvironment();
+		var defaultView = new TestTerminalEnvironment();
+
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(workspace, contentView, format, projectPath: project, view: "content"));
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(workspace, defaultView, format, projectPath: project));
+
+		Assert.Equal(["README.md", "src/nested/App.cs"], ReadMachineFilePaths(contentView.StandardOutput, format));
+		Assert.Equal(
+			ReadMachineFilePaths(defaultView.StandardOutput, format),
+			ReadMachineFilePaths(contentView.StandardOutput, format));
 	}
 
 	[Theory]
@@ -324,19 +471,26 @@ public sealed class ExportContextDocumentContractTests
 		var output = Encoding.UTF8.GetString(destination.ToArray());
 		var expected = RepositoryWebPathPresentationService.NormalizeForDisplay(repositoryUrl);
 		string? diagnosticPath;
+		string? serializedFilePath;
 		if (format == ProjectContextDocumentFormat.Json)
 		{
 			using var document = JsonDocument.Parse(output);
 			diagnosticPath = document.RootElement.GetProperty("diagnostics")[0]
 				.GetProperty("path").GetString();
+			serializedFilePath = document.RootElement.GetProperty("files")[0]
+				.GetProperty("path").GetString();
 		}
 		else
 		{
-			diagnosticPath = XDocument.Parse(output).Root!.Element("diagnostics")!
+			var document = XDocument.Parse(output);
+			diagnosticPath = document.Root!.Element("diagnostics")!
 				.Element("diagnostic")!.Attribute("path")?.Value;
+			serializedFilePath = document.Root.Element("files")!
+				.Element("file")!.Attribute("path")?.Value;
 		}
 
 		Assert.Equal(expected, diagnosticPath);
+		Assert.Equal("App.cs", serializedFilePath);
 		Assert.DoesNotContain(checkout, output, StringComparison.OrdinalIgnoreCase);
 	}
 
@@ -397,7 +551,7 @@ public sealed class ExportContextDocumentContractTests
 
 		var expectedPath = PathUtility.NormalizeSeparators(Path.GetFullPath(source));
 		Assert.Equal(expectedPath, diagnosticPath);
-		Assert.Equal(expectedPath, serializedFilePath);
+		Assert.Equal("App.cs", serializedFilePath);
 	}
 
 	[Theory]
@@ -522,6 +676,348 @@ public sealed class ExportContextDocumentContractTests
 		Assert.Equal(
 			ExtractBudgetReport(environment.StandardError),
 			ExtractBudgetReport(actual.StandardError));
+	}
+
+	[Fact]
+	public async Task RankedCompressedDryRunUsesMeasuredBudgetWithoutMaterializingOrSerializing()
+	{
+		using var workspace = new TemporaryDirectory();
+		var firstPath = workspace.WriteFile("A.cs", "public sealed class A { public int Value => 1; }\n");
+		var secondPath = workspace.WriteFile("B.cs", "public sealed class B { private readonly A dependency = new(); }\n");
+		var dryRun = new TestTerminalEnvironment();
+		using var measurement = DevProjex.Application.Diagnostics.ContentPipelineDiagnostics.BeginMeasurement();
+
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(
+				workspace,
+				dryRun,
+				"markdown",
+				maximumEstimatedTokens: 8,
+				dryRun: true,
+				view: "content",
+				compressCode: true,
+				rank: true));
+		var diagnostics = measurement.Capture();
+
+		var actual = new TestTerminalEnvironment();
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(
+				workspace,
+				actual,
+				"markdown",
+				maximumEstimatedTokens: 8,
+				view: "content",
+				compressCode: true,
+				rank: true));
+
+		Assert.Equal(ExtractBudgetReport(dryRun.StandardError), ExtractBudgetReport(actual.StandardError));
+		Assert.Empty(dryRun.StandardOutput);
+		Assert.Equal(0, diagnostics.PreparedFilesMaterialized);
+		Assert.Equal(0, diagnostics.PreparedWriteBytes);
+		Assert.Equal(0, diagnostics.DocumentWriteBytes);
+		// One pass captures the selection for ranking and one verifies it at write time. The
+		// observation that used to cost a third pass now comes from the bytes indexing read.
+		Assert.Equal(4, diagnostics.SourceVersionHashPasses);
+		Assert.Equal(
+			2 * (new FileInfo(firstPath).Length + new FileInfo(secondPath).Length),
+			diagnostics.SourceVersionHashBytes);
+	}
+
+	[Fact]
+	public async Task TokenBudgetedExportMaterializesOnlyAdmittedFiles()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("A.txt", "aaaa");
+		workspace.WriteFile("B.txt", "bbbb");
+		workspace.WriteFile("C.txt", "cccc");
+		var environment = new TestTerminalEnvironment();
+		using var measurement = ContentPipelineDiagnostics.BeginMeasurement();
+
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(
+				workspace,
+				environment,
+				"text",
+				maximumEstimatedTokens: 1,
+				view: "content",
+				hideSecrets: true));
+		var diagnostics = measurement.Capture();
+
+		Assert.Contains("Included files: 1", environment.StandardError, StringComparison.Ordinal);
+		Assert.Equal(1, diagnostics.PreparedFilesMaterialized);
+	}
+
+	[Theory]
+	[InlineData(false, 2)]
+	[InlineData(true, 2)]
+	[InlineData(false, 1)]
+	[InlineData(true, 1)]
+	public async Task TokenBudgetedExportReportsEachUnscannableFileAcrossBothPreparationPasses(
+		bool writeToFile,
+		int unreadableRead)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/Content.txt", "visible source content\n");
+		var destination = writeToFile ? Path.Combine(workspace.Path, "context.txt") : "-";
+		var environment = new TestTerminalEnvironment();
+		using var services = new TerminalServiceFactory(
+			() => workspace.CreateDirectory("app-data")).Create(AppLanguage.En);
+		var analyzer = new UnreadableOnSelectedReadAnalyzer(unreadableRead);
+		var controlledServices = services with
+		{
+			SecretRedactionOutputPreparer = new SecretRedactionOutputPreparer(analyzer)
+		};
+		var request = new ExportContextCommandRequest(
+			ProjectPath: project,
+			Selection: new ProjectSelectionSpec(
+				GitMode: GitFilteringMode.None,
+				Exclusions: [],
+				HideSecrets: true),
+			View: ProjectContextView.Content,
+			Format: ProjectContextDocumentFormat.Text,
+			OutputPath: destination,
+			Force: false,
+			DryRun: false,
+			MaximumEstimatedTokens: unreadableRead == 1 ? 1 : 1_000,
+			Output: new TerminalOutputOptions(Progress: TerminalProgressMode.Never));
+
+		var exitCode = await new ExportContextCommandHandler(controlledServices, environment)
+			.ExecuteAsync(request, TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Equal(unreadableRead == 1 ? 1 : 2, analyzer.ReadCount);
+		Assert.Equal(1, CountOccurrences(
+			environment.StandardError,
+			"Files excluded from content output: 1."));
+		Assert.Equal(1, CountOccurrences(environment.StandardError, "Content.txt"));
+		if (writeToFile)
+			Assert.True(File.Exists(destination));
+		var output = writeToFile
+			? await File.ReadAllTextAsync(destination, TestContext.Current.CancellationToken)
+			: environment.StandardOutput;
+		Assert.DoesNotContain("visible source content", output, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("utf8-crlf-below", -1L)]
+	[InlineData("utf8-nonascii-exact", 0L)]
+	[InlineData("utf8-nonascii-above", 2L)]
+	[InlineData("utf16-crlf-above", 4L)]
+	public async Task CompressedDryRunAndExportAgreeOnExactLargePassThroughBudget(
+		string variant,
+		long sizeDelta)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var source = Path.Combine(project, "large.txt");
+		var expectedCharacters = await WriteLargeTextVariantAsync(source, variant, sizeDelta);
+		var maximumTokens = checked((expectedCharacters + 3L) / 4L);
+		var destination = Path.Combine(workspace.Path, "context.txt");
+		var dryRun = new TestTerminalEnvironment();
+
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(
+				workspace,
+				dryRun,
+				"text",
+				projectPath: project,
+				outputPath: destination,
+				maximumEstimatedTokens: maximumTokens,
+				dryRun: true,
+				view: "content",
+				compressCode: true));
+
+		var actual = new TestTerminalEnvironment();
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(
+				workspace,
+				actual,
+				"text",
+				projectPath: project,
+				outputPath: destination,
+				maximumEstimatedTokens: maximumTokens,
+				view: "content",
+				compressCode: true));
+
+		Assert.Equal(ExtractBudgetReport(dryRun.StandardError), ExtractBudgetReport(actual.StandardError));
+		Assert.Contains("Included files: 1", actual.StandardError, StringComparison.Ordinal);
+		Assert.Contains("Skipped files: 0", actual.StandardError, StringComparison.Ordinal);
+		var expectedWrittenCharacters = variant.Contains("crlf", StringComparison.Ordinal)
+			? expectedCharacters - 2
+			: expectedCharacters;
+		Assert.Equal(expectedWrittenCharacters, await CountExportedTextCharactersAsync(destination));
+	}
+
+	[Theory]
+	[InlineData("json")]
+	[InlineData("xml")]
+	public async Task StructuredLargeUtf16PassThroughUsesExactPreparedMetrics(string format)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var source = Path.Combine(project, "large.txt");
+		var expectedCharacters = await WriteLargeTextVariantAsync(source, "utf16-crlf-above", 4);
+		var destination = Path.Combine(workspace.Path, $"context.{format}");
+		var environment = new TestTerminalEnvironment();
+		using var measurement = ContentPipelineDiagnostics.BeginMeasurement();
+
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(
+				workspace,
+				environment,
+				format,
+				projectPath: project,
+				outputPath: destination,
+				view: "content",
+				compressCode: true));
+		var diagnostics = measurement.Capture();
+		var document = await File.ReadAllTextAsync(destination, TestContext.Current.CancellationToken);
+		var totalBytes = SecretRedactionOutputPreparer.MaximumScannableFileBytes + 4;
+		var crLfPairs = checked((int)((totalBytes - 2) / 6));
+		var expectedMetricCharacters = ExportOutputMetricsCalculator.FromOrderedContentFiles([
+			new ContentFileMetrics(
+				source,
+				totalBytes,
+				LineCount: crLfPairs + 1,
+				CharCount: checked((int)expectedCharacters),
+				IsEmpty: false,
+				IsWhitespaceOnly: false,
+				IsEstimated: false,
+				CrLfPairCount: crLfPairs,
+				TrailingNewlineChars: 2,
+				TrailingNewlineLineBreaks: 1)
+		]).Chars;
+		var characters = format == "json"
+			? JsonDocument.Parse(document).RootElement.GetProperty("metrics").GetProperty("characters").GetInt64()
+			: long.Parse(
+				XDocument.Parse(document).Root!.Element("metrics")!.Element("characters")!.Value,
+				CultureInfo.InvariantCulture);
+
+		Assert.Equal(expectedMetricCharacters, characters);
+		Assert.Equal(0, diagnostics.PreparedReadBytes);
+	}
+
+	[Theory]
+	[InlineData("markdown")]
+	[InlineData("text")]
+	public async Task HumanLargePassThroughDoesNotRunASeparatePreparationMetricsPass(string format)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var source = Path.Combine(project, "large.txt");
+		await WriteLargeTextVariantAsync(source, "utf8-nonascii-above", 2);
+		var destination = Path.Combine(workspace.Path, $"context.{format}");
+		var environment = new TestTerminalEnvironment();
+		using var measurement = ContentPipelineDiagnostics.BeginMeasurement();
+
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(
+				workspace,
+				environment,
+				format,
+				projectPath: project,
+				outputPath: destination,
+				view: "content",
+				compressCode: true));
+		var diagnostics = measurement.Capture();
+
+		Assert.Equal(2, diagnostics.FullFileReads);
+		Assert.Equal(0, diagnostics.PreparedReadBytes);
+	}
+
+	[Fact]
+	public async Task RankedSourceBackedExportHashesEachSourceTwice()
+	{
+		using var workspace = new TemporaryDirectory();
+		var firstPath = workspace.WriteFile("A.cs", "public sealed class A { }\n");
+		var secondPath = workspace.WriteFile("B.cs", "public sealed class B { private readonly A value = new(); }\n");
+		var environment = new TestTerminalEnvironment();
+		using var measurement = DevProjex.Application.Diagnostics.ContentPipelineDiagnostics.BeginMeasurement();
+
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(
+				workspace,
+				environment,
+				"markdown",
+				view: "content",
+				rank: true));
+		var diagnostics = measurement.Capture();
+
+		// One pass captures the selection for ranking and one verifies it at write time. The
+		// observation that used to cost a third pass now comes from the bytes indexing read.
+		Assert.Equal(4, diagnostics.SourceVersionHashPasses);
+		Assert.Equal(
+			2 * (new FileInfo(firstPath).Length + new FileInfo(secondPath).Length),
+			diagnostics.SourceVersionHashBytes);
+	}
+
+	[Theory]
+	[InlineData("json")]
+	[InlineData("xml")]
+	public async Task StructuredCompressedExportReusesPreparationMetricsWithoutRereadingPreparedText(string format)
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile(
+			"App.cs",
+			"public sealed class App { private int Hidden() { return 42; } }\n");
+		var environment = new TestTerminalEnvironment();
+		using var measurement = DevProjex.Application.Diagnostics.ContentPipelineDiagnostics.BeginMeasurement();
+
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(
+				workspace,
+				environment,
+				format,
+				view: "content",
+				compressCode: true));
+		var diagnostics = measurement.Capture();
+		var documentFormat = format == "json"
+			? ProjectContextDocumentFormat.Json
+			: ProjectContextDocumentFormat.Xml;
+		using var referenceData = new TemporaryDirectory();
+		using var referenceServices = new TerminalServiceFactory(
+				() => referenceData.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var referencePlan = await referenceServices.ContextFactory.BuildAsync(
+			workspace.Path,
+			new ProjectSelectionSpec(
+				GitMode: GitFilteringMode.None,
+				Exclusions: [],
+				CompressCode: true),
+			cancellationToken: TestContext.Current.CancellationToken);
+		var transformation = DevProjex.Application.Compression.ContentTransformationContext.For(
+			new DevProjex.Application.Compression.CodeCompressionContext(
+				referencePlan.SourceRoot,
+				referenceServices.CodeCompressionSession,
+				DevProjex.Application.Compression.CodeTransformKinds.Bodies),
+			redaction: null)!;
+		await using var referencePrepared = await referenceServices.SecretRedactionOutputPreparer
+			.PrepareAsync(transformation, referencePlan.IncludedFiles, TestContext.Current.CancellationToken);
+		using var referenceDestination = new MemoryStream();
+		await referenceServices.ContextDocumentService.WritePreparedCompleteAsync(
+			referencePlan,
+			ProjectContextView.Content,
+			documentFormat,
+			referenceDestination,
+			referencePrepared,
+			TestContext.Current.CancellationToken,
+			useSourceMappedStructuredPaths: true);
+		var referenceOutput = Encoding.UTF8.GetString(referenceDestination.ToArray());
+
+		Assert.Equal(referenceOutput + Environment.NewLine, environment.StandardOutput);
+		Assert.True(diagnostics.PreparedFilesMaterialized > 0, diagnostics.ToString());
+		Assert.Equal(diagnostics.PreparedWriteBytes, diagnostics.PreparedReadBytes);
+		Assert.True(diagnostics.DocumentWriteBytes > 0, diagnostics.ToString());
 	}
 
 	[Fact]
@@ -676,7 +1172,10 @@ public sealed class ExportContextDocumentContractTests
 		long? maximumEstimatedTokens = null,
 		bool dryRun = false,
 		string view = "tree-content",
-		bool compressCode = false)
+		bool compressCode = false,
+		bool rank = false,
+		bool hideSecrets = false,
+		IReadOnlyList<string>? detailFor = null)
 	{
 		var arguments = new List<string>
 		{
@@ -697,6 +1196,18 @@ public sealed class ExportContextDocumentContractTests
 			arguments.Add("--dry-run");
 		if (compressCode)
 			arguments.Add("--compress-code");
+		if (hideSecrets)
+			arguments.Add("--hide-secrets");
+		if (rank)
+		{
+			arguments.Add("--rank");
+			arguments.Add("importance");
+		}
+		foreach (var value in detailFor ?? [])
+		{
+			arguments.Add("--detail-for");
+			arguments.Add(value);
+		}
 
 		return new TerminalApplication(
 				environment,
@@ -710,6 +1221,68 @@ public sealed class ExportContextDocumentContractTests
 		return Convert.ToHexString(await SHA256.HashDataAsync(
 			stream,
 			TestContext.Current.CancellationToken));
+	}
+
+	private static async Task<long> WriteLargeTextVariantAsync(
+		string path,
+		string variant,
+		long sizeDelta)
+	{
+		var totalBytes = SecretRedactionOutputPreparer.MaximumScannableFileBytes + sizeDelta;
+		byte[] prefix;
+		byte[] pattern;
+		long expectedCharacters;
+		switch (variant)
+		{
+			case "utf8-crlf-below":
+				prefix = [];
+				pattern = "a\r\n"u8.ToArray();
+				expectedCharacters = totalBytes;
+				break;
+			case "utf8-nonascii-exact":
+			case "utf8-nonascii-above":
+				prefix = [];
+				pattern = "é"u8.ToArray();
+				expectedCharacters = totalBytes / pattern.Length;
+				break;
+			case "utf16-crlf-above":
+				prefix = [0xff, 0xfe];
+				pattern = [0x61, 0x00, 0x0d, 0x00, 0x0a, 0x00];
+				expectedCharacters = (totalBytes - prefix.Length) / sizeof(char);
+				break;
+			default:
+				throw new ArgumentOutOfRangeException(nameof(variant));
+		}
+		Assert.Equal(0, (totalBytes - prefix.Length) % pattern.Length);
+
+		await using var stream = new FileStream(
+			path,
+			FileMode.CreateNew,
+			FileAccess.Write,
+			FileShare.None,
+			bufferSize: 64 * 1024,
+			useAsync: true);
+		await stream.WriteAsync(prefix, TestContext.Current.CancellationToken);
+		var buffer = new byte[64 * 1024 - (64 * 1024 % pattern.Length)];
+		for (var offset = 0; offset < buffer.Length; offset += pattern.Length)
+			pattern.CopyTo(buffer, offset);
+		var remaining = totalBytes - prefix.Length;
+		while (remaining > 0)
+		{
+			var count = (int)Math.Min(buffer.Length, remaining);
+			await stream.WriteAsync(buffer.AsMemory(0, count), TestContext.Current.CancellationToken);
+			remaining -= count;
+		}
+		return expectedCharacters;
+	}
+
+	private static async Task<long> CountExportedTextCharactersAsync(string path)
+	{
+		var content = await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken);
+		var marker = $"{Environment.NewLine}{Environment.NewLine}large.txt:{Environment.NewLine}{Environment.NewLine}";
+		var start = content.IndexOf(marker, StringComparison.Ordinal);
+		Assert.True(start >= 0, content[..Math.Min(content.Length, 256)]);
+		return content.Length - start - marker.Length;
 	}
 
 	private static string ExtractBudgetReport(string standardError)
@@ -737,6 +1310,23 @@ public sealed class ExportContextDocumentContractTests
 		return TerminalTestProcess.Run(startInfo);
 	}
 
+	private static string[] ReadMachineFilePaths(string output, string format)
+	{
+		if (format == "json")
+		{
+			using var document = JsonDocument.Parse(output);
+			return document.RootElement.GetProperty("files").EnumerateArray()
+				.Select(static file => file.GetProperty("path").GetString()!)
+				.Order(StringComparer.Ordinal)
+				.ToArray();
+		}
+
+		return XDocument.Parse(output).Root!.Element("files")!.Elements("file")
+			.Select(static file => file.Attribute("path")!.Value)
+			.Order(StringComparer.Ordinal)
+			.ToArray();
+	}
+
 	private static int CountOccurrences(string value, string fragment)
 	{
 		var count = 0;
@@ -761,5 +1351,42 @@ public sealed class ExportContextDocumentContractTests
 		return long.Parse(
 			XDocument.Parse(output).Root!.Element("metrics")!.Element("estimatedTokens")!.Value,
 			CultureInfo.InvariantCulture);
+	}
+
+	private sealed class UnreadableOnSelectedReadAnalyzer(int unreadableRead) : IFileContentAnalyzer
+	{
+		private readonly FileContentAnalyzer _inner = new();
+		private int _readCount;
+
+		public int ReadCount => Volatile.Read(ref _readCount);
+
+		public ValueTask<FileContentReadResult> ReadClassifiedAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			Interlocked.Increment(ref _readCount) == unreadableRead
+				? ValueTask.FromResult(new FileContentReadResult(FileContentClassification.Unreadable))
+				: _inner.ReadClassifiedAsync(path, maxSizeForFullRead, cancellationToken);
+
+		public ValueTask<bool> IsTextFileAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			_inner.IsTextFileAsync(path, cancellationToken);
+
+		public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			_inner.GetTextFileMetricsAsync(path, cancellationToken);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			_inner.TryReadAsTextAsync(path, cancellationToken);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			_inner.TryReadAsTextAsync(path, maxSizeForFullRead, cancellationToken);
 	}
 }

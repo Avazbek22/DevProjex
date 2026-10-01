@@ -6,7 +6,8 @@ namespace DevProjex.Terminal.Tui;
 internal sealed class TerminalRecentWorkspaceRow(
 	RecentWorkspaceDescriptor workspace,
 	Func<RecentWorkspaceKind, string> kindLabel,
-	Func<DateTimeOffset, string> openedLabel)
+	Func<DateTimeOffset, string> openedLabel,
+	int nameWidth = TerminalRecentWorkspaceRow.NameWidth)
 {
 	private const int KindWidth = 10;
 	private const int NameWidth = 28;
@@ -20,11 +21,15 @@ internal sealed class TerminalRecentWorkspaceRow(
 		var kind = FitToColumns(kindLabel(Workspace.Kind), KindWidth);
 		var name = FitToColumns(
 			TerminalRecentWorkspacePresentation.DisplayName(Workspace),
-			NameWidth);
+			nameWidth);
 		var opened = openedLabel(Workspace.OpenedUtc);
 		return $"{marker} {PadToColumns(kind, KindWidth)} " +
-		       $"{PadToColumns(name, NameWidth)} {opened}";
+		       $"{PadToColumns(name, nameWidth)} {opened}";
 	}
+
+	// The name column takes what a row leaves after the marker, kind, date and separators.
+	public static int ResolveNameWidth(int rowWidth, int openedWidth) =>
+		Math.Max(NameWidth, rowWidth - KindWidth - openedWidth - 4);
 
 	internal static string FitToColumns(string value, int width)
 	{

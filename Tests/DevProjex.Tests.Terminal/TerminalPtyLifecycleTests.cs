@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.RegularExpressions;
 using DevProjex.Infrastructure.RecentProjects;
 
@@ -39,6 +40,68 @@ public sealed class TerminalPtyLifecycleTests
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(cancellationToken: TestContext.Current.CancellationToken));
+	}
+
+	[Theory(Timeout = 60_000)]
+	[InlineData("\0", ".")]
+	[InlineData("../outside.txt", ".")]
+	[InlineData("notes.txt", "notes.txt")]
+	public async Task PersistedFocusedPathOnlyRestoresNodesInCurrentTree(
+		string persistedFocusedPath,
+		string expectedFocusedPath)
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("notes.txt", "markerless directory");
+		string? dataRoot = null;
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			workspace.Path,
+			[
+				"tui",
+				workspace.Path,
+				"--profile",
+				"standard",
+				"--screen",
+				"inline",
+				"--no-mouse",
+				"--language",
+				"en"
+			],
+			columns: 80,
+			rows: 24,
+			initializeDataRoot: root =>
+			{
+				dataRoot = root;
+				new TerminalSettingsStore(() => root)
+					.SaveProjectSettingsAsync(
+						new TerminalProjectSettings(
+							workspace.Path,
+							[],
+							[],
+							persistedFocusedPath,
+							ProjectContextView.Tree,
+							ProjectContextDocumentFormat.Text,
+							DateTimeOffset.UtcNow),
+						TestContext.Current.CancellationToken)
+					.GetAwaiter()
+					.GetResult();
+			},
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"notes.txt",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.False(terminal.HasExited);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(cancellationToken: TestContext.Current.CancellationToken));
+		Assert.Equal(
+			expectedFocusedPath,
+			new TerminalSettingsStore(() => dataRoot!)
+				.LoadProjectSettings(workspace.Path)?.FocusedPath);
 	}
 
 	[Fact(Timeout = 60_000)]
@@ -85,7 +148,7 @@ public sealed class TerminalPtyLifecycleTests
 
 			await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 
-			Assert.Contains("Canceling operation...", terminal.RawOutput, StringComparison.Ordinal);
+			Assert.Contains("Canceling operation…", terminal.RawOutput, StringComparison.Ordinal);
 			Assert.Equal(
 				CommandLineExitCodes.Success,
 				await terminal.WaitForExitAsync(
@@ -120,6 +183,34 @@ public sealed class TerminalPtyLifecycleTests
 			"Exit DevProjex Terminal?",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Exit DevProjex Terminal?",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.False(terminal.HasExited);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(
+				cancellationToken: TestContext.Current.CancellationToken));
+	}
+
+	[Fact(Timeout = 60_000)]
+	public async Task EscapeAtWelcomeKeepsTheTerminalOpen()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("notes.txt", "markerless directory");
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			workspace.Path,
+			["--language", "en"],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.WaitForScreenAsync(
+			"Choose a workspace action",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		// Input is processed in order: the exit question proves both Esc presses were handled.
+		await terminal.SendCtrlCAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"Exit DevProjex Terminal?",
 			cancellationToken: TestContext.Current.CancellationToken);
@@ -215,6 +306,75 @@ public sealed class TerminalPtyLifecycleTests
 		Assert.DoesNotContain("[[", screen, StringComparison.Ordinal);
 		Assert.Contains(exitAction, screen, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(
+				cancellationToken: TestContext.Current.CancellationToken));
+	}
+
+	[Fact(Timeout = 60_000)]
+	public async Task MinimumSizeWelcomeWrapsTheTaglineAndRefitsStatusAfterLanguageChange()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("notes.txt", "markerless directory");
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			workspace.Path,
+			["--language", "ru"],
+			columns: 60,
+			rows: 20,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var russian = await terminal.WaitForStableScreenAsync(
+			"Выберите действие",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains("откроете.", russian, StringComparison.Ordinal);
+
+		await terminal.SendAsync(":language en\r", TestContext.Current.CancellationToken);
+		var english = await terminal.WaitForStableScreenAsync(
+			"Choose a workspace action",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains("Current folder is ready", english, StringComparison.Ordinal);
+		Assert.Contains("you open it.", english, StringComparison.Ordinal);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(
+				cancellationToken: TestContext.Current.CancellationToken));
+	}
+
+	[Theory(Timeout = 60_000)]
+	[InlineData(60, 20)]
+	[InlineData(120, 20)]
+	public async Task WelcomeWithManyRecentProjectsKeepsItsFramesAboveTheFooter(
+		int columns,
+		int rows)
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("notes.txt", "markerless directory");
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			workspace.Path,
+			["--language", "en"],
+			columns,
+			rows,
+			initializeDataRoot: dataRoot =>
+			{
+				var store = new RecentProjectsStore(() => dataRoot);
+				RecentProjectsDb? snapshot = null;
+				for (var index = 1; index <= 12; index++)
+					snapshot = store.AddFolder(snapshot, workspace.CreateDirectory($"recent-{index:00}"));
+			},
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var screen = await terminal.WaitForStableScreenAsync(
+			"[1]",
+			cancellationToken: TestContext.Current.CancellationToken);
+		var lines = screen.Split('\n');
+		Assert.Equal(rows, lines.Length);
+		Assert.StartsWith("  1-9 Recent", lines[^1], StringComparison.Ordinal);
+		Assert.StartsWith("  └", lines[^2], StringComparison.Ordinal);
+		Assert.Contains("Details", screen, StringComparison.Ordinal);
+		Assert.Contains("Open the current folder", screen, StringComparison.Ordinal);
 		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
@@ -470,11 +630,11 @@ public sealed class TerminalPtyLifecycleTests
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		await terminal.WaitForScreenAsync(
-			$"[x] {projectName}",
+			$"[ ] {projectName}",
 			cancellationToken: TestContext.Current.CancellationToken);
 		var rootRow = FindVisibleTreeRow(
 			terminal.CaptureScreen(),
-			$"[x] {projectName}");
+			$"[ ] {projectName}");
 		Assert.True(rootRow >= 0);
 
 		await terminal.SendMouseClickAsync(
@@ -484,8 +644,8 @@ public sealed class TerminalPtyLifecycleTests
 		await Task.Delay(1_000, TestContext.Current.CancellationToken);
 
 		var screen = terminal.CaptureScreen();
-		Assert.Contains($"[x] {projectName}", screen, StringComparison.Ordinal);
-		Assert.DoesNotContain($"[ ] {projectName}", screen, StringComparison.Ordinal);
+		Assert.Contains($"[ ] {projectName}", screen, StringComparison.Ordinal);
+		Assert.DoesNotContain($"[x] {projectName}", screen, StringComparison.Ordinal);
 		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"Exit DevProjex Terminal?",
@@ -533,6 +693,70 @@ public sealed class TerminalPtyLifecycleTests
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(cancellationToken: TestContext.Current.CancellationToken));
+	}
+
+	[Fact(Timeout = 90_000)]
+	public async Task EscDuringProjectLoadingReturnsToWelcomeAndKeepsTheSessionUsable()
+	{
+		using var project = CreateProject();
+		string? dataRoot = null;
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			project.Path,
+			[
+				"tui",
+				project.Path,
+				"--profile",
+				"standard",
+				"--screen",
+				"inline",
+				"--no-mouse",
+				"--language",
+				"en"
+			],
+			environment: new Dictionary<string, string>
+			{
+				[TerminalProgressCheckpointProtocol.PhasesVariable] = "project-loading"
+			},
+			initializeDataRoot: root => dataRoot = root,
+			useProgressCheckpointHost: true,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.NotNull(dataRoot);
+		await WaitForFileAsync(Path.Combine(
+			dataRoot,
+			TerminalProgressCheckpointProtocol.DirectoryName,
+			TerminalProgressCheckpointProtocol.GetReachedFileName("project-loading")));
+		await terminal.WaitForScreenAsync(
+			"Loading project",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+
+		var welcome = await terminal.WaitForStableScreenAsync(
+			"Operation canceled",
+			forbidden: "Loading project",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains("Choose a workspace action", welcome, StringComparison.Ordinal);
+		Assert.False(terminal.HasExited);
+
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(cancellationToken: TestContext.Current.CancellationToken));
+	}
+
+	private static async Task WaitForFileAsync(string path)
+	{
+		var timeout = Stopwatch.StartNew();
+		while (!File.Exists(path))
+		{
+			if (timeout.Elapsed > TimeSpan.FromSeconds(45))
+				throw new TimeoutException($"Timed out waiting for {path}");
+			await Task.Delay(25, TestContext.Current.CancellationToken);
+		}
 	}
 
 	private static TemporaryDirectory CreateProject()

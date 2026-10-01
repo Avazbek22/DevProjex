@@ -2,22 +2,28 @@ namespace DevProjex.Avalonia.Services;
 
 public static class MessageDialog
 {
+    public static async Task<int> ShowChoiceAsync(
+        Window owner,
+        string title,
+        string message,
+        params string[] choices)
+    {
+        ArgumentNullException.ThrowIfNull(choices);
+        ArgumentOutOfRangeException.ThrowIfLessThan(choices.Length, 2);
+        var completion = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var dialog = CreateChoiceWindow(owner, title, message, choices, completion);
+        dialog.Closed += (_, _) => completion.TrySetResult(0);
+        _ = dialog.ShowDialog(owner);
+        return await completion.Task.ConfigureAwait(false);
+    }
+
     public static async Task ShowAsync(
         Window owner,
         string title,
         string message,
-        string closeButtonText,
-        double height = 200)
+        string closeButtonText)
     {
-        var themeVariant = DialogSurfaceFactory.ResolveThemeVariant(owner);
-        var brushes = DialogSurfaceFactory.ResolveBrushes(owner, themeVariant);
-        var dialog = DialogSurfaceFactory.CreateWindow(
-            title,
-            themeVariant,
-            brushes,
-            BuildContent(message, closeButtonText),
-            width: 420,
-            height: height);
+        var dialog = CreateMessageWindow(owner, title, message, closeButtonText);
 
         if (owner is not null)
             await dialog.ShowDialog(owner);
@@ -31,19 +37,17 @@ public static class MessageDialog
         string message,
         string confirmButtonText,
         string cancelButtonText,
-        double width = 520,
-        double height = 260)
+        double width = 520)
     {
         var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var themeVariant = DialogSurfaceFactory.ResolveThemeVariant(owner);
-        var brushes = DialogSurfaceFactory.ResolveBrushes(owner, themeVariant);
-        var dialog = DialogSurfaceFactory.CreateWindow(
+        var dialog = CreateConfirmationWindow(
+            owner,
             title,
-            themeVariant,
-            brushes,
-            BuildConfirmationContent(message, confirmButtonText, cancelButtonText, completion),
-            width: width,
-            height: height);
+            message,
+            confirmButtonText,
+            cancelButtonText,
+            width,
+            completion);
 
         dialog.Closed += (_, _) => completion.TrySetResult(false);
 
@@ -55,16 +59,51 @@ public static class MessageDialog
         return await completion.Task.ConfigureAwait(false);
     }
 
+    internal static Window CreateMessageWindow(
+        Window? owner,
+        string title,
+        string message,
+        string closeButtonText) =>
+        CreateDialogWindow(owner, title, BuildContent(message, closeButtonText), width: 420);
+
+    internal static Window CreateConfirmationWindow(
+        Window? owner,
+        string title,
+        string message,
+        string confirmButtonText,
+        string cancelButtonText,
+        double width,
+        TaskCompletionSource<bool> completion)
+    {
+        ArgumentNullException.ThrowIfNull(completion);
+        return CreateDialogWindow(
+            owner,
+            title,
+            BuildConfirmationContent(message, confirmButtonText, cancelButtonText, completion),
+            width);
+    }
+
+    internal static Window CreateChoiceWindow(
+        Window? owner,
+        string title,
+        string message,
+        IReadOnlyList<string> choices,
+        TaskCompletionSource<int> completion)
+    {
+        ArgumentNullException.ThrowIfNull(choices);
+        ArgumentNullException.ThrowIfNull(completion);
+        return CreateDialogWindow(owner, title, BuildChoiceContent(message, choices, completion), width: 560);
+    }
+
+    private static Window CreateDialogWindow(Window? owner, string title, Control content, double width)
+    {
+        var themeVariant = DialogSurfaceFactory.ResolveThemeVariant(owner);
+        var brushes = DialogSurfaceFactory.ResolveBrushes(owner, themeVariant);
+        return DialogSurfaceFactory.CreateContentSizedWindow(owner, title, themeVariant, brushes, content, width);
+    }
+
     private static Control BuildContent(string message, string closeButtonText)
     {
-        var text = new TextBlock
-        {
-            Text = message,
-            TextWrapping = TextWrapping.Wrap,
-            Margin = new Thickness(12),
-            VerticalAlignment = VerticalAlignment.Center
-        };
-
         var button = new Button
         {
             Content = closeButtonText,
@@ -77,7 +116,7 @@ public static class MessageDialog
         DockPanel.SetDock(button, Dock.Bottom);
 
         panel.Children.Add(button);
-        panel.Children.Add(text);
+        panel.Children.Add(BuildMessageArea(message));
 
         button.Click += (_, _) =>
             (TopLevel.GetTopLevel(panel) as Window)?.Close();
@@ -91,14 +130,6 @@ public static class MessageDialog
         string cancelButtonText,
         TaskCompletionSource<bool> completion)
     {
-        var text = new TextBlock
-        {
-            Text = message,
-            TextWrapping = TextWrapping.Wrap,
-            Margin = new Thickness(12),
-            VerticalAlignment = VerticalAlignment.Center
-        };
-
         var confirmButton = new Button
         {
             Content = confirmButtonText,
@@ -132,7 +163,7 @@ public static class MessageDialog
         DockPanel.SetDock(buttonPanel, Dock.Bottom);
 
         panel.Children.Add(buttonPanel);
-        panel.Children.Add(text);
+        panel.Children.Add(BuildMessageArea(message));
 
         confirmButton.Click += (_, _) =>
         {
@@ -148,4 +179,59 @@ public static class MessageDialog
 
         return panel;
     }
+
+    private static Control BuildChoiceContent(
+        string message,
+        IReadOnlyList<string> choices,
+        TaskCompletionSource<int> completion)
+    {
+        var buttonPanel = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(6)
+        };
+        for (var index = 0; index < choices.Count; index++)
+        {
+            var choiceIndex = index;
+            var button = new Button
+            {
+                Content = choices[index],
+                MinWidth = 110,
+                Margin = new Thickness(6),
+                HorizontalContentAlignment = HorizontalAlignment.Center,
+                VerticalContentAlignment = VerticalAlignment.Center
+            };
+            if (index == choices.Count - 1)
+                button.Classes.Add("primary-action");
+            button.Click += (_, _) =>
+            {
+                completion.TrySetResult(choiceIndex);
+                (TopLevel.GetTopLevel(buttonPanel) as Window)?.Close();
+            };
+            buttonPanel.Children.Add(button);
+        }
+
+        var panel = new DockPanel();
+        DockPanel.SetDock(buttonPanel, Dock.Bottom);
+        panel.Children.Add(buttonPanel);
+        panel.Children.Add(BuildMessageArea(message));
+        return panel;
+    }
+
+    // The window sizes itself to this area until it reaches its height cap; from then on the
+    // message scrolls while the docked buttons keep their place.
+    private static ScrollViewer BuildMessageArea(string message) =>
+        new()
+        {
+            Content = new TextBlock
+            {
+                Text = message,
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(12),
+                VerticalAlignment = VerticalAlignment.Center
+            },
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
+        };
 }

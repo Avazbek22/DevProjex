@@ -184,13 +184,11 @@ public sealed class TerminalProcessSmokeIntegrationTests
 		Assert.Equal(outputPath, fileContext.StandardOutput.TrimEnd('\r', '\n'));
 		var fileDocument = XDocument.Load(outputPath);
 		var fileEntry = Assert.Single(fileDocument.Root!.Element("files")!.Elements("file"));
-		Assert.Equal(
-			PathUtility.NormalizeSeparators(Path.Combine(project, "C-included.txt")),
-			fileEntry.Attribute("path")?.Value);
+		Assert.Equal("C-included.txt", fileEntry.Attribute("path")?.Value);
 		var tokenBudget = fileDocument.Root.Element("tokenBudget")!;
 		Assert.Equal("1", tokenBudget.Element("includedFiles")?.Value);
 		Assert.Equal(
-			PathUtility.NormalizeSeparators(Path.Combine(project, "B-budget-skipped.txt")),
+			"B-budget-skipped.txt",
 			tokenBudget.Element("largestSkippedFiles")?.Element("file")?.Attribute("path")?.Value);
 		Assert.DoesNotContain("A-size-filtered.txt", fileDocument.ToString(), StringComparison.Ordinal);
 		Assert.DoesNotContain("A-size-filtered.txt", fileContext.StandardError, StringComparison.Ordinal);
@@ -225,7 +223,7 @@ public sealed class TerminalProcessSmokeIntegrationTests
 		Assert.Equal(CommandLineExitCodes.Success, context.ExitCode);
 		using var document = JsonDocument.Parse(context.StandardOutput);
 		var file = Assert.Single(document.RootElement.GetProperty("files").EnumerateArray());
-		Assert.Equal(fifoPath, file.GetProperty("path").GetString());
+		Assert.Equal("events.txt", file.GetProperty("path").GetString());
 		Assert.Equal("unreadable", file.GetProperty("classification").GetString());
 		Assert.Equal(JsonValueKind.Null, file.GetProperty("content").ValueKind);
 		Assert.Contains("File could not be read.", context.StandardError, StringComparison.Ordinal);

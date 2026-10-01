@@ -10,6 +10,7 @@ stdout is the machine/payload channel:
 - help and version;
 - completion scripts;
 - text, JSON, or XML analysis;
+- text, JSON, or Markdown search results;
 - text, Markdown, JSON, or XML context;
 - one absolute result path after file, folder, or ZIP output.
 - one accepted local path or safe repository URL after `open`.
@@ -29,6 +30,8 @@ carriage return, line feed, tab, other control characters, U+2028, and U+2029 as
 visible `\\r`, `\\n`, `\\t`, or `\\uXXXX` sequences. This keeps every reported
 path on one physical line and prevents terminal control injection. JSON and XML
 retain exact machine values and use their format-native escaping instead.
+Source lines quoted by `search` are the one exception for tab: a tab is part of the
+quoted code, cannot break the one-line layout, and is written unchanged.
 
 ## Terminal Modes
 
@@ -103,6 +106,27 @@ The base shape is:
       "lines": 0,
       "chars": 0,
       "tokens": 0
+    },
+    "contentOnly": {
+      "measured": {
+        "files": 0,
+        "lines": 0,
+        "chars": 0,
+        "tokens": 0
+      },
+      "estimated": {
+        "files": 0,
+        "chars": 0,
+        "tokens": 0
+      }
+    },
+    "document": {
+      "view": "content",
+      "format": "text",
+      "lines": 0,
+      "chars": 0,
+      "tokens": 0,
+      "estimated": false
     }
   },
   "diagnostics": [],
@@ -115,6 +139,16 @@ analysis. With no explicit CLI root override it contains the effective profile
 roots; an explicit `--root` replaces it with the validated requested subset.
 Available roots discovered before that restriction are not exposed in analysis
 JSON. `inventory` contains only the projected `files` and `folders` counts.
+
+The existing `metrics.content` object retains its clipboard-style v1 meaning for
+compatibility. `metrics.contentOnly.measured` excludes Root and file headings and
+counts only inspected transformed file bodies. `metrics.contentOnly.estimated`
+separately reports files whose content metrics are size-based. `metrics.document`
+models the exact `export context --view content --format text` document shape with
+its Root line and project-relative file headings; `estimated` is true when one or
+more bodies are estimates or lack text metrics. Every emitted `topFiles` entry has an `estimated`
+Boolean, so an estimated largest file cannot be mistaken for part of the measured
+content total.
 
 For a local source, `project.source` is null. For a cached Git source it is an
 object containing `type: "git"`, the safe `repositoryUrl`, and nullable `branch`
@@ -144,7 +178,8 @@ tree text and content headings. Machine metadata remains directly addressable:
 ```
 
 When enabled content inspection withholds one or more files because they are too
-large, unreadable, non-regular filesystem entries, or use an unsupported encoding,
+large, unreadable, access-denied, non-regular filesystem entries, or use an
+unsupported encoding,
 analysis adds:
 
 ```json
@@ -163,8 +198,8 @@ analysis adds:
 
 `unscannableCount` equals the array length. Each entry contains a source-relative
 `path` with `/` separators and a `reason` token of exactly `too-large`,
-`unreadable`, or `unsupported-encoding`. The object is omitted when no files are
-withheld.
+`unreadable`, `access-denied`, or `unsupported-encoding`. The object is omitted
+when no files are withheld.
 
 With `--findings`, analysis adds an ordered top-level `findings` array. Each
 effective finding contains exactly `ruleId`, `category` (`secret` or
@@ -189,10 +224,265 @@ transformation. Inventory and source byte size still describe the selected proje
 files, not a materialized export container. Machine selection output exposes the
 independent `compressCode`, `stripComments`, and `stripBlankLines` Booleans.
 
+When a requested syntax transformation cannot load its grammar delivery source or
+a language grammar, `analyze` and `export context` preserve complete source text and
+emit warning `DPX-COMPRESSION-UNAVAILABLE` on stderr. Their JSON diagnostics include
+the same stable code, warning severity, and one-line reason naming the content
+directory or grammar resource. This warning does not change exit status and is not
+promoted by `analyze --strict`; it reports reduced optimization, not incomplete or
+unsafe output. Unsupported languages and parse/safety rejection remain distinct
+unchanged-file outcomes and do not use this code.
+
 `--strict` writes the requested document before returning policy exit code `3`
 when diagnostics are present.
 `--fail-on-findings` likewise writes the requested document before returning
-policy exit code `3` when effective findings exist; the two gates are independent.
+policy exit code `3` when effective findings exist or selected text could not be
+inspected. A broken output pipe does not turn that policy result into success; the
+two gates are independent.
+
+## Search JSON
+
+`search --format json` emits a deterministic schema-version-1 document. It is the
+structured form of the same bounded evidence returned by MCP `search_project`:
+match coordinates, containing declarations, the selected declaration body, result
+counts, and every boundary that made the response partial. The complete serialized
+JSON document, including indentation and metadata, is limited to 16,000 characters.
+Admission stops before a complete match would exceed that format-specific budget;
+the JSON document itself is never truncated.
+
+```json
+{
+  "schemaVersion": 1,
+  "kind": "devprojex-search-results",
+  "query": {
+    "pattern": "Configure",
+    "mode": "text"
+  },
+  "matches": [
+    {
+      "path": "src/App.cs",
+      "line": 12,
+      "text": "    void Configure()",
+      "declaration": "App.Configure"
+    }
+  ],
+  "declarations": [
+    {
+      "path": "src/App.cs",
+      "symbol": "App.Configure",
+      "startLine": 12,
+      "endLine": 18,
+      "ranges": [
+        {
+          "startLine": 12,
+          "endLine": 18
+        }
+      ],
+      "body": "    void Configure()\n    {\n        // ...\n    }",
+      "remainingBodyLines": 0
+    }
+  ],
+  "resolution": {
+    "resolved": 1,
+    "ambiguous": 0,
+    "unresolved": 0,
+    "external": 0
+  },
+  "searchBoundary": {
+    "complete": true,
+    "eligibleSources": 24,
+    "inspectedSources": 24,
+    "skippedBinarySources": 0,
+    "encounteredMatches": 1,
+    "retainedMatches": 1,
+    "writtenMatches": 1,
+    "omittedMatches": 0,
+    "namedDeclarationFiles": 1,
+    "limits": []
+  }
+}
+```
+
+`query.mode` is `text`, `regex`, or `symbols`. Match paths are project-relative
+portable paths and line numbers are one-based coordinates in the transformed text
+that was actually searched. `text` is the complete escaped matching line without
+its numeric prefix. `declaration` is nullable when navigation has no containing
+declaration. Declaration `startLine` and `endLine` are the range a written match
+landed in; `ranges` lists every range declared under that `symbol` in that file in
+file order, so overloads and stubs of one name appear together, and the text row
+prints the same ranges (at most six, then `and N more`). Declaration `body` is nullable
+when body output is disabled or no body fits, and `remainingBodyLines` reports a
+bounded prefix honestly.
+
+`resolution` has the same four stable field names as the text `[Resolution]` line.
+For search it describes containing-declaration evidence for written matches:
+`resolved` means one containing declaration was named and `unresolved` means none
+was proved; search does not invent ambiguous or external declaration targets.
+`searchBoundary.limits` uses the same constant tokens as the text
+`[Search boundary]` line. `skippedBinarySources` counts selected binary files, which
+hold no text to search: they do not make a search partial, except when they are the
+whole selection, which is partial with the `binary-sources` limit. An empty `matches` array is meaningful only together with
+that boundary: a complete empty search and a partial search of no readable sources
+are different results. `writtenMatches` is the number of entries in `matches`.
+`omittedMatches` is `encounteredMatches` minus `writtenMatches` (never negative):
+matches observed in inspected sources that the document does not list. Whenever it
+is greater than zero, text and Markdown add
+`[Search observed] matches=N · matching-files=M within inspected sources`, where `N`
+is `encounteredMatches` and `M` counts the inspected files with at least one match.
+Both counts cover inspected sources only, never sources the boundary left unread.
+When matches were observed but no complete matching line fits, text and Markdown
+emit `[Matches omitted]`; when selected sources were left uninspected, an otherwise
+empty result emits `[Search partial]`. Neither state is described as `[No matches]`.
+When a declaration body is included, text and Markdown print its project-relative
+address followed by an executable `devprojex export context ... --view content`
+command for reading that file through the CLI; they never print an MCP-only call.
+A cut body ends with `[Declaration body truncated: N line(s) remain: lines A-B.]`,
+naming the unshown lines of that declaration.
+
+## Related-files JSON
+
+`related --format json` emits one deterministic document on stdout. Operational
+progress and the optional `warning[DPX-DEPENDENCY-UNSUPPORTED]` language diagnostic
+stay on stderr. The shape is:
+
+```json
+{
+  "schemaVersion": 1,
+  "kind": "devprojex-related-files",
+  "direction": "both",
+  "seeds": [
+    {
+      "seed": "Services/ClockService.cs",
+      "languageId": "cSharp",
+      "dependencies": [
+        {
+          "path": "Contracts/IClock.cs",
+          "status": "resolved",
+          "reasons": ["type reference IClock at line 3"],
+          "candidates": ["Contracts/IClock.cs"],
+          "crossScope": false,
+          "estimatedTokens": 84
+        }
+      ],
+      "dependents": [],
+      "noFactsReason": null
+    }
+  ],
+  "coverage": {
+    "files": 3,
+    "supported": 3,
+    "unsupported": 0,
+    "extractionFailed": 0,
+    "unsupportedLanguages": {},
+    "cSharpErrorNodeKinds": {},
+    "extractionFailedFiles": [],
+    "partialParseDiagnostics": [],
+    "configurationDiagnostics": [
+      {
+        "path": "tsconfig.json",
+        "problem": "corrupt",
+        "affectedScopes": 1
+      }
+    ]
+  },
+  "resolution": {
+    "resolved": 1,
+    "ambiguous": 0,
+    "unresolved": 0,
+    "external": 0
+  },
+  "searchScope": {
+    "files": 3
+  }
+}
+```
+
+`direction` is `dependencies`, `dependents`, or `both`. At depth `1`, `seeds`
+contains the requested seed exactly as before. At larger depths, it additionally
+contains each file reached through resolved edges, once, in deterministic
+breadth-first order. Seeds and related paths use portable project-relative `/`
+separators. Each related item retains its aggregate
+evidence reasons, resolution status, sorted candidate list, cross-compilation-scope
+flag, and estimated source tokens. Ambiguous references have `status: "ambiguous"`
+and list every allowed candidate; self-file edges are absent. A seed whose language
+has no adapter has empty relationship arrays and a non-null `noFactsReason`.
+
+`coverage` describes the complete effective manifest, not only the seeds. Its
+unsupported-language and C# error-node dictionaries use stable ordinal keys.
+`partialParseDiagnostics` lists files where damaged constructions were discarded while independent
+facts remained usable. Each item contains `path`, `droppedConstructs`, bounded `ranges` with
+one-based `startLine`/`endLine`, and `rangesTruncated`. Text output reports the same data as
+`[Dependency partial parse] path=... · dropped=N · lines=...`.
+`extractionFailedFiles` lists, in ordinal order, the project-relative path of every
+manifest file whose facts could not be extracted; its length equals
+`extractionFailed`. `configurationDiagnostics` lists dependency configuration files,
+such as `tsconfig.json`, that could not be used for resolution. Each entry has the
+project-relative `path`, `problem` (the lowercase configuration state: `missing`,
+`corrupt`, or `unsupportedsemantics`), and `affectedScopes`, the number of resolution
+scopes that depend on that file. Text output reports at most eight of each as
+`[Dependency extraction failed] path=...` and
+`[Dependency configuration] affected-scopes=N · problem=... · path=...`.
+`resolution` reports `resolved`, `ambiguous`, `unresolved`, and `external` evidence groups for every
+seed section emitted at the requested depth and direction. Text output carries the same values in `[Resolution]`; consequently an
+empty related-file list does not imply that every observed reference was resolved.
+Traversal follows only resolved edges and is limited to 256 distinct seed files.
+Crossing that limit emits `DPX-DEPENDENCY-TRAVERSAL-LIMIT`, returns policy exit
+code `3`, and writes no partial related-files document.
+`searchScope.files` is the manifest file count after the profile, selected paths,
+Git mode, exclusions, and file-size limit. No field can contain a file or candidate
+outside that manifest. See [Dependencies.md](Dependencies.md) for the evidence and
+resolution semantics.
+
+## Tree JSON and XML
+
+`tree --format json` writes one object with two properties: `rootPath`, the absolute
+project path with `/` separators (the safe repository URL for a remote source), and
+`tree`, the effective tree below that root:
+
+```json
+{
+  "rootPath": "/workspace/app",
+  "tree": {
+    "docs": [
+      "guide.md"
+    ],
+    "src": {
+      "nested": [
+        "util.cs"
+      ],
+      "/": [
+        "app.cs"
+      ]
+    },
+    "/": [
+      "README.md"
+    ]
+  }
+}
+```
+
+Each directory is a property named after it. A directory without subdirectories is
+an array of its file names; a directory with subdirectories is an object whose
+properties are those subdirectories and whose `"/"` property, present only when the
+directory has files, lists its own file names. The root follows the same rule
+inside `tree`. Directories precede the `"/"` file list, and both keep the tree's
+deterministic order. An empty directory is an empty array.
+
+`tree --format xml` writes the same tree as compact elements: the root element `t`
+carries the root in its `r` attribute, each directory is a `d` element named by its
+`n` attribute, and each file is an `f` element whose text is the file name:
+
+```xml
+<t r="/workspace/app">
+  <d n="docs">
+    <f>guide.md</f>
+  </d>
+  <f>README.md</f>
+</t>
+```
+
+Both forms contain names only: no file content, metrics, or diagnostics. Context
+documents with `--view tree` use the richer context tree described below.
 
 ## Recent and Cache JSON
 
@@ -241,7 +531,7 @@ document adds `"notFound": true`, all counters and `bytes` are zero, stdout stil
 contains the complete JSON envelope, stderr is empty, and the command returns
 usage exit code `2`. Successful and other non-not-found documents omit the
 additive `notFound` field. Text mode keeps its localized not-found diagnostic on
-stderr.
+stderr under the stable code `DPX-CLI-CACHE-NOT-FOUND`.
 
 ## Profile Validation JSON
 
@@ -259,6 +549,44 @@ stderr.
 `valid` is a JSON Boolean. `errors` is empty for a valid profile and otherwise
 contains validation messages. The document is written before an invalid profile
 returns usage exit code `2`.
+
+## MCP Agent Journal JSON
+
+`mcp log [PROJECT] --format json` emits the stable session-list document:
+
+```json
+{
+  "schema": "devprojex-agent-journal",
+  "version": 1,
+  "sessions": []
+}
+```
+
+Each `sessions` item contains `id`, `startedUtc`, nullable `endedUtc`, `pid`,
+`processStartUtc`, `clientName`, `clientVersion`, `mode`, `roots`, `toolSet`,
+`serverVersion`, `hidePrivateData`, `totals`, and `isLive`. Each root contains
+`configuredPath` and `name`. `mode` is `live` or `standard`; `toolSet` is `full`
+or `reduced`. The session-list and receipt forms use the same camel-case enum
+spelling. `totals` contains `calls`, `resultCharacters`, `estimatedTokens`,
+`filesDelivered`, `secretsMasked`, `privateDataMasked`, and `errors`.
+
+With `--session ID` or `--last`, JSON uses the same `schema` and `version` and
+adds one `receipt` object instead of `sessions`. The receipt contains `session`,
+`totals`, `deliveredPaths`, and `calls`. A delivered-path entry contains `path`
+and `calls`. A call contains `sequence`, `utc`, `tool`, nullable `rootIndex`,
+`arguments`, nullable `revision`, `durationMs`, `resultCharacters`,
+`estimatedTokens`, `filesDelivered`, `deliveredPaths`,
+`additionalDeliveredPaths`, `secretsMasked`, `privateDataMasked`, `notices`, and
+nullable `errorCode`. Arguments are a fixed safe subset and delivered paths are
+relative to a session root; source content and detected values never enter the
+document. At most 200 paths are present in one call, with the remainder counted
+by `additionalDeliveredPaths`.
+
+Text without a session selector is a human table. Text with a selector is a call
+table. Markdown with a selector is the shared context receipt. `--output` writes
+the selected representation without changing it and returns destination-conflict
+exit code `4` if the path already exists. `--clear` requires `--yes` and writes no
+JSON document.
 
 ## Doctor JSON
 
@@ -317,6 +645,26 @@ estimated tokens for both groups, up to 25 largest skipped paths, an `and X more
 line when needed, and a `--compress-code`/larger-budget hint. stdout remains the
 document-only channel.
 
+With `export context --rank importance`, stderr additionally receives a bounded,
+trusted ranking report after the document has been planned. Its summary names
+`importance-v1`, graph coverage, the fixed Git window, and signal degradation;
+at most ten `[Ranking top]` lines report path, unique dependents, unique
+dependencies, Git activity, and an optional role label. Ranked budget omissions
+use `[Skipped] path — priority P, T tokens, R remaining: does not fit the remaining
+budget`. The existing largest-skipped report remains present. Project-derived
+paths are single-line escaped. stdout remains document-only.
+
+With one or more `--focus` values, the summary algorithm is `focus-v1` and names
+the seed count, bounded hop histogram (`0` through `7`, one `8+` bucket and
+`max hop`), unreachable count, `importance-v1` within-hop order, graph coverage,
+and Git window. A degraded seed count distinguishes resolved links, facts without
+resolved neighbors, extraction failure, and unsupported facts. A seed top line is
+`[Ranking top] PATH — seed`; other top lines add hop, canonical parent relation,
+final priority, and the original importance priority. Focus-ranked budget misses
+use `[Skipped] PATH — hop H, priority P, T tokens, R remaining: does not fit the
+remaining budget` (or `unreachable`). Existing coverage, shallow-Git, contribution,
+role, confidence, and largest-skipped output remains present.
+
 ## Context JSON
 
 The top-level shape is:
@@ -351,8 +699,19 @@ The top-level shape is:
 ```
 
 Property order is deterministic where contract tests require it. Paths use `/`
-inside machine documents. A binary entry has `isBinary: true` and null content;
+inside machine documents. Every file path a context document writes is
+project-relative in every view (`tree`, `content`, and `tree-content`) and for local
+and remote sources alike: `files[].path`, `tokenBudget.largestSkippedFiles[].path`,
+and the ranking `top`, `skipped`, `seeds`, and `via` paths. The standard-error budget
+and ranking summaries name files the same way. `project.root` is the only property
+that carries the absolute project location; diagnostic paths keep their own
+representation. A binary entry has `isBinary: true` and null content;
 binary bytes are never inserted into AI context output.
+Context JSON and `tree --format json` escape only what JSON requires: a quote is
+written as `\"`, a backslash as `\\`, and control characters and characters outside
+the Basic Multilingual Plane as `\uXXXX` escapes; `<`, `>`, `&`, `'` and other
+non-ASCII text stay as written. Every document remains valid JSON that parses back
+to the original text.
 
 For a cached Git clone, `project.source` is an additive object containing the
 source type, safe repository URL, and optional branch/commit metadata. Human
@@ -383,6 +742,54 @@ document's `metrics.estimatedTokens` value.
 The existing `metrics` object and `tree` describe the complete effective
 selection before token-budget omission; `files` and `tokenBudget` describe the
 content admitted by the budget.
+
+With `export context --rank importance`, JSON adds an optional `ranking` object
+after `files`. It contains stable fields `algorithm`, `graphVariant`,
+`candidateFiles`, `graphSupportedSources`, `graphExtractionFailures`,
+`graphCoverage`, `gitWindow`, `gitCommits`, `gitUnavailableReason`,
+`redistributedMissingSignals`, and `top`. Each of at most ten `top` entries has
+`path`, `priority`, `score`, `dependents`, `dependencies`, optional `commits`,
+optional `mostRecentCommitPosition`, and `role`. The object is absent when rank is
+omitted. Its `skipped` array contains at most ten highest-priority budget misses,
+each with `path`, `priority`, `estimatedTokens`, `remainingEstimatedTokens`, and
+the stable `reason`. Ranking changes neither a file's prepared content nor its
+token cost. `role` uses `source`, `test-source`, `manifest`, or `entry-point`;
+`gitUnavailableReason` uses lowercase kebab-case tokens headed by `none`.
+
+With focus, `algorithm` is `focus-v1` and `ranking` additionally contains:
+
+```json
+{
+  "focus": {
+    "algorithm": "focus-v1",
+    "withinHop": "importance-v1",
+    "seeds": [
+      { "requested": "src/app.py", "path": "src/app.py", "state": "resolved" }
+    ],
+    "hops": { "0": 1, "1": 6 },
+    "hopsBeyond": 0,
+    "maxHop": 1,
+    "unreachable": 20
+  }
+}
+```
+
+Seed states are `resolved`, `no-resolved-neighbors`, `extraction-failed`, and
+`unsupported`. Every `top` and `skipped` entry adds `hop` (number or null) and
+`baseImportancePriority`. A reachable non-seed also adds `via` with `path` and
+relation `dependent-of`, `dependency-of`, or `linked-with`. These properties and
+the `focus` object are omitted entirely without focus; `importance-v1` JSON stays
+byte-for-byte unchanged.
+`focus.seeds[].requested` preserves the submitted spelling only after applying the
+same safe output-path policy and captured local-user occurrence decision as
+`project.root`. With private-data masking enabled, an absolute seed masks its local
+user segment with the same placeholder as the document header.
+
+With `--detail-for`, every entry in `files` and every entry in
+`tokenBudget.largestSkippedFiles` additionally carries `detail`, a
+`full|compact|signatures` string naming the level resolved for that file. It names the
+resolved level, not a guarantee that a transformation applied. The field is additive
+and present only for a call that supplied the option.
 
 ## Context XML
 
@@ -431,6 +838,11 @@ export. The report always identifies included and skipped file counts and
 estimated tokens, lists at most 25 largest skipped files plus an `and X more`
 line, and recommends `--compress-code` or a larger budget. It belongs to stderr;
 the context document on stdout remains byte-clean.
+When `export context --detail-for` is present, the dry-run plan adds
+`Detail mix: full N; compact N; signatures N` after its size line, and
+`Detail patterns matching nothing: ...` when some supplied glob claimed nothing. Both
+lines go to stderr with the rest of the plan and appear only for a call that supplied
+the option.
 
 A project-copy dry run with Hide Secrets enabled also states that detected text
 will be changed, binary files will remain unchanged, and the result may not build
@@ -508,10 +920,31 @@ hint:
 Choose another path or use --force for ZIP replacement.
 ```
 
-The `DPX-*` code is stable and language-independent. Normal verbosity never
+The `error` and `hint` labels follow the interface language selected by
+`--language`, `DEVPROJEX_LANGUAGE`, or the system language, on every error path:
+parser validation and command failures print the same localized header, for example
+`ошибка[DPX-PROJECT-NOT-FOUND]:` in Russian. The `DPX-*` code is stable and
+language-independent. Normal verbosity never
 prints raw `Exception.Message`, an inner exception, or a platform-localized I/O
 message. Diagnostic verbosity may report an exception type, safe path context,
 stack trace, and request identifier, but never file content or secrets.
+
+`profile reset` returns policy exit code `3` with
+`DPX-CLI-PROFILE-PARTIAL` when persistent marks were removed but the selection
+profile could not be removed. The operation is idempotent; repeating it completes
+the remaining stage once storage is available.
+
+`profile save` and applying `profile import` return policy exit code `3` with
+`DPX-CLI-PROFILE-CONFLICT` if the local profile changed after the command observed
+its revision but before it committed. The command does not overwrite the newer
+profile; repeat it to plan against the latest revision.
+
+`export project` reports `DPX-COMPRESSION-UNAVAILABLE` on stderr when a requested
+syntax transformation cannot load its grammar. The affected source remains
+complete, success and strict-policy semantics are unchanged, and the copy notice
+is printed only when at least one file was actually transformed. Pass-through
+copy also fails as source unavailable if the identity captured from its open
+source handle changes before EOF.
 
 Secret inspection never emits uninspected text. A selected text file above the supported
 16 MiB limit fails no command: `export context` omits its text, and `export project`
@@ -519,6 +952,160 @@ leaves it out of the copy and names it in `DEVPROJEX-NOTICE.txt`.
 `DPX-SECRET-DETECTION-FAILED` identifies rule loading, matching, timeout, or
 classified-read failure on any command; it is a runtime failure (exit `1`) and never
 falls back to an unredacted artifact.
+
+## Error code catalog
+
+Every `DPX-*` code the `devprojex` command line can print, grouped by area. The
+`Exit code` column gives the process exit code for a failure; a code marked
+`warning` is a non-fatal diagnostic that does not change a successful exit
+code (it may appear in the `diagnostics` array or on stderr).
+
+### Parsing and general
+
+| Code | Exit code | Meaning |
+|---|---:|---|
+| `DPX-CLI-UNKNOWN-COMMAND` | 2 | Command name is not recognized. |
+| `DPX-CLI-UNKNOWN-OPTION` | 2 | Option name is not recognized. |
+| `DPX-CLI-MISSING-VALUE` | 2 | A required argument or an option value is missing. |
+| `DPX-CLI-INVALID-VALUE` | 2 | An option value failed validation. |
+| `DPX-CLI-INVALID-SYNTAX` | 2 | Malformed command line (value on a flag that takes none, empty argument, etc.). |
+| `DPX-CLI-LEGACY-SYNTAX` | 2 | A pre-v1 command form was used; see [CLI-Migration.md](CLI-Migration.md). |
+| `DPX-CLI-SELECT-FROM-INVALID` | 2 | `--select-from` file is missing, unreadable, or has no usable paths. |
+| `DPX-CLI-SEARCH-PATTERN` | 2 | The search pattern or its flag combination is invalid. |
+| `DPX-CLI-INVALID-REQUEST` | 2 | The export request is internally inconsistent. |
+| `DPX-CLI-CANCELED` | 130 | The command was canceled (Ctrl+C). |
+| `DPX-CLI-UNEXPECTED` | 1 | An unhandled exception occurred; diagnostic verbosity reports more detail. |
+| `DPX-DEV-RUNNER-UNAVAILABLE` | 1 | An internal developer-only command is not available in this build. |
+
+### Project and selection
+
+| Code | Exit code | Meaning |
+|---|---:|---|
+| `DPX-PROJECT-NOT-FOUND` | 2 | The project path does not exist or is not a readable directory. |
+| `DPX-PROJECT-PATH-REQUIRED` | 2 | No project path was supplied and none can be inferred. |
+| `DPX-PROJECT-PATH-INVALID` | 2 | The project path is malformed. |
+| `DPX-PROJECT-ROOT-ACCESS-DENIED` | 2 | The project root cannot be read (permissions). |
+| `DPX-SELECTION-PATH-INVALID` | 2 | An explicitly selected path is malformed. |
+| `DPX-SELECTION-PATH-MISSING` | 2 | An explicitly selected path does not exist under the project root. |
+| `DPX-PROJECT-PARTIAL-ACCESS` | warning | Some files or folders under the root could not be read; the result is partial. |
+| `DPX-PROJECT-SELECTION-WARNING` | warning | The selection includes paths outside the recognized project boundary. |
+
+### Profiles
+
+| Code | Exit code | Meaning |
+|---|---:|---|
+| `DPX-CLI-PROFILE-NOT-FOUND` | 2 | The referenced profile could not be resolved: no local profile exists for the project, or the `--profile` file does not exist. |
+| `DPX-CLI-PROFILE-UNRESOLVED` | 2 | The profile selection could not be resolved against the current project. |
+| `DPX-CLI-PROFILE-BUSY` | 2 | Another operation is currently using the profile store. |
+| `DPX-CLI-PROFILE-CORRUPT` | 2 | The profile file failed to parse or fails its schema. |
+| `DPX-CLI-PROFILE-FUTURE-SCHEMA` | 2 | The profile was written by a newer, unsupported schema version. |
+| `DPX-CLI-PROFILE-INVALID` | 2 | The profile file exists but cannot be read or is structurally invalid, or the profile request itself is invalid. |
+| `DPX-CLI-PROFILE-SELECTION-TOO-LARGE` | 2 | The explicit selection is too large to save into a portable profile. |
+| `DPX-CLI-PROFILE-WRITE-FAILED` | 1 | The profile store could not be written. |
+| `DPX-CLI-PROFILE-PARTIAL` | 3 | `profile reset` removed persistent marks but not the selection profile; repeat the command. |
+| `DPX-CLI-PROFILE-CONFLICT` | 3 | The local profile changed after the command observed its revision; repeat the command. |
+| `DPX-PROFILE-DESTINATION-EXISTS` | 4 | The profile export destination already exists. |
+
+### Git and remote sources
+
+| Code | Exit code | Meaning |
+|---|---:|---|
+| `DPX-CLI-GIT-URL-INVALID` | 2 | The repository source is not a supported clone URL. |
+| `DPX-CLI-GIT-BRANCH-INVALID` | 2 | `--branch` is not a syntactically valid branch name. |
+| `DPX-CLI-GIT-BRANCH-LOCAL` | 2 | `--branch` was given together with a local (non-URL) source. |
+| `DPX-CLI-GIT-UNAVAILABLE` | 1 | Git is not available on this machine. |
+| `DPX-CLI-GIT-CLONE-FAILED` | 1 | The repository clone did not complete successfully. |
+| `DPX-CLI-GIT-CACHE-FAILED` | 1 | The clone succeeded but could not be published to the managed cache. |
+| `DPX-CLI-GIT-BRANCH-UNAVAILABLE` | 1 | The requested branch could not be resolved on the remote. |
+| `DPX-CLI-CACHE-NOT-FOUND` | 2 | The referenced repository cache entry does not exist. |
+| `DPX-GIT-CACHE-QUOTA` | diagnostic | Git cache size exceeds the configured limit; detail text inside `DPX-CLI-GIT-CACHE-FAILED`. |
+| `DPX-GIT-CACHE-RESERVE` | diagnostic | Git cache destination lacks the required free-space reserve; detail text inside `DPX-CLI-GIT-CACHE-FAILED`. |
+| `DPX-ZIP-METADATA-TIMEOUT` | diagnostic | A ZIP-archive fallback metadata request timed out; detail text inside the clone failure. |
+| `DPX-ZIP-BODY-TIMEOUT` | diagnostic | A ZIP-archive fallback body download made no progress within the deadline; detail text inside the clone failure. |
+| `DPX-ZIP-SYMLINK-SKIPPED` | notice | Progress notice that a symbolic-link entry was skipped while extracting a ZIP-archive fallback; not a failure. |
+| `DPX-GIT-STATE-UNAVAILABLE` | warning | The Git worktree state needed for the requested Git scope could not be read. |
+| `DPX-GIT-STATE-DELETED` | warning | A tracked file the Git scope depends on was deleted in the worktree. |
+| `DPX-GIT-TRACKED-INDEX-UNAVAILABLE` | warning | The tracked-file index could not be loaded for tracked Git mode. |
+| `DPX-GIT-TRACKED-INDEX-PARTIAL` | warning | The tracked-file index loaded only partially. |
+| `DPX-GIT-UNSAFE-FILTER` | warning | A requested Git filter could not be applied safely and was skipped. |
+
+### Export and project copy
+
+| Code | Exit code | Meaning |
+|---|---:|---|
+| `DPX-EXPORT-DESTINATION-EXISTS` | 4 | The export destination already exists. |
+| `DPX-EXPORT-UNSAFE-DESTINATION` | 3 | The destination is inside the source, or otherwise unsafe to write to. |
+| `DPX-EXPORT-UNSAFE-SOURCE` | 1 | The source changed identity during export and can no longer be trusted. |
+| `DPX-EXPORT-SYMLINK-NOT-SUPPORTED` | 1 | A symbolic link in the selection is not supported by this export mode. |
+| `DPX-EXPORT-DESTINATION-UNAVAILABLE` | 1 | The destination could not be created or opened for writing. |
+| `DPX-EXPORT-SOURCE-UNAVAILABLE` | 1 | The source became unreadable during export. |
+| `DPX-EXPORT-RESERVED-NAME` | 3 | The generated `DEVPROJEX-NOTICE.txt` name conflicts with an existing source file. |
+| `DPX-EXPORT-FAILED` | 1 | The export failed for an unclassified reason. |
+| `DPX-CLI-FORCE-NOT-SUPPORTED` | 2 | `--force` was combined with folder export, which does not support replacement. |
+| `DPX-CLI-FOLDER-STDOUT-NOT-SUPPORTED` | 2 | Folder export cannot be written to stdout (`-`). |
+| `DPX-CLI-ZIP-EXTENSION-REQUIRED` | 2 | A ZIP export destination must end in `.zip`. |
+| `DPX-CLI-BINARY-STDOUT-UNAVAILABLE` | 2 | The host does not expose a raw binary stdout stream for ZIP-to-stdout export. |
+| `DPX-CLI-OUTPUT-EXISTS` | 4 | The agent-journal output file already exists. |
+| `DPX-COMPRESSION-UNAVAILABLE` | warning | A requested syntax-compression grammar could not load; the affected source is copied uncompressed. |
+
+### Secrets and dependencies
+
+| Code | Exit code | Meaning |
+|---|---:|---|
+| `DPX-SECRET-DETECTION-FAILED` | 1 | Secret-rule loading, matching, timeout, or classified read failed. |
+| `DPX-SECRET-SCAN-LIMIT-EXCEEDED` | 1 | The secret scan exceeded its size or time budget. |
+| `DPX-DEPENDENCY-TRAVERSAL-LIMIT` | 3 | Related-file traversal exceeded 256 distinct seed files; no partial document is written. |
+| `DPX-DEPENDENCY-UNSUPPORTED` | warning | A dependency fact could not be extracted for an unsupported construct or language. |
+
+### Desktop control
+
+| Code | Exit code | Meaning |
+|---|---:|---|
+| `DPX-DESKTOP-NOT-RUNNING` | 5 | No desktop instance is running to receive the request. |
+| `DPX-DESKTOP-AMBIGUOUS` | 5 | Multiple desktop instances are running and none uniquely matches the project. |
+| `DPX-DESKTOP-TIMEOUT` | 5 | The desktop instance did not respond within the request timeout. |
+| `DPX-DESKTOP-PROTOCOL-MISMATCH` | 5 | The desktop instance uses an incompatible control-protocol version. |
+| `DPX-DESKTOP-INSTANCE-MISMATCH` | 5 | The response did not match the expected instance or request id. |
+| `DPX-DESKTOP-PAYLOAD-TOO-LARGE` | 5 | The control-protocol payload exceeded its size limit. |
+| `DPX-DESKTOP-INVALID-PAYLOAD` | 5 | The control-protocol payload failed validation. |
+| `DPX-DESKTOP-REQUEST-FAILED` | 5 | The desktop instance reported a request failure without a more specific code. |
+| `DPX-DESKTOP-UNKNOWN-ACTION` | 5 | The requested desktop action is not recognized. |
+| `DPX-DESKTOP-NOT-INCLUDED` | 5 | This build does not include the desktop application. |
+| `DPX-DESKTOP-LAUNCH-FAILED` | 5 | The desktop application process could not be launched. |
+| `DPX-DESKTOP-NO-RECENT-PROJECT` | 5 | No recent project is available to open in the desktop application. |
+| `DPX-DESKTOP-PROJECT-OPEN-FAILED` | 5 | The desktop application failed to open the requested project. |
+| `DPX-DESKTOP-STARTUP-FAILED` | 5 | The desktop application failed to start. |
+| `DPX-DESKTOP-SHUTTING-DOWN` | 5 | The desktop instance is shutting down and cannot accept the request. |
+| `DPX-DESKTOP-MODAL-BUSY` | 5 | The desktop instance has a blocking dialog open. |
+| `DPX-DESKTOP-BUSY` | 5 | The desktop instance is busy with another operation. |
+| `DPX-DESKTOP-ACCESS-DENIED` | 5 | The desktop instance denied the request (permissions). |
+| `DPX-DESKTOP-RESOURCE-UNAVAILABLE` | 5 | A resource the desktop instance needed for the request is unavailable. |
+| `DPX-DESKTOP-INVALID-DATA` | 5 | The desktop instance received or holds invalid data for the request. |
+| `DPX-DESKTOP-OPERATION-FAILED` | 5 | The desktop instance's operation failed without a more specific code. |
+
+### Store, cache, and agent journal
+
+| Code | Exit code | Meaning |
+|---|---:|---|
+| `DPX-STORE-MIGRATION-UNAVAILABLE` | 1 | Store-packaged user-data migration could not run. |
+| `DPX-CLI-JOURNAL-NOT-FOUND` | 2 | The referenced agent-journal session does not exist. |
+| `DPX-CLI-JOURNAL-SESSION-REQUIRED` | 2 | Markdown journal output requires `--session ID` or `--last`. |
+| `DPX-CLI-JOURNAL-WRITE-FAILED` | 1 | The agent-journal output could not be written. |
+| `DPX-MCP-STARTUP` | 1 | The `devprojex mcp` server process failed to start. |
+| `DPX-IO-ACCESS-DENIED` | 1 | The operating system denied access to a file or directory. |
+| `DPX-IO-FAILURE` | 1 | An unclassified I/O failure occurred. |
+
+### Doctor checks
+
+`devprojex doctor --format json` gives each check a stable identifier
+`DPX-DOCTOR-<CHECK-NAME>`, built from its uppercase check name: `terminal-launcher`,
+`path-resolution`, `interactive-tty`, `terminal-capabilities`, `unicode`, `git`,
+`tracked-git-mode`, `current-directory`, `profile-store`, `configuration-root`,
+`data-root`, `state-root`, `cache-root`, `terminal-settings`, `recent-workspaces`,
+`temporary-directory`, `repository-cache`, `desktop-ipc`, and `environment`. Each
+check carries its own `pass`/`warning`/`failure`/`skip` status instead of a
+process exit code; only an overall `failure` check changes the command's exit
+code, to policy exit code `3` (see [Doctor JSON](#doctor-json)).
 
 ## Exit Codes
 

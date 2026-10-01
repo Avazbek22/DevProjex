@@ -6,12 +6,14 @@ public sealed record StoreScreenshotCaptureRequest(
 	string ProjectPath,
 	string SessionDirectory,
 	string AppDataDirectory,
-	string LanguageCode);
+	string LanguageCode,
+	IReadOnlyList<string>? LiveContextSelection = null);
 
 public static class StoreScreenshotCaptureRequestStore
 {
 	public const string EnvironmentVariable = "DEVPROJEX_INTERNAL_STORE_CAPTURE";
 	public const string SessionRootName = "store-screenshot-captures";
+	internal const int MaximumLiveContextSelectionCount = 32;
 
 	private static readonly JsonSerializerOptions JsonOptions = new()
 	{
@@ -67,9 +69,44 @@ public static class StoreScreenshotCaptureRequestStore
 			return false;
 		}
 
+		if (!IsValidLiveContextSelection(request.LiveContextSelection, request.ProjectPath))
+			return false;
+
 		var sessionDirectory = Path.GetFullPath(request.SessionDirectory);
 		var appDataDirectory = Path.GetFullPath(request.AppDataDirectory);
 		return PathUtility.IsPathInside(sessionDirectory, sessionRoot) &&
 		       PathUtility.IsPathInside(appDataDirectory, sessionDirectory);
+	}
+
+	private static bool IsValidLiveContextSelection(
+		IReadOnlyList<string>? selection,
+		string projectPath)
+	{
+		if (selection is null)
+			return true;
+		if (selection.Count is 0 or > MaximumLiveContextSelectionCount)
+			return false;
+
+		var projectRoot = Path.GetFullPath(projectPath);
+		foreach (var relativePath in selection)
+		{
+			// Selection entries name project items by their relative path; anything that can
+			// resolve outside the capture project is rejected together with the whole request.
+			if (string.IsNullOrWhiteSpace(relativePath) ||
+				Path.IsPathRooted(relativePath) ||
+				relativePath.Split(['/', '\\']).Any(static segment => segment is "" or "." or ".."))
+			{
+				return false;
+			}
+
+			var fullPath = Path.GetFullPath(Path.Combine(projectRoot, relativePath));
+			if (!PathUtility.IsPathInside(fullPath, projectRoot) ||
+				PathComparer.Default.Equals(fullPath, projectRoot))
+			{
+				return false;
+			}
+		}
+
+		return true;
 	}
 }

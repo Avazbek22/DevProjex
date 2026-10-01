@@ -1,5 +1,6 @@
 using DevProjex.Application.Models;
 using DevProjex.Avalonia.Coordinators;
+using DevProjex.Avalonia.Services;
 
 namespace DevProjex.Avalonia;
 
@@ -15,7 +16,7 @@ public partial class MainWindow : IProjectLoadSnapshotPipelineHost
         SelectionRefreshSnapshot snapshot) =>
         snapshot.RootAccessDenied &&
         PathComparer.Default.Equals(_currentPath, currentPath) &&
-        TryElevateAndRestart(currentPath);
+        HandleBackgroundRootAccessDenied(currentPath);
 
     TreeRefreshInput IProjectLoadSnapshotPipelineHost.CreateTreeRefreshInput(
         string currentPath,
@@ -91,7 +92,7 @@ public partial class MainWindow : IProjectLoadSnapshotPipelineHost
         BuildTreeResult result) =>
         result.RootAccessDenied &&
         PathComparer.Default.Equals(_currentPath, input.CurrentPath) &&
-        TryElevateAndRestart(input.CurrentPath);
+        HandleBackgroundRootAccessDenied(input.CurrentPath);
 
 	void IProjectLoadSnapshotPipelineHost.ReportIncompleteTreeScan() =>
 		_toastService.Show(_localization["Scan.Error.Incomplete"]);
@@ -116,9 +117,16 @@ public partial class MainWindow : IProjectLoadSnapshotPipelineHost
             snapshot.TreeInput.CurrentPath,
             snapshot.SelectionSnapshot))
         {
-			return false;
+            return false;
         }
-		PrepareContentSessionsForPublishedProject(snapshot);
+        PrepareContentSessionsForPublishedProject(snapshot);
+        if (snapshot.ProfileTreeSelection is { } profileTreeSelection)
+        {
+            ApplyTreeSelectionWithoutPublishing(() =>
+                ProjectTreeUiState.RestoreProfileSelection(
+                    snapshot.TreeRoot,
+                    profileTreeSelection.SelectedPaths));
+        }
 
         // Project profiles are applied with option notifications suppressed. Publish the resolved
         // transformation state before post-load work starts, otherwise a persisted compression

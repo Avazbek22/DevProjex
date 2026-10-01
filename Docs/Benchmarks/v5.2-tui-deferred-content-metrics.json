@@ -1,0 +1,196 @@
+{
+  "scenario": "TUI backend project open with deferred content metrics",
+  "date": "2026-09-23",
+  "workload": {
+    "root": "DevProjex repository root",
+    "environmentVariable": "DEVPROJEX_GUI_BENCHMARK_ROOT=(Get-Location).Path",
+    "profile": "Standard",
+    "includedFiles": 2728,
+    "includedBytes": 149434714,
+    "inventoryInvariant": "Included paths, lengths, and UTC modification ticks matched both variants and all six pairs."
+  },
+  "host": {
+    "os": "Windows 11 Pro 10.0.26200 x64",
+    "cpu": "Intel Core i9-13900HX, 24 cores, 32 logical processors",
+    "visibleMemoryKiB": 66795000,
+    "repositoryVolume": "KINGSTON SNV2S1000G NVMe SSD",
+    "dotnetSdk": "10.0.401",
+    "dotnetRuntime": "10.0.12",
+    "configuration": "Release"
+  },
+  "benchmark": "DevProjex.Tests.Terminal.TerminalWorkspaceMetricsLoadTests.RealProjectMeasuresDeferredTuiOpenAgainstFullMetricsPath",
+  "command": "dotnet test Tests/DevProjex.Tests.Terminal/DevProjex.Tests.Terminal.csproj -c Release --no-restore -m:2 --filter \"FullyQualifiedName~RealProjectMeasuresDeferredTuiOpenAgainstFullMetricsPath\" --logger \"console;verbosity=detailed\"",
+  "measurement": {
+    "warmUpPairs": 1,
+    "samplePairs": 5,
+    "order": "Alternating full-then-deferred and deferred-then-full; ignore discovery caches refreshed before each timed variant.",
+    "fullBoundary": "Standard selection resolution plus TerminalProjectContextFactory.BuildAsync with full content output metrics and ignore-impact counts.",
+    "deferredBoundary": "TerminalWorkspaceController.OpenAsync with content output metrics deferred and ignore-impact counts retained.",
+    "onDemandBoundary": "TerminalWorkspaceController.BuildCurrentPlanAsync after deferred open; measured separately.",
+    "timing": "Stopwatch elapsed milliseconds; excludes cache-refresh calls and structured-output comparison.",
+    "allocation": "GC.GetTotalAllocatedBytes(precise: true) delta; process-wide managed allocation, subject to concurrent activity.",
+    "fileReads": "ContentPipelineDiagnostics full-file reads within each timed boundary.",
+    "scope": "Backend operations only; not TUI rendering, terminal readiness, or whole-application startup."
+  },
+  "parity": {
+    "everyPair": "Included paths and bytes, ignore-impact availability, and exact ProjectOutputMetricsReport match after explicit on-demand computation.",
+    "sampleZero": "Structured Tree JSON output bytes matched between previous full-metrics state and deferred state after explicit metrics computation.",
+    "fullMetricCallsPerPair": 2728,
+    "fullFileReadsPerPair": 2299,
+    "fullFileReadBytesPerPair": 28752754,
+    "deferredMetricCallsPerPair": 0,
+    "deferredFullFileReadsPerPair": 0,
+    "onDemandMetricCallsPerPair": 2728,
+    "onDemandFullFileReadsPerPair": 2299,
+    "onDemandFullFileReadBytesPerPair": 28752754
+  },
+  "summaryExcludingWarmUp": {
+    "fullElapsedMs": { "median": 135.1285, "min": 130.2453, "max": 251.619 },
+    "deferredElapsedMs": { "median": 114.5563, "min": 93.747, "max": 142.996 },
+    "onDemandElapsedMs": { "median": 41.4827, "min": 36.4538, "max": 54.1256 },
+    "fullAllocatedBytes": { "median": 35866488, "min": 30366672, "max": 41672376 },
+    "deferredAllocatedBytes": { "median": 35861200, "min": 29173208, "max": 37205560 },
+    "medianOpenElapsedReductionPercent": 15.2
+  },
+  "observations": [
+    {
+      "iteration": -1,
+      "phase": "warm-up",
+      "order": "deferred-then-full",
+      "includedFiles": 2728,
+      "includedBytes": 149434714,
+      "full": { "elapsedMs": 318.8068, "allocatedBytes": 44441976, "metricCalls": 2728, "fileReads": 2299, "fileReadBytes": 28752754 },
+      "deferred": { "elapsedMs": 1162.1318, "allocatedBytes": 170514568, "metricCalls": 0, "fileReads": 0, "fileReadBytes": 0 },
+      "onDemand": { "elapsedMs": 43.7669, "allocatedBytes": 2112984, "metricCalls": 2728, "fileReads": 2299, "fileReadBytes": 28752754 }
+    },
+    {
+      "iteration": 0,
+      "phase": "sample",
+      "order": "full-then-deferred",
+      "includedFiles": 2728,
+      "includedBytes": 149434714,
+      "full": { "elapsedMs": 251.619, "allocatedBytes": 41672376, "metricCalls": 2728, "fileReads": 2299, "fileReadBytes": 28752754 },
+      "deferred": { "elapsedMs": 142.996, "allocatedBytes": 29173208, "metricCalls": 0, "fileReads": 0, "fileReadBytes": 0 },
+      "onDemand": { "elapsedMs": 36.4538, "allocatedBytes": 2110640, "metricCalls": 2728, "fileReads": 2299, "fileReadBytes": 28752754 }
+    },
+    {
+      "iteration": 1,
+      "phase": "sample",
+      "order": "deferred-then-full",
+      "includedFiles": 2728,
+      "includedBytes": 149434714,
+      "full": { "elapsedMs": 130.2453, "allocatedBytes": 35866488, "metricCalls": 2728, "fileReads": 2299, "fileReadBytes": 28752754 },
+      "deferred": { "elapsedMs": 121.8221, "allocatedBytes": 36683592, "metricCalls": 0, "fileReads": 0, "fileReadBytes": 0 },
+      "onDemand": { "elapsedMs": 54.1256, "allocatedBytes": 2112480, "metricCalls": 2728, "fileReads": 2299, "fileReadBytes": 28752754 }
+    },
+    {
+      "iteration": 2,
+      "phase": "sample",
+      "order": "full-then-deferred",
+      "includedFiles": 2728,
+      "includedBytes": 149434714,
+      "full": { "elapsedMs": 160.6104, "allocatedBytes": 35797256, "metricCalls": 2728, "fileReads": 2299, "fileReadBytes": 28752754 },
+      "deferred": { "elapsedMs": 114.5563, "allocatedBytes": 34807848, "metricCalls": 0, "fileReads": 0, "fileReadBytes": 0 },
+      "onDemand": { "elapsedMs": 47.1211, "allocatedBytes": 2110104, "metricCalls": 2728, "fileReads": 2299, "fileReadBytes": 28752754 }
+    },
+    {
+      "iteration": 3,
+      "phase": "sample",
+      "order": "deferred-then-full",
+      "includedFiles": 2728,
+      "includedBytes": 149434714,
+      "full": { "elapsedMs": 135.1285, "allocatedBytes": 37263736, "metricCalls": 2728, "fileReads": 2299, "fileReadBytes": 28752754 },
+      "deferred": { "elapsedMs": 101.1221, "allocatedBytes": 35861200, "metricCalls": 0, "fileReads": 0, "fileReadBytes": 0 },
+      "onDemand": { "elapsedMs": 41.4827, "allocatedBytes": 2111944, "metricCalls": 2728, "fileReads": 2299, "fileReadBytes": 28752754 }
+    },
+    {
+      "iteration": 4,
+      "phase": "sample",
+      "order": "full-then-deferred",
+      "includedFiles": 2728,
+      "includedBytes": 149434714,
+      "full": { "elapsedMs": 131.442, "allocatedBytes": 30366672, "metricCalls": 2728, "fileReads": 2299, "fileReadBytes": 28752754 },
+      "deferred": { "elapsedMs": 93.747, "allocatedBytes": 37205560, "metricCalls": 0, "fileReads": 0, "fileReadBytes": 0 },
+      "onDemand": { "elapsedMs": 36.6155, "allocatedBytes": 2112208, "metricCalls": 2728, "fileReads": 2299, "fileReadBytes": 28752754 }
+    }
+  ],
+  "verificationRun": {
+    "reason": "Rebuilt and reran after a test-only diagnostic scope cleanup.",
+    "corpusDrift": "One additional included file appeared between runs; observations and summaries are not pooled with the initial run.",
+    "includedFiles": 2729,
+    "includedBytes": 149443921,
+    "inventoryInvariant": "Included paths, lengths, and UTC modification ticks matched both variants and all six verification pairs.",
+    "phaseBoundaries": "Same full, deferred, and on-demand boundaries as the initial run; ignore discovery caches refreshed before each timed variant.",
+    "parity": "Exact included-path and metrics parity in every pair; byte-identical structured Tree JSON in sample zero.",
+    "summaryExcludingWarmUp": {
+      "fullElapsedMs": { "median": 134.5777, "min": 127.8275, "max": 219.5146 },
+      "deferredElapsedMs": { "median": 128.8383, "min": 90.9812, "max": 138.4767 },
+      "onDemandElapsedMs": { "median": 36.9715, "min": 33.5497, "max": 42.6297 },
+      "fullAllocatedBytes": { "median": 35343832, "min": 33457376, "max": 41157728 },
+      "deferredAllocatedBytes": { "median": 35398168, "min": 34647280, "max": 39274928 },
+      "medianOpenElapsedReductionPercent": 4.3
+    },
+    "observations": [
+      {
+        "iteration": -1,
+        "phase": "warm-up",
+        "order": "deferred-then-full",
+        "includedFiles": 2729,
+        "includedBytes": 149443921,
+        "full": { "elapsedMs": 309.6235, "allocatedBytes": 47774096, "metricCalls": 2729, "fileReads": 2300, "fileReadBytes": 28761961 },
+        "deferred": { "elapsedMs": 1116.6904, "allocatedBytes": 176528904, "metricCalls": 0, "fileReads": 0, "fileReadBytes": 0 },
+        "onDemand": { "elapsedMs": 47.9114, "allocatedBytes": 2111104, "metricCalls": 2729, "fileReads": 2300, "fileReadBytes": 28761961 }
+      },
+      {
+        "iteration": 0,
+        "phase": "sample",
+        "order": "full-then-deferred",
+        "includedFiles": 2729,
+        "includedBytes": 149443921,
+        "full": { "elapsedMs": 219.5146, "allocatedBytes": 41157728, "metricCalls": 2729, "fileReads": 2300, "fileReadBytes": 28761961 },
+        "deferred": { "elapsedMs": 138.4767, "allocatedBytes": 39274928, "metricCalls": 0, "fileReads": 0, "fileReadBytes": 0 },
+        "onDemand": { "elapsedMs": 42.6297, "allocatedBytes": 2111360, "metricCalls": 2729, "fileReads": 2300, "fileReadBytes": 28761961 }
+      },
+      {
+        "iteration": 1,
+        "phase": "sample",
+        "order": "deferred-then-full",
+        "includedFiles": 2729,
+        "includedBytes": 149443921,
+        "full": { "elapsedMs": 128.3007, "allocatedBytes": 35343832, "metricCalls": 2729, "fileReads": 2300, "fileReadBytes": 28761961 },
+        "deferred": { "elapsedMs": 128.8383, "allocatedBytes": 35398168, "metricCalls": 0, "fileReads": 0, "fileReadBytes": 0 },
+        "onDemand": { "elapsedMs": 35.4698, "allocatedBytes": 2113256, "metricCalls": 2729, "fileReads": 2300, "fileReadBytes": 28761961 }
+      },
+      {
+        "iteration": 2,
+        "phase": "sample",
+        "order": "full-then-deferred",
+        "includedFiles": 2729,
+        "includedBytes": 149443921,
+        "full": { "elapsedMs": 138.5541, "allocatedBytes": 33457376, "metricCalls": 2729, "fileReads": 2300, "fileReadBytes": 28761961 },
+        "deferred": { "elapsedMs": 128.9078, "allocatedBytes": 34647280, "metricCalls": 0, "fileReads": 0, "fileReadBytes": 0 },
+        "onDemand": { "elapsedMs": 36.9715, "allocatedBytes": 2112664, "metricCalls": 2729, "fileReads": 2300, "fileReadBytes": 28761961 }
+      },
+      {
+        "iteration": 3,
+        "phase": "sample",
+        "order": "deferred-then-full",
+        "includedFiles": 2729,
+        "includedBytes": 149443921,
+        "full": { "elapsedMs": 134.5777, "allocatedBytes": 35730376, "metricCalls": 2729, "fileReads": 2300, "fileReadBytes": 28761961 },
+        "deferred": { "elapsedMs": 124.1089, "allocatedBytes": 37514896, "metricCalls": 0, "fileReads": 0, "fileReadBytes": 0 },
+        "onDemand": { "elapsedMs": 39.0562, "allocatedBytes": 2152608, "metricCalls": 2729, "fileReads": 2300, "fileReadBytes": 28761961 }
+      },
+      {
+        "iteration": 4,
+        "phase": "sample",
+        "order": "full-then-deferred",
+        "includedFiles": 2729,
+        "includedBytes": 149443921,
+        "full": { "elapsedMs": 127.8275, "allocatedBytes": 34208216, "metricCalls": 2729, "fileReads": 2300, "fileReadBytes": 28761961 },
+        "deferred": { "elapsedMs": 90.9812, "allocatedBytes": 35384264, "metricCalls": 0, "fileReads": 0, "fileReadBytes": 0 },
+        "onDemand": { "elapsedMs": 33.5497, "allocatedBytes": 2112544, "metricCalls": 2729, "fileReads": 2300, "fileReadBytes": 28761961 }
+      }
+    ]
+  }
+}

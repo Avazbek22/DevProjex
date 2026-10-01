@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "recordedDate": "2026-09-23",
+  "scenario": "AgentJournalStore recent-under-cap retention fast path",
+  "methodology": [
+    "Release test host on Windows, .NET SDK 10.0.401 / runtime 10.0.12.",
+    "Isolated synthetic journal directories only; actual user journals are never inspected.",
+    "Default retention is 200 sessions / 30 days. Fixture restoration is outside timing.",
+    "One first observation and three repeated observations per fixture in a single process; these are not process-cold or disk-cold timings.",
+    "Constructor and sweep are timed; disposal and file-count assertions are outside timing.",
+    "The 512-file scenario includes 312 normal retention removals and does not take the fast path."
+  ],
+  "warmSummary": [
+    { "validHeaderFilesPresented": 0, "constructorMedianMilliseconds": 0.4205, "currentThreadMedianAllocatedBytes": 11760, "filesAfter": 0 },
+    { "validHeaderFilesPresented": 200, "constructorMedianMilliseconds": 5.9497, "currentThreadMedianAllocatedBytes": 75216, "filesAfter": 200 },
+    { "validHeaderFilesPresented": 512, "constructorMedianMilliseconds": 67.9844, "currentThreadMedianAllocatedBytes": 5953704, "filesAfter": 200 }
+  ],
+  "samples": [
+    { "validHeaderFilesPresented": 0, "fixtureHeaderBytes": 0, "iteration": 0, "constructorMilliseconds": 5.3323, "constructorAllocatedBytes": 29464, "filesBefore": 0, "filesAfter": 0 },
+    { "validHeaderFilesPresented": 0, "fixtureHeaderBytes": 0, "iteration": 1, "constructorMilliseconds": 0.4860, "constructorAllocatedBytes": 11760, "filesBefore": 0, "filesAfter": 0 },
+    { "validHeaderFilesPresented": 0, "fixtureHeaderBytes": 0, "iteration": 2, "constructorMilliseconds": 0.4205, "constructorAllocatedBytes": 11760, "filesBefore": 0, "filesAfter": 0 },
+    { "validHeaderFilesPresented": 0, "fixtureHeaderBytes": 0, "iteration": 3, "constructorMilliseconds": 0.4036, "constructorAllocatedBytes": 11760, "filesBefore": 0, "filesAfter": 0 },
+    { "validHeaderFilesPresented": 200, "fixtureHeaderBytes": 129600, "iteration": 0, "constructorMilliseconds": 6.4482, "constructorAllocatedBytes": 75896, "filesBefore": 200, "filesAfter": 200 },
+    { "validHeaderFilesPresented": 200, "fixtureHeaderBytes": 129600, "iteration": 1, "constructorMilliseconds": 5.8080, "constructorAllocatedBytes": 75216, "filesBefore": 200, "filesAfter": 200 },
+    { "validHeaderFilesPresented": 200, "fixtureHeaderBytes": 129600, "iteration": 2, "constructorMilliseconds": 5.9497, "constructorAllocatedBytes": 75216, "filesBefore": 200, "filesAfter": 200 },
+    { "validHeaderFilesPresented": 200, "fixtureHeaderBytes": 129600, "iteration": 3, "constructorMilliseconds": 6.1172, "constructorAllocatedBytes": 75216, "filesBefore": 200, "filesAfter": 200 },
+    { "validHeaderFilesPresented": 512, "fixtureHeaderBytes": 331776, "iteration": 0, "constructorMilliseconds": 75.0504, "constructorAllocatedBytes": 5986584, "filesBefore": 512, "filesAfter": 200 },
+    { "validHeaderFilesPresented": 512, "fixtureHeaderBytes": 331776, "iteration": 1, "constructorMilliseconds": 67.9844, "constructorAllocatedBytes": 5953704, "filesBefore": 512, "filesAfter": 200 },
+    { "validHeaderFilesPresented": 512, "fixtureHeaderBytes": 331776, "iteration": 2, "constructorMilliseconds": 78.5203, "constructorAllocatedBytes": 5953928, "filesBefore": 512, "filesAfter": 200 },
+    { "validHeaderFilesPresented": 512, "fixtureHeaderBytes": 331776, "iteration": 3, "constructorMilliseconds": 63.0661, "constructorAllocatedBytes": 5953704, "filesBefore": 512, "filesAfter": 200 }
+  ]
+}

@@ -15,9 +15,9 @@ public sealed class ProjectContextProjectionPerformanceTests(ITestOutputHelper o
 	public void CompleteTreeProjectionBenchmark()
 	{
 		if (!string.Equals(
-			    Environment.GetEnvironmentVariable("DEVPROJEX_RUN_LARGE_PERF_TESTS"),
-			    "1",
-			    StringComparison.Ordinal))
+				Environment.GetEnvironmentVariable("DEVPROJEX_RUN_LARGE_PERF_TESTS"),
+				"1",
+				StringComparison.Ordinal))
 		{
 			Assert.Skip("Set DEVPROJEX_RUN_LARGE_PERF_TESTS=1 for the pre-release performance gate.");
 		}
@@ -184,6 +184,40 @@ public sealed class ProjectContextProjectionPerformanceTests(ITestOutputHelper o
 
 		Assert.True(aliasHadMatch);
 		Assert.Equal(upperPath, Assert.Single(alias), ProjectTreePathIdentity.CanonicalComparer);
+	}
+
+	[Fact]
+	public void ResolveSelectedPaths_RejectsTraversalAndAbsolutePathsAsMissingSelections()
+	{
+		var rootPath = Path.Combine(Path.GetTempPath(), "dpx-invalid-selection");
+		var sourcePath = Path.Combine(rootPath, "src", "App.cs");
+		var root = new TreeNodeDescriptor(
+			"dpx-invalid-selection",
+			rootPath,
+			IsDirectory: true,
+			IsAccessDenied: false,
+			"folder",
+			[
+				new TreeNodeDescriptor("src", Path.Combine(rootPath, "src"), true, false, "folder",
+				[
+					new TreeNodeDescriptor("App.cs", sourcePath, false, false, "csharp", [])
+				])
+			]);
+		var diagnostics = new List<ContextDiagnostic>();
+
+		var resolved = ProjectContextPlanner.ResolveSelectedPaths(
+			root,
+			rootPath,
+			["../outside.cs", Path.Combine(Path.GetPathRoot(rootPath)!, "outside.cs")],
+			diagnostics,
+			TestContext.Current.CancellationToken,
+			out var hadMatch);
+
+		Assert.False(hadMatch);
+		Assert.Empty(resolved);
+		Assert.Equal(2, diagnostics.Count);
+		Assert.All(diagnostics, static diagnostic =>
+			Assert.Equal("DPX-SELECTION-PATH-MISSING", diagnostic.Code));
 	}
 
 	[Theory]

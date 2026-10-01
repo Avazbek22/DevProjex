@@ -12,7 +12,37 @@ public sealed partial class TerminalLocalizationContractTests
 	[
 		"Terminal.Command.Root",
 		"Terminal.Command.Analyze",
+		"Terminal.Command.Search",
+		"Terminal.Argument.SearchPattern",
+		"Terminal.Option.SearchRegex",
+		"Terminal.Option.SearchSymbols",
+		"Terminal.Option.SearchMaximumResults",
+		"Terminal.Option.SearchBodyCharacters",
+		"Terminal.Option.McpLive",
+		"Terminal.Option.McpRemoteHosts",
+		"Terminal.Option.McpToolSet",
+		"Terminal.Option.McpSearchBodyCharacters",
 		"Terminal.Option.Language",
+		"Terminal.Option.Rank",
+		"Terminal.Validation.RankRequiresContent",
+		"Terminal.Ranking.Summary",
+		"Terminal.Ranking.GitUnavailableSuffix",
+		"Terminal.Ranking.RedistributedSuffix",
+		"Terminal.Ranking.Top",
+		"Terminal.Ranking.Unavailable",
+		"Terminal.Ranking.TestSourceSuffix",
+		"Terminal.Ranking.EntryPointSuffix",
+		"Terminal.Option.Focus",
+		"Terminal.Validation.FocusRequiresRank",
+		"Terminal.Validation.FocusLimit",
+		"Terminal.Validation.FocusEmpty",
+		"Terminal.Option.DetailFor",
+		"Terminal.Validation.DetailFor",
+		"Terminal.Validation.DetailForRequiresContent",
+		"Terminal.DryRun.Detail",
+		"Terminal.DryRun.DetailUnmatched",
+		"Terminal.TokenBudget.RankedSkipped",
+		"Terminal.TokenBudget.OversizedHint",
 		"Terminal.Error.Unexpected",
 		"Terminal.Error.ParserRejected",
 		"Terminal.Analysis.Size",
@@ -264,8 +294,8 @@ public sealed partial class TerminalLocalizationContractTests
 				{
 					var normalizedLine = NormalizeHelpLabel(line);
 					return legacyLabels.All(normalizedLine.Contains) &&
-					       (!normalizedLine.Contains("STAGED", StringComparison.Ordinal) ||
-					        !normalizedLine.Contains("CHANGES", StringComparison.Ordinal));
+						   (!normalizedLine.Contains("STAGED", StringComparison.Ordinal) ||
+							!normalizedLine.Contains("CHANGES", StringComparison.Ordinal));
 				});
 			foreach (var token in persistentAndMomentaryTokens)
 			{
@@ -347,6 +377,58 @@ public sealed partial class TerminalLocalizationContractTests
 				Assert.True(
 					catalog[key].GetColumns() <= 80,
 					$"{key} does not fit 80 columns in {locale}.");
+			}
+		}
+	}
+
+	[Fact]
+	public void FittedFooters_KeepCommandAndHelpEntryPointsAtTheMinimumViewport()
+	{
+		const int minimumColumns = 60;
+		var workspaceFooterKeys = new[]
+		{
+			"Terminal.Tui.Footer.Tree",
+			"Terminal.Tui.Footer.Preview",
+			"Terminal.Tui.Footer.Controls"
+		};
+
+		foreach (var (locale, catalog) in ReadCatalogs())
+		{
+			foreach (var plain in new[] { false, true })
+			{
+				foreach (var key in workspaceFooterKeys)
+				{
+					var footer = TerminalWorkspaceSession.NormalizeLocalizedText(
+						catalog[key],
+						plain,
+						supportsUnicode: true);
+					var fitted = TerminalWorkspaceSession.FitFooterToWidth(footer, minimumColumns - 2);
+					var commandGroup = WelcomeFooterSegmentSeparatorRegex().Split(footer)[^1];
+
+					Assert.True(
+						fitted.GetColumns() <= minimumColumns - 2,
+						$"{key} overflows {minimumColumns} columns in {locale} (plain: {plain}): {fitted}");
+					Assert.True(
+						fitted.EndsWith(commandGroup, StringComparison.Ordinal),
+						$"{key} loses its command hint in {locale} (plain: {plain}): {fitted}");
+				}
+
+				var welcome = TerminalWorkspaceSession.NormalizeLocalizedText(
+					catalog["Terminal.Tui.Footer.Welcome"],
+					plain,
+					supportsUnicode: true);
+				var fittedWelcome = TerminalWorkspaceSession.FitFooterToWidth(welcome, minimumColumns - 4);
+				var entryPoints = WelcomeFooterSegmentSeparatorRegex()
+					.Split(welcome)
+					.Where(static group => group.StartsWith(": ", StringComparison.Ordinal) ||
+										   group.StartsWith("? ", StringComparison.Ordinal))
+					.ToArray();
+
+				Assert.Equal(2, entryPoints.Length);
+				Assert.True(
+					fittedWelcome.GetColumns() <= minimumColumns - 4,
+					$"The Welcome footer overflows {minimumColumns} columns in {locale}: {fittedWelcome}");
+				Assert.All(entryPoints, group => Assert.Contains(group, fittedWelcome, StringComparison.Ordinal));
 			}
 		}
 	}

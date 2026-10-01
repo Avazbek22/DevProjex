@@ -15,9 +15,11 @@
       <Grid ColumnDefinitions="*,Auto">
         <TextBlock Text="{Binding HelpAboutTitle}" FontSize="15" FontWeight="SemiBold" />
         <Button Grid.Column="1"
+                Name="AboutCloseButton"
                 Content="✕"
                 Classes="menu-icon-button"
                 Padding="4"
+                AutomationProperties.Name="{Binding PopoverCloseText}"
                 Click="OnClose" />
       </Grid>
 

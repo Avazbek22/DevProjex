@@ -48,6 +48,8 @@ public sealed class TerminalSettingsStore
 			: null;
 	}
 
+	public bool LoadAgentActivityEnabled() => LoadDocument()?.AgentActivityEnabled == true;
+
 	public TerminalProjectSettings? LoadProjectSettings(string projectRoot)
 	{
 		var normalizedRoot = NormalizeProjectRoot(projectRoot);
@@ -67,15 +69,54 @@ public sealed class TerminalSettingsStore
 		};
 		await UpdateAsync(current =>
 		{
-			var projects = (current.Projects ?? [])
+			var others = (current.Projects ?? [])
 				.Where(project => !PathComparer.Default.Equals(project.Root, normalized.Root))
-				.Append(normalized)
 				.OrderByDescending(static project => project.LastUsedUtc)
-				.Take(MaximumProjectSettings)
-				.ToArray();
-			return current with { Projects = projects };
+				.Take(MaximumProjectSettings - 1)
+				.ToList();
+			return FitProjectsWithinLimit(current, normalized, others);
 		}, cancellationToken).ConfigureAwait(false);
 	}
+
+	// The saved project always keeps its entry: older projects give way first, and an entry
+	// that is too large on its own keeps its shallowest expanded folders. Refusing the whole
+	// write would silently freeze every project's settings once the document is full.
+	private static TerminalSettingsDocument FitProjectsWithinLimit(
+		TerminalSettingsDocument current,
+		TerminalProjectSettings saved,
+		List<TerminalProjectSettings> others)
+	{
+		TerminalSettingsDocument Compose(TerminalProjectSettings entry) =>
+			current with { Projects = [entry, .. others] };
+
+		var document = Compose(saved);
+		while (others.Count > 0 && MeasureBytes(document) > MaximumDocumentBytes)
+		{
+			others.RemoveAt(others.Count - 1);
+			document = Compose(saved);
+		}
+		if (MeasureBytes(document) <= MaximumDocumentBytes)
+			return document;
+
+		var expanded = saved.ExpandedPaths
+			.OrderBy(static path => path == "." ? -1 : path.Count(static character => character == '/'))
+			.ThenBy(static path => path, StringComparer.Ordinal)
+			.ToArray();
+		var kept = 0;
+		var excluded = expanded.Length;
+		while (kept < excluded)
+		{
+			var count = (kept + excluded + 1) / 2;
+			if (MeasureBytes(Compose(saved with { ExpandedPaths = expanded[..count] })) <= MaximumDocumentBytes)
+				kept = count;
+			else
+				excluded = count - 1;
+		}
+		return Compose(saved with { ExpandedPaths = expanded[..kept] });
+	}
+
+	private static int MeasureBytes(TerminalSettingsDocument document) =>
+		JsonSerializer.SerializeToUtf8Bytes(document).Length;
 
 	public async Task SaveScreenModeAsync(
 		TerminalScreenMode screenMode,
@@ -122,20 +163,27 @@ public sealed class TerminalSettingsStore
 			cancellationToken).ConfigureAwait(false);
 	}
 
+	public async Task SaveAgentActivityEnabledAsync(
+		bool enabled,
+		CancellationToken cancellationToken = default)
+	{
+		await UpdateAsync(
+			current => current with { AgentActivityEnabled = enabled },
+			cancellationToken).ConfigureAwait(false);
+	}
+
 	internal string GetPath() =>
 		Path.Combine(_appDataPathProvider(), "DevProjex", "terminal-settings.json");
 
 	private TerminalSettingsDocument? LoadDocument()
 		=> LoadDocument(out _);
 
-	private TerminalSettingsDocument? LoadDocument(out bool hasFutureSchema)
+	private TerminalSettingsDocument? LoadDocument(out bool preserveExistingDocument)
 	{
-		hasFutureSchema = false;
+		preserveExistingDocument = false;
 		try
 		{
 			var path = GetPath();
-			if (!File.Exists(path))
-				return null;
 			TryEnsurePrivateUnixFileMode(path);
 
 			using var source = new FileStream(
@@ -151,8 +199,8 @@ public sealed class TerminalSettingsStore
 				MaximumDocumentBytes,
 				static () => new TerminalSettingsLimitException());
 			using var json = JsonDocument.Parse(stream);
-			hasFutureSchema = IsFutureSchema(json.RootElement);
-			if (hasFutureSchema)
+			preserveExistingDocument = IsFutureSchema(json.RootElement);
+			if (preserveExistingDocument)
 				return null;
 
 			var settings = json.RootElement.Deserialize<TerminalSettingsDocument>();
@@ -164,15 +212,26 @@ public sealed class TerminalSettingsStore
 		{
 			// The schema cannot be classified within this version's resource limit. Preserve the
 			// document exactly as a potentially valid settings file written by a newer version.
-			hasFutureSchema = true;
+			preserveExistingDocument = true;
 			_diagnosticSink("Terminal settings exceed the size limit; the document was preserved and ignored.");
+			return null;
+		}
+		catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+		{
+			return null;
+		}
+		catch (JsonException)
+		{
 			return null;
 		}
 		catch (Exception exception) when (exception is
 			       IOException or
 			       UnauthorizedAccessException or
-			       JsonException)
+			       System.Security.SecurityException or
+			       ArgumentException or
+			       NotSupportedException)
 		{
+			preserveExistingDocument = true;
 			return null;
 		}
 	}
@@ -226,10 +285,10 @@ public sealed class TerminalSettingsStore
 			using var persistenceLock = await PersistenceFileLock
 				.AcquireAsync(path, cancellationToken)
 				.ConfigureAwait(false);
-			var current = LoadDocument(out var hasFutureSchema);
-			if (hasFutureSchema)
+			var current = LoadDocument(out var preserveExistingDocument);
+			if (preserveExistingDocument)
 			{
-				_diagnosticSink("Terminal settings update was skipped because the existing document could not be safely classified.");
+				_diagnosticSink("Terminal settings update was skipped because the existing document could not be safely read or classified.");
 				return;
 			}
 			current ??= new TerminalSettingsDocument(
@@ -313,7 +372,8 @@ public sealed class TerminalSettingsStore
 		TerminalScreenMode ScreenMode,
 		IReadOnlyList<string>? CommandHistory = null,
 		string? Language = null,
-		IReadOnlyList<TerminalProjectSettings>? Projects = null);
+		IReadOnlyList<TerminalProjectSettings>? Projects = null,
+		bool? AgentActivityEnabled = null);
 
 	private static string NormalizeProjectRoot(string root) =>
 		Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));

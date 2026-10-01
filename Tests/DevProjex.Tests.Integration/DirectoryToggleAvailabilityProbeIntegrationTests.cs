@@ -197,8 +197,10 @@ public sealed class DirectoryToggleAvailabilityProbeIntegrationTests
 		using var temp = new TemporaryDirectory();
 		temp.CreateFile("src/app.cs", "class App {}");
 		temp.CreateFile(".idea/workspace.xml", "<project />");
-		temp.CreateFile(".git/config.txt", "[core]\n");
-		MarkHidden(Path.Combine(temp.Path, ".git"));
+		// A hidden dot folder that is NOT the .git administrative boundary: the
+		// boundary is excluded outright and can never carry toggle ownership.
+		temp.CreateFile(".probe/config.txt", "[core]\n");
+		MarkHidden(Path.Combine(temp.Path, ".probe"));
 
 		var bothDirectoryRulesOn = BuildDirectoryToggleSnapshot(
 			temp.Path,
@@ -231,8 +233,10 @@ public sealed class DirectoryToggleAvailabilityProbeIntegrationTests
 		using var temp = new TemporaryDirectory();
 		temp.CreateFile("src/app.cs", "class App {}");
 		temp.CreateFile(".idea/workspace.xml", "<project />");
-		temp.CreateFile(".git/config", "[core]\n");
-		MarkHidden(Path.Combine(temp.Path, ".git"));
+		// Same non-administrative hidden dot folder as above: .git itself would be
+		// boundary-excluded before any toggle could see its filtered content.
+		temp.CreateFile(".probe/config", "[core]\n");
+		MarkHidden(Path.Combine(temp.Path, ".probe"));
 
 		var scanOptions = new ScanOptionsUseCase(new FileSystemScanner());
 		var rules = CreateBaseRules() with

@@ -26,7 +26,8 @@ public sealed class ProjectExportService(
 					cancellationToken,
 					TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(project.RootPath),
 					transformationContext: null,
-					displayRootPath: project.RootPath)
+					displayRootPath: project.RootPath,
+					projectRoot: project.RootPath)
 				.ConfigureAwait(false),
 			ProjectTextExportMode.TreeContent => await treeAndContentExport
 				.BuildAsync(project.RootPath, project.Tree.Root, new HashSet<string>(PathComparer.Default), request.Format, cancellationToken)

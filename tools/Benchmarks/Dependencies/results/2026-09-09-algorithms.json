@@ -1,0 +1,32 @@
+{
+  "date": "2026-09-09",
+  "baseSha": "fe210408c2cc038cd2c1b0adf61a9130bab52b13",
+  "candidateSha": "9c25fd17612ec15d81d2e2fb0b74eaf761e946f4",
+  "runtime": ".NET 10.0.12, x64 RyuJIT AVX2, Windows 11",
+  "benchmarks": {
+    "hash-manifest-20000": {
+      "baseline": { "meanMilliseconds": 3.894, "standardDeviationMilliseconds": 0.0912, "allocatedBytes": 1121976 },
+      "candidate": { "meanMilliseconds": 1.686, "standardDeviationMilliseconds": 0.0015, "allocatedBytes": 410 }
+    },
+    "normalize-20000-97-ranks": {
+      "baseline": { "meanMilliseconds": 2.415, "standardDeviationMilliseconds": 0.1513, "allocatedBytes": 1981809 },
+      "candidate": { "meanMilliseconds": 1.570, "standardDeviationMilliseconds": 0.2756, "allocatedBytes": 771226 }
+    },
+    "normalize-20000-unique-ranks": {
+      "baseline": { "meanMilliseconds": 6.753, "standardDeviationMilliseconds": 0.7858, "allocatedBytes": 4561306 },
+      "candidate": { "meanMilliseconds": 2.213, "standardDeviationMilliseconds": 0.3603, "allocatedBytes": 1816412 }
+    },
+    "pagerank-4000-chain": {
+      "baseline": { "meanNanoseconds": 3465959.2, "standardDeviationNanoseconds": 102513.53, "allocatedBytes": 6091790 },
+      "candidate": { "meanNanoseconds": 2004315.62, "standardDeviationNanoseconds": 162179.408, "allocatedBytes": 3180263 }
+    },
+    "aggregate-20000-mostly-unique": {
+      "baseline": { "meanMilliseconds": 47.666, "standardDeviationMilliseconds": 4.221, "allocatedBytes": 38045569 },
+      "candidate": { "meanMilliseconds": 14.074, "standardDeviationMilliseconds": 0.816, "allocatedBytes": 6364856 }
+    },
+    "alias-lookup": {
+      "baseline": { "meanNanoseconds": 179.4, "standardDeviationNanoseconds": 5.20, "allocatedBytes": 656 },
+      "candidate": { "meanNanoseconds": 95.86, "standardDeviationNanoseconds": 4.001, "allocatedBytes": 224 }
+    }
+  }
+}

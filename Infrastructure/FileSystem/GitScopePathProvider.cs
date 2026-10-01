@@ -107,7 +107,12 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 					cancellationToken)
 				.ConfigureAwait(false);
 			if (!repositoryResult.IsAvailable)
-				return GitScopePathResult.Unavailable(repositoryResult.FailureReason);
+			{
+				return GitScopePathResult.Unavailable(
+					repositoryResult.FailureReason,
+					repositoryResult.FailureDiagnosticCode,
+					repositoryResult.FailureDetail);
+			}
 
 			included.UnionWith(repositoryResult.IncludedPaths);
 			deleted.UnionWith(repositoryResult.DeletedPaths);
@@ -132,6 +137,23 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 		cancellationToken.ThrowIfCancellationRequested();
 		if (!comparisonSemantics.IsAuthoritative)
 			return RepositoryScopeResult.Unavailable("Git path comparison settings could not be resolved.");
+		var safety = await GitRepositorySafetyInspector.InspectAsync(repositoryRoot, cancellationToken)
+			.ConfigureAwait(false);
+		if (!safety.IsComplete)
+			return RepositoryScopeResult.Unavailable("Git safety configuration could not be inspected.");
+		if (safety.OldGitPromisorRepository)
+		{
+			return RepositoryScopeResult.Unavailable(
+				"This partial clone requires Git 2.45 or newer for a no-network local read.");
+		}
+		if (mode == GitFilteringMode.Changes && safety.UnsafeWorkingTreeDrivers.Count > 0)
+		{
+			var driver = safety.UnsafeWorkingTreeDrivers[0];
+			return RepositoryScopeResult.Unavailable(
+				$"Exact comparison is unavailable without running the untrusted Git filter '{driver}'.",
+				GitScopeFilter.UnsafeFilterDiagnosticCode,
+				driver);
+		}
 
 		IReadOnlyList<GitCommandOutput> outputs;
 		switch (mode)
@@ -141,7 +163,7 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 				[
 					await RunAsync(
 						repositoryRoot,
-						CreateDiffArguments(cached: true, diffRange: null),
+						GitProcessOperation.ReadStagedChanges(),
 						cancellationToken).ConfigureAwait(false)
 				];
 				break;
@@ -149,17 +171,17 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 				var outputBudget = new GitScopeOutputBudget(MaximumOutputBytes);
 				var stagedTask = RunAsync(
 					repositoryRoot,
-					CreateDiffArguments(cached: true, diffRange: null),
+					GitProcessOperation.ReadStagedChanges(),
 					cancellationToken,
 					outputBudget);
 				var unstagedTask = RunAsync(
 					repositoryRoot,
-					CreateDiffArguments(cached: false, diffRange: null),
+					GitProcessOperation.ReadWorkingChanges(),
 					cancellationToken,
 					outputBudget);
 				var untrackedTask = RunAsync(
 					repositoryRoot,
-					["ls-files", "--others", "--exclude-standard", "-z", "--"],
+					GitProcessOperation.ReadUntracked(),
 					cancellationToken,
 					outputBudget);
 				outputs = await Task.WhenAll(stagedTask, unstagedTask, untrackedTask)
@@ -172,7 +194,7 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 				[
 					await RunAsync(
 						repositoryRoot,
-						CreateDiffArguments(cached: false, diffRange),
+						GitProcessOperation.ReadRefDiff(diffRange!),
 						cancellationToken).ConfigureAwait(false)
 				];
 				break;
@@ -183,14 +205,14 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 		var failed = outputs.FirstOrDefault(static output => !output.Succeeded);
 		if (failed is not null)
 			return RepositoryScopeResult.Unavailable(failed.FailureReason);
-		var topLevelOutput = await RunAsync(
+		if (!GitTrackedPathIndexCache.TryFindNearestRepositoryBoundary(
 			repositoryRoot,
-			["rev-parse", "--show-toplevel"],
-			cancellationToken).ConfigureAwait(false);
-		if (!topLevelOutput.Succeeded)
-			return RepositoryScopeResult.Unavailable(topLevelOutput.FailureReason);
-		if (!MatchesExpectedRepositoryRoot(topLevelOutput.Values, repositoryRoot))
+			cancellationToken,
+			out var currentRepositoryRoot) ||
+		    !PathComparer.Default.Equals(currentRepositoryRoot, repositoryRoot))
+		{
 			return RepositoryScopeResult.Unavailable("The Git repository boundary changed during scope resolution.");
+		}
 
 		var included = new HashSet<string>(StringComparer.Ordinal);
 		var deleted = new HashSet<string>(StringComparer.Ordinal);
@@ -486,7 +508,7 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 
 	private static async Task<GitCommandOutput> RunAsync(
 		string repositoryRoot,
-		IReadOnlyList<string> commandArguments,
+		GitProcessOperation operation,
 		CancellationToken cancellationToken,
 		GitScopeOutputBudget? outputBudget = null)
 	{
@@ -494,7 +516,7 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 		timeoutSource.CancelAfter(CommandTimeout);
 		using var process = new Process
 		{
-			StartInfo = CreateStartInfo(repositoryRoot, commandArguments)
+			StartInfo = CreateStartInfo(repositoryRoot, operation)
 		};
 		try
 		{
@@ -560,24 +582,12 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 
 	internal static ProcessStartInfo CreateStartInfo(
 		string repositoryRoot,
-		IReadOnlyList<string> commandArguments)
+		GitProcessOperation operation)
 	{
-		var arguments = new List<string>(commandArguments.Count + 6)
-		{
-			"-C",
-			repositoryRoot,
-			"-c",
-			"core.quotepath=false",
-			"-c",
-			"core.fsmonitor=false"
-		};
-		arguments.AddRange(commandArguments);
-		var startInfo = GitProcessStartInfoFactory.Create(repositoryRoot, arguments);
+		var startInfo = GitProcessStartInfoFactory.Create(repositoryRoot, operation);
 		startInfo.StandardOutputEncoding = new UTF8Encoding(
 			encoderShouldEmitUTF8Identifier: false,
 			throwOnInvalidBytes: false);
-		startInfo.Environment["GIT_OPTIONAL_LOCKS"] = "0";
-		startInfo.Environment["GIT_NO_LAZY_FETCH"] = "1";
 		return startInfo;
 	}
 
@@ -645,14 +655,21 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 		IReadOnlySet<string> IncludedPaths,
 		IReadOnlySet<string> DeletedPaths,
 		GitTrackedPathIndex? PathMatcher = null,
-		string? FailureReason = null)
+		string? FailureReason = null,
+		string? FailureDiagnosticCode = null,
+		string? FailureDetail = null)
 	{
-		public static RepositoryScopeResult Unavailable(string? reason) =>
+		public static RepositoryScopeResult Unavailable(
+			string? reason,
+			string? diagnosticCode = null,
+			string? detail = null) =>
 			new(
 				false,
 				new HashSet<string>(StringComparer.Ordinal),
 				new HashSet<string>(StringComparer.Ordinal),
-				FailureReason: reason);
+				FailureReason: reason,
+				FailureDiagnosticCode: diagnosticCode,
+				FailureDetail: detail);
 	}
 
 	private sealed record GitCommandOutput(

@@ -13,11 +13,8 @@ public sealed class RepositoryUrlUtilityTests
 
 	[Theory]
 	[InlineData(
-		"https://github.com/owner/DevProjex.git",
-		"git@github.com:owner/DevProjex.git")]
-	[InlineData(
 		"ssh://git@github.com/owner/DevProjex",
-		"https://github.com/owner/DevProjex")]
+		"git@github.com:owner/DevProjex.git")]
 	[InlineData(
 		"https://GITHUB.com/owner/DevProjex?token=secret",
 		"https://github.com/owner/DevProjex#fragment")]
@@ -66,6 +63,10 @@ public sealed class RepositoryUrlUtilityTests
 			"v2:",
 			RepositoryUrlUtility.GetComparisonKey("https://example.com/Owner/Repo.git"),
 			StringComparison.Ordinal);
+		Assert.StartsWith(
+			"v3:",
+			RepositoryUrlUtility.GetSourceCacheKey("https://example.com/Owner/Repo.git"),
+			StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -77,6 +78,17 @@ public sealed class RepositoryUrlUtilityTests
 		Assert.Equal("https://example.com/owner/repo.git", display);
 		Assert.DoesNotContain("super-secret", display, StringComparison.Ordinal);
 		Assert.DoesNotContain("access_token", display, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void SafeSourceIdentityKeepsUserButRemovesPasswordQueryAndFragment()
+	{
+		var identity = RepositoryUrlUtility.ToSafeSourceIdentity(
+			"https:" + "//alice:super-secret@example.com/owner/repo.git?access_token=hidden#fragment");
+
+		Assert.Equal("https://alice@example.com/owner/repo.git", identity);
+		Assert.DoesNotContain("super-secret", identity, StringComparison.Ordinal);
+		Assert.DoesNotContain("access_token", identity, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -130,13 +142,13 @@ public sealed class RepositoryUrlUtilityTests
 	}
 
 	[Fact]
-	public void LocalRepositoryIdentityStillIgnoresGitSuffix()
+	public void DistinctLocalRepositoryPathsDoNotIgnoreGitSuffix()
 	{
 		var repositoryPath = Path.Combine(Path.GetTempPath(), "DevProjex", "LocalIdentity", "repo");
 
-		Assert.True(RepositoryUrlUtility.AreEquivalent(
-			new Uri(repositoryPath).AbsoluteUri,
-			new Uri(repositoryPath + ".git").AbsoluteUri));
+		Assert.NotEqual(
+			RepositoryUrlUtility.GetSourceCacheKey(new Uri(repositoryPath).AbsoluteUri),
+			RepositoryUrlUtility.GetSourceCacheKey(new Uri(repositoryPath + ".git").AbsoluteUri));
 	}
 
 	[Theory]
@@ -154,7 +166,6 @@ public sealed class RepositoryUrlUtilityTests
 	[InlineData("https://example.com/owner/repo.git")]
 	[InlineData("ssh://git@example.com/owner/repo.git")]
 	[InlineData("git@example.com:owner/repo.git")]
-	[InlineData("git://example.com/owner/repo.git")]
 	public void SupportedRemoteCloneSourcesAreAccepted(string source)
 	{
 		Assert.True(RepositoryUrlUtility.IsSupportedCloneSource(source));

@@ -135,6 +135,24 @@ public sealed class TerminalPolishTests
 	}
 
 	[Fact]
+	public void RequestedCancellationKeepsTheOperationOwnedUntilItsOwnerCompletesIt()
+	{
+		using var session = new CancellationTokenSource();
+		using var coordinator = new AsyncOperationCoordinator(session.Token);
+		var operation = coordinator.Start(WorkspaceOperationKind.Active);
+
+		coordinator.RequestCancel(WorkspaceOperationKind.Active);
+
+		Assert.True(operation.Token.IsCancellationRequested);
+		Assert.True(coordinator.IsCurrent(WorkspaceOperationKind.Active, operation));
+		Assert.False(coordinator.IsRunning(WorkspaceOperationKind.Active));
+
+		coordinator.Complete(WorkspaceOperationKind.Active, operation);
+		Assert.False(coordinator.IsCurrent(WorkspaceOperationKind.Active, operation));
+		coordinator.RequestCancel(WorkspaceOperationKind.Active);
+	}
+
+	[Fact]
 	public void WorkspaceViewBuilderRejectsAnIncompleteScreenGraph()
 	{
 		var exception = Assert.Throws<InvalidOperationException>(() =>

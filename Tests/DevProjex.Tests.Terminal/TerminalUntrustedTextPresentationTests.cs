@@ -7,6 +7,32 @@ namespace DevProjex.Tests.Terminal;
 public sealed class TerminalUntrustedTextPresentationTests
 {
 	[Fact]
+	public void TreeRowShowsAgentActivityInADedicatedColumnOnlyWhenEnabled()
+	{
+		var node = new TreeNodeDescriptor("file.cs", "file.cs", false, false, "file", []);
+
+		var normal = new TerminalTreeRow(node, 0, false, TerminalTreeCheckState.Checked);
+		var inactive = new TerminalTreeRow(
+			node,
+			0,
+			false,
+			TerminalTreeCheckState.Checked,
+			ShowAgentActivity: true,
+			HasAgentActivity: false);
+		var active = new TerminalTreeRow(
+			node,
+			0,
+			false,
+			TerminalTreeCheckState.Checked,
+			ShowAgentActivity: true,
+			HasAgentActivity: true);
+
+		Assert.Equal("  [x] file.cs", normal.ToString());
+		Assert.Equal("  [x]   file.cs", inactive.ToString());
+		Assert.Equal("  [x] A file.cs", active.ToString());
+	}
+
+	[Fact]
 	public void FileSystemNamesNeverRenderTerminalControlCharacters()
 	{
 		const string unsafeName = "a\u001B\tb\nc";

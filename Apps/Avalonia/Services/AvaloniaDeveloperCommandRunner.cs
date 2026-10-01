@@ -64,7 +64,7 @@ internal sealed class AvaloniaDeveloperCommandRunner(
 				"Benchmarks",
 				$"session-{DateTimeOffset.Now:yyyy-MM-dd_HH-mm-ss}-{Guid.NewGuid():N}.json")
 			: Path.GetFullPath(request.OutputPath);
-		var processRequest = DesktopDiagnosticProcessRequestFactory.Create(
+		using var processRequest = DesktopDiagnosticProcessRequestFactory.Create(
 			request.ProjectPath,
 			reportPath,
 			request.Scenario);
@@ -80,10 +80,13 @@ internal sealed class AvaloniaDeveloperCommandRunner(
 
 	private static BenchmarkAnalysisServices CreateAnalysisServices()
 	{
-		using var services = new TerminalServiceFactory().Create(AppLanguage.En);
+		var services = new TerminalServiceFactory().Create(AppLanguage.En);
 		return new BenchmarkAnalysisServices(
 			services.AnalysisService,
-			services.AnalysisReportWriter);
+			services.AnalysisReportWriter,
+			services.ContextFactory,
+			services.ContextDocumentService,
+			services);
 	}
 
 	private static string ResolveVersion()
@@ -108,7 +111,7 @@ internal static class DesktopDiagnosticProcessRequestFactory
 		string outputPath,
 		string scenario)
 	{
-		var processPath = Environment.ProcessPath;
+		var processPath = ProcessEntryPointResolver.ResolveSelfLaunchPath();
 		var assemblyPath = ProcessEntryPointResolver.ResolveManagedAssemblyPath();
 		var arguments = new List<string>();
 		var fileName = processPath;

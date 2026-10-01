@@ -8,13 +8,10 @@ internal sealed class TerminalProjectTreeView : ListView
 {
 	private const long DoubleClickWindowMilliseconds = 500;
 	private readonly Func<int, TerminalTreeRow?> _rowResolver;
-	private readonly TerminalPointerEventDeduplicator _pointerEvents = new();
 	private int _lastNamePressedRow = -1;
-	private int _lastNamePressedColumn = -1;
 	private long _lastNamePressedAt;
-	private int _lastManualDoubleClickRow = -1;
-	private int _lastManualDoubleClickColumn = -1;
-	private long _lastManualDoubleClickAt;
+	private int _lastDisclosurePressedRow = -1;
+	private long _lastDisclosurePressedAt;
 
 	public TerminalProjectTreeView(
 		Func<int, TerminalTreeRow?> rowResolver,
@@ -22,6 +19,10 @@ internal sealed class TerminalProjectTreeView : ListView
 		bool showScrollBars = true)
 	{
 		_rowResolver = rowResolver;
+		// OnMouseEvent owns every pointer gesture. The list's default bindings would turn the
+		// release that ends a click into a second activation and undo the toggle.
+		MouseBindings.Clear(Command.Activate);
+		MouseBindings.Clear(Command.Accept);
 		if (showScrollBars)
 			TerminalScrollBarStyle.Apply(this, useUnicode, vertical: true, horizontal: true);
 	}
@@ -60,12 +61,11 @@ internal sealed class TerminalProjectTreeView : ListView
 		{
 			return base.OnMouseEvent(mouse);
 		}
-
-		var isPressed = mouse.Flags.HasFlag(MouseFlags.LeftButtonPressed);
-		var isDoubleClicked = mouse.Flags.HasFlag(MouseFlags.LeftButtonDoubleClicked);
+		if (TerminalPointerInput.IsMotion(mouse.Flags))
+			return true;
 		if (!IsPrimaryActivation(mouse.Flags))
 			return base.OnMouseEvent(mouse);
-		if (mouse.Position is not { } position)
+		if (!TerminalPointerInput.IsPress(mouse.Flags) || mouse.Position is not { } position)
 			return true;
 
 		var rowIndex = Viewport.Y + position.Y;
@@ -74,56 +74,76 @@ internal sealed class TerminalProjectTreeView : ListView
 			return true;
 
 		var now = Environment.TickCount64;
-		if (isDoubleClicked &&
-		    _lastManualDoubleClickRow == rowIndex &&
-		    _lastManualDoubleClickColumn == position.X &&
-		    now - _lastManualDoubleClickAt <= DoubleClickWindowMilliseconds)
-		{
-			_lastManualDoubleClickRow = -1;
-			_lastManualDoubleClickColumn = -1;
-			return true;
-		}
-		if (!isDoubleClicked && !_pointerEvents.ShouldHandle(isPressed, position.X, position.Y))
-		{
-			return true;
-		}
-
 		SetFocus();
 		SelectedItem = rowIndex;
 		EnsureSelectedItemVisible();
 
-		if (isDoubleClicked ||
-			isPressed && row.Node.IsDirectory &&
-			_lastNamePressedRow == rowIndex &&
-			_lastNamePressedColumn == position.X &&
-			now - _lastNamePressedAt <= DoubleClickWindowMilliseconds)
+		switch (ResolvePointerTarget(row, Viewport.X + position.X))
 		{
-			if (row.Node.IsDirectory)
-			{
-				// The first click already toggled the whole row. Balance the second
-				// click so a double-click changes expansion without changing selection.
+			case TerminalTreePointerTarget.CheckBox:
+				_lastNamePressedRow = -1;
+				_lastDisclosurePressedRow = -1;
 				SelectionToggleRequested?.Invoke(this, EventArgs.Empty);
-				ExpansionToggleRequested?.Invoke(this, EventArgs.Empty);
-				if (!isDoubleClicked)
-				{
-					_lastManualDoubleClickRow = rowIndex;
-					_lastManualDoubleClickColumn = position.X;
-					_lastManualDoubleClickAt = now;
-				}
-			}
+				return true;
+			case TerminalTreePointerTarget.Disclosure:
+				ToggleExpansionFromDisclosure(rowIndex, now);
+				return true;
+		}
+
+		// A click elsewhere on the row only moves the cursor; two presses on a folder name
+		// within the double-click window expand or collapse it.
+		_lastDisclosurePressedRow = -1;
+		if (row.Node.IsDirectory && IsRepeatedPress(_lastNamePressedRow, _lastNamePressedAt, rowIndex, now))
+		{
 			_lastNamePressedRow = -1;
-			_lastNamePressedColumn = -1;
+			ExpansionToggleRequested?.Invoke(this, EventArgs.Empty);
 			return true;
 		}
 		_lastNamePressedRow = row.Node.IsDirectory ? rowIndex : -1;
-		_lastNamePressedColumn = row.Node.IsDirectory ? position.X : -1;
 		_lastNamePressedAt = now;
-		SelectionToggleRequested?.Invoke(this, EventArgs.Empty);
 		return true;
 	}
 
 	internal static bool IsPrimaryActivation(MouseFlags flags) =>
-		flags.HasFlag(MouseFlags.LeftButtonPressed) ||
-		flags.HasFlag(MouseFlags.LeftButtonClicked) ||
-		flags.HasFlag(MouseFlags.LeftButtonDoubleClicked);
+		!TerminalPointerInput.IsMotion(flags) &&
+		(flags.HasFlag(MouseFlags.LeftButtonPressed) ||
+		 flags.HasFlag(MouseFlags.LeftButtonClicked) ||
+		 flags.HasFlag(MouseFlags.LeftButtonDoubleClicked));
+
+	// Mirrors the row layout built by TerminalTreeRow: "<indent><disclosure> [x] <name>".
+	internal static TerminalTreePointerTarget ResolvePointerTarget(TerminalTreeRow row, int column)
+	{
+		var disclosureColumn = row.Depth * 2;
+		var checkBoxStart = disclosureColumn + 2;
+		if (column == disclosureColumn && row.Node.IsDirectory)
+			return TerminalTreePointerTarget.Disclosure;
+		return column >= checkBoxStart && column < checkBoxStart + 3
+			? TerminalTreePointerTarget.CheckBox
+			: TerminalTreePointerTarget.Row;
+	}
+
+	// A double-click on the > / v marker is one request to open or close the folder; its
+	// second press must not undo the first.
+	private void ToggleExpansionFromDisclosure(int rowIndex, long now)
+	{
+		_lastNamePressedRow = -1;
+		if (IsRepeatedPress(_lastDisclosurePressedRow, _lastDisclosurePressedAt, rowIndex, now))
+		{
+			_lastDisclosurePressedRow = -1;
+			return;
+		}
+		_lastDisclosurePressedRow = rowIndex;
+		_lastDisclosurePressedAt = now;
+		ExpansionToggleRequested?.Invoke(this, EventArgs.Empty);
+	}
+
+	private static bool IsRepeatedPress(int lastRow, long lastAt, int rowIndex, long now) =>
+		lastRow == rowIndex && now - lastAt <= DoubleClickWindowMilliseconds;
+}
+
+internal enum TerminalTreePointerTarget
+{
+	Row,
+	Disclosure,
+	CheckBox
 }

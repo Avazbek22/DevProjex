@@ -336,8 +336,9 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 
 	internal static string? GetCurrentExecutablePath()
 	{
-		if (!string.IsNullOrWhiteSpace(Environment.ProcessPath))
-			return Environment.ProcessPath;
+		var selfLaunchPath = ProcessEntryPointResolver.ResolveSelfLaunchPath();
+		if (!string.IsNullOrWhiteSpace(selfLaunchPath))
+			return selfLaunchPath;
 
 		using var process = Process.GetCurrentProcess();
 		return process.MainModule?.FileName;
@@ -1848,7 +1849,7 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 			var fullCommandPath = Path.GetFullPath(commandPath);
 			startInfo.FileName = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe";
 			startInfo.WorkingDirectory = Path.GetDirectoryName(fullCommandPath)!;
-			startInfo.Arguments = $"/d /s /c \"\"{Path.GetFileName(fullCommandPath)}\" --version\"";
+			startInfo.Arguments = $"/d /s /c \"\".\\{Path.GetFileName(fullCommandPath)}\" --version\"";
 		}
 		else
 		{
@@ -1933,6 +1934,29 @@ internal static class WindowsPackageIdentityProbe
 		return result is Success or ErrorInsufficientBuffer;
 	}
 
+	public static bool TryGetPackageFamilyName(out string packageFamilyName)
+	{
+		packageFamilyName = string.Empty;
+		if (!OperatingSystem.IsWindows())
+			return false;
+
+		var length = 0;
+		var result = GetCurrentPackageFamilyName(ref length, null);
+		if (result != ErrorInsufficientBuffer || length <= 1)
+			return false;
+		var builder = new StringBuilder(length);
+		result = GetCurrentPackageFamilyName(ref length, builder);
+		if (result != Success || builder.Length == 0)
+			return false;
+		packageFamilyName = builder.ToString();
+		return true;
+	}
+
 	[DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
 	private static extern int GetCurrentPackageFullName(ref int packageFullNameLength, StringBuilder? packageFullName);
+
+	[DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+	private static extern int GetCurrentPackageFamilyName(
+		ref int packageFamilyNameLength,
+		StringBuilder? packageFamilyName);
 }

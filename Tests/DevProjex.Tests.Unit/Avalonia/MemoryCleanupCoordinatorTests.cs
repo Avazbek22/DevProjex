@@ -10,6 +10,12 @@ public sealed class MemoryCleanupCoordinatorTests
     private static readonly TimeSpan CompletionTimeout =
         TimeSpan.FromSeconds(5);
 
+    // Fast CI timings scale the production 3 s readiness deadline to 240 ms, which a loaded
+    // runner can miss, and a missed deadline silently skips the cleanup under test. Tests that
+    // do not exercise the deadline get a bound that only a hang reaches.
+    private static readonly TimeSpan SettledUiReadinessTimeout =
+        TimeSpan.FromMinutes(1);
+
     [AvaloniaFact]
     public async Task SchedulePreview_PreviewCloseRunsForDetachedGraphAtAnyHeapSize()
     {
@@ -581,7 +587,7 @@ public sealed class MemoryCleanupCoordinatorTests
             captureMemorySnapshot: static () => EmptySnapshot(),
             collect: mode => completion.TrySetResult(mode),
             uiReady: () => Interlocked.Increment(ref readinessChecks) > 1,
-            uiReadinessTimeout: TimeSpan.FromSeconds(1),
+            uiReadinessTimeout: SettledUiReadinessTimeout,
             uiReadinessPollInterval: TimeSpan.FromMilliseconds(1),
             uiReadinessMaximumAttempts: 6);
 
@@ -740,6 +746,48 @@ public sealed class MemoryCleanupCoordinatorTests
         Assert.Equal(0, Volatile.Read(ref trimCount));
     }
 
+	[AvaloniaFact]
+	public async Task Schedule_BackgroundFailureIsReportedByTheSharedRegistry()
+	{
+		var reported = new TaskCompletionSource<(string Operation, Exception Error)>(
+			TaskCreationOptions.RunContinuationsAsynchronously);
+		using var registry = new BackgroundTaskRegistry(
+			reportFailure: (operation, error) => reported.TrySetResult((operation, error)));
+		using var coordinator = CreateCoordinator(
+			captureMemorySnapshot: static () => EmptySnapshot(),
+			collect: static _ => { },
+			deferCleanup: static (_, _) => Task.FromException(new InvalidOperationException("cleanup failed")),
+			backgroundTasks: registry);
+
+		coordinator.Schedule(MemoryCleanupReason.PreviewRebuildCompleted);
+		var failure = await reported.Task.WaitAsync(CompletionTimeout);
+		await WaitUntilIdleAsync(coordinator);
+
+		Assert.Equal("MemoryCleanup.ScheduleCore", failure.Operation);
+		Assert.IsType<InvalidOperationException>(failure.Error);
+	}
+
+	[AvaloniaFact]
+	public async Task SchedulePreview_RenderFailureIsReportedByTheSharedRegistry()
+	{
+		var reported = new TaskCompletionSource<(string Operation, Exception Error)>(
+			TaskCreationOptions.RunContinuationsAsynchronously);
+		using var registry = new BackgroundTaskRegistry(
+			reportFailure: (operation, error) => reported.TrySetResult((operation, error)));
+		using var coordinator = CreateCoordinator(
+			captureMemorySnapshot: static () => EmptySnapshot(),
+			collect: static _ => { },
+			waitForRenderPasses: static _ => Task.FromException(new InvalidOperationException("render failed")),
+			backgroundTasks: registry);
+
+		coordinator.SchedulePreview(MemoryCleanupReason.PreviewClose);
+		var failure = await reported.Task.WaitAsync(CompletionTimeout);
+		await WaitUntilIdleAsync(coordinator);
+
+		Assert.Equal("MemoryCleanup.SchedulePreview", failure.Operation);
+		Assert.IsType<InvalidOperationException>(failure.Error);
+	}
+
     private static MemoryCleanupCoordinator CreateCoordinator(
         Func<MemoryCleanupSnapshot> captureMemorySnapshot,
         Action<MemoryCleanupCollectionMode> collect,
@@ -749,7 +797,9 @@ public sealed class MemoryCleanupCoordinatorTests
         int uiReadinessMaximumAttempts = 24,
         Action? trimWorkingSet = null,
         Func<TimeSpan, CancellationToken, Task>? deferCleanup = null,
-		MemoryCleanupTrace? memoryCleanupTrace = null)
+		MemoryCleanupTrace? memoryCleanupTrace = null,
+		Func<CancellationToken, Task>? waitForRenderPasses = null,
+		BackgroundTaskRegistry? backgroundTasks = null)
     {
         var readinessProbe = uiReady ?? (static () => true);
         return new MemoryCleanupCoordinator(
@@ -758,14 +808,15 @@ public sealed class MemoryCleanupCoordinatorTests
             animationDuration: TimeSpan.Zero,
             captureMemorySnapshot,
             collect,
-            uiReadinessTimeout,
+            uiReadinessTimeout ?? SettledUiReadinessTimeout,
             uiReadinessPollInterval,
             uiReadinessMaximumAttempts,
             trimWorkingSet ?? (static () => { }),
             deferCleanup,
-            waitForRenderPasses: static _ => Task.CompletedTask,
+            waitForRenderPasses: waitForRenderPasses ?? (static _ => Task.CompletedTask),
             queryUiReadiness: _ => Task.FromResult(readinessProbe()),
-			memoryCleanupTrace);
+			memoryCleanupTrace,
+			backgroundTasks);
     }
 
     private static async Task WaitUntilIdleAsync(

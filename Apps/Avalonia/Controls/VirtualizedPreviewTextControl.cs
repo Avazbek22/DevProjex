@@ -2466,6 +2466,16 @@ public sealed class VirtualizedPreviewTextControl : Control
 		SelectionPosition end,
 		bool normalizeForClipboard)
 	{
+		if (Document is { } document && start.Line >= 1 && end.Line <= document.LineCount)
+		{
+			var metrics = PreviewSelectionMetricsCalculator.Calculate(
+				document,
+				new PreviewSelectionRange(start.Line, start.Column, end.Line, end.Column));
+			return metrics.Chars + (normalizeForClipboard
+				? Math.Max(0, metrics.Lines - 1) * (Environment.NewLine.Length - 1)
+				: 0);
+		}
+
 		long characterCount = 0;
 		for (var lineNumber = start.Line; lineNumber <= end.Line; lineNumber++)
 		{
@@ -2540,10 +2550,23 @@ public sealed class VirtualizedPreviewTextControl : Control
 
         var estimatedLineLength = Math.Max(12, Math.Min(Document?.MaxLineLength ?? _maxLineLength, 256));
         var builder = new StringBuilder((end.Line - start.Line + 1) * (estimatedLineLength + 1));
+        // Text-only previews preserve LF; document-backed clipboard output uses platform line endings.
+        var lineSeparator = normalizeForClipboard && Document is not null ? Environment.NewLine : "\n";
 
-        for (var lineNumber = start.Line; lineNumber <= end.Line; lineNumber++)
+        if (Document is { } document && start.Line >= 1 && end.Line <= document.LineCount)
         {
-            var lineText = GetLineText(lineNumber);
+            document.VisitLines(start.Line, end.Line, AppendSelectedLine);
+        }
+        else
+        {
+            for (var lineNumber = start.Line; lineNumber <= end.Line; lineNumber++)
+                AppendSelectedLine(lineNumber, GetLineText(lineNumber));
+        }
+
+        return builder.ToString();
+
+        bool AppendSelectedLine(int lineNumber, ReadOnlySpan<char> lineText)
+        {
             var segmentStart = lineNumber == start.Line
                 ? Math.Clamp(start.Column, 0, lineText.Length)
                 : 0;
@@ -2552,22 +2575,12 @@ public sealed class VirtualizedPreviewTextControl : Control
                 : lineText.Length;
 
             if (segmentEnd > segmentStart)
-                builder.Append(lineText.AsSpan(segmentStart, segmentEnd - segmentStart));
+                builder.Append(lineText.Slice(segmentStart, segmentEnd - segmentStart));
 
             if (lineNumber < end.Line)
-                builder.Append('\n');
+                builder.Append(lineSeparator);
+            return true;
         }
-
-        selectedText = builder.ToString();
-		return normalizeForClipboard
-			? PreviewClipboardPayloadBuilder.BuildSelectionPayload(
-				Document,
-				start.Line,
-				start.Column,
-				end.Line,
-				end.Column,
-				selectedText)
-			: selectedText;
     }
 
     private string GetLineText(int lineNumber)
@@ -2956,7 +2969,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 		var hit = HitTestSelectionPosition(point);
 		if (TryGetRedactionAt(hit, out var redaction))
 		{
-			if (redaction.Source.HasFlag(SecretFindingSource.Detector))
+			if (IsActiveDetectorCandidate(redaction))
 				_contextDetectorRedaction = redaction;
 			if (HasManualMarkIdentity(redaction))
 			{
@@ -2989,7 +3002,9 @@ public sealed class VirtualizedPreviewTextControl : Control
 
 		_contextRuleOccurrenceIds = [];
 		_contextFileOccurrenceIds = [];
-		var visible = _contextDetectorRedaction is not null && Document is not null;
+		var visible = _contextDetectorRedaction is { } detectorRedaction &&
+		              IsActiveDetectorCandidate(detectorRedaction) &&
+		              Document is not null;
 		_bulkRuleRedactionMenuItem.IsVisible = visible;
 		_bulkFileRedactionMenuItem.IsVisible = visible;
 		if (!visible)
@@ -3020,7 +3035,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 		var fileOccurrenceIds = new HashSet<string>(StringComparer.Ordinal);
 		foreach (var span in document.Redactions)
 		{
-			if (!span.Source.HasFlag(SecretFindingSource.Detector))
+			if (!IsActiveDetectorCandidate(span))
 				continue;
 
 			if (string.Equals(span.RuleId, target.RuleId, StringComparison.Ordinal))
@@ -3128,6 +3143,10 @@ public sealed class VirtualizedPreviewTextControl : Control
 	private static bool HasManualMarkIdentity(PreviewRedactionSpan redaction) =>
 		redaction.PersistentMarkHash is { Length: > 0 } ||
 		redaction.SessionMarkId is { Length: > 0 };
+
+	private static bool IsActiveDetectorCandidate(PreviewRedactionSpan redaction) =>
+		redaction.Source.HasFlag(SecretFindingSource.Detector) &&
+		!HasManualMarkIdentity(redaction);
 
 	private bool IsFileContentSelection(PreviewSelectionRange selection)
 	{

@@ -1,3 +1,7 @@
+using System.Drawing;
+using Terminal.Gui.Text;
+using Terminal.Gui.ViewBase;
+
 namespace DevProjex.Tests.Terminal;
 
 public sealed class TerminalWorkspaceTextFittingTests
@@ -27,6 +31,33 @@ public sealed class TerminalWorkspaceTextFittingTests
 		Assert.Equal(width, result.Length);
 	}
 
+	[Theory]
+	[InlineData(
+		"j/k Scroll  {/} Section  : Commands",
+		58,
+		"j/k Scroll  {/} Section  : Commands")]
+	[InlineData(
+		"j/k Прокрутка  {/} Секция  Ctrl+G Строка  W Перенос  : Команды",
+		58,
+		"j/k Прокрутка  {/} Секция  Ctrl+G Строка  : Команды")]
+	[InlineData(
+		"1-9 Недавние  Enter Открыть  : Команды  Ctrl+P Действия  ? Помощь  q Выход",
+		56,
+		"1-9 Недавние  Enter Открыть  : Команды  ? Помощь")]
+	[InlineData(
+		"j/k Deslocar   {/} Secção  Ctrl+G Linha  W Quebrar  : Comandos",
+		40,
+		"j/k Deslocar   {/} Secção  : Comandos")]
+	public void FitFooterToWidth_DropsTrailingShortcutsAndKeepsEntryPoints(
+		string footer,
+		int width,
+		string expected)
+	{
+		var result = TerminalWorkspaceSession.FitFooterToWidth(footer, width);
+
+		Assert.Equal(expected, result);
+	}
+
 	[Fact]
 	public void FitPathToWidth_DoesNotPresentLocalWindowsPathAsFileUri()
 	{
@@ -39,5 +70,53 @@ public sealed class TerminalWorkspaceTextFittingTests
 		Assert.EndsWith(@"\DevProjex", result, StringComparison.Ordinal);
 		Assert.DoesNotContain("file:///", result, StringComparison.Ordinal);
 		Assert.Equal(32, result.Length);
+	}
+
+	[Theory]
+	[InlineData(40, 10)]
+	[InlineData(45, 12)]
+	[InlineData(66, 15)]
+	[InlineData(120, 12)]
+	public void TooSmallHintStaysInsideTheScreenWithTheRequiredSize(int columns, int rows)
+	{
+		const string hint =
+			"O terminal é demasiado pequeno. Redimensione-o para, pelo menos, 60 × 20.";
+		using var screen = new View { Frame = new Rectangle(0, 0, columns, rows) };
+		var label = TerminalWorkspaceSession.CreateTooSmallLabel(hint);
+		label.Visible = true;
+		screen.Add(label);
+
+		screen.Layout();
+
+		var lines = label.TextFormatter.GetLines();
+		Assert.InRange(label.Frame.X, 0, columns);
+		Assert.InRange(label.Frame.Right, 0, columns);
+		Assert.InRange(label.Frame.Y, 0, rows);
+		Assert.InRange(label.Frame.Bottom, 0, rows);
+		Assert.InRange(lines.Count, 1, label.Frame.Height);
+		Assert.All(lines, line => Assert.True(line.GetColumns() <= label.Frame.Width, line));
+		Assert.Equal(hint, string.Join(' ', lines));
+	}
+
+	[Theory]
+	[InlineData("Export completed: {0}")]
+	[InlineData("Экспорт завершён: {0}")]
+	[InlineData("Agent journal exported: {0}")]
+	public void FormatStatusPath_KeepsTheWrittenFileNameInsideOneStatusRow(string format)
+	{
+		const int columns = 78;
+		string[] segments =
+		[
+			Path.GetTempPath(),
+			.. Enumerable.Repeat("deeply-nested-export-folder", 4),
+			"r one.md"
+		];
+		var path = Path.Combine(segments);
+
+		var result = TerminalWorkspaceSession.FormatStatusPath(format, path, columns);
+
+		Assert.StartsWith(format.Replace("{0}", "...", StringComparison.Ordinal), result, StringComparison.Ordinal);
+		Assert.EndsWith(Path.DirectorySeparatorChar + "r one.md", result, StringComparison.Ordinal);
+		Assert.Equal(columns, result.Length);
 	}
 }

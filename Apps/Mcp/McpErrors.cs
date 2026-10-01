@@ -15,9 +15,16 @@ internal static class McpErrorCodes
 	public const string RemoteDisabled = "DPX-MCP-REMOTE-DISABLED";
 	public const string RemoteFailed = "DPX-MCP-REMOTE-FAILED";
 	public const string RemoteLimit = "DPX-MCP-REMOTE-LIMIT";
+	public const string RemoteHostDenied = "DPX-MCP-REMOTE-HOST-DENIED";
 }
 
 internal sealed class McpToolException(string code, string message) : Exception(message)
 {
 	public string Code { get; } = code;
+
+	/// <summary>
+	/// The fixed phrase a batched read prints for this failure instead of the bare code. It never
+	/// carries a path: the request index already identifies the file.
+	/// </summary>
+	public string? BatchReason { get; init; }
 }

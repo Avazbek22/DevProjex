@@ -2,6 +2,10 @@ using DevProjex.Infrastructure.Persistence;
 
 namespace DevProjex.Infrastructure.ThemePresets;
 
+public readonly record struct ThemeSettingsStartupLoadResult(
+    ThemeSettingsDocument Document,
+    bool TemporarilyUnavailable);
+
 public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
 {
     public const int CurrentSchemaVersion = 2;
@@ -50,7 +54,10 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
         }
     }
 
-    public ThemeSettingsDocument LoadForStartup(TimeSpan lockTimeout)
+    public ThemeSettingsDocument LoadForStartup(TimeSpan lockTimeout) =>
+        LoadForStartupWithStatus(lockTimeout).Document;
+
+    public ThemeSettingsStartupLoadResult LoadForStartupWithStatus(TimeSpan lockTimeout)
     {
         lock (_sync)
         {
@@ -58,14 +65,15 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
             {
                 var fileSet = GetFileSet();
                 if (!CrossProcessFileLock.TryAcquire(fileSet, lockTimeout, out var heldLock))
-                    return CreateFactoryDefaults();
+                    return new ThemeSettingsStartupLoadResult(CreateFactoryDefaults(), true);
 
                 using var _ = heldLock;
-                return LoadInternal(fileSet, persistReset: true);
+                var document = LoadInternal(fileSet, persistReset: true, out var temporarilyUnavailable);
+                return new ThemeSettingsStartupLoadResult(document, temporarilyUnavailable);
             }
             catch
             {
-                return CreateFactoryDefaults();
+                return new ThemeSettingsStartupLoadResult(CreateFactoryDefaults(), true);
             }
         }
     }
@@ -100,7 +108,10 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
         IReadOnlyCollection<string> changedPresetKeys,
         string selectedPreset,
         bool selectedThemeModeChanged = true,
-        IReadOnlyCollection<ThemeVariant>? changedEffectThemes = null)
+        IReadOnlyCollection<ThemeVariant>? changedEffectThemes = null,
+        IReadOnlyDictionary<string, ThemePresetFields>? changedPresetFields = null,
+        bool updateSelectedPreset = true,
+        bool refreshDocumentAfterPersist = true)
     {
         lock (_sync)
         {
@@ -113,7 +124,9 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
                 using var _ = heldLock;
                 if (ContainsFutureDocument(fileSet))
                     return false;
-                var latest = LoadInternal(fileSet, persistReset: false);
+                var latest = LoadInternal(fileSet, persistReset: false, out var temporarilyUnavailable);
+                if (temporarilyUnavailable)
+                    return false;
                 foreach (var key in changedPresetKeys.Distinct(StringComparer.OrdinalIgnoreCase))
                 {
                     if (!TryParseKey(key, out var theme, out var effect) ||
@@ -123,10 +136,20 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
                         continue;
                     }
 
-                    SetPreset(latest, theme, effect, preset);
+                    if (changedPresetFields is null)
+                    {
+                        SetPreset(latest, theme, effect, preset);
+                    }
+                    else if (changedPresetFields.TryGetValue(key, out var fields) &&
+                             fields != ThemePresetFields.None)
+                    {
+                        SetPreset(latest, theme, effect, MergePresetFields(
+                            GetPreset(latest, theme, effect), preset, fields));
+                    }
                 }
 
-                if (TryParseKey(selectedPreset, out var selectedTheme, out var selectedEffect))
+                if (updateSelectedPreset &&
+                    TryParseKey(selectedPreset, out var selectedTheme, out var selectedEffect))
                     latest.SelectedPreset = GetKey(selectedTheme, selectedEffect);
 
                 if (selectedThemeModeChanged)
@@ -144,7 +167,8 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
                 if (!TrySaveInternal(fileSet, latest))
                     return false;
 
-                CopyDocument(latest, document);
+                if (refreshDocumentAfterPersist)
+                    CopyDocument(latest, document);
                 return true;
             }
             catch
@@ -156,9 +180,14 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
 
     public ThemeSettingsDocument ResetToDefaults()
     {
-        var defaults = CreateFactoryDefaults();
-        TrySave(defaults);
+        _ = TryResetToDefaults(out var defaults);
         return defaults;
+    }
+
+    public bool TryResetToDefaults(out ThemeSettingsDocument defaults)
+    {
+        defaults = CreateFactoryDefaults();
+        return TrySave(defaults);
     }
 
     public bool TrySave(ThemeSettingsDocument document)
@@ -205,8 +234,15 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
         return true;
     }
 
-    private ThemeSettingsDocument LoadInternal(JsonStoreFileSet fileSet, bool persistReset)
+    private ThemeSettingsDocument LoadInternal(JsonStoreFileSet fileSet, bool persistReset) =>
+        LoadInternal(fileSet, persistReset, out _);
+
+    private ThemeSettingsDocument LoadInternal(
+        JsonStoreFileSet fileSet,
+        bool persistReset,
+        out bool temporarilyUnavailable)
     {
+        temporarilyUnavailable = false;
         if (ContainsFutureDocument(fileSet))
             return CreateFactoryDefaults();
 
@@ -221,8 +257,11 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
         if (primaryStatus == ThemeDocumentReadStatus.Future)
             return CreateFactoryDefaults();
 
-        if (primaryStatus == ThemeDocumentReadStatus.Obsolete)
-            return ResetObsoleteDocument(fileSet, persistReset);
+        if (primaryStatus == ThemeDocumentReadStatus.TemporarilyUnavailable)
+        {
+            temporarilyUnavailable = true;
+            return CreateFactoryDefaults();
+        }
 
         var backupStatus = TryReadCurrent(fileSet.BackupPath, out var backup, out _);
         if (backupStatus == ThemeDocumentReadStatus.Current)
@@ -234,6 +273,12 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
 
         if (backupStatus == ThemeDocumentReadStatus.Future)
             return CreateFactoryDefaults();
+
+        if (backupStatus == ThemeDocumentReadStatus.TemporarilyUnavailable)
+        {
+            temporarilyUnavailable = true;
+            return CreateFactoryDefaults();
+        }
 
         return ResetObsoleteDocument(fileSet, persistReset);
     }
@@ -253,9 +298,6 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
     {
         document = CreateFactoryDefaults();
         requiresRewrite = false;
-        if (!File.Exists(path))
-            return ThemeDocumentReadStatus.MissingOrInvalid;
-
         try
         {
             if (!JsonStorePersistence.TryReadAllTextWithinSizeLimit(
@@ -281,6 +323,13 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
                 return ThemeDocumentReadStatus.Obsolete;
             }
 
+            using var sourceDocument = JsonDocument.Parse(json);
+            if (!sourceDocument.RootElement.TryGetProperty("presets", out var presets) ||
+                presets.ValueKind != JsonValueKind.Object)
+            {
+                return ThemeDocumentReadStatus.MissingOrInvalid;
+            }
+
             var original = JsonSerializer.Serialize(deserialized, SerializerOptions);
             document = NormalizeCurrent(deserialized);
             requiresRewrite = !string.Equals(
@@ -288,6 +337,19 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
                 JsonSerializer.Serialize(document, SerializerOptions),
                 StringComparison.Ordinal);
             return ThemeDocumentReadStatus.Current;
+        }
+        catch (FileNotFoundException)
+        {
+            return ThemeDocumentReadStatus.MissingOrInvalid;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return ThemeDocumentReadStatus.MissingOrInvalid;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                          System.Security.SecurityException)
+        {
+            return ThemeDocumentReadStatus.TemporarilyUnavailable;
         }
         catch
         {
@@ -303,6 +365,8 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
         var status = TryReadCurrent(fileSet.PrimaryPath, out var primary, out var requiresRewrite);
         if (status == ThemeDocumentReadStatus.Future)
             return true;
+        if (status == ThemeDocumentReadStatus.TemporarilyUnavailable)
+            return false;
         if (status == ThemeDocumentReadStatus.Current)
         {
             if (requiresRewrite || !File.Exists(fileSet.BackupPath))
@@ -313,6 +377,8 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
         var backupStatus = TryReadCurrent(fileSet.BackupPath, out var backup, out _);
         if (backupStatus == ThemeDocumentReadStatus.Future)
             return true;
+        if (backupStatus == ThemeDocumentReadStatus.TemporarilyUnavailable)
+            return false;
         if (backupStatus == ThemeDocumentReadStatus.Current)
             return TrySaveInternal(fileSet, backup);
 
@@ -358,6 +424,21 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
         PanelContrast = NormalizePercentage(preset.PanelContrast, fallback.PanelContrast),
         MenuTransparency = NormalizePercentage(preset.MenuTransparency, fallback.MenuTransparency),
         BorderVisibility = NormalizePercentage(preset.BorderVisibility, fallback.BorderVisibility)
+    };
+
+    private static ThemePreset MergePresetFields(
+        ThemePreset latest,
+        ThemePreset requested,
+        ThemePresetFields fields) => latest with
+    {
+        BackgroundTransparency = (fields & ThemePresetFields.BackgroundTransparency) != 0
+            ? requested.BackgroundTransparency : latest.BackgroundTransparency,
+        PanelContrast = (fields & ThemePresetFields.PanelContrast) != 0
+            ? requested.PanelContrast : latest.PanelContrast,
+        MenuTransparency = (fields & ThemePresetFields.MenuTransparency) != 0
+            ? requested.MenuTransparency : latest.MenuTransparency,
+        BorderVisibility = (fields & ThemePresetFields.BorderVisibility) != 0
+            ? requested.BorderVisibility : latest.BorderVisibility
     };
 
     private static double NormalizePercentage(double value, double fallback)
@@ -482,6 +563,7 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
     private enum ThemeDocumentReadStatus
     {
         MissingOrInvalid,
+        TemporarilyUnavailable,
         Obsolete,
         Current,
         Future

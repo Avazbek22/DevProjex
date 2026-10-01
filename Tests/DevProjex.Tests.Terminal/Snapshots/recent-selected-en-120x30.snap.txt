@@ -7,11 +7,11 @@
 
   ┌┤Actions├───────────────────────────────┐  ┌┤Details├─────────────────────────────────────────────────────────────┐
   │  Open current directory                │  │ Open this recent project.                                            │
-  │  [1] <RECENT_PATH>│  │                                                                      │
+  │  [1] <RECENT_PATH>│  │ <PROJECTS_ROOT>/Beta Project │
   │> [2] <RECENT_PATH>│  │                                                                      │
   │  Recent workspaces                     │  │                                                                      │
   │  Browse folder                         │  │                                                                      │
-  │  Open project with settings file...    │  │                                                                      │
+  │  Open project with settings file…      │  │                                                                      │
   │  Clone repository                      │  │                                                                      │
   │  Open Desktop                          │  │                                                                      │
   │  Help                                  │  │                                                                      │

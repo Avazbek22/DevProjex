@@ -1,4 +1,5 @@
 using System.CommandLine;
+using DevProjex.Infrastructure.ResourceStore;
 using Terminal.Gui.Text;
 
 namespace DevProjex.Tests.Terminal;
@@ -145,6 +146,11 @@ public sealed class HelpReleaseRegressionTests
 	[InlineData("profile export", "0,1,2,3,4,130")]
 	[InlineData("ui list", "0,1,2,5,130")]
 	[InlineData("ui status", "0,1,2,3,4,5,130")]
+	[InlineData("search", "0,1,2,3,4,130")]
+	[InlineData("related", "0,1,2,3,4,130")]
+	[InlineData("mcp", "0,1,2,130")]
+	[InlineData("mcp connect", "0,1,2,130")]
+	[InlineData("mcp log", "0,1,2,4,130")]
 	public void LeafHelpListsOnlyReachableExitCodes(string commandPath, string expectedCodes)
 	{
 		var root = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();
@@ -157,6 +163,111 @@ public sealed class HelpReleaseRegressionTests
 		Assert.Equal(
 			expectedCodes.Split(',').Select(int.Parse),
 			CommandHelpRenderer.ResolveExitCodes(command));
+	}
+
+	// The renderer appends "Default: X." and "Repeatable." itself, so a description that
+	// also mentions them shows the same metadata twice.
+	[Theory]
+	[InlineData("en", "default", "repeat")]
+	[InlineData("ru", "по умолчанию", "повтор")]
+	public async Task OptionDescriptionsDoNotRepeatRenderedDefaultsOrRepeatability(
+		string language,
+		string defaultWord,
+		string repeatableStem)
+	{
+		var localization = new LocalizationService(
+			new JsonLocalizationCatalog(),
+			CliChoiceSets.Language.TryParse(language, out var appLanguage) ? appLanguage : AppLanguage.En);
+		var defaultLabel = localization["Terminal.Help.DefaultValue"].Split("{0}")[0].Trim();
+		var repeatableNote = localization["Terminal.Help.Repeatable"];
+		var root = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();
+		var violations = new List<string>();
+		var checkedDefaults = 0;
+		var checkedRepeatables = 0;
+		foreach (var path in EnumeratePublicCommandPaths(root))
+		{
+			var help = await RenderHelpAsync(400, language, path.ToArray());
+			foreach (var entry in ReadOptionEntries(help, localization["Terminal.Help.Options"]))
+			{
+				if (entry.Contains(defaultLabel, StringComparison.Ordinal))
+					checkedDefaults++;
+				if (entry.Contains(repeatableNote, StringComparison.Ordinal))
+					checkedRepeatables++;
+				if (entry.Contains(defaultLabel, StringComparison.Ordinal) &&
+					CountOccurrences(entry, defaultWord) > 1)
+				{
+					violations.Add($"devprojex {string.Join(' ', path)}: {entry}");
+				}
+				if (entry.Contains(repeatableNote, StringComparison.Ordinal) &&
+					CountOccurrences(entry, repeatableStem) > 1)
+				{
+					violations.Add($"devprojex {string.Join(' ', path)}: {entry}");
+				}
+			}
+		}
+
+		Assert.True(checkedDefaults > 0 && checkedRepeatables > 0, "No option metadata was found in the rendered help.");
+		Assert.True(violations.Count == 0, string.Join(Environment.NewLine, violations.Distinct()));
+	}
+
+	[Theory]
+	[InlineData("en")]
+	[InlineData("ru")]
+	public async Task OptionDescriptionsAreNotValidationMessages(string language)
+	{
+		var localization = new LocalizationService(
+			new JsonLocalizationCatalog(),
+			CliChoiceSets.Language.TryParse(language, out var appLanguage) ? appLanguage : AppLanguage.En);
+		var choiceError = localization.Format("Terminal.Validation.Choice", "--git-mode", "\u0001")
+			.Split('\u0001')[0];
+		var root = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();
+		var violations = new List<string>();
+		foreach (var path in EnumeratePublicCommandPaths(root))
+		{
+			var help = await RenderHelpAsync(400, language, path.ToArray());
+			violations.AddRange(ReadOptionEntries(help, localization["Terminal.Help.Options"])
+				.Where(entry => entry.Contains(choiceError, StringComparison.Ordinal))
+				.Select(entry => $"devprojex {string.Join(' ', path)}: {entry}"));
+		}
+
+		Assert.True(violations.Count == 0, string.Join(Environment.NewLine, violations.Distinct()));
+	}
+
+	[Theory]
+	[InlineData("pt-pt")]
+	[InlineData("zh-cn")]
+	[InlineData("ru")]
+	public async Task LanguageDefaultIsShownAsItsCode(string code)
+	{
+		var environment = new TestTerminalEnvironment
+		{
+			Width = 200,
+			Variables = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+			{
+				["DEVPROJEX_LANGUAGE"] = code
+			}
+		};
+
+		var exitCode = await new TerminalApplication(environment).RunAsync(
+			["--help", "--language", "en"],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		var languageLine = environment.StandardOutput
+			.Split(Environment.NewLine)
+			.Single(static line => line.TrimStart().StartsWith("--language", StringComparison.Ordinal));
+		Assert.EndsWith($"Default: {code}.", languageLine, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task OptionalValueSwitchesShowTheirValueAsOptional()
+	{
+		var help = await RenderHelpAsync(120, "en", "analyze");
+
+		Assert.Contains("--hide-secrets [<on|off>]", help, StringComparison.Ordinal);
+		Assert.Contains("--compress-code [<on|off>]", help, StringComparison.Ordinal);
+		Assert.DoesNotContain("--hide-secrets <on|off>", help, StringComparison.Ordinal);
+		Assert.Contains("--format <text|json>", help, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -220,6 +331,47 @@ public sealed class HelpReleaseRegressionTests
 		Assert.Empty(environment.StandardError);
 		Assert.DoesNotContain("\u001b", environment.StandardOutput, StringComparison.Ordinal);
 		return environment.StandardOutput;
+	}
+
+	private static IEnumerable<string> ReadOptionEntries(string help, string optionsHeader)
+	{
+		var inOptions = false;
+		StringBuilder? entry = null;
+		foreach (var line in help.Split(Environment.NewLine))
+		{
+			if (!inOptions)
+			{
+				inOptions = line == optionsHeader;
+				continue;
+			}
+			if (line.Length == 0)
+				break;
+			if (line.StartsWith("  -", StringComparison.Ordinal) || line.StartsWith("  /", StringComparison.Ordinal))
+			{
+				if (entry is not null)
+					yield return entry.ToString();
+				entry = new StringBuilder(line.Trim());
+			}
+			else
+			{
+				entry?.Append(' ').Append(line.Trim());
+			}
+		}
+		if (entry is not null)
+			yield return entry.ToString();
+	}
+
+	private static int CountOccurrences(string text, string value)
+	{
+		var count = 0;
+		for (var index = text.IndexOf(value, StringComparison.OrdinalIgnoreCase);
+			 index >= 0;
+			 index = text.IndexOf(value, index + value.Length, StringComparison.OrdinalIgnoreCase))
+		{
+			count++;
+		}
+
+		return count;
 	}
 
 	private static IEnumerable<IReadOnlyList<string>> EnumeratePublicCommandPaths(

@@ -1,3 +1,6 @@
+using DevProjex.Application.Context;
+using DevProjex.Application.Models;
+
 namespace DevProjex.Tests.Unit;
 
 public sealed class SelectionSessionStateTests
@@ -28,6 +31,27 @@ public sealed class SelectionSessionStateTests
         Assert.False(states[".csv"]);
         Assert.False(states[".hidden"]);
         Assert.Equal(new[] { ".cs", ".json" }, cache.SelectedNames.Order(StringComparer.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void SelectionOptionStateCache_LegacyHiddenSelectionSurvivesVisibleEditAndLocalProfileResolution()
+    {
+        var cache = new SelectionOptionStateCache(StringComparer.OrdinalIgnoreCase);
+        cache.RestoreProfile(selectedNames: [".md"], optionStates: null);
+
+        cache.UpdateFromVisibleOptionStates([(".cs", false)]);
+
+        var profile = ProjectSelectionProfileBuilder.Create(
+            visibleExtensions: [new SelectionOption(".cs", false)],
+            visibleIgnoreOptions: [],
+            cachedExtensionStates: cache.SnapshotOptionStatesOrNull(suppressLegacySelectedOnlyState: false),
+            cachedIgnoreOptionStates: null,
+            selectedIgnoreOptions: [],
+            extensionComparer: StringComparer.OrdinalIgnoreCase);
+        var resolved = ProjectSelectionAdapter.FromLegacyProfile(profile, ProjectProfileReference.Local);
+
+        Assert.True(profile.ExtensionStates![".md"]);
+        Assert.Contains(".md", resolved.Extensions!);
     }
 
     [Fact]
@@ -77,6 +101,28 @@ public sealed class SelectionSessionStateTests
         Assert.True(cache.OptionStates[".cs"]);
         Assert.False(cache.TryUpdateKnownOption(".new", isChecked: true, out _));
         Assert.DoesNotContain(".new", cache.OptionStates.Keys, StringComparer.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SelectionOptionStateCache_TryUpdateKnownOption_CompletesHiddenSelectedNamesFromPartialState()
+    {
+        var cache = new SelectionOptionStateCache(StringComparer.OrdinalIgnoreCase);
+        cache.RestoreProfile(
+            selectedNames: [".cs", ".md", ".json"],
+            optionStates: new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+            {
+                [".cs"] = true,
+                [".json"] = false
+            });
+        cache.MarkIncomplete();
+
+        Assert.True(cache.TryUpdateKnownOption(".cs", isChecked: false, out var previousState));
+
+        Assert.True(previousState);
+        Assert.True(cache.HasFullState);
+        Assert.False(cache.OptionStates[".cs"]);
+        Assert.True(cache.OptionStates[".md"]);
+        Assert.False(cache.OptionStates[".json"]);
     }
 
     [Fact]

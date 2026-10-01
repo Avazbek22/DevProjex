@@ -1,3 +1,4 @@
+using Avalonia.Automation;
 using Avalonia.Data;
 
 namespace DevProjex.Avalonia.Controls;
@@ -76,6 +77,14 @@ internal sealed class ProjectTreeViewItem : TreeViewItem
     private AnimatedTreeChildrenHost? _childrenHost;
     private bool _animateNextExpansionChange;
     private bool _isExpansionAnimationEnabled = true;
+
+    public ProjectTreeViewItem()
+    {
+        // Screen readers name a row by its node; without this the peer exposes no name at all.
+        Bind(
+            AutomationProperties.NameProperty,
+            new Binding(nameof(TreeNodeViewModel.DisplayName)));
+    }
 
     protected override Type StyleKeyOverride => typeof(TreeViewItem);
 

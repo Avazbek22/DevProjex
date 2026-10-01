@@ -1,10 +1,152 @@
+using DevProjex.Infrastructure.Persistence;
+using System.Text.Json.Nodes;
+
 namespace DevProjex.Tests.Unit;
 
 public sealed class PersistentSecretMarkStoreTests
 {
+	[Fact]
+	public async Task BackupFailureAfterPrimaryCommitIsReportedAsSuccessfulWrite()
+	{
+		using var temporary = new TemporaryDirectory();
+		var project = temporary.CreateFolder("project");
+		var operations = new JsonStoreWriteOperations(
+			static (source, destination, backup) => File.Replace(source, destination, backup),
+			static (_, _, _) => throw new IOException("backup unavailable"));
+		var store = new PersistentSecretMarkStore(
+			() => temporary.Path,
+			writeOperations: operations);
+
+		var write = await store.AddAsync(
+			project,
+			Mark(FirstHash, 12),
+			TestContext.Current.CancellationToken);
+		var loaded = await store.LoadAsync(project, TestContext.Current.CancellationToken);
+
+		Assert.True(write.Succeeded);
+		Assert.True(loaded.Succeeded);
+		Assert.Single(loaded.Snapshot!.Marks);
+	}
+
 	private const string FirstHash = "001122334455";
 	private const string SecondHash = "aabbccddeeff";
+	private const string ThirdHash = "112233445566";
 	private const string V2Hash = "v2:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+	[Fact]
+	public async Task CurrentSchemaWithoutProjects_RecoversBackupBeforeNextMark()
+	{
+		using var temporary = new TemporaryDirectory();
+		var project = temporary.CreateFolder("project");
+		var store = new ProjectProfileStore(() => temporary.Path);
+		var cancellationToken = TestContext.Current.CancellationToken;
+		Assert.True((await store.AddMarkAsync(project, Mark(FirstHash, 12), cancellationToken)).Succeeded);
+		var primaryPath = Path.Combine(temporary.Path, "DevProjex", "project-secret-marks.json");
+		using var savedBackup = JsonDocument.Parse(File.ReadAllText(primaryPath + ".bak"));
+		var schemaVersion = savedBackup.RootElement.GetProperty("schemaVersion").GetInt32();
+		File.WriteAllText(primaryPath, JsonSerializer.Serialize(new { schemaVersion }));
+
+		var loaded = await store.LoadMarksAsync(project, cancellationToken);
+		var added = await store.AddMarkAsync(project, Mark(SecondHash, 16), cancellationToken);
+
+		Assert.True(loaded.Succeeded);
+		Assert.Contains(loaded.Snapshot!.Marks, mark => mark.H == FirstHash);
+		Assert.True(added.Succeeded);
+		Assert.Contains(added.Snapshot!.Marks, mark => mark.H == FirstHash);
+		Assert.Contains(added.Snapshot.Marks, mark => mark.H == SecondHash);
+		using var backup = JsonDocument.Parse(File.ReadAllText(primaryPath + ".bak"));
+		var states = backup.RootElement.GetProperty("projects")
+			.GetProperty(PathUtility.Normalize(project))
+			.GetProperty("states")
+			.EnumerateArray()
+			.Select(static state => state.GetProperty("hash").GetString())
+			.ToArray();
+		Assert.Contains(FirstHash, states);
+		Assert.Contains(SecondHash, states);
+	}
+
+	[Fact]
+	public async Task CurrentSchemaProjectWithoutStates_RecoversBackupBeforeNextMark()
+	{
+		using var temporary = new TemporaryDirectory();
+		var project = temporary.CreateFolder("project");
+		var store = new ProjectProfileStore(() => temporary.Path);
+		var cancellationToken = TestContext.Current.CancellationToken;
+		Assert.True((await store.AddMarkAsync(project, Mark(FirstHash, 12), cancellationToken)).Succeeded);
+		var primaryPath = Path.Combine(temporary.Path, "DevProjex", "project-secret-marks.json");
+		var incomplete = JsonNode.Parse(File.ReadAllText(primaryPath))!.AsObject();
+		Assert.True(incomplete["projects"]![PathUtility.Normalize(project)]!.AsObject().Remove("states"));
+		File.WriteAllText(primaryPath, incomplete.ToJsonString());
+
+		var loaded = await store.LoadMarksAsync(project, cancellationToken);
+		var added = await store.AddMarkAsync(project, Mark(SecondHash, 16), cancellationToken);
+
+		Assert.True(loaded.Succeeded);
+		Assert.Contains(loaded.Snapshot!.Marks, mark => mark.H == FirstHash);
+		Assert.True(added.Succeeded);
+		Assert.Contains(added.Snapshot!.Marks, mark => mark.H == FirstHash);
+		Assert.Contains(added.Snapshot.Marks, mark => mark.H == SecondHash);
+		using var backup = JsonDocument.Parse(File.ReadAllText(primaryPath + ".bak"));
+		var states = backup.RootElement.GetProperty("projects")
+			.GetProperty(PathUtility.Normalize(project))
+			.GetProperty("states")
+			.EnumerateArray()
+			.Select(static state => state.GetProperty("hash").GetString())
+			.ToArray();
+		Assert.Contains(FirstHash, states);
+		Assert.Contains(SecondHash, states);
+	}
+
+	[Theory]
+	[InlineData("null")]
+	[InlineData("42")]
+	public async Task CurrentSchemaProjectWithNonArrayStates_PreservesBackupAcrossSiblingWrite(
+		string invalidStatesJson)
+	{
+		using var temporary = new TemporaryDirectory();
+		var damagedProject = temporary.CreateFolder("damaged");
+		var siblingProject = temporary.CreateFolder("sibling");
+		var store = new ProjectProfileStore(() => temporary.Path);
+		var cancellationToken = TestContext.Current.CancellationToken;
+		Assert.True((await store.AddMarkAsync(damagedProject, Mark(FirstHash, 12), cancellationToken)).Succeeded);
+		Assert.True((await store.AddMarkAsync(siblingProject, Mark(SecondHash, 16), cancellationToken)).Succeeded);
+		var primaryPath = Path.Combine(temporary.Path, "DevProjex", "project-secret-marks.json");
+		using (var validBackup = JsonDocument.Parse(File.ReadAllText(primaryPath + ".bak")))
+		{
+			var savedProjects = validBackup.RootElement.GetProperty("projects");
+			Assert.Single(savedProjects.GetProperty(PathUtility.Normalize(damagedProject))
+				.GetProperty("states").EnumerateArray());
+			Assert.Single(savedProjects.GetProperty(PathUtility.Normalize(siblingProject))
+				.GetProperty("states").EnumerateArray());
+		}
+		var damagedPrimary = JsonNode.Parse(File.ReadAllText(primaryPath))!.AsObject();
+		damagedPrimary["projects"]![PathUtility.Normalize(damagedProject)]!["states"] =
+			JsonNode.Parse(invalidStatesJson);
+		File.WriteAllText(primaryPath, damagedPrimary.ToJsonString());
+
+		var siblingBeforeWrite = await store.LoadMarksAsync(siblingProject, cancellationToken);
+		var added = await store.AddMarkAsync(siblingProject, Mark(ThirdHash, 20), cancellationToken);
+		var restored = await store.LoadMarksAsync(damagedProject, cancellationToken);
+
+		Assert.True(siblingBeforeWrite.Succeeded);
+		Assert.Contains(siblingBeforeWrite.Snapshot!.Marks, mark => mark.H == SecondHash);
+		Assert.True(added.Succeeded);
+		Assert.Contains(added.Snapshot!.Marks, mark => mark.H == SecondHash);
+		Assert.Contains(added.Snapshot.Marks, mark => mark.H == ThirdHash);
+		Assert.True(restored.Succeeded);
+		Assert.Contains(restored.Snapshot!.Marks, mark => mark.H == FirstHash);
+		using var backup = JsonDocument.Parse(File.ReadAllText(primaryPath + ".bak"));
+		var projects = backup.RootElement.GetProperty("projects");
+		var restoredStates = projects.GetProperty(PathUtility.Normalize(damagedProject))
+			.GetProperty("states").EnumerateArray()
+			.Select(static state => state.GetProperty("hash").GetString());
+		var siblingStates = projects.GetProperty(PathUtility.Normalize(siblingProject))
+			.GetProperty("states").EnumerateArray()
+			.Select(static state => state.GetProperty("hash").GetString()).ToArray();
+		Assert.Contains(FirstHash, restoredStates);
+		Assert.Contains(SecondHash, siblingStates);
+		Assert.Contains(ThirdHash, siblingStates);
+	}
 
 	[Fact]
 	public async Task FutureSchema_IsReadOnlyAcrossLoadMutationsMigrationAndClear()
@@ -413,6 +555,68 @@ public sealed class PersistentSecretMarkStoreTests
 		Assert.True(repeated.Succeeded);
 		Assert.Empty(repeated.Snapshot!.Marks);
 		Assert.Equal(removed.Snapshot!.Revision, repeated.Snapshot.Revision);
+	}
+
+	[Fact]
+	public void LegacyMigrationAtProjectCapacity_PreservesTheLegacyMarkAndMarkStore()
+	{
+		using var temporary = new TemporaryDirectory();
+		var project = temporary.CreateFolder("new-project");
+		var directory = temporary.CreateFolder("DevProjex");
+		var projects = new Dictionary<string, PersistedProjectSecretMarks>(PathComparer.Default);
+		for (var index = 0; index < ProjectProfileStorageLimits.MaximumPersistentMarkProjects; index++)
+		{
+			projects.Add(
+				Path.Combine(temporary.Path, $"existing-{index:D4}"),
+				new PersistedProjectSecretMarks());
+		}
+		var markPath = Path.Combine(directory, "project-secret-marks.json");
+		File.WriteAllText(
+			markPath,
+			JsonSerializer.Serialize(
+				new PersistentSecretMarkDb { SchemaVersion = 4, Projects = projects },
+				new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+		var markBytesBefore = File.ReadAllBytes(markPath);
+		var normalizedProject = PathUtility.Normalize(project).Replace("\\", "\\\\", StringComparison.Ordinal);
+		var profilePath = Path.Combine(directory, "project-profiles.json");
+		File.WriteAllText(
+			profilePath,
+			$$"""
+			  {
+			    "schemaVersion": 3,
+			    "profiles": {
+			      "{{normalizedProject}}": {
+			        "selectedRootFolders": [],
+			        "selectedExtensions": [],
+			        "selectedIgnoreOptions": [],
+			        "rootFolderStates": {},
+			        "extensionStates": {},
+			        "ignoreOptionStates": {},
+			        "selectedPaths": [],
+			        "markedSecrets": [ { "h": "{{FirstHash}}", "key": "TOKEN", "length": 12 } ],
+			        "updatedUtc": "2026-01-01T00:00:00+00:00"
+			      }
+			    }
+			  }
+			  """);
+
+		var lookup = new ProjectProfileStore(() => temporary.Path)
+			.LookupProfile(project, TimeSpan.FromSeconds(5));
+
+		Assert.Equal(ProjectProfileLookupStatus.InvalidStorage, lookup.Status);
+		Assert.Contains("\"markedSecrets\"", File.ReadAllText(profilePath), StringComparison.Ordinal);
+		Assert.Equal(markBytesBefore, File.ReadAllBytes(markPath));
+		Assert.False(File.Exists(markPath + ".bak"));
+
+		var existingProject = projects.Keys.First();
+		var existingMigration = new PersistentSecretMarkStore(() => temporary.Path)
+			.MergeLegacy(existingProject, [Mark(FirstHash, 12)], TimeSpan.FromSeconds(5));
+		Assert.True(existingMigration.Succeeded);
+		Assert.Single(existingMigration.Snapshot!.Marks);
+		using var persisted = JsonDocument.Parse(File.ReadAllBytes(markPath));
+		Assert.Equal(
+			ProjectProfileStorageLimits.MaximumPersistentMarkProjects,
+			persisted.RootElement.GetProperty("projects").EnumerateObject().Count());
 	}
 
 	[Fact]

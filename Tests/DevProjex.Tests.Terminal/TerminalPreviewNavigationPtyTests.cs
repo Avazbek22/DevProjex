@@ -8,6 +8,55 @@ namespace DevProjex.Tests.Terminal;
 public sealed partial class TerminalPreviewNavigationPtyTests
 {
 	[Fact(Timeout = 90_000)]
+	public async Task NarrowPreviewTitleEndsWithAnEllipsisInsteadOfACutFormat()
+	{
+		using var project = CreateScrollableProject();
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			project.Path,
+			[
+				"tui",
+				project.Path,
+				"--profile",
+				"standard",
+				"--screen",
+				"inline",
+				"--no-mouse",
+				"--language",
+				"ru"
+			],
+			columns: 60,
+			rows: 20,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.WaitForScreenAsync(
+			"ДЕРЕВО ПРОЕКТА",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"> ПРЕДПРОСМОТР КОНТЕКСТА",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync("3", TestContext.Current.CancellationToken);
+		await terminal.SendAsync(":format markdown\r", TestContext.Current.CancellationToken);
+
+		var screen = await terminal.WaitForScreenAsync(
+			"Mark...├┐",
+			cancellationToken: TestContext.Current.CancellationToken);
+		var title = screen.Split('\n').Single(static line =>
+			line.Contains("ПРЕДПРОСМОТР КОНТЕКСТА", StringComparison.Ordinal));
+		Assert.Contains("Дерево + содержимое", title, StringComparison.Ordinal);
+		Assert.EndsWith("...├┐", title.TrimEnd(), StringComparison.Ordinal);
+		await terminal.SendAsync(":quit\r", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Выйти из DevProjex Terminal?",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(
+				cancellationToken: TestContext.Current.CancellationToken));
+	}
+
+	[Fact(Timeout = 90_000)]
 	public async Task PreviewViewportAndFocusSurviveKeyboardNavigationOverlaysAndResize()
 	{
 		using var project = CreateScrollableProject();
@@ -252,6 +301,79 @@ public sealed partial class TerminalPreviewNavigationPtyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.False(terminal.HasExited);
 
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(
+				cancellationToken: TestContext.Current.CancellationToken));
+	}
+
+	[Fact(Timeout = 90_000)]
+	public async Task ContentPreviewKeepsItsPositionWhenATreeCheckboxChanges()
+	{
+		using var project = new TemporaryDirectory();
+		for (var index = 1; index <= 60; index++)
+		{
+			project.WriteFile(
+				$"a/Feature{index:D3}.cs",
+				$"internal sealed class ContentMarker{index:D3} {{ }}");
+		}
+		project.WriteFile("b/Tail.cs", "internal sealed class TailMarker { }");
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			project.Path,
+			[
+				"tui",
+				project.Path,
+				"--profile",
+				"standard",
+				"--screen",
+				"inline",
+				"--no-mouse",
+				"--language",
+				"en"
+			],
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Ctrl+A/U Select all/none",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendCtrlAAsync(TestContext.Current.CancellationToken);
+		await terminal.SendAsync("2", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"ContentMarker001",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await WaitForStableScreenAsync(terminal, TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"j/k Scroll",
+			cancellationToken: TestContext.Current.CancellationToken);
+		// Stay well below the short tree listing that a plan change shows before the rendered
+		// document, while keeping the removed tail section outside the viewport.
+		await terminal.SendEndAsync(TestContext.Current.CancellationToken);
+		await terminal.SendPageUpAsync(TestContext.Current.CancellationToken);
+		await terminal.SendPageUpAsync(TestContext.Current.CancellationToken);
+		var scrolled = await WaitForStableScreenAsync(
+			terminal,
+			TestContext.Current.CancellationToken);
+		var markersBeforeToggle = GetVisibleMarkers(scrolled);
+		Assert.NotEmpty(markersBeforeToggle);
+		Assert.True(markersBeforeToggle.Min() > 20, scrolled);
+		Assert.DoesNotContain("TailMarker", scrolled, StringComparison.Ordinal);
+
+		await terminal.SendShiftTabAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"> PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
+		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
+		await terminal.SendSpaceAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"[ ] b",
+			cancellationToken: TestContext.Current.CancellationToken);
+		var afterToggle = await WaitForStableScreenAsync(
+			terminal,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(markersBeforeToggle, GetVisibleMarkers(afterToggle));
 		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,

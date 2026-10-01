@@ -7,12 +7,24 @@ name: Grammar Delivery
 # and under PublishSingleFile the native extraction directory is not on the OS loader search path,
 # so grammars cannot be loaded by name at all. Both are re-checked here on every RID DevProjex
 # ships, every time the binding version, the curated set or the delivery code changes.
+#
+# CI tier 1 (pull_request, grammar paths only), 2 (push to v*), 3 (master, release candidate).
+# Policy: .github/workflows/README.md. The pull_request paths are deliberately narrow: this gate
+# publishes six RIDs including an Intel macOS leg, so it must not run on unrelated feature pushes.
+# workflow_call exists for release-candidate.yml; keep `contents: read` and no write permission.
 
 on:
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      checkout_ref:
+        description: Commit or ref to validate
+        required: false
+        type: string
   push:
     branches:
       - master
+      - 'v*'
     paths:
       - 'Packaging/GrammarDeliveryProbe/**'
       - 'Application/Compression/**'
@@ -24,6 +36,8 @@ on:
       - 'Directory.Packages.props'
       - '.github/workflows/grammar-delivery.yml'
   pull_request:
+    # The release PR (v* -> master) is excluded: its head commit already carries the push run.
+    branches-ignore: [master]
     paths:
       - 'Packaging/GrammarDeliveryProbe/**'
       - 'Application/Compression/**'
@@ -44,9 +58,10 @@ env:
   # Loader traces are the only diagnostic available when a RID-specific load fails.
   TREESITTER_DEBUG_LOADER: 1
 
+# One run per pull request or branch head; release-candidate calls are never cancelled.
 concurrency:
-  group: grammar-delivery-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: grammar-delivery-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
 
 jobs:
   portable:
@@ -81,15 +96,17 @@ jobs:
             binary: GrammarDeliveryProbe
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
 
       - name: Setup .NET 10
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
 
       - name: Cache NuGet packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           key: nuget-grammar-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Directory.Packages.props') }}
@@ -229,15 +246,17 @@ jobs:
             runner: windows-11-arm
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
 
       - name: Setup .NET 10
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
 
       - name: Cache NuGet packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           key: nuget-grammar-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Directory.Packages.props') }}

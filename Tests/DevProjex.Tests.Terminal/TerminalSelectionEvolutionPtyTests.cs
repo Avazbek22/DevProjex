@@ -226,7 +226,7 @@ public sealed class TerminalSelectionEvolutionPtyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("(•) No Git filtering", optimistic, StringComparison.Ordinal);
 		Assert.Contains("( ) Use .gitignore", optimistic, StringComparison.Ordinal);
-		Assert.Contains("[ ] Smart ignore", optimistic, StringComparison.Ordinal);
+		Assert.Contains("[ ] Smart Ignore", optimistic, StringComparison.Ordinal);
 		Assert.Contains("[ ] Empty folders", optimistic, StringComparison.Ordinal);
 		Assert.DoesNotContain("Processing request", optimistic, StringComparison.Ordinal);
 
@@ -245,7 +245,7 @@ public sealed class TerminalSelectionEvolutionPtyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("(•) No Git filtering", completed, StringComparison.Ordinal);
 		Assert.Contains("( ) Use .gitignore", completed, StringComparison.Ordinal);
-		Assert.Contains("[ ] Smart ignore", completed, StringComparison.Ordinal);
+		Assert.Contains("[ ] Smart Ignore", completed, StringComparison.Ordinal);
 		Assert.Contains("[ ] Empty folders", completed, StringComparison.Ordinal);
 		Assert.Contains("[ ] Empty files", completed, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
@@ -253,7 +253,7 @@ public sealed class TerminalSelectionEvolutionPtyTests
 	}
 
 	[Fact(Timeout = 60_000)]
-	public async Task ExitCancelsBlockedSettingsRefresh()
+	public async Task ExitWaitsForBlockedSettingsRefresh()
 	{
 		using var project = CreateGitIgnoreProject();
 		string? dataRoot = null;
@@ -277,7 +277,19 @@ public sealed class TerminalSelectionEvolutionPtyTests
 			GetCheckpointRoot(dataRoot),
 			"background-refresh");
 
-		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
+		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"OK",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenWithoutAsync(
+			"OK",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Building tree",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.False(terminal.HasExited);
+		ReleaseCheckpoint(GetCheckpointRoot(dataRoot), "background-refresh");
 
 		Assert.Equal(
 			CommandLineExitCodes.Success,

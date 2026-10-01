@@ -215,9 +215,30 @@ public sealed class TerminalCommandHistoryTests
 		Assert.Equal("format json", history.Previous("set hide-secrets "));
 		Assert.Equal("view tree", history.Previous("ignored"));
 		Assert.Equal("view tree", history.Previous("ignored"));
-		Assert.Equal("format json", history.Next());
-		Assert.Equal("set hide-secrets ", history.Next());
-		Assert.Equal("set hide-secrets ", history.Next());
+		Assert.Equal("format json", history.Next("view tree"));
+		Assert.Equal("set hide-secrets ", history.Next("format json"));
+		Assert.Equal("set hide-secrets ", history.Next("set hide-secrets "));
+	}
+
+	[Fact]
+	public void NextKeepsTheTypedTextWhenHistoryIsNotBeingBrowsed()
+	{
+		var emptyHistory = new TerminalCommandHistory();
+		var history = new TerminalCommandHistory(["view tree"]);
+
+		Assert.Equal("view content", emptyHistory.Next("view content"));
+		Assert.Equal("view content", history.Next("view content"));
+	}
+
+	[Fact]
+	public void NextKeepsTextEditedAfterReturningToTheNewestPosition()
+	{
+		var history = new TerminalCommandHistory(["view tree"]);
+
+		Assert.Equal("view tree", history.Previous("set "));
+		Assert.Equal("set ", history.Next("view tree"));
+
+		Assert.Equal("set hide-secrets on", history.Next("set hide-secrets on"));
 	}
 
 	[Fact]

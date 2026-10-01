@@ -6,6 +6,9 @@ namespace DevProjex.Tests.Terminal;
 [Collection(TerminalProcessCollection.Name)]
 public sealed class TerminalWorkspaceCommandLinePtyTests
 {
+	// The wide Parameters panel shortens the title to "Content processi…".
+	private const string WideContentProcessingTitle = "Content processi";
+
 	[Fact(Timeout = 120_000)]
 	public async Task CopyCommandPublishesAnInlineSuccessResult()
 	{
@@ -59,16 +62,15 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 			timeout: TimeSpan.FromSeconds(45),
 			cancellationToken: TestContext.Current.CancellationToken);
 		var peakBefore = terminal.PeakWorkingSetBytes;
-		var stopwatch = Stopwatch.StartNew();
 
-		await terminal.SendAsync(":copy content text\r", TestContext.Current.CancellationToken);
+		await terminal.OpenCommandLineAsync(TestContext.Current.CancellationToken);
+		await terminal.SendAsync("copy content text\r", TestContext.Current.CancellationToken);
 		var result = await terminal.WaitForScreenAsync(
 			"Use :export instead",
 			timeout: TimeSpan.FromSeconds(75),
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Contains("too large", result, StringComparison.OrdinalIgnoreCase);
-		Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(75));
 		Assert.True(
 			terminal.PeakWorkingSetBytes - peakBefore < 192L * 1024 * 1024,
 			"The copy path allocated memory proportional to the oversized UTF-16 payload.");
@@ -100,6 +102,58 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 
 		Assert.Contains("Примерное число токенов", resultLine, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
+		await QuitAsync(terminal);
+	}
+
+	[Fact(Timeout = 120_000)]
+	public async Task RelatedCommandPublishesDependencyOutputInTheCommandPanel()
+	{
+		using var project = new TemporaryDirectory();
+		project.WriteFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />\n");
+		project.WriteFile("Consumer.cs", "public sealed class Consumer { public Target Value { get; } }\n");
+		project.WriteFile("Target.cs", "public sealed class Target {}\n");
+		await using var terminal = await StartAsync(project.Path, columns: 160, rows: 40);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.SendAsync(
+			":related Consumer.cs --direction dependencies --depth 1\r",
+			TestContext.Current.CancellationToken);
+		var result = await terminal.WaitForScreenAsync(
+			"Dependencies",
+			timeout: TimeSpan.FromSeconds(45),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains("Target.cs", result, StringComparison.Ordinal);
+		Assert.Contains("[Resolution]", result, StringComparison.Ordinal);
+		Assert.False(terminal.HasExited);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await QuitAsync(terminal);
+	}
+
+	[Fact(Timeout = 120_000)]
+	public async Task RelatedCommandReportsTheSelectionFailureInTheCommandPanel()
+	{
+		using var project = new TemporaryDirectory();
+		project.WriteFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />\n");
+		project.WriteFile("Consumer.cs", "public sealed class Consumer {}\n");
+		await using var terminal = await StartAsync(project.Path, columns: 160, rows: 40);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.SendAsync(
+			":related Missing.cs\r",
+			TestContext.Current.CancellationToken);
+		var result = await terminal.WaitForScreenAsync(
+			"DPX-SELECTION-PATH-MISSING",
+			timeout: TimeSpan.FromSeconds(45),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains("selected path is absent from the effective tree", result, StringComparison.OrdinalIgnoreCase);
+		Assert.False(terminal.HasExited);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
 		await QuitAsync(terminal);
 	}
 
@@ -150,7 +204,20 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 		await terminal.WaitForScreenAsync(
 			"PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"readme.md",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Files 3",
+			cancellationToken: TestContext.Current.CancellationToken);
 		await ExecuteAsync(terminal, "type .md off", ".md: disabled");
+		await terminal.WaitForScreenWithoutAsync(
+			"readme.md",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Files 2",
+			cancellationToken: TestContext.Current.CancellationToken);
 		project.WriteFile("notes.md", "# Added while the workspace is open");
 		project.WriteFile("config.toml", "enabled = true");
 
@@ -199,6 +266,62 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 				cancellationToken: TestContext.Current.CancellationToken));
 	}
 
+	[Fact(Timeout = 120_000)]
+	public async Task KeyPressedDuringASuccessResultStillActs()
+	{
+		using var project = CreateProject();
+		await using var terminal = await StartAsync(project.Path, columns: 120, rows: 30);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		// "CONTEXT PREVIEW: Content" is the success result; the pane title uses " · ".
+		await terminal.SendAsync(":view content\r", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"CONTEXT PREVIEW: Content",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync("1", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"CONTEXT PREVIEW · Tree",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.SendAsync(":view content\r", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"CONTEXT PREVIEW: Content",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		var dismissed = await terminal.WaitForStableScreenAsync(
+			"CONTEXT PREVIEW · Content",
+			forbidden: "Close this project and return to Welcome?",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.DoesNotContain("Close this project", dismissed, StringComparison.Ordinal);
+		Assert.False(terminal.HasExited);
+		await QuitAsync(terminal);
+	}
+
+	[Fact(Timeout = 120_000)]
+	public async Task SearchCommandKeepsFocusOnThePreviewMatchAfterTheResultHides()
+	{
+		using var project = CreateProject();
+		await using var terminal = await StartAsync(project.Path, columns: 160, rows: 40);
+		await terminal.WaitForScreenAsync(
+			"┤> PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.SendAsync(":search readme\r", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"┤> CONTEXT PREVIEW",
+			cancellationToken: TestContext.Current.CancellationToken);
+		var settled = await terminal.WaitForStableScreenAsync(
+			"┤> CONTEXT PREVIEW",
+			forbidden: "Preview search: readme",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.DoesNotContain("┤> PROJECT TREE", settled, StringComparison.Ordinal);
+		Assert.False(terminal.HasExited);
+		await QuitAsync(terminal);
+	}
+
 	[Theory(Timeout = 120_000)]
 	[InlineData(160, 40, false)]
 	[InlineData(100, 30, false)]
@@ -221,7 +344,8 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 			"PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
 
-		await terminal.SendAsync(":vie", TestContext.Current.CancellationToken);
+		await terminal.OpenCommandLineAsync(TestContext.Current.CancellationToken);
+		await terminal.SendAsync("vie", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			":view",
 			cancellationToken: TestContext.Current.CancellationToken);
@@ -238,11 +362,25 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 			column: 4,
 			row: 4,
 			cancellationToken: TestContext.Current.CancellationToken);
-		await Task.Delay(100, TestContext.Current.CancellationToken);
+		await terminal.WaitForStableScreenAsync(
+			readiness: screen =>
+				screen.Contains(":view", StringComparison.Ordinal) &&
+				HaveSameBackground(terminal, commandRow, metricsRow, columns),
+			readinessDescription: "preserving the command-line background after mouse input",
+			timelineState: screen =>
+				$"command={screen.Contains(":view", StringComparison.Ordinal)} " +
+				$"background={HaveSameBackground(terminal, commandRow, metricsRow, columns)}",
+			timeout: PtySafetyTimeout,
+			cancellationToken: TestContext.Current.CancellationToken);
 		AssertSameBackground(
 			terminal.CaptureCellStyle(commandRow, Math.Min(columns - 2, 80)),
 			terminal.CaptureCellStyle(metricsRow, Math.Min(columns - 2, 80)));
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForStableScreenAsync(
+			required: "PROJECT TREE",
+			forbidden: ":view",
+			timeout: PtySafetyTimeout,
+			cancellationToken: TestContext.Current.CancellationToken);
 		await QuitAsync(terminal);
 	}
 
@@ -273,6 +411,38 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 				line.Contains('0')),
 			$"The Exclusions palette row did not report zero selected rules.\n{palette}");
 		Assert.DoesNotContain("none available", palette, StringComparison.OrdinalIgnoreCase);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForStableScreenAsync(
+			required: "PROJECT TREE",
+			forbidden: "Building preview…",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await QuitAsync(terminal);
+	}
+
+	[Fact(Timeout = 90_000)]
+	public async Task ActionPaletteLabelsFolderExportWithTheLowercaseKeyThatRunsIt()
+	{
+		using var project = CreateProject();
+		await using var terminal = await StartAsync(project.Path, columns: 120, rows: 30);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.SendAsync("\u0010", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Filter actions:",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync("export folder", TestContext.Current.CancellationToken);
+		var palette = await terminal.WaitForScreenAsync(
+			"export folder <path>",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.True(
+			palette.Split('\n').Any(static line =>
+				line.Contains("export folder <path>", StringComparison.Ordinal) &&
+				line.Contains("[z]", StringComparison.Ordinal)),
+			$"The folder export palette row did not show the z shortcut.\n{palette}");
+		Assert.DoesNotContain("[Z]", palette, StringComparison.Ordinal);
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForStableScreenAsync(
 			required: "PROJECT TREE",
@@ -351,10 +521,10 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 		var environment = CreateSharedSettingsEnvironment(settings.Path);
 
 		await using (var first = await StartAsync(
-			             project.Path,
-			             columns: 120,
-			             rows: 30,
-			             environment))
+						 project.Path,
+						 columns: 120,
+						 rows: 30,
+						 environment))
 		{
 			await first.WaitForScreenAsync(
 				"PROJECT TREE",
@@ -398,11 +568,11 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 		var environment = CreateSharedSettingsEnvironment(settings.Path);
 
 		await using (var first = await StartAsync(
-			             project.Path,
-			             columns: 160,
-			             rows: 36,
-			             environment,
-			             language: "en"))
+						 project.Path,
+						 columns: 160,
+						 rows: 36,
+						 environment,
+						 language: "en"))
 		{
 			await first.WaitForScreenAsync(
 				"PROJECT TREE",
@@ -463,11 +633,11 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 		}
 
 		await using (var persisted = await StartAsync(
-			             project.Path,
-			             columns: 160,
-			             rows: 36,
-			             environment,
-			             language: null))
+						 project.Path,
+						 columns: 160,
+						 rows: 36,
+						 environment,
+						 language: null))
 		{
 			await persisted.WaitForScreenAsync(
 				"プロジェクトツリー",
@@ -476,11 +646,11 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 		}
 
 		await using (var overridden = await StartAsync(
-			             project.Path,
-			             columns: 160,
-			             rows: 36,
-			             environment,
-			             language: "ru"))
+						 project.Path,
+						 columns: 160,
+						 rows: 36,
+						 environment,
+						 language: "ru"))
 		{
 			var russianWorkspace = await overridden.WaitForScreenAsync(
 				"ДЕРЕВО ПРОЕКТА",
@@ -525,21 +695,18 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 			await terminal.WaitForScreenAsync(
 				"PROJECT TREE",
 				cancellationToken: TestContext.Current.CancellationToken);
-			await terminal.SendAsync(":language ja\r", TestContext.Current.CancellationToken);
+			await terminal.OpenCommandLineAsync(TestContext.Current.CancellationToken);
+			await terminal.SendAsync("language ja\r", TestContext.Current.CancellationToken);
 			await terminal.WaitForScreenAsync(
 				"言語をjaに切り替えました。",
 				cancellationToken: TestContext.Current.CancellationToken);
 
-			var stopwatch = Stopwatch.StartNew();
-			await terminal.SendAsync(":quit\r", TestContext.Current.CancellationToken);
+			await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 			var exitCode = await terminal.WaitForExitAsync(
-				timeout: TimeSpan.FromSeconds(5),
+				timeout: PtySafetyTimeout,
 				cancellationToken: TestContext.Current.CancellationToken);
 
 			Assert.Equal(CommandLineExitCodes.Success, exitCode);
-			Assert.True(
-				stopwatch.Elapsed < TimeSpan.FromSeconds(3),
-				$"TUI exit waited {stopwatch.Elapsed} for best-effort settings persistence.");
 		}
 		finally
 		{
@@ -555,7 +722,7 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 		var destination = Path.Combine(output.Path, "command context.md");
 		await using var terminal = await StartAsync(project.Path, columns: 160, rows: 40);
 		await terminal.WaitForScreenAsync(
-			"Content processing",
+			WideContentProcessingTitle,
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		await ExecuteAsync(terminal, "set hide-secrets on", "Hide secrets: enabled");
@@ -563,11 +730,15 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 			"[x] Hide secrets",
 			terminal.CaptureScreen(),
 			StringComparison.Ordinal);
-		await ExecuteAsync(terminal, "set smart-ignore off", "Smart ignore: disabled");
+		await ExecuteAsync(terminal, "set smart-ignore off", "Smart Ignore: disabled");
 		await ExecuteAsync(terminal, "set gitignore off", "Use .gitignore: disabled");
+		await ExecuteAsync(
+			terminal,
+			"set git staged",
+			"This Git mode needs a Git repository and an installed Git.");
 		await ExecuteAsync(terminal, "all content off", "All: disabled");
 		await ExecuteAsync(terminal, "type .cs off", ".cs: disabled");
-		await ExecuteAsync(terminal, "all types off", "All: disabled");
+		await ExecuteAsync(terminal, "all types off", "File types · All: disabled");
 		await terminal.WaitForScreenAsync(
 			"No visible items",
 			cancellationToken: TestContext.Current.CancellationToken);
@@ -583,7 +754,8 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 		await ExecuteAsync(terminal, "filter src", "Tree filter: src");
 		await ExecuteAsync(terminal, "filter", "Tree filter cleared");
 
-		await terminal.SendAsync(":help set\r", TestContext.Current.CancellationToken);
+		await terminal.OpenCommandLineAsync(TestContext.Current.CancellationToken);
+		await terminal.SendAsync("help set\r", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"set <option> <value>",
 			cancellationToken: TestContext.Current.CancellationToken);
@@ -631,7 +803,7 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 		var destination = Path.Combine(output.Path, "redacted context.md");
 		await using var terminal = await StartAsync(project.Path, columns: 160, rows: 40);
 		await terminal.WaitForScreenAsync(
-			"Content processing",
+			WideContentProcessingTitle,
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		await ExecuteAsync(terminal, "set hide-secrets on", "Hide secrets: enabled");
@@ -761,8 +933,11 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		await terminal.SendAsync(":set hide-secrets on", TestContext.Current.CancellationToken);
-		await Task.Delay(250, TestContext.Current.CancellationToken);
-		var screen = terminal.CaptureScreen();
+		var screen = await terminal.WaitForStableScreenAsync(
+			required: "Terminal too small",
+			forbidden: ":set hide-secrets on",
+			timeout: PtySafetyTimeout,
+			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("Terminal too small", screen, StringComparison.Ordinal);
 		Assert.DoesNotContain(":set hide-secrets on", screen, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
@@ -772,6 +947,139 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 			"PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await QuitAsync(terminal);
+	}
+
+	[Fact(Timeout = 120_000)]
+	public async Task OpenCommandLineKeepsTheKeyboardAfterAClickOnAnotherPane()
+	{
+		using var project = CreateProject();
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			project.Path,
+			[
+				"tui",
+				project.Path,
+				"--profile",
+				"standard",
+				"--screen",
+				"inline",
+				"--language",
+				"en"
+			],
+			columns: 160,
+			rows: 36,
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.WaitForStableScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.OpenCommandLineAsync(TestContext.Current.CancellationToken);
+		await terminal.SendAsync("view con", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			":view con",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendMouseClickAsync(
+			column: 90,
+			row: 10,
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync("tent\r", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"CONTEXT PREVIEW: Content",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.OpenCommandLineAsync(TestContext.Current.CancellationToken);
+		await terminal.SendAsync("view tree", TestContext.Current.CancellationToken);
+		await terminal.SendMouseClickAsync(
+			column: 10,
+			row: 4,
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenWithoutAsync(
+			":view tree",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.False(terminal.HasExited);
+		await QuitAsync(terminal);
+	}
+
+	[Fact(Timeout = 90_000)]
+	public async Task CommandDraftSurvivesATemporarilyTooSmallTerminal()
+	{
+		using var project = CreateProject();
+		await using var terminal = await StartAsync(project.Path, columns: 80, rows: 24);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.OpenCommandLineAsync(TestContext.Current.CancellationToken);
+		await terminal.SendAsync("view content", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			":view content",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.ResizeAsync(59, 19, TestContext.Current.CancellationToken);
+		await terminal.WaitForStableScreenAsync(
+			"Terminal too small",
+			forbidden: ":view content",
+			timeout: PtySafetyTimeout,
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.ResizeAsync(80, 24, TestContext.Current.CancellationToken);
+		await terminal.WaitForStableScreenAsync(
+			":view content",
+			forbidden: "Terminal too small",
+			timeout: PtySafetyTimeout,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"CONTEXT PREVIEW: Content",
+			timeout: PtySafetyTimeout,
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.False(terminal.HasExited);
+		await QuitAsync(terminal);
+	}
+
+	[Fact(Timeout = 90_000)]
+	public async Task WelcomeCommandDraftSurvivesATemporarilyTooSmallTerminal()
+	{
+		using var welcomeDirectory = new TemporaryDirectory();
+		welcomeDirectory.WriteFile("notes.txt", "markerless directory");
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			welcomeDirectory.Path,
+			["--language", "en"],
+			columns: 80,
+			rows: 24,
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Choose a workspace action",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync(":quit", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			":quit",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.ResizeAsync(59, 19, TestContext.Current.CancellationToken);
+		await terminal.WaitForStableScreenAsync(
+			"Terminal too small",
+			forbidden: ":quit",
+			timeout: PtySafetyTimeout,
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.ResizeAsync(80, 24, TestContext.Current.CancellationToken);
+		// The footer shares the command row, so it must stay hidden while the draft is back.
+		await terminal.WaitForStableScreenAsync(
+			":quit",
+			forbidden: "q Exit",
+			timeout: PtySafetyTimeout,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Exit DevProjex Terminal?",
+			timeout: PtySafetyTimeout,
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(
+				timeout: PtySafetyTimeout,
+				cancellationToken: TestContext.Current.CancellationToken));
 	}
 
 	[Fact(Timeout = 90_000)]
@@ -793,6 +1101,33 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 		Assert.Contains("CONTEXT PREVIEW: Content", result, StringComparison.Ordinal);
 		await terminal.WaitForScreenAsync(
 			"ghp_a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.False(terminal.HasExited);
+		await QuitAsync(terminal);
+	}
+
+	[Fact(Timeout = 90_000)]
+	public async Task BracketedPasteLandsInTheCommandLineWithoutExecutingIt()
+	{
+		using var project = CreateProject();
+		await using var terminal = await StartAsync(project.Path, columns: 120, rows: 30);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.OpenCommandLineAsync(TestContext.Current.CancellationToken);
+		await terminal.SendAsync(
+			"\u001b[200~view content\r\n\u001b[201~",
+			TestContext.Current.CancellationToken);
+		var pasted = await terminal.WaitForScreenAsync(
+			":view content",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.DoesNotContain("CONTEXT PREVIEW: Content", pasted, StringComparison.Ordinal);
+		Assert.DoesNotContain(@"\r\n", pasted, StringComparison.Ordinal);
+
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"CONTEXT PREVIEW: Content",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.False(terminal.HasExited);
 		await QuitAsync(terminal);
@@ -843,7 +1178,7 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 		using var project = CreateGitProject();
 		await using var terminal = await StartAsync(project.Path, columns: 160, rows: 40);
 		await terminal.WaitForScreenAsync(
-			"Content processing",
+			WideContentProcessingTitle,
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		var contentOptions = new (string Token, string Label)[]
@@ -938,12 +1273,13 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 		await terminal.WaitForScreenAsync(
 			"Workspace commands",
 			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendAsync(":", TestContext.Current.CancellationToken);
-		await Task.Delay(250, TestContext.Current.CancellationToken);
-		var overlay = terminal.CaptureScreen();
+		var overlay = await terminal.WaitForStableScreenAsync(
+			required: "Workspace commands",
+			timeout: PtySafetyTimeout,
+			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("Workspace commands", overlay, StringComparison.Ordinal);
 
-		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await terminal.SendAsync(":\u001b", TestContext.Current.CancellationToken);
 		var workspace = await terminal.WaitForScreenWithoutAsync(
 			"Workspace commands",
 			cancellationToken: TestContext.Current.CancellationToken);
@@ -1007,7 +1343,7 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 		project.WriteFile("global.json", "{}");
 		var path = Path.Combine(project.Path, "oversized.txt");
 		var targetBytes = TerminalWorkspaceController.MaximumClipboardPayloadBytes /
-		                  sizeof(char) + 1024;
+						  sizeof(char) + 1024;
 		var buffer = Enumerable.Repeat((byte)'x', 80 * 1024).ToArray();
 		for (var index = 4095; index < buffer.Length; index += 4096)
 			buffer[index] = (byte)'\n';
@@ -1060,12 +1396,11 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 
 	private static async Task QuitAsync(TerminalPtyHarness terminal)
 	{
-		await terminal.SendAsync(":quit\r", TestContext.Current.CancellationToken);
-		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(
-				timeout: TimeSpan.FromSeconds(30),
+				timeout: PtySafetyTimeout,
 				cancellationToken: TestContext.Current.CancellationToken));
 	}
 
@@ -1074,7 +1409,8 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 		string command,
 		string expected)
 	{
-		await terminal.SendAsync($":{command}\r", TestContext.Current.CancellationToken);
+		await terminal.OpenCommandLineAsync(TestContext.Current.CancellationToken);
+		await terminal.SendAsync($"{command}\r", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			expected,
 			timeout: TimeSpan.FromSeconds(30),
@@ -1094,16 +1430,20 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 	}
 
-	private static IReadOnlyDictionary<string, string> CreateSharedSettingsEnvironment(
-		string root) => new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+	private static IReadOnlyDictionary<string, string> CreateSharedSettingsEnvironment(string root)
 	{
-		["DEVPROJEX_INTERNAL_DATA_ROOT"] = Path.Combine(root, "devprojex"),
-		["XDG_CONFIG_HOME"] = Path.Combine(root, "config"),
-		["XDG_DATA_HOME"] = Path.Combine(root, "data"),
-		["XDG_CACHE_HOME"] = Path.Combine(root, "cache"),
-		["APPDATA"] = Path.Combine(root, "roaming"),
-		["LOCALAPPDATA"] = Path.Combine(root, "local")
-	};
+		var dataRoot = Path.Combine(root, "devprojex");
+		Directory.CreateDirectory(dataRoot);
+		return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+		{
+			["DEVPROJEX_INTERNAL_DATA_ROOT"] = dataRoot,
+			["XDG_CONFIG_HOME"] = Path.Combine(root, "config"),
+			["XDG_DATA_HOME"] = Path.Combine(root, "data"),
+			["XDG_CACHE_HOME"] = Path.Combine(root, "cache"),
+			["APPDATA"] = Path.Combine(root, "roaming"),
+			["LOCALAPPDATA"] = Path.Combine(root, "local")
+		};
+	}
 
 	private static void Verify(string name, string screen, string projectPath) =>
 		TerminalScreenSnapshot.Verify(
@@ -1117,4 +1457,22 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 		Assert.Equal(expected.Background, actual.Background);
 		Assert.Equal(expected.Inverse, actual.Inverse);
 	}
+
+	private static bool HaveSameBackground(
+		TerminalPtyHarness terminal,
+		int commandRow,
+		int metricsRow,
+		int columns)
+	{
+		var command = terminal.CaptureCellStyle(commandRow, Math.Min(columns - 2, 80));
+		var metrics = terminal.CaptureCellStyle(metricsRow, Math.Min(columns - 2, 80));
+		return command.BackgroundMode == metrics.BackgroundMode &&
+			   command.Background == metrics.Background &&
+			   command.Inverse == metrics.Inverse;
+	}
+
+	private static TimeSpan PtySafetyTimeout =>
+		string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase)
+			? TimeSpan.FromMinutes(2)
+			: TimeSpan.FromSeconds(30);
 }

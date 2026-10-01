@@ -22,10 +22,21 @@ public sealed record GitScopePathResult(
 	IReadOnlySet<string> IncludedPaths,
 	int DeletedPathCount,
 	string? FailureReason = null,
-	IReadOnlyList<GitTrackedPathIndex>? PathMatchers = null)
+	IReadOnlyList<GitTrackedPathIndex>? PathMatchers = null,
+	string? FailureDiagnosticCode = null,
+	string? FailureDetail = null)
 {
-	public static GitScopePathResult Unavailable(string? reason = null) =>
-		new(false, new HashSet<string>(PathComparer.Default), 0, reason);
+	public static GitScopePathResult Unavailable(
+		string? reason = null,
+		string? diagnosticCode = null,
+		string? detail = null) =>
+		new(
+			false,
+			new HashSet<string>(PathComparer.Default),
+			0,
+			reason,
+			FailureDiagnosticCode: diagnosticCode,
+			FailureDetail: detail);
 
 	public bool ContainsPath(string path)
 	{
@@ -76,6 +87,7 @@ public static class GitScopeFilter
 {
 	public const string UnavailableDiagnosticCode = "DPX-GIT-STATE-UNAVAILABLE";
 	public const string DeletedDiagnosticCode = "DPX-GIT-STATE-DELETED";
+	public const string UnsafeFilterDiagnosticCode = "DPX-GIT-UNSAFE-FILTER";
 
 	public static IReadOnlyList<string> GetDiscoveredRepositoryRoots(
 		ProjectTreeInventorySnapshot? inventory) =>
@@ -359,10 +371,11 @@ public static class GitScopeFilter
 		string projectRoot,
 		GitScopePathResult scope) =>
 		new(
-			UnavailableDiagnosticCode,
+			scope.FailureDiagnosticCode ?? UnavailableDiagnosticCode,
 			ContextDiagnosticSeverity.Error,
 			scope.FailureReason ?? "The requested Git state is unavailable.",
-			projectRoot);
+			projectRoot,
+			Detail: scope.FailureDetail);
 
 	public static ContextDiagnostic CreateDeletedDiagnostic(string projectRoot, int count) =>
 		new(

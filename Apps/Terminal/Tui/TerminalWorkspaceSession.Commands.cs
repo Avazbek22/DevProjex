@@ -1,11 +1,22 @@
 using System.Globalization;
 using DevProjex.Terminal.CommandLine;
+using DevProjex.Terminal.Execution;
 using DevProjex.Terminal.Rendering;
 
 namespace DevProjex.Terminal.Tui;
 
 internal sealed partial class TerminalWorkspaceSession
 {
+	private static readonly IReadOnlySet<TerminalWorkspaceCommandVerb> WelcomeCommandVerbs =
+		new HashSet<TerminalWorkspaceCommandVerb>
+		{
+			TerminalWorkspaceCommandVerb.Open,
+			TerminalWorkspaceCommandVerb.Recent,
+			TerminalWorkspaceCommandVerb.Language,
+			TerminalWorkspaceCommandVerb.Help,
+			TerminalWorkspaceCommandVerb.Quit
+		};
+
 	private TerminalWorkspaceActionRegistry BuildWorkspaceActionRegistry()
 	{
 		var key = new TerminalWorkspaceActionRegistryCacheKey(
@@ -40,11 +51,13 @@ internal sealed partial class TerminalWorkspaceSession
 				TerminalWorkspaceCommandAvailability.Always => true,
 				TerminalWorkspaceCommandAvailability.GitClone => IsGitCloneCommandAvailable(),
 				_ => _screen == TerminalWorkspaceScreen.Workspace &&
-				     _state is not null && !HasActiveOperation
+					 _state is not null && !HasActiveOperation
 			},
 			command => definition.Handler(this, command),
 			definition.Availability == TerminalWorkspaceCommandAvailability.GitClone
-				? () => L("Terminal.Tui.Command.Error.GitCloneRequired")
+				? () => L(HasActiveOperation
+					? "Terminal.Tui.Command.Error.Unavailable"
+					: "Terminal.Tui.Command.Error.GitCloneRequired")
 				: null);
 
 	private bool IsGitCloneCommandAvailable() =>
@@ -59,11 +72,10 @@ internal sealed partial class TerminalWorkspaceSession
 			return InvalidCommandExecution();
 		if (command.Target == "git")
 		{
-			if (!GitScopeSelection.TryParse(command.Text, out var gitMode, out var diffRange) ||
-			    !IsGitModeAvailable(gitMode))
-			{
+			if (!GitScopeSelection.TryParse(command.Text, out var gitMode, out var diffRange))
 				return InvalidCommandExecution();
-			}
+			if (!IsGitModeAvailable(gitMode))
+				return GitRepositoryRequiredExecution();
 			UpdateDraftPreferredGitMode(gitMode);
 			ApplyPathFilters(
 				gitMode,
@@ -77,6 +89,21 @@ internal sealed partial class TerminalWorkspaceSession
 		}
 		if (command.Enabled is not { } enabled)
 			return InvalidCommandExecution();
+		if (command.Target == "activity")
+		{
+			_agentActivityEnabled = enabled;
+			if (!enabled)
+				ResetAgentJournalProjection();
+			_state.SetAgentActivity(
+				enabled,
+				enabled ? _agentJournalSnapshot?.DeliveredPathCalls.Keys : null);
+			TrackBackgroundTask(_services.TerminalSettingsStore.SaveAgentActivityEnabledAsync(
+				enabled,
+				_settingsPersistenceCts.Token));
+			RefreshWorkspace();
+			ScheduleAgentJournalRefresh();
+			return ToggleCommandResult(L("Menu.View.AgentActivity"), enabled);
+		}
 
 		var content = ProjectPresentationCatalog.ContentTransformations.FirstOrDefault(
 			descriptor => string.Equals(descriptor.Token, command.Target, StringComparison.Ordinal));
@@ -112,13 +139,19 @@ internal sealed partial class TerminalWorkspaceSession
 			? mode.Value
 			: GitFilteringMode.None;
 		if (!IsGitModeAvailable(nextMode))
-			return InvalidCommandExecution();
+			return GitRepositoryRequiredExecution();
 		UpdateDraftPreferredGitMode(nextMode);
 		ApplyPathFilters(
 			nextMode,
 			selection.Exclusions ?? [],
 			originatedFromCommandLine: true);
-		return ToggleCommandResult(L(ProjectPresentationCatalog.Get(mode.Value).LabelKey), enabled);
+		var result = ToggleCommandResult(L(ProjectPresentationCatalog.Get(mode.Value).LabelKey), enabled);
+		// Turning a legacy Git toggle off always ends Git filtering, whichever Git mode was
+		// active, so the result names the mode that is now in effect.
+		return enabled
+			? result
+			: TerminalWorkspaceCommandExecutionResult.Success(
+				result.Message + PanelSeparator + L(ProjectPresentationCatalog.Get(GitFilteringMode.None).LabelKey));
 	}
 
 	internal TerminalWorkspaceCommandExecutionResult ExecuteAllCommand(
@@ -126,21 +159,28 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		if (_state is null || command.Enabled is not { } enabled)
 			return InvalidCommandExecution();
+		string sectionTitle;
 		switch (command.Target)
 		{
 			case "types":
 				ApplyExtensions(enabled ? _state.Plan.AvailableExtensions : [], true);
+				sectionTitle = L("Terminal.Tui.FileTypes");
 				break;
 			case "exclusions":
 				ApplyAllExclusions(enabled, true);
+				sectionTitle = L("Terminal.Tui.Exclusions");
 				break;
 			case "content":
 				ApplyAllContentTransformations(enabled, true);
+				sectionTitle = L("Settings.Secrets.Title");
 				break;
 			default:
 				return InvalidCommandExecution();
 		}
-		return ToggleCommandResult(L("Settings.All"), enabled);
+		// Three sections share the All control, so the result names the one that changed.
+		return ToggleCommandResult(
+			NormalizeControlTitle(sectionTitle) + PanelSeparator + L("Settings.All"),
+			enabled);
 	}
 
 	internal TerminalWorkspaceCommandExecutionResult ExecuteTypeCommand(
@@ -159,6 +199,40 @@ internal sealed partial class TerminalWorkspaceSession
 		}
 		ApplyExtensions(values, true);
 		return ToggleCommandResult(string.Join(", ", command.Values), enabled);
+	}
+
+	internal TerminalWorkspaceCommandExecutionResult ExecuteSelectCommand(
+		TerminalWorkspaceCommand command)
+	{
+		if (_state is null || command.Enabled is not { } enabled || command.Values is null)
+			return InvalidCommandExecution();
+		try
+		{
+			var result = _state.SetSelection(command.Values, enabled);
+			if (result.SelectionChanged)
+			{
+				RefreshWorkspace();
+				ScheduleSelectionProjection();
+				ScheduleLocalProfilePersistence();
+			}
+			var message = string.Format(
+				CultureInfo.CurrentCulture,
+				L("Terminal.Tui.Command.Select.Result"),
+				result.ChangedNodes,
+				result.MissingSelectors);
+			if (result.MissingSelectors > 0)
+			{
+				message += "\n[DPX-SELECTION-PATH-MISSING] " +
+					L("Terminal.Diagnostic.SelectedPathMissing");
+			}
+			return TerminalWorkspaceCommandExecutionResult.Success(message);
+		}
+		catch (Exception exception) when (exception is
+			ProjectRelativeGlobException or ProjectContextValidationException)
+		{
+			return TerminalWorkspaceCommandExecutionResult.Failure(
+				L("Terminal.Tui.Command.Select.Error.InvalidPattern"));
+		}
 	}
 
 	internal TerminalWorkspaceCommandExecutionResult ExecuteViewCommand(
@@ -205,9 +279,7 @@ internal sealed partial class TerminalWorkspaceSession
 		_previewSearchQuery = query.Length == 0 ? null : query;
 		if (query.Length == 0)
 		{
-			CancelPreviewSearch(clearQuery: true);
-			_preview.ClearSearch();
-			UpdatePanelTitles();
+			ClearPreviewSearch();
 		}
 		else
 		{
@@ -232,12 +304,17 @@ internal sealed partial class TerminalWorkspaceSession
 			return InvalidCommandExecution();
 		var query = command.Text?.Trim() ?? string.Empty;
 		_searchQuery = query.Length == 0 ? null : query;
-		_selectedTreePath = CaptureCurrentTreePath();
+		var selectedPath = CaptureCurrentTreePath();
 		_state.ApplyTreeFilter(query);
+		if (query.Length == 0)
+			RevealTreeSelection(selectedPath);
+		else
+			_selectedTreePath = selectedPath;
 		RefreshWorkspace();
-		if (_state.VisibleRows.Count > 0)
+		if (query.Length > 0 && !IsTreePathVisible(selectedPath) &&
+			_state.FindNext(query, -1) is var match and >= 0)
 		{
-			_tree.SelectedItem = 0;
+			_tree.SelectedItem = match;
 			TrackTreeSelection();
 		}
 		return TerminalWorkspaceCommandExecutionResult.Success(
@@ -254,7 +331,13 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		if (command.Target == "context")
 		{
-			ExportContext(command.Format, command.Destination, originatedFromCommandLine: true);
+			if (ValidateContextBudget(command, _previewView) is { } budgetError)
+				return budgetError;
+			ExportContext(
+				command.Format,
+				command.Destination,
+				originatedFromCommandLine: true,
+				budget: TerminalContextBudget.From(command));
 			return TerminalWorkspaceCommandExecutionResult.Deferred();
 		}
 		if (command.ProjectExportFormat is not { } projectFormat ||
@@ -269,14 +352,159 @@ internal sealed partial class TerminalWorkspaceSession
 	internal TerminalWorkspaceCommandExecutionResult ExecuteCopyCommand(
 		TerminalWorkspaceCommand command)
 	{
+		if (ValidateContextBudget(command, command.View ?? _previewView) is { } budgetError)
+			return budgetError;
 		CopyCurrentContext(command);
 		return TerminalWorkspaceCommandExecutionResult.Deferred();
 	}
+
+	// Mirrors the direct CLI rule that ranking needs a view with file content.
+	private TerminalWorkspaceCommandExecutionResult? ValidateContextBudget(
+		TerminalWorkspaceCommand command,
+		ProjectContextView view) =>
+		command.Rank is not null && view == ProjectContextView.Tree
+			? TerminalWorkspaceCommandExecutionResult.Failure(L("Terminal.Validation.RankRequiresContent"))
+			: null;
 
 	internal TerminalWorkspaceCommandExecutionResult ExecuteAnalyzeCommand(
 		TerminalWorkspaceCommand command)
 	{
 		AnalyzeCurrentContext(originatedFromCommandLine: true);
+		return TerminalWorkspaceCommandExecutionResult.Deferred();
+	}
+
+	internal TerminalWorkspaceCommandExecutionResult ExecuteRelatedCommand(
+		TerminalWorkspaceCommand command)
+	{
+		if (_state is null || string.IsNullOrWhiteSpace(command.Target))
+			return InvalidCommandExecution();
+
+		var direction = command.Text switch
+		{
+			"dependencies" => DependencyDirection.Dependencies,
+			"dependents" => DependencyDirection.Dependents,
+			"both" => DependencyDirection.Both,
+			_ => throw new ArgumentOutOfRangeException(nameof(command), command.Text, null)
+		};
+		var depth = command.Depth ?? RelatedQueryRunner.MinimumDepth;
+		var state = _state;
+		TrackActiveOperation(RunOperationAsync(
+			L("Terminal.Tui.Command.Related.Title"),
+			async token =>
+			{
+				var plan = await _controller.BuildCurrentPlanAsync(state, token).ConfigureAwait(false);
+				var planDiagnostics = FormatContextDiagnostics(plan.Diagnostics);
+				if (plan.HasErrors)
+				{
+					throw new TerminalWorkspaceOperationException(
+						"DPX-TUI-RELATED-SELECTION-FAILED",
+						planDiagnostics);
+				}
+				var seed = RelatedQueryRunner.ResolveSeed(plan, command.Target);
+				DependencyRelatedResult related;
+				try
+				{
+					related = await RelatedQueryRunner.FindAsync(
+							_services.DependencyFactsEngine,
+							plan,
+							seed,
+							direction,
+							depth,
+							token)
+						.ConfigureAwait(false);
+				}
+				catch (DependencyTraversalLimitException exception)
+				{
+					throw new TerminalWorkspaceOperationException(
+						DependencyTraversalLimitException.ErrorCode,
+						_services.Localization.Format(
+							"Terminal.Related.TraversalLimit",
+							exception.MaximumSeeds));
+				}
+				using var writer = new StringWriter(CultureInfo.CurrentCulture);
+				if (planDiagnostics.Length > 0)
+				{
+					await writer.WriteLineAsync(planDiagnostics).ConfigureAwait(false);
+					await writer.WriteLineAsync().ConfigureAwait(false);
+				}
+				if (related.Seeds.Any(static item => item.NoFactsReason is { Length: > 0 }))
+				{
+					await writer.WriteLineAsync(
+						"warning[DPX-DEPENDENCY-UNSUPPORTED]: " +
+						TerminalTextEscaping.EscapeSingleLine(L("Terminal.Related.NoFacts"))).ConfigureAwait(false);
+				}
+				await RelatedOutputRenderer.WriteAsync(
+						writer,
+						related,
+						direction,
+						AnalysisOutputFormat.Text,
+						_services.Localization,
+						token)
+					.ConfigureAwait(false);
+				return writer.ToString().TrimEnd();
+			},
+			originatedFromCommandLine: true));
+		return TerminalWorkspaceCommandExecutionResult.Deferred();
+	}
+
+	internal TerminalWorkspaceCommandExecutionResult ExecuteGrepCommand(
+		TerminalWorkspaceCommand command)
+	{
+		if (_state is null || string.IsNullOrEmpty(command.Text) ||
+			command.MaximumResults is not { } maximumResults)
+		{
+			return InvalidCommandExecution();
+		}
+
+		var pattern = command.Text;
+		var mode = command.SearchMode;
+		TrackActiveOperation(RunOperationAsync(
+			L("Terminal.Tui.Command.Grep.Title"),
+			async token =>
+			{
+				await AwaitLatestSettingsRefreshAsync(token).ConfigureAwait(false);
+				var plan = await _controller.BuildCurrentPlanAsync(_state, token).ConfigureAwait(false);
+				var planDiagnostics = FormatContextDiagnostics(plan.Diagnostics);
+				if (plan.HasErrors)
+				{
+					throw new TerminalWorkspaceOperationException(
+						"DPX-TUI-GREP-SELECTION-FAILED",
+						planDiagnostics);
+				}
+				SearchCommandHandler.SearchResult result;
+				try
+				{
+					result = await _controller.SearchProjectAsync(plan, pattern, mode, maximumResults, token)
+						.ConfigureAwait(false);
+				}
+				catch (SearchCommandException exception)
+				{
+					throw new TerminalWorkspaceOperationException(
+						exception.Code,
+						L("Terminal.Tui.Command.Grep.Error.InvalidPattern"));
+				}
+				var output = TerminalProjectSearchOutput.Format(result, _services.Localization);
+				return planDiagnostics.Length == 0
+					? output
+					: $"{planDiagnostics}\n\n{output}";
+			},
+			originatedFromCommandLine: true,
+			cornerProgressLabel: L("Terminal.Tui.Command.Grep.Progress")));
+		return TerminalWorkspaceCommandExecutionResult.Deferred();
+	}
+
+	internal TerminalWorkspaceCommandExecutionResult ExecuteRevealCommand(
+		TerminalWorkspaceCommand command)
+	{
+		if (_state is null || _tree is null || string.IsNullOrWhiteSpace(command.Text))
+			return InvalidCommandExecution();
+		if (!TryRevealTreePath(command.Text))
+		{
+			return TerminalWorkspaceCommandExecutionResult.Failure(
+				L("Terminal.Tui.Tree.RevealNotFound"));
+		}
+		// The command line hands focus back to this pane when it closes.
+		_commandReturnPane = TerminalWorkspacePane.Tree;
 		return TerminalWorkspaceCommandExecutionResult.Deferred();
 	}
 
@@ -297,27 +525,336 @@ internal sealed partial class TerminalWorkspaceSession
 	internal TerminalWorkspaceCommandExecutionResult ExecuteRecentCommand(
 		TerminalWorkspaceCommand command)
 	{
-		return TryLeaveWorkspace(() =>
-			{
-				ShowWelcome();
-				_application.Invoke(OpenRecentWorkspaces);
-			})
-			? TerminalWorkspaceCommandExecutionResult.Deferred()
-			: TerminalWorkspaceCommandExecutionResult.Unavailable();
+		// Declining the confirmation, or staying after a failed save, is not a command error.
+		TryLeaveWorkspace(() =>
+		{
+			ShowWelcome();
+			_application.Invoke(OpenRecentWorkspaces);
+		});
+		return TerminalWorkspaceCommandExecutionResult.Deferred();
 	}
+
+	internal TerminalWorkspaceCommandExecutionResult ExecuteOpenCommand(
+		TerminalWorkspaceCommand command) => OpenProjectSource(command.Text);
 
 	internal TerminalWorkspaceCommandExecutionResult ExecuteProfileCommand(
 		TerminalWorkspaceCommand command)
 	{
-		if (command.Target != "save")
-			return InvalidCommandExecution();
-		if (!string.IsNullOrWhiteSpace(command.Text) && !IsValidProfileName(command.Text))
+		switch (command.Target)
 		{
-			return TerminalWorkspaceCommandExecutionResult.Failure(
-				L("Terminal.Tui.Command.Error.InvalidProfileName"));
+			case "save":
+				if (!string.IsNullOrWhiteSpace(command.Text) && !IsValidProfileName(command.Text))
+				{
+					return TerminalWorkspaceCommandExecutionResult.Failure(
+						L("Terminal.Tui.Command.Error.InvalidProfileName"));
+				}
+				SaveProfile(command.Text, originatedFromCommandLine: true);
+				return TerminalWorkspaceCommandExecutionResult.Deferred();
+			case "load":
+				return LoadProfile(command.Text);
+			case "show":
+				return ShowCurrentProfile();
+			case "reset":
+				return ResetCurrentProfile();
+			default:
+				return InvalidCommandExecution();
 		}
-		SaveProfile(command.Text, originatedFromCommandLine: true);
+	}
+
+	internal TerminalWorkspaceCommandExecutionResult ExecuteMcpCommand(
+		TerminalWorkspaceCommand command)
+	{
+		if (_state is null)
+			return InvalidCommandExecution();
+		if (command.McpAction is TerminalWorkspaceMcpAction.ShowLog or
+			TerminalWorkspaceMcpAction.ExportLog or
+			TerminalWorkspaceMcpAction.ClearLog)
+		{
+			return ExecuteAgentJournalCommand(command);
+		}
+
+		McpConnectionClient? client = command.Target switch
+		{
+			"claude-code" => McpConnectionClient.ClaudeCode,
+			"codex" => McpConnectionClient.Codex,
+			"cursor" => McpConnectionClient.Cursor,
+			"vscode" => McpConnectionClient.VsCode,
+			"json" => McpConnectionClient.Json,
+			_ => null
+		};
+		if (client is null)
+			return InvalidCommandExecution();
+
+		var projectRoot = _state.Plan.SourceRoot;
+		if (McpConnectionProjectRoot.CreateRefusal(_services.Localization, Path.GetFullPath(projectRoot)) is
+			{ } refusal)
+		{
+			ShowMcpConnectionResult(refusal);
+			return TerminalWorkspaceCommandExecutionResult.Deferred();
+		}
+
+		if (command.McpAction == TerminalWorkspaceMcpAction.Print)
+		{
+			var mode = command.Text == "standard"
+				? McpConnectionMode.Standard
+				: McpConnectionMode.Live;
+			var executablePath = McpConnectionExecutablePathResolver.Resolve(
+				_services.TerminalCommandSetupService.Probe(),
+				Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+			var fragment = _services.McpConnectionService.CreatePrintableConfiguration(
+				new McpConnectionRequest(
+					client.Value,
+					mode,
+					executablePath,
+					Path.GetFullPath(projectRoot)));
+			ShowScrollableOverlay(
+				L("Terminal.Tui.Command.Mcp.Title"),
+				fragment,
+				TerminalWorkspaceTheme.Dialog,
+				preferredWidth: 96,
+				preferredHeight: 14);
+			return TerminalWorkspaceCommandExecutionResult.Deferred();
+		}
+
+		var operationCts = ReplaceActiveOperation();
+		var connectionMode = command.Text == "standard"
+			? McpConnectionMode.Standard
+			: McpConnectionMode.Live;
+		TrackActiveOperation(Task.Run(
+			() => ConnectMcpClientAsync(client.Value, connectionMode, projectRoot, operationCts),
+			CancellationToken.None));
 		return TerminalWorkspaceCommandExecutionResult.Deferred();
+	}
+
+	private async Task ConnectMcpClientAsync(
+		McpConnectionClient client,
+		McpConnectionMode mode,
+		string projectRoot,
+		CancellationTokenSource operationCts)
+	{
+		try
+		{
+			var result = await RunAfterSelectionPersistenceAsync(
+				mode,
+				cancellationToken => _selectionProfilePersistence.FlushAsync(cancellationToken),
+				PromptSelectionPersistenceRetryAsync,
+				async cancellationToken =>
+				{
+					var executablePath = McpConnectionExecutablePathResolver.Resolve(
+						_services.TerminalCommandSetupService.Probe(),
+						Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+					var request = new McpConnectionRequest(
+						client,
+						mode,
+						executablePath,
+						Path.GetFullPath(projectRoot));
+					cancellationToken.ThrowIfCancellationRequested();
+					return await ConnectMcpClientWithConfirmationAsync(request, operationCts)
+						.ConfigureAwait(false);
+				},
+				operationCts.Token).ConfigureAwait(false);
+
+			await InvokeAsync(() =>
+			{
+				if (result is null)
+					return true;
+				if (_operations.IsCurrent(WorkspaceOperationKind.Active, operationCts) &&
+					_screen == TerminalWorkspaceScreen.Workspace)
+				{
+					ShowMcpConnectionResult(result);
+				}
+				return true;
+			}).ConfigureAwait(false);
+		}
+		catch (OperationCanceledException) when (operationCts.IsCancellationRequested)
+		{
+		}
+		catch
+		{
+			await InvokeAsync(() =>
+			{
+				if (_operations.IsCurrent(WorkspaceOperationKind.Active, operationCts) &&
+					_screen == TerminalWorkspaceScreen.Workspace)
+				{
+					ShowMcpConnectionResult(new McpConnectionResult(
+						McpConnectionStatus.ProcessFailed,
+						L("Mcp.Connect.UnknownError")));
+				}
+				return true;
+			}).ConfigureAwait(false);
+		}
+		finally
+		{
+			ReleaseActiveOperation(operationCts);
+		}
+	}
+
+	internal static async Task<T?> RunAfterSelectionPersistenceAsync<T>(
+		McpConnectionMode mode,
+		Func<CancellationToken, Task<bool>> flushSelectionAsync,
+		Func<Task<bool>> retryAsync,
+		Func<CancellationToken, Task<T>> connectAsync,
+		CancellationToken cancellationToken)
+		where T : class
+	{
+		ArgumentNullException.ThrowIfNull(flushSelectionAsync);
+		ArgumentNullException.ThrowIfNull(retryAsync);
+		ArgumentNullException.ThrowIfNull(connectAsync);
+		if (mode == McpConnectionMode.Live)
+		{
+			while (!await flushSelectionAsync(cancellationToken).ConfigureAwait(false))
+			{
+				if (!await retryAsync().ConfigureAwait(false))
+					return null;
+			}
+		}
+
+		return await connectAsync(cancellationToken).ConfigureAwait(false);
+	}
+
+	private async Task<bool> PromptSelectionPersistenceRetryAsync()
+	{
+		var retry = false;
+		await InvokeAsync(() =>
+		{
+			var decision = ShowChoice(
+				L("Terminal.Tui.ProfileSaveFailure.Title"),
+				L("Terminal.Tui.ProfileSaveFailure.Message"),
+				L("Dialog.Cancel"),
+				L("Terminal.Tui.Retry"));
+			retry = decision == 1;
+			return true;
+		}).ConfigureAwait(false);
+		return retry;
+	}
+
+	private async Task<McpConnectionResult> ConnectMcpClientWithConfirmationAsync(
+		McpConnectionRequest request,
+		CancellationTokenSource operationCts)
+	{
+		if (request.Client is McpConnectionClient.Cursor or McpConnectionClient.VsCode)
+		{
+			var initial = await _services.McpConnectionService
+				.ConnectAsync(request, operationCts.Token)
+				.ConfigureAwait(false);
+			if (initial.FieldsToReplace is not { Count: > 0 })
+				return initial;
+
+			var clientName = request.Client == McpConnectionClient.Cursor ? "Cursor" : "VS Code";
+			var entryReplacementConfirmed = await InvokeAsync(() => ShowChoice(
+				L("Mcp.Connect.ProjectEntryReplaceTitle"),
+				_services.Localization.Format(
+					"Mcp.Connect.ProjectEntryReplacePrompt",
+					clientName,
+					string.Join(", ", initial.FieldsToReplace.Select(SingleLineTextEscaping.Escape))),
+				L("Dialog.Cancel"),
+				L("Mcp.Connect.ProjectEntryReplaceConfirm")) == 1).ConfigureAwait(false);
+			if (!entryReplacementConfirmed)
+			{
+				return new McpConnectionResult(
+					McpConnectionStatus.InvalidConfiguration,
+					L("Mcp.Connect.ProjectEntryReplaceCanceled"));
+			}
+
+			return await _services.McpConnectionService.ConnectAsync(
+				request with
+				{
+					ReplaceExistingFields = true,
+					ExpectedExistingEntryFingerprint = initial.ExistingEntryFingerprint
+				},
+				operationCts.Token).ConfigureAwait(false);
+		}
+
+		if (request.Client != McpConnectionClient.Codex ||
+			_services.McpConnectionService is not IMcpConnectionReplacementService replacementService)
+		{
+			return await _services.McpConnectionService
+				.ConnectAsync(request, operationCts.Token)
+				.ConfigureAwait(false);
+		}
+
+		var inspection = await replacementService
+			.InspectAsync(request, operationCts.Token)
+			.ConfigureAwait(false);
+		if (!inspection.RequiresProjectReplacement ||
+			string.IsNullOrWhiteSpace(inspection.ExistingProjectRoot))
+		{
+			return await _services.McpConnectionService
+				.ConnectAsync(request, operationCts.Token)
+				.ConfigureAwait(false);
+		}
+
+		var confirmed = await InvokeAsync(() => Confirm(
+			L("Mcp.Connect.ReplaceTitle"),
+			_services.Localization.Format(
+				"Mcp.Connect.ReplacePrompt",
+				inspection.ExistingProjectRoot,
+				request.ProjectRoot))).ConfigureAwait(false);
+		if (!confirmed)
+		{
+			return new McpConnectionResult(
+				McpConnectionStatus.InvalidConfiguration,
+				L("Mcp.Connect.ReplaceCanceled"));
+		}
+
+		return await replacementService.ReplaceAsync(
+			request,
+			inspection.ExistingProjectRoot,
+			operationCts.Token).ConfigureAwait(false);
+	}
+
+	private void ShowMcpConnectionResult(McpConnectionResult result)
+	{
+		var isExpectedOutcome = result.Succeeded ||
+			result.Status == McpConnectionStatus.ManualConfiguration;
+		var statusScheme = isExpectedOutcome
+			? TerminalWorkspaceTheme.Success
+			: TerminalWorkspaceTheme.Warning;
+		ShowScrollableOverlay(
+			L("Terminal.Tui.Command.Mcp.Title"),
+			BuildMcpConnectionOutput(result),
+			isExpectedOutcome ? TerminalWorkspaceTheme.Dialog : TerminalWorkspaceTheme.Warning,
+			preferredWidth: 96,
+			preferredHeight: 20);
+		ShowTransientStatus(result.UserMessage.Split('\n')[0].TrimEnd('\r'), statusScheme);
+	}
+
+	private string BuildMcpConnectionOutput(McpConnectionResult result) =>
+		BuildMcpConnectionOutput(result, _services.Localization);
+
+	internal static string BuildMcpConnectionOutput(
+		McpConnectionResult result,
+		LocalizationService localization)
+	{
+		// A message can carry several sentences on separate lines; each is still escaped on its own.
+		var sections = new List<string>
+		{
+			string.Join(
+				Environment.NewLine,
+				result.UserMessage
+					.Split('\n')
+					.Select(static line => TerminalTextEscaping.EscapeSingleLine(line.TrimEnd('\r'))))
+		};
+		if (result.Succeeded && !string.IsNullOrWhiteSpace(result.NextStep))
+		{
+			sections.Add(TerminalTextEscaping.EscapeSingleLine(result.NextStep));
+		}
+		else if (result.Succeeded && !string.IsNullOrWhiteSpace(result.NextCommand))
+		{
+			sections.Add(TerminalTextEscaping.EscapeSingleLine(
+				localization.Format("Mcp.Connect.RunInProject", result.NextCommand)));
+		}
+		if (!string.IsNullOrWhiteSpace(result.CommandOutput))
+			System.Diagnostics.Trace.WriteLine($"MCP client command output: {result.CommandOutput}");
+		if (result.SuggestedConfigPaths is not null)
+		{
+			sections.Add(string.Join(
+				Environment.NewLine,
+				result.SuggestedConfigPaths.Select(TerminalTextEscaping.EscapeSingleLine)));
+		}
+		if (!string.IsNullOrWhiteSpace(result.ManualConfiguration))
+			sections.Add(result.ManualConfiguration);
+		return string.Join(Environment.NewLine + Environment.NewLine, sections);
 	}
 
 	internal TerminalWorkspaceCommandExecutionResult ExecuteRefreshCommand(
@@ -397,10 +934,17 @@ internal sealed partial class TerminalWorkspaceSession
 		TerminalWorkspaceCommandExecutionResult.Failure(
 			L("Terminal.Tui.Command.Error.InvalidState"));
 
+	private TerminalWorkspaceCommandExecutionResult GitRepositoryRequiredExecution() =>
+		TerminalWorkspaceCommandExecutionResult.Failure(
+			L("Terminal.Tui.Command.Error.GitRepositoryRequired"));
+
 	private void ShowCommandHelp(string? verb)
 	{
 		var definitions = verb is null
 			? TerminalWorkspaceCommandCatalog.All
+				.Where(definition => _screen != TerminalWorkspaceScreen.Welcome ||
+					WelcomeCommandVerbs.Contains(definition.Verb))
+				.ToArray()
 			: TerminalWorkspaceCommandCatalog.All
 				.Where(definition => definition.Token == verb)
 				.ToArray();
@@ -417,18 +961,36 @@ internal sealed partial class TerminalWorkspaceSession
 			preferredHeight: 27);
 	}
 
-	private TerminalWorkspaceCommandParseContext BuildCommandParseContext() =>
-		_screen == TerminalWorkspaceScreen.Welcome
-			? new([], new HashSet<TerminalWorkspaceCommandVerb>
-			{
-				TerminalWorkspaceCommandVerb.Recent,
-				TerminalWorkspaceCommandVerb.Language,
-				TerminalWorkspaceCommandVerb.Help,
-				TerminalWorkspaceCommandVerb.Quit
-			})
-			: new(
-				_state?.Plan.AvailableExtensions ?? [],
-				WorkingDirectory: _state?.Plan.SourceRoot ?? Directory.GetCurrentDirectory());
+	private TerminalWorkspaceCommandParseContext BuildCommandParseContext(
+		bool includeKnownProjectPaths = true)
+	{
+		if (_screen == TerminalWorkspaceScreen.Welcome)
+		{
+			return new TerminalWorkspaceCommandParseContext(
+				[],
+				WelcomeCommandVerbs,
+				WorkingDirectory: Directory.GetCurrentDirectory());
+		}
+
+		if (_state?.Plan is not { } plan)
+		{
+			return new TerminalWorkspaceCommandParseContext(
+				[],
+				WorkingDirectory: Directory.GetCurrentDirectory());
+		}
+		if (!includeKnownProjectPaths)
+			return new TerminalWorkspaceCommandParseContext(plan.AvailableExtensions);
+
+		var knownPaths = TerminalWorkspaceCommandParser.GetKnownProjectCompletionPaths(
+			plan.EffectiveTree,
+			plan.SourceRoot);
+		return new TerminalWorkspaceCommandParseContext(
+			plan.AvailableExtensions,
+			WorkingDirectory: plan.SourceRoot,
+			ProfileDirectory: ResolvePortableProfileDirectory(),
+			KnownProjectPaths: knownPaths.Paths,
+			KnownProjectFiles: knownPaths.Files);
+	}
 
 	private void OpenCommandLine(string initialText = "")
 	{
@@ -486,9 +1048,9 @@ internal sealed partial class TerminalWorkspaceSession
 			: BuildWorkspaceActionRegistry().Execute(parse.Command!);
 		AppLanguage? persistedLanguage = null;
 		if (parse.Command!.Definition.Verb == TerminalWorkspaceCommandVerb.Language &&
-		    parse.Command.Text is { } languageCode &&
-		    result.Status == TerminalWorkspaceCommandExecutionStatus.Success &&
-		    AppLanguageUtility.TryParseCode(languageCode, out var language))
+			parse.Command.Text is { } languageCode &&
+			result.Status == TerminalWorkspaceCommandExecutionStatus.Success &&
+			AppLanguageUtility.TryParseCode(languageCode, out var language))
 		{
 			persistedLanguage = language;
 		}
@@ -522,8 +1084,8 @@ internal sealed partial class TerminalWorkspaceSession
 		if (!historyChanged && language is null)
 			return;
 		if (_commandHistoryPersistence.Enqueue(
-			    _commandHistory.Entries.ToArray(),
-			    language) is { } saveTask)
+				_commandHistory.Entries.ToArray(),
+				language) is { } saveTask)
 		{
 			TrackBackgroundTask(saveTask);
 		}
@@ -532,6 +1094,7 @@ internal sealed partial class TerminalWorkspaceSession
 	private TerminalWorkspaceCommandExecutionResult ExecuteWelcomeCommand(TerminalWorkspaceCommand command) =>
 		command.Definition.Verb switch
 		{
+			TerminalWorkspaceCommandVerb.Open => ExecuteOpenCommand(command),
 			TerminalWorkspaceCommandVerb.Recent => ExecuteRecentCommand(command),
 			TerminalWorkspaceCommandVerb.Language => ExecuteLanguageCommand(command),
 			TerminalWorkspaceCommandVerb.Help => ExecuteHelpCommand(command),
@@ -541,15 +1104,20 @@ internal sealed partial class TerminalWorkspaceSession
 
 	private string FormatCommandError(TerminalWorkspaceCommandError error)
 	{
+		// Option validation reuses the direct CLI wording verbatim.
+		if (error.MessageKey is { } messageKey)
+			return L(messageKey);
 		var key = error.Code switch
 		{
 			TerminalWorkspaceCommandErrorCode.EmptyInput => "Terminal.Tui.Command.Error.Empty",
 			TerminalWorkspaceCommandErrorCode.UnterminatedQuote => "Terminal.Tui.Command.Error.Quote",
 			TerminalWorkspaceCommandErrorCode.UnknownVerb => "Terminal.Tui.Command.Error.UnknownVerb",
+			TerminalWorkspaceCommandErrorCode.UnavailableVerb => "Terminal.Tui.Command.Error.UnavailableVerb",
 			TerminalWorkspaceCommandErrorCode.MissingArgument => "Terminal.Tui.Command.Error.Missing",
 			TerminalWorkspaceCommandErrorCode.UnexpectedArgument => "Terminal.Tui.Command.Error.Unexpected",
 			TerminalWorkspaceCommandErrorCode.UnknownToken => "Terminal.Tui.Command.Error.UnknownToken",
-			TerminalWorkspaceCommandErrorCode.InvalidValue => "Terminal.Tui.Command.Error.InvalidValue",
+			TerminalWorkspaceCommandErrorCode.InvalidValue or
+				TerminalWorkspaceCommandErrorCode.InvalidOption => "Terminal.Tui.Command.Error.InvalidValue",
 			TerminalWorkspaceCommandErrorCode.UnknownLanguage =>
 				"Terminal.Tui.Command.Language.Error.Unknown",
 			_ => throw new ArgumentOutOfRangeException()

@@ -1,9 +1,26 @@
 name: Store Package Smoke
 
+# CI tier 3 only. Policy: .github/workflows/README.md
+# The Store package needs the Visual Studio 2026 runner image and about 45 minutes, so it runs
+# on `push` to master, on manual dispatch, and inside release-candidate.yml with force_full.
+# Never add a pull_request or v* trigger here; a Store regression is caught by the release
+# candidate before the tag, which is the only moment the Store package is produced anyway.
+
 on:
   push:
     branches: [ "master" ]
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      checkout_ref:
+        description: Commit or ref to validate
+        required: false
+        type: string
+      force_full:
+        description: Run the Store smoke without changed-path filtering
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -15,7 +32,7 @@ env:
 
 concurrency:
   group: store-package-smoke-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 jobs:
   plan-store:
@@ -24,11 +41,18 @@ jobs:
     timeout-minutes: 5
     outputs:
       run_store: ${{ steps.plan.outputs.run_store }}
+      source_sha: ${{ steps.source.outputs.source_sha }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
           fetch-depth: 0
+
+      - name: Pin Store validation source
+        id: source
+        shell: bash
+        run: echo "source_sha=$(git rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
 
       - name: Validate CI planner contracts
         shell: pwsh
@@ -40,12 +64,21 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           PREVIOUS_GATE_NAME: Store Gate
-        run: >
-          ./Scripts/ci/Select-CiPlan.ps1
-          -GitHubEventPath $env:GITHUB_EVENT_PATH
-          -GitHubEventName $env:GITHUB_EVENT_NAME
-          -PreviousGateName $env:PREVIOUS_GATE_NAME
-          -GitHubOutputPath $env:GITHUB_OUTPUT
+          FORCE_FULL: ${{ inputs.force_full }}
+        run: |
+          $common = @{
+            PreviousGateName = $env:PREVIOUS_GATE_NAME
+            GitHubOutputPath = $env:GITHUB_OUTPUT
+          }
+          if ($env:FORCE_FULL -eq 'true') {
+            ./Scripts/ci/Select-CiPlan.ps1 -Full @common
+          }
+          else {
+            ./Scripts/ci/Select-CiPlan.ps1 `
+              -GitHubEventPath $env:GITHUB_EVENT_PATH `
+              -GitHubEventName $env:GITHUB_EVENT_NAME `
+              @common
+          }
 
   store-package-smoke:
     name: Store Package Smoke
@@ -55,15 +88,17 @@ jobs:
     timeout-minutes: 45
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan-store.outputs.source_sha }}
 
       - name: Setup .NET 10
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: 10.0.x
 
       - name: Cache NuGet packages
-        uses: actions/cache@v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.nuget/packages
           key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'Directory.Build.props') }}
@@ -89,12 +124,15 @@ jobs:
         env:
           PLAN_RESULT: ${{ needs.plan-store.result }}
           STORE_RESULT: ${{ needs.store-package-smoke.result }}
+          FORCE_FULL: ${{ inputs.force_full }}
         run: |
           $results = @{
             plan = $env:PLAN_RESULT
             store = $env:STORE_RESULT
           }
-          $failed = @($results.GetEnumerator() | Where-Object { $_.Value -notin @('success', 'skipped') })
+          # Under force_full (release candidate) a skipped smoke is a failure, not a pass.
+          $allowed = if ($env:FORCE_FULL -eq 'true') { @('success') } else { @('success', 'skipped') }
+          $failed = @($results.GetEnumerator() | Where-Object { $_.Value -notin $allowed })
           if ($failed.Count -gt 0) {
             throw "Selected Store jobs failed: $($failed.ForEach({ \"$($_.Key)=$($_.Value)\" }) -join ', ')"
           }

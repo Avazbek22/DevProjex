@@ -41,9 +41,12 @@ public static class PreviewClipboardPayloadBuilder
 
     private static string NormalizeLineEndingsForClipboard(string text)
     {
-        if (string.IsNullOrEmpty(text) || Environment.NewLine == "\n")
+        if (string.IsNullOrEmpty(text))
             return text;
 
-        return text.Replace("\n", Environment.NewLine, StringComparison.Ordinal);
+        var normalized = text.Replace("\r\n", "\n", StringComparison.Ordinal);
+        return Environment.NewLine == "\n"
+            ? normalized
+            : normalized.Replace("\n", Environment.NewLine, StringComparison.Ordinal);
     }
 }

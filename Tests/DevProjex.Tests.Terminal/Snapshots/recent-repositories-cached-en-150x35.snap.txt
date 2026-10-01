@@ -10,7 +10,7 @@
   │> Recent workspaces┌┤Recent workspaces├────────────────────────────────────────────────────────────────────────────────────┐                    │
   │  Browse folder    │ Open a recent local folder or Git repository from one shared history.                                 │                    │
   │  Open project with│                                                                                                       │                    │
-  │  Clone repository │ > Git        DevProjex                    Today                                                       │                    │
+  │  Clone repository │ > Git        DevProjex                                                                       Today    │                    │
   │  Open Desktop     │                                                                                                       │                    │
   │  Help             │                                                                                                       │                    │
   │  Exit             │ Git · DevProjex                                                                                       │                    │

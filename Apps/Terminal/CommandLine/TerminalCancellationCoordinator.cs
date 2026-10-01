@@ -4,7 +4,9 @@ namespace DevProjex.Terminal.CommandLine;
 
 public sealed class TerminalCancellationCoordinator : IDisposable
 {
+	private static readonly TimeSpan ConsoleCloseGracePeriod = TimeSpan.FromSeconds(4);
 	private readonly CancellationTokenSource _cancellationSource = new();
+	private readonly ManualResetEventSlim _shutdownCompleted = new();
 	private readonly InterruptPolicy _interruptPolicy = new();
 	private readonly List<PosixSignalRegistration> _signalRegistrations = [];
 	private readonly object _lifetimeGate = new();
@@ -21,6 +23,11 @@ public sealed class TerminalCancellationCoordinator : IDisposable
 		{
 			Console.CancelKeyPress += HandleConsoleCancel;
 			_consoleHandlerRegistered = true;
+			// Closing the console window or tab, logoff and shutdown end the process as soon as
+			// the handler returns. Holding the handler briefly lets the cancelled command flush
+			// its pending saves first.
+			RegisterClose(PosixSignal.SIGHUP);
+			RegisterClose(PosixSignal.SIGTERM);
 		}
 		else
 		{
@@ -36,6 +43,7 @@ public sealed class TerminalCancellationCoordinator : IDisposable
 
 	public void Dispose()
 	{
+		_shutdownCompleted.Set();
 		var disposeCancellationSource = false;
 		lock (_lifetimeGate)
 		{
@@ -71,6 +79,19 @@ public sealed class TerminalCancellationCoordinator : IDisposable
 			{
 				TryHandleInterrupt(() => context.Cancel = true);
 			}));
+	}
+
+	private void RegisterClose(PosixSignal signal)
+	{
+		_signalRegistrations.Add(PosixSignalRegistration.Create(
+			signal,
+			context => HandleCloseRequest(() => context.Cancel = true, ConsoleCloseGracePeriod)));
+	}
+
+	internal void HandleCloseRequest(Action suppressNativeAction, TimeSpan gracePeriod)
+	{
+		if (TryHandleInterrupt(suppressNativeAction))
+			_shutdownCompleted.Wait(gracePeriod);
 	}
 
 	internal bool TryHandleInterrupt(Action suppressNativeAction)

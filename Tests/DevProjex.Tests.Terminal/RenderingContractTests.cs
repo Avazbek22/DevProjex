@@ -144,6 +144,30 @@ public sealed class RenderingContractTests
 	}
 
 	[Fact]
+	public void UnsafeGitFilterDiagnosticNamesTheDriverOnStderr()
+	{
+		var environment = new TestTerminalEnvironment();
+		var renderer = new ContextDiagnosticRenderer(
+			environment,
+			new TerminalOutputOptions(),
+			new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En));
+
+		renderer.Write(
+		[
+			new ContextDiagnostic(
+				GitScopeFilter.UnsafeFilterDiagnosticCode,
+				ContextDiagnosticSeverity.Error,
+				"internal message",
+				Path.GetFullPath("repository"),
+				Detail: "hostile")
+		]);
+
+		Assert.Contains(GitScopeFilter.UnsafeFilterDiagnosticCode, environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("hostile", environment.StandardError, StringComparison.Ordinal);
+		Assert.DoesNotContain("internal message", environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void RedirectedDiagnosticKeepsEscapedLongPathOnOnePhysicalLine()
 	{
 		var environment = new TestTerminalEnvironment

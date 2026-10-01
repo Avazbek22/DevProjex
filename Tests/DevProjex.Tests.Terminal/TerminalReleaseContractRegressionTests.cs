@@ -1,3 +1,7 @@
+using System.CommandLine;
+using System.CommandLine.Parsing;
+using DevProjex.Infrastructure.ResourceStore;
+
 namespace DevProjex.Tests.Terminal;
 
 [Collection(EnvironmentVariableCollection.Name)]
@@ -181,7 +185,7 @@ public sealed class TerminalReleaseContractRegressionTests
 			workspace.Path,
 			ProjectProfileReference.Standard,
 			TestContext.Current.CancellationToken);
-		state.SelectNone();
+		state.RestoreSelectedRelativePaths([]);
 
 		var contextArguments = ParseArgumentVector(
 			TerminalWorkspaceController.BuildEquivalentContextCommand(
@@ -202,6 +206,150 @@ public sealed class TerminalReleaseContractRegressionTests
 			expectedSource,
 			new TestTerminalEnvironment(),
 			TestContext.Current.CancellationToken));
+	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task EquivalentCommandsPreserveExplicitEmptyExtensions(bool exportProject)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/src/app.cs", "class App {}");
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		services.LocalProfileStore.SaveProfile(
+			project,
+			new ProjectSelectionProfile(
+				SelectedRootFolders: [],
+				SelectedExtensions: [],
+				SelectedIgnoreOptions: [],
+				ExtensionStates: new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+				{
+					[".cs"] = false
+				}));
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			project,
+			ProjectProfileReference.Local,
+			TestContext.Current.CancellationToken);
+
+		var arguments = ParseArgumentVector(exportProject
+			? TerminalWorkspaceController.BuildEquivalentProjectCommand(
+				state,
+				ProjectCopyExportFormat.Folder,
+				Path.Combine(workspace.Path, "export"),
+				dryRun: true)
+			: TerminalWorkspaceController.BuildEquivalentContextCommand(
+				state,
+				ProjectContextView.TreeContent,
+				ProjectContextDocumentFormat.Markdown,
+				Path.Combine(workspace.Path, "context.md"),
+				dryRun: true));
+
+		Assert.DoesNotContain("--extension", arguments);
+		var selectedPathsSourceIndex = Array.IndexOf(arguments, "--select-from");
+		Assert.InRange(selectedPathsSourceIndex, 0, arguments.Length - 2);
+		Assert.Equal(
+			OperatingSystem.IsWindows() ? "NUL" : "/dev/null",
+			arguments[selectedPathsSourceIndex + 1]);
+		var profileIndex = Array.IndexOf(arguments, "--profile");
+		Assert.InRange(profileIndex, 0, arguments.Length - 2);
+		var selectionOptions = new SelectionOptions(
+			new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En),
+			new TestTerminalEnvironment());
+		var selectionCommand = new System.CommandLine.RootCommand();
+		selectionOptions.AddTo(selectionCommand);
+		var selectionParse = selectionCommand.Parse(
+		[
+			"--profile", arguments[profileIndex + 1],
+			"--select-from", arguments[selectedPathsSourceIndex + 1]
+		]);
+		Assert.Empty(selectionParse.Errors);
+		var effectiveSelection = await selectionOptions.ResolveAsync(
+			selectionParse,
+			project,
+			services,
+			TestContext.Current.CancellationToken);
+		Assert.Empty(effectiveSelection.SelectedPaths ?? []);
+		var effectivePlan = await services.ContextFactory.BuildAsync(
+			project,
+			effectiveSelection,
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Empty(effectivePlan.IncludedFiles);
+
+		var environment = new TestTerminalEnvironment();
+		var exitCode = await new TerminalApplication(
+				environment,
+				new TerminalServiceFactory(() => workspace.CreateDirectory("execution-data")))
+			.RunAsync(
+				arguments.Skip(1).Concat(["--language", "en"]).ToArray(),
+				TestContext.Current.CancellationToken);
+
+		Assert.True(
+			exitCode == CommandLineExitCodes.Success,
+			environment.StandardError);
+		Assert.Contains("Inventory: 0 files", environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task EquivalentCommandsPreserveExplicitEmptyRoots(bool exportProject)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/src/app.cs", "class App {}");
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		services.LocalProfileStore.SaveProfile(
+			project,
+			new ProjectSelectionProfile(
+				SelectedRootFolders: [],
+				SelectedExtensions: [".cs"],
+				SelectedIgnoreOptions: [],
+				RootFolderStates: new Dictionary<string, bool>(ProjectTreePathIdentity.CanonicalComparer)
+				{
+					["src"] = false
+				}));
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			project,
+			ProjectProfileReference.Local,
+			TestContext.Current.CancellationToken);
+
+		var arguments = ParseArgumentVector(exportProject
+			? TerminalWorkspaceController.BuildEquivalentProjectCommand(
+				state,
+				ProjectCopyExportFormat.Folder,
+				Path.Combine(workspace.Path, "export"),
+				dryRun: true)
+			: TerminalWorkspaceController.BuildEquivalentContextCommand(
+				state,
+				ProjectContextView.TreeContent,
+				ProjectContextDocumentFormat.Markdown,
+				Path.Combine(workspace.Path, "context.md"),
+				dryRun: true));
+
+		Assert.NotNull(state.Plan.Selection.Roots);
+		Assert.Empty(state.Plan.SelectedRoots);
+		Assert.DoesNotContain("--root", arguments);
+		AssertEmptySelectionSource(
+			arguments,
+			OperatingSystem.IsWindows() ? "NUL" : "/dev/null");
+
+		var environment = new TestTerminalEnvironment();
+		var exitCode = await new TerminalApplication(
+				environment,
+				new TerminalServiceFactory(() => workspace.CreateDirectory("execution-data")))
+			.RunAsync(
+				arguments.Skip(1).Concat(["--language", "en"]).ToArray(),
+				TestContext.Current.CancellationToken);
+
+		Assert.True(
+			exitCode == CommandLineExitCodes.Success,
+			environment.StandardError);
+		Assert.Contains("Inventory: 0 files", environment.StandardError, StringComparison.Ordinal);
 	}
 
 	private static void AssertEmptySelectionSource(

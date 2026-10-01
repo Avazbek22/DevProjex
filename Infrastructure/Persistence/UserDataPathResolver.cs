@@ -10,6 +10,34 @@ internal enum UserDataDirectoryKind
 
 public static class UserDataPathResolver
 {
+	public const string InternalDataRootVariable = "DEVPROJEX_INTERNAL_DATA_ROOT";
+	public const string ApplicationDirectoryName = "DevProjex";
+	private const string UnsafeServiceDirectoryMessage =
+		"Application service directories must be physical directories, not a symbolic link or junction.";
+
+	public static string? ResolveInternalDataRoot(string? candidate)
+	{
+		if (string.IsNullOrWhiteSpace(candidate))
+			return null;
+
+		try
+		{
+			if (!Path.IsPathFullyQualified(candidate))
+				return null;
+			var resolved = Path.GetFullPath(candidate);
+			return Directory.Exists(resolved) ? resolved : null;
+		}
+		catch (Exception exception) when (exception is
+			   ArgumentException or
+			   NotSupportedException or
+			   IOException or
+			   UnauthorizedAccessException or
+			   System.Security.SecurityException)
+		{
+			return null;
+		}
+	}
+
 	public static string GetConfigurationRoot() =>
 		Resolve(
 			UserDataDirectoryKind.Configuration,
@@ -37,6 +65,85 @@ public static class UserDataPathResolver
 			OperatingSystem.IsWindows(),
 			Environment.GetFolderPath,
 			Environment.GetEnvironmentVariable);
+
+	/// <summary>
+	/// The per-user DevProjex state directory: the <see cref="ApplicationDirectoryName"/> folder of the
+	/// platform state root, or of an isolated data root when one is supplied instead. Every writer and
+	/// reader of shared state resolves its folder through this one method so they cannot disagree.
+	/// </summary>
+	public static string GetApplicationStateDirectory(string stateRoot)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(stateRoot);
+		return Path.Combine(Path.GetFullPath(stateRoot), ApplicationDirectoryName);
+	}
+
+	public static string GetApplicationStateDirectory() =>
+		GetApplicationStateDirectory(GetStateRoot());
+
+	internal static string ResolveApplicationStateDirectory(
+		bool isWindows,
+		Func<Environment.SpecialFolder, Environment.SpecialFolderOption, string> specialFolderProvider,
+		Func<string, string?> environmentProvider) =>
+		GetApplicationStateDirectory(Resolve(
+			UserDataDirectoryKind.State,
+			isWindows,
+			specialFolderProvider,
+			environmentProvider));
+
+	/// <summary>
+	/// Creates the DevProjex state directory, refusing a symbolic link or junction at the state root
+	/// or at the DevProjex folder. Service folders below it apply the same check to themselves.
+	/// </summary>
+	internal static string EnsurePhysicalApplicationStateDirectory(string stateRoot) =>
+		EnsurePhysicalServiceDirectory(stateRoot, ApplicationDirectoryName);
+
+	internal static string EnsurePhysicalServiceDirectory(string root, string name)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(root);
+		ArgumentException.ThrowIfNullOrWhiteSpace(name);
+		if (name.IndexOfAny([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]) >= 0 ||
+			name is "." or "..")
+		{
+			throw new ArgumentException("A service directory name must be one path segment.", nameof(name));
+		}
+
+		var normalizedRoot = Path.GetFullPath(root);
+		EnsurePhysicalDirectory(normalizedRoot, createIfMissing: true);
+		var directory = Path.Combine(normalizedRoot, name);
+		EnsurePhysicalDirectory(directory, createIfMissing: true);
+		return directory;
+	}
+
+	internal static string EnsurePhysicalDirectory(string path, bool createIfMissing)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(path);
+		var normalized = Path.GetFullPath(path);
+		if (!Directory.Exists(normalized))
+		{
+			if (!createIfMissing)
+				throw new DirectoryNotFoundException($"Directory '{normalized}' does not exist.");
+			Directory.CreateDirectory(normalized);
+		}
+
+		string? linkTarget;
+		try
+		{
+			linkTarget = new DirectoryInfo(normalized).LinkTarget;
+		}
+		catch (Exception exception) when (exception is
+			   IOException or
+			   UnauthorizedAccessException or
+			   System.Security.SecurityException or
+			   ArgumentException or
+			   NotSupportedException)
+		{
+			throw new IOException(UnsafeServiceDirectoryMessage, exception);
+		}
+
+		if (linkTarget is not null || !FileSystemRootEntryPolicy.IsPhysicalDirectory(normalized))
+			throw new IOException(UnsafeServiceDirectoryMessage);
+		return normalized;
+	}
 
 	internal static string GetLegacyLocalDataRoot() =>
 		ResolveLegacyLocalData(
@@ -74,7 +181,7 @@ public static class UserDataPathResolver
 		}
 
 		if (isWindows ||
-		    kind is UserDataDirectoryKind.Configuration or UserDataDirectoryKind.Data)
+			kind is UserDataDirectoryKind.Configuration or UserDataDirectoryKind.Data)
 		{
 			var platformFolder = kind == UserDataDirectoryKind.Configuration
 				? Environment.SpecialFolder.ApplicationData

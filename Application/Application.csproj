@@ -12,5 +12,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="DevProjex.Tests.Unit" />
+    <InternalsVisibleTo Include="DevProjex.Mcp" />
+    <InternalsVisibleTo Include="DevProjex" />
   </ItemGroup>
 </Project>

@@ -1,0 +1,210 @@
+{
+  "protocol": "focus-v1",
+  "registeredOn": "2026-09-07",
+  "status": "pre-registered-before-first-run",
+  "selection": {
+    "profile": "standard",
+    "detail": "full",
+    "tokenEstimate": "(transformedCharacters + 3) / 4",
+    "admission": "existing greedy pass",
+    "budgets": [4000, 8000, 16000],
+    "manifestRule": "Every order receives the same effective selection. A seed or graph traversal never widens it."
+  },
+  "orders": [
+    {
+      "id": "current",
+      "comparator": "Existing effective-selection order without ranking."
+    },
+    {
+      "id": "importance-v1",
+      "comparator": "Existing importance-v1 priority, then canonical relative path ordinal."
+    },
+    {
+      "id": "seed-first",
+      "comparator": "The one registered seed first, followed by importance-v1 priority and canonical relative path ordinal; no graph traversal."
+    },
+    {
+      "id": "focus-v1",
+      "comparator": "The registered seed first; then minimum undirected hop over the unique resolved non-self importance graph, importance-v1 priority, and canonical relative path ordinal; unreachable files follow in importance-v1 order."
+    },
+    {
+      "id": "focus-ppr",
+      "comparator": "The registered seed first; then descending personalized PageRank, importance-v1 priority, and canonical relative path ordinal. The graph is the same undirected projection as focus-v1. Damping is 0.85; teleport is uniform over seeds present in the graph; dangling mass returns to teleport; the initial vector is teleport; stop after 100 iterations or L1 change below 1e-12; quantize to an absolute 1e-12 grid. If no seed is a graph node, the order is N/A."
+    },
+    {
+      "id": "directed-from-seed",
+      "comparator": "Resolve related_files in both directions for the registered seed, narrow explicit paths to the seed plus the returned concrete related paths, preserve the seed as the first admission candidate, then order the surviving related paths by importance-v1 priority and canonical relative path ordinal. This is not the search-seeded directed baseline from the importance-v1 review."
+    }
+  ],
+  "metrics": {
+    "bestSufficientSet": "For each task, order, and budget, choose the sufficient set with the greatest admitted-file fraction; break a tie in favor of the primary required set.",
+    "recallNew": "Admitted files from bestSufficientSet minus registered seeds, divided by all files in bestSufficientSet minus registered seeds. If that remainder is empty, report N/A, never 1.",
+    "allRequired": "One if any primary or alternative sufficient set is admitted completely, otherwise zero.",
+    "irrelevantTokenShare": "Estimated tokens admitted for files outside bestSufficientSet divided by all admitted estimated file tokens; zero when no file tokens are admitted.",
+    "oracle": "True when the total estimated token cost of at least one sufficient set fits the original budget.",
+    "oracleAfterSeeds": "Run the registered seeds through the same greedy pass first, consuming budget only for seeds that fit and skipping oversized seeds. True when at least one sufficient set can still be completed from the resulting admitted seeds and remaining budget."
+  },
+  "performance": {
+    "repetitions": 7,
+    "statistic": "median",
+    "cold": "A new evaluator process and fresh application caches for each measured ranking invocation.",
+    "warm": "The same pinned manifest and repository are ranked once to populate application caches before each measured invocation.",
+    "measurements": [
+      "importance-v1 elapsed milliseconds",
+      "focus-v1 elapsed milliseconds",
+      "focus-v1 incremental milliseconds and percent over importance-v1",
+      "peak working set bytes"
+    ]
+  },
+  "releaseCriterion": {
+    "eligibleCells": "Cells where oracleAfterSeeds is true and recallNew is not N/A.",
+    "recall": "Mean RecallNew(focus-v1) minus mean RecallNew(seed-first) is at least 0.10 over all eligible cells and is not negative in any repository.",
+    "allRequired": "AllRequired(focus-v1) is greater than or equal to AllRequired(seed-first) in every eligible cell.",
+    "time": "For every repository, median warm focus-v1 incremental time is at most max(5 percent of median warm importance-v1 time, 100 milliseconds).",
+    "memory": "For every repository, median focus-v1 peak working set growth over importance-v1 is at most 10 percent.",
+    "decision": "The public focus parameter ships only if all recall, AllRequired, time, and memory conditions pass. Otherwise this change retains only the internal evaluator, frozen registry, results, and Docs/Ranking.md evaluation section."
+  },
+  "repositories": [
+    {
+      "id": "devprojex",
+      "url": "https://github.com/Avazbek22/DevProjex.git",
+      "commit": "c249c30944b15771f351ff2057f77817b1706ea4",
+      "tasks": [
+        {
+          "id": "token-budget-report",
+          "prompt": "Trace a token-budget skip from transformed character cost to its user-facing report.",
+          "seed": "Application/Context/ProjectContextTokenBudget.cs",
+          "seedRationale": "The task names the token-budget decision, so its accumulator contract is the natural first file.",
+          "required": ["Application/Context/ProjectContextDocumentService.cs", "Application/Context/ProjectContextTokenBudget.cs", "Apps/Terminal/Execution/TokenBudgetOutput.cs"],
+          "alternatives": [["Application/Context/ProjectContextDocumentService.cs", "Application/Context/ProjectContextTokenBudget.cs", "Apps/Mcp/DevProjexMcpTools.cs"]]
+        },
+        {
+          "id": "mandatory-redaction",
+          "prompt": "Verify that mandatory secret redaction survives a change in selection exclusions.",
+          "seed": "Application/Secrets/SecretRedactionContext.cs",
+          "seedRationale": "The task directly names mandatory secret redaction, whose context is the first contract to inspect.",
+          "required": ["Application/Context/ProjectSelectionSpec.cs", "Application/Secrets/SecretRedactionContext.cs", "Apps/Terminal/Execution/ExportContextCommandHandler.cs"],
+          "alternatives": [["Application/Context/ProjectSelectionSpec.cs", "Application/Secrets/SecretRedactionContext.cs", "Apps/Mcp/McpProjectService.cs"]]
+        },
+        {
+          "id": "nested-git-changes",
+          "prompt": "Determine changes selection across nested Git repository boundaries.",
+          "seed": "Application/Context/GitScopeSelection.cs",
+          "seedRationale": "The requested behavior is named by the Git-scope selection contract.",
+          "required": ["Application/Context/GitScopeSelection.cs", "Infrastructure/FileSystem/GitScopePathProvider.cs", "Apps/Terminal/Execution/TerminalProjectContextFactory.cs"],
+          "alternatives": []
+        },
+        {
+          "id": "stored-mcp-pack",
+          "prompt": "Explain the lifetime of a stored MCP pack and how ranges are read.",
+          "seed": "Apps/Mcp/McpPackRegistry.cs",
+          "seedRationale": "The pack registry owns stored-pack lifetime and range access.",
+          "required": ["Apps/Mcp/DevProjexMcpTools.cs", "Apps/Mcp/McpPackRegistry.cs"],
+          "alternatives": []
+        },
+        {
+          "id": "remote-clone-cache",
+          "prompt": "Trace an explicit remote source through clone identity and cache reuse.",
+          "seed": "Infrastructure/Git/RepoCacheService.cs",
+          "seedRationale": "Cache reuse is the final behavior named by the task and the cache service exposes its identity boundary.",
+          "required": ["Apps/Mcp/McpProjectSourceResolver.cs", "Infrastructure/Git/GitRepositoryService.cs", "Infrastructure/Git/RepoCacheService.cs"],
+          "alternatives": []
+        }
+      ]
+    },
+    {
+      "id": "repomix",
+      "url": "https://github.com/yamadashy/repomix.git",
+      "commit": "85e3969b010c72b905203812d1a3f5beb84a2102",
+      "tasks": [
+        {
+          "id": "git-frequency-order",
+          "prompt": "Establish Git-frequency ordering and the no-Git fallback.",
+          "seed": "src/core/output/outputSort.ts",
+          "seedRationale": "The task asks first about output ordering, which is applied by outputSort.",
+          "required": ["src/core/output/outputSort.ts", "src/core/git/gitLogHandle.ts"],
+          "alternatives": []
+        },
+        {
+          "id": "mcp-path-confinement",
+          "prompt": "Trace lexical and symlink confinement for MCP file access.",
+          "seed": "src/mcp/pathScope.ts",
+          "seedRationale": "Path confinement is explicitly named and centralized in pathScope.",
+          "required": ["src/mcp/pathScope.ts", "src/mcp/tools/mcpToolRuntime.ts"],
+          "alternatives": []
+        },
+        {
+          "id": "remote-config-trust",
+          "prompt": "Explain how a remote configuration becomes trusted without silently executing an unreviewed symlink.",
+          "seed": "src/cli/actions/remoteAction.ts",
+          "seedRationale": "The remote action is the entry to the trust workflow named by the task.",
+          "required": ["src/cli/actions/remoteAction.ts", "src/cli/prompts/remoteConfigTrustPrompt.ts", "src/cli/prompts/remoteConfigTrustStore.ts"],
+          "alternatives": []
+        },
+        {
+          "id": "local-pack-pipeline",
+          "prompt": "Trace a local pack from collection through transformation to rendering.",
+          "seed": "src/core/packager.ts",
+          "seedRationale": "The packager is the orchestration entry for the pipeline described by the task.",
+          "required": ["src/core/packager.ts", "src/core/file/fileProcess.ts", "src/core/output/outputGenerate.ts"],
+          "alternatives": []
+        },
+        {
+          "id": "mcp-pack-codebase",
+          "prompt": "Explain how the MCP pack_codebase call narrows its root and invokes packing.",
+          "seed": "src/mcp/tools/packCodebaseTool.ts",
+          "seedRationale": "The named MCP call enters through packCodebaseTool.",
+          "required": ["src/mcp/tools/packCodebaseTool.ts", "src/mcp/tools/mcpToolRuntime.ts", "src/mcp/pathScope.ts"],
+          "alternatives": []
+        }
+      ]
+    },
+    {
+      "id": "flask",
+      "url": "https://github.com/pallets/flask.git",
+      "commit": "d318b683471101618febed18996405ad26462110",
+      "tasks": [
+        {
+          "id": "blueprint-errors",
+          "prompt": "Trace blueprint error-handler registration and request-time selection.",
+          "seed": "src/flask/sansio/blueprints.py",
+          "seedRationale": "Blueprint registration is the first behavior named by the task.",
+          "required": ["src/flask/sansio/blueprints.py", "src/flask/sansio/app.py", "src/flask/app.py"],
+          "alternatives": []
+        },
+        {
+          "id": "session-cookie",
+          "prompt": "Find where a session cookie is signed and which configuration keys affect saving it.",
+          "seed": "src/flask/sessions.py",
+          "seedRationale": "The session implementation is the obvious first file for cookie signing.",
+          "required": ["src/flask/sessions.py", "src/flask/app.py"],
+          "alternatives": []
+        },
+        {
+          "id": "cli-discovery",
+          "prompt": "Explain CLI application discovery and application-factory invocation.",
+          "seed": "src/flask/cli.py",
+          "seedRationale": "The complete requested workflow is explicitly a CLI concern and is co-located in cli.py.",
+          "required": ["src/flask/cli.py"],
+          "alternatives": []
+        },
+        {
+          "id": "context-lifetime",
+          "prompt": "Trace request/application context creation, session opening, and teardown.",
+          "seed": "src/flask/ctx.py",
+          "seedRationale": "The task begins with context creation, owned by ctx.py.",
+          "required": ["src/flask/ctx.py", "src/flask/app.py"],
+          "alternatives": []
+        },
+        {
+          "id": "json-provider",
+          "prompt": "Explain how a custom JSON provider is selected and used.",
+          "seed": "src/flask/json/provider.py",
+          "seedRationale": "The named JSON provider abstraction is the natural first file to inspect.",
+          "required": ["src/flask/sansio/app.py", "src/flask/json/provider.py"],
+          "alternatives": [["src/flask/sansio/app.py", "src/flask/json/__init__.py"]]
+        }
+      ]
+    }
+  ]
+}

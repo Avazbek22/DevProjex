@@ -32,6 +32,44 @@ public sealed class TerminalRecentWorkspaceRowTests
 		Assert.DoesNotContain(workspace.DisplayName, rendered, StringComparison.Ordinal);
 	}
 
+	[Fact]
+	public void ToString_UsesTheNameWidthLeftByAWideDialog()
+	{
+		const string name = "project-with-a-rather-long-name-number-15";
+		var workspace = new RecentWorkspaceDescriptor(
+			RecentWorkspaceKind.Folder,
+			$@"C:\Projects\{name}",
+			$@"C:\Projects\{name}",
+			name,
+			"folder:test",
+			DateTimeOffset.UnixEpoch);
+		var nameWidth = TerminalRecentWorkspaceRow.ResolveNameWidth(98, "today".Length);
+		var row = new TerminalRecentWorkspaceRow(
+			workspace,
+			static _ => "Folder",
+			static _ => "today",
+			nameWidth);
+
+		var rendered = row.ToString();
+
+		Assert.Contains($" {name} ", rendered, StringComparison.Ordinal);
+		Assert.EndsWith(" today", rendered, StringComparison.Ordinal);
+		Assert.Equal(98, rendered.GetColumns());
+	}
+
+	[Theory]
+	[InlineData(98, 5, 79)]
+	[InlineData(98, 10, 74)]
+	[InlineData(48, 5, 29)]
+	[InlineData(40, 10, 28)]
+	public void ResolveNameWidth_FillsTheRowButKeepsTheDefaultColumn(
+		int rowWidth,
+		int openedWidth,
+		int expected)
+	{
+		Assert.Equal(expected, TerminalRecentWorkspaceRow.ResolveNameWidth(rowWidth, openedWidth));
+	}
+
 	[Theory]
 	[InlineData("DevProjex", 28, "DevProjex")]
 	[InlineData("Long project identity that exceeds the column", 10, "Long pr...")]

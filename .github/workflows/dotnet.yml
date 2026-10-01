@@ -1,11 +1,30 @@
 name: .NET CI
 
+# CI tier 1, 2, and 3. Policy: .github/workflows/README.md
+# The change planner (Scripts/ci/Select-CiPlan.ps1) decides which suites and operating systems
+# run for a pull request; unclassified paths fall back to the full plan. A new product test goes
+# into an existing suite and needs no edit here. Do not add a `push: v*` trigger: every merge
+# into v5.x is also a synchronize of the open release PR, which already runs this workflow.
+# The three-OS matrix stays on pull requests on purpose: Windows and macOS path, PTY, and file
+# system differences are found here, not later.
+
 on:
   push:
     branches:
       - master
   pull_request:
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      checkout_ref:
+        description: Commit or ref to validate
+        required: false
+        type: string
+      force_full:
+        description: Run every CI job without changed-path filtering
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -32,15 +51,30 @@ jobs:
       run_terminal_command: ${{ steps.plan.outputs.run_terminal_command }}
       run_ignore_scanner: ${{ steps.plan.outputs.run_ignore_scanner }}
       run_documentation: ${{ steps.plan.outputs.run_documentation }}
+      changed_paths: ${{ steps.plan.outputs.changed_paths }}
+      planned_suites: ${{ steps.plan.outputs.planned_suites }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
           fetch-depth: 0
 
       - name: Validate CI planner contracts
         shell: pwsh
         run: ./Scripts/ci/Test-CiChangePlanner.ps1
+
+      - name: Validate the executed-tests check
+        shell: pwsh
+        run: ./Scripts/ci/Test-ExecutedTestsContract.ps1
+
+      - name: Validate the indentation gate
+        shell: pwsh
+        run: ./Scripts/ci/Test-IndentationContract.ps1
+
+      - name: Validate the CI gate
+        shell: pwsh
+        run: ./Scripts/ci/Test-CiGateContract.ps1
 
       - name: Select CI plan
         id: plan
@@ -48,12 +82,83 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           PREVIOUS_GATE_NAME: CI Gate
+          FORCE_FULL: ${{ inputs.force_full }}
+        run: |
+          $common = @{
+            PreviousGateName = $env:PREVIOUS_GATE_NAME
+            GitHubOutputPath = $env:GITHUB_OUTPUT
+          }
+          if ($env:FORCE_FULL -eq 'true') {
+            ./Scripts/ci/Select-CiPlan.ps1 -Full @common
+          }
+          else {
+            ./Scripts/ci/Select-CiPlan.ps1 `
+              -GitHubEventPath $env:GITHUB_EVENT_PATH `
+              -GitHubEventName $env:GITHUB_EVENT_NAME `
+              @common
+          }
+
+  workflow-lint:
+    name: Workflow syntax
+    if: ${{ github.event_name == 'pull_request' || inputs.force_full == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
+
+      - name: Lint GitHub Actions workflows
+        shell: bash
         run: >
-          ./Scripts/ci/Select-CiPlan.ps1
-          -GitHubEventPath $env:GITHUB_EVENT_PATH
-          -GitHubEventName $env:GITHUB_EVENT_NAME
-          -PreviousGateName $env:PREVIOUS_GATE_NAME
-          -GitHubOutputPath $env:GITHUB_OUTPUT
+          go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+          -shellcheck=
+          .github/workflows/dotnet.yml
+          .github/workflows/release-validate.yml
+          .github/workflows/release-candidate.yml
+          .github/workflows/headless-build.yml
+          .github/workflows/container-build.yml
+          .github/workflows/packages-build.yml
+          .github/workflows/appimage-build.yml
+          .github/workflows/package-headless.yml
+          .github/workflows/publish-container.yml
+          .github/workflows/publish-packages.yml
+          .github/workflows/package-appimage.yml
+          .github/workflows/grammar-delivery.yml
+          .github/workflows/store-package-smoke.yml
+
+  indentation:
+    name: Indentation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
+          fetch-depth: 0
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Check the indentation of changed C# files
+        shell: pwsh
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          $head = git rev-parse HEAD
+          # Outside a pull request there is nothing to compare a file against, so the gate reports
+          # no changed files and passes. That is what keeps it runnable rather than skipped, which
+          # a `force_full` run counts as a failure.
+          $base = if ([string]::IsNullOrWhiteSpace($env:BASE_SHA) -or $env:BASE_SHA -match '^0+$') {
+            $head
+          } else {
+            $env:BASE_SHA
+          }
+          ./Scripts/ci/Test-Indentation.ps1 -BaseSha $base -HeadSha $head
 
   test-suite:
     name: CI (${{ matrix.os_name }} / ${{ matrix.suite_name }})
@@ -66,15 +171,17 @@ jobs:
       matrix: ${{ fromJson(needs.prepare-matrix.outputs.matrix) }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
 
       - name: Setup .NET 10
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
 
       - name: Cache NuGet packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'Directory.Build.props', 'Directory.Packages.props') }}
@@ -105,12 +212,14 @@ jobs:
       - name: Run ${{ matrix.suite_name }} Tests
         if: ${{ matrix.os_id != 'linux' && matrix.suite_id != 'ui' }}
         shell: pwsh
+        env:
+          TEST_FILTER: ${{ matrix.suite_id == 'integration' && '(Category!=TerminalCommand)&(Category!=LocalPerformance)&(Category!=Performance)' || '(Category!=LocalPerformance)&(Category!=Performance)' }}
         run: >
           dotnet test ${{ matrix.project_path }}
           -c Release
           --no-build
           --verbosity minimal
-          ${{ matrix.test_filter_args }}
+          --filter "$env:TEST_FILTER"
           --logger "trx;LogFileName=${{ matrix.trx_name }}"
           --results-directory "TestResults/${{ matrix.suite_id }}"
           --blame-hang
@@ -126,7 +235,7 @@ jobs:
           --no-build
           --verbosity minimal
           --
-          --results-directory "TestResults/${{ matrix.suite_id }}"
+          --results-directory "${{ github.workspace }}/TestResults/${{ matrix.suite_id }}"
           --report-xunit-trx
           --report-xunit-trx-filename "${{ matrix.trx_name }}"
           --timeout 20m
@@ -134,12 +243,14 @@ jobs:
       - name: Run ${{ matrix.suite_name }} Tests (Linux headless)
         if: ${{ matrix.os_id == 'linux' && matrix.suite_id != 'ui' }}
         shell: bash
+        env:
+          TEST_FILTER: ${{ matrix.suite_id == 'integration' && '(Category!=TerminalCommand)&(Category!=LocalPerformance)&(Category!=Performance)' || '(Category!=LocalPerformance)&(Category!=Performance)' }}
         run: >
           xvfb-run -a dotnet test ${{ matrix.project_path }}
           -c Release
           --no-build
           --verbosity minimal
-          ${{ matrix.test_filter_args }}
+          --filter "$TEST_FILTER"
           --logger "trx;LogFileName=${{ matrix.trx_name }}"
           --results-directory "TestResults/${{ matrix.suite_id }}"
           --blame-hang
@@ -155,10 +266,18 @@ jobs:
           --no-build
           --verbosity minimal
           --
-          --results-directory "TestResults/${{ matrix.suite_id }}"
+          --results-directory "${{ github.workspace }}/TestResults/${{ matrix.suite_id }}"
           --report-xunit-trx
           --report-xunit-trx-filename "${{ matrix.trx_name }}"
           --timeout 20m
+
+      - name: Confirm the ${{ matrix.suite_name }} tests executed
+        if: ${{ success() }}
+        shell: pwsh
+        run: >
+          ./Scripts/ci/Test-ExecutedTests.ps1
+          -ResultsPath "TestResults/${{ matrix.suite_id }}"
+          -JobName 'CI (${{ matrix.os_name }} / ${{ matrix.suite_name }})'
 
       - name: Print Test Runner Logs
         if: ${{ failure() }}
@@ -174,7 +293,7 @@ jobs:
 
       - name: Upload Test Results
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-results-${{ matrix.os_id }}-${{ matrix.suite_id }}
           path: |
@@ -203,15 +322,17 @@ jobs:
             os_id: macos
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
 
       - name: Setup .NET 10
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
 
       - name: Cache NuGet packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           key: nuget-terminal-command-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'Directory.Build.props', 'Directory.Packages.props') }}
@@ -298,6 +419,14 @@ jobs:
           --logger "trx;LogFileName=terminal-command-integration.trx"
           --results-directory "TestResults/terminal-command-integration"
 
+      - name: Confirm the terminal command tests executed
+        if: ${{ success() }}
+        shell: pwsh
+        run: >
+          ./Scripts/ci/Test-ExecutedTests.ps1
+          -ResultsPath "TestResults/terminal-command-unit","TestResults/terminal-command-integration"
+          -JobName 'Terminal Command Matrix (${{ matrix.os_name }})'
+
       - name: Print terminal command test runner logs
         if: ${{ failure() }}
         shell: pwsh
@@ -312,7 +441,7 @@ jobs:
 
       - name: Upload terminal command results
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: terminal-command-results-${{ matrix.os_id }}
           path: |
@@ -344,15 +473,17 @@ jobs:
             run_large_perf_tests: "0"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
 
       - name: Setup .NET 10
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
 
       - name: Cache NuGet packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           key: nuget-ignore-scanner-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'Directory.Build.props') }}
@@ -393,9 +524,17 @@ jobs:
               Write-Host "::endgroup::"
             }
 
+      - name: Confirm the ignore/scanner tests executed
+        if: ${{ success() }}
+        shell: pwsh
+        run: >
+          ./Scripts/ci/Test-ExecutedTests.ps1
+          -ResultsPath "TestResults/ignore-scanner"
+          -JobName 'Ignore/Scanner Matrix (${{ matrix.os_name }})'
+
       - name: Upload ignore/scanner results
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ignore-scanner-results-${{ matrix.os_id }}
           path: |
@@ -411,15 +550,17 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
 
       - name: Setup .NET 10
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
 
       - name: Cache NuGet packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           key: nuget-documentation-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'Directory.Build.props', 'Directory.Packages.props') }}
@@ -430,7 +571,48 @@ jobs:
       - name: Run documentation contract tests
         shell: pwsh
         run: |
-          dotnet test Tests/DevProjex.Tests.Terminal/DevProjex.Tests.Terminal.csproj -c Release --verbosity minimal --filter "FullyQualifiedName~DocumentationAndPackagingContractTests|FullyQualifiedName~DocumentationExecutionRegressionTests"
+          dotnet test Tests/DevProjex.Tests.Terminal/DevProjex.Tests.Terminal.csproj -c Release --verbosity minimal --filter "FullyQualifiedName~DocumentationAndPackagingContractTests|FullyQualifiedName~DocumentationExecutionRegressionTests" --logger "trx;LogFileName=documentation.trx" --results-directory "TestResults/documentation"
+
+      - name: Confirm the documentation contract tests executed
+        if: ${{ success() }}
+        shell: pwsh
+        run: >
+          ./Scripts/ci/Test-ExecutedTests.ps1
+          -ResultsPath "TestResults/documentation"
+          -JobName 'Documentation Contracts'
+
+  ranking-eval-tests:
+    name: Ranking Evaluator Tests
+    needs: prepare-matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build and test RankingEval
+        shell: pwsh
+        run: |
+          dotnet build tools/RankingEval/RankingEval.csproj -c Release
+          dotnet test tools/RankingEval/Tests/RankingEval.Tests.csproj -c Release --verbosity minimal --filter "FullyQualifiedName~EvaluationMetricsTests" --logger "trx;LogFileName=ranking-eval.trx" --results-directory "TestResults/ranking-eval"
+
+      - name: Test MCP usage recorder
+        run: node --test tools/McpUsageRecorder/tests/recorder.test.mjs
+
+      - name: Confirm the ranking evaluator tests executed
+        if: ${{ success() }}
+        shell: pwsh
+        run: >
+          ./Scripts/ci/Test-ExecutedTests.ps1
+          -ResultsPath "TestResults/ranking-eval"
+          -JobName 'Ranking Evaluator Tests'
 
   ci-gate:
     name: CI Gate
@@ -440,11 +622,19 @@ jobs:
       - terminal-command-cross-platform
       - ignore-scanner-cross-platform
       - documentation-contracts
+      - ranking-eval-tests
+      - workflow-lint
+      - indentation
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
     steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
+          fetch-depth: 0
+
       - name: Verify selected jobs
         shell: pwsh
         env:
@@ -453,6 +643,10 @@ jobs:
           TERMINAL_COMMAND_RESULT: ${{ needs.terminal-command-cross-platform.result }}
           IGNORE_SCANNER_RESULT: ${{ needs.ignore-scanner-cross-platform.result }}
           DOCUMENTATION_RESULT: ${{ needs.documentation-contracts.result }}
+          RANKING_EVAL_RESULT: ${{ needs.ranking-eval-tests.result }}
+          WORKFLOW_LINT_RESULT: ${{ needs.workflow-lint.result }}
+          INDENTATION_RESULT: ${{ needs.indentation.result }}
+          FORCE_FULL: ${{ inputs.force_full }}
         run: |
           $results = @{
             plan = $env:PREPARE_RESULT
@@ -460,9 +654,112 @@ jobs:
             terminalCommand = $env:TERMINAL_COMMAND_RESULT
             ignoreScanner = $env:IGNORE_SCANNER_RESULT
             documentation = $env:DOCUMENTATION_RESULT
+            rankingEval = $env:RANKING_EVAL_RESULT
+            workflowLint = $env:WORKFLOW_LINT_RESULT
+            indentation = $env:INDENTATION_RESULT
           }
-          $failed = @($results.GetEnumerator() | Where-Object { $_.Value -notin @('success', 'skipped') })
+          $accepted = if ($env:FORCE_FULL -eq 'true') { @('success') } else { @('success', 'skipped') }
+          $failed = @($results.GetEnumerator() | Where-Object { $_.Value -notin $accepted })
           if ($failed.Count -gt 0) {
             $details = $failed.ForEach({ "$($_.Key)=$($_.Value)" }) -join ', '
             throw "Selected CI jobs failed: $details"
           }
+
+      - name: Verify that skipped jobs could not have been affected
+        if: ${{ always() && inputs.force_full != true }}
+        shell: pwsh
+        env:
+          PREPARE_RESULT: ${{ needs.prepare-matrix.result }}
+          TEST_RESULT: ${{ needs.test-suite.result }}
+          TERMINAL_COMMAND_RESULT: ${{ needs.terminal-command-cross-platform.result }}
+          IGNORE_SCANNER_RESULT: ${{ needs.ignore-scanner-cross-platform.result }}
+          DOCUMENTATION_RESULT: ${{ needs.documentation-contracts.result }}
+          PLANNER_PATHS: ${{ needs.prepare-matrix.outputs.changed_paths }}
+          PLANNER_SUITES: ${{ needs.prepare-matrix.outputs.planned_suites }}
+          EVENT_BEFORE: ${{ github.event.before }}
+          EVENT_AFTER: ${{ github.event.after }}
+          PLANNER_HAS_TESTS: ${{ needs.prepare-matrix.outputs.has_test_matrix }}
+          PLANNER_TERMINAL_COMMAND: ${{ needs.prepare-matrix.outputs.run_terminal_command }}
+          PLANNER_IGNORE_SCANNER: ${{ needs.prepare-matrix.outputs.run_ignore_scanner }}
+          PLANNER_DOCUMENTATION: ${{ needs.prepare-matrix.outputs.run_documentation }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          # A plan the gate has not checked is a plan the gate is trusting. The changed paths are
+          # worked out here, from the commits, rather than taken from the job that made the plan.
+          if ($env:PREPARE_RESULT -ne 'success') {
+            Write-Host 'No plan was produced, so there is no skip to vouch for.'
+            exit 0
+          }
+
+          $results = @{
+            tests = $env:TEST_RESULT
+            terminalCommand = $env:TERMINAL_COMMAND_RESULT
+            ignoreScanner = $env:IGNORE_SCANNER_RESULT
+            documentation = $env:DOCUMENTATION_RESULT
+          }
+          $planned = @{
+            tests = $env:PLANNER_HAS_TESTS
+            terminalCommand = $env:PLANNER_TERMINAL_COMMAND
+            ignoreScanner = $env:PLANNER_IGNORE_SCANNER
+            documentation = $env:PLANNER_DOCUMENTATION
+          }
+          $skipped = @($results.GetEnumerator() | Where-Object { $_.Value -eq 'skipped' } |
+            ForEach-Object { $_.Key })
+          if ($skipped.Count -eq 0) {
+            Write-Host 'No job was skipped.'
+            exit 0
+          }
+
+          $willRun = @($planned.GetEnumerator() | Where-Object { $_.Value -eq 'true' } |
+            ForEach-Object { $_.Key })
+          $head = git rev-parse HEAD
+          $base = if ([string]::IsNullOrWhiteSpace($env:BASE_SHA) -or $env:BASE_SHA -match '^0+$') {
+            ''
+          } else {
+            $env:BASE_SHA
+          }
+          if ([string]::IsNullOrWhiteSpace($base)) {
+            Write-Host 'There is no base to compare against, so the change cannot be established here.'
+            exit 0
+          }
+
+          $changed = @(git -c core.quotepath=false diff --name-only "$base...$head" --)
+          if ($LASTEXITCODE -ne 0) {
+            throw "The changed paths could not be worked out from $base...$head, so the skips cannot be checked."
+          }
+
+          $plannedSuites = @($env:PLANNER_SUITES -split ',' |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+
+          # The plan is also allowed to have been decided from the delta of the push that
+          # triggered this run, which is what the incremental tier does. It is worked out here
+          # too, so that the plan is checked against a change rather than believed about one.
+          # A rebase leaves the event naming a commit that is on no ref, so the commits are
+          # looked for before a range is built from them.
+          $pushed = @()
+          $pushedAvailable = $false
+          $sha = '^[0-9a-fA-F]{40}$'
+          if ($env:EVENT_BEFORE -match $sha -and $env:EVENT_BEFORE -notmatch '^0{40}$' -and
+              $env:EVENT_AFTER -match $sha) {
+            git cat-file -e "$($env:EVENT_BEFORE)^{commit}" 2>$null
+            $beforeExists = $LASTEXITCODE -eq 0
+            git cat-file -e "$($env:EVENT_AFTER)^{commit}" 2>$null
+            $afterExists = $LASTEXITCODE -eq 0
+            if ($beforeExists -and $afterExists) {
+              $pushed = @(git -c core.quotepath=false diff --name-only "$($env:EVENT_BEFORE)..$($env:EVENT_AFTER)" --)
+              $pushedAvailable = $LASTEXITCODE -eq 0
+            }
+          }
+          # Looking for a commit that is not there is an answer, not a failure, and the step is
+          # ended by whatever the last native command leaves behind.
+          $global:LASTEXITCODE = 0
+
+          ./Scripts/ci/Test-CiGateSkip.ps1 `
+            -ChangedPath $changed `
+            -PlannerChangedPathJson $env:PLANNER_PATHS `
+            -SkippedJob $skipped `
+            -PlannerWillRunJob $willRun `
+            -PlannerWillRunSuite $plannedSuites `
+            -PushedChangedPath $pushed `
+            -PushedChangeAvailable:$pushedAvailable
+

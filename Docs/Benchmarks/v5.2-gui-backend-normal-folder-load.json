@@ -1,0 +1,98 @@
+{
+  "scenario": "GUI backend load without visual delays",
+  "date": "2026-09-23",
+  "platform": "Windows 11 / .NET 10.0.12 / Release",
+  "root": "DevProjex repository root",
+  "benchmark": "DevProjex.Tests.Unit.Avalonia.GuiBackendLoadMeasurementTests.RealProject_RecordsInitialMetricsAndPublicationWithoutVisualDelays",
+  "setup": "DEVPROJEX_GUI_BENCHMARK_ROOT=(Get-Location).Path",
+  "command": "dotnet test Tests/DevProjex.Tests.Unit/DevProjex.Tests.Unit.csproj -c Release --no-build --filter \"FullyQualifiedName~GuiBackendLoadMeasurementTests.RealProject_RecordsInitialMetricsAndPublicationWithoutVisualDelays\" --logger \"console;verbosity=detailed\"",
+  "compositionMs": 58.188,
+  "common": {
+    "files": 2723,
+    "fullFileReads": 2294,
+    "fullFileReadBytes": 28658016,
+    "contentFingerprintComputations": 0,
+    "ignore": {
+      "rootFactsRequests": 546,
+      "rootFactsCacheHits": 129,
+      "rootFactsBuilds": 417,
+      "rootFactsEvictions": 0,
+      "projectScopeDiscoveries": 4,
+      "ignoreRulesBuilds": 2,
+      "fullSelectionRefreshes": 1,
+      "liveSelectionRefreshes": 0,
+      "dynamicSelectionPasses": 1,
+      "workspaceScans": 1,
+      "directoryEnumerations": 2,
+      "fileEnumerations": 1,
+      "combinedEntryEnumerations": 475,
+      "gitIgnoreSourceReadRequests": 6,
+      "gitIgnoreSourceBytes": 33288,
+      "gitIgnoreLoadRequests": 16,
+      "gitIgnoreLoadExecutions": 13,
+      "gitIgnoreLoadReuses": 3
+    }
+  },
+  "samples": [
+    {
+      "iteration": 0,
+      "phase": "first",
+      "sharedLoadMs": 695.4874,
+      "metricsScanMs": 62.4894,
+      "metricsPublishedMs": 99.8921,
+      "metricsAllocatedBytes": 5010224,
+      "fileVersionOpenCount": 5875,
+      "metricsLockWaitTicks": 173
+    },
+    {
+      "iteration": 1,
+      "phase": "warm-filesystem-fresh-metrics",
+      "sharedLoadMs": 250.2515,
+      "metricsScanMs": 35.179,
+      "metricsPublishedMs": 67.5299,
+      "metricsAllocatedBytes": 3719112,
+      "fileVersionOpenCount": 5875,
+      "metricsLockWaitTicks": 71
+    },
+    {
+      "iteration": 2,
+      "phase": "warm-filesystem-fresh-metrics",
+      "sharedLoadMs": 181.4827,
+      "metricsScanMs": 35.5569,
+      "metricsPublishedMs": 62.5126,
+      "metricsAllocatedBytes": 3676552,
+      "fileVersionOpenCount": 5875,
+      "metricsLockWaitTicks": 12
+    },
+    {
+      "iteration": 3,
+      "phase": "warm-filesystem-fresh-metrics",
+      "sharedLoadMs": 113.5216,
+      "metricsScanMs": 28.9676,
+      "metricsPublishedMs": 62.0676,
+      "metricsAllocatedBytes": 3677288,
+      "fileVersionOpenCount": 5875,
+      "metricsLockWaitTicks": 15
+    },
+    {
+      "iteration": 4,
+      "phase": "warm-filesystem-fresh-metrics",
+      "sharedLoadMs": 110.5213,
+      "metricsScanMs": 44.1983,
+      "metricsPublishedMs": 84.338,
+      "metricsAllocatedBytes": 3677352,
+      "fileVersionOpenCount": 5875,
+      "metricsLockWaitTicks": 29
+    },
+    {
+      "iteration": 5,
+      "phase": "warm-filesystem-fresh-metrics",
+      "sharedLoadMs": 102.2869,
+      "metricsScanMs": 29.7591,
+      "metricsPublishedMs": 60.9524,
+      "metricsAllocatedBytes": 3786728,
+      "fileVersionOpenCount": 5875,
+      "metricsLockWaitTicks": 10
+    }
+  ]
+}

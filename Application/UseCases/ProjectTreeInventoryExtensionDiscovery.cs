@@ -19,9 +19,7 @@ public static class ProjectTreeInventoryExtensionDiscovery
 			root.FullPath,
 			inventory.DiscoveredGitIgnoreMatchers,
 			inventory.DiscoveredGitTrackedPathIndexes);
-		var rootGitIgnore = rules.IsGitIgnoreTraversalEnabled
-			? gitIgnoreContext.Evaluate(root.FullPath, root.RelativePath, isDirectory: true, root.Name)
-			: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
+		var rootGitIgnore = gitIgnoreContext.Evaluate(root.FullPath, root.RelativePath, isDirectory: true, root.Name);
 		if (ShouldSkipDirectory(in root, rules, rootGitIgnore))
 			return extensions;
 
@@ -38,13 +36,11 @@ public static class ProjectTreeInventoryExtensionDiscovery
 				cancellationToken.ThrowIfCancellationRequested();
 				var childIndex = parent.FirstChildIndex + childOffset;
 				ref readonly var child = ref inventory.GetEntryRef(childIndex);
-				var gitIgnore = rules.IsGitIgnoreTraversalEnabled
-					? gitIgnoreContext.Evaluate(
-						child.FullPath,
-						child.RelativePath,
-						child.IsDirectory,
-						child.Name)
-					: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
+				var gitIgnore = gitIgnoreContext.Evaluate(
+					child.FullPath,
+					child.RelativePath,
+					child.IsDirectory,
+					child.Name);
 
 				if (child.IsDirectory)
 				{

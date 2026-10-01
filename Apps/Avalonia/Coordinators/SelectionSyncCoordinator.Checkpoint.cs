@@ -13,19 +13,21 @@ public sealed partial class SelectionSyncCoordinator
             IReadOnlyList<SelectionOption> extensionOptions,
             IReadOnlyList<IgnoreOptionSnapshot> ignoreOptions,
             IReadOnlyList<IgnoreOptionDescriptor> ignoreDescriptors,
-			string? ignoreOptionsProjectPath,
+            string? ignoreOptionsProjectPath,
             bool hasExtensionlessExtensionEntries,
             int extensionlessExtensionEntriesCount,
             bool hasIgnoreOptionCounts,
             IgnoreOptionCounts ignoreOptionCounts,
             IgnoreControllerImpactCounts controllerImpactCounts,
             GitWorkspaceEvidence gitEvidence,
-			bool gitRepositoryBoundaryKnownAbsent,
-			bool preservePreferredGitModeForPersistence,
+            bool gitRepositoryBoundaryKnownAbsent,
+            bool preservePreferredGitModeForPersistence,
             SelectionRefreshRollbackSnapshot? stableSelectionSnapshot,
             SelectionRefreshRollbackSnapshot? reversibleSelectionSnapshot,
             AppliedSelectionState? appliedSelectionState,
             ProjectContextGitReadiness appliedGitReadiness,
+            string? activeGitDiffRange,
+            string? appliedGitDiffRange,
             bool selectionPersistenceBlockedByIncompleteScan,
             bool selectionRefreshDirty)
         {
@@ -34,19 +36,21 @@ public sealed partial class SelectionSyncCoordinator
             ExtensionOptions = extensionOptions;
             IgnoreOptions = ignoreOptions;
             IgnoreDescriptors = ignoreDescriptors;
-			IgnoreOptionsProjectPath = ignoreOptionsProjectPath;
+            IgnoreOptionsProjectPath = ignoreOptionsProjectPath;
             HasExtensionlessExtensionEntries = hasExtensionlessExtensionEntries;
             ExtensionlessExtensionEntriesCount = extensionlessExtensionEntriesCount;
             HasIgnoreOptionCounts = hasIgnoreOptionCounts;
             IgnoreOptionCounts = ignoreOptionCounts;
             ControllerImpactCounts = controllerImpactCounts;
             GitEvidence = gitEvidence;
-			GitRepositoryBoundaryKnownAbsent = gitRepositoryBoundaryKnownAbsent;
-			PreservePreferredGitModeForPersistence = preservePreferredGitModeForPersistence;
+            GitRepositoryBoundaryKnownAbsent = gitRepositoryBoundaryKnownAbsent;
+            PreservePreferredGitModeForPersistence = preservePreferredGitModeForPersistence;
             StableSelectionSnapshot = stableSelectionSnapshot;
             ReversibleSelectionSnapshot = reversibleSelectionSnapshot;
             AppliedSelectionState = appliedSelectionState;
             AppliedGitReadiness = appliedGitReadiness;
+            ActiveGitDiffRange = activeGitDiffRange;
+            AppliedGitDiffRange = appliedGitDiffRange;
             SelectionPersistenceBlockedByIncompleteScan = selectionPersistenceBlockedByIncompleteScan;
             SelectionRefreshDirty = selectionRefreshDirty;
         }
@@ -56,19 +60,21 @@ public sealed partial class SelectionSyncCoordinator
         internal IReadOnlyList<SelectionOption> ExtensionOptions { get; }
         internal IReadOnlyList<IgnoreOptionSnapshot> IgnoreOptions { get; }
         internal IReadOnlyList<IgnoreOptionDescriptor> IgnoreDescriptors { get; }
-		internal string? IgnoreOptionsProjectPath { get; }
+        internal string? IgnoreOptionsProjectPath { get; }
         internal bool HasExtensionlessExtensionEntries { get; }
         internal int ExtensionlessExtensionEntriesCount { get; }
         internal bool HasIgnoreOptionCounts { get; }
         internal IgnoreOptionCounts IgnoreOptionCounts { get; }
         internal IgnoreControllerImpactCounts ControllerImpactCounts { get; }
         internal GitWorkspaceEvidence GitEvidence { get; }
-		internal bool GitRepositoryBoundaryKnownAbsent { get; }
-		internal bool PreservePreferredGitModeForPersistence { get; }
+        internal bool GitRepositoryBoundaryKnownAbsent { get; }
+        internal bool PreservePreferredGitModeForPersistence { get; }
         internal SelectionRefreshRollbackSnapshot? StableSelectionSnapshot { get; }
         internal SelectionRefreshRollbackSnapshot? ReversibleSelectionSnapshot { get; }
         internal AppliedSelectionState? AppliedSelectionState { get; }
         internal ProjectContextGitReadiness AppliedGitReadiness { get; }
+        internal string? ActiveGitDiffRange { get; }
+        internal string? AppliedGitDiffRange { get; }
         internal bool SelectionPersistenceBlockedByIncompleteScan { get; }
         internal bool SelectionRefreshDirty { get; }
     }
@@ -95,19 +101,21 @@ public sealed partial class SelectionSyncCoordinator
             extensions,
             ignoreOptions,
             _ignoreOptions.ToArray(),
-			_ignoreOptionsProjectPath,
+            _ignoreOptionsProjectPath,
             _hasExtensionlessExtensionEntries,
             _extensionlessExtensionEntriesCount,
             _hasIgnoreOptionCounts,
             _ignoreOptionCounts,
             _ignoreControllerImpactCounts,
             _gitWorkspaceEvidence,
-			_gitRepositoryBoundaryKnownAbsent,
-			_preservePreferredGitModeForPersistence,
+            _gitRepositoryBoundaryKnownAbsent,
+            _preservePreferredGitModeForPersistence,
             _stableSelectionSnapshot,
             _reversibleSelectionSnapshot,
             _appliedSelectionState,
             _appliedGitReadiness,
+            _activeGitDiffRange,
+            _appliedGitDiffRange,
             _selectionPersistenceBlockedByIncompleteScan,
             HasDirtySelectionRefresh());
     }
@@ -152,19 +160,21 @@ public sealed partial class SelectionSyncCoordinator
 
             _session.RestoreSnapshot(checkpoint.Session);
             _ignoreOptions = checkpoint.IgnoreDescriptors;
-			_ignoreOptionsProjectPath = checkpoint.IgnoreOptionsProjectPath;
+            _ignoreOptionsProjectPath = checkpoint.IgnoreOptionsProjectPath;
             _hasExtensionlessExtensionEntries = checkpoint.HasExtensionlessExtensionEntries;
             _extensionlessExtensionEntriesCount = checkpoint.ExtensionlessExtensionEntriesCount;
             _hasIgnoreOptionCounts = checkpoint.HasIgnoreOptionCounts;
             _ignoreOptionCounts = checkpoint.IgnoreOptionCounts;
             _ignoreControllerImpactCounts = checkpoint.ControllerImpactCounts;
             _gitWorkspaceEvidence = checkpoint.GitEvidence;
-			_gitRepositoryBoundaryKnownAbsent = checkpoint.GitRepositoryBoundaryKnownAbsent;
-			_preservePreferredGitModeForPersistence = checkpoint.PreservePreferredGitModeForPersistence;
+            _gitRepositoryBoundaryKnownAbsent = checkpoint.GitRepositoryBoundaryKnownAbsent;
+            _preservePreferredGitModeForPersistence = checkpoint.PreservePreferredGitModeForPersistence;
             _stableSelectionSnapshot = checkpoint.StableSelectionSnapshot;
             _reversibleSelectionSnapshot = checkpoint.ReversibleSelectionSnapshot;
             _appliedSelectionState = checkpoint.AppliedSelectionState;
             _appliedGitReadiness = checkpoint.AppliedGitReadiness;
+            _activeGitDiffRange = checkpoint.ActiveGitDiffRange;
+            _appliedGitDiffRange = checkpoint.AppliedGitDiffRange;
             _selectionPersistenceBlockedByIncompleteScan =
                 checkpoint.SelectionPersistenceBlockedByIncompleteScan;
             Volatile.Write(ref _selectionRefreshDirty, checkpoint.SelectionRefreshDirty ? 1 : 0);
@@ -181,28 +191,28 @@ public sealed partial class SelectionSyncCoordinator
             _suppressIgnoreItemCheck = false;
         }
 
-		RefreshGitFilteringModePresentation();
-		SynchronizeDerivedAggregateSelectionState();
+        RefreshGitFilteringModePresentation();
+        SynchronizeDerivedAggregateSelectionState();
 
         _pendingApplyEvaluationRequested = false;
         _selectionRefreshEngine.InvalidateCaches();
         _ignoreRulesBuildCache.Invalidate();
         RequestPendingApplyEvaluation();
-		if (checkpoint.SelectionRefreshDirty)
-		{
-			// A dirty checkpoint represents a user selection whose dependent rows/counts were
-			// not stable yet. The old task was detached above; one full refresh is the smallest
-			// safe way to make the restored checkbox state and every dependent section converge.
-			QueueFullRefresh(currentPathProvider(), changedIgnoreOptionId: null);
-		}
+        if (checkpoint.SelectionRefreshDirty)
+        {
+            // A dirty checkpoint represents a user selection whose dependent rows/counts were
+            // not stable yet. The old task was detached above; one full refresh is the smallest
+            // safe way to make the restored checkbox state and every dependent section converge.
+            QueueFullRefresh(currentPathProvider(), changedIgnoreOptionId: null);
+        }
     }
 
     private void InvalidatePendingRefreshesForProjectCheckpointRestore()
     {
-		// A canceled filesystem operation is allowed to finish cooperatively on its old gate.
-		// New-project work receives a fresh serialization boundary immediately, so a provider
-		// that is temporarily slow to observe cancellation cannot freeze the restored session.
-		Interlocked.Exchange(ref _refreshLock, new SemaphoreSlim(1, 1));
+        // A canceled filesystem operation is allowed to finish cooperatively on its old gate.
+        // New-project work receives a fresh serialization boundary immediately, so a provider
+        // that is temporarily slow to observe cancellation cannot freeze the restored session.
+        Interlocked.Exchange(ref _refreshLock, new SemaphoreSlim(1, 1));
 
         CancellationTokenSource? liveRefreshCts;
         CancellationTokenSource? fullRefreshCts;

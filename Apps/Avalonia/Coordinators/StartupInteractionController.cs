@@ -18,7 +18,7 @@ internal sealed class StartupInteractionController(
     Func<Task> refreshTreeAsync,
     Func<string, Task<bool>> openProjectAsync,
     Action closeWindow,
-	Action<Action>? applyTreeSelectionBatch = null)
+    Action<Action>? applyTreeSelectionBatch = null)
 {
     private const string BenchmarkIdleSecondsEnvironmentVariable =
         "DEVPROJEX_UI_BENCHMARK_IDLE_SECONDS";
@@ -42,35 +42,35 @@ internal sealed class StartupInteractionController(
             string.IsNullOrWhiteSpace(currentPath))
         {
             return;
-		}
-		var applicationIntent = selectionSpec.ApplicationIntent;
-		// TODO(cli): Remove root selection from Desktop requests when the public --root contract
-		// is revised. Desktop intentionally applies the complete project scope.
-		var extensionMode = applicationIntent?.Extensions ?? ResolveLegacyMode(selectionSpec.Extensions);
-		var gitMode = applicationIntent?.GitMode ?? ResolveLegacyMode(selectionSpec.GitMode);
-		var exclusionMode = applicationIntent?.Exclusions ?? ResolveLegacyMode(selectionSpec.Exclusions);
-		var hideSecretsMode = applicationIntent?.HideSecrets ?? ResolveLegacyMode(selectionSpec.HideSecrets);
-		var hidePrivateDataMode = applicationIntent?.HidePrivateData ??
-		                          ResolveLegacyMode(selectionSpec.HidePrivateData);
-		var compressCodeMode = applicationIntent?.CompressCode ?? ResolveLegacyMode(selectionSpec.CompressCode);
-		var stripCommentsMode = applicationIntent?.StripComments ?? ResolveLegacyMode(selectionSpec.StripComments);
-		var stripBlankLinesMode = applicationIntent?.StripBlankLines ?? ResolveLegacyMode(selectionSpec.StripBlankLines);
-		var applyGitMode = gitMode == ProjectSelectionApplicationMode.ApplyResolvedValue;
-		var applyExclusions = exclusionMode == ProjectSelectionApplicationMode.ApplyResolvedValue;
-		var applyHideSecrets = hideSecretsMode == ProjectSelectionApplicationMode.ApplyResolvedValue;
-		var applyHidePrivateData = hidePrivateDataMode == ProjectSelectionApplicationMode.ApplyResolvedValue;
-		var applyCompressCode = compressCodeMode == ProjectSelectionApplicationMode.ApplyResolvedValue;
-		var applyStripComments = stripCommentsMode == ProjectSelectionApplicationMode.ApplyResolvedValue;
-		var applyStripBlankLines = stripBlankLinesMode == ProjectSelectionApplicationMode.ApplyResolvedValue;
+        }
+        var applicationIntent = selectionSpec.ApplicationIntent;
+        // TODO(cli): Remove root selection from Desktop requests when the public --root contract
+        // is revised. Desktop intentionally applies the complete project scope.
+        var extensionMode = applicationIntent?.Extensions ?? ResolveLegacyMode(selectionSpec.Extensions);
+        var gitMode = applicationIntent?.GitMode ?? ResolveLegacyMode(selectionSpec.GitMode);
+        var exclusionMode = applicationIntent?.Exclusions ?? ResolveLegacyMode(selectionSpec.Exclusions);
+        var hideSecretsMode = applicationIntent?.HideSecrets ?? ResolveLegacyMode(selectionSpec.HideSecrets);
+        var hidePrivateDataMode = applicationIntent?.HidePrivateData ??
+                                  ResolveLegacyMode(selectionSpec.HidePrivateData);
+        var compressCodeMode = applicationIntent?.CompressCode ?? ResolveLegacyMode(selectionSpec.CompressCode);
+        var stripCommentsMode = applicationIntent?.StripComments ?? ResolveLegacyMode(selectionSpec.StripComments);
+        var stripBlankLinesMode = applicationIntent?.StripBlankLines ?? ResolveLegacyMode(selectionSpec.StripBlankLines);
+        var applyGitMode = gitMode == ProjectSelectionApplicationMode.ApplyResolvedValue;
+        var applyExclusions = exclusionMode == ProjectSelectionApplicationMode.ApplyResolvedValue;
+        var applyHideSecrets = hideSecretsMode == ProjectSelectionApplicationMode.ApplyResolvedValue;
+        var applyHidePrivateData = hidePrivateDataMode == ProjectSelectionApplicationMode.ApplyResolvedValue;
+        var applyCompressCode = compressCodeMode == ProjectSelectionApplicationMode.ApplyResolvedValue;
+        var applyStripComments = stripCommentsMode == ProjectSelectionApplicationMode.ApplyResolvedValue;
+        var applyStripBlankLines = stripBlankLinesMode == ProjectSelectionApplicationMode.ApplyResolvedValue;
         var selectedExtensions = extensionMode != ProjectSelectionApplicationMode.ApplyResolvedValue ||
-		                         selectionSpec.Extensions is null
+                                 selectionSpec.Extensions is null
             ? null
             : new HashSet<string>(
                 selectionSpec.Extensions,
                 StringComparer.OrdinalIgnoreCase);
 
         HashSet<IgnoreOptionId>? selectedIgnoreOptions = null;
-		if (applyGitMode || applyExclusions)
+        if (applyGitMode || applyExclusions)
         {
             var persistedIgnoreStates = selection.SnapshotIgnoreOptionStatesForPersistence();
             var inheritedIgnoreOptions = persistedIgnoreStates is null
@@ -80,50 +80,51 @@ internal sealed class StartupInteractionController(
                     .Select(static state => state.Key)
                     .ToArray();
             selectedIgnoreOptions = ResolveIgnoreSelectionOverride(
-				selectionSpec with
-				{
-					GitMode = applyGitMode ? selectionSpec.GitMode : null,
-					Exclusions = applyExclusions ? selectionSpec.Exclusions : null,
-					HideSecrets = null,
-					HidePrivateData = null,
-					CompressCode = null,
-					StripComments = null,
-					StripBlankLines = null
-				},
+                selectionSpec with
+                {
+                    GitMode = applyGitMode ? selectionSpec.GitMode : null,
+                    Exclusions = applyExclusions ? selectionSpec.Exclusions : null,
+                    HideSecrets = null,
+                    HidePrivateData = null,
+                    CompressCode = null,
+                    StripComments = null,
+                    StripBlankLines = null
+                },
                 inheritedIgnoreOptions);
         }
 
-		var pathSelectionChanged = selection.ApplySelectionOverrides(
+        var pathSelectionChanged = selection.ApplySelectionOverrides(
             currentPath,
             selectedExtensions,
             selectedIgnoreOptions,
-			gitModeOverride: applyGitMode ? selectionSpec.GitMode : null,
+            gitModeOverride: applyGitMode ? selectionSpec.GitMode : null,
+            gitDiffRangeOverride: applyGitMode ? selectionSpec.GitDiffRange : null,
             ignoreOptionStateIsComplete: applyExclusions,
-			resetExtensionSelectionToDefaults:
-				extensionMode == ProjectSelectionApplicationMode.ResetToDefaults);
-		if (applyHideSecrets)
-			selection.ApplyHideSecretsOverride(selectionSpec.HideSecrets);
-		if (applyHidePrivateData)
-			selection.ApplyHidePrivateDataOverride(selectionSpec.HidePrivateData);
-		if (applyCompressCode)
-			selection.ApplyCompressCodeOverride(selectionSpec.CompressCode);
-		if (applyStripComments)
-			selection.ApplyStripCommentsOverride(selectionSpec.StripComments);
-		if (applyStripBlankLines)
-			selection.ApplyStripBlankLinesOverride(selectionSpec.StripBlankLines);
+            resetExtensionSelectionToDefaults:
+                extensionMode == ProjectSelectionApplicationMode.ResetToDefaults);
+        if (applyHideSecrets)
+            selection.ApplyHideSecretsOverride(selectionSpec.HideSecrets);
+        if (applyHidePrivateData)
+            selection.ApplyHidePrivateDataOverride(selectionSpec.HidePrivateData);
+        if (applyCompressCode)
+            selection.ApplyCompressCodeOverride(selectionSpec.CompressCode);
+        if (applyStripComments)
+            selection.ApplyStripCommentsOverride(selectionSpec.StripComments);
+        if (applyStripBlankLines)
+            selection.ApplyStripBlankLinesOverride(selectionSpec.StripBlankLines);
 
-		if (pathSelectionChanged)
-		{
-			await selection.WaitForPendingRefreshesAsync();
-			cancellationToken.ThrowIfCancellationRequested();
-			await refreshTreeAsync();
-			cancellationToken.ThrowIfCancellationRequested();
+        if (pathSelectionChanged)
+        {
+            await selection.WaitForPendingRefreshesAsync();
+            cancellationToken.ThrowIfCancellationRequested();
+            await refreshTreeAsync();
+            cancellationToken.ThrowIfCancellationRequested();
 
-			await selection.UpdateLiveOptionsForProjectScopeIfDirtyAsync(
-				currentPath);
-			await selection.WaitForPendingRefreshesAsync();
-			cancellationToken.ThrowIfCancellationRequested();
-		}
+            await selection.UpdateLiveOptionsForProjectScopeIfDirtyAsync(
+                currentPath);
+            await selection.WaitForPendingRefreshesAsync();
+            cancellationToken.ThrowIfCancellationRequested();
+        }
 
         if (selectionSpec.SelectedPaths is { } selectedPaths)
             await ApplySelectedPathsAsync(selectedPaths, cancellationToken);
@@ -140,27 +141,27 @@ internal sealed class StartupInteractionController(
         // every exclusion without silently replacing the independently selected Git mode.
         var resolvedGitMode = selectionSpec.GitMode ??
                               GitFilteringModeResolver.Resolve(inheritedIgnoreOptions);
-		var resolvedExclusions = selectionSpec.Exclusions ??
+        var resolvedExclusions = selectionSpec.Exclusions ??
                                  ProjectSelectionAdapter.ToExclusions(inheritedIgnoreOptions);
-		var resolvedHideSecrets = selectionSpec.HideSecrets ??
-		                          inheritedIgnoreOptions.Contains(IgnoreOptionId.HideSecrets);
-		var resolvedHidePrivateData = selectionSpec.HidePrivateData ??
-		                              inheritedIgnoreOptions.Contains(IgnoreOptionId.HidePrivateData);
+        var resolvedHideSecrets = selectionSpec.HideSecrets ??
+                                  inheritedIgnoreOptions.Contains(IgnoreOptionId.HideSecrets);
+        var resolvedHidePrivateData = selectionSpec.HidePrivateData ??
+                                      inheritedIgnoreOptions.Contains(IgnoreOptionId.HidePrivateData);
         return new HashSet<IgnoreOptionId>(
             ProjectSelectionAdapter.ToIgnoreOptions(
                 selectionSpec with
                 {
                     GitMode = resolvedGitMode,
-					Exclusions = resolvedExclusions,
-					HideSecrets = resolvedHideSecrets,
-					HidePrivateData = resolvedHidePrivateData
+                    Exclusions = resolvedExclusions,
+                    HideSecrets = resolvedHideSecrets,
+                    HidePrivateData = resolvedHidePrivateData
                 }));
     }
 
-	private static ProjectSelectionApplicationMode ResolveLegacyMode<T>(T? value) =>
-		value is null
-			? ProjectSelectionApplicationMode.Preserve
-			: ProjectSelectionApplicationMode.ApplyResolvedValue;
+    private static ProjectSelectionApplicationMode ResolveLegacyMode<T>(T? value) =>
+        value is null
+            ? ProjectSelectionApplicationMode.Preserve
+            : ProjectSelectionApplicationMode.ApplyResolvedValue;
 
     public async Task ApplyUiOptionsAsync()
     {
@@ -297,90 +298,90 @@ internal sealed class StartupInteractionController(
             },
             cancellationToken);
 
-		cancellationToken.ThrowIfCancellationRequested();
-		ApplyCheckedStates(nodes, checkedStates, applyTreeSelectionBatch);
+        cancellationToken.ThrowIfCancellationRequested();
+        ApplyCheckedStates(nodes, checkedStates, applyTreeSelectionBatch);
     }
 
-	internal static HashSet<string> ResolveSelectedFullPaths(
-		string rootPath,
-		IEnumerable<string> selectedPaths,
-		CancellationToken cancellationToken = default)
-	{
-		ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
-		ArgumentNullException.ThrowIfNull(selectedPaths);
+    internal static HashSet<string> ResolveSelectedFullPaths(
+        string rootPath,
+        IEnumerable<string> selectedPaths,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
+        ArgumentNullException.ThrowIfNull(selectedPaths);
 
-		var result = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
-		foreach (var path in selectedPaths)
-		{
-			cancellationToken.ThrowIfCancellationRequested();
-			result.Add(PathUtility.Normalize(ResolveSelectedPath(rootPath, path)));
-		}
+        var result = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
+        foreach (var path in selectedPaths)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            result.Add(PathUtility.Normalize(ResolveSelectedPath(rootPath, path)));
+        }
 
-		return result;
-	}
+        return result;
+    }
 
-	internal static bool[] ResolveSelectedNodeStates(
-		IReadOnlyList<string> nodePaths,
-		IReadOnlySet<string> selectedPaths,
-		IReadOnlySet<string> selectedDirectories,
-		CancellationToken cancellationToken = default)
-	{
-		ArgumentNullException.ThrowIfNull(nodePaths);
-		ArgumentNullException.ThrowIfNull(selectedPaths);
-		ArgumentNullException.ThrowIfNull(selectedDirectories);
+    internal static bool[] ResolveSelectedNodeStates(
+        IReadOnlyList<string> nodePaths,
+        IReadOnlySet<string> selectedPaths,
+        IReadOnlySet<string> selectedDirectories,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(nodePaths);
+        ArgumentNullException.ThrowIfNull(selectedPaths);
+        ArgumentNullException.ThrowIfNull(selectedDirectories);
 
-		var checkedStates = new bool[nodePaths.Count];
-		for (var index = 0; index < nodePaths.Count; index++)
-		{
-			cancellationToken.ThrowIfCancellationRequested();
-			var nodePath = PathUtility.Normalize(nodePaths[index]);
-			if (selectedPaths.Contains(nodePath))
-			{
-				checkedStates[index] = true;
-				continue;
-			}
+        var checkedStates = new bool[nodePaths.Count];
+        for (var index = 0; index < nodePaths.Count; index++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var nodePath = PathUtility.Normalize(nodePaths[index]);
+            if (selectedPaths.Contains(nodePath))
+            {
+                checkedStates[index] = true;
+                continue;
+            }
 
-			var ancestorPath = Path.GetDirectoryName(nodePath);
-			while (!string.IsNullOrEmpty(ancestorPath))
-			{
-				cancellationToken.ThrowIfCancellationRequested();
-				if (selectedDirectories.Contains(ancestorPath))
-				{
-					checkedStates[index] = true;
-					break;
-				}
+            var ancestorPath = Path.GetDirectoryName(nodePath);
+            while (!string.IsNullOrEmpty(ancestorPath))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (selectedDirectories.Contains(ancestorPath))
+                {
+                    checkedStates[index] = true;
+                    break;
+                }
 
-				var parentPath = Path.GetDirectoryName(ancestorPath);
-				if (PathComparer.Default.Equals(parentPath, ancestorPath))
-					break;
-				ancestorPath = parentPath;
-			}
-		}
+                var parentPath = Path.GetDirectoryName(ancestorPath);
+                if (PathComparer.Default.Equals(parentPath, ancestorPath))
+                    break;
+                ancestorPath = parentPath;
+            }
+        }
 
-		return checkedStates;
-	}
+        return checkedStates;
+    }
 
-	internal static void ApplyCheckedStates(
-		IReadOnlyList<TreeNodeViewModel> nodes,
-		IReadOnlyList<bool> checkedStates,
-		Action<Action>? applyBatch)
-	{
-		ArgumentNullException.ThrowIfNull(nodes);
-		ArgumentNullException.ThrowIfNull(checkedStates);
-		if (nodes.Count != checkedStates.Count)
-			throw new ArgumentException("Node and state counts must match.", nameof(checkedStates));
+    internal static void ApplyCheckedStates(
+        IReadOnlyList<TreeNodeViewModel> nodes,
+        IReadOnlyList<bool> checkedStates,
+        Action<Action>? applyBatch)
+    {
+        ArgumentNullException.ThrowIfNull(nodes);
+        ArgumentNullException.ThrowIfNull(checkedStates);
+        if (nodes.Count != checkedStates.Count)
+            throw new ArgumentException("Node and state counts must match.", nameof(checkedStates));
 
-		void ApplyStates()
-		{
-			for (var index = 0; index < nodes.Count; index++)
-				nodes[index].IsChecked = checkedStates[index];
-		}
+        void ApplyStates()
+        {
+            for (var index = 0; index < nodes.Count; index++)
+                nodes[index].IsChecked = checkedStates[index];
+        }
 
-		if (applyBatch is null)
-			ApplyStates();
-		else
-			applyBatch(ApplyStates);
-	}
+        if (applyBatch is null)
+            ApplyStates();
+        else
+            applyBatch(ApplyStates);
+    }
 
     private static string ResolveSelectedPath(string rootPath, string relativePath)
     {

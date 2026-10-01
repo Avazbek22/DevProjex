@@ -10,6 +10,94 @@ namespace DevProjex.Tests.Unit;
 public sealed class SelectionSyncCoordinatorAdditionalTests
 {
 	[Fact]
+	public void DesktopDiffOverrideCarriesTheRangeAndNonDiffModesClearIt()
+	{
+		const string projectPath = @"C:\Project";
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(viewModel, currentPathProvider: () => projectPath);
+		var applyOverrides = typeof(SelectionSyncCoordinator).GetMethod(
+			"ApplySelectionOverrides",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(applyOverrides);
+		Assert.Contains(
+			applyOverrides!.GetParameters(),
+			static parameter => parameter.Name == "gitDiffRangeOverride");
+		var appliedRange = typeof(SelectionSyncCoordinator).GetProperty("AppliedGitDiffRange");
+		Assert.NotNull(appliedRange);
+
+		Assert.True((bool)applyOverrides.Invoke(
+			coordinator,
+			[projectPath, null, null, GitFilteringMode.Diff, "main..topic", false, false])!);
+		coordinator.AcceptCurrentSelectionsAsApplied(projectPath);
+
+		Assert.Equal("main..topic", appliedRange!.GetValue(coordinator));
+		var createRefreshContext = typeof(SelectionSyncCoordinator).GetMethod(
+			"CreateSelectionRefreshContext",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(createRefreshContext);
+		var refreshContext = Assert.IsType<SelectionRefreshContext>(
+			createRefreshContext!.Invoke(coordinator, [projectPath, false]));
+		Assert.Equal("main..topic", refreshContext.GitDiffRange);
+
+		Assert.True((bool)applyOverrides.Invoke(
+			coordinator,
+			[projectPath, null, null, GitFilteringMode.Changes, null, false, false])!);
+		coordinator.AcceptCurrentSelectionsAsApplied(projectPath);
+
+		Assert.Null(appliedRange.GetValue(coordinator));
+		refreshContext = Assert.IsType<SelectionRefreshContext>(
+			createRefreshContext.Invoke(coordinator, [projectPath, false]));
+		Assert.Null(refreshContext.GitDiffRange);
+
+		Assert.True((bool)applyOverrides.Invoke(
+			coordinator,
+			[projectPath, null, null, GitFilteringMode.Diff, "release..topic", false, false])!);
+		coordinator.AcceptCurrentSelectionsAsApplied(projectPath);
+		coordinator.ResetProjectProfileSelections(@"C:\OtherProject");
+
+		Assert.Null(appliedRange.GetValue(coordinator));
+	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public void SameProjectProfileOrResetPreservesDiffRangeForMomentaryRestore(bool resetToDefaults)
+	{
+		const string projectPath = @"C:\Project";
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(viewModel, currentPathProvider: () => projectPath);
+		Assert.True(coordinator.ApplySelectionOverrides(
+			projectPath,
+			selectedExtensions: null,
+			selectedIgnoreOptions: null,
+			gitModeOverride: GitFilteringMode.Diff,
+			gitDiffRangeOverride: "main..topic"));
+		coordinator.AcceptCurrentSelectionsAsApplied(projectPath);
+
+		if (resetToDefaults)
+		{
+			coordinator.ResetProjectProfileSelections(projectPath);
+		}
+		else
+		{
+			coordinator.ApplyProjectProfileSelections(
+				projectPath,
+				new ProjectSelectionProfile(
+					SelectedRootFolders: [],
+					SelectedExtensions: [],
+					SelectedIgnoreOptions: [],
+					IgnoreOptionStates: new Dictionary<IgnoreOptionId, bool>()));
+		}
+
+		Assert.Equal("main..topic", coordinator.AppliedGitDiffRange);
+		coordinator.RestoreMomentaryGitFilteringMode(GitFilteringMode.Diff);
+		coordinator.AcceptCurrentSelectionsAsApplied(projectPath);
+
+		Assert.Equal(GitFilteringMode.Diff, coordinator.ActiveGitFilteringMode);
+		Assert.Equal("main..topic", coordinator.AppliedGitDiffRange);
+	}
+
+	[Fact]
 	public void MomentaryGuiGitModeUsesRadioPresentationAndPersistsTheStickyMode()
 	{
 		using var project = new TemporaryDirectory();
@@ -2470,9 +2558,9 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 			new HashSet<string>());
 
 		if (availabilityProvider is null &&
-		    contentTransformationChanged is null &&
-		    contentTransformationChangedWithId is null &&
-		    gitAvailabilityResolver is null)
+			contentTransformationChanged is null &&
+			contentTransformationChangedWithId is null &&
+			gitAvailabilityResolver is null)
 		{
 			return new SelectionSyncCoordinator(
 				viewModel,

@@ -1,14 +1,350 @@
 using System.Reflection;
+using System.Security;
 using System.Text.Json;
 using DevProjex.Application.Context;
+using DevProjex.Application.UseCases;
+using DevProjex.Infrastructure.FileSystem;
 using DevProjex.Infrastructure.RecentProjects;
 using DevProjex.Infrastructure.ThemePresets;
+using DevProjex.Kernel.Abstractions;
+using DevProjex.Terminal.DesktopControl;
 
 namespace DevProjex.Tests.UI;
 
 [Collection(UiWorkspaceCollection.Name)]
 public sealed class MainWindowStartupAutomationUiTests
 {
+	[AvaloniaFact]
+	public async Task OpenFolder_OlderBlockedRootProbeCannotReplaceNewerOpenedProject()
+	{
+		using var olderProject = UiTestProject.CreateDefault();
+		using var newerProject = UiTestProject.CreateDefault();
+		using var scanner = new BlockingRootProbeScanner(olderProject.RootPath);
+		var appDataPath = Path.Combine(olderProject.AppDataPath, Guid.NewGuid().ToString("N"));
+		var options = DesktopStartupOptions.Default;
+		var services = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath) with
+		{
+			ScanOptionsUseCase = new ScanOptionsUseCase(scanner)
+		};
+		var window = new MainWindow(options, services);
+		UiTestDriver.TrackTopLevelWindow(window);
+
+		try
+		{
+			window.Show();
+			var olderOpen = Assert.IsAssignableFrom<Task<bool>>(
+				await UiTestDriver.BeginOpenFolderAsync(window, olderProject.RootPath));
+			await scanner.Started.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+			await UiTestDriver.OpenFolderAsync(window, newerProject.RootPath);
+			Assert.Equal(GetComparablePath(newerProject.RootPath), GetComparablePath(GetCurrentPath(window)));
+
+			scanner.Release();
+			Assert.False(await olderOpen.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
+			Assert.Equal(GetComparablePath(newerProject.RootPath), GetComparablePath(GetCurrentPath(window)));
+		}
+		finally
+		{
+			scanner.Release();
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task OpenFolder_NewerFailedPreflightDoesNotSupersedeOlderEligibleProject()
+	{
+		using var olderProject = UiTestProject.CreateDefault();
+		using var scanner = new BlockingRootProbeScanner(olderProject.RootPath);
+		var appDataPath = Path.Combine(olderProject.AppDataPath, Guid.NewGuid().ToString("N"));
+		var options = DesktopStartupOptions.Default;
+		var services = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath) with
+		{
+			ScanOptionsUseCase = new ScanOptionsUseCase(scanner)
+		};
+		var window = new MainWindow(options, services);
+		UiTestDriver.TrackTopLevelWindow(window);
+		Window? dialog = null;
+
+		try
+		{
+			window.Show();
+			var olderOpen = Assert.IsAssignableFrom<Task<bool>>(
+				await UiTestDriver.BeginOpenFolderAsync(window, olderProject.RootPath));
+			await scanner.Started.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+			var missingPath = Path.Combine(olderProject.RootPath, "missing-project");
+			var newerOpen = Assert.IsAssignableFrom<Task<bool>>(
+				await UiTestDriver.BeginOpenFolderAsync(window, missingPath));
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => window.OwnedWindows.Count == 1,
+				"missing-project error dialog to open");
+			dialog = Assert.Single(window.OwnedWindows);
+			await UiTestDriver.CloseTopLevelWindowAsync(dialog);
+			dialog = null;
+			Assert.False(await newerOpen.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+
+			scanner.Release();
+			Assert.True(await olderOpen.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
+			Assert.Equal(GetComparablePath(olderProject.RootPath), GetComparablePath(GetCurrentPath(window)));
+		}
+		finally
+		{
+			scanner.Release();
+			if (dialog is not null)
+				await UiTestDriver.CloseTopLevelWindowAsync(dialog);
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task OpenFolder_OlderAccessFailureCannotPromptOrElevateAfterNewerProjectOpens()
+	{
+		using var olderProject = UiTestProject.CreateDefault();
+		using var newerProject = UiTestProject.CreateDefault();
+		using var scanner = new BlockingRootProbeScanner(olderProject.RootPath, canReadBlockedRoot: false);
+		var elevation = new RecordingElevationService();
+		var appDataPath = Path.Combine(olderProject.AppDataPath, Guid.NewGuid().ToString("N"));
+		var options = DesktopStartupOptions.Default;
+		var services = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath) with
+		{
+			ScanOptionsUseCase = new ScanOptionsUseCase(scanner),
+			Elevation = elevation
+		};
+		var window = new MainWindow(options, services);
+		UiTestDriver.TrackTopLevelWindow(window);
+
+		try
+		{
+			window.Show();
+			var olderOpen = Assert.IsAssignableFrom<Task<bool>>(
+				await UiTestDriver.BeginOpenFolderAsync(window, olderProject.RootPath));
+			await scanner.Started.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+			await UiTestDriver.OpenFolderAsync(window, newerProject.RootPath);
+			scanner.Release();
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => olderOpen.IsCompleted || elevation.RelaunchCount != 0,
+				"older open to finish or request elevation",
+				TimeSpan.FromSeconds(5));
+			Assert.Equal(0, elevation.RelaunchCount);
+			Assert.False(await olderOpen.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+			Assert.Equal(GetComparablePath(newerProject.RootPath), GetComparablePath(GetCurrentPath(window)));
+			Assert.Empty(window.OwnedWindows);
+		}
+		finally
+		{
+			scanner.Release();
+			foreach (var dialog in window.OwnedWindows.ToArray())
+				await UiTestDriver.CloseTopLevelWindowAsync(dialog);
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task OpenFolder_ClosedWindowRejectsLateRootAccessFailureWithoutElevation()
+	{
+		using var project = UiTestProject.CreateDefault();
+		using var scanner = new BlockingRootProbeScanner(project.RootPath, canReadBlockedRoot: false);
+		var elevation = new RecordingElevationService();
+		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var options = DesktopStartupOptions.Default;
+		var services = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath) with
+		{
+			ScanOptionsUseCase = new ScanOptionsUseCase(scanner),
+			Elevation = elevation
+		};
+		var window = new MainWindow(options, services);
+		UiTestDriver.TrackTopLevelWindow(window);
+
+		try
+		{
+			window.Show();
+			var openTask = Assert.IsAssignableFrom<Task<bool>>(
+				await UiTestDriver.BeginOpenFolderAsync(window, project.RootPath));
+			await scanner.Started.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+			window.Close();
+			await window.ShutdownCompletion.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+			scanner.Release();
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => openTask.IsCompleted || elevation.RelaunchCount != 0,
+				"closed-window open to finish or request elevation",
+				TimeSpan.FromSeconds(5));
+			Assert.Equal(0, elevation.RelaunchCount);
+			Assert.False(await openTask.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+			Assert.Empty(window.OwnedWindows);
+		}
+		finally
+		{
+			scanner.Release();
+			foreach (var dialog in window.OwnedWindows.ToArray())
+				await UiTestDriver.CloseTopLevelWindowAsync(dialog);
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task StartupUi_AgentActivityPreferenceStorageFailureDoesNotBlockRequestedProject()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var options = new DesktopStartupOptions(
+			new DesktopOpenRequest(ProjectPath: project.RootPath, Language: AppLanguage.En));
+		var services = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath) with
+		{
+			AgentActivityPreferenceStore = new AgentActivityPreferenceStore(
+				() => throw new SecurityException("Agent activity preference storage is unavailable."))
+		};
+		var window = new MainWindow(options, services);
+		UiTestDriver.TrackTopLevelWindow(window);
+
+		try
+		{
+			window.Show();
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => UiTestDriver.GetViewModel(window).IsProjectLoaded,
+				"requested project to load despite agent activity preference storage failure");
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task StartupUi_DesktopControlStorageFailureDoesNotBlockRequestedProject()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+		Directory.CreateDirectory(appDataPath);
+		var options = new DesktopStartupOptions(
+			new DesktopOpenRequest(ProjectPath: project.RootPath, Language: AppLanguage.En));
+		var services = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath) with
+		{
+			DesktopControlServerFactory = (_, _, _) =>
+				Task.FromException<DevProjex.Terminal.DesktopControl.DesktopControlServer>(
+					new IOException("Desktop control storage is unavailable."))
+		};
+		var window = new MainWindow(options, services);
+		UiTestDriver.TrackTopLevelWindow(window);
+
+		try
+		{
+			window.Show();
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => UiTestDriver.GetViewModel(window).IsProjectLoaded,
+				"requested project to load despite desktop control storage failure");
+			Assert.Equal(GetComparablePath(project.RootPath), GetComparablePath(GetCurrentPath(window)));
+			var startupError = typeof(MainWindow).GetField(
+				"_desktopStartupErrorCode",
+				BindingFlags.Instance | BindingFlags.NonPublic);
+			Assert.Equal("DPX-DESKTOP-STARTUP-FAILED", startupError?.GetValue(window));
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+	}
+
+	[AvaloniaTheory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task DesktopOpen_RegistryWriteFailureDoesNotFailAppliedRequest(bool alreadyLoaded)
+	{
+		using var project = UiTestProject.CreateDefault();
+		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var unavailableRoot = Path.Combine(project.AppDataPath, "unavailable-registry-root");
+		File.WriteAllText(unavailableRoot, string.Empty);
+		var registryRoot = appDataPath;
+		var paths = new DesktopControlPaths(() => registryRoot);
+		var options = DesktopStartupOptions.Default;
+		var services = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath) with
+		{
+			DesktopControlServerFactory = (handler, projectPath, cancellationToken) =>
+				DesktopControlServer.StartAsync(handler, projectPath, paths, cancellationToken)
+		};
+		var window = new MainWindow(options, services);
+		UiTestDriver.TrackTopLevelWindow(window);
+
+		try
+		{
+			window.Show();
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => GetDesktopControlServer(window) is not null,
+				"Desktop control server to publish before the registry becomes unavailable");
+			if (alreadyLoaded)
+			{
+				var initialOpen = await InvokeDesktopInteractionAsync(
+					window,
+					new DesktopOpenProjectRequest(new DesktopOpenRequest(project.RootPath)));
+				Assert.True(initialOpen.Success, initialOpen.ErrorCode ?? "Initial project open failed.");
+			}
+
+			registryRoot = unavailableRoot;
+			var result = await InvokeDesktopInteractionAsync(
+				window,
+				new DesktopOpenProjectRequest(
+					new DesktopOpenRequest(project.RootPath, Language: AppLanguage.Ru)));
+
+			Assert.True(result.Success, result.ErrorCode ?? "Desktop open request failed.");
+			Assert.NotNull(result.State);
+			Assert.True(Assert.IsType<bool>(result.State["projectLoaded"]));
+			Assert.Equal(
+				GetComparablePath(project.RootPath),
+				GetComparablePath(Assert.IsType<string>(result.State["projectPath"])));
+			Assert.True(UiTestDriver.GetViewModel(window).IsProjectLoaded);
+			Assert.Equal(GetComparablePath(project.RootPath), GetComparablePath(GetCurrentPath(window)));
+			Assert.Equal(AppLanguage.Ru, services.Localization.CurrentLanguage);
+		}
+		finally
+		{
+			registryRoot = appDataPath;
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task DesktopOpen_MissingProjectStillReturnsOpenFailure()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var window = CreateStartupWindow(DesktopStartupOptions.Default, appDataPath);
+		Window? dialog = null;
+
+		try
+		{
+			window.Show();
+			var missingPath = Path.Combine(project.RootPath, "missing-project");
+			var requestTask = InvokeDesktopInteractionAsync(
+				window,
+				new DesktopOpenProjectRequest(new DesktopOpenRequest(missingPath)));
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => window.OwnedWindows.Count == 1,
+				"missing-project error dialog to open");
+			dialog = Assert.Single(window.OwnedWindows);
+			await UiTestDriver.CloseTopLevelWindowAsync(dialog);
+			dialog = null;
+
+			var result = await requestTask;
+			Assert.False(result.Success);
+			Assert.Equal("DPX-DESKTOP-PROJECT-OPEN-FAILED", result.ErrorCode);
+			Assert.False(UiTestDriver.GetViewModel(window).IsProjectLoaded);
+		}
+		finally
+		{
+			if (dialog?.IsVisible == true)
+				await UiTestDriver.CloseTopLevelWindowAsync(dialog);
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+	}
+
 	[AvaloniaFact]
 	public async Task StartupUi_ExplicitEmptySelectionUnchecksEveryTreeNode()
 	{
@@ -180,6 +516,75 @@ public sealed class MainWindowStartupAutomationUiTests
 				"last recent project to load at startup");
 
 			Assert.Equal(GetComparablePath(secondPath), GetComparablePath(GetCurrentPath(window)));
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task StartupUi_LastRetriesRecentHistoryAfterConstructorLockContention()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var recentFolder = Path.Combine(project.RootPath, "history", "recent");
+		Directory.CreateDirectory(recentFolder);
+		var recentStore = new RecentProjectsStore(() => appDataPath);
+		var db = recentStore.Load();
+		Assert.Single(recentStore.AddFolder(db, recentFolder).RecentFolders);
+
+		var options = new DesktopStartupOptions(
+			new DesktopOpenRequest(UseLastProject: true, Language: AppLanguage.En));
+		var lockPath = recentStore.GetPath() + ".lock";
+		MainWindow window;
+		using (var heldLock = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+		{
+			window = CreateStartupWindow(options, appDataPath);
+		}
+
+		try
+		{
+			window.Show();
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => UiTestDriver.GetViewModel(window).IsProjectLoaded,
+				"saved recent project to load after the constructor lock is released");
+			Assert.Equal(GetComparablePath(recentFolder), GetComparablePath(GetCurrentPath(window)));
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task DesktopOpen_LastRetriesRecentHistoryAfterDeferredLockContention()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var recentFolder = Path.Combine(project.RootPath, "history", "recent");
+		Directory.CreateDirectory(recentFolder);
+		var recentStore = new RecentProjectsStore(() => appDataPath);
+		var db = recentStore.Load();
+		Assert.Single(recentStore.AddFolder(db, recentFolder).RecentFolders);
+
+		var window = CreateStartupWindow(DesktopStartupOptions.Default, appDataPath);
+		try
+		{
+			var request = new DesktopOpenProjectRequest(new DesktopOpenRequest(UseLastProject: true));
+			var lockPath = recentStore.GetPath() + ".lock";
+			using (var heldLock = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+			{
+				window.Show();
+				var unavailable = await InvokeDesktopInteractionAsync(window, request);
+				Assert.False(unavailable.Success);
+				Assert.Equal("DPX-DESKTOP-NO-RECENT-PROJECT", unavailable.ErrorCode);
+			}
+
+			var retried = await InvokeDesktopInteractionAsync(window, request);
+			Assert.True(retried.Success, retried.ErrorCode ?? "Recent project did not open after lock release.");
+			Assert.Equal(GetComparablePath(recentFolder), GetComparablePath(GetCurrentPath(window)));
 		}
 		finally
 		{
@@ -639,6 +1044,12 @@ public sealed class MainWindowStartupAutomationUiTests
 		return Assert.IsType<string>(field?.GetValue(window));
 	}
 
+	private static DesktopControlServer? GetDesktopControlServer(MainWindow window)
+	{
+		var field = typeof(MainWindow).GetField("_desktopControlServer", BindingFlags.Instance | BindingFlags.NonPublic);
+		return field?.GetValue(window) as DesktopControlServer;
+	}
+
 	private static string GetComparablePath(string? path)
 	{
 		Assert.False(string.IsNullOrWhiteSpace(path));
@@ -673,5 +1084,68 @@ public sealed class MainWindowStartupAutomationUiTests
 		public static TemporaryEnvironmentVariable Set(string name, string value) => new(name, value);
 
 		public void Dispose() => Environment.SetEnvironmentVariable(_name, _previousValue);
+	}
+
+	private sealed class BlockingRootProbeScanner(string blockedPath, bool canReadBlockedRoot = true)
+		: IFileSystemScannerProjectWorkspaceScanner, IDisposable
+	{
+		private readonly FileSystemScanner _inner = new();
+		private readonly ManualResetEventSlim _release = new(initialState: false);
+		private readonly TaskCompletionSource _started =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+		public Task Started => _started.Task;
+
+		public void Release() => _release.Set();
+
+		public bool CanReadRoot(string rootPath)
+		{
+			if (PathComparer.Default.Equals(rootPath, blockedPath))
+			{
+				_started.TrySetResult();
+				if (!_release.Wait(TimeSpan.FromSeconds(15)))
+					throw new TimeoutException("The controlled root probe was not released.");
+			}
+
+			return (!PathComparer.Default.Equals(rootPath, blockedPath) || canReadBlockedRoot) &&
+			       _inner.CanReadRoot(rootPath);
+		}
+
+		public ScanResult<HashSet<string>> GetExtensions(
+			string rootPath,
+			IgnoreRules rules,
+			CancellationToken cancellationToken = default) =>
+			_inner.GetExtensions(rootPath, rules, cancellationToken);
+
+		public ScanResult<HashSet<string>> GetRootFileExtensions(
+			string rootPath,
+			IgnoreRules rules,
+			CancellationToken cancellationToken = default) =>
+			_inner.GetRootFileExtensions(rootPath, rules, cancellationToken);
+
+		public ScanResult<List<string>> GetRootFolderNames(
+			string rootPath,
+			IgnoreRules rules,
+			CancellationToken cancellationToken = default) =>
+			_inner.GetRootFolderNames(rootPath, rules, cancellationToken);
+
+		public ScanResult<ProjectWorkspaceScanSnapshot> ScanProjectWorkspace(
+			ProjectWorkspaceScanRequest request,
+			CancellationToken cancellationToken = default) =>
+			_inner.ScanProjectWorkspace(request, cancellationToken);
+
+		public void Dispose() => _release.Dispose();
+	}
+
+	private sealed class RecordingElevationService : IElevationService
+	{
+		public bool IsAdministrator => false;
+		public int RelaunchCount { get; private set; }
+
+		public bool TryRelaunchAsAdministrator(IReadOnlyList<string> arguments)
+		{
+			RelaunchCount++;
+			return false;
+		}
 	}
 }

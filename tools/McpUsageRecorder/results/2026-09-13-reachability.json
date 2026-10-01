@@ -1,0 +1,6206 @@
+{
+  "schemaVersion": 1,
+  "repositories": [
+    {
+      "id": "httpx",
+      "url": "https://github.com/encode/httpx.git",
+      "commit": "26d48e0634e6ee9cdc0533996db289ce4b430177"
+    },
+    {
+      "id": "hono",
+      "url": "https://github.com/honojs/hono.git",
+      "commit": "eebdf7be39abf0a872671835ccce0c4f03ea497a"
+    },
+    {
+      "id": "serilog",
+      "url": "https://github.com/serilog/serilog.git",
+      "commit": "1b461379f4e218a939d5c94897df2a1dbbf90573"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T1",
+      "repository": "httpx",
+      "taskSummary": "Explain how redirect handling preserves or removes authorization across origins and scheme upgrades.",
+      "queries": [
+        {
+          "pattern": "redirect",
+          "rationale": "The task asks about redirect handling."
+        },
+        {
+          "pattern": "authorization",
+          "rationale": "The task names the Authorization header."
+        },
+        {
+          "pattern": "same[- ]origin",
+          "rationale": "The task asks about same-origin behavior."
+        }
+      ],
+      "treePatterns": [
+        {
+          "pattern": "**/*redirect*",
+          "rationale": "Redirect is a task term usable as a filename filter."
+        },
+        {
+          "pattern": "**/*client*",
+          "rationale": "The task is explicitly about client redirect handling."
+        }
+      ],
+      "seeds": [
+        {
+          "path": "httpx/_client.py",
+          "discoveredBy": {
+            "surface": "search_project",
+            "input": "redirect"
+          }
+        }
+      ],
+      "searchRuns": [
+        {
+          "pattern": "redirect",
+          "rationale": "The task asks about redirect handling.",
+          "visiblePaths": [
+            "httpx/_client.py",
+            "tests/client/test_redirects.py"
+          ],
+          "continuedPaths": [],
+          "boundary": {
+            "complete": false,
+            "inspectedSources": 115,
+            "eligibleSources": 125,
+            "retainedMatches": 387,
+            "encounteredMatches": 387,
+            "writtenMatches": 200,
+            "namedDeclarationFiles": 14,
+            "limits": [
+              "max-results"
+            ]
+          },
+          "usedStoredContinuation": true,
+          "error": null,
+          "visibleFileCount": 22,
+          "continuedFileCounts": [
+            3
+          ]
+        },
+        {
+          "pattern": "authorization",
+          "rationale": "The task names the Authorization header.",
+          "visiblePaths": [
+            "httpx/_client.py",
+            "tests/client/test_redirects.py"
+          ],
+          "continuedPaths": [],
+          "boundary": {
+            "complete": true,
+            "inspectedSources": 115,
+            "eligibleSources": 125,
+            "retainedMatches": 106,
+            "encounteredMatches": 106,
+            "writtenMatches": 106,
+            "namedDeclarationFiles": 9,
+            "limits": []
+          },
+          "usedStoredContinuation": false,
+          "error": null,
+          "visibleFileCount": 14,
+          "continuedFileCounts": []
+        },
+        {
+          "pattern": "same[- ]origin",
+          "rationale": "The task asks about same-origin behavior.",
+          "visiblePaths": [
+            "httpx/_client.py"
+          ],
+          "continuedPaths": [],
+          "boundary": {
+            "complete": true,
+            "inspectedSources": 115,
+            "eligibleSources": 125,
+            "retainedMatches": 2,
+            "encounteredMatches": 2,
+            "writtenMatches": 2,
+            "namedDeclarationFiles": 1,
+            "limits": []
+          },
+          "usedStoredContinuation": false,
+          "error": null,
+          "visibleFileCount": 2,
+          "continuedFileCounts": []
+        }
+      ],
+      "treeRuns": [
+        {
+          "pattern": "**/*redirect*",
+          "rationale": "Redirect is a task term usable as a filename filter.",
+          "visiblePaths": [
+            "tests/client/test_redirects.py"
+          ],
+          "truncated": false,
+          "error": null
+        },
+        {
+          "pattern": "**/*client*",
+          "rationale": "The task is explicitly about client redirect handling.",
+          "visiblePaths": [
+            "httpx/_client.py"
+          ],
+          "truncated": false,
+          "error": null
+        }
+      ],
+      "related": {
+        "seedsUsed": [
+          "httpx/_client.py"
+        ],
+        "calls": 14,
+        "callsByHop": {
+          "1": 1,
+          "2": 13
+        },
+        "failedCalls": 0,
+        "unresolvedEvidenceCount": 0,
+        "unresolvedStatuses": {}
+      },
+      "requiredFiles": [
+        {
+          "path": "httpx/_client.py",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "redirect",
+              "position": 10
+            },
+            {
+              "surface": "search_project",
+              "input": "authorization",
+              "position": 5
+            },
+            {
+              "surface": "search_project",
+              "input": "same[- ]origin",
+              "position": 2
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*client*",
+              "position": 2
+            }
+          ],
+          "relatedHop": 0,
+          "relatedVia": null,
+          "matchingTaskQueries": [
+            "redirect",
+            "authorization",
+            "same[- ]origin"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "redirect",
+                "complete": false,
+                "limits": [
+                  "max-results"
+                ],
+                "initialPosition": 10,
+                "continuationPage": 1
+              },
+              {
+                "pattern": "authorization",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 5,
+                "continuationPage": null
+              },
+              {
+                "pattern": "same[- ]origin",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 2,
+                "continuationPage": null
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*client*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "tests/client/test_redirects.py",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "redirect",
+              "position": 1
+            },
+            {
+              "surface": "search_project",
+              "input": "authorization",
+              "position": 11
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*redirect*",
+              "position": 1
+            }
+          ],
+          "relatedHop": 2,
+          "relatedVia": "httpx/__init__.py",
+          "matchingTaskQueries": [
+            "redirect",
+            "authorization"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "redirect",
+                "complete": false,
+                "limits": [
+                  "max-results"
+                ],
+                "initialPosition": 1,
+                "continuationPage": 1
+              },
+              {
+                "pattern": "authorization",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 11,
+                "continuationPage": null
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*redirect*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        }
+      ]
+    },
+    {
+      "id": "T2",
+      "repository": "httpx",
+      "taskSummary": "Locate synchronous and asynchronous HTTP transports, their proxy construction, documentation, and tests.",
+      "queries": [
+        {
+          "pattern": "HTTPTransport",
+          "rationale": "The task names the synchronous transport."
+        },
+        {
+          "pattern": "AsyncHTTPTransport",
+          "rationale": "The task names the asynchronous transport."
+        },
+        {
+          "pattern": "proxy",
+          "rationale": "The task asks how proxy transports are constructed."
+        }
+      ],
+      "treePatterns": [
+        {
+          "pattern": "**/*transport*",
+          "rationale": "Transport is a task term usable as a filename filter."
+        },
+        {
+          "pattern": "**/*prox*",
+          "rationale": "Proxy is a task term usable as a filename filter."
+        }
+      ],
+      "seeds": [
+        {
+          "path": "httpx/_transports/default.py",
+          "discoveredBy": {
+            "surface": "search_project",
+            "input": "HTTPTransport"
+          }
+        }
+      ],
+      "searchRuns": [
+        {
+          "pattern": "HTTPTransport",
+          "rationale": "The task names the synchronous transport.",
+          "visiblePaths": [
+            "httpx/_transports/default.py",
+            "httpx/_client.py",
+            "httpx/_transports/base.py",
+            "docs/advanced/transports.md",
+            "docs/advanced/proxies.md",
+            "tests/client/test_proxies.py"
+          ],
+          "continuedPaths": [],
+          "boundary": {
+            "complete": true,
+            "inspectedSources": 115,
+            "eligibleSources": 125,
+            "retainedMatches": 60,
+            "encounteredMatches": 60,
+            "writtenMatches": 60,
+            "namedDeclarationFiles": 4,
+            "limits": []
+          },
+          "usedStoredContinuation": false,
+          "error": null,
+          "visibleFileCount": 12,
+          "continuedFileCounts": []
+        },
+        {
+          "pattern": "AsyncHTTPTransport",
+          "rationale": "The task names the asynchronous transport.",
+          "visiblePaths": [
+            "httpx/_transports/default.py",
+            "httpx/_client.py",
+            "tests/client/test_proxies.py"
+          ],
+          "continuedPaths": [],
+          "boundary": {
+            "complete": true,
+            "inspectedSources": 115,
+            "eligibleSources": 125,
+            "retainedMatches": 14,
+            "encounteredMatches": 14,
+            "writtenMatches": 14,
+            "namedDeclarationFiles": 3,
+            "limits": []
+          },
+          "usedStoredContinuation": false,
+          "error": null,
+          "visibleFileCount": 7,
+          "continuedFileCounts": []
+        },
+        {
+          "pattern": "proxy",
+          "rationale": "The task asks how proxy transports are constructed.",
+          "visiblePaths": [
+            "httpx/_transports/default.py",
+            "httpx/_client.py",
+            "docs/advanced/transports.md",
+            "docs/advanced/proxies.md",
+            "tests/client/test_proxies.py"
+          ],
+          "continuedPaths": [],
+          "boundary": {
+            "complete": false,
+            "inspectedSources": 115,
+            "eligibleSources": 125,
+            "retainedMatches": 415,
+            "encounteredMatches": 415,
+            "writtenMatches": 200,
+            "namedDeclarationFiles": 10,
+            "limits": [
+              "max-results"
+            ]
+          },
+          "usedStoredContinuation": true,
+          "error": null,
+          "visibleFileCount": 29,
+          "continuedFileCounts": [
+            10
+          ]
+        }
+      ],
+      "treeRuns": [
+        {
+          "pattern": "**/*transport*",
+          "rationale": "Transport is a task term usable as a filename filter.",
+          "visiblePaths": [
+            "docs/advanced/transports.md"
+          ],
+          "truncated": false,
+          "error": null
+        },
+        {
+          "pattern": "**/*prox*",
+          "rationale": "Proxy is a task term usable as a filename filter.",
+          "visiblePaths": [
+            "docs/advanced/proxies.md",
+            "tests/client/test_proxies.py"
+          ],
+          "truncated": false,
+          "error": null
+        }
+      ],
+      "related": {
+        "seedsUsed": [
+          "httpx/_transports/default.py"
+        ],
+        "calls": 10,
+        "callsByHop": {
+          "1": 1,
+          "2": 9
+        },
+        "failedCalls": 0,
+        "unresolvedEvidenceCount": 0,
+        "unresolvedStatuses": {}
+      },
+      "requiredFiles": [
+        {
+          "path": "httpx/_transports/default.py",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "HTTPTransport",
+              "position": 11
+            },
+            {
+              "surface": "search_project",
+              "input": "AsyncHTTPTransport",
+              "position": 6
+            },
+            {
+              "surface": "search_project",
+              "input": "proxy",
+              "position": 22
+            }
+          ],
+          "relatedHop": 0,
+          "relatedVia": null,
+          "matchingTaskQueries": [
+            "HTTPTransport",
+            "AsyncHTTPTransport",
+            "proxy"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "HTTPTransport",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 11,
+                "continuationPage": null
+              },
+              {
+                "pattern": "AsyncHTTPTransport",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 6,
+                "continuationPage": null
+              },
+              {
+                "pattern": "proxy",
+                "complete": false,
+                "limits": [
+                  "max-results"
+                ],
+                "initialPosition": 22,
+                "continuationPage": 1
+              }
+            ],
+            "tree": []
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "httpx/_client.py",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "HTTPTransport",
+              "position": 8
+            },
+            {
+              "surface": "search_project",
+              "input": "AsyncHTTPTransport",
+              "position": 4
+            },
+            {
+              "surface": "search_project",
+              "input": "proxy",
+              "position": 16
+            }
+          ],
+          "relatedHop": 1,
+          "relatedVia": "httpx/_transports/default.py",
+          "matchingTaskQueries": [
+            "HTTPTransport",
+            "AsyncHTTPTransport",
+            "proxy"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "HTTPTransport",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 8,
+                "continuationPage": null
+              },
+              {
+                "pattern": "AsyncHTTPTransport",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 4,
+                "continuationPage": null
+              },
+              {
+                "pattern": "proxy",
+                "complete": false,
+                "limits": [
+                  "max-results"
+                ],
+                "initialPosition": 16,
+                "continuationPage": 1
+              }
+            ],
+            "tree": []
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "httpx/_transports/base.py",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "HTTPTransport",
+              "position": 10
+            }
+          ],
+          "relatedHop": 1,
+          "relatedVia": "httpx/_transports/default.py",
+          "matchingTaskQueries": [
+            "HTTPTransport"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "HTTPTransport",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 10,
+                "continuationPage": null
+              }
+            ],
+            "tree": []
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "docs/advanced/transports.md",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "HTTPTransport",
+              "position": 3
+            },
+            {
+              "surface": "search_project",
+              "input": "proxy",
+              "position": 1
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*transport*",
+              "position": 1
+            }
+          ],
+          "relatedHop": null,
+          "relatedVia": null,
+          "matchingTaskQueries": [
+            "HTTPTransport",
+            "proxy"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "HTTPTransport",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 3,
+                "continuationPage": null
+              },
+              {
+                "pattern": "proxy",
+                "complete": false,
+                "limits": [
+                  "max-results"
+                ],
+                "initialPosition": 1,
+                "continuationPage": 1
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*transport*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "docs/advanced/proxies.md",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "HTTPTransport",
+              "position": 2
+            },
+            {
+              "surface": "search_project",
+              "input": "proxy",
+              "position": 6
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*prox*",
+              "position": 1
+            }
+          ],
+          "relatedHop": null,
+          "relatedVia": null,
+          "matchingTaskQueries": [
+            "HTTPTransport",
+            "proxy"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "HTTPTransport",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 2,
+                "continuationPage": null
+              },
+              {
+                "pattern": "proxy",
+                "complete": false,
+                "limits": [
+                  "max-results"
+                ],
+                "initialPosition": 6,
+                "continuationPage": 1
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*prox*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "tests/client/test_proxies.py",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "HTTPTransport",
+              "position": 12
+            },
+            {
+              "surface": "search_project",
+              "input": "AsyncHTTPTransport",
+              "position": 7
+            },
+            {
+              "surface": "search_project",
+              "input": "proxy",
+              "position": 25
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*prox*",
+              "position": 2
+            }
+          ],
+          "relatedHop": 2,
+          "relatedVia": "httpx/__init__.py",
+          "matchingTaskQueries": [
+            "HTTPTransport",
+            "AsyncHTTPTransport",
+            "proxy"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "HTTPTransport",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 12,
+                "continuationPage": null
+              },
+              {
+                "pattern": "AsyncHTTPTransport",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 7,
+                "continuationPage": null
+              },
+              {
+                "pattern": "proxy",
+                "complete": false,
+                "limits": [
+                  "max-results"
+                ],
+                "initialPosition": 25,
+                "continuationPage": 1
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*prox*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        }
+      ]
+    },
+    {
+      "id": "T3",
+      "repository": "httpx",
+      "taskSummary": "Explain where request extensions are merged and how per-request values take precedence.",
+      "queries": [
+        {
+          "pattern": "build_request",
+          "rationale": "The task names the request-building operation."
+        },
+        {
+          "pattern": "extensions",
+          "rationale": "The task asks about request extensions."
+        },
+        {
+          "pattern": "merge",
+          "rationale": "The task asks where values are merged."
+        }
+      ],
+      "treePatterns": [
+        {
+          "pattern": "**/*client*",
+          "rationale": "The task asks about client-level and per-request state."
+        },
+        {
+          "pattern": "**/*extension*",
+          "rationale": "Extensions is a task term usable as a filename filter."
+        }
+      ],
+      "seeds": [
+        {
+          "path": "httpx/_client.py",
+          "discoveredBy": {
+            "surface": "search_project",
+            "input": "build_request"
+          }
+        }
+      ],
+      "searchRuns": [
+        {
+          "pattern": "build_request",
+          "rationale": "The task names the request-building operation.",
+          "visiblePaths": [
+            "httpx/_client.py",
+            "tests/client/test_client.py"
+          ],
+          "continuedPaths": [],
+          "boundary": {
+            "complete": true,
+            "inspectedSources": 115,
+            "eligibleSources": 125,
+            "retainedMatches": 38,
+            "encounteredMatches": 38,
+            "writtenMatches": 38,
+            "namedDeclarationFiles": 5,
+            "limits": []
+          },
+          "usedStoredContinuation": false,
+          "error": null,
+          "visibleFileCount": 10,
+          "continuedFileCounts": []
+        },
+        {
+          "pattern": "extensions",
+          "rationale": "The task asks about request extensions.",
+          "visiblePaths": [
+            "httpx/_client.py",
+            "httpx/_models.py",
+            "docs/advanced/extensions.md",
+            "httpx/_types.py",
+            "tests/client/test_client.py"
+          ],
+          "continuedPaths": [],
+          "boundary": {
+            "complete": true,
+            "inspectedSources": 115,
+            "eligibleSources": 125,
+            "retainedMatches": 101,
+            "encounteredMatches": 101,
+            "writtenMatches": 101,
+            "namedDeclarationFiles": 8,
+            "limits": []
+          },
+          "usedStoredContinuation": false,
+          "error": null,
+          "visibleFileCount": 14,
+          "continuedFileCounts": []
+        },
+        {
+          "pattern": "merge",
+          "rationale": "The task asks where values are merged.",
+          "visiblePaths": [
+            "httpx/_client.py",
+            "tests/client/test_client.py"
+          ],
+          "continuedPaths": [],
+          "boundary": {
+            "complete": true,
+            "inspectedSources": 115,
+            "eligibleSources": 125,
+            "retainedMatches": 60,
+            "encounteredMatches": 60,
+            "writtenMatches": 60,
+            "namedDeclarationFiles": 6,
+            "limits": []
+          },
+          "usedStoredContinuation": false,
+          "error": null,
+          "visibleFileCount": 9,
+          "continuedFileCounts": []
+        }
+      ],
+      "treeRuns": [
+        {
+          "pattern": "**/*client*",
+          "rationale": "The task asks about client-level and per-request state.",
+          "visiblePaths": [
+            "httpx/_client.py",
+            "tests/client/test_client.py"
+          ],
+          "truncated": false,
+          "error": null
+        },
+        {
+          "pattern": "**/*extension*",
+          "rationale": "Extensions is a task term usable as a filename filter.",
+          "visiblePaths": [
+            "docs/advanced/extensions.md"
+          ],
+          "truncated": false,
+          "error": null
+        }
+      ],
+      "related": {
+        "seedsUsed": [
+          "httpx/_client.py"
+        ],
+        "calls": 14,
+        "callsByHop": {
+          "1": 1,
+          "2": 13
+        },
+        "failedCalls": 0,
+        "unresolvedEvidenceCount": 0,
+        "unresolvedStatuses": {}
+      },
+      "requiredFiles": [
+        {
+          "path": "httpx/_client.py",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "build_request",
+              "position": 1
+            },
+            {
+              "surface": "search_project",
+              "input": "extensions",
+              "position": 5
+            },
+            {
+              "surface": "search_project",
+              "input": "merge",
+              "position": 4
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*client*",
+              "position": 2
+            }
+          ],
+          "relatedHop": 0,
+          "relatedVia": null,
+          "matchingTaskQueries": [
+            "build_request",
+            "extensions",
+            "merge"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "build_request",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 1,
+                "continuationPage": null
+              },
+              {
+                "pattern": "extensions",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 5,
+                "continuationPage": null
+              },
+              {
+                "pattern": "merge",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 4,
+                "continuationPage": null
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*client*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "httpx/_models.py",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "extensions",
+              "position": 7
+            }
+          ],
+          "relatedHop": 1,
+          "relatedVia": "httpx/_client.py",
+          "matchingTaskQueries": [
+            "extensions"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "extensions",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 7,
+                "continuationPage": null
+              }
+            ],
+            "tree": []
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "docs/advanced/extensions.md",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "extensions",
+              "position": 3
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*extension*",
+              "position": 1
+            }
+          ],
+          "relatedHop": null,
+          "relatedVia": null,
+          "matchingTaskQueries": [
+            "extensions"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "extensions",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 3,
+                "continuationPage": null
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*extension*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "httpx/_types.py",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "extensions",
+              "position": 10
+            }
+          ],
+          "relatedHop": 1,
+          "relatedVia": "httpx/_client.py",
+          "matchingTaskQueries": [
+            "extensions"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "extensions",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 10,
+                "continuationPage": null
+              }
+            ],
+            "tree": []
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "tests/client/test_client.py",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "build_request",
+              "position": 8
+            },
+            {
+              "surface": "search_project",
+              "input": "extensions",
+              "position": 13
+            },
+            {
+              "surface": "search_project",
+              "input": "merge",
+              "position": 6
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*client*",
+              "position": 4
+            }
+          ],
+          "relatedHop": 2,
+          "relatedVia": "httpx/__init__.py",
+          "matchingTaskQueries": [
+            "build_request",
+            "extensions",
+            "merge"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "build_request",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 8,
+                "continuationPage": null
+              },
+              {
+                "pattern": "extensions",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 13,
+                "continuationPage": null
+              },
+              {
+                "pattern": "merge",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 6,
+                "continuationPage": null
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*client*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        }
+      ]
+    },
+    {
+      "id": "T4",
+      "repository": "hono",
+      "taskSummary": "Trace URL decoding for request paths and parameters, including invalid encoded sequences.",
+      "queries": [
+        {
+          "pattern": "decode",
+          "rationale": "The task asks about decoding."
+        },
+        {
+          "pattern": "getPath",
+          "rationale": "The task names path extraction."
+        },
+        {
+          "pattern": "param",
+          "rationale": "The task asks about route parameters."
+        }
+      ],
+      "treePatterns": [
+        {
+          "pattern": "**/*request*",
+          "rationale": "Request is a task term usable as a filename filter."
+        },
+        {
+          "pattern": "**/*url*",
+          "rationale": "URL is a task term usable as a filename filter."
+        }
+      ],
+      "seeds": [
+        {
+          "path": "src/request.ts",
+          "discoveredBy": {
+            "surface": "search_project",
+            "input": "param"
+          }
+        }
+      ],
+      "searchRuns": [
+        {
+          "pattern": "decode",
+          "rationale": "The task asks about decoding.",
+          "visiblePaths": [
+            "src/request.ts",
+            "src/utils/url.ts",
+            "src/request.test.ts",
+            "src/utils/url.test.ts"
+          ],
+          "continuedPaths": [],
+          "boundary": {
+            "complete": false,
+            "inspectedSources": 479,
+            "eligibleSources": 486,
+            "retainedMatches": 275,
+            "encounteredMatches": 275,
+            "writtenMatches": 200,
+            "namedDeclarationFiles": 15,
+            "limits": [
+              "max-results"
+            ]
+          },
+          "usedStoredContinuation": true,
+          "error": null,
+          "visibleFileCount": 40,
+          "continuedFileCounts": [
+            5
+          ]
+        },
+        {
+          "pattern": "getPath",
+          "rationale": "The task names path extraction.",
+          "visiblePaths": [
+            "src/utils/url.ts",
+            "src/hono-base.ts",
+            "src/utils/url.test.ts"
+          ],
+          "continuedPaths": [],
+          "boundary": {
+            "complete": true,
+            "inspectedSources": 479,
+            "eligibleSources": 486,
+            "retainedMatches": 81,
+            "encounteredMatches": 81,
+            "writtenMatches": 81,
+            "namedDeclarationFiles": 7,
+            "limits": []
+          },
+          "usedStoredContinuation": false,
+          "error": null,
+          "visibleFileCount": 9,
+          "continuedFileCounts": []
+        },
+        {
+          "pattern": "param",
+          "rationale": "The task asks about route parameters.",
+          "visiblePaths": [
+            "src/request.ts",
+            "src/utils/url.ts",
+            "src/hono-base.ts",
+            "src/request.test.ts",
+            "src/utils/url.test.ts"
+          ],
+          "continuedPaths": [],
+          "boundary": {
+            "complete": false,
+            "inspectedSources": 479,
+            "eligibleSources": 486,
+            "retainedMatches": 1407,
+            "encounteredMatches": 1407,
+            "writtenMatches": 185,
+            "namedDeclarationFiles": 0,
+            "limits": [
+              "annotation-files",
+              "response-characters"
+            ]
+          },
+          "usedStoredContinuation": true,
+          "error": null,
+          "visibleFileCount": 132,
+          "continuedFileCounts": [
+            53,
+            28,
+            13
+          ]
+        }
+      ],
+      "treeRuns": [
+        {
+          "pattern": "**/*request*",
+          "rationale": "Request is a task term usable as a filename filter.",
+          "visiblePaths": [
+            "src/request.ts",
+            "src/request.test.ts"
+          ],
+          "truncated": false,
+          "error": null
+        },
+        {
+          "pattern": "**/*url*",
+          "rationale": "URL is a task term usable as a filename filter.",
+          "visiblePaths": [
+            "src/utils/url.ts",
+            "src/utils/url.test.ts"
+          ],
+          "truncated": false,
+          "error": null
+        }
+      ],
+      "related": {
+        "seedsUsed": [
+          "src/request.ts"
+        ],
+        "calls": 14,
+        "callsByHop": {
+          "1": 1,
+          "2": 13
+        },
+        "failedCalls": 0,
+        "unresolvedEvidenceCount": 0,
+        "unresolvedStatuses": {}
+      },
+      "requiredFiles": [
+        {
+          "path": "src/request.ts",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "decode",
+              "position": 29
+            },
+            {
+              "surface": "search_project",
+              "input": "param",
+              "position": 96
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*request*",
+              "position": 5
+            }
+          ],
+          "relatedHop": 0,
+          "relatedVia": null,
+          "matchingTaskQueries": [
+            "decode",
+            "param"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "decode",
+                "complete": false,
+                "limits": [
+                  "max-results"
+                ],
+                "initialPosition": 29,
+                "continuationPage": null
+              },
+              {
+                "pattern": "param",
+                "complete": false,
+                "limits": [
+                  "annotation-files",
+                  "response-characters"
+                ],
+                "initialPosition": 96,
+                "continuationPage": 2
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*request*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "src/utils/url.ts",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "decode",
+              "position": 1
+            },
+            {
+              "surface": "search_project",
+              "input": "getPath",
+              "position": 1
+            },
+            {
+              "surface": "search_project",
+              "input": "param",
+              "position": 126
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*url*",
+              "position": 2
+            }
+          ],
+          "relatedHop": 1,
+          "relatedVia": "src/request.ts",
+          "matchingTaskQueries": [
+            "decode",
+            "getPath",
+            "param"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "decode",
+                "complete": false,
+                "limits": [
+                  "max-results"
+                ],
+                "initialPosition": 1,
+                "continuationPage": 1
+              },
+              {
+                "pattern": "getPath",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 1,
+                "continuationPage": null
+              },
+              {
+                "pattern": "param",
+                "complete": false,
+                "limits": [
+                  "annotation-files",
+                  "response-characters"
+                ],
+                "initialPosition": 126,
+                "continuationPage": 3
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*url*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "src/hono-base.ts",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "getPath",
+              "position": 6
+            },
+            {
+              "surface": "search_project",
+              "input": "param",
+              "position": 55
+            }
+          ],
+          "relatedHop": 2,
+          "relatedVia": "src/context.ts",
+          "matchingTaskQueries": [
+            "getPath",
+            "param"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "getPath",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 6,
+                "continuationPage": null
+              },
+              {
+                "pattern": "param",
+                "complete": false,
+                "limits": [
+                  "annotation-files",
+                  "response-characters"
+                ],
+                "initialPosition": 55,
+                "continuationPage": 1
+              }
+            ],
+            "tree": []
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "src/request.test.ts",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "decode",
+              "position": 28
+            },
+            {
+              "surface": "search_project",
+              "input": "param",
+              "position": 95
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*request*",
+              "position": 4
+            }
+          ],
+          "relatedHop": 1,
+          "relatedVia": "src/request.ts",
+          "matchingTaskQueries": [
+            "decode",
+            "param"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "decode",
+                "complete": false,
+                "limits": [
+                  "max-results"
+                ],
+                "initialPosition": 28,
+                "continuationPage": null
+              },
+              {
+                "pattern": "param",
+                "complete": false,
+                "limits": [
+                  "annotation-files",
+                  "response-characters"
+                ],
+                "initialPosition": 95,
+                "continuationPage": 2
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*request*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "src/utils/url.test.ts",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "decode",
+              "position": 40
+            },
+            {
+              "surface": "search_project",
+              "input": "getPath",
+              "position": 9
+            },
+            {
+              "surface": "search_project",
+              "input": "param",
+              "position": 125
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*url*",
+              "position": 1
+            }
+          ],
+          "relatedHop": 2,
+          "relatedVia": "src/utils/url.ts",
+          "matchingTaskQueries": [
+            "decode",
+            "getPath",
+            "param"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "decode",
+                "complete": false,
+                "limits": [
+                  "max-results"
+                ],
+                "initialPosition": 40,
+                "continuationPage": null
+              },
+              {
+                "pattern": "getPath",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 9,
+                "continuationPage": null
+              },
+              {
+                "pattern": "param",
+                "complete": false,
+                "limits": [
+                  "annotation-files",
+                  "response-characters"
+                ],
+                "initialPosition": 125,
+                "continuationPage": 3
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*url*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        }
+      ]
+    },
+    {
+      "id": "T5",
+      "repository": "hono",
+      "taskSummary": "Explain Context.json response typing through client types, middleware, and tests.",
+      "queries": [
+        {
+          "pattern": "TypedResponse",
+          "rationale": "The task names typed responses."
+        },
+        {
+          "pattern": "jsonRespond",
+          "rationale": "The task asks about the JSON response helper."
+        },
+        {
+          "pattern": "Context.*json|[.]json[(]",
+          "rationale": "The task names Context.json."
+        }
+      ],
+      "treePatterns": [
+        {
+          "pattern": "**/*context*",
+          "rationale": "Context is a task term usable as a filename filter."
+        },
+        {
+          "pattern": "**/*types*",
+          "rationale": "The task explicitly asks about types."
+        },
+        {
+          "pattern": "**/*cors*",
+          "rationale": "The task names CORS middleware."
+        },
+        {
+          "pattern": "**/*bearer-auth*",
+          "rationale": "The task names bearer-auth middleware."
+        }
+      ],
+      "seeds": [
+        {
+          "path": "src/context.ts",
+          "discoveredBy": {
+            "surface": "search_project",
+            "input": "TypedResponse"
+          }
+        }
+      ],
+      "searchRuns": [
+        {
+          "pattern": "TypedResponse",
+          "rationale": "The task names typed responses.",
+          "visiblePaths": [
+            "src/context.ts",
+            "src/types.ts"
+          ],
+          "continuedPaths": [],
+          "boundary": {
+            "complete": true,
+            "inspectedSources": 479,
+            "eligibleSources": 486,
+            "retainedMatches": 110,
+            "encounteredMatches": 110,
+            "writtenMatches": 110,
+            "namedDeclarationFiles": 6,
+            "limits": []
+          },
+          "usedStoredContinuation": false,
+          "error": null,
+          "visibleFileCount": 8,
+          "continuedFileCounts": []
+        },
+        {
+          "pattern": "jsonRespond",
+          "rationale": "The task asks about the JSON response helper.",
+          "visiblePaths": [
+            "src/context.ts"
+          ],
+          "continuedPaths": [],
+          "boundary": {
+            "complete": true,
+            "inspectedSources": 479,
+            "eligibleSources": 486,
+            "retainedMatches": 8,
+            "encounteredMatches": 8,
+            "writtenMatches": 8,
+            "namedDeclarationFiles": 1,
+            "limits": []
+          },
+          "usedStoredContinuation": false,
+          "error": null,
+          "visibleFileCount": 1,
+          "continuedFileCounts": []
+        },
+        {
+          "pattern": "Context.*json|[.]json[(]",
+          "rationale": "The task names Context.json.",
+          "visiblePaths": [
+            "src/context.ts",
+            "src/middleware/bearer-auth/index.ts",
+            "src/middleware/cors/index.ts",
+            "src/context.test.ts"
+          ],
+          "continuedPaths": [],
+          "boundary": {
+            "complete": false,
+            "inspectedSources": 479,
+            "eligibleSources": 486,
+            "retainedMatches": 896,
+            "encounteredMatches": 896,
+            "writtenMatches": 200,
+            "namedDeclarationFiles": 15,
+            "limits": [
+              "max-results"
+            ]
+          },
+          "usedStoredContinuation": true,
+          "error": null,
+          "visibleFileCount": 45,
+          "continuedFileCounts": [
+            11,
+            1
+          ]
+        }
+      ],
+      "treeRuns": [
+        {
+          "pattern": "**/*context*",
+          "rationale": "Context is a task term usable as a filename filter.",
+          "visiblePaths": [
+            "src/context.ts",
+            "src/context.test.ts"
+          ],
+          "truncated": false,
+          "error": null
+        },
+        {
+          "pattern": "**/*types*",
+          "rationale": "The task explicitly asks about types.",
+          "visiblePaths": [
+            "src/types.ts",
+            "src/client/types.ts"
+          ],
+          "truncated": false,
+          "error": null
+        },
+        {
+          "pattern": "**/*cors*",
+          "rationale": "The task names CORS middleware.",
+          "visiblePaths": [],
+          "truncated": false,
+          "error": null
+        },
+        {
+          "pattern": "**/*bearer-auth*",
+          "rationale": "The task names bearer-auth middleware.",
+          "visiblePaths": [],
+          "truncated": false,
+          "error": null
+        }
+      ],
+      "related": {
+        "seedsUsed": [
+          "src/context.ts"
+        ],
+        "calls": 79,
+        "callsByHop": {
+          "1": 1,
+          "2": 78
+        },
+        "failedCalls": 0,
+        "unresolvedEvidenceCount": 0,
+        "unresolvedStatuses": {}
+      },
+      "requiredFiles": [
+        {
+          "path": "src/context.ts",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "TypedResponse",
+              "position": 1
+            },
+            {
+              "surface": "search_project",
+              "input": "jsonRespond",
+              "position": 1
+            },
+            {
+              "surface": "search_project",
+              "input": "Context.*json|[.]json[(]",
+              "position": 17
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*context*",
+              "position": 2
+            }
+          ],
+          "relatedHop": 0,
+          "relatedVia": null,
+          "matchingTaskQueries": [
+            "TypedResponse",
+            "jsonRespond",
+            "Context.*json|[.]json[(]"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "TypedResponse",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 1,
+                "continuationPage": null
+              },
+              {
+                "pattern": "jsonRespond",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 1,
+                "continuationPage": null
+              },
+              {
+                "pattern": "Context.*json|[.]json[(]",
+                "complete": false,
+                "limits": [
+                  "max-results"
+                ],
+                "initialPosition": 17,
+                "continuationPage": null
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*context*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "src/types.ts",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "TypedResponse",
+              "position": 6
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*types*",
+              "position": 8
+            }
+          ],
+          "relatedHop": 1,
+          "relatedVia": "src/context.ts",
+          "matchingTaskQueries": [
+            "TypedResponse"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "TypedResponse",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 6,
+                "continuationPage": null
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*types*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "src/client/types.ts",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "get_tree",
+              "input": "**/*types*",
+              "position": 4
+            }
+          ],
+          "relatedHop": 2,
+          "relatedVia": "src/helper/testing/index.ts",
+          "matchingTaskQueries": [],
+          "limitEvidence": {
+            "search": [],
+            "tree": [
+              {
+                "pattern": "**/*types*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "src/middleware/bearer-auth/index.ts",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "Context.*json|[.]json[(]",
+              "position": 25
+            }
+          ],
+          "relatedHop": 1,
+          "relatedVia": "src/context.ts",
+          "matchingTaskQueries": [
+            "Context.*json|[.]json[(]"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "Context.*json|[.]json[(]",
+                "complete": false,
+                "limits": [
+                  "max-results"
+                ],
+                "initialPosition": 25,
+                "continuationPage": null
+              }
+            ],
+            "tree": []
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "src/middleware/cors/index.ts",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "Context.*json|[.]json[(]",
+              "position": 29
+            }
+          ],
+          "relatedHop": 1,
+          "relatedVia": "src/context.ts",
+          "matchingTaskQueries": [
+            "Context.*json|[.]json[(]"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "Context.*json|[.]json[(]",
+                "complete": false,
+                "limits": [
+                  "max-results"
+                ],
+                "initialPosition": 29,
+                "continuationPage": null
+              }
+            ],
+            "tree": []
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "src/context.test.ts",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "Context.*json|[.]json[(]",
+              "position": 16
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*context*",
+              "position": 1
+            }
+          ],
+          "relatedHop": 1,
+          "relatedVia": "src/context.ts",
+          "matchingTaskQueries": [
+            "Context.*json|[.]json[(]"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "Context.*json|[.]json[(]",
+                "complete": false,
+                "limits": [
+                  "max-results"
+                ],
+                "initialPosition": 16,
+                "continuationPage": 1
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*context*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        }
+      ]
+    },
+    {
+      "id": "T6",
+      "repository": "hono",
+      "taskSummary": "Identify implementation and test templates for a middleware and where distribution exports are registered.",
+      "queries": [
+        {
+          "pattern": "method-not-allowed",
+          "rationale": "The task names method-not-allowed as a template."
+        },
+        {
+          "pattern": "body-limit",
+          "rationale": "The task names body-limit as a template."
+        },
+        {
+          "pattern": "powered-by",
+          "rationale": "The task names powered-by as a template."
+        },
+        {
+          "pattern": "exports",
+          "rationale": "The task asks about distribution export registration."
+        }
+      ],
+      "treePatterns": [
+        {
+          "pattern": "**/*method-not-allowed*",
+          "rationale": "A named middleware can be used as a filename filter."
+        },
+        {
+          "pattern": "**/*body-limit*",
+          "rationale": "A named middleware can be used as a filename filter."
+        },
+        {
+          "pattern": "**/*powered-by*",
+          "rationale": "A named middleware can be used as a filename filter."
+        },
+        {
+          "pattern": "package.json",
+          "rationale": "The task asks about package export registration."
+        },
+        {
+          "pattern": "jsr.json",
+          "rationale": "The task asks about distribution export registration."
+        }
+      ],
+      "seeds": [],
+      "searchRuns": [
+        {
+          "pattern": "method-not-allowed",
+          "rationale": "The task names method-not-allowed as a template.",
+          "visiblePaths": [
+            "package.json",
+            "jsr.json"
+          ],
+          "continuedPaths": [],
+          "boundary": {
+            "complete": true,
+            "inspectedSources": 479,
+            "eligibleSources": 486,
+            "retainedMatches": 8,
+            "encounteredMatches": 8,
+            "writtenMatches": 8,
+            "namedDeclarationFiles": 0,
+            "limits": []
+          },
+          "usedStoredContinuation": false,
+          "error": null,
+          "visibleFileCount": 3,
+          "continuedFileCounts": []
+        },
+        {
+          "pattern": "body-limit",
+          "rationale": "The task names body-limit as a template.",
+          "visiblePaths": [
+            "package.json",
+            "jsr.json"
+          ],
+          "continuedPaths": [],
+          "boundary": {
+            "complete": true,
+            "inspectedSources": 479,
+            "eligibleSources": 486,
+            "retainedMatches": 17,
+            "encounteredMatches": 17,
+            "writtenMatches": 17,
+            "namedDeclarationFiles": 0,
+            "limits": []
+          },
+          "usedStoredContinuation": false,
+          "error": null,
+          "visibleFileCount": 7,
+          "continuedFileCounts": []
+        },
+        {
+          "pattern": "powered-by",
+          "rationale": "The task names powered-by as a template.",
+          "visiblePaths": [
+            "package.json",
+            "jsr.json"
+          ],
+          "continuedPaths": [],
+          "boundary": {
+            "complete": true,
+            "inspectedSources": 479,
+            "eligibleSources": 486,
+            "retainedMatches": 38,
+            "encounteredMatches": 38,
+            "writtenMatches": 38,
+            "namedDeclarationFiles": 5,
+            "limits": []
+          },
+          "usedStoredContinuation": false,
+          "error": null,
+          "visibleFileCount": 12,
+          "continuedFileCounts": []
+        },
+        {
+          "pattern": "exports",
+          "rationale": "The task asks about distribution export registration.",
+          "visiblePaths": [
+            "package.json",
+            "jsr.json"
+          ],
+          "continuedPaths": [],
+          "boundary": {
+            "complete": true,
+            "inspectedSources": 479,
+            "eligibleSources": 486,
+            "retainedMatches": 18,
+            "encounteredMatches": 18,
+            "writtenMatches": 18,
+            "namedDeclarationFiles": 3,
+            "limits": []
+          },
+          "usedStoredContinuation": false,
+          "error": null,
+          "visibleFileCount": 6,
+          "continuedFileCounts": []
+        }
+      ],
+      "treeRuns": [
+        {
+          "pattern": "**/*method-not-allowed*",
+          "rationale": "A named middleware can be used as a filename filter.",
+          "visiblePaths": [],
+          "truncated": false,
+          "error": null
+        },
+        {
+          "pattern": "**/*body-limit*",
+          "rationale": "A named middleware can be used as a filename filter.",
+          "visiblePaths": [],
+          "truncated": false,
+          "error": null
+        },
+        {
+          "pattern": "**/*powered-by*",
+          "rationale": "A named middleware can be used as a filename filter.",
+          "visiblePaths": [],
+          "truncated": false,
+          "error": null
+        },
+        {
+          "pattern": "package.json",
+          "rationale": "The task asks about package export registration.",
+          "visiblePaths": [
+            "package.json"
+          ],
+          "truncated": false,
+          "error": null
+        },
+        {
+          "pattern": "jsr.json",
+          "rationale": "The task asks about distribution export registration.",
+          "visiblePaths": [
+            "jsr.json"
+          ],
+          "truncated": false,
+          "error": null
+        }
+      ],
+      "related": {
+        "seedsUsed": [],
+        "calls": 0,
+        "callsByHop": {},
+        "failedCalls": 0,
+        "unresolvedEvidenceCount": 0,
+        "unresolvedStatuses": {}
+      },
+      "requiredFiles": [
+        {
+          "path": "package.json",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "method-not-allowed",
+              "position": 2
+            },
+            {
+              "surface": "search_project",
+              "input": "body-limit",
+              "position": 2
+            },
+            {
+              "surface": "search_project",
+              "input": "powered-by",
+              "position": 4
+            },
+            {
+              "surface": "search_project",
+              "input": "exports",
+              "position": 6
+            },
+            {
+              "surface": "get_tree",
+              "input": "package.json",
+              "position": 1
+            }
+          ],
+          "relatedHop": null,
+          "relatedVia": null,
+          "matchingTaskQueries": [
+            "method-not-allowed",
+            "body-limit",
+            "powered-by",
+            "exports"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "method-not-allowed",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 2,
+                "continuationPage": null
+              },
+              {
+                "pattern": "body-limit",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 2,
+                "continuationPage": null
+              },
+              {
+                "pattern": "powered-by",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 4,
+                "continuationPage": null
+              },
+              {
+                "pattern": "exports",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 6,
+                "continuationPage": null
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "package.json",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "jsr.json",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "method-not-allowed",
+              "position": 1
+            },
+            {
+              "surface": "search_project",
+              "input": "body-limit",
+              "position": 1
+            },
+            {
+              "surface": "search_project",
+              "input": "powered-by",
+              "position": 3
+            },
+            {
+              "surface": "search_project",
+              "input": "exports",
+              "position": 5
+            },
+            {
+              "surface": "get_tree",
+              "input": "jsr.json",
+              "position": 1
+            }
+          ],
+          "relatedHop": null,
+          "relatedVia": null,
+          "matchingTaskQueries": [
+            "method-not-allowed",
+            "body-limit",
+            "powered-by",
+            "exports"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "method-not-allowed",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 1,
+                "continuationPage": null
+              },
+              {
+                "pattern": "body-limit",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 1,
+                "continuationPage": null
+              },
+              {
+                "pattern": "powered-by",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 3,
+                "continuationPage": null
+              },
+              {
+                "pattern": "exports",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 5,
+                "continuationPage": null
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "jsr.json",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        }
+      ]
+    },
+    {
+      "id": "T7",
+      "repository": "serilog",
+      "taskSummary": "Explain how source-context overrides choose the effective logging level and fall back to defaults.",
+      "queries": [
+        {
+          "pattern": "GetEffectiveLevel",
+          "rationale": "The task names effective-level selection."
+        },
+        {
+          "pattern": "SourceContext",
+          "rationale": "The task asks about source-context overrides."
+        },
+        {
+          "pattern": "override",
+          "rationale": "The task asks how overrides are selected."
+        }
+      ],
+      "treePatterns": [
+        {
+          "pattern": "**/*LevelOverride*",
+          "rationale": "Level override is a task term usable as a filename filter."
+        },
+        {
+          "pattern": "**/*Logger*",
+          "rationale": "The task is about logger level selection."
+        }
+      ],
+      "seeds": [
+        {
+          "path": "src/Serilog/Core/LevelOverrideMap.cs",
+          "discoveredBy": {
+            "surface": "search_project",
+            "input": "GetEffectiveLevel"
+          }
+        }
+      ],
+      "searchRuns": [
+        {
+          "pattern": "GetEffectiveLevel",
+          "rationale": "The task names effective-level selection.",
+          "visiblePaths": [
+            "src/Serilog/Core/LevelOverrideMap.cs",
+            "src/Serilog/Core/Logger.cs",
+            "test/Serilog.Tests/Core/LevelOverrideMapTests.cs"
+          ],
+          "continuedPaths": [],
+          "boundary": {
+            "complete": true,
+            "inspectedSources": 280,
+            "eligibleSources": 282,
+            "retainedMatches": 9,
+            "encounteredMatches": 9,
+            "writtenMatches": 9,
+            "namedDeclarationFiles": 2,
+            "limits": []
+          },
+          "usedStoredContinuation": false,
+          "error": null,
+          "visibleFileCount": 5,
+          "continuedFileCounts": []
+        },
+        {
+          "pattern": "SourceContext",
+          "rationale": "The task asks about source-context overrides.",
+          "visiblePaths": [
+            "src/Serilog/Core/Logger.cs",
+            "test/Serilog.Tests/Core/ChildLoggerTests.cs"
+          ],
+          "continuedPaths": [],
+          "boundary": {
+            "complete": true,
+            "inspectedSources": 280,
+            "eligibleSources": 282,
+            "retainedMatches": 34,
+            "encounteredMatches": 34,
+            "writtenMatches": 34,
+            "namedDeclarationFiles": 9,
+            "limits": []
+          },
+          "usedStoredContinuation": false,
+          "error": null,
+          "visibleFileCount": 14,
+          "continuedFileCounts": []
+        },
+        {
+          "pattern": "override",
+          "rationale": "The task asks how overrides are selected.",
+          "visiblePaths": [
+            "src/Serilog/Core/LevelOverrideMap.cs",
+            "src/Serilog/Core/Logger.cs",
+            "src/Serilog/LoggerConfiguration.cs",
+            "src/Serilog/Configuration/LoggerMinimumLevelConfiguration.cs",
+            "test/Serilog.Tests/Core/LevelOverrideMapTests.cs",
+            "test/Serilog.Tests/Core/ChildLoggerTests.cs"
+          ],
+          "continuedPaths": [],
+          "boundary": {
+            "complete": false,
+            "inspectedSources": 280,
+            "eligibleSources": 282,
+            "retainedMatches": 280,
+            "encounteredMatches": 280,
+            "writtenMatches": 177,
+            "namedDeclarationFiles": 0,
+            "limits": [
+              "response-characters"
+            ]
+          },
+          "usedStoredContinuation": true,
+          "error": null,
+          "visibleFileCount": 38,
+          "continuedFileCounts": [
+            7
+          ]
+        }
+      ],
+      "treeRuns": [
+        {
+          "pattern": "**/*LevelOverride*",
+          "rationale": "Level override is a task term usable as a filename filter.",
+          "visiblePaths": [
+            "src/Serilog/Core/LevelOverrideMap.cs",
+            "test/Serilog.Tests/Core/LevelOverrideMapTests.cs"
+          ],
+          "truncated": false,
+          "error": null
+        },
+        {
+          "pattern": "**/*Logger*",
+          "rationale": "The task is about logger level selection.",
+          "visiblePaths": [
+            "src/Serilog/Core/Logger.cs",
+            "src/Serilog/LoggerConfiguration.cs",
+            "src/Serilog/Configuration/LoggerMinimumLevelConfiguration.cs",
+            "test/Serilog.Tests/Core/ChildLoggerTests.cs"
+          ],
+          "truncated": false,
+          "error": null
+        }
+      ],
+      "related": {
+        "seedsUsed": [
+          "src/Serilog/Core/LevelOverrideMap.cs"
+        ],
+        "calls": 3,
+        "callsByHop": {
+          "1": 1,
+          "2": 2
+        },
+        "failedCalls": 0,
+        "unresolvedEvidenceCount": 0,
+        "unresolvedStatuses": {}
+      },
+      "requiredFiles": [
+        {
+          "path": "src/Serilog/Core/LevelOverrideMap.cs",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "GetEffectiveLevel",
+              "position": 2
+            },
+            {
+              "surface": "search_project",
+              "input": "override",
+              "position": 5
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*LevelOverride*",
+              "position": 1
+            }
+          ],
+          "relatedHop": 0,
+          "relatedVia": null,
+          "matchingTaskQueries": [
+            "GetEffectiveLevel",
+            "override"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "GetEffectiveLevel",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 2,
+                "continuationPage": null
+              },
+              {
+                "pattern": "override",
+                "complete": false,
+                "limits": [
+                  "response-characters"
+                ],
+                "initialPosition": 5,
+                "continuationPage": 1
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*LevelOverride*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "src/Serilog/Core/Logger.cs",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "GetEffectiveLevel",
+              "position": 3
+            },
+            {
+              "surface": "search_project",
+              "input": "SourceContext",
+              "position": 3
+            },
+            {
+              "surface": "search_project",
+              "input": "override",
+              "position": 6
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*Logger*",
+              "position": 15
+            }
+          ],
+          "relatedHop": 2,
+          "relatedVia": "src/Serilog/Events/LogEventLevel.cs",
+          "matchingTaskQueries": [
+            "GetEffectiveLevel",
+            "SourceContext",
+            "override"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "GetEffectiveLevel",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 3,
+                "continuationPage": null
+              },
+              {
+                "pattern": "SourceContext",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 3,
+                "continuationPage": null
+              },
+              {
+                "pattern": "override",
+                "complete": false,
+                "limits": [
+                  "response-characters"
+                ],
+                "initialPosition": 6,
+                "continuationPage": null
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*Logger*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "src/Serilog/LoggerConfiguration.cs",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "override",
+              "position": 17
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*Logger*",
+              "position": 19
+            }
+          ],
+          "relatedHop": null,
+          "relatedVia": null,
+          "matchingTaskQueries": [
+            "override"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "override",
+                "complete": false,
+                "limits": [
+                  "response-characters"
+                ],
+                "initialPosition": 17,
+                "continuationPage": null
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*Logger*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "src/Serilog/Configuration/LoggerMinimumLevelConfiguration.cs",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "override",
+              "position": 3
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*Logger*",
+              "position": 12
+            }
+          ],
+          "relatedHop": 2,
+          "relatedVia": "src/Serilog/Core/LoggingLevelSwitch.cs",
+          "matchingTaskQueries": [
+            "override"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "override",
+                "complete": false,
+                "limits": [
+                  "response-characters"
+                ],
+                "initialPosition": 3,
+                "continuationPage": 1
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*Logger*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "test/Serilog.Tests/Core/LevelOverrideMapTests.cs",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "GetEffectiveLevel",
+              "position": 5
+            },
+            {
+              "surface": "search_project",
+              "input": "override",
+              "position": 30
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*LevelOverride*",
+              "position": 2
+            }
+          ],
+          "relatedHop": 2,
+          "relatedVia": "src/Serilog/Core/LoggingLevelSwitch.cs",
+          "matchingTaskQueries": [
+            "GetEffectiveLevel",
+            "override"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "GetEffectiveLevel",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 5,
+                "continuationPage": null
+              },
+              {
+                "pattern": "override",
+                "complete": false,
+                "limits": [
+                  "response-characters"
+                ],
+                "initialPosition": 30,
+                "continuationPage": null
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*LevelOverride*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "test/Serilog.Tests/Core/ChildLoggerTests.cs",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "SourceContext",
+              "position": 11
+            },
+            {
+              "surface": "search_project",
+              "input": "override",
+              "position": 29
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*Logger*",
+              "position": 27
+            }
+          ],
+          "relatedHop": 2,
+          "relatedVia": "src/Serilog/Events/LogEventLevel.cs",
+          "matchingTaskQueries": [
+            "SourceContext",
+            "override"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "SourceContext",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 11,
+                "continuationPage": null
+              },
+              {
+                "pattern": "override",
+                "complete": false,
+                "limits": [
+                  "response-characters"
+                ],
+                "initialPosition": 29,
+                "continuationPage": 1
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*Logger*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        }
+      ]
+    },
+    {
+      "id": "T8",
+      "repository": "serilog",
+      "taskSummary": "Map the enricher interface, implementations, aggregation, configuration, context, and tests.",
+      "queries": [
+        {
+          "pattern": "ILogEventEnricher",
+          "rationale": "The task names the enricher interface."
+        },
+        {
+          "pattern": "SafeAggregateEnricher",
+          "rationale": "The task asks about safe aggregation."
+        },
+        {
+          "pattern": "LogContext",
+          "rationale": "The task asks about context enrichment."
+        },
+        {
+          "pattern": "Enrich\\(",
+          "rationale": "The task names the Enrich method."
+        }
+      ],
+      "treePatterns": [
+        {
+          "pattern": "**/*Enricher*",
+          "rationale": "Enricher is a task term usable as a filename filter."
+        },
+        {
+          "pattern": "**/*LogContext*",
+          "rationale": "LogContext is a task term usable as a filename filter."
+        }
+      ],
+      "seeds": [
+        {
+          "path": "src/Serilog/Core/ILogEventEnricher.cs",
+          "discoveredBy": {
+            "surface": "search_project",
+            "input": "ILogEventEnricher"
+          }
+        }
+      ],
+      "searchRuns": [
+        {
+          "pattern": "ILogEventEnricher",
+          "rationale": "The task names the enricher interface.",
+          "visiblePaths": [
+            "src/Serilog/Core/ILogEventEnricher.cs",
+            "src/Serilog/Core/Logger.cs",
+            "src/Serilog/Core/Enrichers/PropertyEnricher.cs",
+            "src/Serilog/Core/Enrichers/FixedPropertyEnricher.cs",
+            "src/Serilog/Core/Enrichers/ConditionalEnricher.cs",
+            "src/Serilog/Core/Enrichers/SafeAggregateEnricher.cs",
+            "src/Serilog/Core/Enrichers/EmptyEnricher.cs",
+            "src/Serilog/Context/LogContextEnricher.cs",
+            "src/Serilog/Configuration/LoggerEnrichmentConfiguration.cs",
+            "test/Serilog.Tests/Context/LogContextTests.cs"
+          ],
+          "continuedPaths": [],
+          "boundary": {
+            "complete": true,
+            "inspectedSources": 280,
+            "eligibleSources": 282,
+            "retainedMatches": 74,
+            "encounteredMatches": 74,
+            "writtenMatches": 74,
+            "namedDeclarationFiles": 17,
+            "limits": []
+          },
+          "usedStoredContinuation": false,
+          "error": null,
+          "visibleFileCount": 23,
+          "continuedFileCounts": []
+        },
+        {
+          "pattern": "SafeAggregateEnricher",
+          "rationale": "The task asks about safe aggregation.",
+          "visiblePaths": [
+            "src/Serilog/Core/Logger.cs",
+            "src/Serilog/Core/Enrichers/SafeAggregateEnricher.cs",
+            "src/Serilog/Configuration/LoggerEnrichmentConfiguration.cs"
+          ],
+          "continuedPaths": [],
+          "boundary": {
+            "complete": true,
+            "inspectedSources": 280,
+            "eligibleSources": 282,
+            "retainedMatches": 8,
+            "encounteredMatches": 8,
+            "writtenMatches": 8,
+            "namedDeclarationFiles": 2,
+            "limits": []
+          },
+          "usedStoredContinuation": false,
+          "error": null,
+          "visibleFileCount": 6,
+          "continuedFileCounts": []
+        },
+        {
+          "pattern": "LogContext",
+          "rationale": "The task asks about context enrichment.",
+          "visiblePaths": [
+            "src/Serilog/Context/LogContextEnricher.cs",
+            "src/Serilog/Configuration/LoggerEnrichmentConfiguration.cs",
+            "test/Serilog.Tests/Context/LogContextTests.cs"
+          ],
+          "continuedPaths": [],
+          "boundary": {
+            "complete": true,
+            "inspectedSources": 280,
+            "eligibleSources": 282,
+            "retainedMatches": 68,
+            "encounteredMatches": 68,
+            "writtenMatches": 68,
+            "namedDeclarationFiles": 8,
+            "limits": []
+          },
+          "usedStoredContinuation": false,
+          "error": null,
+          "visibleFileCount": 13,
+          "continuedFileCounts": []
+        },
+        {
+          "pattern": "Enrich\\(",
+          "rationale": "The task names the Enrich method.",
+          "visiblePaths": [
+            "src/Serilog/Core/ILogEventEnricher.cs",
+            "src/Serilog/Core/Logger.cs",
+            "src/Serilog/Core/Enrichers/PropertyEnricher.cs",
+            "src/Serilog/Core/Enrichers/FixedPropertyEnricher.cs",
+            "src/Serilog/Core/Enrichers/ConditionalEnricher.cs",
+            "src/Serilog/Core/Enrichers/SafeAggregateEnricher.cs",
+            "src/Serilog/Core/Enrichers/EmptyEnricher.cs",
+            "src/Serilog/Context/LogContextEnricher.cs"
+          ],
+          "continuedPaths": [],
+          "boundary": {
+            "complete": true,
+            "inspectedSources": 280,
+            "eligibleSources": 282,
+            "retainedMatches": 19,
+            "encounteredMatches": 19,
+            "writtenMatches": 19,
+            "namedDeclarationFiles": 10,
+            "limits": []
+          },
+          "usedStoredContinuation": false,
+          "error": null,
+          "visibleFileCount": 13,
+          "continuedFileCounts": []
+        }
+      ],
+      "treeRuns": [
+        {
+          "pattern": "**/*Enricher*",
+          "rationale": "Enricher is a task term usable as a filename filter.",
+          "visiblePaths": [
+            "src/Serilog/Core/ILogEventEnricher.cs",
+            "src/Serilog/Core/Enrichers/PropertyEnricher.cs",
+            "src/Serilog/Core/Enrichers/FixedPropertyEnricher.cs",
+            "src/Serilog/Core/Enrichers/ConditionalEnricher.cs",
+            "src/Serilog/Core/Enrichers/SafeAggregateEnricher.cs",
+            "src/Serilog/Core/Enrichers/EmptyEnricher.cs",
+            "src/Serilog/Context/LogContextEnricher.cs"
+          ],
+          "truncated": false,
+          "error": null
+        },
+        {
+          "pattern": "**/*LogContext*",
+          "rationale": "LogContext is a task term usable as a filename filter.",
+          "visiblePaths": [
+            "src/Serilog/Context/LogContextEnricher.cs",
+            "test/Serilog.Tests/Context/LogContextTests.cs"
+          ],
+          "truncated": false,
+          "error": null
+        }
+      ],
+      "related": {
+        "seedsUsed": [
+          "src/Serilog/Core/ILogEventEnricher.cs"
+        ],
+        "calls": 21,
+        "callsByHop": {
+          "1": 1,
+          "2": 20
+        },
+        "failedCalls": 0,
+        "unresolvedEvidenceCount": 0,
+        "unresolvedStatuses": {}
+      },
+      "requiredFiles": [
+        {
+          "path": "src/Serilog/Core/ILogEventEnricher.cs",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "ILogEventEnricher",
+              "position": 1
+            },
+            {
+              "surface": "search_project",
+              "input": "Enrich\\(",
+              "position": 8
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*Enricher*",
+              "position": 8
+            }
+          ],
+          "relatedHop": 0,
+          "relatedVia": null,
+          "matchingTaskQueries": [
+            "ILogEventEnricher",
+            "Enrich\\("
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "ILogEventEnricher",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 1,
+                "continuationPage": null
+              },
+              {
+                "pattern": "Enrich\\(",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 8,
+                "continuationPage": null
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*Enricher*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "src/Serilog/Core/Logger.cs",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "ILogEventEnricher",
+              "position": 11
+            },
+            {
+              "surface": "search_project",
+              "input": "SafeAggregateEnricher",
+              "position": 4
+            },
+            {
+              "surface": "search_project",
+              "input": "Enrich\\(",
+              "position": 9
+            }
+          ],
+          "relatedHop": 1,
+          "relatedVia": "src/Serilog/Core/ILogEventEnricher.cs",
+          "matchingTaskQueries": [
+            "ILogEventEnricher",
+            "SafeAggregateEnricher",
+            "Enrich\\("
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "ILogEventEnricher",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 11,
+                "continuationPage": null
+              },
+              {
+                "pattern": "SafeAggregateEnricher",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 4,
+                "continuationPage": null
+              },
+              {
+                "pattern": "Enrich\\(",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 9,
+                "continuationPage": null
+              }
+            ],
+            "tree": []
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "src/Serilog/Core/Enrichers/PropertyEnricher.cs",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "ILogEventEnricher",
+              "position": 9
+            },
+            {
+              "surface": "search_project",
+              "input": "Enrich\\(",
+              "position": 6
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*Enricher*",
+              "position": 6
+            }
+          ],
+          "relatedHop": 1,
+          "relatedVia": "src/Serilog/Core/ILogEventEnricher.cs",
+          "matchingTaskQueries": [
+            "ILogEventEnricher",
+            "Enrich\\("
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "ILogEventEnricher",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 9,
+                "continuationPage": null
+              },
+              {
+                "pattern": "Enrich\\(",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 6,
+                "continuationPage": null
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*Enricher*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "src/Serilog/Core/Enrichers/FixedPropertyEnricher.cs",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "ILogEventEnricher",
+              "position": 8
+            },
+            {
+              "surface": "search_project",
+              "input": "Enrich\\(",
+              "position": 5
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*Enricher*",
+              "position": 5
+            }
+          ],
+          "relatedHop": 1,
+          "relatedVia": "src/Serilog/Core/ILogEventEnricher.cs",
+          "matchingTaskQueries": [
+            "ILogEventEnricher",
+            "Enrich\\("
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "ILogEventEnricher",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 8,
+                "continuationPage": null
+              },
+              {
+                "pattern": "Enrich\\(",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 5,
+                "continuationPage": null
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*Enricher*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "src/Serilog/Core/Enrichers/ConditionalEnricher.cs",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "ILogEventEnricher",
+              "position": 6
+            },
+            {
+              "surface": "search_project",
+              "input": "Enrich\\(",
+              "position": 3
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*Enricher*",
+              "position": 3
+            }
+          ],
+          "relatedHop": 1,
+          "relatedVia": "src/Serilog/Core/ILogEventEnricher.cs",
+          "matchingTaskQueries": [
+            "ILogEventEnricher",
+            "Enrich\\("
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "ILogEventEnricher",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 6,
+                "continuationPage": null
+              },
+              {
+                "pattern": "Enrich\\(",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 3,
+                "continuationPage": null
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*Enricher*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "src/Serilog/Core/Enrichers/SafeAggregateEnricher.cs",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "ILogEventEnricher",
+              "position": 10
+            },
+            {
+              "surface": "search_project",
+              "input": "SafeAggregateEnricher",
+              "position": 1
+            },
+            {
+              "surface": "search_project",
+              "input": "Enrich\\(",
+              "position": 7
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*Enricher*",
+              "position": 7
+            }
+          ],
+          "relatedHop": 1,
+          "relatedVia": "src/Serilog/Core/ILogEventEnricher.cs",
+          "matchingTaskQueries": [
+            "ILogEventEnricher",
+            "SafeAggregateEnricher",
+            "Enrich\\("
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "ILogEventEnricher",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 10,
+                "continuationPage": null
+              },
+              {
+                "pattern": "SafeAggregateEnricher",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 1,
+                "continuationPage": null
+              },
+              {
+                "pattern": "Enrich\\(",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 7,
+                "continuationPage": null
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*Enricher*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "src/Serilog/Core/Enrichers/EmptyEnricher.cs",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "ILogEventEnricher",
+              "position": 7
+            },
+            {
+              "surface": "search_project",
+              "input": "Enrich\\(",
+              "position": 4
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*Enricher*",
+              "position": 4
+            }
+          ],
+          "relatedHop": 1,
+          "relatedVia": "src/Serilog/Core/ILogEventEnricher.cs",
+          "matchingTaskQueries": [
+            "ILogEventEnricher",
+            "Enrich\\("
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "ILogEventEnricher",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 7,
+                "continuationPage": null
+              },
+              {
+                "pattern": "Enrich\\(",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 4,
+                "continuationPage": null
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*Enricher*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "src/Serilog/Context/LogContextEnricher.cs",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "ILogEventEnricher",
+              "position": 5
+            },
+            {
+              "surface": "search_project",
+              "input": "LogContext",
+              "position": 1
+            },
+            {
+              "surface": "search_project",
+              "input": "Enrich\\(",
+              "position": 2
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*Enricher*",
+              "position": 2
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*LogContext*",
+              "position": 5
+            }
+          ],
+          "relatedHop": 1,
+          "relatedVia": "src/Serilog/Core/ILogEventEnricher.cs",
+          "matchingTaskQueries": [
+            "ILogEventEnricher",
+            "LogContext",
+            "Enrich\\("
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "ILogEventEnricher",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 5,
+                "continuationPage": null
+              },
+              {
+                "pattern": "LogContext",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 1,
+                "continuationPage": null
+              },
+              {
+                "pattern": "Enrich\\(",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 2,
+                "continuationPage": null
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*Enricher*",
+                "visible": true,
+                "truncated": false
+              },
+              {
+                "pattern": "**/*LogContext*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "src/Serilog/Configuration/LoggerEnrichmentConfiguration.cs",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "ILogEventEnricher",
+              "position": 2
+            },
+            {
+              "surface": "search_project",
+              "input": "SafeAggregateEnricher",
+              "position": 2
+            },
+            {
+              "surface": "search_project",
+              "input": "LogContext",
+              "position": 7
+            }
+          ],
+          "relatedHop": 1,
+          "relatedVia": "src/Serilog/Core/ILogEventEnricher.cs",
+          "matchingTaskQueries": [
+            "ILogEventEnricher",
+            "SafeAggregateEnricher",
+            "LogContext"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "ILogEventEnricher",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 2,
+                "continuationPage": null
+              },
+              {
+                "pattern": "SafeAggregateEnricher",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 2,
+                "continuationPage": null
+              },
+              {
+                "pattern": "LogContext",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 7,
+                "continuationPage": null
+              }
+            ],
+            "tree": []
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "test/Serilog.Tests/Core/LoggerTests.cs",
+          "classification": "two-or-three-call-chain",
+          "reason": "resolved dependency evidence reaches the file at hop 2",
+          "directEvidence": [],
+          "relatedHop": 2,
+          "relatedVia": "src/Serilog/Core/Pipeline/SilentLogger.cs",
+          "matchingTaskQueries": [],
+          "limitEvidence": {
+            "search": [],
+            "tree": []
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "test/Serilog.Tests/Context/LogContextTests.cs",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "ILogEventEnricher",
+              "position": 18
+            },
+            {
+              "surface": "search_project",
+              "input": "LogContext",
+              "position": 3
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*LogContext*",
+              "position": 7
+            }
+          ],
+          "relatedHop": 1,
+          "relatedVia": "src/Serilog/Core/ILogEventEnricher.cs",
+          "matchingTaskQueries": [
+            "ILogEventEnricher",
+            "LogContext"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "ILogEventEnricher",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 18,
+                "continuationPage": null
+              },
+              {
+                "pattern": "LogContext",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 3,
+                "continuationPage": null
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*LogContext*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        }
+      ]
+    },
+    {
+      "id": "N1",
+      "repository": "serilog",
+      "taskSummary": "Find the scalar-conversion policy interface, all implementations, the call site, and conditional target behavior.",
+      "queries": [
+        {
+          "pattern": "IScalarConversionPolicy",
+          "rationale": "The task names the conversion-policy interface."
+        },
+        {
+          "pattern": "TryConvertToScalar",
+          "rationale": "The task asks how scalar conversion is invoked."
+        },
+        {
+          "pattern": "PropertyValueConverter",
+          "rationale": "The task names the conversion call site."
+        }
+      ],
+      "treePatterns": [
+        {
+          "pattern": "**/*ScalarConversionPolicy*",
+          "rationale": "The named policy is usable as a filename filter."
+        },
+        {
+          "pattern": "**/*PropertyValueConverter*",
+          "rationale": "The named call site is usable as a filename filter."
+        }
+      ],
+      "seeds": [
+        {
+          "path": "src/Serilog/Core/IScalarConversionPolicy.cs",
+          "discoveredBy": {
+            "surface": "search_project",
+            "input": "IScalarConversionPolicy"
+          }
+        }
+      ],
+      "searchRuns": [
+        {
+          "pattern": "IScalarConversionPolicy",
+          "rationale": "The task names the conversion-policy interface.",
+          "visiblePaths": [
+            "src/Serilog/Core/IScalarConversionPolicy.cs",
+            "src/Serilog/Capturing/PropertyValueConverter.cs",
+            "src/Serilog/Policies/PrimitiveScalarConversionPolicy.cs",
+            "src/Serilog/Policies/SimpleScalarConversionPolicy.cs",
+            "src/Serilog/Policies/EnumScalarConversionPolicy.cs",
+            "src/Serilog/Policies/ByteArrayScalarConversionPolicy.cs",
+            "src/Serilog/Policies/ByteMemoryScalarConversionPolicy.cs"
+          ],
+          "continuedPaths": [],
+          "boundary": {
+            "complete": true,
+            "inspectedSources": 280,
+            "eligibleSources": 282,
+            "retainedMatches": 8,
+            "encounteredMatches": 8,
+            "writtenMatches": 8,
+            "namedDeclarationFiles": 6,
+            "limits": []
+          },
+          "usedStoredContinuation": false,
+          "error": null,
+          "visibleFileCount": 7,
+          "continuedFileCounts": []
+        },
+        {
+          "pattern": "TryConvertToScalar",
+          "rationale": "The task asks how scalar conversion is invoked.",
+          "visiblePaths": [
+            "src/Serilog/Core/IScalarConversionPolicy.cs",
+            "src/Serilog/Capturing/PropertyValueConverter.cs",
+            "src/Serilog/Policies/PrimitiveScalarConversionPolicy.cs",
+            "src/Serilog/Policies/SimpleScalarConversionPolicy.cs",
+            "src/Serilog/Policies/EnumScalarConversionPolicy.cs",
+            "src/Serilog/Policies/ByteArrayScalarConversionPolicy.cs",
+            "src/Serilog/Policies/ByteMemoryScalarConversionPolicy.cs"
+          ],
+          "continuedPaths": [],
+          "boundary": {
+            "complete": true,
+            "inspectedSources": 280,
+            "eligibleSources": 282,
+            "retainedMatches": 7,
+            "encounteredMatches": 7,
+            "writtenMatches": 7,
+            "namedDeclarationFiles": 6,
+            "limits": []
+          },
+          "usedStoredContinuation": false,
+          "error": null,
+          "visibleFileCount": 7,
+          "continuedFileCounts": []
+        },
+        {
+          "pattern": "PropertyValueConverter",
+          "rationale": "The task names the conversion call site.",
+          "visiblePaths": [
+            "src/Serilog/Capturing/PropertyValueConverter.cs"
+          ],
+          "continuedPaths": [],
+          "boundary": {
+            "complete": true,
+            "inspectedSources": 280,
+            "eligibleSources": 282,
+            "retainedMatches": 25,
+            "encounteredMatches": 25,
+            "writtenMatches": 25,
+            "namedDeclarationFiles": 5,
+            "limits": []
+          },
+          "usedStoredContinuation": false,
+          "error": null,
+          "visibleFileCount": 9,
+          "continuedFileCounts": []
+        }
+      ],
+      "treeRuns": [
+        {
+          "pattern": "**/*ScalarConversionPolicy*",
+          "rationale": "The named policy is usable as a filename filter.",
+          "visiblePaths": [
+            "src/Serilog/Core/IScalarConversionPolicy.cs",
+            "src/Serilog/Policies/PrimitiveScalarConversionPolicy.cs",
+            "src/Serilog/Policies/SimpleScalarConversionPolicy.cs",
+            "src/Serilog/Policies/EnumScalarConversionPolicy.cs",
+            "src/Serilog/Policies/ByteArrayScalarConversionPolicy.cs",
+            "src/Serilog/Policies/ByteMemoryScalarConversionPolicy.cs"
+          ],
+          "truncated": false,
+          "error": null
+        },
+        {
+          "pattern": "**/*PropertyValueConverter*",
+          "rationale": "The named call site is usable as a filename filter.",
+          "visiblePaths": [
+            "src/Serilog/Capturing/PropertyValueConverter.cs"
+          ],
+          "truncated": false,
+          "error": null
+        }
+      ],
+      "related": {
+        "seedsUsed": [
+          "src/Serilog/Core/IScalarConversionPolicy.cs"
+        ],
+        "calls": 6,
+        "callsByHop": {
+          "1": 1,
+          "2": 5
+        },
+        "failedCalls": 0,
+        "unresolvedEvidenceCount": 0,
+        "unresolvedStatuses": {}
+      },
+      "requiredFiles": [
+        {
+          "path": "src/Serilog/Core/IScalarConversionPolicy.cs",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "IScalarConversionPolicy",
+              "position": 1
+            },
+            {
+              "surface": "search_project",
+              "input": "TryConvertToScalar",
+              "position": 1
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*ScalarConversionPolicy*",
+              "position": 1
+            }
+          ],
+          "relatedHop": 0,
+          "relatedVia": null,
+          "matchingTaskQueries": [
+            "IScalarConversionPolicy",
+            "TryConvertToScalar"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "IScalarConversionPolicy",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 1,
+                "continuationPage": null
+              },
+              {
+                "pattern": "TryConvertToScalar",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 1,
+                "continuationPage": null
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*ScalarConversionPolicy*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "src/Serilog/Capturing/PropertyValueConverter.cs",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "IScalarConversionPolicy",
+              "position": 2
+            },
+            {
+              "surface": "search_project",
+              "input": "TryConvertToScalar",
+              "position": 7
+            },
+            {
+              "surface": "search_project",
+              "input": "PropertyValueConverter",
+              "position": 2
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*PropertyValueConverter*",
+              "position": 1
+            }
+          ],
+          "relatedHop": null,
+          "relatedVia": null,
+          "matchingTaskQueries": [
+            "IScalarConversionPolicy",
+            "TryConvertToScalar",
+            "PropertyValueConverter"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "IScalarConversionPolicy",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 2,
+                "continuationPage": null
+              },
+              {
+                "pattern": "TryConvertToScalar",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 7,
+                "continuationPage": null
+              },
+              {
+                "pattern": "PropertyValueConverter",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 2,
+                "continuationPage": null
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*PropertyValueConverter*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "src/Serilog/Policies/PrimitiveScalarConversionPolicy.cs",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "IScalarConversionPolicy",
+              "position": 6
+            },
+            {
+              "surface": "search_project",
+              "input": "TryConvertToScalar",
+              "position": 5
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*ScalarConversionPolicy*",
+              "position": 5
+            }
+          ],
+          "relatedHop": 1,
+          "relatedVia": "src/Serilog/Core/IScalarConversionPolicy.cs",
+          "matchingTaskQueries": [
+            "IScalarConversionPolicy",
+            "TryConvertToScalar"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "IScalarConversionPolicy",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 6,
+                "continuationPage": null
+              },
+              {
+                "pattern": "TryConvertToScalar",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 5,
+                "continuationPage": null
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*ScalarConversionPolicy*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "src/Serilog/Policies/SimpleScalarConversionPolicy.cs",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "IScalarConversionPolicy",
+              "position": 7
+            },
+            {
+              "surface": "search_project",
+              "input": "TryConvertToScalar",
+              "position": 6
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*ScalarConversionPolicy*",
+              "position": 6
+            }
+          ],
+          "relatedHop": 1,
+          "relatedVia": "src/Serilog/Core/IScalarConversionPolicy.cs",
+          "matchingTaskQueries": [
+            "IScalarConversionPolicy",
+            "TryConvertToScalar"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "IScalarConversionPolicy",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 7,
+                "continuationPage": null
+              },
+              {
+                "pattern": "TryConvertToScalar",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 6,
+                "continuationPage": null
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*ScalarConversionPolicy*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "src/Serilog/Policies/EnumScalarConversionPolicy.cs",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "IScalarConversionPolicy",
+              "position": 5
+            },
+            {
+              "surface": "search_project",
+              "input": "TryConvertToScalar",
+              "position": 4
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*ScalarConversionPolicy*",
+              "position": 4
+            }
+          ],
+          "relatedHop": 1,
+          "relatedVia": "src/Serilog/Core/IScalarConversionPolicy.cs",
+          "matchingTaskQueries": [
+            "IScalarConversionPolicy",
+            "TryConvertToScalar"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "IScalarConversionPolicy",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 5,
+                "continuationPage": null
+              },
+              {
+                "pattern": "TryConvertToScalar",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 4,
+                "continuationPage": null
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*ScalarConversionPolicy*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "src/Serilog/Policies/ByteArrayScalarConversionPolicy.cs",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "IScalarConversionPolicy",
+              "position": 3
+            },
+            {
+              "surface": "search_project",
+              "input": "TryConvertToScalar",
+              "position": 2
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*ScalarConversionPolicy*",
+              "position": 2
+            }
+          ],
+          "relatedHop": 1,
+          "relatedVia": "src/Serilog/Core/IScalarConversionPolicy.cs",
+          "matchingTaskQueries": [
+            "IScalarConversionPolicy",
+            "TryConvertToScalar"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "IScalarConversionPolicy",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 3,
+                "continuationPage": null
+              },
+              {
+                "pattern": "TryConvertToScalar",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 2,
+                "continuationPage": null
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*ScalarConversionPolicy*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "src/Serilog/Policies/ByteMemoryScalarConversionPolicy.cs",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "IScalarConversionPolicy",
+              "position": 4
+            },
+            {
+              "surface": "search_project",
+              "input": "TryConvertToScalar",
+              "position": 3
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*ScalarConversionPolicy*",
+              "position": 3
+            }
+          ],
+          "relatedHop": null,
+          "relatedVia": null,
+          "matchingTaskQueries": [
+            "IScalarConversionPolicy",
+            "TryConvertToScalar"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "IScalarConversionPolicy",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 4,
+                "continuationPage": null
+              },
+              {
+                "pattern": "TryConvertToScalar",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 3,
+                "continuationPage": null
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*ScalarConversionPolicy*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        }
+      ]
+    },
+    {
+      "id": "N2",
+      "repository": "httpx",
+      "taskSummary": "Verify URL and URL-component length boundaries and the InvalidURL messages they produce.",
+      "queries": [
+        {
+          "pattern": "65536",
+          "rationale": "The task states the length boundary."
+        },
+        {
+          "pattern": "URL too long",
+          "rationale": "The task quotes the whole-URL error."
+        },
+        {
+          "pattern": "URL component",
+          "rationale": "The task quotes the component error."
+        },
+        {
+          "pattern": "InvalidURL",
+          "rationale": "The task names the exception."
+        }
+      ],
+      "treePatterns": [
+        {
+          "pattern": "**/*url*",
+          "rationale": "URL is a task term usable as a filename filter."
+        }
+      ],
+      "seeds": [
+        {
+          "path": "httpx/_urlparse.py",
+          "discoveredBy": {
+            "surface": "search_project",
+            "input": "65536"
+          }
+        }
+      ],
+      "searchRuns": [
+        {
+          "pattern": "65536",
+          "rationale": "The task states the length boundary.",
+          "visiblePaths": [
+            "httpx/_urlparse.py"
+          ],
+          "continuedPaths": [],
+          "boundary": {
+            "complete": true,
+            "inspectedSources": 115,
+            "eligibleSources": 125,
+            "retainedMatches": 1,
+            "encounteredMatches": 1,
+            "writtenMatches": 1,
+            "namedDeclarationFiles": 0,
+            "limits": []
+          },
+          "usedStoredContinuation": false,
+          "error": null,
+          "visibleFileCount": 1,
+          "continuedFileCounts": []
+        },
+        {
+          "pattern": "URL too long",
+          "rationale": "The task quotes the whole-URL error.",
+          "visiblePaths": [
+            "httpx/_urlparse.py",
+            "tests/models/test_url.py"
+          ],
+          "continuedPaths": [],
+          "boundary": {
+            "complete": true,
+            "inspectedSources": 115,
+            "eligibleSources": 125,
+            "retainedMatches": 2,
+            "encounteredMatches": 2,
+            "writtenMatches": 2,
+            "namedDeclarationFiles": 2,
+            "limits": []
+          },
+          "usedStoredContinuation": false,
+          "error": null,
+          "visibleFileCount": 2,
+          "continuedFileCounts": []
+        },
+        {
+          "pattern": "URL component",
+          "rationale": "The task quotes the component error.",
+          "visiblePaths": [
+            "httpx/_urlparse.py",
+            "tests/models/test_url.py"
+          ],
+          "continuedPaths": [],
+          "boundary": {
+            "complete": true,
+            "inspectedSources": 115,
+            "eligibleSources": 125,
+            "retainedMatches": 7,
+            "encounteredMatches": 7,
+            "writtenMatches": 7,
+            "namedDeclarationFiles": 2,
+            "limits": []
+          },
+          "usedStoredContinuation": false,
+          "error": null,
+          "visibleFileCount": 3,
+          "continuedFileCounts": []
+        },
+        {
+          "pattern": "InvalidURL",
+          "rationale": "The task names the exception.",
+          "visiblePaths": [
+            "httpx/_urlparse.py",
+            "httpx/_exceptions.py",
+            "tests/models/test_url.py"
+          ],
+          "continuedPaths": [],
+          "boundary": {
+            "complete": true,
+            "inspectedSources": 115,
+            "eligibleSources": 125,
+            "retainedMatches": 40,
+            "encounteredMatches": 40,
+            "writtenMatches": 40,
+            "namedDeclarationFiles": 4,
+            "limits": []
+          },
+          "usedStoredContinuation": false,
+          "error": null,
+          "visibleFileCount": 7,
+          "continuedFileCounts": []
+        }
+      ],
+      "treeRuns": [
+        {
+          "pattern": "**/*url*",
+          "rationale": "URL is a task term usable as a filename filter.",
+          "visiblePaths": [
+            "httpx/_urlparse.py",
+            "httpx/_urls.py",
+            "tests/models/test_url.py"
+          ],
+          "truncated": false,
+          "error": null
+        }
+      ],
+      "related": {
+        "seedsUsed": [
+          "httpx/_urlparse.py"
+        ],
+        "calls": 4,
+        "callsByHop": {
+          "1": 1,
+          "2": 3
+        },
+        "failedCalls": 0,
+        "unresolvedEvidenceCount": 0,
+        "unresolvedStatuses": {}
+      },
+      "requiredFiles": [
+        {
+          "path": "httpx/_urlparse.py",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "65536",
+              "position": 1
+            },
+            {
+              "surface": "search_project",
+              "input": "URL too long",
+              "position": 1
+            },
+            {
+              "surface": "search_project",
+              "input": "URL component",
+              "position": 2
+            },
+            {
+              "surface": "search_project",
+              "input": "InvalidURL",
+              "position": 6
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*url*",
+              "position": 1
+            }
+          ],
+          "relatedHop": 0,
+          "relatedVia": null,
+          "matchingTaskQueries": [
+            "65536",
+            "URL too long",
+            "URL component",
+            "InvalidURL"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "65536",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 1,
+                "continuationPage": null
+              },
+              {
+                "pattern": "URL too long",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 1,
+                "continuationPage": null
+              },
+              {
+                "pattern": "URL component",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 2,
+                "continuationPage": null
+              },
+              {
+                "pattern": "InvalidURL",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 6,
+                "continuationPage": null
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*url*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "httpx/_urls.py",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "get_tree",
+              "input": "**/*url*",
+              "position": 2
+            }
+          ],
+          "relatedHop": 1,
+          "relatedVia": "httpx/_urlparse.py",
+          "matchingTaskQueries": [],
+          "limitEvidence": {
+            "search": [],
+            "tree": [
+              {
+                "pattern": "**/*url*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "httpx/_exceptions.py",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "InvalidURL",
+              "position": 5
+            }
+          ],
+          "relatedHop": 1,
+          "relatedVia": "httpx/_urlparse.py",
+          "matchingTaskQueries": [
+            "InvalidURL"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "InvalidURL",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 5,
+                "continuationPage": null
+              }
+            ],
+            "tree": []
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "tests/models/test_url.py",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "URL too long",
+              "position": 2
+            },
+            {
+              "surface": "search_project",
+              "input": "URL component",
+              "position": 3
+            },
+            {
+              "surface": "search_project",
+              "input": "InvalidURL",
+              "position": 7
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*url*",
+              "position": 3
+            }
+          ],
+          "relatedHop": null,
+          "relatedVia": null,
+          "matchingTaskQueries": [
+            "URL too long",
+            "URL component",
+            "InvalidURL"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "URL too long",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 2,
+                "continuationPage": null
+              },
+              {
+                "pattern": "URL component",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 3,
+                "continuationPage": null
+              },
+              {
+                "pattern": "InvalidURL",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 7,
+                "continuationPage": null
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*url*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        }
+      ]
+    },
+    {
+      "id": "N3",
+      "repository": "hono",
+      "taskSummary": "Trace route registration, dispatch, request handoff, and composed handler progress.",
+      "queries": [
+        {
+          "pattern": "addRoute",
+          "rationale": "The task names route registration."
+        },
+        {
+          "pattern": "dispatch",
+          "rationale": "The task names dispatch."
+        },
+        {
+          "pattern": "matchResult",
+          "rationale": "The task names the dispatch result."
+        },
+        {
+          "pattern": "compose",
+          "rationale": "The task asks about composed handler progress."
+        }
+      ],
+      "treePatterns": [
+        {
+          "pattern": "**/*route*",
+          "rationale": "Route is a task term usable as a filename filter."
+        },
+        {
+          "pattern": "**/*request*",
+          "rationale": "Request is a task term usable as a filename filter."
+        },
+        {
+          "pattern": "**/*compose*",
+          "rationale": "Compose is a task term usable as a filename filter."
+        }
+      ],
+      "seeds": [
+        {
+          "path": "src/hono-base.ts",
+          "discoveredBy": {
+            "surface": "search_project",
+            "input": "addRoute"
+          }
+        },
+        {
+          "path": "src/request.ts",
+          "discoveredBy": {
+            "surface": "get_tree",
+            "input": "**/*request*"
+          }
+        },
+        {
+          "path": "src/compose.ts",
+          "discoveredBy": {
+            "surface": "search_project",
+            "input": "compose"
+          }
+        }
+      ],
+      "searchRuns": [
+        {
+          "pattern": "addRoute",
+          "rationale": "The task names route registration.",
+          "visiblePaths": [
+            "src/hono-base.ts"
+          ],
+          "continuedPaths": [],
+          "boundary": {
+            "complete": true,
+            "inspectedSources": 479,
+            "eligibleSources": 486,
+            "retainedMatches": 9,
+            "encounteredMatches": 9,
+            "writtenMatches": 9,
+            "namedDeclarationFiles": 1,
+            "limits": []
+          },
+          "usedStoredContinuation": false,
+          "error": null,
+          "visibleFileCount": 2,
+          "continuedFileCounts": []
+        },
+        {
+          "pattern": "dispatch",
+          "rationale": "The task names dispatch.",
+          "visiblePaths": [
+            "src/hono-base.ts",
+            "src/compose.ts"
+          ],
+          "continuedPaths": [],
+          "boundary": {
+            "complete": true,
+            "inspectedSources": 479,
+            "eligibleSources": 486,
+            "retainedMatches": 23,
+            "encounteredMatches": 23,
+            "writtenMatches": 23,
+            "namedDeclarationFiles": 5,
+            "limits": []
+          },
+          "usedStoredContinuation": false,
+          "error": null,
+          "visibleFileCount": 9,
+          "continuedFileCounts": []
+        },
+        {
+          "pattern": "matchResult",
+          "rationale": "The task names the dispatch result.",
+          "visiblePaths": [
+            "src/hono-base.ts",
+            "src/context.ts",
+            "src/request.ts"
+          ],
+          "continuedPaths": [],
+          "boundary": {
+            "complete": true,
+            "inspectedSources": 479,
+            "eligibleSources": 486,
+            "retainedMatches": 26,
+            "encounteredMatches": 26,
+            "writtenMatches": 26,
+            "namedDeclarationFiles": 3,
+            "limits": []
+          },
+          "usedStoredContinuation": false,
+          "error": null,
+          "visibleFileCount": 4,
+          "continuedFileCounts": []
+        },
+        {
+          "pattern": "compose",
+          "rationale": "The task asks about composed handler progress.",
+          "visiblePaths": [
+            "src/hono-base.ts",
+            "src/compose.ts"
+          ],
+          "continuedPaths": [],
+          "boundary": {
+            "complete": true,
+            "inspectedSources": 479,
+            "eligibleSources": 486,
+            "retainedMatches": 115,
+            "encounteredMatches": 115,
+            "writtenMatches": 115,
+            "namedDeclarationFiles": 5,
+            "limits": []
+          },
+          "usedStoredContinuation": false,
+          "error": null,
+          "visibleFileCount": 12,
+          "continuedFileCounts": []
+        }
+      ],
+      "treeRuns": [
+        {
+          "pattern": "**/*route*",
+          "rationale": "Route is a task term usable as a filename filter.",
+          "visiblePaths": [],
+          "truncated": false,
+          "error": null
+        },
+        {
+          "pattern": "**/*request*",
+          "rationale": "Request is a task term usable as a filename filter.",
+          "visiblePaths": [
+            "src/request.ts"
+          ],
+          "truncated": false,
+          "error": null
+        },
+        {
+          "pattern": "**/*compose*",
+          "rationale": "Compose is a task term usable as a filename filter.",
+          "visiblePaths": [
+            "src/compose.ts"
+          ],
+          "truncated": false,
+          "error": null
+        }
+      ],
+      "related": {
+        "seedsUsed": [
+          "src/hono-base.ts",
+          "src/request.ts",
+          "src/compose.ts"
+        ],
+        "calls": 24,
+        "callsByHop": {
+          "1": 3,
+          "2": 21
+        },
+        "failedCalls": 0,
+        "unresolvedEvidenceCount": 0,
+        "unresolvedStatuses": {}
+      },
+      "requiredFiles": [
+        {
+          "path": "src/hono-base.ts",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "addRoute",
+              "position": 2
+            },
+            {
+              "surface": "search_project",
+              "input": "dispatch",
+              "position": 1
+            },
+            {
+              "surface": "search_project",
+              "input": "matchResult",
+              "position": 4
+            },
+            {
+              "surface": "search_project",
+              "input": "compose",
+              "position": 5
+            }
+          ],
+          "relatedHop": 0,
+          "relatedVia": null,
+          "matchingTaskQueries": [
+            "addRoute",
+            "dispatch",
+            "matchResult",
+            "compose"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "addRoute",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 2,
+                "continuationPage": null
+              },
+              {
+                "pattern": "dispatch",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 1,
+                "continuationPage": null
+              },
+              {
+                "pattern": "matchResult",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 4,
+                "continuationPage": null
+              },
+              {
+                "pattern": "compose",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 5,
+                "continuationPage": null
+              }
+            ],
+            "tree": []
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "src/context.ts",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "matchResult",
+              "position": 1
+            }
+          ],
+          "relatedHop": 1,
+          "relatedVia": "src/compose.ts",
+          "matchingTaskQueries": [
+            "matchResult"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "matchResult",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 1,
+                "continuationPage": null
+              }
+            ],
+            "tree": []
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "src/request.ts",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "matchResult",
+              "position": 2
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*request*",
+              "position": 5
+            }
+          ],
+          "relatedHop": 0,
+          "relatedVia": null,
+          "matchingTaskQueries": [
+            "matchResult"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "matchResult",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 2,
+                "continuationPage": null
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*request*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "src/compose.ts",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "dispatch",
+              "position": 3
+            },
+            {
+              "surface": "search_project",
+              "input": "compose",
+              "position": 4
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*compose*",
+              "position": 2
+            }
+          ],
+          "relatedHop": 0,
+          "relatedVia": null,
+          "matchingTaskQueries": [
+            "dispatch",
+            "compose"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "dispatch",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 3,
+                "continuationPage": null
+              },
+              {
+                "pattern": "compose",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 4,
+                "continuationPage": null
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*compose*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "src/request/constants.ts",
+          "classification": "two-or-three-call-chain",
+          "reason": "resolved dependency evidence reaches the file at hop 1",
+          "directEvidence": [],
+          "relatedHop": 1,
+          "relatedVia": "src/request.ts",
+          "matchingTaskQueries": [],
+          "limitEvidence": {
+            "search": [],
+            "tree": []
+          },
+          "exactPathReadable": true
+        }
+      ]
+    },
+    {
+      "id": "N4",
+      "repository": "serilog",
+      "taskSummary": "Explain batching queue overflow, dropped events, nonblocking behavior, and failure notification paths.",
+      "queries": [
+        {
+          "pattern": "BatchingOptions",
+          "rationale": "The task names batching configuration."
+        },
+        {
+          "pattern": "ILoggingFailureListener",
+          "rationale": "The task names the failure listener."
+        },
+        {
+          "pattern": "SelfLog",
+          "rationale": "The task names the diagnostic fallback."
+        },
+        {
+          "pattern": "drop|discard",
+          "rationale": "The task asks about dropped events."
+        },
+        {
+          "pattern": "backpressure",
+          "rationale": "The task asks whether backpressure is applied."
+        }
+      ],
+      "treePatterns": [
+        {
+          "pattern": "**/*Batch*",
+          "rationale": "Batching is a task term usable as a filename filter."
+        },
+        {
+          "pattern": "**/*LoggingFailure*",
+          "rationale": "Failure notification is a task term usable as a filename filter."
+        },
+        {
+          "pattern": "**/*SelfLog*",
+          "rationale": "SelfLog is a task term usable as a filename filter."
+        }
+      ],
+      "seeds": [
+        {
+          "path": "src/Serilog/Core/Sinks/Batching/BatchingSink.cs",
+          "discoveredBy": {
+            "surface": "search_project",
+            "input": "drop|discard"
+          }
+        }
+      ],
+      "searchRuns": [
+        {
+          "pattern": "BatchingOptions",
+          "rationale": "The task names batching configuration.",
+          "visiblePaths": [
+            "src/Serilog/Configuration/BatchingOptions.cs",
+            "src/Serilog/Core/Sinks/Batching/BatchingSink.cs",
+            "src/Serilog/Configuration/LoggerSinkConfiguration.cs"
+          ],
+          "continuedPaths": [],
+          "boundary": {
+            "complete": true,
+            "inspectedSources": 280,
+            "eligibleSources": 282,
+            "retainedMatches": 14,
+            "encounteredMatches": 14,
+            "writtenMatches": 14,
+            "namedDeclarationFiles": 4,
+            "limits": []
+          },
+          "usedStoredContinuation": false,
+          "error": null,
+          "visibleFileCount": 5,
+          "continuedFileCounts": []
+        },
+        {
+          "pattern": "ILoggingFailureListener",
+          "rationale": "The task names the failure listener.",
+          "visiblePaths": [
+            "src/Serilog/Core/Sinks/Batching/BatchingSink.cs",
+            "src/Serilog/Configuration/LoggerSinkConfiguration.cs",
+            "src/Serilog/Core/ILoggingFailureListener.cs",
+            "src/Serilog/Debugging/SelfLog.cs"
+          ],
+          "continuedPaths": [],
+          "boundary": {
+            "complete": true,
+            "inspectedSources": 280,
+            "eligibleSources": 282,
+            "retainedMatches": 21,
+            "encounteredMatches": 21,
+            "writtenMatches": 21,
+            "namedDeclarationFiles": 9,
+            "limits": []
+          },
+          "usedStoredContinuation": false,
+          "error": null,
+          "visibleFileCount": 11,
+          "continuedFileCounts": []
+        },
+        {
+          "pattern": "SelfLog",
+          "rationale": "The task names the diagnostic fallback.",
+          "visiblePaths": [
+            "src/Serilog/Core/Sinks/Batching/BatchingSink.cs",
+            "src/Serilog/Configuration/LoggerSinkConfiguration.cs",
+            "src/Serilog/Debugging/SelfLog.cs"
+          ],
+          "continuedPaths": [],
+          "boundary": {
+            "complete": true,
+            "inspectedSources": 280,
+            "eligibleSources": 282,
+            "retainedMatches": 61,
+            "encounteredMatches": 61,
+            "writtenMatches": 61,
+            "namedDeclarationFiles": 15,
+            "limits": []
+          },
+          "usedStoredContinuation": false,
+          "error": null,
+          "visibleFileCount": 21,
+          "continuedFileCounts": []
+        },
+        {
+          "pattern": "drop|discard",
+          "rationale": "The task asks about dropped events.",
+          "visiblePaths": [
+            "src/Serilog/Core/Sinks/Batching/BatchingSink.cs"
+          ],
+          "continuedPaths": [],
+          "boundary": {
+            "complete": true,
+            "inspectedSources": 280,
+            "eligibleSources": 282,
+            "retainedMatches": 42,
+            "encounteredMatches": 42,
+            "writtenMatches": 42,
+            "namedDeclarationFiles": 6,
+            "limits": []
+          },
+          "usedStoredContinuation": false,
+          "error": null,
+          "visibleFileCount": 7,
+          "continuedFileCounts": []
+        },
+        {
+          "pattern": "backpressure",
+          "rationale": "The task asks whether backpressure is applied.",
+          "visiblePaths": [
+            "src/Serilog/Configuration/BatchingOptions.cs",
+            "src/Serilog/Configuration/LoggerSinkConfiguration.cs"
+          ],
+          "continuedPaths": [],
+          "boundary": {
+            "complete": true,
+            "inspectedSources": 280,
+            "eligibleSources": 282,
+            "retainedMatches": 4,
+            "encounteredMatches": 4,
+            "writtenMatches": 4,
+            "namedDeclarationFiles": 2,
+            "limits": []
+          },
+          "usedStoredContinuation": false,
+          "error": null,
+          "visibleFileCount": 2,
+          "continuedFileCounts": []
+        }
+      ],
+      "treeRuns": [
+        {
+          "pattern": "**/*Batch*",
+          "rationale": "Batching is a task term usable as a filename filter.",
+          "visiblePaths": [
+            "src/Serilog/Configuration/BatchingOptions.cs",
+            "src/Serilog/Core/Sinks/Batching/BatchingSink.cs"
+          ],
+          "truncated": false,
+          "error": null
+        },
+        {
+          "pattern": "**/*LoggingFailure*",
+          "rationale": "Failure notification is a task term usable as a filename filter.",
+          "visiblePaths": [
+            "src/Serilog/Core/LoggingFailureKind.cs",
+            "src/Serilog/Core/ILoggingFailureListener.cs"
+          ],
+          "truncated": false,
+          "error": null
+        },
+        {
+          "pattern": "**/*SelfLog*",
+          "rationale": "SelfLog is a task term usable as a filename filter.",
+          "visiblePaths": [
+            "src/Serilog/Debugging/SelfLog.cs"
+          ],
+          "truncated": false,
+          "error": null
+        }
+      ],
+      "related": {
+        "seedsUsed": [
+          "src/Serilog/Core/Sinks/Batching/BatchingSink.cs"
+        ],
+        "calls": 10,
+        "callsByHop": {
+          "1": 1,
+          "2": 9
+        },
+        "failedCalls": 0,
+        "unresolvedEvidenceCount": 0,
+        "unresolvedStatuses": {}
+      },
+      "requiredFiles": [
+        {
+          "path": "src/Serilog/Configuration/BatchingOptions.cs",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "BatchingOptions",
+              "position": 1
+            },
+            {
+              "surface": "search_project",
+              "input": "backpressure",
+              "position": 1
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*Batch*",
+              "position": 1
+            }
+          ],
+          "relatedHop": 1,
+          "relatedVia": "src/Serilog/Core/Sinks/Batching/BatchingSink.cs",
+          "matchingTaskQueries": [
+            "BatchingOptions",
+            "backpressure"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "BatchingOptions",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 1,
+                "continuationPage": null
+              },
+              {
+                "pattern": "backpressure",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 1,
+                "continuationPage": null
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*Batch*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "src/Serilog/Core/Sinks/Batching/BatchingSink.cs",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "BatchingOptions",
+              "position": 4
+            },
+            {
+              "surface": "search_project",
+              "input": "ILoggingFailureListener",
+              "position": 4
+            },
+            {
+              "surface": "search_project",
+              "input": "SelfLog",
+              "position": 12
+            },
+            {
+              "surface": "search_project",
+              "input": "drop|discard",
+              "position": 2
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*Batch*",
+              "position": 3
+            }
+          ],
+          "relatedHop": 0,
+          "relatedVia": null,
+          "matchingTaskQueries": [
+            "BatchingOptions",
+            "ILoggingFailureListener",
+            "SelfLog",
+            "drop|discard"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "BatchingOptions",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 4,
+                "continuationPage": null
+              },
+              {
+                "pattern": "ILoggingFailureListener",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 4,
+                "continuationPage": null
+              },
+              {
+                "pattern": "SelfLog",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 12,
+                "continuationPage": null
+              },
+              {
+                "pattern": "drop|discard",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 2,
+                "continuationPage": null
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*Batch*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "src/Serilog/Configuration/LoggerSinkConfiguration.cs",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "BatchingOptions",
+              "position": 3
+            },
+            {
+              "surface": "search_project",
+              "input": "ILoggingFailureListener",
+              "position": 2
+            },
+            {
+              "surface": "search_project",
+              "input": "SelfLog",
+              "position": 8
+            },
+            {
+              "surface": "search_project",
+              "input": "backpressure",
+              "position": 2
+            }
+          ],
+          "relatedHop": 1,
+          "relatedVia": "src/Serilog/Core/Sinks/Batching/BatchingSink.cs",
+          "matchingTaskQueries": [
+            "BatchingOptions",
+            "ILoggingFailureListener",
+            "SelfLog",
+            "backpressure"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "BatchingOptions",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 3,
+                "continuationPage": null
+              },
+              {
+                "pattern": "ILoggingFailureListener",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 2,
+                "continuationPage": null
+              },
+              {
+                "pattern": "SelfLog",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 8,
+                "continuationPage": null
+              },
+              {
+                "pattern": "backpressure",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 2,
+                "continuationPage": null
+              }
+            ],
+            "tree": []
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "src/Serilog/Core/LoggingFailureKind.cs",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "get_tree",
+              "input": "**/*LoggingFailure*",
+              "position": 3
+            }
+          ],
+          "relatedHop": 1,
+          "relatedVia": "src/Serilog/Core/Sinks/Batching/BatchingSink.cs",
+          "matchingTaskQueries": [],
+          "limitEvidence": {
+            "search": [],
+            "tree": [
+              {
+                "pattern": "**/*LoggingFailure*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "src/Serilog/Core/ILoggingFailureListener.cs",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "ILoggingFailureListener",
+              "position": 1
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*LoggingFailure*",
+              "position": 1
+            }
+          ],
+          "relatedHop": 1,
+          "relatedVia": "src/Serilog/Core/Sinks/Batching/BatchingSink.cs",
+          "matchingTaskQueries": [
+            "ILoggingFailureListener"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "ILoggingFailureListener",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 1,
+                "continuationPage": null
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*LoggingFailure*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        },
+        {
+          "path": "src/Serilog/Debugging/SelfLog.cs",
+          "classification": "one-call",
+          "reason": "task-derived search or tree input names the file",
+          "directEvidence": [
+            {
+              "surface": "search_project",
+              "input": "ILoggingFailureListener",
+              "position": 8
+            },
+            {
+              "surface": "search_project",
+              "input": "SelfLog",
+              "position": 1
+            },
+            {
+              "surface": "get_tree",
+              "input": "**/*SelfLog*",
+              "position": 1
+            }
+          ],
+          "relatedHop": 2,
+          "relatedVia": "src/Serilog/Core/ILoggingFailureListener.cs",
+          "matchingTaskQueries": [
+            "ILoggingFailureListener",
+            "SelfLog"
+          ],
+          "limitEvidence": {
+            "search": [
+              {
+                "pattern": "ILoggingFailureListener",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 8,
+                "continuationPage": null
+              },
+              {
+                "pattern": "SelfLog",
+                "complete": true,
+                "limits": [],
+                "initialPosition": 1,
+                "continuationPage": null
+              }
+            ],
+            "tree": [
+              {
+                "pattern": "**/*SelfLog*",
+                "visible": true,
+                "truncated": false
+              }
+            ]
+          },
+          "exactPathReadable": true
+        }
+      ]
+    }
+  ],
+  "files": [
+    {
+      "repository": "hono",
+      "path": "jsr.json",
+      "tasks": [
+        "T6"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "hono",
+      "path": "package.json",
+      "tasks": [
+        "T6"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "hono",
+      "path": "src/client/types.ts",
+      "tasks": [
+        "T5"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "hono",
+      "path": "src/compose.ts",
+      "tasks": [
+        "N3"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "hono",
+      "path": "src/context.test.ts",
+      "tasks": [
+        "T5"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "hono",
+      "path": "src/context.ts",
+      "tasks": [
+        "T5",
+        "N3"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "hono",
+      "path": "src/hono-base.ts",
+      "tasks": [
+        "T4",
+        "N3"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "hono",
+      "path": "src/middleware/bearer-auth/index.ts",
+      "tasks": [
+        "T5"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "hono",
+      "path": "src/middleware/cors/index.ts",
+      "tasks": [
+        "T5"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "hono",
+      "path": "src/request.test.ts",
+      "tasks": [
+        "T4"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "hono",
+      "path": "src/request.ts",
+      "tasks": [
+        "T4",
+        "N3"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "hono",
+      "path": "src/request/constants.ts",
+      "tasks": [
+        "N3"
+      ],
+      "classification": "two-or-three-call-chain",
+      "reasons": [
+        "resolved dependency evidence reaches the file at hop 1"
+      ]
+    },
+    {
+      "repository": "hono",
+      "path": "src/types.ts",
+      "tasks": [
+        "T5"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "hono",
+      "path": "src/utils/url.test.ts",
+      "tasks": [
+        "T4"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "hono",
+      "path": "src/utils/url.ts",
+      "tasks": [
+        "T4"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "httpx",
+      "path": "docs/advanced/extensions.md",
+      "tasks": [
+        "T3"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "httpx",
+      "path": "docs/advanced/proxies.md",
+      "tasks": [
+        "T2"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "httpx",
+      "path": "docs/advanced/transports.md",
+      "tasks": [
+        "T2"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "httpx",
+      "path": "httpx/_client.py",
+      "tasks": [
+        "T1",
+        "T2",
+        "T3"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "httpx",
+      "path": "httpx/_exceptions.py",
+      "tasks": [
+        "N2"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "httpx",
+      "path": "httpx/_models.py",
+      "tasks": [
+        "T3"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "httpx",
+      "path": "httpx/_transports/base.py",
+      "tasks": [
+        "T2"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "httpx",
+      "path": "httpx/_transports/default.py",
+      "tasks": [
+        "T2"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "httpx",
+      "path": "httpx/_types.py",
+      "tasks": [
+        "T3"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "httpx",
+      "path": "httpx/_urlparse.py",
+      "tasks": [
+        "N2"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "httpx",
+      "path": "httpx/_urls.py",
+      "tasks": [
+        "N2"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "httpx",
+      "path": "tests/client/test_client.py",
+      "tasks": [
+        "T3"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "httpx",
+      "path": "tests/client/test_proxies.py",
+      "tasks": [
+        "T2"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "httpx",
+      "path": "tests/client/test_redirects.py",
+      "tasks": [
+        "T1"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "httpx",
+      "path": "tests/models/test_url.py",
+      "tasks": [
+        "N2"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "serilog",
+      "path": "src/Serilog/Capturing/PropertyValueConverter.cs",
+      "tasks": [
+        "N1"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "serilog",
+      "path": "src/Serilog/Configuration/BatchingOptions.cs",
+      "tasks": [
+        "N4"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "serilog",
+      "path": "src/Serilog/Configuration/LoggerEnrichmentConfiguration.cs",
+      "tasks": [
+        "T8"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "serilog",
+      "path": "src/Serilog/Configuration/LoggerMinimumLevelConfiguration.cs",
+      "tasks": [
+        "T7"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "serilog",
+      "path": "src/Serilog/Configuration/LoggerSinkConfiguration.cs",
+      "tasks": [
+        "N4"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "serilog",
+      "path": "src/Serilog/Context/LogContextEnricher.cs",
+      "tasks": [
+        "T8"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "serilog",
+      "path": "src/Serilog/Core/Enrichers/ConditionalEnricher.cs",
+      "tasks": [
+        "T8"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "serilog",
+      "path": "src/Serilog/Core/Enrichers/EmptyEnricher.cs",
+      "tasks": [
+        "T8"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "serilog",
+      "path": "src/Serilog/Core/Enrichers/FixedPropertyEnricher.cs",
+      "tasks": [
+        "T8"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "serilog",
+      "path": "src/Serilog/Core/Enrichers/PropertyEnricher.cs",
+      "tasks": [
+        "T8"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "serilog",
+      "path": "src/Serilog/Core/Enrichers/SafeAggregateEnricher.cs",
+      "tasks": [
+        "T8"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "serilog",
+      "path": "src/Serilog/Core/ILogEventEnricher.cs",
+      "tasks": [
+        "T8"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "serilog",
+      "path": "src/Serilog/Core/ILoggingFailureListener.cs",
+      "tasks": [
+        "N4"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "serilog",
+      "path": "src/Serilog/Core/IScalarConversionPolicy.cs",
+      "tasks": [
+        "N1"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "serilog",
+      "path": "src/Serilog/Core/LevelOverrideMap.cs",
+      "tasks": [
+        "T7"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "serilog",
+      "path": "src/Serilog/Core/Logger.cs",
+      "tasks": [
+        "T7",
+        "T8"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "serilog",
+      "path": "src/Serilog/Core/LoggingFailureKind.cs",
+      "tasks": [
+        "N4"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "serilog",
+      "path": "src/Serilog/Core/Sinks/Batching/BatchingSink.cs",
+      "tasks": [
+        "N4"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "serilog",
+      "path": "src/Serilog/Debugging/SelfLog.cs",
+      "tasks": [
+        "N4"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "serilog",
+      "path": "src/Serilog/LoggerConfiguration.cs",
+      "tasks": [
+        "T7"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "serilog",
+      "path": "src/Serilog/Policies/ByteArrayScalarConversionPolicy.cs",
+      "tasks": [
+        "N1"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "serilog",
+      "path": "src/Serilog/Policies/ByteMemoryScalarConversionPolicy.cs",
+      "tasks": [
+        "N1"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "serilog",
+      "path": "src/Serilog/Policies/EnumScalarConversionPolicy.cs",
+      "tasks": [
+        "N1"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "serilog",
+      "path": "src/Serilog/Policies/PrimitiveScalarConversionPolicy.cs",
+      "tasks": [
+        "N1"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "serilog",
+      "path": "src/Serilog/Policies/SimpleScalarConversionPolicy.cs",
+      "tasks": [
+        "N1"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "serilog",
+      "path": "test/Serilog.Tests/Context/LogContextTests.cs",
+      "tasks": [
+        "T8"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "serilog",
+      "path": "test/Serilog.Tests/Core/ChildLoggerTests.cs",
+      "tasks": [
+        "T7"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "serilog",
+      "path": "test/Serilog.Tests/Core/LevelOverrideMapTests.cs",
+      "tasks": [
+        "T7"
+      ],
+      "classification": "one-call",
+      "reasons": [
+        "task-derived search or tree input names the file"
+      ]
+    },
+    {
+      "repository": "serilog",
+      "path": "test/Serilog.Tests/Core/LoggerTests.cs",
+      "tasks": [
+        "T8"
+      ],
+      "classification": "two-or-three-call-chain",
+      "reasons": [
+        "resolved dependency evidence reaches the file at hop 2"
+      ]
+    }
+  ],
+  "summary": {
+    "taskFileOccurrences": 65,
+    "uniqueRequiredFiles": 59,
+    "occurrencesByClass": {
+      "one-call": 63,
+      "two-or-three-call-chain": 2,
+      "requires-knowledge-absent-from-task": 0,
+      "unreachable": 0
+    },
+    "uniqueFilesByClass": {
+      "one-call": 57,
+      "two-or-three-call-chain": 2,
+      "requires-knowledge-absent-from-task": 0,
+      "unreachable": 0
+    }
+  },
+  "productSha": "02afa318a3c7ca51527b6169c6328a40ef5ac7eb",
+  "analysisSourceSha": "0a2ea25818699cacb820f489911d4f683b1cea01",
+  "inputs": {
+    "registrySha256": "99a5129be42f5522dca3a4b88c9e8e3d04f18f109e5754cf18cbc347d9dd21e1",
+    "oraclesSha256": "b32fc3a13987ab81b2a67ea3c0ff50240ac7a2240890114965526b9204ed7b7f",
+    "serverSha256": "bf25ad063013b3adc1399804ad01d19a759450119c439f43944a3c6c8e545533"
+  }
+}

@@ -109,7 +109,7 @@ public sealed class TreeSearchCoordinatorDebounceTests
 	}
 
 	[AvaloniaFact]
-	public async Task DebounceContinuationAfterDispose_DoesNotRecreateSearchToken()
+	public void DebounceContinuationAfterDispose_DoesNotRecreateSearchToken()
 	{
 		var (viewModel, treeView) = CreateContext();
 		var coordinator = new TreeSearchCoordinator(viewModel, treeView);
@@ -122,7 +122,9 @@ public sealed class TreeSearchCoordinatorDebounceTests
 			[0, CancellationToken.None]));
 
 		coordinator.Dispose();
-		await continuation.WaitAsync(TimeSpan.FromSeconds(2));
+		// The disposed continuation cannot dispatch UI work. Waiting synchronously keeps
+		// Avalonia object cleanup on the headless UI thread that created the TreeView.
+		continuation.WaitAsync(TimeSpan.FromSeconds(2)).GetAwaiter().GetResult();
 
 		Assert.Null(GetPrivateField<CancellationTokenSource>(coordinator, "_searchCts"));
 	}

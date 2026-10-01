@@ -43,6 +43,14 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			includeContentOutputMetrics: false,
 			cancellationToken);
 
+	public Task<ProjectContextPlan> BuildWithTreeMetricsAsync(
+		ProjectContextRequest request,
+		bool captureIgnoreImpactCounts,
+		CancellationToken cancellationToken = default)
+		=> BuildWithTreeMetricsAsync(
+			captureIgnoreImpactCounts ? request with { CaptureIgnoreImpactCounts = true } : request,
+			cancellationToken);
+
 	public Task<ProjectContextPlan> BuildStructureAsync(
 		ProjectContextRequest request,
 		CancellationToken cancellationToken = default)
@@ -152,7 +160,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 				? selection.Extensions
 				: ResolveExtensionSelectionIntent(selection, refreshedLocalState, loaded),
 			GitMode = preserveRequestedSelectionIntent ||
-			          GitScopeSelection.IsMomentary(selection.GitMode!.Value)
+					  GitScopeSelection.IsMomentary(selection.GitMode!.Value)
 				? selection.GitMode
 				: ResolveGitModeIntent(selection, refreshedLocalState, loaded),
 			Exclusions = preserveRequestedSelectionIntent
@@ -176,6 +184,8 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			SelectedPaths = NormalizeRelativeSelectionForOutput(
 				sourceRoot,
 				selectedFullPaths,
+				selection.SelectedPaths,
+				explicitSelectionHadMatch,
 				cancellationToken),
 			LocalProfileState = refreshedLocalState
 		};
@@ -212,7 +222,8 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			IgnoreOptionCounts: loaded.IgnoreOptionCounts,
 			IgnoreControllerImpactCounts: loaded.IgnoreControllerImpactCounts)
 		{
-			IncludesOutputMetrics = includeTreeOutputMetrics && includeContentOutputMetrics
+			IncludesOutputMetrics = includeTreeOutputMetrics && includeContentOutputMetrics,
+			ObservedControlFiles = loaded.TreeInventory?.ObservedControlFiles ?? []
 		};
 		if (loaded.TreeInventory is not null && loaded.EffectiveRules is not null)
 		{
@@ -275,7 +286,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 	{
 		ArgumentNullException.ThrowIfNull(plan);
 		if (!_gitScopeProjectionContexts.TryGetValue(plan, out var context) ||
-		    context.SelectedPathFrontier is null)
+			context.SelectedPathFrontier is null)
 		{
 			return null;
 		}
@@ -380,6 +391,18 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			pathComparer: null,
 			cancellationToken);
 
+	public Task<ProjectContextPlan> ReprojectSelectionWithOutputMetricsAsync(
+		ProjectContextPlan baseline,
+		IReadOnlyCollection<string>? selectedPaths,
+		CancellationToken cancellationToken = default) =>
+		ReprojectSelectionCoreAsync(
+			baseline,
+			selectedPaths,
+			forceEmptySelection: false,
+			pathComparer: null,
+			cancellationToken,
+			includeOutputMetrics: true);
+
 	public Task<ProjectContextPlan> ReprojectSelectionAsync(
 		ProjectContextPlan baseline,
 		IReadOnlyCollection<string>? selectedPaths,
@@ -405,14 +428,27 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			pathComparer: null,
 			cancellationToken);
 
+	public Task<ProjectContextPlan> ReprojectEmptySelectionWithOutputMetricsAsync(
+		ProjectContextPlan baseline,
+		CancellationToken cancellationToken = default) =>
+		ReprojectSelectionCoreAsync(
+			baseline,
+			selectedPaths: [],
+			forceEmptySelection: true,
+			pathComparer: null,
+			cancellationToken,
+			includeOutputMetrics: true);
+
 	private async Task<ProjectContextPlan> ReprojectSelectionCoreAsync(
 		ProjectContextPlan baseline,
 		IReadOnlyCollection<string>? selectedPaths,
 		bool forceEmptySelection,
 		StringComparer? pathComparer,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		bool? includeOutputMetrics = null)
 	{
 		ArgumentNullException.ThrowIfNull(baseline);
+		var captureOutputMetrics = includeOutputMetrics ?? baseline.IncludesOutputMetrics;
 		var diagnostics = baseline.Diagnostics
 			.Where(static diagnostic =>
 				diagnostic.Code is not MissingSelectedPathCode and not InvalidSelectedPathCode)
@@ -457,6 +493,8 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			SelectedPaths = NormalizeRelativeSelectionForOutput(
 				baseline.SourceRoot,
 				selectedFullPaths,
+				forceEmptySelection ? [] : selectedPaths,
+				explicitSelectionHadMatch,
 				cancellationToken)
 		};
 		var reportInput = new LoadedProjectAnalysisRequest(
@@ -482,7 +520,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		var analysis = await analysisService
 			.BuildReportFromTreeAsync(
 				reportInput,
-				baseline.IncludesOutputMetrics,
+				captureOutputMetrics,
 				cancellationToken)
 			.ConfigureAwait(false);
 
@@ -494,6 +532,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			IncludedFiles = includedFiles,
 			IncludedFolders = includedFolders,
 			Analysis = analysis,
+			IncludesOutputMetrics = captureOutputMetrics,
 			Diagnostics = diagnostics,
 			Fingerprint = BuildFingerprint(
 				baseline.SourceRoot,
@@ -518,7 +557,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			SelectedPathFrontier = CloneSelectedPathFrontier(selectedPathFrontier)
 		};
 		if (GitScopeSelection.IsMomentary(selection.GitMode ?? GitFilteringMode.None) &&
-		    reprojectedContext.Scope is { IsAvailable: true } scope)
+			reprojectedContext.Scope is { IsAvailable: true } scope)
 		{
 			return ApplyGitScopeProjection(
 				baseline,
@@ -558,7 +597,8 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		bool? stripComments,
 		bool? stripBlankLines,
 		bool? hidePrivateData,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		IReadOnlyList<ContentDetailOverride>? contentDetailOverrides = null)
 	{
 		ArgumentNullException.ThrowIfNull(baseline);
 		cancellationToken.ThrowIfCancellationRequested();
@@ -568,7 +608,8 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			HidePrivateData = hidePrivateData ?? baseline.Selection.HidePrivateData,
 			CompressCode = compressCode ?? baseline.Selection.CompressCode,
 			StripComments = stripComments ?? baseline.Selection.StripComments,
-			StripBlankLines = stripBlankLines ?? baseline.Selection.StripBlankLines
+			StripBlankLines = stripBlankLines ?? baseline.Selection.StripBlankLines,
+			ContentDetailOverrides = contentDetailOverrides ?? baseline.Selection.ContentDetailOverrides
 		};
 		var transformed = baseline with
 		{
@@ -628,8 +669,8 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			{
 				cancellationToken.ThrowIfCancellationRequested();
 				if (!entry.IsDirectory &&
-				    sizes.TryGetValue(entry.FullPath, out var currentLength) &&
-				    currentLength < 0)
+					sizes.TryGetValue(entry.FullPath, out var currentLength) &&
+					currentLength < 0)
 				{
 					sizes[entry.FullPath] = Math.Max(0, entry.Length);
 					unresolvedCount--;
@@ -745,7 +786,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 				"Selection profile was not fully resolved.");
 		}
 		if (selection.GitMode == GitFilteringMode.Diff &&
-		    !GitScopeSelection.IsValidDiffRange(selection.GitDiffRange))
+			!GitScopeSelection.IsValidDiffRange(selection.GitDiffRange))
 		{
 			throw new ProjectContextValidationException(
 				"DPX-GIT-STATE-UNAVAILABLE",
@@ -783,26 +824,26 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		var inferredState = state with
 		{
 			RootsOverridden = state.RootsOverridden ||
-				                  !SetEquals(
-					                  selection.Roots,
-					                  profileRoots,
-					                  ProjectTreePathIdentity.CanonicalComparer),
+								  !SetEquals(
+									  selection.Roots,
+									  profileRoots,
+									  ProjectTreePathIdentity.CanonicalComparer),
 			ExtensionsOverridden = state.ExtensionsOverridden ||
-			                       !SetEquals(
-				                       selection.Extensions,
-				                       profileExtensions,
-				                       StringComparer.OrdinalIgnoreCase),
+								   !SetEquals(
+									   selection.Extensions,
+									   profileExtensions,
+									   StringComparer.OrdinalIgnoreCase),
 			IgnoreOptionsOverridden = state.IgnoreOptionsOverridden ||
-			                          selection.GitMode != GitFilteringModeResolver.Resolve(profileIgnoreOptions) ||
-			                          !SetEquals(
-				                          selection.Exclusions,
-				                          ProjectSelectionAdapter.ToExclusions(profileIgnoreOptions),
-				                          EqualityComparer<ProjectExclusion>.Default) ||
-				                          selection.HideSecrets != profileIgnoreOptions.Contains(IgnoreOptionId.HideSecrets) ||
-				                          selection.HidePrivateData != profileIgnoreOptions.Contains(IgnoreOptionId.HidePrivateData) ||
-				                          selection.CompressCode != profileIgnoreOptions.Contains(IgnoreOptionId.CompressCode) ||
-				                          selection.StripComments != profileIgnoreOptions.Contains(IgnoreOptionId.StripComments) ||
-				                          selection.StripBlankLines != profileIgnoreOptions.Contains(IgnoreOptionId.StripBlankLines)
+									  selection.GitMode != GitFilteringModeResolver.Resolve(profileIgnoreOptions) ||
+									  !SetEquals(
+										  selection.Exclusions,
+										  ProjectSelectionAdapter.ToExclusions(profileIgnoreOptions),
+										  EqualityComparer<ProjectExclusion>.Default) ||
+										  selection.HideSecrets != profileIgnoreOptions.Contains(IgnoreOptionId.HideSecrets) ||
+										  selection.HidePrivateData != profileIgnoreOptions.Contains(IgnoreOptionId.HidePrivateData) ||
+										  selection.CompressCode != profileIgnoreOptions.Contains(IgnoreOptionId.CompressCode) ||
+										  selection.StripComments != profileIgnoreOptions.Contains(IgnoreOptionId.StripComments) ||
+										  selection.StripBlankLines != profileIgnoreOptions.Contains(IgnoreOptionId.StripBlankLines)
 		};
 
 		return selection with { LocalProfileState = inferredState };
@@ -858,7 +899,8 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 				rootStates,
 				extensionStates,
 				ignoreStates,
-				profile.SelectedPaths?.ToArray())
+				profile.SelectedPaths?.ToArray(),
+				profile.MarkedSecrets?.ToArray())
 		};
 	}
 
@@ -1073,7 +1115,21 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		foreach (var input in selectedPaths)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			var relativePath = ProjectSelectionPath.NormalizeRelative(input);
+			string relativePath;
+			try
+			{
+				relativePath = ProjectSelectionPath.NormalizeRelative(input);
+			}
+			catch (ProjectContextValidationException exception) when (
+				exception.Code == ProjectSelectionPath.InvalidPathCode)
+			{
+				diagnostics.Add(new ContextDiagnostic(
+					MissingSelectedPathCode,
+					ContextDiagnosticSeverity.Warning,
+					"Selected path is not present in the effective project tree.",
+					input));
+				continue;
+			}
 			if (relativePath.Length == 0)
 			{
 				explicitSelectionHadMatch = true;
@@ -1096,6 +1152,49 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		}
 
 		return NormalizeSelectionFrontier(root, resolved, cancellationToken);
+	}
+
+	public static ProjectPathSelectionState ClassifyPath(
+		ProjectContextPlan plan,
+		string fullPath)
+	{
+		ArgumentNullException.ThrowIfNull(plan);
+		return ClassifyPath(plan.EffectiveTree, plan.IncludedFiles, fullPath);
+	}
+
+	internal static ProjectPathSelectionState ClassifyPath(
+		TreeNodeDescriptor effectiveTree,
+		IReadOnlyList<string> includedFiles,
+		string fullPath)
+	{
+		ArgumentNullException.ThrowIfNull(effectiveTree);
+		ArgumentNullException.ThrowIfNull(includedFiles);
+		ArgumentException.ThrowIfNullOrWhiteSpace(fullPath);
+		var normalizedPath = PathUtility.Normalize(fullPath);
+		foreach (var includedFile in includedFiles)
+		{
+			if (ProjectTreePathIdentity.CanonicalComparer.Equals(
+				PathUtility.Normalize(includedFile),
+				normalizedPath))
+			{
+				return ProjectPathSelectionState.InsideSelection;
+			}
+		}
+
+		var pending = new Stack<TreeNodeDescriptor>();
+		pending.Push(effectiveTree);
+		while (pending.Count > 0)
+		{
+			var current = pending.Pop();
+			if (ProjectTreePathIdentity.CanonicalComparer.Equals(
+				PathUtility.Normalize(current.FullPath),
+				normalizedPath))
+				return ProjectPathSelectionState.OutsideSelection;
+			for (var index = current.Children.Count - 1; index >= 0; index--)
+				pending.Push(current.Children[index]);
+		}
+
+		return ProjectPathSelectionState.HiddenByFilters;
 	}
 
 	private static IReadOnlySet<string> NormalizeSelectionFrontier(
@@ -1157,7 +1256,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 				if (platformAliases.TryGetValue(key, out var existingPath))
 				{
 					if (existingPath is not null &&
-					    !ProjectTreePathIdentity.CanonicalComparer.Equals(existingPath, node.FullPath))
+						!ProjectTreePathIdentity.CanonicalComparer.Equals(existingPath, node.FullPath))
 					{
 						platformAliases[key] = null;
 					}
@@ -1184,8 +1283,8 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			if (ExactPaths.TryGetValue(relativePath, out fullPath!))
 				return true;
 			if (PlatformAliases is not null &&
-			    PlatformAliases.TryGetValue(relativePath, out var alias) &&
-			    alias is not null)
+				PlatformAliases.TryGetValue(relativePath, out var alias) &&
+				alias is not null)
 			{
 				fullPath = alias;
 				return true;
@@ -1237,14 +1336,18 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			: null;
 	}
 
-	private static IReadOnlyList<string> NormalizeRelativeSelectionForOutput(
+	private static IReadOnlyList<string>? NormalizeRelativeSelectionForOutput(
 		string sourceRoot,
 		IReadOnlySet<string> selectedFullPaths,
+		IReadOnlyCollection<string>? requestedPaths,
+		bool explicitSelectionHadMatch,
 		CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
+		if (requestedPaths is null)
+			return null;
 		if (selectedFullPaths.Count == 0)
-			return [];
+			return requestedPaths.Count > 0 && explicitSelectionHadMatch ? null : [];
 
 		var normalizedPaths = new List<string>(selectedFullPaths.Count);
 		foreach (var selectedPath in selectedFullPaths)
@@ -1280,6 +1383,15 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		Append($"compress-code:{selection.CompressCode == true}");
 		Append($"strip-comments:{selection.StripComments == true}");
 		Append($"strip-blank-lines:{selection.StripBlankLines == true}");
+		// Only appended when the call actually asked for a mix, so a plan without per-file detail
+		// keeps the fingerprint it has always had.
+		foreach (var entry in selection.ContentDetailOverrides ?? [])
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			Append($"detail:{(int)entry.RequestedKinds}");
+			foreach (var pattern in entry.Patterns.Patterns)
+				Append("detail-pattern:" + pattern);
+		}
 		foreach (var root in selection.Roots ?? [])
 		{
 			cancellationToken.ThrowIfCancellationRequested();
@@ -1298,10 +1410,10 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			var useFolder = fileIndex >= orderedIncludedFiles.Count ||
-			                folderIndex < orderedIncludedFolders.Count &&
-			                pathComparer.Compare(
-				                orderedIncludedFolders[folderIndex],
-				                orderedIncludedFiles[fileIndex]) <= 0;
+							folderIndex < orderedIncludedFolders.Count &&
+							pathComparer.Compare(
+								orderedIncludedFolders[folderIndex],
+								orderedIncludedFiles[fileIndex]) <= 0;
 			var path = useFolder
 				? orderedIncludedFolders[folderIndex++]
 				: orderedIncludedFiles[fileIndex++];
@@ -1376,16 +1488,9 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			selectsNoEffectivePaths: false,
 			cancellationToken,
 			effectivePathComparer);
-		var includedFiles = ProjectTreeSelectionProjection.BuildOrderedSelectedFilePathsWithCancellation(
-			root,
-			selectedFullPaths,
-			ensureExists: false,
-			cancellationToken,
-			effectivePathComparer);
-		var includedFolders = BuildOrderedIncludedFolders(
+		var (includedFiles, includedFolders) = BuildOrderedIncludedPaths(
 			includedNodes,
-			cancellationToken,
-			effectivePathComparer);
+			cancellationToken);
 		return (projectedTree, includedFiles, includedFolders);
 	}
 
@@ -1490,26 +1595,29 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 
 		var includedPathSet = BuildIncludedPathSet(includedNodes, cancellationToken, pathComparer);
 		return ProjectTreeSelectionProjection.BuildProjectedTreeWithCancellation(
-			       root,
-			       includedPathSet,
-			       cancellationToken) ??
-		       root with { Children = [] };
+				   root,
+				   includedPathSet,
+				   cancellationToken) ??
+			   root with { Children = [] };
 	}
 
-	private static string[] BuildOrderedIncludedFolders(
+	private static (IReadOnlyList<string> Files, IReadOnlyList<string> Folders) BuildOrderedIncludedPaths(
 		IReadOnlyList<TreeNodeDescriptor> includedNodes,
-		CancellationToken cancellationToken,
-		StringComparer? pathComparer = null)
+		CancellationToken cancellationToken)
 	{
+		var includedFiles = new List<string>();
 		var includedFolders = new List<string>();
 		foreach (var node in includedNodes)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			if (node.IsDirectory)
 				includedFolders.Add(node.FullPath);
+			else
+				includedFiles.Add(node.FullPath);
 		}
 
+		CancellationAwareSort.Sort(includedFiles, ProjectTreePathIdentity.CanonicalComparer, cancellationToken);
 		CancellationAwareSort.Sort(includedFolders, ProjectTreePathIdentity.CanonicalComparer, cancellationToken);
-		return includedFolders.ToArray();
+		return (includedFiles, includedFolders.ToArray());
 	}
 }

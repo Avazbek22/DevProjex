@@ -1,0 +1,422 @@
+using System.Diagnostics;
+using DevProjex.Application.Selection;
+using DevProjex.Infrastructure.ProjectProfiles;
+
+namespace DevProjex.Terminal.Tui;
+
+internal enum TerminalSelectionPersistencePhase
+{
+	Idle,
+	Pending,
+	Saving,
+	Deferred,
+	Failed
+}
+
+internal readonly record struct TerminalSelectionPersistenceState(
+	TerminalSelectionPersistencePhase Phase,
+	string? FailureReason = null);
+
+internal sealed class TerminalSelectionProfilePersistenceCoordinator : IDisposable
+{
+	private static readonly TimeSpan PersistenceDelay = TimeSpan.FromSeconds(2);
+	private readonly Func<string, ProjectSelectionProfile, CancellationToken,
+		Task<ProjectProfilePersistenceResult>> _persistAsync;
+	private readonly Func<CancellationToken, Task> _delayAsync;
+	private readonly Func<TimeSpan, CancellationToken, Task> _retryDelayAsync;
+	private readonly Action<Exception>? _failureCallback;
+	private readonly int _maxBackgroundAttempts;
+	private readonly SemaphoreSlim _writeGate = new(1, 1);
+	private readonly object _sync = new();
+	private PendingWrite? _pending;
+	private CancellationTokenSource? _delayCts;
+	private Task _activePersistence = Task.CompletedTask;
+	private TerminalSelectionPersistenceState _state = new(TerminalSelectionPersistencePhase.Idle);
+	private long _version;
+	private int _activeWriteCalls;
+	private int _disposed;
+
+	public event EventHandler? StateChanged;
+
+	public TerminalSelectionPersistenceState State
+	{
+		get
+		{
+			lock (_sync)
+				return _state;
+		}
+	}
+
+	public TerminalSelectionProfilePersistenceCoordinator(
+		Func<string, ProjectSelectionProfile, CancellationToken,
+			Task<ProjectProfilePersistenceResult>> persistAsync,
+		Action<Exception>? failureCallback = null)
+		: this(
+			persistAsync,
+			static cancellationToken => Task.Delay(PersistenceDelay, cancellationToken),
+			failureCallback: failureCallback)
+	{
+	}
+
+	public TerminalSelectionProfilePersistenceCoordinator(
+		Func<string, ProjectSelectionProfile, CancellationToken, Task> persistAsync,
+		Action<Exception>? failureCallback = null)
+		: this(
+			(projectPath, profile, cancellationToken) => PersistAndReportSavedAsync(
+				persistAsync,
+				projectPath,
+				profile,
+				cancellationToken),
+			failureCallback)
+	{
+	}
+
+	internal TerminalSelectionProfilePersistenceCoordinator(
+		Func<string, ProjectSelectionProfile, CancellationToken,
+			Task<ProjectProfilePersistenceResult>> persistAsync,
+		Func<CancellationToken, Task> delayAsync,
+		Func<TimeSpan, CancellationToken, Task>? retryDelayAsync = null,
+		Action<Exception>? failureCallback = null,
+		int maxBackgroundAttempts = 3)
+	{
+		_persistAsync = persistAsync ?? throw new ArgumentNullException(nameof(persistAsync));
+		_delayAsync = delayAsync ?? throw new ArgumentNullException(nameof(delayAsync));
+		_retryDelayAsync = retryDelayAsync ?? Task.Delay;
+		_failureCallback = failureCallback;
+		_maxBackgroundAttempts = Math.Max(1, maxBackgroundAttempts);
+	}
+
+	internal TerminalSelectionProfilePersistenceCoordinator(
+		Func<string, ProjectSelectionProfile, CancellationToken, Task> persistAsync,
+		Func<CancellationToken, Task> delayAsync,
+		Func<TimeSpan, CancellationToken, Task>? retryDelayAsync = null,
+		Action<Exception>? failureCallback = null,
+		int maxBackgroundAttempts = 3)
+		: this(
+			(projectPath, profile, cancellationToken) => PersistAndReportSavedAsync(
+				persistAsync,
+				projectPath,
+				profile,
+				cancellationToken),
+			delayAsync,
+			retryDelayAsync,
+			failureCallback,
+			maxBackgroundAttempts)
+	{
+	}
+
+	private static async Task<ProjectProfilePersistenceResult> PersistAndReportSavedAsync(
+		Func<string, ProjectSelectionProfile, CancellationToken, Task> persistAsync,
+		string projectPath,
+		ProjectSelectionProfile profile,
+		CancellationToken cancellationToken)
+	{
+		await persistAsync(projectPath, profile, cancellationToken).ConfigureAwait(false);
+		return ProjectProfilePersistenceResult.Saved();
+	}
+
+	public void Schedule(string projectPath, ProjectSelectionProfile profile)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(projectPath);
+		ArgumentNullException.ThrowIfNull(profile);
+		if (Volatile.Read(ref _disposed) != 0)
+			return;
+
+		CancellationToken token;
+		long version;
+		EventHandler? stateChanged;
+		lock (_sync)
+		{
+			if (_disposed != 0)
+				return;
+
+			_delayCts?.Cancel();
+			_delayCts?.Dispose();
+			_delayCts = new CancellationTokenSource();
+			token = _delayCts.Token;
+			version = checked(++_version);
+			_pending = new PendingWrite(
+				Path.GetFullPath(projectPath),
+				ProjectSelectionProfileBuilder.Clone(profile),
+				version);
+			stateChanged = SetStateLocked(new TerminalSelectionPersistenceState(
+				TerminalSelectionPersistencePhase.Pending));
+		}
+		stateChanged?.Invoke(this, EventArgs.Empty);
+
+		lock (_sync)
+		{
+			if (_disposed == 0 && version == _version)
+				_activePersistence = PersistAfterDelayAsync(version, token);
+		}
+	}
+
+	public async Task<bool> FlushAsync(
+		CancellationToken cancellationToken = default,
+		bool reportFailure = true)
+	{
+		while (true)
+		{
+			Task active;
+			lock (_sync)
+			{
+				_delayCts?.Cancel();
+				_delayCts?.Dispose();
+				_delayCts = null;
+				active = _activePersistence;
+			}
+
+			await active.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+			PendingWrite? pending;
+			lock (_sync)
+				pending = _pending;
+			if (pending is null)
+				return true;
+
+			var persisted = await PersistVersionAsync(
+				pending.Version,
+				cancellationToken,
+				_maxBackgroundAttempts,
+				reportFailure).ConfigureAwait(false);
+			if (!persisted)
+				return false;
+		}
+	}
+
+	public void DiscardPending()
+	{
+		EventHandler? stateChanged;
+		lock (_sync)
+		{
+			_delayCts?.Cancel();
+			_delayCts?.Dispose();
+			_delayCts = null;
+			_pending = null;
+			_version = checked(_version + 1);
+			stateChanged = SetStateLocked(new TerminalSelectionPersistenceState(
+				TerminalSelectionPersistencePhase.Idle));
+		}
+		stateChanged?.Invoke(this, EventArgs.Empty);
+	}
+
+	private async Task PersistAfterDelayAsync(long version, CancellationToken cancellationToken)
+	{
+		try
+		{
+			await _delayAsync(cancellationToken).ConfigureAwait(false);
+		}
+		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+		{
+			return;
+		}
+
+		await PersistVersionAsync(
+			version,
+			CancellationToken.None,
+			_maxBackgroundAttempts,
+			reportFailure: true).ConfigureAwait(false);
+	}
+
+	private async Task<bool> PersistVersionAsync(
+		long version,
+		CancellationToken cancellationToken,
+		int attempts,
+		bool reportFailure)
+	{
+		Exception? lastFailure = null;
+		for (var attempt = 0; attempt < attempts; attempt++)
+		{
+			PendingWrite? pending;
+			lock (_sync)
+			{
+				if (_disposed != 0 || _pending?.Version != version)
+					return true;
+				pending = _pending;
+			}
+			PublishStateForVersion(
+				version,
+				new TerminalSelectionPersistenceState(TerminalSelectionPersistencePhase.Saving));
+
+			try
+			{
+				var result = await PersistAsync(pending, cancellationToken).ConfigureAwait(false);
+				if (!result.Completed)
+				{
+					PublishStateForVersion(
+						version,
+						new TerminalSelectionPersistenceState(
+							result.Disposition == ProjectProfilePersistenceDisposition.Deferred
+								? TerminalSelectionPersistencePhase.Deferred
+								: TerminalSelectionPersistencePhase.Failed,
+							result.Reason));
+					return false;
+				}
+				return true;
+			}
+			catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+			{
+				throw;
+			}
+			catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+			{
+				lastFailure = exception;
+				if (attempt + 1 < attempts)
+				{
+					await _retryDelayAsync(
+						TimeSpan.FromMilliseconds(100 * (attempt + 1)),
+						cancellationToken).ConfigureAwait(false);
+				}
+			}
+		}
+
+		if (lastFailure is not null && reportFailure)
+		{
+			Trace.TraceWarning(
+				"Terminal project selection persistence failed: {0}",
+				lastFailure.GetType().Name);
+			_failureCallback?.Invoke(lastFailure);
+		}
+		if (lastFailure is not null)
+		{
+			PublishStateForVersion(
+				version,
+				new TerminalSelectionPersistenceState(
+					TerminalSelectionPersistencePhase.Failed,
+					lastFailure.Message));
+		}
+		return false;
+	}
+
+	private void PublishStateForVersion(long version, TerminalSelectionPersistenceState state)
+	{
+		EventHandler? stateChanged;
+		lock (_sync)
+		{
+			if (_disposed != 0 || _pending?.Version != version)
+				return;
+			stateChanged = SetStateLocked(state);
+		}
+		stateChanged?.Invoke(this, EventArgs.Empty);
+	}
+
+	private EventHandler? SetStateLocked(TerminalSelectionPersistenceState state)
+	{
+		if (_state == state)
+			return null;
+		_state = state;
+		return StateChanged;
+	}
+
+	private async Task<ProjectProfilePersistenceResult> PersistAsync(
+		PendingWrite pending,
+		CancellationToken cancellationToken)
+	{
+		if (!await TryEnterWriteAsync(cancellationToken).ConfigureAwait(false))
+			return ProjectProfilePersistenceResult.Unchanged();
+
+		EventHandler? stateChanged = null;
+		ProjectProfilePersistenceResult result;
+		try
+		{
+			lock (_sync)
+			{
+				if (_disposed != 0 || _pending?.Version != pending.Version)
+					return ProjectProfilePersistenceResult.Unchanged();
+			}
+
+			result = await _persistAsync(
+				pending.ProjectPath,
+				pending.Profile,
+				cancellationToken).ConfigureAwait(false);
+			if (result.Completed)
+			{
+				lock (_sync)
+				{
+					if (_pending?.Version == pending.Version)
+					{
+						// Publish completion before releasing the gate so a queued flush cannot
+						// write the same snapshot again or revive a discarded selection.
+						_pending = null;
+						stateChanged = SetStateLocked(new TerminalSelectionPersistenceState(
+							TerminalSelectionPersistencePhase.Idle));
+					}
+				}
+			}
+		}
+		finally
+		{
+			ReleaseWriteGate();
+		}
+
+		stateChanged?.Invoke(this, EventArgs.Empty);
+		return result;
+	}
+
+	private async Task<bool> TryEnterWriteAsync(CancellationToken cancellationToken)
+	{
+		lock (_sync)
+		{
+			if (_disposed != 0)
+				return false;
+
+			_activeWriteCalls++;
+		}
+
+		try
+		{
+			await _writeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+			return true;
+		}
+		catch
+		{
+			ExitWriteCall();
+			throw;
+		}
+	}
+
+	private void ReleaseWriteGate()
+	{
+		_writeGate.Release();
+		ExitWriteCall();
+	}
+
+	private void ExitWriteCall()
+	{
+		bool disposeWriteGate;
+		lock (_sync)
+		{
+			_activeWriteCalls--;
+			disposeWriteGate = _disposed != 0 && _activeWriteCalls == 0;
+		}
+
+		if (disposeWriteGate)
+			_writeGate.Dispose();
+	}
+
+	public void Dispose()
+	{
+		bool disposeWriteGate;
+		lock (_sync)
+		{
+			if (_disposed != 0)
+				return;
+
+			_disposed = 1;
+			disposeWriteGate = _activeWriteCalls == 0;
+			_delayCts?.Cancel();
+			_delayCts?.Dispose();
+			_delayCts = null;
+			_pending = null;
+			_version = checked(_version + 1);
+		}
+		// Queued calls also retain the gate until their wait and release have completed.
+		if (disposeWriteGate)
+			_writeGate.Dispose();
+	}
+
+	private sealed record PendingWrite(
+		string ProjectPath,
+		ProjectSelectionProfile Profile,
+		long Version);
+}

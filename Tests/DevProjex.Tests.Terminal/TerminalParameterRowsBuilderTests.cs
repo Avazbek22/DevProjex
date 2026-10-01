@@ -340,6 +340,7 @@ public sealed class TerminalParameterRowsBuilderTests
 		Assert.DoesNotContain(rows, static row => row.Exclusion is not null);
 		Assert.Equal("Settings.All", aggregate.Label);
 		Assert.False(aggregate.IsSelected);
+		Assert.False(aggregate.IsEnabled);
 	}
 
 	[Fact]
@@ -401,6 +402,25 @@ public sealed class TerminalParameterRowsBuilderTests
 			selected.Label);
 		Assert.True(selected.IsSelected);
 		Assert.False(cleared.IsSelected);
+	}
+
+	[Fact]
+	public void ExclusionAggregateWithoutApplicableRowsIsUnavailable()
+	{
+		var builder = CreateBuilder();
+
+		var allEnabled = builder.BuildExclusionAggregate(CreatePlan(
+			ProjectSelectionSpec.Standard,
+			hasIgnoreOptionCounts: true,
+			ignoreOptionCounts: IgnoreOptionCounts.Empty));
+		var noneEnabled = builder.BuildExclusionAggregate(CreatePlan(
+			ProjectSelectionSpec.Standard with { Exclusions = [] },
+			hasIgnoreOptionCounts: true,
+			ignoreOptionCounts: IgnoreOptionCounts.Empty));
+
+		Assert.False(allEnabled.IsEnabled);
+		Assert.False(noneEnabled.IsEnabled);
+		Assert.True(CreateBuilder().BuildExclusionAggregate(CreatePlan(ProjectSelectionSpec.Standard)).IsEnabled);
 	}
 
 	[Fact]
