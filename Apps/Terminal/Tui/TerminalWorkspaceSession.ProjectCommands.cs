@@ -247,7 +247,7 @@ internal sealed partial class TerminalWorkspaceSession
 			}
 			catch (PortableProjectProfileException exception)
 			{
-				await ShowCommandFailureAsync(exception.Code, L("Terminal.Error.ProfileInvalid"))
+				await ShowCommandFailureAsync(exception.Code, L(PortableProfileFailureMessageKey(exception.Code)))
 					.ConfigureAwait(false);
 			}
 			catch (ProjectContextValidationException exception)

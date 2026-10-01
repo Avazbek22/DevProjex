@@ -831,9 +831,9 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			_welcomeContext?.CurrentDirectory);
 		if (profilePath is null)
 			return;
-		if (!File.Exists(profilePath))
+		if (ClassifyPickedPortableProfile(profilePath) is { } unavailable)
 		{
-			ShowError("DPX-CLI-PROFILE-INVALID", L("Terminal.Tui.Error.ProfileUnavailable"));
+			ShowError(unavailable.Code, L(unavailable.MessageKey));
 			return;
 		}
 
@@ -855,6 +855,18 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				ProjectProfileSourceKind.Portable,
 				Path.GetFullPath(profilePath)));
 	}
+
+	// The picker rules out only a file that is not there, as the CLI does; whether an existing
+	// file is a valid profile is decided when it loads, which reports DPX-CLI-PROFILE-INVALID.
+	internal static (string Code, string MessageKey)? ClassifyPickedPortableProfile(string profilePath) =>
+		File.Exists(profilePath)
+			? null
+			: ("DPX-CLI-PROFILE-NOT-FOUND", PortableProfileFailureMessageKey("DPX-CLI-PROFILE-NOT-FOUND"));
+
+	internal static string PortableProfileFailureMessageKey(string code) =>
+		code == "DPX-CLI-PROFILE-NOT-FOUND"
+			? "Terminal.Error.ProfileUnresolved"
+			: "Terminal.Error.ProfileInvalid";
 
 	private void BeginCloneRepository(
 		string? repositoryUrl = null,
@@ -1190,7 +1202,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			ReturnFromProjectOpenError(
 				operationCts,
 				exception.Code,
-				L("Terminal.Error.ProfileInvalid"),
+				L(PortableProfileFailureMessageKey(exception.Code)),
 				projectPath,
 				source,
 				sourceIdentity);
