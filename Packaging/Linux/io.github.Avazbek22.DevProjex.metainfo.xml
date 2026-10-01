@@ -38,20 +38,24 @@
   </branding>
   <screenshots>
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/Avazbek22/DevProjex/master/Packaging/Windows/StoreListing/ImportFolder/Screenshots/1_Main/EN.png</image>
-      <caption>DevProjex Desktop ready to open a project</caption>
+      <image>https://raw.githubusercontent.com/Avazbek22/DevProjex/master/Packaging/Windows/StoreListing/ImportFolder/Screenshots/1_Tree_Preview/EN.png</image>
+      <caption>Preview project structure and file contents before export</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/Avazbek22/DevProjex/master/Packaging/Windows/StoreListing/ImportFolder/Screenshots/2_Loaded_Project/EN.png</image>
-      <caption>A loaded project with its selectable file tree</caption>
+      <image>https://raw.githubusercontent.com/Avazbek22/DevProjex/master/Packaging/Windows/StoreListing/ImportFolder/Screenshots/2_Live_Context/EN.png</image>
+      <caption>Live Context: your AI agent follows the checkboxes, and ✦ marks the files it received</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/Avazbek22/DevProjex/master/Packaging/Windows/StoreListing/ImportFolder/Screenshots/3_Mcp_Menu/EN.png</image>
+      <caption>Connect an AI agent in one step: Claude Code, Codex, Cursor, VS Code</caption>
     </screenshot>
     <screenshot>
       <image>https://raw.githubusercontent.com/Avazbek22/DevProjex/master/Packaging/Windows/StoreListing/ImportFolder/Screenshots/6_Terminal_Workspace/EN.png</image>
-      <caption>The keyboard-first Terminal Workspace</caption>
+      <caption>The same workflow in the terminal: tree, preview, and parameters</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/Avazbek22/DevProjex/master/Docs/Media/terminal-workspace/format-json.png</image>
-      <caption>Structured JSON output in the terminal</caption>
+      <image>https://raw.githubusercontent.com/Avazbek22/DevProjex/master/Packaging/Windows/StoreListing/ImportFolder/Screenshots/10_Terminal_JSON/EN.png</image>
+      <caption>Context preview in JSON for scripts and automation</caption>
     </screenshot>
   </screenshots>
   <releases>

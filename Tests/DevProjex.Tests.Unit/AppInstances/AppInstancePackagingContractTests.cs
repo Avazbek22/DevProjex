@@ -370,6 +370,34 @@ public sealed class AppInstancePackagingContractTests
     }
 
     [Fact]
+    public void LinuxMetainfo_ScreenshotsPointToFilesThatExistInTheRepository()
+    {
+        // The AppImage gate validates these URLs against the published master branch,
+        // so a renamed screenshot only fails after the release branch is merged.
+        const string masterPrefix = "https://raw.githubusercontent.com/Avazbek22/DevProjex/master/";
+        var repositoryRoot = ResolveRepositoryRoot();
+        var metainfo = XDocument.Load(Path.Combine(
+            repositoryRoot,
+            "Packaging",
+            "Linux",
+            "io.github.Avazbek22.DevProjex.metainfo.xml"));
+
+        var imageUrls = metainfo.Descendants("screenshot")
+            .Select(static screenshot => screenshot.Element("image")?.Value ?? string.Empty)
+            .ToArray();
+
+        Assert.NotEmpty(imageUrls);
+        foreach (var imageUrl in imageUrls)
+        {
+            Assert.StartsWith(masterPrefix, imageUrl, StringComparison.Ordinal);
+            var relativePath = imageUrl[masterPrefix.Length..].Replace('/', Path.DirectorySeparatorChar);
+            Assert.True(
+                File.Exists(Path.Combine(repositoryRoot, relativePath)),
+                $"Metainfo screenshot is missing from the repository: {imageUrl}");
+        }
+    }
+
+    [Fact]
     public void MacOsPackaging_DocumentsDevprojexTerminalAliasWithoutSelfModifyingPath()
     {
         var repositoryRoot = ResolveRepositoryRoot();
