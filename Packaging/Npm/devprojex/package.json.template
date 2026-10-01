@@ -2,6 +2,16 @@
   "name": "devprojex",
   "version": "__VERSION__",
   "description": "Turn a folder or repository into focused context for AI from the CLI, TUI, or MCP server.",
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "ai",
+    "llm",
+    "context",
+    "cli",
+    "tui",
+    "code-context"
+  ],
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -16,6 +26,7 @@
   },
   "files": [
     "bin/devprojex.js",
+    "README.md",
     "LICENSE"
   ],
   "optionalDependencies": {

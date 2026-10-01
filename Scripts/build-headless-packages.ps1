@@ -193,6 +193,7 @@ $mainTemplate = Get-Content -LiteralPath (Join-Path $repoRoot "Packaging/Npm/dev
     $mainTemplate.Replace("__VERSION__", $packageVersion),
     [System.Text.UTF8Encoding]::new($false))
 Copy-Item -LiteralPath (Join-Path $repoRoot "Packaging/Npm/devprojex/bin/devprojex.js") -Destination (Join-Path $mainStage "bin/devprojex.js")
+Copy-Item -LiteralPath (Join-Path $repoRoot "Packaging/Npm/devprojex/README.md") -Destination (Join-Path $mainStage "README.md")
 Copy-Item -LiteralPath (Join-Path $repoRoot "LICENSE") -Destination (Join-Path $mainStage "LICENSE")
 Invoke-Checked "npm" @("pack", ".", "--pack-destination", $npmRoot) $mainStage
 

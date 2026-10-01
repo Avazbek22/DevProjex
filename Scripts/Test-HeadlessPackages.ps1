@@ -319,6 +319,7 @@ try {
     Assert-Artifact (Test-Path -LiteralPath $mainJsonPath -PathType Leaf) $mainName "package.json"
     Assert-Artifact (Test-Path -LiteralPath (Join-Path $mainRoot "bin/devprojex.js") -PathType Leaf) $mainName "bin/devprojex.js"
     Assert-Artifact (Test-Path -LiteralPath (Join-Path $mainRoot "LICENSE") -PathType Leaf) $mainName "LICENSE"
+    Assert-Artifact (Test-Path -LiteralPath (Join-Path $mainRoot "README.md") -PathType Leaf) $mainName "README.md"
     $mainJson = Get-Content -LiteralPath $mainJsonPath -Raw | ConvertFrom-Json
     Assert-Artifact ($mainJson.name -ceq "devprojex") $mainName "package name 'devprojex'"
     Assert-Artifact ($mainJson.version -ceq $Version) $mainName "version '$Version'"

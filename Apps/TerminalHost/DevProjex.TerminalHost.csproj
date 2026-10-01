@@ -25,6 +25,7 @@
     <HeadlessPackageVersion Condition="'$(HeadlessPackageVersion)'==''">$(DevProjexVersion)</HeadlessPackageVersion>
     <PackageVersion>$(HeadlessPackageVersion)</PackageVersion>
     <Description>Turn a folder or repository into focused context for AI from the CLI, TUI, or MCP server.</Description>
+    <PackageTags>mcp;mcp-server;ai;llm;context;cli;tui;code-context;dotnet-tool</PackageTags>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/Avazbek22/DevProjex</PackageProjectUrl>
     <RepositoryUrl>https://github.com/Avazbek22/DevProjex</RepositoryUrl>
