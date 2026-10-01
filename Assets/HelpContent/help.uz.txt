@@ -278,7 +278,7 @@ Daraxt shrifti «Ko‘rinish → Daraxt shrifti» orqali tanlanadi.
 Tanlangan shrift sozlamalar panelidagi «Sozlamalarni qo‘llash» tugmasi bosilgandan keyin qo‘llanadi.
 
 ### Agent faolligi
-«Ko‘rinish → Agent faolligi» jonli MCP seansi davomida AI agent olgan fayllarni belgilaydi; 19.4-bo‘limga qarang.
+Jonli AI agent qaysi fayllarni olganini ko‘rish uchun «Ko‘rinish → Agent faolligi» bandini yoqing: bunday fayllar daraxtda ✦ belgisi bilan belgilanadi (19.4-bo‘lim).
 
 ## 9) Daraxt bo‘yicha qidiruv
 Qidiruv panelini ochadi, mosliklarni yoritadi va navigatsiya qiladi.
@@ -621,7 +621,11 @@ Jonli seans faol bo‘lganda oyna sarlavhasi `· Live context (<client>)` bilan,
 Jurnal faqat shu kompyuterda, DevProjex holat papkasida saqlanadi va 30 kun davomida ko‘pi bilan 200 ta seansni saqlaydi. Unda fayl mazmuni, topilgan sir qiymatlari yoki qidiruv so‘rovlari matni saqlanmaydi. «Eksport…» seansni Markdown yoki JSON kvitansiyasi sifatida saqlaydi. «Tozalash» tasdiqlangandan keyin yakunlangan seanslarni o‘chiradi; faol seanslar va boshqa loyihalar bilan umumiy seanslar saqlanadi.
 
 ### 19.4 Agent faolligi
-«Ko‘rinish → Agent faolligi» odatda o‘chirilgan. U yoqilganda agent oxirgi jonli seans davomida olgan fayllar daraxtda ✦ bilan belgilanadi, belgining maslahat oynasi esa agent faylni necha marta olganini ko‘rsatadi. Belgilar filtrlar yoki belgilash kataklarini hech qachon o‘zgartirmaydi. Ular yangi jonli seans boshlanganda, Agent faolligi o‘chirilganda va loyiha qayta ochilganda tozalanadi. Oddiy seanslar jurnalda ko‘rinadi, lekin belgi qo‘shmaydi.
+«Ko‘rinish → Agent faolligi» odatda o‘chirilgan: belgilarni yoqish uchun ushbu bandni tanlang, o‘chirish uchun esa uni yana tanlang. U yoqilgan va jonli seans faol bo‘lganda, agent shu seansda mazmunini olgan har bir fayl — butun fayl, qatorlar oralig‘i, qidiruv mosliklari yoki e’lon — daraxtda ✦ bilan belgilanadi. Agent faqat daraxt ro‘yxatida yoki hajm bahosida ko‘rgan fayl belgilanmaydi. Agent faylni necha marta olganini ko‘rish uchun kursorni ✦ ustiga olib boring, masalan: «Agent 3 marta oldi».
+
+Belgilar faqat nima yetkazilganini ko‘rsatadi: ular belgilash kataklarini, filtrlarni yoki agent o‘qiy oladigan narsalarni hech qachon o‘zgartirmaydi. Ular yangi jonli seans boshlanganda, jonli seans tugaganda, Agent faolligi o‘chirilganda va loyiha qayta ochilganda tozalanadi; shundan keyin agent olgan fayllar yana belgilanadi. Oddiy seanslar jurnalda ko‘rinadi, lekin belgi qo‘shmaydi.
+
+Terminal ish maydonida `:set activity on` xuddi shu fayllarni daraxtda A harfi bilan belgilaydi, bunday fayl fokusda bo‘lganda esa holat satri agent uni necha marta olganini ko‘rsatadi; `:set activity off` belgilarni olib tashlaydi.
 
 ## 20) Eslatmalar
 * Ruxsat yetarli bo‘lmasa, ilova admin huquqi bilan qayta ishga tushirishni taklif qiladi; rad etilsa, xabar chiqadi.

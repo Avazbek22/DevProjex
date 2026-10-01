@@ -278,7 +278,7 @@ Czcionkę drzewa wybiera się w „Widok → Czcionka drzewa”.
 Wybrana czcionka jest stosowana po kliknięciu „Zastosuj ustawienia” w panelu ustawień.
 
 ### Aktywność agenta
-„Widok → Aktywność agenta” oznacza pliki, które agent AI otrzymał podczas sesji live MCP; szczegóły w sekcji 19.4.
+Włącz „Widok → Aktywność agenta”, aby widzieć, które pliki otrzymał agent AI w sesji live: w drzewie są oznaczone symbolem ✦ (sekcja 19.4).
 
 ## 9) Wyszukiwanie (drzewo)
 Otwiera pasek wyszukiwania, wyróżnia dopasowania i umożliwia przechodzenie między nimi.
@@ -621,7 +621,11 @@ Gdy sesja live jest aktywna, tytuł okna kończy się na `· Live context (<clie
 Dziennik jest przechowywany wyłącznie na tym komputerze, w folderze stanu DevProjex; zachowuje najwyżej 200 sesji, każdą przez najwyżej 30 dni. Nie zapisuje zawartości plików, wykrytych wartości sekretów ani tekstu zapytań wyszukiwania. „Eksportuj…” zapisuje sesję jako potwierdzenie w formacie Markdown lub JSON. „Wyczyść” po potwierdzeniu usuwa zakończone sesje; aktywne sesje i sesje współdzielone z innymi projektami są zachowywane.
 
 ### 19.4 Aktywność agenta
-„Widok → Aktywność agenta” jest domyślnie wyłączona. Po jej włączeniu pliki, które agent otrzymał podczas ostatniej sesji live, są oznaczane w drzewie symbolem ✦, a podpowiedź znacznika pokazuje, ile razy agent otrzymał plik. Znaczniki nigdy nie zmieniają filtrów ani pól wyboru. Są usuwane, gdy zaczyna się nowsza sesja live, gdy „Aktywność agenta” zostaje wyłączona i gdy projekt zostaje ponownie otwarty. Sesje w trybie standardowym pojawiają się w dzienniku, ale nie dodają znaczników.
+„Widok → Aktywność agenta” jest domyślnie wyłączona: wybierz tę pozycję, aby włączyć znaczniki, i wybierz ją ponownie, aby je wyłączyć. Gdy jest włączona i trwa sesja live, każdy plik, którego zawartość agent otrzymał w tej sesji — cały plik, zakres wierszy, wyniki wyszukiwania lub deklarację — jest oznaczany w drzewie symbolem ✦. Plik, który agent widział tylko na liście drzewa lub w oszacowaniu rozmiaru, nie jest oznaczany. Najedź kursorem na ✦, aby zobaczyć, ile razy agent otrzymał plik, na przykład „Agent otrzymał 3 razy”.
+
+Znaczniki pokazują tylko to, co zostało przekazane: nigdy nie zmieniają pól wyboru, filtrów ani tego, co agent może czytać. Są usuwane, gdy zaczyna się nowsza sesja live, gdy sesja live się kończy, gdy „Aktywność agenta” zostaje wyłączona i gdy projekt zostaje ponownie otwarty; pliki, które agent otrzyma później, są oznaczane od nowa. Sesje w trybie standardowym pojawiają się w dzienniku, ale nie dodają znaczników.
+
+W terminalowym obszarze roboczym `:set activity on` oznacza te same pliki literą A w drzewie, a gdy taki plik ma fokus, pasek stanu pokazuje, ile razy agent go otrzymał; `:set activity off` usuwa znaczniki.
 
 ## 20) Uwagi
 * Jeśli uprawnienia są niewystarczające, aplikacja może zaproponować ponowne uruchomienie z podwyższonymi uprawnieniami; po odmowie wyświetlane jest powiadomienie.

@@ -278,7 +278,7 @@ Phông chữ cây được chọn qua “Xem → Phông chữ cây”.
 Phông chữ đã chọn được áp dụng sau khi nhấp “Áp dụng cài đặt” trong bảng cài đặt.
 
 ### Hoạt động của tác nhân
-“Xem → Hoạt động của tác nhân” đánh dấu các tệp mà một tác nhân AI đã nhận trong một phiên MCP live; xem phần 19.4.
+Bật “Xem → Hoạt động của tác nhân” để biết tác nhân AI live đã nhận những tệp nào: các tệp đó được gắn dấu ✦ trên cây (phần 19.4).
 
 ## 9) Tìm kiếm (cây)
 Mở thanh tìm kiếm, tô sáng các kết quả khớp và cho phép di chuyển giữa chúng.
@@ -621,7 +621,11 @@ Khi một phiên live đang hoạt động, tiêu đề cửa sổ kết thúc b
 Nhật ký chỉ được lưu trên máy tính này, trong thư mục trạng thái của DevProjex, và giữ tối đa 200 phiên trong 30 ngày. Nhật ký không lưu nội dung tệp, giá trị bí mật được phát hiện hay văn bản của truy vấn tìm kiếm. Xuất… lưu một phiên thành biên nhận Markdown hoặc JSON. Xóa sẽ xóa các phiên đã kết thúc sau khi xác nhận; các phiên đang hoạt động và các phiên dùng chung với dự án khác được giữ lại.
 
 ### 19.4 Hoạt động của tác nhân
-“Xem → Hoạt động của tác nhân” tắt theo mặc định. Khi bật, các tệp mà tác nhân đã nhận trong phiên live gần nhất được đánh dấu bằng ✦ trên cây, và chú giải của dấu cho biết tác nhân đã nhận tệp bao nhiêu lần. Các dấu không bao giờ thay đổi bộ lọc hay hộp kiểm. Chúng bị xóa khi một phiên live mới hơn bắt đầu, khi tắt Hoạt động của tác nhân và khi mở lại dự án. Các phiên Thông thường xuất hiện trong nhật ký nhưng không thêm dấu.
+“Xem → Hoạt động của tác nhân” tắt theo mặc định: chọn mục này để bật dấu, chọn lại để tắt. Khi tùy chọn đang bật và có phiên live đang hoạt động, mọi tệp mà tác nhân đã nhận nội dung trong phiên đó — toàn bộ tệp, một khoảng dòng, các dòng khớp khi tìm kiếm hoặc một khai báo — đều được đánh dấu bằng ✦ trên cây. Tệp mà tác nhân chỉ thấy trong danh sách cây hoặc trong ước tính kích thước sẽ không được đánh dấu. Di chuột lên ✦ để xem tác nhân đã nhận tệp bao nhiêu lần, ví dụ “Tác nhân đã nhận 3 lần”.
+
+Dấu chỉ cho biết những gì đã được gửi: chúng không bao giờ thay đổi hộp kiểm, bộ lọc hay phạm vi mà tác nhân được đọc. Dấu bị xóa khi một phiên live mới hơn bắt đầu, khi phiên live kết thúc, khi tắt Hoạt động của tác nhân và khi mở lại dự án; các tệp tác nhân nhận sau đó sẽ được đánh dấu lại. Các phiên Thông thường xuất hiện trong nhật ký nhưng không thêm dấu.
+
+Trong Terminal Workspace, `:set activity on` đánh dấu chính các tệp đó bằng A trên cây, và khi một tệp như vậy được chọn, dòng trạng thái cho biết tác nhân đã nhận tệp đó bao nhiêu lần; `:set activity off` xóa các dấu.
 
 ## 20) Ghi chú
 * Nếu không đủ quyền, ứng dụng có thể đề xuất khởi động lại với quyền nâng cao; nếu bạn từ chối, một thông báo sẽ được hiển thị.

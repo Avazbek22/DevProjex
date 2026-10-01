@@ -278,7 +278,7 @@ La police de l’arborescence se choisit via « Affichage → Police de l’ar
 La police choisie est appliquée après un clic sur « Appliquer » dans le panneau des paramètres.
 
 ### Activité de l’agent
-« Affichage → Activité de l’agent » marque les fichiers qu’un agent IA a reçus pendant une session MCP live ; voir la section 19.4.
+Activez « Affichage → Activité de l’agent » pour voir quels fichiers un agent IA a reçus pendant une session live : ils sont marqués d’un ✦ dans l’arborescence (section 19.4).
 
 ## 9) Recherche dans l’arborescence
 Ouvre la recherche, met en évidence les correspondances et permet la navigation.
@@ -621,7 +621,11 @@ Tant qu’une session live est active, le titre de la fenêtre se termine par `�
 Le journal est stocké uniquement sur cet ordinateur, dans le dossier d’état de DevProjex, et conserve au plus 200 sessions pendant 30 jours. Il ne stocke ni le contenu des fichiers, ni les valeurs secrètes détectées, ni le texte des requêtes de recherche. « Exporter… » enregistre une session sous forme de reçu Markdown ou JSON. « Effacer » supprime les sessions terminées après confirmation ; les sessions actives et celles partagées avec d’autres projets sont conservées.
 
 ### 19.4 Activité de l’agent
-« Affichage → Activité de l’agent » est désactivé par défaut. Lorsqu’il est activé, les fichiers que l’agent a reçus pendant la dernière session live sont marqués d’un ✦ dans l’arborescence, et l’info-bulle du marqueur indique combien de fois l’agent a reçu le fichier. Les marqueurs ne modifient jamais les filtres ni les cases cochées. Ils sont effacés lorsqu’une session live plus récente démarre, lorsque l’activité de l’agent est désactivée et lorsque le projet est rouvert. Les sessions Standard apparaissent dans le journal mais n’ajoutent pas de marqueurs.
+« Affichage → Activité de l’agent » est désactivé par défaut : sélectionnez-le pour afficher les marqueurs, puis sélectionnez-le de nouveau pour les masquer. Tant qu’il est activé et qu’une session live est en cours, chaque fichier dont l’agent a reçu le contenu pendant cette session — le fichier entier, une plage de lignes, des résultats de recherche ou une déclaration — est marqué d’un ✦ dans l’arborescence. Un fichier que l’agent a seulement vu dans une liste de l’arborescence ou dans une estimation de taille n’est pas marqué. Survolez ✦ pour voir combien de fois l’agent a reçu le fichier, par exemple « L’agent a reçu ce fichier 3 fois ».
+
+Les marqueurs indiquent seulement ce qui a été transmis : ils ne modifient jamais les cases cochées, les filtres ni ce que l’agent peut lire. Ils sont effacés lorsqu’une session live plus récente démarre, lorsque la session live se termine, lorsque l’activité de l’agent est désactivée et lorsque le projet est rouvert ; les fichiers que l’agent reçoit ensuite sont de nouveau marqués. Les sessions Standard apparaissent dans le journal mais n’ajoutent pas de marqueurs.
+
+Dans l’espace de travail du terminal, `:set activity on` marque les mêmes fichiers d’un A dans l’arborescence ; lorsqu’un de ces fichiers a le focus, la ligne d’état indique combien de fois l’agent l’a reçu. `:set activity off` supprime les marqueurs.
 
 ## 20) Notes
 * Si les permissions sont insuffisantes, l’application peut proposer un redémarrage avec élévation ; en cas de refus, un avertissement s’affiche.

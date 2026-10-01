@@ -278,7 +278,7 @@ Ağaç yazı tipi “Görünüm → Ağaç yazı tipi” ile seçilir.
 Seçilen yazı tipi, ayarlar panelinde “Ayarları uygula”ya tıklandıktan sonra uygulanır.
 
 ### Aracı etkinliği
-“Görünüm → Aracı etkinliği”, canlı (live) bir MCP oturumunda bir yapay zekâ aracısının aldığı dosyaları işaretler; bkz. bölüm 19.4.
+Canlı bir yapay zekâ aracısının hangi dosyaları aldığını görmek için “Görünüm → Aracı etkinliği”ni açın: bu dosyalar ağaçta ✦ ile işaretlenir (bölüm 19.4).
 
 ## 9) Arama (ağaç)
 Arama çubuğunu açar, eşleşmeleri vurgular ve aralarında gezinmeyi sağlar.
@@ -621,7 +621,11 @@ Canlı bir oturum etkinken pencere başlığı `· Live context (<client>)` ile,
 Günlük yalnızca bu bilgisayarda, DevProjex durum klasöründe saklanır ve en fazla 200 oturumu 30 gün boyunca tutar. Dosya içeriğini, algılanan gizli değerleri veya arama sorgularının metnini saklamaz. Dışa aktar… bir oturumu Markdown veya JSON makbuzu olarak kaydeder. Temizle, onaydan sonra tamamlanmış oturumları siler; etkin oturumlar ve diğer projelerle paylaşılan oturumlar korunur.
 
 ### 19.4 Aracı etkinliği
-“Görünüm → Aracı etkinliği” varsayılan olarak kapalıdır. Açıkken, aracının son canlı oturum sırasında aldığı dosyalar ağaçta ✦ ile işaretlenir ve işaretin araç ipucu aracının dosyayı kaç kez aldığını gösterir. İşaretler filtreleri veya onay kutularını asla değiştirmez. Daha yeni bir canlı oturum başladığında, Aracı etkinliği kapatıldığında ve proje yeniden açıldığında temizlenir. Standart oturumlar günlükte görünür ancak işaret eklemez.
+“Görünüm → Aracı etkinliği” varsayılan olarak kapalıdır: işaretleri açmak için bu öğeyi seçin, kapatmak için yeniden seçin. Açıkken ve bir canlı oturum etkinken, aracının bu oturumda içeriğini aldığı her dosya — dosyanın tamamı, bir satır aralığı, arama eşleşmeleri veya bir bildirim — ağaçta ✦ ile işaretlenir. Aracının yalnızca ağaç listesinde veya boyut tahmininde gördüğü dosyalar işaretlenmez. Aracının dosyayı kaç kez aldığını görmek için imleci ✦ üzerine getirin; örneğin “Aracı 3 kez aldı”.
+
+İşaretler yalnızca neyin teslim edildiğini gösterir: onay kutularını, filtreleri veya aracının okuyabileceklerini asla değiştirmez. Daha yeni bir canlı oturum başladığında, canlı oturum sona erdiğinde, Aracı etkinliği kapatıldığında ve proje yeniden açıldığında temizlenir; aracının bundan sonra aldığı dosyalar yeniden işaretlenir. Standart oturumlar günlükte görünür ancak işaret eklemez.
+
+Terminal Çalışma Alanında `:set activity on` aynı dosyaları ağaçta A ile işaretler; böyle bir dosya odaktayken durum satırı aracının onu kaç kez aldığını gösterir. `:set activity off` işaretleri kaldırır.
 
 ## 20) Notlar
 * İzinler yetersizse uygulama yükseltilmiş yetkiyle yeniden başlatmayı önerebilir; reddedilirse bir bildirim gösterilir.

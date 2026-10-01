@@ -278,7 +278,7 @@ Fonta pohon dipilih melalui “Tampilan → Fonta pohon”.
 Fonta yang dipilih diterapkan setelah mengklik “Terapkan pengaturan” di panel pengaturan.
 
 ### Aktivitas agen
-“Tampilan → Aktivitas agen” menandai file yang diterima agen AI selama sesi MCP live; lihat bagian 19.4.
+Aktifkan “Tampilan → Aktivitas agen” untuk melihat file mana yang diterima agen AI live: file tersebut mendapat penanda ✦ di pohon (bagian 19.4).
 
 ## 9) Pencarian (pohon)
 Membuka bilah pencarian, menyorot hasil yang cocok, dan memungkinkan navigasi.
@@ -621,7 +621,11 @@ Selama sesi live aktif, judul jendela diakhiri dengan `· Live context (<client>
 Jurnal hanya disimpan di komputer ini, di folder status DevProjex, dan menyimpan paling banyak 200 sesi selama 30 hari. Jurnal tidak menyimpan isi file, nilai rahasia yang terdeteksi, atau teks kueri pencarian. Ekspor… menyimpan sesi sebagai tanda terima Markdown atau JSON. Hapus menghapus sesi yang sudah selesai setelah konfirmasi; sesi aktif dan sesi yang juga dipakai proyek lain tetap dipertahankan.
 
 ### 19.4 Aktivitas agen
-“Tampilan → Aktivitas agen” nonaktif secara bawaan. Jika diaktifkan, file yang diterima agen selama sesi live terakhir ditandai dengan ✦ di pohon, dan tooltip penanda menunjukkan berapa kali agen menerima file tersebut. Penanda tidak pernah mengubah filter atau kotak centang. Penanda dihapus saat sesi live yang lebih baru dimulai, saat Aktivitas agen dimatikan, dan saat proyek dibuka kembali. Sesi Standar muncul di jurnal tetapi tidak menambahkan penanda.
+“Tampilan → Aktivitas agen” nonaktif secara bawaan: pilih untuk mengaktifkan penanda, lalu pilih lagi untuk menonaktifkannya. Selama opsi ini aktif dan ada sesi live yang aktif, setiap file yang isinya diterima agen dalam sesi tersebut — seluruh file, rentang baris, baris hasil pencarian, atau sebuah deklarasi — ditandai dengan ✦ di pohon. File yang hanya dilihat agen dalam daftar pohon atau dalam perkiraan ukuran tidak ditandai. Arahkan kursor ke ✦ untuk melihat berapa kali agen menerima file tersebut, misalnya “Agen menerima 3 kali”.
+
+Penanda hanya menunjukkan apa yang telah dikirim: penanda tidak pernah mengubah kotak centang, filter, atau apa yang dapat dibaca agen. Penanda dihapus saat sesi live yang lebih baru dimulai, saat sesi live berakhir, saat Aktivitas agen dimatikan, dan saat proyek dibuka kembali; file yang diterima agen setelah itu akan ditandai lagi. Sesi Standar muncul di jurnal tetapi tidak menambahkan penanda.
+
+Di Terminal Workspace, `:set activity on` menandai file yang sama dengan A di pohon, dan saat file tersebut difokuskan, baris status menampilkan berapa kali agen menerimanya; `:set activity off` menghapus penanda.
 
 ## 20) Catatan
 * Jika izin tidak mencukupi, aplikasi dapat menyarankan untuk memulai ulang dengan hak akses yang lebih tinggi; jika ditolak, pemberitahuan akan ditampilkan.

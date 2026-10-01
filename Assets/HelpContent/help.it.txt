@@ -278,7 +278,7 @@ Il font dell’albero si sceglie da «Visualizza → Font albero».
 Il font scelto viene applicato dopo aver premuto «Applica» nel pannello impostazioni.
 
 ### Attività dell’agente
-«Visualizza → Attività dell’agente» contrassegna i file che un agente IA ha ricevuto durante una sessione MCP live; vedi la sezione 19.4.
+Attiva «Visualizza → Attività dell’agente» per vedere quali file ha ricevuto un agente IA durante una sessione live: nell’albero sono contrassegnati con ✦ (sezione 19.4).
 
 ## 9) Ricerca nell’albero
 Apre la ricerca, evidenzia le corrispondenze e permette la navigazione.
@@ -621,7 +621,11 @@ Mentre una sessione live è attiva, il titolo della finestra termina con `· Liv
 Il registro viene conservato solo su questo computer, nella cartella di stato di DevProjex, e mantiene al massimo 200 sessioni per 30 giorni. Non memorizza il contenuto dei file, i valori segreti rilevati né il testo delle query di ricerca. «Esporta…» salva una sessione come ricevuta in Markdown o JSON. «Cancella» elimina le sessioni completate dopo una conferma; le sessioni attive e quelle condivise con altri progetti vengono conservate.
 
 ### 19.4 Attività dell’agente
-«Visualizza → Attività dell’agente» è disattivato per impostazione predefinita. Quando è attivo, i file che l’agente ha ricevuto durante l’ultima sessione live sono contrassegnati con ✦ nell’albero, e il tooltip del contrassegno indica quante volte l’agente ha ricevuto il file. I contrassegni non modificano mai filtri o checkbox. Vengono rimossi quando inizia una sessione live più recente, quando l’attività dell’agente viene disattivata e quando il progetto viene riaperto. Le sessioni Standard compaiono nel registro ma non aggiungono contrassegni.
+«Visualizza → Attività dell’agente» è disattivato per impostazione predefinita: selezionalo per mostrare i contrassegni e selezionalo di nuovo per nasconderli. Finché è attivo ed è in corso una sessione live, ogni file di cui l’agente ha ricevuto il contenuto in quella sessione — il file intero, un intervallo di righe, risultati di ricerca o una dichiarazione — è contrassegnato con ✦ nell’albero. Un file che l’agente ha visto solo in un elenco dell’albero o in una stima delle dimensioni non viene contrassegnato. Passa il puntatore su ✦ per vedere quante volte l’agente ha ricevuto il file, ad esempio «L’agente ha ricevuto il file 3 volte».
+
+I contrassegni mostrano solo ciò che è stato consegnato: non modificano mai checkbox, filtri o ciò che l’agente può leggere. Vengono rimossi quando inizia una sessione live più recente, quando la sessione live termina, quando l’attività dell’agente viene disattivata e quando il progetto viene riaperto; i file che l’agente riceve in seguito vengono contrassegnati di nuovo. Le sessioni Standard compaiono nel registro ma non aggiungono contrassegni.
+
+Nell’area di lavoro del terminale, `:set activity on` contrassegna gli stessi file con A nell’albero e, quando uno di questi file ha il focus, la riga di stato mostra quante volte l’agente lo ha ricevuto; `:set activity off` rimuove i contrassegni.
 
 ## 20) Note
 * Se i permessi non bastano, l’app può proporre il riavvio con privilegi elevati; in caso di rifiuto viene mostrato un avviso.

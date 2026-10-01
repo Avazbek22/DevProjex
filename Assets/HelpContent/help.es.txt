@@ -278,7 +278,7 @@ La fuente del árbol se selecciona en «Ver → Fuente del árbol».
 La fuente seleccionada se aplica después de hacer clic en «Aplicar configuración» en el panel de configuración.
 
 ### Actividad del agente
-«Ver → Actividad del agente» marca los archivos que un agente de IA recibió durante una sesión MCP en vivo; consulte la sección 19.4.
+Active «Ver → Actividad del agente» para ver qué archivos recibió un agente de IA durante una sesión en vivo: se marcan con ✦ en el árbol (sección 19.4).
 
 ## 9) Búsqueda (árbol)
 Abre la barra de búsqueda, resalta las coincidencias y permite navegar entre ellas.
@@ -621,7 +621,11 @@ Mientras hay una sesión en vivo activa, el título de la ventana termina en `·
 El registro se guarda solo en este equipo, en la carpeta de estado de DevProjex, y conserva como máximo 200 sesiones durante 30 días. No guarda el contenido de los archivos, los valores secretos detectados ni el texto de las consultas de búsqueda. «Exportar…» guarda una sesión como recibo en Markdown o JSON. «Borrar» elimina las sesiones finalizadas tras una confirmación; las sesiones activas y las compartidas con otros proyectos se conservan.
 
 ### 19.4 Actividad del agente
-«Ver → Actividad del agente» está desactivado de forma predeterminada. Cuando está activado, los archivos que el agente recibió durante la última sesión en vivo se marcan con ✦ en el árbol, y la información sobre herramientas de la marca indica cuántas veces recibió el agente el archivo. Las marcas nunca cambian los filtros ni las casillas. Se borran cuando empieza una sesión en vivo más reciente, cuando se desactiva «Actividad del agente» y cuando se vuelve a abrir el proyecto. Las sesiones estándar aparecen en el registro, pero no añaden marcas.
+«Ver → Actividad del agente» está desactivado de forma predeterminada: selecciónelo para mostrar las marcas y vuelva a seleccionarlo para ocultarlas. Mientras está activado y hay una sesión en vivo activa, cada archivo cuyo contenido recibió el agente en esa sesión —el archivo completo, un rango de líneas, resultados de búsqueda o una declaración— se marca con ✦ en el árbol. Un archivo que el agente solo vio en un listado del árbol o en una estimación de tamaño no se marca. Pase el puntero sobre ✦ para ver cuántas veces recibió el agente el archivo, por ejemplo «El agente recibió el archivo 3 veces».
+
+Las marcas solo muestran lo que se entregó: nunca cambian las casillas, los filtros ni lo que el agente puede leer. Se borran cuando empieza una sesión en vivo más reciente, cuando termina la sesión en vivo, cuando se desactiva «Actividad del agente» y cuando se vuelve a abrir el proyecto; los archivos que el agente reciba después se vuelven a marcar. Las sesiones estándar aparecen en el registro, pero no añaden marcas.
+
+En el Terminal Workspace, `:set activity on` marca los mismos archivos con A en el árbol y, cuando uno de ellos tiene el foco, la línea de estado muestra cuántas veces lo recibió el agente; `:set activity off` quita las marcas.
 
 ## 20) Notas
 * Si los permisos no son suficientes, la aplicación puede proponer reiniciarse con privilegios elevados; si lo rechaza, se muestra una notificación.

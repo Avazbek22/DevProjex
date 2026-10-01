@@ -278,7 +278,7 @@ The tree font is selected via “View → Tree font”.
 The selected font is applied after clicking “Apply settings” in the settings panel.
 
 ### Agent activity
-“View → Agent activity” marks files that an AI agent received during a live MCP session; see section 19.4.
+Turn on “View → Agent activity” to see which files a live AI agent received: they get a ✦ marker in the tree (section 19.4).
 
 ## 9) Search (tree)
 Opens the search bar, highlights matches, and allows navigation.
@@ -621,7 +621,11 @@ While a live session is active, the window title ends with `· Live context (<cl
 The journal is stored only on this computer, in the DevProjex state folder, and keeps at most 200 sessions for 30 days. It does not store file contents, detected secret values, or the text of search queries. Export… saves a session as a Markdown or JSON receipt. Clear deletes completed sessions after confirmation; active sessions and sessions shared with other projects are kept.
 
 ### 19.4 Agent activity
-“View → Agent activity” is off by default. When it is on, files that the agent received during the latest live session are marked with ✦ in the tree, and the marker's tooltip shows how many times the agent received the file. The markers never change filters or checkboxes. They are cleared when a newer live session starts, when Agent activity is turned off, and when the project is reopened. Standard sessions appear in the journal but do not add markers.
+“View → Agent activity” is off by default: select it to turn the markers on, and select it again to turn them off. While it is on and a live session is active, every file whose content the agent received in that session — the whole file, a line range, search matches, or a declaration — is marked with ✦ in the tree. A file that the agent only saw in a tree listing or in a size estimate is not marked. Hover over ✦ to see how many times the agent received the file, for example “Agent received 3 times”.
+
+The markers only show what was delivered: they never change checkboxes, filters, or what the agent can read. They are cleared when a newer live session starts, when the live session ends, when Agent activity is turned off, and when the project is reopened; files that the agent receives after that are marked again. Standard sessions appear in the journal but do not add markers.
+
+In Terminal Workspace, `:set activity on` marks the same files with A in the tree, and when such a file is focused, the status line shows how many times the agent received it; `:set activity off` removes the markers.
 
 ## 20) Notes
 * If permissions are insufficient, the app may suggest restarting with elevation; if declined, a notification is shown.

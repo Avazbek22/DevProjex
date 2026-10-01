@@ -278,7 +278,7 @@ Die Baum-Schrift wird über „Ansicht → Baum-Schrift“ ausgewählt.
 Die ausgewählte Schrift wird nach dem Klick auf „Anwenden“ im Einstellungen-Panel angewendet.
 
 ### Agentenaktivität
-„Ansicht → Agentenaktivität“ markiert Dateien, die ein KI-Agent während einer Live-MCP-Sitzung erhalten hat; siehe Abschnitt 19.4.
+Mit „Ansicht → Agentenaktivität“ sehen Sie, welche Dateien ein KI-Agent in einer Live-Sitzung erhalten hat: Diese Dateien werden im Baum mit ✦ markiert (Abschnitt 19.4).
 
 ## 9) Suche im Baum
 Öffnet die Suche, hebt Treffer hervor und erlaubt Navigation.
@@ -621,7 +621,11 @@ Solange eine Live-Sitzung aktiv ist, endet der Fenstertitel mit `· Live context
 Das Journal wird nur auf diesem Computer im Statusordner von DevProjex gespeichert und enthält höchstens 200 Sitzungen der letzten 30 Tage. Es speichert keine Dateiinhalte, keine erkannten geheimen Werte und keinen Text von Suchanfragen. „Exportieren…“ speichert eine Sitzung als Beleg in Markdown oder JSON. „Leeren“ löscht nach einer Bestätigung abgeschlossene Sitzungen; aktive Sitzungen und Sitzungen, die mit anderen Projekten geteilt werden, bleiben erhalten.
 
 ### 19.4 Agentenaktivität
-„Ansicht → Agentenaktivität“ ist standardmäßig deaktiviert. Ist sie aktiviert, werden Dateien, die der Agent während der letzten Live-Sitzung erhalten hat, im Baum mit ✦ markiert, und der Tooltip der Markierung zeigt, wie oft der Agent die Datei erhalten hat. Die Markierungen ändern niemals Filter oder Kontrollkästchen. Sie werden entfernt, wenn eine neuere Live-Sitzung beginnt, wenn die Agentenaktivität ausgeschaltet wird und wenn das Projekt erneut geöffnet wird. Standard-Sitzungen erscheinen im Journal, fügen aber keine Markierungen hinzu.
+„Ansicht → Agentenaktivität“ ist standardmäßig deaktiviert: Ein Klick auf den Menüpunkt schaltet die Markierungen ein, ein weiterer schaltet sie wieder aus. Solange die Option aktiv ist und eine Live-Sitzung läuft, wird jede Datei, deren Inhalt der Agent in dieser Sitzung erhalten hat — die ganze Datei, ein Zeilenbereich, Suchtreffer oder eine Deklaration —, im Baum mit ✦ markiert. Eine Datei, die der Agent nur in einer Baumauflistung oder in einer Größenschätzung gesehen hat, wird nicht markiert. Wenn Sie den Mauszeiger auf ✦ bewegen, sehen Sie, wie oft der Agent die Datei erhalten hat, zum Beispiel „Agent erhielt die Datei 3-mal“.
+
+Die Markierungen zeigen nur, was geliefert wurde: Sie ändern niemals Kontrollkästchen, Filter oder das, was der Agent lesen darf. Sie werden entfernt, wenn eine neuere Live-Sitzung beginnt, wenn die Live-Sitzung endet, wenn die Agentenaktivität ausgeschaltet wird und wenn das Projekt erneut geöffnet wird; Dateien, die der Agent danach erhält, werden wieder markiert. Standard-Sitzungen erscheinen im Journal, fügen aber keine Markierungen hinzu.
+
+Im Terminal-Arbeitsbereich markiert `:set activity on` dieselben Dateien im Baum mit A; ist eine solche Datei fokussiert, zeigt die Statuszeile, wie oft der Agent sie erhalten hat. `:set activity off` entfernt die Markierungen.
 
 ## 20) Hinweise
 * Bei fehlenden Rechten kann die App einen Neustart mit erhöhten Rechten vorschlagen; bei Ablehnung erscheint eine Meldung.
