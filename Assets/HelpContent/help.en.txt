@@ -128,7 +128,7 @@ The cache is stored in the user's system cache directory. Run `devprojex doctor`
 * Get updates — updates only the current branch: fetch and reset to origin/<branch>. For a Git Clone project, F5 performs the same action; the regular “File → Refresh” command is disabled.
 
 ### Clone window
-In the Git Clone window, a “Recent repositories” list can appear below the URL field.
+In the Git Clone window, a “Recent links” list can appear below the URL field.
 
 Rules:
 * the list appears only if the history already contains recently cloned repositories;
@@ -152,7 +152,7 @@ The toggle defines the tree representation format for operations where the tree 
 
 The toggle affects:
 * Copy tree
-* Copy tree + content
+* Copy tree and content
 * Export tree
 * Export tree and content
 
@@ -175,7 +175,7 @@ Copies file contents:
 * for files containing only whitespace/line breaks, the path and the line `[Whitespace, N bytes]` are output.
 Hotkey: {mod}{alt}V.
 
-### Copy tree + content
+### Copy tree and content
 Combines tree and content:
 * tree is built from selection; if selection is empty/invalid, the full tree is used;
 * content follows the same rules as “Copy content”;
@@ -200,7 +200,7 @@ MD:
 * uses a Markdown nested list;
 * folders end with `/`.
 
-Tree + content:
+Tree and content:
 * the selected tree format applies to the tree block;
 * content block remains text;
 * file headers in the content block use relative paths with `/`;
@@ -312,9 +312,9 @@ Available on the right:
 * Apply settings
 * Content processing
 * Exclusions
-* Extensions
+* File types
 
-Changes in “Exclusions” and “Extensions” are staged in the panel and applied after clicking “Apply settings”.
+Changes in “Exclusions” and “File types” are staged in the panel and applied after clicking “Apply settings”.
 
 After a checkbox changes, the app may update available options and their counts in the background. The resulting tree is rebuilt only after clicking “Apply settings”.
 
@@ -322,7 +322,7 @@ If an available-options update is canceled with the X button in the status bar, 
 
 Each list has an All toggle.
 
-Note about “Extensions”:
+Note about “File types”:
 * this list shows only files that have an extension;
 * files without an extension are not added to this list and are controlled by a separate option in “Exclusions”.
 
@@ -368,8 +368,8 @@ Depending on the project contents, the following options may be shown:
 * Empty files
 * Hidden folders
 * Hidden files
-* Dot-prefixed folders
-* Dot-prefixed files
+* Dot folders
+* Dot files
 * Files without extension
 
 The GUI selector and the TUI Git-axis radio rows are hidden completely when Git filtering is not applicable: there is no repository boundary and the `.gitignore` filter cannot change the current tree. When the axis is visible outside a repository, the GUI offers only none and `.gitignore`, while the TUI disables the repository-only rows. Inside a Git repository, the five regular values are none, `.gitignore`, tracked files, staged files, and all current changes; in the TUI, an active `diff:<ref>..<ref>` scope appears as a sixth row. Selecting a value replaces the current Git mode without changing Smart Ignore or the basic exclusions. Other options are shown when their rules can change the current tree, so the list may change after switching another rule or file type.
@@ -448,7 +448,7 @@ Smart Ignore can stay hidden while the selected Git mode already covers all of i
 A Git negation rule starting with `!` cancels only a Git result. It does not disable Smart Ignore or a basic rule.
 
 ### 12.8 Basic rules
-“Dot-prefixed folders” and “Dot-prefixed files” inspect the item name.
+“Dot folders” and “Dot files” inspect the item name.
 
 “Hidden folders” and “Hidden files” inspect the system hidden attribute. On some platforms, a dot-prefixed name and the system attribute may describe the same item or different items.
 
@@ -479,7 +479,7 @@ If settings preparation is cancelled, DevProjex returns the panel to the last fu
 
 ## 13) How the tree and metrics are calculated
 Result depends on:
-* selected Extensions
+* selected file types
 * Ignore rules
 * active Filter
 * checked tree nodes (for selection-based operations)
@@ -494,7 +494,7 @@ The status bar has two blocks:
 Format:
 * Lines
 * Chars
-* ~Tokens (approximate)
+* ≈Tokens (approximate)
 
 Large values are shown with compact suffixes (K/M).
 
@@ -515,9 +515,9 @@ Content metrics:
 ### 13.3 When counters update
 Recalculation runs:
 * after opening/refreshing a project;
-* after applying settings (exclusions and extensions);
+* after applying settings (exclusions and file types);
 * when tree checkboxes change (with debounce);
-* when switching tree format (for operations where tree output is used).
+* when switching tree format (for operations where tree output is used);
 * when background calculation is canceled, counters are set to 0 until the next completed recalculation.
 
 ## 14) Icons
@@ -566,7 +566,7 @@ It also clears completed agent journal sessions (section 19.3); active sessions 
 
 Important:
 * Recent history for local folders is not cleared;
-* Recent repositories history in the Git Clone window is not cleared;
+* “Recent links” history in the Git Clone window is not cleared;
 * files and folders on disk are not modified or deleted.
 
 ## 17) Languages
