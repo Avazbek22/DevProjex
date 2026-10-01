@@ -205,6 +205,27 @@ public sealed class MainWindowDropAndTitleBehaviorTests
 		Assert.EndsWith(" · Live context (2 sessions)", title, StringComparison.Ordinal);
 	}
 
+	[Theory]
+	[InlineData("", "")]
+	[InlineData(@" - S:\DevProjex · Live context (Claude Code)", @" - S:\DevProjex · Live context (Claude Code)")]
+	public void RemoveTitleVersion_DropsOnlyTheLeadingProductVersion(string suffix, string expectedSuffix)
+	{
+		var method = GetPrivateStaticMethod("RemoveTitleVersion");
+
+		var title = (string)method.Invoke(null, [MainWindowViewModel.BaseTitle + suffix])!;
+
+		Assert.Equal(MainWindowViewModel.ProductName + expectedSuffix, title);
+		Assert.DoesNotContain(MainWindowViewModel.TitleVersion, title, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void RemoveTitleVersion_LeavesForeignTitlesUnchanged()
+	{
+		var method = GetPrivateStaticMethod("RemoveTitleVersion");
+
+		Assert.Equal("Agent journal", (string)method.Invoke(null, ["Agent journal"])!);
+	}
+
 	private static LiveSessionRecord CreateSession(int pid, string clientName) =>
 		new(
 			pid,

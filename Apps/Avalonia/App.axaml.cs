@@ -65,6 +65,8 @@ public sealed class App : global::Avalonia.Application
                                   out var parsedCaptureLanguage)
             ? parsedCaptureLanguage
             : (AppLanguage?)null;
+        if (captureLanguage is { } storeCaptureLanguage)
+            ApplyStoreCaptureCulture(storeCaptureLanguage);
         var startupOptions = new DesktopStartupOptions(
             OpenRequest: storeCaptureRequest is not null
                 ? new DesktopOpenRequest(Language: captureLanguage)
@@ -87,6 +89,23 @@ public sealed class App : global::Avalonia.Application
 
         var services = AvaloniaCompositionRoot.CreateAfterMigrationAdmission(startupOptions);
         return new MainWindow(startupOptions, services);
+    }
+
+    // Store media shows numbers and dates the way a user of the captured language sees them,
+    // not in the regional format of the machine that happens to run the capture.
+    private static void ApplyStoreCaptureCulture(AppLanguage language)
+    {
+        try
+        {
+            var culture = CultureInfo.CreateSpecificCulture(AppLanguageUtility.ToCode(language));
+            CultureInfo.DefaultThreadCurrentCulture = culture;
+            CultureInfo.DefaultThreadCurrentUICulture = culture;
+            CultureInfo.CurrentCulture = culture;
+            CultureInfo.CurrentUICulture = culture;
+        }
+        catch (CultureNotFoundException)
+        {
+        }
     }
 
     private static DesktopDiagnosticScenario ParseDiagnosticScenario(string scenario) =>

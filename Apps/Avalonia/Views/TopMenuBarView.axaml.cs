@@ -133,6 +133,8 @@ public partial class TopMenuBarView : UserControl
     public MenuItem? LanguagePlMenuItemControl => LanguagePlMenuItem;
     public MenuItem? LanguageViMenuItemControl => LanguageViMenuItem;
     public MenuItem? LanguageIdMenuItemControl => LanguageIdMenuItem;
+    internal MenuItem? McpMenuItemControl => McpMenuItem;
+    internal MenuItem? McpLiveContextMenuItemControl => McpLiveContextMenuItem;
 
     public void PrepareProjectToolsReveal(bool animate)
     {

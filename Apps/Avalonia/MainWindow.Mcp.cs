@@ -24,6 +24,12 @@ public partial class MainWindow
             return;
         }
 
+        CreateAgentJournalWindow().Show(this);
+        e.Handled = true;
+    }
+
+    private AgentJournalWindow CreateAgentJournalWindow()
+    {
         var window = new AgentJournalWindow(
             this,
             _agentJournalReader,
@@ -37,8 +43,7 @@ public partial class MainWindow
             if (ReferenceEquals(_agentJournalWindow, window))
                 _agentJournalWindow = null;
         };
-        window.Show(this);
-        e.Handled = true;
+        return window;
     }
 
     private async void OnMcpConnectionRequested(object? sender, McpConnectionRequestedEventArgs e)

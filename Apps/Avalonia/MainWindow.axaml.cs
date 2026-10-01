@@ -2135,14 +2135,14 @@ public partial class MainWindow : Window
         var multipleSessionsText = _liveSessions.Count > 1
             ? _localization.Format("LiveContext.Title.Sessions", _liveSessions.Count)
             : null;
-        _viewModel.Title = BuildWindowTitle(
+        _viewModel.Title = ApplyStoreCaptureTitlePolicy(BuildWindowTitle(
             _currentPath,
             _viewModel.IsGitMode,
             _currentRepositoryUrl,
             _viewModel.CurrentBranch,
             _currentProjectDisplayName,
             _liveSessions,
-            multipleSessionsText);
+            multipleSessionsText));
     }
 
 #if DEVPROJEX_PROJECT_LOAD_TIMING

@@ -4,6 +4,8 @@ param(
     [string]$PartnerCenterCsv,
     [string]$ProjectPath,
     [string]$OutputRoot,
+    [string[]]$Languages,
+    [string[]]$Scenes,
     [switch]$SkipPublish,
     [switch]$KeepSessionData,
     [switch]$PlanOnly
@@ -12,24 +14,29 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+# Relative arguments follow the PowerShell location, which can differ from the process directory.
+function Resolve-CallerPath([string]$Path) {
+    return $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
+}
+
 function Resolve-RepositoryRoot {
     return [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 }
 
 function Resolve-PartnerCenterCsv([string]$RepositoryRoot, [string]$ExplicitPath) {
     if (-not [string]::IsNullOrWhiteSpace($ExplicitPath)) {
-        $resolved = [System.IO.Path]::GetFullPath($ExplicitPath)
+        $resolved = Resolve-CallerPath $ExplicitPath
         if (-not (Test-Path -LiteralPath $resolved -PathType Leaf)) {
             throw "Partner Center CSV was not found: $resolved"
         }
         return $resolved
     }
 
-    $candidates = @(
+    $candidates = @(@(
         Get-ChildItem -LiteralPath $RepositoryRoot -Filter "listingData-*.csv" -File -ErrorAction SilentlyContinue
         Get-ChildItem -LiteralPath (Join-Path $RepositoryRoot "Packaging\Windows\StoreListing") -Filter "listingData-*.csv" -File -ErrorAction SilentlyContinue
         Get-ChildItem -LiteralPath (Join-Path $RepositoryRoot "Packaging\Windows\StoreListing") -Filter "Exported*.csv" -File -ErrorAction SilentlyContinue
-    ) | Sort-Object LastWriteTimeUtc -Descending
+    ) | Sort-Object LastWriteTimeUtc -Descending)
     if ($candidates.Count -eq 0) {
         throw "No Partner Center listingData export was found. Pass -PartnerCenterCsv explicitly."
     }
@@ -41,9 +48,13 @@ function Get-StoreLocaleColumns([object[]]$Rows) {
         throw "Partner Center CSV is empty."
     }
 
+    return @(Select-StoreLocaleColumns @($Rows[0].PSObject.Properties.Name))
+}
+
+function Select-StoreLocaleColumns([string[]]$Headers) {
     $metadataColumns = @("Field", "ID", "Type", "default")
     $localizedTypeHeader = '^Type \(.+\)$'
-    return @($Rows[0].PSObject.Properties.Name | Where-Object { $metadataColumns -notcontains $_ -and $_ -notmatch $localizedTypeHeader })
+    return @($Headers | Where-Object { $metadataColumns -notcontains $_ -and $_ -notmatch $localizedTypeHeader })
 }
 
 function Get-LocalizationCodes([string]$RepositoryRoot) {
@@ -136,6 +147,73 @@ function Mount-CleanProjectSnapshot([string]$SnapshotRoot) {
     throw "No free drive letter was available for the clean Store showcase path."
 }
 
+function Assert-GuiSceneDeclarations([object]$Manifest, [string]$RepositoryRoot) {
+    $scenes = @($Manifest.scenes)
+    $indices = @($scenes | ForEach-Object { [int]$_.index } | Sort-Object)
+    if ($scenes.Count -ne 5 -or ($indices -join ',') -ne "1,2,3,4,5") {
+        throw "store-screenshots.json must declare GUI scenes 1-5 exactly once."
+    }
+    foreach ($scene in $scenes) {
+        if ([string]$scene.directory -cne ("{0}_{1}" -f [int]$scene.index, [string]$scene.name)) {
+            throw "GUI scene '$($scene.name)' must use the directory '$($scene.index)_$($scene.name)'."
+        }
+    }
+
+    $agentSessions = if ($null -ne $Manifest.PSObject.Properties["agentSessions"]) { $Manifest.agentSessions } else { $null }
+    if ($null -eq $agentSessions -or
+        $null -eq $agentSessions.PSObject.Properties["live"] -or
+        $null -eq $agentSessions.PSObject.Properties["earlier"] -or
+        $null -eq $agentSessions.PSObject.Properties["liveSelection"]) {
+        throw "store-screenshots.json must declare the agent sessions shown by the Live context scenes."
+    }
+    $selection = @($agentSessions.liveSelection)
+    if ($selection.Count -eq 0) {
+        throw "store-screenshots.json must declare a Live context selection."
+    }
+    foreach ($relativePath in $selection) {
+        $path = [string]$relativePath
+        if ([System.IO.Path]::IsPathRooted($path) -or @($path -split '[\\/]') -contains ".." -or
+            -not (Test-Path -LiteralPath (Join-Path $RepositoryRoot $path))) {
+            throw "Live context selection entry '$path' must name an existing project path."
+        }
+    }
+    foreach ($session in @(@($agentSessions.earlier) + @($agentSessions.live))) {
+        if ([string]::IsNullOrWhiteSpace([string]$session.clientName) -or @($session.calls).Count -eq 0) {
+            throw "Every scripted agent session must name its client and declare at least one call."
+        }
+    }
+}
+
+function Select-GuiScenes([object]$Manifest, [string[]]$Requested) {
+    # Scenes can be named by index, name or directory ("3", "Mcp_Menu", "3_Mcp_Menu"). Without a
+    # selection every declared scene is captured.
+    $declared = @($Manifest.scenes)
+    $tokens = @(
+        @($Requested) |
+            Where-Object { $null -ne $_ } |
+            ForEach-Object { ([string]$_) -split ',' } |
+            ForEach-Object { $_.Trim() } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    )
+    if ($tokens.Count -eq 0) {
+        return $declared
+    }
+
+    $selected = @{}
+    foreach ($token in $tokens) {
+        $match = @($declared | Where-Object {
+            [string]::Equals([string]$_.index, $token, [System.StringComparison]::Ordinal) -or
+            [string]::Equals([string]$_.name, $token, [System.StringComparison]::OrdinalIgnoreCase) -or
+            [string]::Equals([string]$_.directory, $token, [System.StringComparison]::OrdinalIgnoreCase)
+        })
+        if ($match.Count -ne 1) {
+            throw "GUI scene '$token' is not declared in store-screenshots.json."
+        }
+        $selected[[int]$match[0].index] = $match[0]
+    }
+    return @($selected.Keys | Sort-Object | ForEach-Object { $selected[$_] })
+}
+
 function Initialize-NativeCapture {
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
@@ -171,9 +249,64 @@ namespace DevProjex.StoreCapture
 "@
     }
 
+    if (-not ("DevProjex.StoreCapture.WindowActivation" -as [type])) {
+        Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+
+namespace DevProjex.StoreCapture
+{
+    public static class WindowActivation
+    {
+        [DllImport("user32.dll")]
+        public static extern IntPtr GetForegroundWindow();
+
+        [DllImport("user32.dll")]
+        public static extern uint GetWindowThreadProcessId(IntPtr window, IntPtr processId);
+
+        [DllImport("kernel32.dll")]
+        public static extern uint GetCurrentThreadId();
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool AttachThreadInput(uint attach, uint attachTo, bool attachInput);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool BringWindowToTop(IntPtr window);
+    }
+}
+"@
+    }
+
     # PowerShell 5.1 is commonly system-DPI-aware. Switching only this capture thread to
     # per-monitor V2 keeps Win32 window coordinates and bitmap pixels in the same space.
     [DevProjex.StoreCapture.NativeMethods]::SetThreadDpiAwarenessContext([IntPtr](-4)) | Out-Null
+}
+
+function Set-CaptureForegroundWindow([IntPtr]$Window) {
+    # Windows lets a process take the foreground only while it owns the latest input. A capture
+    # started from a background shell would otherwise leave the window inactive, with a dimmed
+    # title bar, so this thread briefly shares input state with the current foreground window.
+    $activation = [DevProjex.StoreCapture.WindowActivation]
+    $foreground = $activation::GetForegroundWindow()
+    if ($foreground -eq $Window) {
+        return
+    }
+    $currentThread = $activation::GetCurrentThreadId()
+    $foregroundThread = $activation::GetWindowThreadProcessId($foreground, [IntPtr]::Zero)
+    $attached = $foregroundThread -ne 0 -and
+        $foregroundThread -ne $currentThread -and
+        $activation::AttachThreadInput($currentThread, $foregroundThread, $true)
+    try {
+        $activation::BringWindowToTop($Window) | Out-Null
+        [DevProjex.StoreCapture.NativeMethods]::SetForegroundWindow($Window) | Out-Null
+    }
+    finally {
+        if ($attached) {
+            $activation::AttachThreadInput($currentThread, $foregroundThread, $false) | Out-Null
+        }
+    }
 }
 
 function Wait-Until([scriptblock]$Condition, [TimeSpan]$Timeout, [string]$FailureMessage) {
@@ -234,7 +367,7 @@ function Set-CaptureWindowGeometry(
             $true)) {
         throw "Unable to position the DevProjex window for Store capture."
     }
-    [DevProjex.StoreCapture.NativeMethods]::SetForegroundWindow($Process.MainWindowHandle) | Out-Null
+    Set-CaptureForegroundWindow $Process.MainWindowHandle
     [DevProjex.StoreCapture.NativeMethods]::SetCursorPos(
         $WorkingArea.Right - 2,
         $WorkingArea.Bottom - 2) | Out-Null
@@ -268,6 +401,213 @@ function Save-DesktopRegion([System.Drawing.Rectangle]$Region, [string]$Destinat
     }
 }
 
+function Assert-CaptureProcessRunning([string]$SessionDirectory, [System.Diagnostics.Process]$Process, [string]$Expected) {
+    $failurePath = Join-Path $SessionDirectory "failure.json"
+    if (Test-Path -LiteralPath $failurePath) {
+        $failure = Get-Content -LiteralPath $failurePath -Raw
+        throw "DevProjex Store capture failed: $failure"
+    }
+    if ($Process.HasExited) {
+        throw "DevProjex exited before Store capture state '$Expected' was ready. Exit code: $($Process.ExitCode)."
+    }
+}
+
+function Wait-ForCaptureEvent(
+    [string]$SessionDirectory,
+    [System.Diagnostics.Process]$Process,
+    [string[]]$PendingStems,
+    [bool]$AcceptLiveSessionRequest) {
+    # The application decides the scene order. The controller reacts to whichever declared
+    # scene is ready next and to the one-time request to start the live agent session.
+    $found = @{ Value = $null }
+    Wait-Until {
+        if ($AcceptLiveSessionRequest -and
+            (Test-Path -LiteralPath (Join-Path $SessionDirectory "live-session-request.json"))) {
+            $found.Value = "live-session-request"
+            return $true
+        }
+        foreach ($stem in $PendingStems) {
+            if (Test-Path -LiteralPath (Join-Path $SessionDirectory "ready-$stem.json")) {
+                $found.Value = $stem
+                return $true
+            }
+        }
+        Assert-CaptureProcessRunning $SessionDirectory $Process "next scene"
+        return $false
+    } ([TimeSpan]::FromMinutes(3)) "Timed out waiting for the next Store capture scene."
+    return [string]$found.Value
+}
+
+function Write-CaptureMarker([string]$SessionDirectory, [string]$FileName, [string]$Content) {
+    $path = Join-Path $SessionDirectory $FileName
+    $temporaryPath = "$path.tmp"
+    [System.IO.File]::WriteAllText($temporaryPath, $Content, (New-Object System.Text.UTF8Encoding($false)))
+    Move-Item -LiteralPath $temporaryPath -Destination $path -Force
+}
+
+function ConvertTo-ProcessArgument([string]$Value) {
+    if ($Value.Length -gt 0 -and $Value -notmatch '[\s"]') {
+        return $Value
+    }
+    $escaped = [System.Text.RegularExpressions.Regex]::Replace($Value, '(\\*)"', '$1$1\"')
+    $escaped = [System.Text.RegularExpressions.Regex]::Replace($escaped, '(\\+)$', '$1$1')
+    return '"' + $escaped + '"'
+}
+
+function Start-StoreAgentServer([string]$Binary, [string]$ProjectPath, [string]$DataRoot, [bool]$Live) {
+    $arguments = "mcp --root " + (ConvertTo-ProcessArgument $ProjectPath)
+    if ($Live) {
+        $arguments += " --live"
+    }
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new($Binary, $arguments)
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.WorkingDirectory = Split-Path -Parent $Binary
+    $startInfo.RedirectStandardInput = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.StandardOutputEncoding = New-Object System.Text.UTF8Encoding($false)
+    # The journal, the live-session heartbeat and the saved window selection all resolve
+    # under this root, which is the same isolated directory the capture window uses.
+    $startInfo.EnvironmentVariables["DEVPROJEX_INTERNAL_DATA_ROOT"] = $DataRoot
+    $startInfo.EnvironmentVariables.Remove("DEVPROJEX_INTERNAL_STORE_CAPTURE")
+    $process = [System.Diagnostics.Process]::Start($startInfo)
+    return [pscustomobject]@{
+        Process = $process
+        StandardError = $process.StandardError.ReadToEndAsync()
+        NextId = 1
+    }
+}
+
+function Send-StoreAgentMessage([object]$Server, [object]$Message) {
+    $json = ($Message | ConvertTo-Json -Depth 32 -Compress) + "`n"
+    $bytes = (New-Object System.Text.UTF8Encoding($false)).GetBytes($json)
+    $stream = $Server.Process.StandardInput.BaseStream
+    $stream.Write($bytes, 0, $bytes.Length)
+    $stream.Flush()
+}
+
+function Invoke-StoreAgentRequest([object]$Server, [string]$Method, [object]$Params) {
+    $id = [int]$Server.NextId
+    $Server.NextId = $id + 1
+    Send-StoreAgentMessage $Server ([ordered]@{ jsonrpc = "2.0"; id = $id; method = $Method; params = $Params })
+
+    $deadline = [DateTime]::UtcNow.AddSeconds(90)
+    while ($true) {
+        $remaining = $deadline - [DateTime]::UtcNow
+        if ($remaining -le [TimeSpan]::Zero) {
+            throw "The DevProjex MCP server did not answer '$Method' in time."
+        }
+        $read = $Server.Process.StandardOutput.ReadLineAsync()
+        if (-not $read.Wait($remaining)) {
+            throw "The DevProjex MCP server did not answer '$Method' in time."
+        }
+        $line = $read.Result
+        if ($null -eq $line) {
+            throw "The DevProjex MCP server closed its output during '$Method'. $($Server.StandardError.Result)"
+        }
+        if ([string]::IsNullOrWhiteSpace($line)) {
+            continue
+        }
+        $message = $line | ConvertFrom-Json
+        $names = @($message.PSObject.Properties.Name)
+        if ($names -notcontains "id" -or [int]$message.id -ne $id) {
+            continue
+        }
+        if ($names -contains "error") {
+            throw "The DevProjex MCP server rejected '$Method': $($message.error.message)"
+        }
+        return $message.result
+    }
+}
+
+function Initialize-StoreAgentSession([object]$Server, [object]$Session) {
+    Invoke-StoreAgentRequest $Server "initialize" ([ordered]@{
+        protocolVersion = "2025-06-18"
+        capabilities = @{}
+        clientInfo = [ordered]@{
+            name = [string]$Session.clientName
+            version = [string]$Session.clientVersion
+        }
+    }) | Out-Null
+    Send-StoreAgentMessage $Server ([ordered]@{ jsonrpc = "2.0"; method = "notifications/initialized" })
+}
+
+function Invoke-StoreAgentCalls([object]$Server, [object]$Session) {
+    $calls = @($Session.calls)
+    foreach ($call in $calls) {
+        $result = Invoke-StoreAgentRequest $Server "tools/call" ([ordered]@{
+            name = [string]$call.name
+            arguments = $call.arguments
+        })
+        if (@($result.PSObject.Properties.Name) -contains "isError" -and $result.isError) {
+            throw "The scripted MCP call '$($call.name)' failed: $(@($result.content)[0].text)"
+        }
+    }
+    return $calls.Count
+}
+
+function Stop-StoreAgentServer([object]$Server) {
+    $process = $Server.Process
+    try {
+        if (-not $process.HasExited) {
+            # Closing stdin is how a real client ends the session; the server then writes the
+            # journal end record and removes its live-session heartbeat.
+            $process.StandardInput.Close()
+            if (-not $process.WaitForExit(20000)) {
+                $process.Kill()
+                $process.WaitForExit()
+                return $false
+            }
+        }
+        return $process.ExitCode -eq 0
+    }
+    finally {
+        $process.Dispose()
+    }
+}
+
+function Invoke-StoreAgentSession([string]$Binary, [string]$ProjectPath, [string]$DataRoot, [object]$Session) {
+    $server = Start-StoreAgentServer $Binary $ProjectPath $DataRoot ([bool]$Session.live)
+    $stopped = $false
+    try {
+        Initialize-StoreAgentSession $server $Session
+        Invoke-StoreAgentCalls $server $Session | Out-Null
+        $stopped = $true
+        if (-not (Stop-StoreAgentServer $server)) {
+            throw "The scripted '$($Session.clientName)' MCP session did not end cleanly."
+        }
+    }
+    finally {
+        if (-not $stopped) {
+            Stop-StoreAgentServer $server | Out-Null
+        }
+    }
+}
+
+function Start-StoreLiveAgentSession(
+    [string]$Binary,
+    [string]$ProjectPath,
+    [string]$DataRoot,
+    [string]$SessionDirectory,
+    [object]$Session,
+    [System.Diagnostics.Process]$AppProcess) {
+    $server = Start-StoreAgentServer $Binary $ProjectPath $DataRoot $true
+    try {
+        Initialize-StoreAgentSession $server $Session
+        Write-CaptureMarker $SessionDirectory "live-session-connected" "connected"
+        # The window marks only calls made after it first observed the session.
+        Wait-ForCaptureState $SessionDirectory "live-session-observed.json" $AppProcess | Out-Null
+        $callCount = Invoke-StoreAgentCalls $server $Session
+        Write-CaptureMarker $SessionDirectory "live-session-calls-complete.json" (@{ calls = $callCount } | ConvertTo-Json -Compress)
+        return $server
+    }
+    catch {
+        Stop-StoreAgentServer $server | Out-Null
+        throw
+    }
+}
+
 function Start-LanguageCapture(
     [string]$Binary,
     [string]$LanguageCode,
@@ -275,16 +615,25 @@ function Start-LanguageCapture(
     [string]$SessionRoot,
     [string]$ScreenshotRoot,
     [object]$Manifest,
+    [object[]]$SelectedScenes,
     [System.Drawing.Rectangle]$WorkingArea) {
     $languageSession = Join-Path $SessionRoot $LanguageCode
     $appData = Join-Path $languageSession "app-data"
     New-Item -ItemType Directory -Path $appData -Force | Out-Null
+    $agentSessions = $Manifest.agentSessions
+    # Earlier sessions complete before the window starts, so the journal already holds a short
+    # history when the live session begins.
+    foreach ($earlierSession in @($agentSessions.earlier)) {
+        Invoke-StoreAgentSession $Binary $ShowcaseProject $appData $earlierSession
+    }
+
     $requestPath = Join-Path $languageSession "request.json"
     $requestJson = @{
         projectPath = $ShowcaseProject
         sessionDirectory = $languageSession
         appDataDirectory = $appData
         languageCode = $LanguageCode
+        liveContextSelection = [string[]]@($agentSessions.liveSelection)
     } | ConvertTo-Json
     [System.IO.File]::WriteAllText(
         $requestPath,
@@ -295,23 +644,58 @@ function Start-LanguageCapture(
     $startInfo.UseShellExecute = $false
     $startInfo.WorkingDirectory = Split-Path -Parent $Binary
     $startInfo.EnvironmentVariables["DEVPROJEX_INTERNAL_STORE_CAPTURE"] = $requestPath
+    # Settings and journals already follow the capture request; this keeps the window's
+    # desktop-control registration out of the user's state directory as well.
+    $startInfo.EnvironmentVariables["DEVPROJEX_INTERNAL_DATA_ROOT"] = $appData
     $process = [System.Diagnostics.Process]::Start($startInfo)
+    $liveServer = $null
     try {
         Wait-ForCaptureState $languageSession "window-ready.json" $process | Out-Null
         $captureRegion = Set-CaptureWindowGeometry $process $Manifest $WorkingArea
         New-Item -ItemType File -Path (Join-Path $languageSession "window-positioned") -Force | Out-Null
 
+        $pendingScenes = [ordered]@{}
         foreach ($scene in $Manifest.scenes) {
-            $stem = "{0:D2}-{1}" -f [int]$scene.index, [string]$scene.name
-            Wait-ForCaptureState $languageSession "ready-$stem.json" $process | Out-Null
-            [DevProjex.StoreCapture.NativeMethods]::SetForegroundWindow($process.MainWindowHandle) | Out-Null
+            $pendingScenes[("{0:D2}-{1}" -f [int]$scene.index, [string]$scene.name)] = $scene
+        }
+        while ($pendingScenes.Count -gt 0) {
+            $captureEvent = Wait-ForCaptureEvent `
+                $languageSession `
+                $process `
+                ([string[]]@($pendingScenes.Keys)) `
+                ($null -eq $liveServer)
+            if ($captureEvent -eq "live-session-request") {
+                $liveServer = Start-StoreLiveAgentSession `
+                    $Binary `
+                    $ShowcaseProject `
+                    $appData `
+                    $languageSession `
+                    $agentSessions.live `
+                    $process
+                continue
+            }
+
+            $stem = $captureEvent
+            $scene = $pendingScenes[$stem]
+            $pendingScenes.Remove($stem)
+            # The application always walks through every scene, because later scenes build on
+            # the state of earlier ones. Scenes outside the selection are acknowledged unsaved,
+            # so their images in the output folder stay untouched.
+            if (@($SelectedScenes | Where-Object { [int]$_.index -eq [int]$scene.index }).Count -eq 0) {
+                New-Item -ItemType File -Path (Join-Path $languageSession "captured-$stem") -Force | Out-Null
+                continue
+            }
+            $readyState = Get-Content -LiteralPath (Join-Path $languageSession "ready-$stem.json") -Raw | ConvertFrom-Json
+            if ([string]$readyState.foreground -ne "owned") {
+                Set-CaptureForegroundWindow $process.MainWindowHandle
+            }
             # The application has already completed its state/render barriers. This short
             # guard only lets DWM present that final frame before desktop pixel capture.
             Start-Sleep -Milliseconds ([int]$Manifest.captureSettleMilliseconds)
             $destination = Join-Path $ScreenshotRoot (Join-Path ([string]$scene.directory) ($LanguageCode.ToUpperInvariant() + ".png"))
             Save-DesktopRegion $captureRegion $destination
             New-Item -ItemType File -Path (Join-Path $languageSession "captured-$stem") -Force | Out-Null
-            Write-Host "  [$LanguageCode] $($scene.index)/$($Manifest.scenes.Count): $destination"
+            Write-Host "  [$LanguageCode] $($scene.index) $($scene.name): $destination"
         }
 
         Wait-ForCaptureState $languageSession "complete.json" $process | Out-Null
@@ -328,6 +712,64 @@ function Start-LanguageCapture(
             $process.WaitForExit()
         }
         $process.Dispose()
+        if ($null -ne $liveServer -and -not (Stop-StoreAgentServer $liveServer)) {
+            Write-Warning "The live MCP session for '$LanguageCode' did not end cleanly."
+        }
+    }
+}
+
+function Update-ListingCsvScreenshotRows(
+    [string]$Path,
+    [hashtable]$LocaleMap,
+    [object]$Manifest) {
+    # An existing import CSV is edited in place: only the GUI screenshot rows are rewritten, so
+    # its encoding, header, quoting, text rows and the TUI rows stay byte-for-byte unchanged.
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    $hasBom = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
+    $encoding = New-Object System.Text.UTF8Encoding($hasBom, $true)
+    $offset = if ($hasBom) { 3 } else { 0 }
+    $text = $encoding.GetString($bytes, $offset, $bytes.Length - $offset)
+    $headerEnd = $text.IndexOf("`r`n", [System.StringComparison]::Ordinal)
+    if ($headerEnd -lt 0) {
+        throw "Import CSV has no CRLF-terminated header: $Path"
+    }
+    $headers = @($text.Substring(0, $headerEnd).Split(','))
+    $localeColumns = @(Select-StoreLocaleColumns $headers)
+
+    foreach ($scene in $Manifest.scenes) {
+        $field = "DesktopScreenshot$($scene.index)"
+        $pattern = "(?m)^" + [System.Text.RegularExpressions.Regex]::Escape($field) + ",[^`r`n]*(?=`r`n|$)"
+        $rowMatches = [System.Text.RegularExpressions.Regex]::Matches($text, $pattern)
+        if ($rowMatches.Count -ne 1) {
+            throw "Import CSV must contain exactly one '$field' row; found $($rowMatches.Count)."
+        }
+        $line = $rowMatches[0].Value
+        $values = @($line.Split(','))
+        if ($line.Contains('"') -or $values.Count -ne $headers.Count) {
+            throw "Import CSV row '$field' is not a plain single-line record."
+        }
+        foreach ($locale in $localeColumns) {
+            $column = [Array]::IndexOf($headers, $locale)
+            if (-not $LocaleMap.ContainsKey($locale)) {
+                throw "Import CSV locale '$locale' is not present in the Partner Center export."
+            }
+            $languageCode = [string]$LocaleMap[$locale]
+            $values[$column] = "ImportFolder/Screenshots/$($scene.directory)/$($languageCode.ToUpperInvariant()).png"
+        }
+        $text = $text.Remove($rowMatches[0].Index, $rowMatches[0].Length).Insert($rowMatches[0].Index, ($values -join ','))
+    }
+
+    $output = New-Object System.IO.MemoryStream
+    try {
+        $encoded = $encoding.GetBytes($text)
+        if ($hasBom) {
+            $output.Write($bytes, 0, 3)
+        }
+        $output.Write($encoded, 0, $encoded.Length)
+        [System.IO.File]::WriteAllBytes($Path, $output.ToArray())
+    }
+    finally {
+        $output.Dispose()
     }
 }
 
@@ -337,6 +779,11 @@ function Update-ListingCsv(
     [hashtable]$LocaleMap,
     [object]$Manifest,
     [string]$Destination) {
+    if (Test-Path -LiteralPath $Destination -PathType Leaf) {
+        Update-ListingCsvScreenshotRows $Destination $LocaleMap $Manifest
+        return
+    }
+
     foreach ($scene in $Manifest.scenes) {
         $fieldName = "DesktopScreenshot$($scene.index)"
         $row = $Rows | Where-Object { $_.Field -eq $fieldName } | Select-Object -First 1
@@ -388,13 +835,13 @@ function ConvertTo-StoreCsvRow([string[]]$Values) {
 function New-ContactSheet(
     [string]$ScreenshotRoot,
     [string[]]$LanguageCodes,
-    [object]$Manifest,
+    [object[]]$Scenes,
     [string]$Destination) {
     $thumbnailWidth = 512
     $thumbnailHeight = 320
     $labelHeight = 28
     $sheet = [System.Drawing.Bitmap]::new(
-        $thumbnailWidth * $Manifest.scenes.Count,
+        $thumbnailWidth * $Scenes.Count,
         ($thumbnailHeight + $labelHeight) * $LanguageCodes.Count)
     try {
         $graphics = [System.Drawing.Graphics]::FromImage($sheet)
@@ -405,8 +852,8 @@ function New-ContactSheet(
                 for ($languageIndex = 0; $languageIndex -lt $LanguageCodes.Count; $languageIndex++) {
                     $language = $LanguageCodes[$languageIndex]
                     $rowY = $languageIndex * ($thumbnailHeight + $labelHeight)
-                    foreach ($scene in $Manifest.scenes) {
-                        $column = [int]$scene.index - 1
+                    for ($column = 0; $column -lt $Scenes.Count; $column++) {
+                        $scene = $Scenes[$column]
                         $sourcePath = Join-Path $ScreenshotRoot (Join-Path ([string]$scene.directory) ($language.ToUpperInvariant() + ".png"))
                         $source = [System.Drawing.Image]::FromFile($sourcePath)
                         try {
@@ -449,11 +896,32 @@ $localeMap = @{}
 foreach ($locale in $localeColumns) {
     $localeMap[$locale] = Resolve-AppLanguageCode $locale $supportedCodes
 }
-$captureLanguages = @($supportedCodes | Sort-Object -Unique)
+$captureLanguages = if ($null -ne $Languages -and $Languages.Count -gt 0) {
+    @(
+        $Languages |
+            ForEach-Object { $_ -split ',' } |
+            ForEach-Object { $_.Trim().Replace("_", "-").ToLowerInvariant() } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            Sort-Object -Unique |
+            ForEach-Object {
+                if ($supportedCodes -notcontains $_) {
+                    throw "GUI capture language '$_' has no application localization catalog."
+                }
+                $_
+            }
+    )
+} else {
+    @($supportedCodes | Sort-Object -Unique)
+}
+$captureLanguages = @($captureLanguages)
+Assert-GuiSceneDeclarations $manifest $repositoryRoot
+$captureScenes = @(Select-GuiScenes $manifest $Scenes)
 
 Write-Host "Partner Center CSV: $partnerCsvPath"
 Write-Host "Store locales: $($localeColumns -join ', ')"
 Write-Host "Application captures: $($captureLanguages -join ', ')"
+Write-Host "GUI scenes: $(@($captureScenes | ForEach-Object { $_.name }) -join ', ')"
+Write-Host "Agent sessions: $(@(@($manifest.agentSessions.earlier) + @($manifest.agentSessions.live) | ForEach-Object { $_.clientName }) -join ', ')"
 if ($PlanOnly) {
     return
 }
@@ -466,13 +934,13 @@ if (-not $isWindowsPlatform -or -not [Environment]::UserInteractive) {
 $resolvedOutputRoot = if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
     Join-Path $storeListingRoot "ImportFolder"
 } else {
-    [System.IO.Path]::GetFullPath($OutputRoot)
+    Resolve-CallerPath $OutputRoot
 }
 $screenshotRoot = Join-Path $resolvedOutputRoot "Screenshots"
 New-Item -ItemType Directory -Path $screenshotRoot -Force | Out-Null
 
 $resolvedPublishedExe = if (-not [string]::IsNullOrWhiteSpace($PublishedExe)) {
-    [System.IO.Path]::GetFullPath($PublishedExe)
+    Resolve-CallerPath $PublishedExe
 } else {
     Join-Path $repositoryRoot "artifacts\store-screenshots\publish\DevProjex.exe"
 }
@@ -493,7 +961,7 @@ try {
         $snapshotDrive = [string]$mountedSnapshot.Drive
         [string]$mountedSnapshot.ProjectPath
     } else {
-        [System.IO.Path]::GetFullPath($ProjectPath)
+        Resolve-CallerPath $ProjectPath
     }
     if (-not (Test-Path -LiteralPath $showcaseProject -PathType Container)) {
         throw "Store showcase project was not found: $showcaseProject"
@@ -509,6 +977,7 @@ try {
             $sessionRoot `
             $screenshotRoot `
             $manifest `
+            $captureScenes `
             $workingArea
     }
 
@@ -516,11 +985,19 @@ try {
     Update-ListingCsv $rows $localeColumns $localeMap $manifest $listingCsv
     $contactSheet = Join-Path $repositoryRoot "artifacts\store-screenshots\contact-sheet.png"
     New-Item -ItemType Directory -Path (Split-Path -Parent $contactSheet) -Force | Out-Null
-    New-ContactSheet $screenshotRoot $captureLanguages $manifest $contactSheet
+    New-ContactSheet $screenshotRoot $captureLanguages $captureScenes $contactSheet
 
-    & (Join-Path $repositoryRoot "Scripts\validate-store-listing.ps1")
-    if ($LASTEXITCODE -ne 0) {
-        throw "Store listing validation failed with exit code $LASTEXITCODE."
+    # The validator checks the repository import folder, so it only applies when that folder
+    # is the output; a scratch output root is reviewed through its contact sheet instead.
+    $repositoryImportFolder = [System.IO.Path]::GetFullPath((Join-Path $storeListingRoot "ImportFolder"))
+    if ([string]::Equals(
+            $resolvedOutputRoot.TrimEnd('\'),
+            $repositoryImportFolder.TrimEnd('\'),
+            [System.StringComparison]::OrdinalIgnoreCase)) {
+        & (Join-Path $repositoryRoot "Scripts\validate-store-listing.ps1")
+        if ($LASTEXITCODE -ne 0) {
+            throw "Store listing validation failed with exit code $LASTEXITCODE."
+        }
     }
 
     Write-Host "Store screenshots: $screenshotRoot"
