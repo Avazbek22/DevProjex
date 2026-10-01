@@ -274,7 +274,7 @@ Gdy obszar roboczy podglądu jest aktywny, tryb kompaktowy włącza się automat
 
 ### Czcionka drzewa
 Czcionkę drzewa wybiera się w „Widok → Czcionka drzewa”.
-„Domyślny” przywraca standardową czcionkę drzewa.
+„Domyślna” przywraca standardową czcionkę drzewa.
 Wybrana czcionka jest stosowana po kliknięciu „Zastosuj ustawienia” w panelu ustawień.
 
 ### Aktywność agenta
@@ -492,14 +492,14 @@ Pasek stanu ma dwa bloki:
 * Zawartość — metryki eksportowanej zawartości plików.
 
 Format:
-* Wiersze
+* Linie
 * Znaki
 * ≈Tokeny (w przybliżeniu)
 
 Duże wartości są pokazywane z krótkimi przyrostkami (K/M).
 
 Ważne:
-* „Wiersze” w bloku „Drzewo” oznaczają liczbę wierszy końcowej reprezentacji drzewa, a nie liczbę plików na dysku;
+* „Linie” w bloku „Drzewo” oznaczają liczbę wierszy końcowej reprezentacji drzewa, a nie liczbę plików na dysku;
 * ta wartość obejmuje foldery, pliki i elementy usługowe drzewa (na przykład węzły z odmową dostępu).
 
 ### 13.2 Jak obliczane są metryki
@@ -541,7 +541,7 @@ Dostępne ustawienia:
 * Przezroczystość tła — dostępna dla efektów „Przezroczystość” i „Rozmycie”.
 * Kontrast górnego paska — reguluje główny panel z poleceniami podglądu, wyszukiwania, filtra i formatu drzewa.
 * Przezroczystość menu — dotyczy w równym stopniu menu głównego i jego podmenu.
-* Widoczność granic — reguluje, jak wyraźnie widoczne są krawędzie interfejsu.
+* Widoczność ramek — reguluje, jak wyraźnie widoczne są krawędzie interfejsu.
 
 Mica używa systemowego materiału platformy i nie ma osobnego ustawienia przezroczystości tła. Jeśli wybrany efekt „Rozmycie” lub Mica jest niedostępny, aplikacja najpierw próbuje drugiego efektu natywnego. Zwykłe nieprzezroczyste tło jest używane tylko wtedy, gdy niedostępne są zarówno „Rozmycie”, jak i Mica.
 
