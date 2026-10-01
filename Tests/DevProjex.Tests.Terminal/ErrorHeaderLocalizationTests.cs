@@ -59,6 +59,7 @@ public sealed class ErrorHeaderLocalizationTests
 	[InlineData("DPX-CLI-LEGACY-SYNTAX", "--path|.")]
 	[InlineData("DPX-CLI-JOURNAL-SESSION-REQUIRED", "mcp|log|.|--format|markdown")]
 	[InlineData("DPX-CLI-JOURNAL-NOT-FOUND", "mcp|log|.|--last")]
+	[InlineData("DPX-CLI-PROFILE-NOT-FOUND", "profile|validate|missing-profile.json")]
 	[InlineData("DPX-TUI-NOT-INTERACTIVE", "tui|.")]
 	public async Task EveryErrorPathPrintsTheRussianHeader(string code, string invocation)
 	{

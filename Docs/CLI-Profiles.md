@@ -199,7 +199,9 @@ settings for that project; an absent local profile is a usage error. Local looku
 reports missing (`DPX-CLI-PROFILE-NOT-FOUND`), temporary contention
 (`DPX-CLI-PROFILE-BUSY`), corrupt storage (`DPX-CLI-PROFILE-CORRUPT`), and a
 newer unsupported schema (`DPX-CLI-PROFILE-FUTURE-SCHEMA`) separately. These
-failures never fall back to the broader standard profile. Saving is refused when
+failures never fall back to the broader standard profile. A `--profile FILE` that
+does not exist reports `DPX-CLI-PROFILE-NOT-FOUND`; a file that exists but cannot be
+read or fails validation reports `DPX-CLI-PROFILE-INVALID`. Saving is refused when
 both the primary profile database and its backup are corrupt; their original
 bytes are retained for manual recovery instead of being replaced by an empty
 database.

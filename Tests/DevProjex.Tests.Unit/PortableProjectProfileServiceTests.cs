@@ -171,6 +171,54 @@ public sealed class PortableProjectProfileServiceTests
 		Assert.Equal("DPX-CLI-PROFILE-INVALID", exception.Code);
 	}
 
+	[Theory]
+	[InlineData("missing.json")]
+	[InlineData("missing-folder/missing.json")]
+	public async Task LoadAsyncReportsAMissingProfileFileAsNotFound(string relativePath)
+	{
+		using var workspace = new TemporaryDirectory();
+		var profile = Path.Combine(workspace.Path, relativePath);
+
+		var exception = await Assert.ThrowsAsync<PortableProjectProfileException>(() =>
+			new PortableProjectProfileService().LoadAsync(
+				profile,
+				TestContext.Current.CancellationToken));
+
+		Assert.Equal("DPX-CLI-PROFILE-NOT-FOUND", exception.Code);
+	}
+
+	[Fact]
+	public async Task LoadAsyncKeepsAnExistingMalformedProfileInvalid()
+	{
+		using var workspace = new TemporaryDirectory();
+		var profile = workspace.CreateFile("malformed.json", "{ not json");
+
+		var exception = await Assert.ThrowsAsync<PortableProjectProfileException>(() =>
+			new PortableProjectProfileService().LoadAsync(
+				profile,
+				TestContext.Current.CancellationToken));
+
+		Assert.Equal("DPX-CLI-PROFILE-INVALID", exception.Code);
+	}
+
+	[Fact]
+	public async Task ValidateAsyncCarriesTheFailureCode()
+	{
+		using var workspace = new TemporaryDirectory();
+		var malformed = workspace.CreateFile("malformed.json", "{ not json");
+		var service = new PortableProjectProfileService();
+
+		var missing = await service.ValidateAsync(
+			Path.Combine(workspace.Path, "missing.json"),
+			TestContext.Current.CancellationToken);
+		var invalid = await service.ValidateAsync(malformed, TestContext.Current.CancellationToken);
+
+		Assert.False(missing.IsValid);
+		Assert.Equal("DPX-CLI-PROFILE-NOT-FOUND", missing.ErrorCode);
+		Assert.False(invalid.IsValid);
+		Assert.Equal("DPX-CLI-PROFILE-INVALID", invalid.ErrorCode);
+	}
+
 	[Fact]
 	public async Task SaveAsyncRejectsDocumentPastLoadLimitBeforeReplacingDestination()
 	{

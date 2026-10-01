@@ -919,12 +919,12 @@ code (it may appear in the `diagnostics` array or on stderr).
 
 | Code | Exit code | Meaning |
 |---|---:|---|
-| `DPX-CLI-PROFILE-NOT-FOUND` | 2 | The referenced portable profile could not be resolved. |
+| `DPX-CLI-PROFILE-NOT-FOUND` | 2 | The referenced profile could not be resolved: no local profile exists for the project, or the `--profile` file does not exist. |
 | `DPX-CLI-PROFILE-UNRESOLVED` | 2 | The profile selection could not be resolved against the current project. |
 | `DPX-CLI-PROFILE-BUSY` | 2 | Another operation is currently using the profile store. |
 | `DPX-CLI-PROFILE-CORRUPT` | 2 | The profile file failed to parse or fails its schema. |
 | `DPX-CLI-PROFILE-FUTURE-SCHEMA` | 2 | The profile was written by a newer, unsupported schema version. |
-| `DPX-CLI-PROFILE-INVALID` | 2 | The profile content is structurally invalid. |
+| `DPX-CLI-PROFILE-INVALID` | 2 | The profile file exists but cannot be read or is structurally invalid, or the profile request itself is invalid. |
 | `DPX-CLI-PROFILE-SELECTION-TOO-LARGE` | 2 | The explicit selection is too large to save into a portable profile. |
 | `DPX-CLI-PROFILE-WRITE-FAILED` | 1 | The profile store could not be written. |
 | `DPX-CLI-PROFILE-PARTIAL` | 3 | `profile reset` removed persistent marks but not the selection profile; repeat the command. |

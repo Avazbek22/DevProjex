@@ -1084,6 +1084,70 @@ public sealed class ProfileCommandContractTests
 			ProjectSelectionPath.NormalizePortableRelative("src\\app.cs"));
 	}
 
+	[Theory]
+	[InlineData("show")]
+	[InlineData("export")]
+	public async Task MissingPortableProfileFileIsNotFoundRatherThanInvalid(string action)
+	{
+		using var workspace = CreateWorkspace();
+		using var destination = new TemporaryDirectory();
+		var missingProfile = Path.Combine(workspace.Path, "profiles", "missing.json");
+		var environment = new TestTerminalEnvironment();
+		string[] arguments = action == "show"
+			? ["profile", "show", workspace.Path, "--profile", missingProfile]
+			: ["profile", "export", workspace.Path, "--profile", missingProfile, "-o",
+				Path.Combine(destination.Path, "exported.json")];
+
+		var exitCode = await RunAsync(workspace, environment, arguments);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.StartsWith("error[DPX-CLI-PROFILE-NOT-FOUND]:", environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("The selected profile could not be resolved.", environment.StandardError, StringComparison.Ordinal);
+		Assert.DoesNotContain("DPX-CLI-PROFILE-INVALID", environment.StandardError, StringComparison.Ordinal);
+		Assert.False(File.Exists(Path.Combine(destination.Path, "exported.json")));
+	}
+
+	[Fact]
+	public async Task MalformedPortableProfileFileStaysInvalid()
+	{
+		using var workspace = CreateWorkspace();
+		var profile = WriteProfile(workspace, "{ not json");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			"profile", "show", workspace.Path, "--profile", profile);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.StartsWith("error[DPX-CLI-PROFILE-INVALID]:", environment.StandardError, StringComparison.Ordinal);
+		Assert.DoesNotContain("DPX-CLI-PROFILE-NOT-FOUND", environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task ValidateNamesAMissingProfileFileAsNotFound()
+	{
+		using var workspace = CreateWorkspace();
+		var missingProfile = Path.Combine(workspace.Path, "profiles", "missing.json");
+		var textEnvironment = new TestTerminalEnvironment();
+		var jsonEnvironment = new TestTerminalEnvironment();
+
+		var textExitCode = await RunAsync(workspace, textEnvironment, "profile", "validate", missingProfile);
+		var jsonExitCode = await RunAsync(
+			workspace,
+			jsonEnvironment,
+			"profile", "validate", missingProfile, "--format", "json");
+
+		Assert.Equal(CommandLineExitCodes.UsageError, textExitCode);
+		Assert.StartsWith("error[DPX-CLI-PROFILE-NOT-FOUND]:", textEnvironment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("The selected profile could not be resolved.", textEnvironment.StandardError, StringComparison.Ordinal);
+		Assert.Equal(CommandLineExitCodes.UsageError, jsonExitCode);
+		using var document = JsonDocument.Parse(jsonEnvironment.StandardOutput);
+		Assert.False(document.RootElement.GetProperty("valid").GetBoolean());
+		Assert.Equal(1, document.RootElement.GetProperty("errors").GetArrayLength());
+	}
+
 	private static TemporaryDirectory CreateWorkspace()
 	{
 		var workspace = new TemporaryDirectory();
