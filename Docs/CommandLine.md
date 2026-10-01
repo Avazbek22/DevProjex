@@ -11,7 +11,7 @@ The portable distribution contains one primary executable per RID:
 
 ## Getting Started
 
-After enabling **Help > Launch from terminal**:
+After enabling **Help → Launch from terminal**:
 
 ```shell
 devprojex --help

@@ -23,7 +23,7 @@ The upper table lists sessions by start time, client and version, live or
 standard mode, project roots, calls, result characters, estimated tokens,
 delivered files, masked values, and duration. A live session is marked and its
 row is refreshed while calls arrive. Active Standard sessions update their call
-rows as well; only Live sessions drive the main-window activity indicator. A
+rows as well; only Live sessions drive the Agent activity tree markers. A
 session left without a closing record is shown as inactive with an unknown end
 time. Its duration is a lower bound ending at the last retained event, never at
 the current time. The lower table lists the selected

@@ -51,7 +51,7 @@ curl -fL "https://github.com/Avazbek22/DevProjex/releases/download/v<version>/De
 ```
 
 Moving the `DevProjex` file to a directory on `PATH` does not create the lowercase
-`devprojex` command used by the documentation. Use **Help → Terminal command setup**,
+`devprojex` command used by the documentation. Use **Help → Launch from terminal**,
 or create an executable launcher with the expected name:
 
 ```bash

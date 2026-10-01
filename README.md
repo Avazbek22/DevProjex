@@ -177,6 +177,8 @@ git diff --name-only | devprojex export context . --select-from - -o -
 devprojex export project . --as zip --hide-secrets -o ../devprojex-submission.zip
 $ devprojex export project . --as zip -o - > devprojex-submission.zip
 devprojex analyze . --git-mode tracked --exclude smart-ignore
+devprojex search Configure . --symbols
+devprojex related src/App.cs --direction both
 devprojex profile save . --hide-secrets on
 devprojex cache update https://github.com/owner/repo
 ```
@@ -187,6 +189,7 @@ devprojex cache update https://github.com/owner/repo
 * Git repository URLs as project sources — analyze, export, open, or start the TUI on a repository straight from its URL through a managed clone cache (`devprojex cache`, `devprojex recent`)
 * A redaction pre-flight for CI — `--findings` lists rule, category, file, and source line (never the values), and `--fail-on-findings` fails the pipeline when findings exist
 * Composable selection — pipe a file list from `git diff` or any tool into `--select-from -`
+* Project search and relations — `devprojex search` finds text, `--regex` patterns, or declarations by name with `--symbols`; `devprojex related` lists the files a file uses and the files that use it
 * Documented aliases and short flags (`export ctx`, `export proj`, `-f`, `-n`, `-q`) plus `devprojex help <command>` and shell completion for bash, zsh, fish, and PowerShell
 * A keyboard-first Terminal Workspace for interactive work, no desktop app needed
 * A searchable Action Palette to find any workflow fast
@@ -252,7 +255,7 @@ The missing off switch is a control guarantee, not a detection guarantee. DevPro
 detects common secret formats, but detection is heuristic; review each pack before
 publishing it outside your environment.
 
-**Built for agent efficiency.** Trees default to compact markdown, content declares the root once and uses relative paths — no tokens wasted on scaffolding. With `max_tokens`, files are considered in deterministic selection order; each is included if its estimated transformed-content tokens fit the remaining budget, otherwise it is reported as skipped and packing continues. `top_files` shows where the tokens go, `git_scope` narrows `get_tree`, `analyze`, `pack_context`, or `search_project` to staged files, current changes, or a ref-to-ref diff, and `profile` switches between built-in defaults, your saved Desktop selections, or a portable profile file.
+**Built for agent efficiency.** Trees default to compact markdown, content declares the root once and uses relative paths — no tokens wasted on scaffolding. With `max_tokens`, files are considered in deterministic selection order; each is included if its estimated transformed-content tokens fit the remaining budget, otherwise it is reported as skipped and packing continues. `top_files` shows where the tokens go, `git_scope` narrows `get_tree`, `analyze`, `pack_context`, `search_project`, or `related_files` to staged files, current changes, or a ref-to-ref diff, and `profile` switches between built-in defaults, your saved Desktop selections, or a portable profile file.
 
 Want to audit what the agent gets? Open the same project in the GUI: the engine and redaction pipeline are shared, and filters match when the same profile and parameters are used.
 
@@ -364,7 +367,7 @@ Detection runs a pinned, reviewed [Gitleaks](https://github.com/gitleaks/gitleak
 
 ## Documentation 📚
 
-[Installation](Docs/Installation.md) · [Smart Ignore](Docs/SmartIgnore.md) · [Hide Secrets](Docs/HideSecrets.md) · [Hide private data](Docs/HidePrivateData.md) · [Code Compression](Docs/CodeCompression.md) · [Command Line](Docs/CommandLine.md) · [Terminal Workspace](Docs/TerminalWorkspace.md) · [MCP Server](Docs/McpServer.md) · [Agent Journal](Docs/AgentJournal.md) · [Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md)
+[Installation](Docs/Installation.md) · [Smart Ignore](Docs/SmartIgnore.md) · [Hide Secrets](Docs/HideSecrets.md) · [Hide private data](Docs/HidePrivateData.md) · [Code Compression](Docs/CodeCompression.md) · [Command Line](Docs/CommandLine.md) · [Terminal Workspace](Docs/TerminalWorkspace.md) · [MCP Server](Docs/McpServer.md) · [Agent Journal](Docs/AgentJournal.md) · [Related files](Docs/Dependencies.md) · [Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md)
 
 ---
 
