@@ -149,11 +149,18 @@ jobs:
           name: headless-release-assets
           path: artifacts/headless-release
 
-      - name: Upload archives, receipts, and checksums
+      - name: Upload archives and their checksums
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          # This job has no checkout, so gh needs the repository named explicitly.
+          GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
         run: |
           set -euo pipefail
-          gh release upload "${RELEASE_TAG}" artifacts/headless-release/* --clobber
+          # Build receipts stay in the workflow artifact. The release page carries only the
+          # archives and a checksum file that lists exactly those archives.
+          cd artifacts/headless-release
+          grep -v 'publish-payload\.' SHA256SUMS.headless.txt > "${RUNNER_TEMP}/SHA256SUMS.headless.txt"
+          cp "${RUNNER_TEMP}/SHA256SUMS.headless.txt" SHA256SUMS.headless.txt
+          gh release upload "${RELEASE_TAG}" DevProjex-headless.* SHA256SUMS.headless.txt --clobber
