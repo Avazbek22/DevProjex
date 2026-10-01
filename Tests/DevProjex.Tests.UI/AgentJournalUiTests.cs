@@ -155,8 +155,9 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 	public void JournalInitialSizeUsesSeventyPercentWithinTheOwnerAndMinimums()
 	{
 		Assert.Equal(new Size(1400, 700), AgentJournalWindow.ResolveInitialSize(new Size(2000, 1000)));
-		Assert.Equal(new Size(900, 560), AgentJournalWindow.ResolveInitialSize(new Size(1200, 800)));
-		Assert.Equal(new Size(900, 560), AgentJournalWindow.ResolveInitialSize(new Size(1063, 600)));
+		Assert.Equal(new Size(1040, 560), AgentJournalWindow.ResolveInitialSize(new Size(1200, 800)));
+		Assert.Equal(new Size(1040, 560), AgentJournalWindow.ResolveInitialSize(new Size(1063, 600)));
+		Assert.Equal(new Size(1040, 560), AgentJournalWindow.ResolveInitialSize(default));
 	}
 
 	[AvaloniaFact]
@@ -908,6 +909,70 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 				await UiTestDriver.CloseWindowAsync(owner);
 			}
 		}
+	}
+
+	[AvaloniaFact]
+	public async Task JournalColumnHeadersStayOnOneLineInEveryInterfaceLanguage()
+	{
+		var fixture = JournalFixture.Create(workspace.Project.RootPath);
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En);
+		var journal = new AgentJournalWindow(
+			new RecordingJournalReader(fixture.Sessions, fixture.Calls),
+			new RecordingFormatter(),
+			localization,
+			workspace.Project.RootPath);
+		UiTestDriver.TrackTopLevelWindow(journal);
+		journal.Show();
+		try
+		{
+			await journal.RefreshAsync();
+			await WaitForJournalConditionAsync(
+				() => journal.ViewModel.Sessions.Count > 0 && journal.ViewModel.Calls.Count > 0,
+				"journal rows to load");
+			Assert.Equal(AgentJournalWindow.MinimumWindowWidth, journal.Width, precision: 3);
+
+			foreach (var language in Enum.GetValues<AppLanguage>())
+			{
+				localization.SetLanguage(language);
+				await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+				AssertSingleLineHeaders(journal, "JournalSessionsColumnsHeader", language);
+				AssertSingleLineHeaders(journal, "JournalCallsColumnsHeader", language);
+				AssertHeaderColumnsFit(journal, "JournalSessionsColumnsHeader");
+				AssertHeaderColumnsFit(journal, "JournalCallsColumnsHeader");
+			}
+
+			var sessionsHeader = Assert.IsType<Grid>(journal.FindControl<Grid>("JournalSessionsColumnsHeader"));
+			var callsHeader = Assert.IsType<Grid>(journal.FindControl<Grid>("JournalCallsColumnsHeader"));
+			Assert.True(sessionsHeader.ColumnDefinitions[3].ActualWidth >= 110);
+			Assert.True(callsHeader.ColumnDefinitions[3].ActualWidth >= 110);
+			AssertRowsShareHeaderColumns(journal, "JournalSessionsList", sessionsHeader);
+			AssertRowsShareHeaderColumns(journal, "JournalCallsList", callsHeader);
+		}
+		finally
+		{
+			await UiTestDriver.CloseTopLevelWindowAsync(journal);
+		}
+	}
+
+	[Fact]
+	public void SessionDurationsUseTheMillisecondPrecisionOfCallDurations()
+	{
+		var fixture = JournalFixture.Create(Path.GetTempPath());
+		var started = fixture.LiveSession.StartedUtc;
+		var ended = fixture.LiveSession with
+		{
+			IsLive = false,
+			EndedUtc = started + TimeSpan.FromTicks(31_921_234)
+		};
+
+		Assert.Equal(
+			AgentJournalPresentation.FormatDuration(3_192),
+			AgentJournalPresentation.FormatSessionDuration(ended, started));
+		Assert.Equal(
+			AgentJournalPresentation.FormatDuration(250),
+			AgentJournalPresentation.FormatSessionDuration(
+				fixture.LiveSession,
+				started + TimeSpan.FromTicks(2_509_999)));
 	}
 
 	[AvaloniaFact]
@@ -1847,6 +1912,38 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 		AssertOpaqueBrush(journal.FindControl<Border>("JournalEmptySurface")?.Background);
 		Assert.Equal(2, Grid.GetRowSpan(Assert.IsType<Border>(
 			journal.FindControl<Border>("JournalEmptySurface"))));
+	}
+
+	private static void AssertSingleLineHeaders(
+		AgentJournalWindow journal,
+		string name,
+		AppLanguage language)
+	{
+		var header = Assert.IsType<Grid>(journal.FindControl<Grid>(name));
+		var cells = header.Children.OfType<TextBlock>().ToArray();
+		Assert.Equal(header.ColumnDefinitions.Count, cells.Length);
+		foreach (var cell in cells)
+		{
+			var context = $"{language}/{name}/{cell.Text}";
+			Assert.False(string.IsNullOrWhiteSpace(cell.Text), context);
+			Assert.True(cell.TextWrapping == TextWrapping.NoWrap, context);
+			Assert.True(cell.TextTrimming == TextTrimming.CharacterEllipsis, context);
+			Assert.True(cell.MaxLines == 1, context);
+			Assert.True(cell.TextLayout.TextLines.Count == 1, context);
+			Assert.Equal(cell.Text, ToolTip.GetTip(cell));
+			Assert.Equal(cell.Text, AutomationProperties.GetName(cell));
+		}
+	}
+
+	private static void AssertRowsShareHeaderColumns(AgentJournalWindow journal, string listName, Grid header)
+	{
+		var list = Assert.IsType<ListBox>(journal.FindControl<ListBox>(listName));
+		var row = list.GetVisualDescendants().OfType<ListBoxItem>().First();
+		var rowGrid = row.GetVisualDescendants().OfType<Grid>()
+			.First(grid => grid.ColumnDefinitions.Count == header.ColumnDefinitions.Count);
+		Assert.Equal(
+			header.ColumnDefinitions.Select(static column => column.Width),
+			rowGrid.ColumnDefinitions.Select(static column => column.Width));
 	}
 
 	private static void AssertHeaderColumnsFit(AgentJournalWindow journal, string name)

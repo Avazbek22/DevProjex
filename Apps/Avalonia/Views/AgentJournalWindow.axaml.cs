@@ -9,7 +9,8 @@ namespace DevProjex.Avalonia.Views;
 
 internal partial class AgentJournalWindow : Window
 {
-    internal const double MinimumWindowWidth = 900;
+    // Wide enough for every localized column header and for typical dates, clients and durations.
+    internal const double MinimumWindowWidth = 1040;
     internal const double MinimumWindowHeight = 560;
     private const double OwnerSizeRatio = 0.7;
     private static readonly TimeSpan SessionRefreshInterval = TimeSpan.FromSeconds(5);
@@ -598,7 +599,7 @@ internal partial class AgentJournalWindow : Window
             var lowerBound = history.LastEventUtc.Value >= session.StartedUtc
                 ? history.LastEventUtc.Value - session.StartedUtc
                 : TimeSpan.Zero;
-            return "≥" + lowerBound.ToString("g", CultureInfo.CurrentCulture);
+            return "≥" + AgentJournalPresentation.FormatDuration(lowerBound);
         }
         return AgentJournalPresentation.FormatSessionDuration(session, now);
     }
