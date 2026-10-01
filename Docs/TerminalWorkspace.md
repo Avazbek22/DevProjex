@@ -197,8 +197,9 @@ shows only `Live context`.
 
 `set activity on|off` controls the persisted **Agent activity** delivery markers. When
 it is on, files delivered by the live session carry `A` in a dedicated tree marker
-column, and focusing one adds `Agent received N times` to the status line, the same
-text as the Desktop marker tooltip. The status line shows no MCP tool names or call
+column, and focusing one adds its delivery count to the status line, for example
+`Agent received 3 times`, the same text as the Desktop marker tooltip in the interface
+language and its plural form. The status line shows no MCP tool names or call
 counts; `mcp log` lists them. Turning the setting off removes the markers without
 changing or deleting the journal.
 

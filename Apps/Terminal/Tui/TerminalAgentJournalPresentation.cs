@@ -188,7 +188,8 @@ internal static class TerminalAgentJournalPresentation
 	public static string? BuildFocusedDeliveryHint(
 		TerminalAgentJournalSnapshot snapshot,
 		string? focusedTreePath,
-		Func<string, string, string>? localize = null)
+		Func<string, string, string>? localize = null,
+		AppLanguage language = AppLanguage.En)
 	{
 		ArgumentNullException.ThrowIfNull(snapshot);
 		if (string.IsNullOrWhiteSpace(focusedTreePath) ||
@@ -199,7 +200,10 @@ internal static class TerminalAgentJournalPresentation
 
 		return string.Format(
 			CultureInfo.CurrentCulture,
-			Text(localize, "AgentActivity.Tree.ToolTip", "Agent received {0} times"),
+			Text(
+				localize,
+				LocalizationPluralRules.ResolveKey("AgentActivity.Tree.ToolTip", language, deliveredCalls),
+				deliveredCalls == 1 ? "Agent received {0} time" : "Agent received {0} times"),
 			deliveredCalls);
 	}
 

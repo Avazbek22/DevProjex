@@ -66,10 +66,11 @@ public sealed partial class McpServerProcessTests
 			// Desktop marker tooltip; tools and call counts stay in the journal.
 			await terminal.SendAsync(":reveal src/App.cs\r", TestContext.Current.CancellationToken);
 			var focused = await terminal.WaitForScreenAsync(
-				"Agent received 1 times",
+				"Agent received 1 time",
 				timeout: TimeSpan.FromSeconds(30),
 				cancellationToken: TestContext.Current.CancellationToken);
 			Assert.Contains("A App.cs", focused, StringComparison.Ordinal);
+			Assert.DoesNotContain("Agent received 1 times", focused, StringComparison.Ordinal);
 			Assert.DoesNotContain("Agent activity", focused, StringComparison.Ordinal);
 			Assert.DoesNotContain("get_file", focused, StringComparison.Ordinal);
 			Assert.DoesNotContain("get_tree", focused, StringComparison.Ordinal);

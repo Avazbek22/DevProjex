@@ -1161,10 +1161,17 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 	public async Task AgentActivityMarksDeliveredFilesWithoutAddingStatusBarText()
 	{
 		var fixture = JournalFixture.Create(workspace.Project.RootPath);
-		var reader = new RecordingJournalReader(fixture.Sessions, fixture.Calls);
+		var reader = new ScriptedActivityJournalReader(
+			fixture.LiveSession,
+			fixture.Calls[fixture.LiveSession.Id]);
+		LocalizationService? localization = null;
 		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
 			workspace.Project,
-			configureServices: services => services with { AgentJournalReader = reader });
+			configureServices: services =>
+			{
+				localization = services.Localization;
+				return services with { AgentJournalReader = reader };
+			});
 
 		try
 		{
@@ -1186,7 +1193,7 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 				viewModel.TreeNodes.SelectMany(static root => root.Flatten()),
 				node => PathComparer.Default.Equals(node.FullPath, deliveredPath));
 			deliveredNode.EnsureParentsExpanded();
-			reader.AppendCall(fixture.LiveSession.Id, fixture.SecondCall);
+			reader.AppendCalls(fixture.SecondCall);
 			await UiTestDriver.WaitForConditionAsync(
 				window,
 				() => FindDeliveryMarker(window, deliveredNode) is not null,
@@ -1194,7 +1201,7 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 
 			var marker = FindDeliveryMarker(window, deliveredNode)!;
 			Assert.Equal(1, deliveredNode.AgentDeliveryCount);
-			Assert.Equal("Agent received 1 times", deliveredNode.AgentDeliveryToolTip);
+			Assert.Equal("Agent received 1 time", deliveredNode.AgentDeliveryToolTip);
 			Assert.Equal(deliveredNode.AgentDeliveryToolTip, ToolTip.GetTip(marker));
 
 			var statusStrip = Assert.Single(
@@ -1221,6 +1228,21 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 				fragment => Assert.DoesNotContain(
 					statusTexts,
 					text => text.Contains(fragment, StringComparison.OrdinalIgnoreCase)));
+
+			reader.AppendCalls(
+				fixture.SecondCall with { Sequence = 3 },
+				fixture.SecondCall with { Sequence = 4 });
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => deliveredNode.AgentDeliveryCount == 3,
+				"two more deliveries of the same file");
+			Assert.Equal("Agent received 3 times", deliveredNode.AgentDeliveryToolTip);
+			localization!.SetLanguage(AppLanguage.Ru);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => deliveredNode.AgentDeliveryToolTip == "Агент получил 3 раза",
+				"the marker tooltip to follow the interface language plural form");
+			Assert.Equal(deliveredNode.AgentDeliveryToolTip, ToolTip.GetTip(FindDeliveryMarker(window, deliveredNode)!));
 		}
 		finally
 		{
@@ -1448,7 +1470,10 @@ public sealed class AgentJournalUiTests(UiWorkspaceFixture workspace)
 			"AgentJournal.Notice.Unavailable",
 			"AgentJournal.Notice.HistoryRecovered",
 			"AgentJournal.Notice.HistoryIncomplete",
-			"AgentActivity.Tree.ToolTip"
+			"AgentActivity.Tree.ToolTip.One",
+			"AgentActivity.Tree.ToolTip.Few",
+			"AgentActivity.Tree.ToolTip.Many",
+			"AgentActivity.Tree.ToolTip.Other"
 		};
 		var catalog = new JsonLocalizationCatalog();
 		foreach (var language in Enum.GetValues<AppLanguage>())

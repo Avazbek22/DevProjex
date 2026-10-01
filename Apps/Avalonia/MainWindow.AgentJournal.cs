@@ -286,7 +286,12 @@ public partial class MainWindow
             count,
             count == 0
                 ? string.Empty
-                : _localization.Format("AgentActivity.Tree.ToolTip", count));
+                : _localization.Format(
+                    LocalizationPluralRules.ResolveKey(
+                        "AgentActivity.Tree.ToolTip",
+                        _localization.CurrentLanguage,
+                        count),
+                    count));
     }
 
     private static void AddDeliveredPathCounts(

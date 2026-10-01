@@ -9,7 +9,7 @@ public sealed class TerminalWorkspaceStatusLineTests
 	private const string LiveContext = "Live context (Claude Code)";
 	private const string Compression = "Сжатие недоступно";
 	private const string CompactCompression = "C!";
-	private const string FocusedDelivery = "Агент получил 3 раз";
+	private const string FocusedDelivery = "Агент получил 3 раза";
 
 	private static readonly string[] RussianMetrics =
 	[

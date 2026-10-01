@@ -110,7 +110,7 @@ public sealed class TerminalAgentJournalPresentationTests
 				snapshot,
 				Path.GetFullPath(Path.Combine(workspace.Path, "src", "App.cs"))));
 		Assert.Equal(
-			"Agent received 1 times",
+			"Agent received 1 time",
 			TerminalAgentJournalPresentation.BuildFocusedDeliveryHint(
 				snapshot,
 				Path.GetFullPath(Path.Combine(workspace.Path, "README.md"))));
@@ -372,7 +372,7 @@ public sealed class TerminalAgentJournalPresentationTests
 		Assert.Contains("AgentJournal.Mode.Live", keys);
 		Assert.Contains("AgentJournal.Column.Tool", keys);
 		Assert.Contains("AgentJournal.Footer", keys);
-		Assert.Contains("AgentActivity.Tree.ToolTip", keys);
+		Assert.Contains("AgentActivity.Tree.ToolTip.One", keys);
 		Assert.Contains("AgentJournal.Column.Session", keys);
 		Assert.Contains("AgentJournal.Column.Client", keys);
 	}
@@ -400,12 +400,52 @@ public sealed class TerminalAgentJournalPresentationTests
 		var hint = TerminalAgentJournalPresentation.BuildFocusedDeliveryHint(
 			snapshot,
 			Path.GetFullPath(Path.Combine(workspace.Path, "README.md")),
-			(key, _) => localization[key]);
+			(key, _) => localization[key],
+			AppLanguage.Ru);
 
-		Assert.Equal("Агент получил 3 раз", hint);
+		Assert.Equal("Агент получил 3 раза", hint);
 		Assert.All(
 			new[] { "get_file", "search_project", "pack_context", "5", localization["Menu.View.AgentActivity"] },
 			fragment => Assert.DoesNotContain(fragment, hint, StringComparison.Ordinal));
+	}
+
+	[Theory]
+	[InlineData(AppLanguage.Ru, 1, "Агент получил 1 раз")]
+	[InlineData(AppLanguage.Ru, 3, "Агент получил 3 раза")]
+	[InlineData(AppLanguage.Ru, 5, "Агент получил 5 раз")]
+	[InlineData(AppLanguage.Ru, 21, "Агент получил 21 раз")]
+	[InlineData(AppLanguage.En, 1, "Agent received 1 time")]
+	[InlineData(AppLanguage.En, 3, "Agent received 3 times")]
+	[InlineData(AppLanguage.Pl, 1, "Agent otrzymał 1 raz")]
+	[InlineData(AppLanguage.Pl, 3, "Agent otrzymał 3 razy")]
+	[InlineData(AppLanguage.Uk, 1, "Агент отримав 1 раз")]
+	[InlineData(AppLanguage.Uk, 3, "Агент отримав 3 рази")]
+	[InlineData(AppLanguage.Uk, 5, "Агент отримав 5 разів")]
+	public void FocusedDeliveryHintUsesTheLanguagePluralForm(
+		AppLanguage language,
+		int deliveries,
+		string expected)
+	{
+		using var workspace = new TemporaryDirectory();
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), language);
+		var session = CreateSession() with
+		{
+			Roots = [new AgentJournalRoot(workspace.Path, "project")]
+		};
+		var calls = Enumerable.Range(1, deliveries)
+			.Select(static sequence => CreateCall(sequence, "get_file", ["README.md"]))
+			.ToArray();
+		var snapshot = TerminalAgentJournalSnapshot.Create(
+			workspace.Path,
+			new AgentJournalReceipt(session, session.Totals, [], calls));
+
+		var hint = TerminalAgentJournalPresentation.BuildFocusedDeliveryHint(
+			snapshot,
+			Path.GetFullPath(Path.Combine(workspace.Path, "README.md")),
+			(key, _) => localization[key],
+			language);
+
+		Assert.Equal(expected, hint);
 	}
 
 	[Fact]
