@@ -3449,9 +3449,20 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		}
 
 		private DependencyEdge Edge(FileFacts source, ImportFact import, ResolutionStatus status, string? target, string reason, IReadOnlyList<string> candidates) =>
-			CreateEdge(source, target, EvidenceLayer.ExplicitImport, status,
-				import.IsWildcard ? import.Specifier + ".*" : import.Specifier,
+			CreateEdge(source, target, EvidenceLayer.ExplicitImport, status, ImportReference(import),
 				reason, import.Site, candidates);
+
+		// A relative module keeps its leading dots as written: "from . import types" imports ".",
+		// not an empty name, and "from ..pkg import x" imports "..pkg", not a top-level "pkg".
+		private static string ImportReference(ImportFact import)
+		{
+			if (import.RelativeLevel <= 0)
+				return import.IsWildcard ? import.Specifier + ".*" : import.Specifier;
+			var module = new string('.', import.RelativeLevel) + import.Specifier;
+			if (!import.IsWildcard)
+				return module;
+			return import.Specifier.Length == 0 ? module + "*" : module + ".*";
+		}
 
 		private DependencyEdge Edge(FileFacts source, ReferenceFact reference, ResolutionStatus status, string? target, string reason, IReadOnlyList<string> candidates)
 		{

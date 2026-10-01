@@ -338,7 +338,9 @@ configuration files of one language have the same root, ownership is diagnosed a
 of choosing one by filename order. A nested Python configuration owns only its subtree; files outside
 that subtree retain the root fallback scope.
 
-Python relative imports start at the source package. `from module import Name` first checks classes,
+Python relative imports start at the source package, and evidence names the relative module as
+written, leading dots included: `from . import types` is `import . at line N` and
+`from ..pkg import Name` is `import ..pkg at line N`. `from module import Name` first checks classes,
 functions, and static import aliases provided by either an ordinary module or a package initializer.
 Only module-level class and function declarations provide importable names; a method or nested class
 cannot satisfy `from module import Name`. Imports inside a function or class still create a dependency

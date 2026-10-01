@@ -273,6 +273,28 @@ public sealed partial class McpServerIntegrationTests
 		});
 		Assert.True(nameless.IsError);
 		Assert.Contains(McpErrorCodes.InvalidArguments, AllText(nameless), StringComparison.Ordinal);
+
+		// A regular expression in declaration mode would otherwise answer a confident "no matches".
+		foreach (var regularExpression in new[] { "OrderService\\(", "\\bOrderService\\b", "class\\s+OrderService" })
+		{
+			var refused = await server.CallAsync("search_project", new Dictionary<string, object?>
+			{
+				["pattern"] = regularExpression,
+				["symbols"] = true
+			});
+			Assert.True(refused.IsError, regularExpression);
+			Assert.Contains(McpErrorCodes.InvalidArguments, AllText(refused), StringComparison.Ordinal);
+			Assert.Contains("looks like a regular expression", AllText(refused), StringComparison.Ordinal);
+			Assert.Contains("omit symbols to search text with a regex", AllText(refused), StringComparison.Ordinal);
+		}
+		var parameterList = Text(await server.CallAsync("search_project", new Dictionary<string, object?>
+		{
+			["pattern"] = "decimal CalculateTotal(",
+			["symbols"] = true,
+			["context_lines"] = 0
+		}));
+		Assert.Contains("OrderService.cs", parameterList, StringComparison.Ordinal);
+		Assert.Contains("matches retained=1/1", parameterList, StringComparison.Ordinal);
 	}
 
 	[Fact]

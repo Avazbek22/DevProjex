@@ -196,14 +196,6 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 			if (TryNormalizeRelativePath(relative) is { } normalized)
 				current.DeliveredPaths.Add(normalized);
 		}
-		current.FilesDelivered = Math.Max(current.FilesDelivered, current.DeliveredPaths.Count);
-	}
-
-	public void RecordFileCount(int count)
-	{
-		var current = invocation.Value;
-		if (current is not null)
-			current.FilesDelivered = Math.Max(current.FilesDelivered, Math.Max(0, count));
 	}
 
 	public void RecordProtection(SecretRedactionSnapshot? snapshot)
@@ -278,7 +270,9 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 			(long)Stopwatch.GetElapsedTime(current.StartTimestamp).TotalMilliseconds,
 			characters,
 			CodeCompressionSnapshot.EstimateTokens(characters),
-			Math.Max(current.FilesDelivered, paths.Length),
+			// A file is delivered only when some of its content reached the client, so the count is the
+			// set of recorded paths; listings and metrics record none.
+			paths.Length,
 			storedPaths,
 			Math.Max(0, paths.Length - storedPaths.Length),
 			current.SecretsMasked,
@@ -629,7 +623,6 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 		public int? RootIndex { get; set; }
 		public int? Revision { get; set; }
 		public HashSet<string> DeliveredPaths { get; } = new(ProjectTreePathIdentity.CanonicalComparer);
-		public int FilesDelivered { get; set; }
 		public long SecretsMasked { get; set; }
 		public long PrivateDataMasked { get; set; }
 		public HashSet<string> Notices { get; } = new(StringComparer.Ordinal);

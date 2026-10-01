@@ -34,6 +34,12 @@ public sealed class LiveSessionRegistry(
 	private readonly TimeProvider clock = timeProvider ?? TimeProvider.System;
 	private readonly Func<int, DateTimeOffset?> processStart = processStartProvider ?? TryGetProcessStartUtc;
 
+	/// <summary>
+	/// The state root this registry resolves its folder from. Stores that follow the same sessions,
+	/// such as the agent journal, take their own folder from this root.
+	/// </summary>
+	public string StateRoot => Path.GetFullPath(stateRoot());
+
 	public string DirectoryPath
 	{
 		get
@@ -41,7 +47,8 @@ public sealed class LiveSessionRegistry(
 			try
 			{
 				var directory = UserDataPathResolver.EnsurePhysicalServiceDirectory(
-					stateRoot(), "live-sessions");
+					UserDataPathResolver.EnsurePhysicalApplicationStateDirectory(stateRoot()),
+					"live-sessions");
 				if (!OperatingSystem.IsWindows())
 					File.SetUnixFileMode(directory, PrivateDirectoryMode);
 				return directory;

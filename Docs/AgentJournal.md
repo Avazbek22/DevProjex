@@ -11,6 +11,14 @@ available before a project is opened. In that state the window shows sessions
 from all projects. With a project open, **Current project only** is selected by
 default and can be cleared to show the complete journal.
 
+The journal is stored in the `agent-journal` folder of the per-user DevProjex state
+directory: `%LOCALAPPDATA%\DevProjex` on Windows, and `$XDG_STATE_HOME/DevProjex` on
+Linux and macOS, or `~/.local/state/DevProjex` when `XDG_STATE_HOME` is not set. The
+live-session registry (`live-sessions`) and the Desktop Agent activity preference
+(`agent-activity-view.json`) live in the same directory. Desktop, Terminal Workspace,
+the CLI, and the MCP server all resolve it the same way, so they always read and write
+the same records.
+
 The upper table lists sessions by start time, client and version, live or
 standard mode, project roots, calls, result characters, estimated tokens,
 delivered files, masked values, and duration. A live session is marked and its
@@ -21,9 +29,16 @@ time. Its duration is a lower bound ending at the last retained event, never at
 the current time. The lower table lists the selected
 session's calls, including their arguments, selection revision, duration,
 result size, delivered files, masking counters, notices, and stable error code.
-“Delivered” means that the file was present in text actually returned to the
-client; preparing or retaining a stored pack does not count as delivery. A
-`read_pack` call records the paths represented by its returned page. With
+“Delivered” means that some of the file's content was actually returned to the
+client: its whole text, a line range, a page of a stored result, search match lines,
+or a declaration body. Naming a file in a listing, as `get_tree` does, or measuring
+it, as `analyze` does, delivers nothing, and preparing or retaining a stored pack
+does not count as delivery either. A `read_pack` call records the paths represented
+by its returned page. A call counts each delivered file once; the session total adds
+the calls together, so a file returned by three calls counts three times, while the
+receipt's delivered-path table lists each file once with its number of calls. Masked
+values are counted the same way: only masks inside returned content count, so a call
+that returns no file content reports none. With
 multiple roots, path identity includes both the root number and relative path.
 Notices such as reading outside the selection are plain text facts, not warning
 colors.
@@ -75,8 +90,9 @@ complete a tool call before looking for it.
 
 **View → Agent activity** is off by default and is stored as a view preference.
 When enabled for an open project with a live session, the right side of the
-status bar shows the client, most recent tool and useful argument, files from
-that call, the session token estimate, and call count. The text follows the
+status bar shows the client, most recent tool and useful argument, the files that
+call delivered, the session token estimate, and call count. A `get_tree` or
+`analyze` call therefore shows no delivered files. The text follows the
 normal metrics visibility and is hidden in compact mode. It disappears when
 the live session ends.
 

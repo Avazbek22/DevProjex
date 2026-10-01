@@ -51,7 +51,7 @@ internal sealed class McpGlobSet
 	{
 		var normalized = PathUtility.NormalizeSeparators(relativePath);
 		return (_includes.Count == 0 || _includes.Any(regex => regex.IsMatch(normalized))) &&
-		       !_excludes.Any(regex => regex.IsMatch(normalized));
+			   !_excludes.Any(regex => regex.IsMatch(normalized));
 	}
 
 	public bool IncludesDirectory(string relativePath)
@@ -59,7 +59,7 @@ internal sealed class McpGlobSet
 		var normalized = PathUtility.NormalizeSeparators(relativePath).TrimEnd('/');
 		var subtreeBoundary = normalized + "/";
 		return (_includes.Count == 0 || MatchesPathOrSubtreeBoundary(_includes, normalized, subtreeBoundary)) &&
-		       !MatchesPathOrSubtreeBoundary(_excludes, normalized, subtreeBoundary);
+			   !MatchesPathOrSubtreeBoundary(_excludes, normalized, subtreeBoundary);
 	}
 
 	private static bool MatchesPathOrSubtreeBoundary(
@@ -110,6 +110,14 @@ internal sealed class McpGlobSet
 		try
 		{
 			ProjectRelativeGlob.Validate(pattern);
+		}
+		catch (ProjectRelativeGlobException failure) when (failure.IsNegation && parameter == "exclude_patterns")
+		{
+			// The pattern already sits in the exclusion list; moving it there is not the fix.
+			throw Invalid(
+				parameter,
+				$"{ProjectRelativeGlob.NegationUnsupported}; write the pattern without '!', because " +
+				"exclude_patterns already removes what it matches");
 		}
 		catch (ProjectRelativeGlobException failure)
 		{

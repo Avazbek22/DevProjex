@@ -93,6 +93,18 @@ public sealed partial class McpServerIntegrationTests
 		Assert.Contains(calls, call => call.Tool == "get_file" && call.DeliveredPaths.Contains("Outside.cs"));
 		Assert.Equal(live, calls.Single(call => call.Tool == "get_file").Notices.Contains(AgentJournalNoticeCodes.OutsideSelection));
 		Assert.True(calls.Sum(static call => call.SecretsMasked) > 0);
+		Assert.True(calls.Single(call => call.Tool == "get_file").SecretsMasked > 0);
+		foreach (var listing in calls.Where(static call => call.Tool is "list_projects" or "get_tree" or "analyze"))
+		{
+			Assert.Equal(0, listing.FilesDelivered);
+			Assert.Empty(listing.DeliveredPaths);
+			Assert.Equal(0, listing.SecretsMasked);
+			Assert.Equal(0, listing.PrivateDataMasked);
+		}
+		Assert.All(calls, static call => Assert.Equal(
+			call.DeliveredPaths.Count + call.AdditionalDeliveredPaths,
+			call.FilesDelivered));
+		Assert.Equal(calls.Sum(static call => (long)call.FilesDelivered), session.Totals.FilesDelivered);
 	}
 
 	[Fact]
@@ -830,6 +842,19 @@ public sealed partial class McpServerIntegrationTests
 			Assert.StartsWith("DPX-MCP-INVALID-PATTERN", Text(rejected), StringComparison.Ordinal);
 			Assert.Contains(reason, Text(rejected), StringComparison.Ordinal);
 		}
+
+		// The advice follows the parameter: a negated exclusion is already where it belongs.
+		var negatedInclude = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["include_patterns"] = new[] { "!src/**" } });
+		var negatedExclude = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["exclude_patterns"] = new[] { "!src/**" } });
+		Assert.Contains("list the pattern in exclude_patterns instead", Text(negatedInclude), StringComparison.Ordinal);
+		Assert.True(negatedExclude.IsError);
+		Assert.StartsWith("DPX-MCP-INVALID-PATTERN", Text(negatedExclude), StringComparison.Ordinal);
+		Assert.Contains("write the pattern without '!'", Text(negatedExclude), StringComparison.Ordinal);
+		Assert.DoesNotContain("list the pattern in exclude_patterns", Text(negatedExclude), StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -3238,6 +3263,45 @@ public sealed partial class McpServerIntegrationTests
 			scalarPath,
 			"[Tree depth] max_depth counts from the project root; 1 requested path(s) sit at depth 3 " +
 			"or deeper, so nothing under them is shown. Omit max_depth, or pass 5 to show two levels " +
+			"below them.");
+
+		// A file has nothing under it: the trailer names the depth that shows the file itself.
+		var hiddenFile = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["paths"] = new[] { "src/main/java/org/app/App.java" },
+				["max_depth"] = 3
+			});
+		var shownFile = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["paths"] = new[] { "src/main/java/org/app/App.java" },
+				["max_depth"] = 6
+			});
+		var fileAndDirectory = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["paths"] = new[] { "src/main/java/org/app/App.java", "src/main/java" },
+				["max_depth"] = 3
+			});
+
+		Assert.NotEqual(true, hiddenFile.IsError);
+		AssertTrustedTrailerOutsideSpotlight(
+			hiddenFile,
+			"[Tree depth] max_depth counts from the project root; 1 requested file(s) sit at depth 6 " +
+			"or deeper, so they are not shown. Omit max_depth, or pass 6 to show them.");
+		Assert.DoesNotContain("levels below", AllText(hiddenFile), StringComparison.Ordinal);
+		Assert.NotEqual(true, shownFile.IsError);
+		Assert.Contains("App.java", ExtractSpotlightBody(Text(shownFile)), StringComparison.Ordinal);
+		Assert.DoesNotContain("[Tree depth]", AllText(shownFile), StringComparison.Ordinal);
+		Assert.NotEqual(true, fileAndDirectory.IsError);
+		AssertTrustedTrailerOutsideSpotlight(
+			fileAndDirectory,
+			"[Tree depth] max_depth counts from the project root; 2 requested path(s) sit at depth 3 " +
+			"or deeper, so nothing under them is shown. Omit max_depth, or pass 6 to show two levels " +
 			"below them.");
 	}
 
@@ -6801,6 +6865,48 @@ public sealed partial class McpServerIntegrationTests
 		return match.Groups[1].Value;
 	}
 
+	[Fact]
+	public async Task JsonPayloadsEscapeOnlyWhatJsonRequiresAndRoundTripTheContent()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("проект");
+		const string fileName = "R&D's Привет.txt";
+		const string content = "say \"hi\" <b>&amp;</b> it's Привет \u001B[0m\tend";
+		File.WriteAllText(Path.Combine(project, fileName), content);
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var pack = ExtractSpotlightBody(Text(await server.CallAsync("pack_context", new Dictionary<string, object?>
+		{
+			["view"] = "content",
+			["format"] = "json"
+		})));
+		var tree = ExtractSpotlightBody(Text(await server.CallAsync("get_tree", new Dictionary<string, object?>
+		{
+			["format"] = "json"
+		})));
+		var projects = ExtractSpotlightBody(Text(await server.CallAsync("list_projects")));
+
+		using (var document = JsonDocument.Parse(pack))
+		{
+			var file = Assert.Single(document.RootElement.GetProperty("files").EnumerateArray());
+			Assert.Equal(content, file.GetProperty("content").GetString());
+		}
+		using (JsonDocument.Parse(tree))
+		using (JsonDocument.Parse(projects))
+		{
+		}
+		// A quote costs two characters, markup and non-ASCII text stay as written, and a control
+		// character is still escaped, so the payload remains one valid JSON document.
+		Assert.Contains("say \\\"hi\\\" <b>&amp;</b> it's Привет \\u001B[0m\\tend", pack, StringComparison.Ordinal);
+		Assert.Contains(fileName, tree, StringComparison.Ordinal);
+		Assert.Contains("проект", projects, StringComparison.Ordinal);
+		foreach (var payload in new[] { pack, tree, projects })
+		{
+			foreach (var escape in new[] { "\\u0022", "\\u003C", "\\u003E", "\\u0026", "\\u0027", "\\u043F" })
+				Assert.DoesNotContain(escape, payload, StringComparison.OrdinalIgnoreCase);
+		}
+	}
+
 	private static string ExtractSpotlightBody(string text)
 	{
 		var opening = Regex.Match(text, "<untrusted-data-[0-9a-f]{24}>\\n");
@@ -7104,11 +7210,46 @@ public sealed partial class McpServerIntegrationTests
 		Assert.DoesNotContain(Secret, text, StringComparison.Ordinal);
 		Assert.Single(Regex.Matches(text, "File: Sensitive\\.txt").Cast<Match>());
 		Assert.Contains("Requests: 1.1, 2.1", text, StringComparison.Ordinal);
-		Assert.Contains("[Range clamped] requests=1.1, 2.1", text, StringComparison.Ordinal);
+		// Only 2.1 asked for lines past the end of the file; 1.1 ended inside it.
+		Assert.Contains("[Range clamped] requests=2.1;", text, StringComparison.Ordinal);
 		Assert.Contains("[Batch read] ok=3 · partial=0 · not-returned=0 · unavailable=0.", text,
 			StringComparison.Ordinal);
 		Assert.Equal(2, diagnostics.FullFileReads);
 		Assert.Equal(0, diagnostics.PreparedFilesMaterialized);
+	}
+
+	[Fact]
+	public async Task GetFileBatchReportsClampingOnlyForAnExplicitEndLineThatStillReturnedLines()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Whole.txt"), "alpha\nbeta\n");
+		File.WriteAllText(Path.Combine(project, "Short.txt"), "one\ntwo\nthree\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync("get_file", new Dictionary<string, object?>
+		{
+			["requests"] = new object[]
+			{
+				new { path = "Whole.txt" },
+				new { path = "Short.txt", ranges = new[] { new { start_line = 2, end_line = 999 } } },
+				new { path = "Short.txt", ranges = new[] { new { start_line = 50, end_line = 1200 } } }
+			}
+		});
+		var text = Text(result).Replace("\r\n", "\n", StringComparison.Ordinal);
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.Contains("3.1 — not-returned", text, StringComparison.Ordinal);
+		Assert.Contains("File: Short.txt\nRequests: 2.1\nStatus: ok\n", text, StringComparison.Ordinal);
+		Assert.Contains("File: Whole.txt\nRequests: 1.1\nStatus: ok\n", text, StringComparison.Ordinal);
+		// A whole-file read asked for no end line, and a range past the end returned nothing.
+		Assert.Single(Regex.Matches(text, Regex.Escape("[Range clamped]")).Cast<Match>());
+		Assert.Contains(
+			"[Range clamped] requests=2.1; end_line exceeded the file; returned through line 4.",
+			text,
+			StringComparison.Ordinal);
+		Assert.Contains("[Batch read] ok=2 · partial=0 · not-returned=1 · unavailable=0.", text,
+			StringComparison.Ordinal);
 	}
 
 	[Fact]

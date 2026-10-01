@@ -24,6 +24,7 @@ internal sealed class AgentJournalSessionViewModel(
     public string MaskedCompact { get; } = maskedCompact;
     public string Duration { get; } = duration;
     public bool IsLive => Session.IsLive && Session.Mode == AgentJournalMode.Live;
+    public string AccessibleName => AgentJournalPresentation.JoinAccessibleName(Time, Client, Mode, Project);
 }
 
 internal sealed class AgentJournalCallViewModel(
@@ -46,6 +47,7 @@ internal sealed class AgentJournalCallViewModel(
     public string MaskedCompact { get; } = maskedCompact;
     public string Notices { get; } = notices;
     public string Error => Call.ErrorCode ?? string.Empty;
+    public string AccessibleName => AgentJournalPresentation.JoinAccessibleName(Sequence, Time, Tool, Arguments, Error);
 }
 
 internal sealed class AgentJournalWindowViewModel : ViewModelBase
@@ -211,6 +213,10 @@ internal sealed class AgentJournalWindowViewModel : ViewModelBase
 
 internal static class AgentJournalPresentation
 {
+    // A list row is announced by its visible cells rather than by the view model type.
+    public static string JoinAccessibleName(params string[] cells) =>
+        string.Join(" · ", cells.Where(static cell => !string.IsNullOrWhiteSpace(cell)));
+
     public static string FormatNumber(long value) => value switch
     {
         >= 1_000_000 => (value / 1_000_000d).ToString("0.#M", CultureInfo.CurrentCulture),

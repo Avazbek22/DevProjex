@@ -436,6 +436,7 @@
             IsEnabled="{Binding IsProjectLoaded}"
             IsVisible="{Binding IsProjectLoaded}"
             Margin="0,0,3,0"
+            AutomationProperties.Name="{Binding PreviewTooltip}"
             AutomationProperties.HelpText="{Binding PreviewTooltip}"
             ToolTip.ShowDelay="700"
             ToolTip.Placement="BottomEdgeAlignedRight"
@@ -460,6 +461,7 @@
             Click="OnToggleFilter"
             IsEnabled="{Binding IsProjectLoaded}"
             IsVisible="{Binding IsProjectLoaded}"
+            AutomationProperties.Name="{Binding FilterTooltip}"
             ToolTip.ShowDelay="700"
             ToolTip.Placement="BottomEdgeAlignedRight"
             ToolTip.VerticalOffset="5">

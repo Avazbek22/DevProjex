@@ -5,14 +5,16 @@ namespace DevProjex.Tests.Unit;
 public sealed class LiveSessionRegistryTests
 {
 	[Fact]
-	public void DirectoryPath_IsDirectlyUnderTheStateRoot()
+	public void DirectoryPath_IsInTheDevProjexFolderOfTheStateRoot()
 	{
 		using var workspace = new TemporaryDirectory();
 		var registry = new LiveSessionRegistry(() => workspace.Path);
 
 		Assert.Equal(
-			Path.Combine(workspace.Path, "live-sessions"),
+			Path.Combine(workspace.Path, "DevProjex", "live-sessions"),
 			registry.DirectoryPath);
+		Assert.False(Directory.Exists(Path.Combine(workspace.Path, "live-sessions")));
+		Assert.Equal(Path.GetFullPath(workspace.Path), registry.StateRoot);
 	}
 
 	[Fact]
@@ -25,7 +27,8 @@ public sealed class LiveSessionRegistryTests
 		}
 
 		using var workspace = new TemporaryDirectory();
-		var directory = Directory.CreateDirectory(Path.Combine(workspace.Path, "live-sessions")).FullName;
+		var directory = Directory.CreateDirectory(
+			Path.Combine(workspace.Path, "DevProjex", "live-sessions")).FullName;
 		File.SetUnixFileMode(
 			directory,
 			UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
@@ -325,7 +328,9 @@ public sealed class LiveSessionRegistryTests
 	{
 		using var temporary = new TemporaryDirectory();
 		using var outside = new TemporaryDirectory();
-		var link = Path.Combine(temporary.Path, "live-sessions");
+		var link = Path.Combine(
+			Directory.CreateDirectory(Path.Combine(temporary.Path, "DevProjex")).FullName,
+			"live-sessions");
 		try
 		{
 			Directory.CreateSymbolicLink(link, outside.Path);
@@ -338,6 +343,28 @@ public sealed class LiveSessionRegistryTests
 		var registry = new LiveSessionRegistry(() => temporary.Path);
 
 		Assert.Empty(registry.ReadActive());
+		Assert.Empty(Directory.EnumerateFileSystemEntries(outside.Path));
+	}
+
+	[Fact]
+	public void RegistryRejectsASymbolicLinkDevProjexFolder()
+	{
+		using var temporary = new TemporaryDirectory();
+		using var outside = new TemporaryDirectory();
+		var link = Path.Combine(temporary.Path, "DevProjex");
+		try
+		{
+			Directory.CreateSymbolicLink(link, outside.Path);
+		}
+		catch (Exception linkException) when (linkException is IOException or UnauthorizedAccessException)
+		{
+			Assert.Skip("Creating directory symbolic links is unavailable in this environment.");
+			return;
+		}
+		var registry = new LiveSessionRegistry(() => temporary.Path);
+
+		Assert.Empty(registry.ReadActive());
+		Assert.Throws<IOException>(() => registry.DirectoryPath);
 		Assert.Empty(Directory.EnumerateFileSystemEntries(outside.Path));
 	}
 

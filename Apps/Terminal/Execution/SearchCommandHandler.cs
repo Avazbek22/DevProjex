@@ -22,6 +22,9 @@ public sealed class SearchCommandHandler(
 	private const int MaximumStoredCharacters = 2_000_000;
 	private const int MaximumDeclarationsReported = 20;
 	private const long MaximumInspectedBytes = 64L * 1024 * 1024;
+	private const string SymbolsRegularExpressionMessage =
+		"--symbols takes declaration names such as command, class Command or Foo|Bar; " +
+		"this pattern looks like a regular expression.";
 	private static readonly JsonSerializerOptions JsonOptions = new()
 	{
 		WriteIndented = true,
@@ -32,6 +35,16 @@ public sealed class SearchCommandHandler(
 		SearchCommandRequest request,
 		CancellationToken cancellationToken)
 	{
+		// A regular expression in declaration mode would otherwise report a confident "no
+		// matches"; refusing it before the project is analyzed also keeps the refusal cheap.
+		if (request.Mode == SearchMode.Symbols && McpSearchSymbols.LooksLikeRegularExpression(request.Pattern))
+		{
+			throw new SearchCommandException(
+				"DPX-CLI-SEARCH-PATTERN",
+				SymbolsRegularExpressionMessage,
+				hint: "Pass the name, or use --regex instead of --symbols to search text with a regular expression.");
+		}
+
 		var status = new StatusRenderer(environment, request.Output);
 		var plan = await status.RunAsync(
 			services.Localization["Terminal.Status.AnalyzingProject"],
@@ -305,7 +318,8 @@ public sealed class SearchCommandHandler(
 			var layout = DevProjexMcpTools.PlanSearchDeclarationBody(
 				rendered,
 				symbols.Declarations,
-				preview);
+				preview,
+				ranges: symbols.DeclarationRanges);
 			rendered = layout.Rendered;
 			preview = layout.Preview;
 
@@ -316,7 +330,13 @@ public sealed class SearchCommandHandler(
 				contentCharacters);
 			if (!namesWritten)
 				symbols = symbols with { AnnotatedHits = 0 };
-			AppendDeclarationSection(rendered.Output, symbols.Declarations, preview, request, contentCharacters);
+			AppendDeclarationSection(
+				rendered.Output,
+				symbols.Declarations,
+				symbols.DeclarationRanges,
+				preview,
+				request,
+				contentCharacters);
 
 			var matches = rendered.WrittenHits.Select(hit =>
 			{
@@ -365,7 +385,10 @@ public sealed class SearchCommandHandler(
 					declaration.StartLine,
 					declaration.EndLine,
 					preview?.Declaration == declaration ? preview.Text : null,
-					preview?.Declaration == declaration ? preview.RemainingLines : 0)).ToArray(),
+					preview?.Declaration == declaration ? preview.RemainingLines : 0,
+					symbols.DeclarationRanges.Of(declaration)
+						.Select(static range => new SearchDeclarationRange(range.StartLine, range.EndLine))
+						.ToArray())).ToArray(),
 				resolution,
 				boundary,
 				rendered.Output.ToString().TrimEnd(),
@@ -421,6 +444,9 @@ public sealed class SearchCommandHandler(
 		{
 			SearchMode.Regex => pattern,
 			SearchMode.Text => Regex.Escape(pattern),
+			SearchMode.Symbols when McpSearchSymbols.LooksLikeRegularExpression(pattern) => throw new McpToolException(
+				McpErrorCodes.InvalidPattern,
+				$"{McpErrorCodes.InvalidPattern}: {SymbolsRegularExpressionMessage}"),
 			SearchMode.Symbols => declarationNames.Count > 0
 				? McpSearchSymbols.ToDeclarationNamePattern(declarationNames)
 				: throw new McpToolException(
@@ -517,6 +543,7 @@ public sealed class SearchCommandHandler(
 	private static void AppendDeclarationSection(
 		StringBuilder output,
 		IReadOnlyList<McpSearchDeclaration> declarations,
+		McpDeclarationLineRanges ranges,
 		McpSearchDeclarationPreview? preview,
 		SearchCommandRequest request,
 		int maximumCharacters)
@@ -530,8 +557,7 @@ public sealed class SearchCommandHandler(
 		{
 			var row = $"{McpTextEscaping.EscapeSingleLine(declaration.RelativePath)} " +
 					  $"{McpTextEscaping.EscapeSingleLine(declaration.Name)} " +
-					  $"{declaration.StartLine.ToString(CultureInfo.InvariantCulture)}-" +
-					  $"{declaration.EndLine.ToString(CultureInfo.InvariantCulture)}{Environment.NewLine}";
+					  $"{ranges.Format(declaration)}{Environment.NewLine}";
 			if (output.Length + section.Length + row.Length > maximumCharacters)
 				break;
 			section.Append(row);
@@ -714,6 +740,11 @@ public sealed class SearchCommandHandler(
 					symbol = declaration.Symbol,
 					startLine = declaration.StartLine,
 					endLine = declaration.EndLine,
+					ranges = declaration.Ranges.Select(static range => new
+					{
+						startLine = range.StartLine,
+						endLine = range.EndLine
+					}),
 					body = declaration.Body,
 					remainingBodyLines = declaration.RemainingBodyLines
 				}),
@@ -793,13 +824,22 @@ public sealed class SearchCommandHandler(
 		int StartLine,
 		int EndLine,
 		string? Body,
-		int RemainingBodyLines);
+		int RemainingBodyLines,
+		IReadOnlyList<SearchDeclarationRange> Ranges);
+
+	internal readonly record struct SearchDeclarationRange(int StartLine, int EndLine);
 
 	internal readonly record struct SearchResolution(int Resolved, int Ambiguous, int Unresolved, int External);
 }
 
-internal sealed class SearchCommandException(string code, string message, Exception? innerException = null)
+internal sealed class SearchCommandException(
+	string code,
+	string message,
+	Exception? innerException = null,
+	string? hint = null)
 	: Exception(message, innerException)
 {
 	public string Code { get; } = code;
+
+	public string? Hint { get; } = hint;
 }

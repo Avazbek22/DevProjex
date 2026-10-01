@@ -653,6 +653,8 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 		CancellationToken cancellationToken = default)
 	{
 		ValidateRequest(request);
+		if (McpConnectionProjectRoot.CreateRefusal(_localization, request.ProjectRoot) is { } refusal)
+			return refusal;
 		return request.Client switch
 		{
 			McpConnectionClient.ClaudeCode => await ConnectCommandLineClientAsync(

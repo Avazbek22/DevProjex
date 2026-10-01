@@ -20,6 +20,10 @@ internal static class McpSearchSymbols
 	/// </summary>
 	public const int MaximumAnnotatedFiles = 64;
 
+	private static readonly char[] DeclarationTailStarts = ['(', '<', '{', '[', ';', ',', '='];
+	private static readonly char[] RegularExpressionOnlySyntax = ['\\', '^', '+'];
+	private static readonly char[] NameMetacharacters = ['*', '?', '(', ')', '[', ']', '{', '}'];
+
 	/// <summary>
 	/// Reduces a declaration-name query to the names it asks for. Readers write the declaration
 	/// they picture, such as "class Foo", "type Foo|interface Foo" or "def foo(", so each
@@ -31,21 +35,67 @@ internal static class McpSearchSymbols
 		var names = new List<string>();
 		foreach (var alternative in pattern.Split('|', StringSplitOptions.TrimEntries))
 		{
-			var words = alternative.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-			for (var index = words.Length - 1; index >= 0; index--)
-			{
-				var word = words[index];
-				var cut = word.IndexOfAny(['(', '<', '{', '[', ';', ',', '=']);
-				var name = (cut >= 0 ? word[..cut] : word).TrimEnd('.', '#', '/', ':');
-				if (name.Length == 0)
-					continue;
-				if (!names.Contains(name, StringComparer.Ordinal))
-					names.Add(name);
-				break;
-			}
+			var name = FindDeclaredName(alternative);
+			if (name.Length > 0 && !names.Contains(name, StringComparer.Ordinal))
+				names.Add(name);
 		}
 		return names;
 	}
+
+	/// <summary>
+	/// Tells a regular expression from a declaration-name query, so a regex sent in declaration
+	/// mode is refused instead of answering a confident "no matches". No supported language puts
+	/// a backslash, '^', '+', ".*" or "(?" in a declaration, and a declared name never holds a
+	/// quantifier, bracket, brace or parenthesis: those may only follow the name as its parameter
+	/// list, type arguments or body, as in "def foo(" or "interface Box&lt;T&gt; {". One trailing
+	/// '?' stays part of a name, because Ruby declares predicates such as "valid?".
+	/// </summary>
+	public static bool LooksLikeRegularExpression(string pattern)
+	{
+		ArgumentNullException.ThrowIfNull(pattern);
+		if (pattern.AsSpan().IndexOfAny(RegularExpressionOnlySyntax) >= 0 ||
+			pattern.Contains(".*", StringComparison.Ordinal) ||
+			pattern.Contains("(?", StringComparison.Ordinal))
+		{
+			return true;
+		}
+
+		foreach (var alternative in pattern.Split('|', StringSplitOptions.TrimEntries))
+		{
+			var name = FindDeclaredName(alternative);
+			var looksLikeRegex = name.Length == 0
+				? alternative.AsSpan().IndexOfAny(NameMetacharacters) >= 0
+				: !IsPlainDeclaredName(name);
+			if (looksLikeRegex)
+				return true;
+		}
+		return false;
+	}
+
+	private static string FindDeclaredName(string alternative)
+	{
+		var words = alternative.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+		for (var index = words.Length - 1; index >= 0; index--)
+		{
+			var word = words[index];
+			var cut = word.IndexOfAny(DeclarationTailStarts);
+			var name = (cut >= 0 ? word[..cut] : word).TrimEnd('.', '#', '/', ':');
+			if (name.Length > 0)
+				return name;
+		}
+		return string.Empty;
+	}
+
+	private static bool IsPlainDeclaredName(string name)
+	{
+		var body = name.Length > 1 && name[^1] == '?' && IsIdentifierCharacter(name[^2])
+			? name.AsSpan(0, name.Length - 1)
+			: name.AsSpan();
+		return body.IndexOfAny(NameMetacharacters) < 0;
+	}
+
+	private static bool IsIdentifierCharacter(char character) =>
+		char.IsLetterOrDigit(character) || character == '_';
 
 	/// <summary>
 	/// Builds the whole-identifier pattern for a declaration-name search. A qualified name is
@@ -247,6 +297,7 @@ internal static class McpSearchSymbols
 
 		var names = new Dictionary<McpSearchHitKey, string>();
 		var declarations = new List<McpSearchDeclaration>();
+		var repeatedNameRanges = new Dictionary<McpSearchDeclaration, IReadOnlyList<(int StartLine, int EndLine)>>();
 		var declared = new HashSet<string>(StringComparer.Ordinal);
 		var annotated = 0;
 		var unannotatedFiles = new HashSet<string>(StringComparer.Ordinal);
@@ -281,11 +332,17 @@ internal static class McpSearchSymbols
 			// declaration touched by ten matches is still one thing to open.
 			if (declared.Add($"{hit.RelativePath}\u0000{best.Name}"))
 			{
-				declarations.Add(new McpSearchDeclaration(
+				var declaration = new McpSearchDeclaration(
 					hit.RelativePath,
 					best.Name,
 					best.Start,
-					best.End));
+					best.End);
+				declarations.Add(declaration);
+				// Overloads and stubs share one name, so the one row lists every range: the hit's
+				// declaration alone would hide the implementation a reader came for.
+				var sameName = SameNameRanges(spans, best.Name);
+				if (sameName.Count > 1)
+					repeatedNameRanges[declaration] = sameName;
 			}
 			annotated++;
 		}
@@ -295,8 +352,22 @@ internal static class McpSearchSymbols
 			declarations,
 			annotated,
 			unannotatedFiles.Count,
-			skippedFiles);
+			skippedFiles)
+		{
+			DeclarationRanges = new McpDeclarationLineRanges(repeatedNameRanges)
+		};
 	}
+
+	private static IReadOnlyList<(int StartLine, int EndLine)> SameNameRanges(
+		IReadOnlyList<DeclarationSpan> spans,
+		string name) =>
+		spans
+			.Where(span => string.Equals(span.Name, name, StringComparison.Ordinal))
+			.Select(static span => (span.Start, span.End))
+			.Distinct()
+			.OrderBy(static range => range.Start)
+			.ThenBy(static range => range.End)
+			.ToArray();
 
 	public static IReadOnlyList<NavigationDeclaration> CaptureNavigation(
 		DependencyFactsEngine engine,
@@ -523,20 +594,45 @@ internal readonly record struct McpSymbolLookup(
 	/// Lists the candidates' line ranges in file order, so an ambiguous name can be read by range
 	/// instead of by reading the whole file. Line numbers are not project text.
 	/// </summary>
-	public string FormatCandidateLines()
+	public string FormatCandidateLines() => FormatLineRanges(Candidates);
+
+	/// <summary>
+	/// Writes inclusive line ranges compactly: at most six, then how many more there are.
+	/// </summary>
+	public static string FormatLineRanges(IReadOnlyList<(int StartLine, int EndLine)> ranges)
 	{
+		ArgumentNullException.ThrowIfNull(ranges);
 		var listed = string.Join(
 			", ",
-			Candidates
+			ranges
 				.Take(MaximumListedCandidates)
-				.Select(static candidate => string.Create(
+				.Select(static range => string.Create(
 					CultureInfo.InvariantCulture,
-					$"{candidate.StartLine}-{candidate.EndLine}")));
-		var unlisted = Candidates.Count - MaximumListedCandidates;
+					$"{range.StartLine}-{range.EndLine}")));
+		var unlisted = ranges.Count - MaximumListedCandidates;
 		return unlisted > 0
 			? string.Create(CultureInfo.InvariantCulture, $"{listed} and {unlisted} more")
 			: listed;
 	}
+}
+
+/// <summary>
+/// The line ranges of every declaration that shares a listed declaration's name in its file. An
+/// overloaded name is one row, so the row carries all of its ranges rather than whichever one a
+/// hit happened to land in first.
+/// </summary>
+internal sealed class McpDeclarationLineRanges(
+	IReadOnlyDictionary<McpSearchDeclaration, IReadOnlyList<(int StartLine, int EndLine)>> repeatedNames)
+{
+	public static readonly McpDeclarationLineRanges None =
+		new(new Dictionary<McpSearchDeclaration, IReadOnlyList<(int StartLine, int EndLine)>>());
+
+	public IReadOnlyList<(int StartLine, int EndLine)> Of(McpSearchDeclaration declaration) =>
+		repeatedNames.TryGetValue(declaration, out var ranges)
+			? ranges
+			: [(declaration.StartLine, declaration.EndLine)];
+
+	public string Format(McpSearchDeclaration declaration) => McpSymbolLookup.FormatLineRanges(Of(declaration));
 }
 
 internal readonly record struct McpSearchHit(string RelativePath, string FullPath, int Line);
@@ -731,4 +827,6 @@ internal sealed record McpSearchSymbolResult(
 {
 	public static readonly McpSearchSymbolResult None =
 		new(new Dictionary<McpSearchHitKey, string>(), [], 0, 0, 0);
+
+	public McpDeclarationLineRanges DeclarationRanges { get; init; } = McpDeclarationLineRanges.None;
 }

@@ -78,7 +78,7 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 	{
 		get
 		{
-			var root = UserDataPathResolver.EnsurePhysicalDirectory(stateRoot(), createIfMissing: true);
+			var root = UserDataPathResolver.EnsurePhysicalApplicationStateDirectory(stateRoot());
 			var directory = Path.Combine(root, "agent-journal");
 			if (!OperatingSystem.IsWindows() && !Directory.Exists(directory))
 			{

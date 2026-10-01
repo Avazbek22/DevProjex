@@ -1,5 +1,6 @@
 using DevProjex.Application.Secrets;
 using DevProjex.Infrastructure.Secrets;
+using System.Text.Encodings.Web;
 using System.Text.Json.Nodes;
 
 namespace DevProjex.Mcp;
@@ -14,9 +15,19 @@ internal static class McpToolResults
 	private static readonly Lazy<IReadOnlyList<ISecretDetector>> SecretMetadataDetectors = new(
 		static () => [new GitleaksSecretDetector()],
 		LazyThreadSafetyMode.ExecutionAndPublication);
+	/// <summary>
+	/// JSON an agent reads rather than HTML embeds: a quote costs two characters instead of six and
+	/// non-ASCII names stay readable, while control characters are still escaped, so the text
+	/// remains valid JSON.
+	/// </summary>
+	internal static readonly JsonSerializerOptions CompactJsonOptions = new()
+	{
+		Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+	};
 	private static readonly JsonSerializerOptions StructuredTextOptions = new()
 	{
-		WriteIndented = true
+		WriteIndented = true,
+		Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
 	};
 
 	public static CallToolResult TextSuccess(

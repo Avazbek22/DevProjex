@@ -50,6 +50,56 @@ public sealed class ExportContextDocumentContractTests
 			OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 	}
 
+	[Fact]
+	public void JsonExportsEscapeOnlyWhatJsonRequires()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var data = new TemporaryDirectory();
+		const string fileName = "R&D's Привет.txt";
+		const string content = "say \"hi\" <b>&amp;</b> it's Привет \u001B[0m\tend";
+		workspace.WriteFile(fileName, content);
+
+		var export = RunProcess(
+			data.Path,
+			"export", "context", workspace.Path,
+			"--view", "content",
+			"--format", "json",
+			"--git-mode", "none",
+			"--exclude", "none",
+			"--plain",
+			"--progress", "never",
+			"-o", "-");
+		var tree = RunProcess(
+			data.Path,
+			"tree", workspace.Path,
+			"--format", "json",
+			"--git-mode", "none",
+			"--exclude", "none",
+			"--progress", "never",
+			"-o", "-");
+
+		Assert.Equal(CommandLineExitCodes.Success, export.ExitCode);
+		Assert.Equal(CommandLineExitCodes.Success, tree.ExitCode);
+		using (var document = JsonDocument.Parse(export.StandardOutput))
+		{
+			var file = Assert.Single(document.RootElement.GetProperty("files").EnumerateArray());
+			Assert.Equal(content, file.GetProperty("content").GetString());
+		}
+		using (JsonDocument.Parse(tree.StandardOutput))
+		{
+		}
+		Assert.Contains(
+			"say \\\"hi\\\" <b>&amp;</b> it's Привет \\u001B[0m\\tend",
+			export.StandardOutput,
+			StringComparison.Ordinal);
+		Assert.Contains(fileName, tree.StandardOutput, StringComparison.Ordinal);
+		foreach (var output in new[] { export.StandardOutput, tree.StandardOutput })
+		{
+			foreach (var escape in new[] { "\\u0022", "\\u003C", "\\u0026", "\\u0027" })
+				Assert.DoesNotContain(escape, output, StringComparison.OrdinalIgnoreCase);
+		}
+	}
+
 	[Theory]
 	[InlineData(false, "└── docs")]
 	[InlineData(true, "`-- docs")]

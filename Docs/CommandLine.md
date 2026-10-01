@@ -165,7 +165,10 @@ claude-code|codex|cursor|vscode|json --mode live|standard [--replace]
 result. The project defaults to the current directory, the client to
 `claude-code`, and the mode to `standard`; `--mode live` registers a server that
 follows the selection the DevProjex window saved for the project. Desktop and
-Terminal Workspace keep their own explicit live and standard choices.
+Terminal Workspace keep their own explicit live and standard choices. Before any
+client work, and with or without `--print`, the command checks that `PROJECT` is an
+existing folder: a missing path or a path to a file fails with `DPX-PROJECT-NOT-FOUND`,
+a message naming the problem, and exit code `2`, and nothing is registered or printed.
 
 Claude Code receives a project-local `claude mcp remove`/`mcp add` sequence.
 Codex receives the equivalent global `codex mcp` replacement. Cursor updates
@@ -705,6 +708,10 @@ enables a timed .NET regular expression; `--symbols` treats the pattern as one o
 more declaration names separated by `|` (each alternative keeps its last word, so
 `class Foo` asks for `Foo`) while retaining the same source evidence and containing-
 declaration lookup, and is the same mode as MCP `search_project` with `symbols: true`.
+A `--symbols` pattern that looks like a regular expression, such as `command\(` or
+`\bcommand\b`, is refused before the project is read with `DPX-CLI-SEARCH-PATTERN`
+(exit code 2) and a hint to pass the name or use `--regex`; the rule is the one MCP
+applies to `symbols: true`.
 Selected binary files are counted as skipped rather than searched and do not make
 a search partial unless nothing else was selected. They are not charged to the inspection
 budget, and a file that does not fit what remains of it is skipped while later files that

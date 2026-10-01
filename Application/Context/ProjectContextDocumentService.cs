@@ -4,7 +4,6 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Encodings.Web;
 using System.Text.Json;
-using System.Text.Unicode;
 using System.Xml;
 using DevProjex.Application.Diagnostics;
 using DevProjex.Application.Ranking;
@@ -1161,7 +1160,9 @@ public sealed class ProjectContextDocumentService(
 		using var writer = new Utf8JsonWriter(destination, new JsonWriterOptions
 		{
 			Indented = true,
-			Encoder = JavaScriptEncoder.Create(UnicodeRanges.All),
+			// The document is read by people and agents, not embedded in HTML: quotes stay \" and
+			// non-ASCII text stays readable, while control characters are still escaped.
+			Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
 			MaxDepth = int.MaxValue
 		});
 		var rankingEntriesByFullPath = CreateRankingEntryLookup(ranking);
@@ -2079,7 +2080,9 @@ public sealed class ProjectContextDocumentService(
 		using var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions
 		{
 			Indented = true,
-			Encoder = JavaScriptEncoder.Create(UnicodeRanges.All),
+			// The document is read by people and agents, not embedded in HTML: quotes stay \" and
+			// non-ASCII text stays readable, while control characters are still escaped.
+			Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
 			MaxDepth = int.MaxValue
 		});
 

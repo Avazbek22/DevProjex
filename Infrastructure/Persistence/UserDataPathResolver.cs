@@ -11,6 +11,7 @@ internal enum UserDataDirectoryKind
 public static class UserDataPathResolver
 {
 	public const string InternalDataRootVariable = "DEVPROJEX_INTERNAL_DATA_ROOT";
+	public const string ApplicationDirectoryName = "DevProjex";
 	private const string UnsafeServiceDirectoryMessage =
 		"Application service directories must be physical directories, not a symbolic link or junction.";
 
@@ -64,6 +65,37 @@ public static class UserDataPathResolver
 			OperatingSystem.IsWindows(),
 			Environment.GetFolderPath,
 			Environment.GetEnvironmentVariable);
+
+	/// <summary>
+	/// The per-user DevProjex state directory: the <see cref="ApplicationDirectoryName"/> folder of the
+	/// platform state root, or of an isolated data root when one is supplied instead. Every writer and
+	/// reader of shared state resolves its folder through this one method so they cannot disagree.
+	/// </summary>
+	public static string GetApplicationStateDirectory(string stateRoot)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(stateRoot);
+		return Path.Combine(Path.GetFullPath(stateRoot), ApplicationDirectoryName);
+	}
+
+	public static string GetApplicationStateDirectory() =>
+		GetApplicationStateDirectory(GetStateRoot());
+
+	internal static string ResolveApplicationStateDirectory(
+		bool isWindows,
+		Func<Environment.SpecialFolder, Environment.SpecialFolderOption, string> specialFolderProvider,
+		Func<string, string?> environmentProvider) =>
+		GetApplicationStateDirectory(Resolve(
+			UserDataDirectoryKind.State,
+			isWindows,
+			specialFolderProvider,
+			environmentProvider));
+
+	/// <summary>
+	/// Creates the DevProjex state directory, refusing a symbolic link or junction at the state root
+	/// or at the DevProjex folder. Service folders below it apply the same check to themselves.
+	/// </summary>
+	internal static string EnsurePhysicalApplicationStateDirectory(string stateRoot) =>
+		EnsurePhysicalServiceDirectory(stateRoot, ApplicationDirectoryName);
 
 	internal static string EnsurePhysicalServiceDirectory(string root, string name)
 	{

@@ -192,9 +192,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_commandHistory = new TerminalCommandHistory(
 			services.TerminalSettingsStore.LoadCommandHistory());
 		_agentActivityEnabled = services.TerminalSettingsStore.LoadAgentActivityEnabled();
-		_agentJournalStore = new Lazy<AgentJournalStore>(() => new AgentJournalStore(
-			() => Path.GetDirectoryName(services.LiveSessionRegistry.DirectoryPath)!,
-			activeSessionProvider: () => services.LiveSessionRegistry.ReadActive()));
+		_agentJournalStore = new Lazy<AgentJournalStore>(() => CreateAgentJournalStore(services));
 		_commandHistoryPersistence = new TerminalCommandHistoryPersistenceQueue(
 			services.TerminalSettingsStore.SaveCommandStateAsync,
 			_settingsPersistenceCts.Token);
@@ -1243,6 +1241,12 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		}
 		ReturnToWelcomeWithError(operationCts, code, message);
 	}
+
+	// The journal follows the sessions of this workspace's registry, so both resolve from its root.
+	internal static AgentJournalStore CreateAgentJournalStore(TerminalServices services) =>
+		new(
+			() => services.LiveSessionRegistry.StateRoot,
+			activeSessionProvider: () => services.LiveSessionRegistry.ReadActive());
 
 	internal static string ResolveProjectOpenErrorDetail(
 		string projectPath,

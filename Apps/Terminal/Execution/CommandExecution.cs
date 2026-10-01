@@ -110,6 +110,7 @@ internal static class CommandExecution
 			return WriteError(environment, outputOptions, text, new TerminalError(
 				exception.Code,
 				exception.Message,
+				exception.Hint,
 				ExitCode: CommandLineExitCodes.UsageError,
 				Exception: exception));
 		}

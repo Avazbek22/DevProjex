@@ -80,6 +80,11 @@ public partial class MainWindow
             cancellationToken.ThrowIfCancellationRequested();
             if (!CanPresentMcpDialog(windowLifetime))
                 return;
+            if (result.Status == McpConnectionStatus.ProjectNotFound)
+            {
+                await ShowErrorAsync(result.UserMessage);
+                return;
+            }
 
             if (result.Succeeded)
             {

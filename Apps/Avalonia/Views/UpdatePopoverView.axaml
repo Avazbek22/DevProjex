@@ -36,10 +36,11 @@
                    FontWeight="SemiBold"
                    VerticalAlignment="Center" />
         <Button Grid.Column="1"
+                Name="UpdateCloseButton"
                 Content="✕"
                 Classes="menu-icon-button"
                 Padding="4"
-                AutomationProperties.Name="{Binding UpdateTitle}"
+                AutomationProperties.Name="{Binding PopoverCloseText}"
                 Click="OnClose" />
       </Grid>
 

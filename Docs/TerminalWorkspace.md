@@ -358,7 +358,10 @@ appears both in the workspace status line and in a scrollable output panel. A
 missing command-line client or another failure shows the same reason together with
 the manual fallback configuration. Cursor and VS Code update their project files;
 the other client behaviors match `devprojex mcp connect`. The older `mcp` form
-continues to print a fragment and accepts an explicit live or standard mode.
+continues to print a fragment and accepts an explicit live or standard mode. If the
+open project's folder no longer exists or has been replaced by a file, both forms
+report that with the same message as the CLI and neither registers nor prints a
+configuration.
 Because Codex uses one shared `devprojex` registration, replacing a registration
 that points at another project requires confirmation showing both roots. Claude Code
 uses a project-local registration and does not need that cross-project confirmation.

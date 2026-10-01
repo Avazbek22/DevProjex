@@ -1944,8 +1944,8 @@ public sealed class DependencyFactsEngineIntegrationTests
 	public async Task TypeScriptPackageExports_NullTargetIsUnresolvedAndLegacyConfigIsExplicit()
 	{
 		using var fixture = new TemporaryDirectory();
-		var config = fixture.CreateFile("tsconfig.json", "{" + "\"compilerOptions\":{\"moduleResolution\":\"node10\",\"baseUrl\":\".\"}}" );
-		var package = fixture.CreateFile("package.json", "{" + "\"name\":\"self\",\"exports\":{\"./blocked\":null}}" );
+		var config = fixture.CreateFile("tsconfig.json", "{" + "\"compilerOptions\":{\"moduleResolution\":\"node10\",\"baseUrl\":\".\"}}");
+		var package = fixture.CreateFile("package.json", "{" + "\"name\":\"self\",\"exports\":{\"./blocked\":null}}");
 		var main = fixture.CreateFile("main.ts", "import value from \"self/blocked\";");
 		using var engine = CreateEngine();
 
@@ -2823,7 +2823,7 @@ public sealed class DependencyFactsEngineIntegrationTests
 			[config, initializer, model, consumer],
 			cancellationToken: TestContext.Current.CancellationToken);
 
-		var moduleImport = Assert.Single(result.Edges, item => item.Source == "pkg/consumer.py" && item.Reference == "model");
+		var moduleImport = Assert.Single(result.Edges, item => item.Source == "pkg/consumer.py" && item.Reference == ".model");
 		Assert.Equal(ResolutionStatus.Resolved, moduleImport.Status);
 		Assert.Equal("pkg/model.py", moduleImport.Target);
 		Assert.Equal(2, moduleImport.Evidence.Count);
@@ -2891,6 +2891,38 @@ public sealed class DependencyFactsEngineIntegrationTests
 	}
 
 	[Fact]
+	public async Task PythonRelativeImport_KeepsItsLeadingDotsInTheEdgeReference()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("pyproject.toml", "[project]\nname = \"fixture\"");
+		var package = fixture.CreateFile("pkg/__init__.py", string.Empty);
+		var subpackage = fixture.CreateFile("pkg/sub/__init__.py", string.Empty);
+		var types = fixture.CreateFile("pkg/types.py", "class Kind: pass");
+		var sibling = fixture.CreateFile("pkg/sub/sibling.py", "class Value: pass");
+		var consumer = fixture.CreateFile(
+			"pkg/sub/consumer.py",
+			"from .. import types\nfrom ..types import Kind\nfrom . import sibling\nfrom .sibling import *\nfrom . import *");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(fixture.Path, [config, package, subpackage, types, sibling, consumer],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		// The reference reads as the module was written, never as an empty or top-level name.
+		var references = result.Edges
+			.Where(static edge => edge.Source == "pkg/sub/consumer.py")
+			.Select(static edge => edge.Reference)
+			.ToHashSet(StringComparer.Ordinal);
+		Assert.Contains("..", references);
+		Assert.Contains("..types", references);
+		Assert.Contains(".", references);
+		Assert.Contains(".sibling.*", references);
+		Assert.Contains(".*", references);
+		Assert.DoesNotContain(string.Empty, references);
+		Assert.Contains(result.Edges, static edge => edge.Source == "pkg/sub/consumer.py" &&
+			edge.Reference == ".." && edge.Target == "pkg/types.py");
+	}
+
+	[Fact]
 	public async Task PythonPlatformCatalog_UsesDeclaredTargetVersionAndAConservativeUnknownVersion()
 	{
 		using var fixture = new TemporaryDirectory();
@@ -2919,7 +2951,7 @@ public sealed class DependencyFactsEngineIntegrationTests
 	public async Task Cache_ReparsesOnlyChangedSourceAndReresolvesConfigurationWithoutParsing()
 	{
 		using var fixture = new TemporaryDirectory();
-		var config = fixture.CreateFile("tsconfig.json", "{" + "\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}" );
+		var config = fixture.CreateFile("tsconfig.json", "{" + "\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}");
 		var main = fixture.CreateFile("main.ts", "import { value } from \"alias\";");
 		var value = fixture.CreateFile("value.ts", "export const value = 1;");
 		using var engine = CreateEngine();
@@ -2927,7 +2959,7 @@ public sealed class DependencyFactsEngineIntegrationTests
 		_ = await engine.IndexAsync(fixture.Path, manifest,
 			cancellationToken: TestContext.Current.CancellationToken);
 
-		File.WriteAllText(config, "{" + "\"compilerOptions\":{\"moduleResolution\":\"bundler\",\"paths\":{\"alias\":[\"value.ts\"]}}}" );
+		File.WriteAllText(config, "{" + "\"compilerOptions\":{\"moduleResolution\":\"bundler\",\"paths\":{\"alias\":[\"value.ts\"]}}}");
 		var configured = await engine.IndexAsync(fixture.Path, manifest,
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Equal(0, configured.Metrics.ParsedFiles);

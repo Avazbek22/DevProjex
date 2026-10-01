@@ -27,6 +27,7 @@
       <Button Name="FilterCloseButton"
               Grid.Column="2"
               Content="✕"
+              AutomationProperties.Name="{Binding FilterCloseText}"
               Width="32"
               Click="OnFilterClose" />
     </Grid>

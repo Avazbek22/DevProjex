@@ -1,7 +1,7 @@
 {
   "name": "python",
   "edges": [
-    { "source": "src/pkg/consumer.py", "reference": "", "status": "Resolved", "target": "src/pkg/sibling.py" },
+    { "source": "src/pkg/consumer.py", "reference": ".", "status": "Resolved", "target": "src/pkg/sibling.py" },
     { "source": "src/pkg/consumer.py", "reference": "pkg", "status": "Resolved", "target": "src/pkg/public.py" },
     { "source": "src/pkg/consumer.py", "reference": "pkg.*", "status": "Unresolved", "reasonContains": "dynamic __all__" },
     { "source": "src/pkg/namespaces.py", "reference": "ns", "status": "Resolved", "target": "namespace:ns" },

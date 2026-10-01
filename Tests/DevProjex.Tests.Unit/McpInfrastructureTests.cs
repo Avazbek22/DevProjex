@@ -313,6 +313,48 @@ public sealed class McpInfrastructureTests
 			McpSearchSymbols.ParseDeclarationNames(pattern));
 	}
 
+	[Theory]
+	[InlineData("command\\(")]
+	[InlineData("\\bcommand\\b")]
+	[InlineData("def\\s+command")]
+	[InlineData("def command\\s*\\(")]
+	[InlineData("^def command")]
+	[InlineData("command.*")]
+	[InlineData("command+")]
+	[InlineData("comm?and")]
+	[InlineData("[Cc]ommand")]
+	[InlineData("(command|group)")]
+	[InlineData("(?i)command")]
+	[InlineData("Foo|Bar*")]
+	public void DeclarationNameQueriesRecognizeRegularExpressions(string pattern)
+	{
+		Assert.True(McpSearchSymbols.LooksLikeRegularExpression(pattern));
+	}
+
+	[Theory]
+	[InlineData("command")]
+	[InlineData("class Command")]
+	[InlineData("def command")]
+	[InlineData("def command(")]
+	[InlineData("def compute(self):")]
+	[InlineData("Foo|Bar")]
+	[InlineData("type JSONRespond|interface JSONRespond")]
+	[InlineData("Group.command")]
+	[InlineData("A::B")]
+	[InlineData("Shop.OrderService.CalculateTotal")]
+	[InlineData("interface Box<T> {")]
+	[InlineData("function load() {}")]
+	[InlineData("func Map[T](")]
+	[InlineData("class Foo:")]
+	[InlineData("Order(Service")]
+	[InlineData("valid?")]
+	[InlineData("$http")]
+	[InlineData(" | ")]
+	public void DeclarationNameQueriesKeepAcceptingDeclarationForms(string pattern)
+	{
+		Assert.False(McpSearchSymbols.LooksLikeRegularExpression(pattern));
+	}
+
 	[Fact]
 	public void BodyTruncationNoticeNamesTheExactUnshownLines()
 	{
@@ -377,6 +419,39 @@ public sealed class McpInfrastructureTests
 		Assert.Equal("1-5, 11-15, 21-25, 31-35, 41-45, 51-55 and 2 more", eight.FormatCandidateLines());
 		Assert.Equal(1, McpSymbolLookup.Found(3, 9).CandidateCount);
 		Assert.Equal(0, McpSymbolLookup.Unknown.CandidateCount);
+	}
+
+	[Fact]
+	public void SearchDeclarationOfARepeatedNameCarriesEveryRangeOfThatNameInItsFile()
+	{
+		IReadOnlyList<NavigationDeclaration> declarations =
+		[
+			new("command", NavigationSymbolKind.Function, null, 8, 12, "fingerprint"),
+			new("command", NavigationSymbolKind.Function, null, 3, 3, "fingerprint"),
+			new("command", NavigationSymbolKind.Function, null, 5, 6, "fingerprint"),
+			new("group", NavigationSymbolKind.Function, null, 14, 15, "fingerprint")
+		];
+		var navigation = new Dictionary<string, IReadOnlyList<NavigationDeclaration>>(StringComparer.Ordinal)
+		{
+			["src/cli.py"] = declarations
+		};
+
+		var result = McpSearchSymbols.Resolve(
+			[
+				new McpSearchHit("src/cli.py", "/repo/src/cli.py", 5),
+				new McpSearchHit("src/cli.py", "/repo/src/cli.py", 9),
+				new McpSearchHit("src/cli.py", "/repo/src/cli.py", 14)
+			],
+			navigation,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(2, result.Declarations.Count);
+		var command = result.Declarations[0];
+		Assert.Equal(new McpSearchDeclaration("src/cli.py", "command", 5, 6), command);
+		Assert.Equal("3-3, 5-6, 8-12", result.DeclarationRanges.Format(command));
+		Assert.Equal(new[] { (3, 3), (5, 6), (8, 12) }, result.DeclarationRanges.Of(command));
+		Assert.Equal("14-15", result.DeclarationRanges.Format(result.Declarations[1]));
+		Assert.Equal("14-15", McpDeclarationLineRanges.None.Format(result.Declarations[1]));
 	}
 
 	[Fact]
@@ -916,6 +991,32 @@ public sealed class McpInfrastructureTests
 		Assert.Equal(
 			McpErrorCodes.InvalidPattern,
 			Assert.Throws<McpToolException>(() => McpGlobSet.Create(["../*.cs"], null)).Code);
+	}
+
+	[Fact]
+	public void GlobNegationRefusalAdvisesWhatFitsTheParameterItCameFrom()
+	{
+		var negation = Assert.Throws<ProjectRelativeGlobException>(() => ProjectRelativeGlob.Validate("!src/**"));
+		var include = Assert.Throws<McpToolException>(() => McpGlobSet.Create(["!src/**"], null));
+		var exclude = Assert.Throws<McpToolException>(() => McpGlobSet.Create(null, ["!src/**"]));
+		var otherExcludeFailure = Assert.Throws<McpToolException>(() => McpGlobSet.Create(null, ["[Ss]rc/**"]));
+
+		Assert.True(negation.IsNegation);
+		Assert.False(Assert.Throws<ProjectRelativeGlobException>(() => ProjectRelativeGlob.Validate("../x")).IsNegation);
+		Assert.Equal(McpErrorCodes.InvalidPattern, include.Code);
+		Assert.Contains(
+			"invalid 'include_patterns': negation ('!') is not supported; list the pattern in exclude_patterns instead.",
+			include.Message,
+			StringComparison.Ordinal);
+		Assert.Equal(McpErrorCodes.InvalidPattern, exclude.Code);
+		Assert.Contains(
+			"invalid 'exclude_patterns': negation ('!') is not supported; write the pattern without '!', " +
+			"because exclude_patterns already removes what it matches.",
+			exclude.Message,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain("list the pattern in exclude_patterns", exclude.Message, StringComparison.Ordinal);
+		Assert.Contains("character classes ('[...]') are not supported", otherExcludeFailure.Message,
+			StringComparison.Ordinal);
 	}
 
 	[Fact]

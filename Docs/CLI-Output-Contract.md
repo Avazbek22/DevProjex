@@ -272,6 +272,12 @@ the JSON document itself is never truncated.
       "symbol": "App.Configure",
       "startLine": 12,
       "endLine": 18,
+      "ranges": [
+        {
+          "startLine": 12,
+          "endLine": 18
+        }
+      ],
       "body": "    void Configure()\n    {\n        // ...\n    }",
       "remainingBodyLines": 0
     }
@@ -300,8 +306,12 @@ the JSON document itself is never truncated.
 portable paths and line numbers are one-based coordinates in the transformed text
 that was actually searched. `text` is the complete escaped matching line without
 its numeric prefix. `declaration` is nullable when navigation has no containing
-declaration. Declaration `body` is nullable when body output is disabled or no body
-fits, and `remainingBodyLines` reports a bounded prefix honestly.
+declaration. Declaration `startLine` and `endLine` are the range a written match
+landed in; `ranges` lists every range declared under that `symbol` in that file in
+file order, so overloads and stubs of one name appear together, and the text row
+prints the same ranges (at most six, then `and N more`). Declaration `body` is nullable
+when body output is disabled or no body fits, and `remainingBodyLines` reports a
+bounded prefix honestly.
 
 `resolution` has the same four stable field names as the text `[Resolution]` line.
 For search it describes containing-declaration evidence for written matches:
@@ -616,6 +626,11 @@ The top-level shape is:
 Property order is deterministic where contract tests require it. Paths use `/`
 inside machine documents. A binary entry has `isBinary: true` and null content;
 binary bytes are never inserted into AI context output.
+Context JSON and `tree --format json` escape only what JSON requires: a quote is
+written as `\"`, a backslash as `\\`, and control characters and characters outside
+the Basic Multilingual Plane as `\uXXXX` escapes; `<`, `>`, `&`, `'` and other
+non-ASCII text stay as written. Every document remains valid JSON that parses back
+to the original text.
 
 For a cached Git clone, `project.source` is an additive object containing the
 source type, safe repository URL, and optional branch/commit metadata. Human

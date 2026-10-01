@@ -276,6 +276,84 @@ public sealed class UserDataPathResolverTests
 	}
 
 	[Fact]
+	public void WindowsApplicationStateDirectoryIsTheDevProjexFolderOfLocalApplicationData()
+	{
+		var localData = Path.Combine(Path.GetTempPath(), "dpx-local-app-data");
+		var home = Path.Combine(Path.GetTempPath(), "dpx-user");
+
+		var actual = UserDataPathResolver.ResolveApplicationStateDirectory(
+			isWindows: true,
+			(folder, _) => folder switch
+			{
+				Environment.SpecialFolder.LocalApplicationData => localData,
+				Environment.SpecialFolder.UserProfile => home,
+				_ => string.Empty
+			},
+			static name => name == "XDG_STATE_HOME" ? Path.Combine(Path.GetTempPath(), "ignored") : null);
+
+		Assert.Equal(Path.GetFullPath(Path.Combine(localData, "DevProjex")), actual);
+	}
+
+	[Fact]
+	public void WindowsApplicationStateDirectoryFallsBackToTheProfileLocalFolder()
+	{
+		var home = Path.Combine(Path.GetTempPath(), "dpx-user");
+
+		var actual = UserDataPathResolver.ResolveApplicationStateDirectory(
+			isWindows: true,
+			(folder, _) => folder == Environment.SpecialFolder.UserProfile ? home : string.Empty,
+			static _ => null);
+
+		Assert.Equal(Path.GetFullPath(Path.Combine(home, "AppData", "Local", "DevProjex")), actual);
+	}
+
+	[Fact]
+	public void UnixApplicationStateDirectoryIsTheDevProjexFolderOfXdgStateHome()
+	{
+		var xdgState = Path.Combine(Path.GetTempPath(), "dpx-xdg-state");
+		var localData = Path.Combine(Path.GetTempPath(), "dpx-local-share");
+
+		var actual = UserDataPathResolver.ResolveApplicationStateDirectory(
+			isWindows: false,
+			(folder, _) => folder == Environment.SpecialFolder.LocalApplicationData ? localData : string.Empty,
+			name => name == "XDG_STATE_HOME" ? xdgState : null);
+
+		Assert.Equal(Path.GetFullPath(Path.Combine(xdgState, "DevProjex")), actual);
+	}
+
+	[Fact]
+	public void UnixApplicationStateDirectoryFallsBackToLocalStateUnderHome()
+	{
+		var home = Path.Combine(Path.GetTempPath(), "dpx-home");
+		var localData = Path.Combine(Path.GetTempPath(), "dpx-local-share");
+
+		var actual = UserDataPathResolver.ResolveApplicationStateDirectory(
+			isWindows: false,
+			(folder, _) => folder switch
+			{
+				Environment.SpecialFolder.LocalApplicationData => localData,
+				Environment.SpecialFolder.UserProfile => home,
+				_ => string.Empty
+			},
+			static _ => null);
+
+		Assert.Equal(Path.GetFullPath(Path.Combine(home, ".local", "state", "DevProjex")), actual);
+	}
+
+	[Fact]
+	public void IsolatedDataRootKeepsTheApplicationStateDirectoryInsideIt()
+	{
+		using var workspace = new TemporaryDirectory();
+		var isolated = UserDataPathResolver.ResolveInternalDataRoot(workspace.CreateFolder("isolated"))!;
+
+		Assert.Equal(
+			Path.Combine(isolated, "DevProjex"),
+			UserDataPathResolver.GetApplicationStateDirectory(isolated),
+			PathComparer.Default);
+		Assert.Throws<ArgumentException>(() => UserDataPathResolver.GetApplicationStateDirectory(" "));
+	}
+
+	[Fact]
 	public void MissingUserDataRootsFailInsteadOfUsingCurrentDirectory()
 	{
 		Assert.Throws<InvalidOperationException>(() =>

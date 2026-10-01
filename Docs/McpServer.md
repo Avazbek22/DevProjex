@@ -208,8 +208,9 @@ These trusted lines supplement rather than replace `[Search boundary]`,
 live lines contain only fixed words, revision and count values, the saved date,
 and fixed enum states. Root names, file and folder names, and paths remain inside the same
 randomized untrusted-data boundary used for other project-controlled text.
-The server records a live-session heartbeat under the application state root in
-`live-sessions/<pid>.json`. Desktop and Terminal remove records whose process
+The server records a live-session heartbeat in `live-sessions/<pid>.json` inside the
+per-user DevProjex state directory described under [Agent journal](#agent-journal).
+Desktop and Terminal remove records whose process
 identity no longer matches or whose heartbeat is older than 15 seconds; a
 healthy server updates every 5 seconds and removes its record on normal exit.
 
@@ -391,8 +392,10 @@ queueing it. The journal does not store file contents, tool-result bodies,
 search-query text, symbol-selector text, detected secret values, or masked
 private-data values.
 
-Journal files live under the per-user DevProjex state directory in its
-`agent-journal` folder. Retention keeps at most 200 sessions and removes entries
+Journal files live in the `agent-journal` folder of the per-user DevProjex state
+directory: `%LOCALAPPDATA%\DevProjex` on Windows, and `$XDG_STATE_HOME/DevProjex` on
+Linux and macOS, or `~/.local/state/DevProjex` when `XDG_STATE_HOME` is not set.
+Retention keeps at most 200 sessions and removes entries
 older than 30 days. Active Standard and Live sessions are exempt from both retention
 and clearing. **Journal…** in the desktop MCP menu, `mcp log` in Terminal Workspace,
 and the CLI journal commands read the same records. Clearing can be limited to the
@@ -404,6 +407,8 @@ session metadata, totals, delivered-path counts, and call rows, so a user can re
 evidence of what context was made available without retaining the returned file
 bodies. A delivered path is counted only when its text was actually returned, not
 when a stored result was merely prepared; `read_pack` accounts for the page it returns.
+`get_tree` and `analyze` name and measure files without returning their text, so they
+deliver no files and count no masked values.
 If a stored source disappears before its protection count is captured, the journal
 records `unavailable` and keeps that count unknown instead of reporting a false zero;
 known counts on the same page are still accumulated.
@@ -632,7 +637,7 @@ description has to fit a budget rather than grow one silently.
 | `analyze` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `detail_by_pattern?`, `tracked_only?`, `git_scope?`, `top_files?`, `max_file_bytes?`, `max_tokens?`, `rank?`, `focus?` | File, character, and token metrics plus the requested largest files by tokens. `contentMetrics` separates measured transformed bodies from size-based estimates; `documentMetrics` models `pack_context` with `view=content`, `format=text`, relative file headings, and its Root line. Every ranked file carries `estimated`; an uninspected one also carries `uninspected: true`. The `topFiles` array has a 32,000-character aggregate budget; `topFilesTruncated` and `topFilesRemaining` make any omission explicit. With `max_tokens` the result also carries `admission`: which files that budget would admit, from the same greedy pass `pack_context` uses and without producing content. `rank` and `focus` order that admission and are invalid without `max_tokens`. |
 | `pack_context` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `detail_by_pattern?`, `tracked_only?`, `git_scope?`, `max_tokens?`, `rank?`, `focus?`, `max_file_bytes?`, `view?`, `format?`, `expand_related?` | Exact DevProjex context pipeline. `max_tokens` measures the safe transformed selection, applies the ordinary token admission order, and materializes only admitted content without changing the budget report. `rank: "importance"` opts into importance-aware admission and document order; `focus` seeds graph-hop order within it. `detail_by_pattern` overrides `detail` per file. `expand_related` packs its `seeds` together with their statically resolved neighbours, as described in [`pack_context.expand_related`](#pack_contextexpand_related). `full` adds no transformations; transformations enabled by the active profile still apply. Inline through 50,000 characters; otherwise returns a `pack_id` valid until this server process exits. After restart, call `pack_context` again. |
 | `read_pack` | `pack_id`, `start_line?`, `end_line?`, `start_column?` | Pages a stored result from `pack_context`, `search_project`, or `related_files`. Inclusive, 1-based line range; `start_column` continues within `start_line` using 1-based Unicode characters. At most 1,000 lines or 50,000 characters per call. An `end_line` after EOF is clamped and reported. A manual protection-policy change after storage fails with `DPX-MCP-STORED-PROTECTION-CHANGED` and requires rerunning the producing tool. If the current saved policy cannot be verified, `DPX-MCP-STORED-PROTECTION-UNAVAILABLE` fails closed until the selection becomes readable. A selection-only revision change keeps the stored page readable with its existing revision warning. Call the originating tool again after server restart or quota eviction. |
-| `search_project` | `project?`, `branch?`, `pattern`, `paths?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `symbols?`, `max_results?` | `symbols: true` is the declaration-name mode of CLI `search --symbols`: `pattern` names one or more declarations separated by `|`, and each alternative keeps its last word before any parameter list or type arguments, so `class Foo`, `type Foo|interface Foo` and `def foo(` all ask for their names. A qualified name is matched on its last segment and then narrowed to that declaration. Only declarations with those names match, never their uses; a pattern that names nothing is refused with `DPX-MCP-INVALID-ARGUMENTS`. Otherwise matches over safe transformed text, grouped by file: the relative path stands on its own line, then each line of the group is written as `line:text` for a match and `line-text` for context. Quoted text keeps its tabs as tabs, so it copies back as code; any other control character, U+2028, or U+2029 is escaped as `\uXXXX` so each result line stays one physical line. Line numbers refer to that returned text after replacements. `search_project` matches file content only and never matches paths; use `get_tree` with `include_patterns` to find files by name. A bounded collector keeps stronger evidence from everything inspected instead of preserving arrival order. The returned match text is capped at 16,000 characters. Overlapping or adjacent context windows are merged and distinct groups use `--`. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200. The trusted `[Search boundary]` line distinguishes a complete result from every partial limit and reports inspected sources, encountered and retained matches, written matches, named declaration files, and continuation guidance. Actual text inserted by redaction never matches. |
+| `search_project` | `project?`, `branch?`, `pattern`, `paths?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `symbols?`, `max_results?` | `symbols: true` is the declaration-name mode of CLI `search --symbols`: `pattern` names one or more declarations separated by `|`, and each alternative keeps its last word before any parameter list or type arguments, so `class Foo`, `type Foo|interface Foo` and `def foo(` all ask for their names. A qualified name is matched on its last segment and then narrowed to that declaration. Only declarations with those names match, never their uses; a pattern that names nothing is refused with `DPX-MCP-INVALID-ARGUMENTS`, and so is a pattern that looks like a regular expression (a backslash, `^`, `+`, `.*` or `(?` anywhere, or `*`, `?`, brackets, braces or parentheses where a name stands), with a hint to pass the name or omit `symbols` to search text with a regex. Brackets, braces and parentheses after a name stay a declaration tail, as in `def foo(`, one trailing `?` stays part of a name such as Ruby `valid?`, and `$` stays a name character. Otherwise matches over safe transformed text, grouped by file: the relative path stands on its own line, then each line of the group is written as `line:text` for a match and `line-text` for context. Quoted text keeps its tabs as tabs, so it copies back as code; any other control character, U+2028, or U+2029 is escaped as `\uXXXX` so each result line stays one physical line. Line numbers refer to that returned text after replacements. `search_project` matches file content only and never matches paths; use `get_tree` with `include_patterns` to find files by name. A bounded collector keeps stronger evidence from everything inspected instead of preserving arrival order. The returned match text is capped at 16,000 characters. Overlapping or adjacent context windows are merged and distinct groups use `--`. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200. The trusted `[Search boundary]` line distinguishes a complete result from every partial limit and reports inspected sources, encountered and retained matches, written matches, named declaration files, and continuation guidance. Actual text inserted by redaction never matches. |
 | `related_files` | `project?`, `branch?`, `path`, `direction?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `tracked_only?`, `git_scope?`, `max_file_bytes?` | Statically evidenced dependencies and dependents for one seed or up to 16 seeds. `direction` is `dependencies`, `dependents`, or `both` (default). The trusted `[Resolution]` line counts resolved, ambiguous, unresolved, and external edges for the call. Coverage distinguishes recognized supported languages from unsupported files and reports configuration diagnostics. Evidence protection consumes transformed sources one at a time under a cumulative 64 MiB source budget; sources outside that budget are not opened by this pass and their dynamic fragments become bounded generic reasons. Results larger than 50,000 characters use `read_pack`. |
 | `get_file` | `project?`, `branch?`, `profile?`, either `path` with `start_line?`, `end_line?`, `start_column?`, `symbol?`, or `requests` | Redacted text from one effective file or a batch of up to eight file requests and sixteen file selections. Every returned section starts with its path and returned line interval. A batch item with only `path` reads the whole file; `ranges` or `symbol` narrows it. Ranges are inclusive, each physical file is read and redacted once, overlaps merge, and every original range reports `ok`, `partial`, `not-returned`, or `unavailable` from its own returned coverage. Both forms share the 1,000-line/50,000-character limit. Coordinates refer to returned text after replacements. A non-empty file that cannot pass the 16 MiB mandatory-redaction boundary is withheld; the single form returns `DPX-MCP-PAYLOAD-TRUNCATED` and never returns an empty success, while batch output reports the count-only unavailable status. `profile` applies the same effective selection and transformations as `analyze` and `pack_context`. Markdown-escaped names copied from default `get_tree` are accepted (`\_` and other ASCII punctuation); use `format: "text"` to copy unescaped names. A `start_line` or `end_line` that holds several numbers, or an unknown range-like argument such as `start_range`, is refused with a pointer to the `requests` form; a directory `path` is refused with the `get_tree` call that lists it. |
 
@@ -697,8 +702,8 @@ and the fixed response and stored-result limits still apply. `[Search scope] fil
 unresolved=K · external=E` counts the selected-direction edges considered for the call.
 A seed without facts is a successful empty result with
 its path and any nonstandard explanation inside the untrusted block. One of the six fixed
-dependency-engine status constants is repeated without a path in the trusted line
-`[No facts] <constant>.`; file extensions and arbitrary project text never enter that line. A
+dependency-engine status constants is stated instead, once and without a path, in the trusted
+line `[No facts] <constant>.`; file extensions and arbitrary project text never enter that line. A
 call with no resolved edges receives trusted `[No related files] in the effective
 selection.`; when unresolved references exist, that same line reports their count.
 Calls and static member uses are not edges, so an empty section is not evidence that
@@ -1052,7 +1057,10 @@ a directory entry whose own depth reaches `max_depth`, or a file entry deeper th
 `max_depth` — the response appends a `[Tree depth]` trailer stating how many
 entries are hidden, the shallowest depth among them, and a `max_depth` value that
 shows two levels below the deepest one; the trailer carries only counts, never the
-path itself.
+path itself. When every hidden entry is a file, which has nothing below it, the
+trailer instead says those files are not shown and gives the `max_depth` that shows
+them, as in `[Tree depth] max_depth counts from the project root; 1 requested file(s)
+sit at depth 6 or deeper, so they are not shown. Omit max_depth, or pass 6 to show them.`
 The three narrowing parameters compose in a fixed order and never widen each other:
 `paths` and the pattern arrays intersect to form the selection, and `max_depth`
 then prunes the rendering of that selection. Listing one directory therefore needs
@@ -1093,6 +1101,11 @@ messages; the safe trusted warning trailer remains authoritative.
 For tools that expose a format choice, `markdown` and `text` representations are
 intended for people and agents to read. JSON and XML are machine-readable forms
 with escaping guarantees; use `json` or `xml` when reliable parsing is required.
+JSON in a response (`list_projects`, `analyze`, `json` trees and packs, and the
+arguments printed for a follow-up call) escapes only what JSON requires: a quote
+costs `\"` rather than a six-character escape, a backslash is `\\`, and control
+characters and characters outside the Basic Multilingual Plane use `\uXXXX`;
+`<`, `>`, `&`, `'` and other non-ASCII text stay as written.
 
 The documented per-tool character limits apply to useful payload text.
 Untrusted-data markers and trusted warning trailers can add a small fixed overhead
@@ -1243,6 +1256,9 @@ lists alternatives (at most 64 per pattern, 1,024 per array after expansion).
 on every platform — copy names from `get_tree`. Negation (`!`) and character
 classes (`[...]`) are rejected with `DPX-MCP-INVALID-PATTERN` rather than
 matched literally, because a silently empty result reads as "no such files".
+A negated `include_patterns` entry is told to move to `exclude_patterns`; a negated
+`exclude_patterns` entry is told to drop the `!`, since that list already removes
+what it matches.
 `paths` contains existing project-relative files or directories for `get_tree`,
 `analyze`, `pack_context`, and `search_project`. Its entries are literal paths;
 glob metacharacters have meaning only in the pattern parameters. A `paths` entry
@@ -1430,7 +1446,11 @@ src/Core/LevelOverrideMap.cs Core.LevelOverrideMap 17-58
 
 One line per declaration, not per hit: a declaration ten matches landed in is still
 one thing to open. The name and inclusive range come directly from the innermost named
-declaration the navigation projection reports. The name is accepted unchanged by
+declaration the navigation projection reports. A name declared more than once in one
+file, such as overloads or typing stubs, is still one line, and that line lists every
+range of the name in file order in the form an ambiguous `get_file.symbol` reports: at
+most six ranges, then `and N more`, as in
+`src/click/decorators.py command 138-138, 143-151, 152-161, 162-166, 167-250`. The name is accepted unchanged by
 `get_file.symbol`. C#, JavaScript, TypeScript, Go, Python, Java, Rust, Kotlin, Ruby, PHP,
 C, and C++ include supported members and functions, with their owner chain when names
 repeat within a file. When more than one root is configured, the printed `get_file`
@@ -1474,7 +1494,10 @@ A cut body reports exactly how many
 declaration lines remain, names them as a range, as in `[Declaration body truncated: 60 line(s) remain; read lines 30-89 with get_file.]`, and prints the complete `get_file` arguments needed to read it.
 The trusted `[Declaration body] shown=1/N` notice states how many other declarations need
 separate reads. If the selected printed name identifies more than one declaration in its
-file, no body is guessed; the response says to use the listed inclusive range instead.
+file, no body is guessed; the trusted `[Declaration body]` notice names those ranges, as
+in `[Declaration body] omitted because the selected symbol names 5 declarations in its file,
+at lines 138-138, 143-151, 152-161, 162-166, 167-250; read the one you need with get_file
+ranges.`
 
 #### Evidence-preserving placement checks
 
@@ -1573,7 +1596,12 @@ when only part intersects that coverage, `not-returned` when none intersects, or
 computed separately for every original range after overlap merging; one page status
 is never copied onto all merged inputs. Thus a page ending at line 992 reports
 `ok`, `partial`, and `not-returned` respectively for `1-100`, `50-1500`, and
-`1450-1600`. In live mode a path that disappeared since discovery
+`1450-1600`. A section header names only the ranges that section serves, so a range
+that starts after the last line is reported only as `not-returned`. The trusted
+`[Range clamped] requests=...; end_line exceeded the file; returned through line N.`
+trailer names only ranges whose explicit `end_line` passed the end of the file while
+the range still returned lines; a path-only whole-file read never reports clamping.
+In live mode a path that disappeared since discovery
 is an unavailable item rather than a failure for the whole batch. An unknown,
 ambiguous, or unsupported `symbol` is likewise reported only on its item, while
 syntactically invalid request records still reject the call before any read; an

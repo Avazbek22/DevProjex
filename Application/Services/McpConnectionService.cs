@@ -9,7 +9,54 @@ public enum McpConnectionStatus
 	InvalidConfiguration,
 	ProcessFailed,
 	TimedOut,
-	Canceled
+	Canceled,
+	ProjectNotFound
+}
+
+public enum McpConnectionProjectRootState
+{
+	Directory,
+	Missing,
+	NotDirectory
+}
+
+/// <summary>
+/// Every surface that registers or prints a connection checks the project root here first, so a
+/// client is never pointed at a path that cannot be served and all surfaces word the refusal alike.
+/// </summary>
+public static class McpConnectionProjectRoot
+{
+	public const string ErrorCode = "DPX-PROJECT-NOT-FOUND";
+
+	public static McpConnectionProjectRootState Inspect(string projectRoot)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
+		if (System.IO.Directory.Exists(projectRoot))
+			return McpConnectionProjectRootState.Directory;
+		return File.Exists(projectRoot)
+			? McpConnectionProjectRootState.NotDirectory
+			: McpConnectionProjectRootState.Missing;
+	}
+
+	public static string? DescribeProblem(LocalizationService localization, string projectRoot)
+	{
+		ArgumentNullException.ThrowIfNull(localization);
+		return Inspect(projectRoot) switch
+		{
+			McpConnectionProjectRootState.Missing => localization["Mcp.Connect.ProjectMissing"],
+			McpConnectionProjectRootState.NotDirectory => localization["Mcp.Connect.ProjectNotDirectory"],
+			_ => null
+		};
+	}
+
+	/// <summary>
+	/// The refusal shown by surfaces that present a connection result: the problem on the first line and
+	/// the path it concerns on the second.
+	/// </summary>
+	public static McpConnectionResult? CreateRefusal(LocalizationService localization, string projectRoot) =>
+		DescribeProblem(localization, projectRoot) is { } problem
+			? new McpConnectionResult(McpConnectionStatus.ProjectNotFound, problem + "\n" + projectRoot)
+			: null;
 }
 
 public sealed record McpConnectionRequest(

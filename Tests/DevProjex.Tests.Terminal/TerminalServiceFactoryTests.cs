@@ -1,3 +1,4 @@
+using DevProjex.Infrastructure.AgentJournal;
 using DevProjex.Infrastructure.Git;
 using DevProjex.Infrastructure.Persistence;
 using DevProjex.Infrastructure.ProjectProfiles;
@@ -74,7 +75,7 @@ public sealed class TerminalServiceFactoryTests
 	public async Task McpLogDoesNotOpenJournalWhenMigrationIsUnavailable()
 	{
 		using var workspace = new TemporaryDirectory();
-		var journalDirectory = Path.Combine(UserDataPathResolver.GetStateRoot(), "agent-journal");
+		var journalDirectory = Path.Combine(UserDataPathResolver.GetApplicationStateDirectory(), "agent-journal");
 		var journalExistedBefore = Directory.Exists(journalDirectory);
 		var probes = 0;
 		var factory = new TerminalServiceFactory(
@@ -153,7 +154,7 @@ public sealed class TerminalServiceFactoryTests
 
 		Assert.False(factory.HostCapabilities.HasDesktopApplication);
 		Assert.Equal(
-			Path.Combine(dataRoot, "live-sessions"),
+			Path.Combine(dataRoot, "DevProjex", "live-sessions"),
 			services.LiveSessionRegistry.DirectoryPath,
 			PathComparer.Default);
 		Assert.Equal(
@@ -166,6 +167,31 @@ public sealed class TerminalServiceFactoryTests
 			PathComparer.Default);
 		Assert.IsType<McpConnectionService>(services.McpConnectionService);
 		Assert.IsType<McpClientLaunchService>(services.McpClientLaunchService);
+	}
+
+	[Fact]
+	public void JournalWriterWorkspaceAndMcpLogResolveTheSameDevProjexStateFolder()
+	{
+		using var workspace = new TemporaryDirectory();
+		var dataRoot = workspace.CreateDirectory("isolated-data");
+		var factory = TerminalServiceFactory.FromEnvironment(
+			new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+			{
+				[InvocationEnvironment.InternalDataRootVariable] = dataRoot
+			},
+			TerminalHostCapabilities.Headless);
+		using var services = factory.Create(AppLanguage.En);
+
+		// The MCP server writes, and `mcp log` reads, through a store built from this provider.
+		using var serverAndCommandStore = new AgentJournalStore(factory.AppDataPathProvider);
+		using var workspaceStore = TerminalWorkspaceSession.CreateAgentJournalStore(services);
+
+		var expected = Path.Combine(dataRoot, "DevProjex", "agent-journal");
+		Assert.Equal(expected, serverAndCommandStore.DirectoryPath, PathComparer.Default);
+		Assert.Equal(expected, workspaceStore.DirectoryPath, PathComparer.Default);
+		Assert.Equal(dataRoot, services.LiveSessionRegistry.StateRoot, PathComparer.Default);
+		Assert.False(Directory.Exists(Path.Combine(dataRoot, "agent-journal")));
+		Assert.False(Directory.Exists(Path.Combine(dataRoot, "live-sessions")));
 	}
 
 	[Fact]
