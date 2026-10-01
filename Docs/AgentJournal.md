@@ -23,7 +23,7 @@ The upper table lists sessions by start time, client and version, live or
 standard mode, project roots, calls, result characters, estimated tokens,
 delivered files, masked values, and duration. A live session is marked and its
 row is refreshed while calls arrive. Active Standard sessions update their call
-rows as well; only Live sessions drive the main-window activity indicator. A
+rows as well; only Live sessions drive the main-window delivery markers. A
 session left without a closing record is shown as inactive with an unknown end
 time. Its duration is a lower bound ending at the last retained event, never at
 the current time. The lower table lists the selected
@@ -89,18 +89,15 @@ complete a tool call before looking for it.
 ## Agent activity
 
 **View → Agent activity** is off by default and is stored as a view preference.
-When enabled for an open project with a live session, the right side of the
-status bar shows the client, most recent tool and useful argument, the files that
-call delivered, the session token estimate, and call count. A `get_tree` or
-`analyze` call therefore shows no delivered files. The text follows the
-normal metrics visibility and is hidden in compact mode. It disappears when
-the live session ends.
-
-Files delivered during the latest live session receive a `✦` marker in the
-tree. Its tooltip reports how many calls delivered that path. The marker never
-changes filters or checkboxes. The trace is cleared when a newer live session
-starts, when Agent activity is turned off, and when the project is reopened;
-calls made after reopening create a new trace.
+It controls only the delivery markers in the Desktop tree and adds no text to the
+status bar. When it is enabled for an open project with a live session, files
+delivered during the latest live session receive a `✦` marker in the tree. Its
+tooltip reports how many calls delivered that path, for example "Agent received
+3 times". A `get_tree` or `analyze` call delivers no files and therefore adds no
+marker. The marker never changes filters or checkboxes. The trace is cleared when
+a newer live session starts, when the live session ends, when Agent activity is
+turned off, and when the project is reopened; calls made after reopening create a
+new trace.
 
 Standard-mode sessions remain visible in Journal, but they do not add the Live
 context suffix to the main window title and do not drive Agent activity.
