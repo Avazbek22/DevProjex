@@ -18,7 +18,7 @@
 │                                 │ Export context  [E]       :export context [format] [path]                               │                                 ││
 │                                 │ To folder…  [Z]           :export folder <path>                                         │                                 ││
 │                                 │ To ZIP archive…  [Shift…  :export zip <path>                                            │                                 ││
-│                                 │ Export settings...  [P]   :profile save [name]                                          │                                 ││
+│                                 │ Export settings…  [P]     :profile save [name]                                          │                                 ││
 │                                 │ Open Desktop  [G]                                                                       │                                 ││
 │                                 │ Details                                                                                 │─────────────────────────────────┘│
 │                                 │                                                                                         │File types├─────── [x] All (3) ──┐│

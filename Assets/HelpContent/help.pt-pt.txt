@@ -26,7 +26,7 @@ Clique com o botão direito num nó ou prima {shift}F10 ou a tecla Menu no nó e
 Se o caminho já não existir no disco, abrir o item no gestor de ficheiros ou copiar o seu conteúdo mostra uma mensagem de erro; copiar o caminho continua a funcionar.
 
 ## 3) Ficheiro
-* Abrir pasta... — abre a pasta raiz ({mod}O)
+* Abrir pasta… — abre a pasta raiz ({mod}O)
 * Nova janela — abre uma nova instância independente do DevProjex
 * Recente — lista de pastas locais abertas recentemente
 * Atualizar — volta a analisar uma pasta local e reconstrói a árvore (F5)
@@ -44,7 +44,7 @@ Os tipos de ficheiro selecionados, as regras de exclusão e os itens marcados s�
 
 Os ficheiros de texto e binários são copiados, e as pastas vazias incluídas são preservadas. Os ficheiros de origem não são modificados. O resultado não pode ser guardado dentro do projeto de origem.
 
-Durante a exportação, não é possível alterar a árvore ou as definições, usar o filtro, mudar o formato ou o modo de visualização, executar comandos Git, atualizar nem abrir outro projeto.
+Durante a exportação, não é possível alterar a árvore ou as definições, usar o filtro, mudar o formato ou o modo de pré-visualização, executar comandos Git, atualizar nem abrir outro projeto.
 
 Regras de formato:
 * Exportar árvore:
@@ -64,7 +64,7 @@ Regras:
 * pode largar uma pasta;
 * pode largar um ficheiro — nesse caso, é aberta a pasta que o contém;
 * se largar vários itens, é usado o primeiro caminho local adequado;
-* se um caminho não estiver disponível ou não existir, são aplicadas as mesmas verificações de acesso de «Abrir pasta...»;
+* se um caminho não estiver disponível ou não existir, são aplicadas as mesmas verificações de acesso de «Abrir pasta…»;
 * os itens não suportados ou não locais são ignorados.
 
 ### Recente
@@ -120,7 +120,7 @@ Se o comando `devprojex` não funcionar, abra no DevProjex:
 «Ajuda → Iniciar a partir do terminal».
 
 ## 5) Git
-«Git → Clonar repositório...» clona um repositório para a cache do DevProjex e abre-o. «Ramo» e «Obter atualizações» só estão disponíveis para projetos clonados desta forma. A aplicação não mexe nos seus ficheiros — trabalha apenas com a cache.
+«Git → Clonar repositório…» clona um repositório para a cache do DevProjex e abre-o. «Ramo» e «Obter atualizações» só estão disponíveis para projetos clonados desta forma. A aplicação não mexe nos seus ficheiros — trabalha apenas com a cache.
 
 A cache é guardada no diretório de cache do sistema do utilizador. Execute `devprojex doctor` para ver o caminho efetivo.
 
@@ -206,14 +206,14 @@ MD:
 * os cabeçalhos de ficheiro no bloco de conteúdo usam caminhos relativos com `/`;
 * é exportado como `.txt`.
 
-## 7) Modo de visualização
+## 7) Modo de pré-visualização
 Abre-se com o botão do ícone do olho na barra superior ou com {mod}B.
 
-Os botões laterais do rato seguem a navegação de um browser: Avançar abre o modo de visualização e Voltar fecha-o. Repetir a direção atual não tem efeito.
+Os botões laterais do rato seguem a navegação de um browser: Avançar abre o modo de pré-visualização e Voltar fecha-o. Repetir a direção atual não tem efeito.
 
 {mod}{shift}F abre ou fecha a pesquisa no conteúdo dos ficheiros da pré-visualização. Enter ou F3 vai para a correspondência seguinte; {shift}Enter ou {shift}F3, para a anterior.
 
-Mostra o resultado final numa área de trabalho separada, junto à árvore. Este modo não copia para a área de transferência nem exporta para um ficheiro por si só — é um modo de visualização.
+Mostra o resultado final numa área de trabalho separada, junto à árvore. Este modo não copia para a área de transferência nem exporta para um ficheiro por si só — é um modo de pré-visualização.
 
 Por predefinição, a área de trabalho abre-se assim:
 * à esquerda — árvore do projeto;
@@ -235,7 +235,7 @@ Além disso:
 * durante a deslocação, o caminho do ficheiro atual fica fixado no topo; clicar no caminho fixado volta ao início desse ficheiro;
 * a barra de deslocação da pré-visualização marca as correspondências da pesquisa e as linhas com valores detetados; clicar numa marca salta para a respetiva linha; um valor mantido sem alterações continua marcado, e os cabeçalhos de caminho mascarados geram uma única marca na primeira linha;
 * o zoom da árvore e o da pré-visualização podem ser independentes;
-* no modo de visualização, pode copiar o resultado atual completo ou o bloco do ficheiro visível sem abrir o menu Copiar.
+* no modo de pré-visualização, pode copiar o resultado atual completo ou o bloco do ficheiro visível sem abrir o menu Copiar.
 
 Botões:
 * botão de copiar no lado esquerdo da ilha superior da pré-visualização — copia o modo de pré-visualização atual:
@@ -243,9 +243,9 @@ Botões:
   * Conteúdo
   * Árvore + conteúdo
 * X no painel da árvore — oculta a árvore e deixa apenas o painel de pré-visualização;
-* X no painel superior da pré-visualização — fecha completamente o modo de visualização;
+* X no painel superior da pré-visualização — fecha completamente o modo de pré-visualização;
 * pequeno botão de copiar no cabeçalho do ficheiro fixado — copia o bloco do ficheiro visível exatamente como é mostrado na pré-visualização;
-* premir novamente o ícone do olho ou {mod}B também fecha o modo de visualização.
+* premir novamente o ícone do olho ou {mod}B também fecha o modo de pré-visualização.
 
 Pesquisar e Filtrar estão disponíveis enquanto o painel da árvore estiver visível na pré-visualização.
 Se a árvore estiver oculta, Pesquisar e Filtrar ficam temporariamente indisponíveis até sair do modo só de pré-visualização.

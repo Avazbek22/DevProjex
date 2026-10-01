@@ -9,7 +9,7 @@
   │> Open current directory                                                  │
   │  Recent workspaces                                                       │
   │  Browse folder                                                           │
-  │  Open project with settings file...                                      │
+  │  Open project with settings file…                                        │
   │  Clone repository                                                        │
   │  Open Desktop                                                            │
   │  Help                                                                    │

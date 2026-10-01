@@ -1333,7 +1333,7 @@ public sealed class TerminalSettingsPanelPtyTests
 
 	[Theory(Timeout = 90_000)]
 	[InlineData("ru", "Обработка содерж…", "Исключения")]
-	[InlineData("uz", "Kontentni q…", "Istisnolar")]
+	[InlineData("uz", "Tarkibni qa…", "Istisnolar")]
 	public async Task LocalizedRedactionLabelsKeepTheirCountersWhenEllipsized(
 		string language,
 		string contentTitle,

@@ -90,7 +90,7 @@ Vous verrez ainsi les commandes et options de premier niveau. Les options et exe
 Exemples :
 * `devprojex` — ouvrir l’espace de travail interactif du terminal. Dans cet espace, les actions s’exécutent via la ligne de commande `:` (par exemple `:copy`, `:analyze`, `:branch`, `:language`) ; la liste complète des commandes figure dans l’aide intégrée de l’espace de travail et dans la documentation du projet.
 * `devprojex tui .` — ouvrir le dossier indiqué directement dans l’espace de travail du terminal.
-* `devprojex open . --preview` — ouvrir le dossier courant dans l’aperçu Desktop.
+* `devprojex open . --preview` — ouvrir le dossier actuel dans l’aperçu Desktop.
 * `devprojex analyze . --format json` — analyser le projet courant au format JSON.
 * `devprojex tree .` — imprimer l’arborescence du projet dans le terminal.
 * `devprojex export context . --format markdown -o ../devprojex-context.md` — enregistrer un contexte prêt pour l’IA hors du projet source.
@@ -105,7 +105,7 @@ Exemples :
 * `devprojex mcp log . --last` — afficher la dernière session du journal de l’agent.
 
 Particularités :
-* `.` désigne le dossier courant du terminal ;
+* `.` désigne le dossier actuel du terminal ;
 * les chemins contenant des espaces doivent être placés entre guillemets ;
 * `--git-mode` choisit `none`, `gitignore`, `tracked`, `staged`, `changes` ou `diff:<ref>..<ref>` ;
 * `--exclude` gère les exclusions ordinaires séparément de la filtration Git ;
@@ -120,7 +120,7 @@ Si la commande `devprojex` ne fonctionne pas, ouvrez dans DevProjex :
 « Aide → Lancer depuis le terminal ».
 
 ## 5) Git
-« Git → Cloner le dépôt... » clone un dépôt dans le cache de DevProjex et l’ouvre. « Branche » et « Obtenir les mises à jour » ne sont disponibles que pour les projets clonés de cette façon. L’application ne touche pas à vos fichiers — elle travaille uniquement avec le cache.
+« Git → Cloner le dépôt… » clone un dépôt dans le cache de DevProjex et l’ouvre. « Branche » et « Obtenir les mises à jour » ne sont disponibles que pour les projets clonés de cette façon. L’application ne touche pas à vos fichiers — elle travaille uniquement avec le cache.
 
 Le cache est stocké dans le répertoire de cache de l’utilisateur. `devprojex doctor` affiche le chemin effectivement utilisé.
 
@@ -188,7 +188,7 @@ Les formats représentent différemment la même arborescence de projet sélecti
 JSON :
 * `rootPath` — chemin racine absolu normalisé avec `/`.
 * `tree` — contenu du dossier racine.
-* L’export JSON utilise ce format d’arborescence : les tableaux contiennent les fichiers, les objets contiennent les sous-dossiers, `/` contient les fichiers du dossier courant, et `[]` représente un dossier vide.
+* L’export JSON utilise ce format d’arborescence : les tableaux contiennent les fichiers, les objets contiennent les sous-dossiers, `/` contient les fichiers du dossier actuel, et `[]` représente un dossier vide.
 
 XML :
 * le nœud racine est `<t r="...">` ;

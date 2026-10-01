@@ -120,7 +120,7 @@ Wenn der Befehl `devprojex` nicht funktioniert, öffnen Sie in DevProjex:
 „Hilfe → Aus dem Terminal starten“.
 
 ## 5) Git
-„Git → Repository klonen...“ klont ein Repository in den DevProjex-Cache und öffnet es. „Branch“ und „Aktualisierungen abrufen“ sind nur für auf diese Weise geklonte Projekte verfügbar. Die App berührt Ihre Dateien nicht — sie arbeitet nur mit dem Cache.
+„Git → Repository klonen…“ klont ein Repository in den DevProjex-Cache und öffnet es. „Branch“ und „Aktualisierungen abrufen“ sind nur für auf diese Weise geklonte Projekte verfügbar. Die App berührt Ihre Dateien nicht — sie arbeitet nur mit dem Cache.
 
 Der Cache wird im Cacheverzeichnis des Benutzers gespeichert. Den tatsächlich verwendeten Pfad zeigt `devprojex doctor` an.
 

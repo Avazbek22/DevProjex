@@ -120,7 +120,7 @@ Se il comando `devprojex` non funziona, apri in DevProjex:
 «Aiuto → Avvia dal terminale».
 
 ## 5) Git
-«Git → Clona repository...» clona un repository nella cache di DevProjex e lo apre. «Branch» e «Ottieni aggiornamenti» sono disponibili solo per i progetti clonati in questo modo. L’app non tocca i tuoi file — lavora solo con la cache.
+«Git → Clona repository…» clona un repository nella cache di DevProjex e lo apre. «Branch» e «Ottieni aggiornamenti» sono disponibili solo per i progetti clonati in questo modo. L’app non tocca i tuoi file — lavora solo con la cache.
 
 La cache viene archiviata nella directory della cache dell’utente. `devprojex doctor` mostra il percorso effettivamente utilizzato.
 

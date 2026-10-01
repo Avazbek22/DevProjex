@@ -26,7 +26,7 @@ Clique com o botão direito em um nó ou pressione {shift}F10 ou a tecla Menu no
 Se o caminho não existir mais no disco, abrir o item no gerenciador de arquivos ou copiar seu conteúdo mostra uma mensagem de erro; copiar o caminho continua funcionando.
 
 ## 3) Arquivo
-* Abrir pasta... — abre a pasta raiz ({mod}O)
+* Abrir pasta… — abre a pasta raiz ({mod}O)
 * Nova janela — abre uma nova instância independente do DevProjex
 * Recente — lista de pastas locais abertas recentemente
 * Atualizar — verifica novamente uma pasta local e reconstrói a árvore (F5)
@@ -64,7 +64,7 @@ Regras:
 * você pode soltar uma pasta;
 * você pode soltar um arquivo — nesse caso, a pasta que o contém é aberta;
 * se vários itens forem soltos, o primeiro caminho local adequado é usado;
-* se um caminho não estiver disponível ou não existir, são aplicadas as mesmas verificações de acesso de “Abrir pasta...”;
+* se um caminho não estiver disponível ou não existir, são aplicadas as mesmas verificações de acesso de “Abrir pasta…”;
 * itens não compatíveis ou não locais são ignorados.
 
 ### Recente
@@ -120,7 +120,7 @@ Se o comando `devprojex` não funcionar, abra no DevProjex:
 “Ajuda → Iniciar a partir do terminal”.
 
 ## 5) Git
-“Git → Clonar repositório...” clona um repositório no cache do DevProjex e o abre. “Ramo” e “Obter atualizações” ficam disponíveis apenas para projetos clonados dessa forma. O aplicativo não mexe nos seus arquivos — trabalha apenas com o cache.
+“Git → Clonar repositório…” clona um repositório no cache do DevProjex e o abre. “Ramo” e “Obter atualizações” ficam disponíveis apenas para projetos clonados dessa forma. O aplicativo não mexe nos seus arquivos — trabalha apenas com o cache.
 
 O cache é armazenado no diretório de cache do sistema do usuário. Execute `devprojex doctor` para ver o caminho efetivo.
 

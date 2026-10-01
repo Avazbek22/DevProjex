@@ -11,7 +11,7 @@
   │> [2] <RECENT_PATH>│  │                                                                      │
   │  Recent workspaces                     │  │                                                                      │
   │  Browse folder                         │  │                                                                      │
-  │  Open project with settings file...    │  │                                                                      │
+  │  Open project with settings file…      │  │                                                                      │
   │  Clone repository                      │  │                                                                      │
   │  Open Desktop                          │  │                                                                      │
   │  Help                                  │  │                                                                      │

@@ -26,7 +26,7 @@ Bir düğüme sağ tıklayın ya da odaktaki düğümde {shift}F10 veya Menü tu
 Yol artık diskte yoksa öğeyi dosya yöneticisinde açmak veya içeriğini kopyalamak bir hata mesajı gösterir; yol kopyalama yine çalışır.
 
 ## 3) Dosya
-* Klasörü aç... — kök klasörü açar ({mod}O)
+* Klasörü aç… — kök klasörü açar ({mod}O)
 * Yeni pencere — yeni ve bağımsız bir DevProjex örneği açar
 * Son kullanılanlar — yakın zamanda açılan yerel klasörlerin listesi
 * Yenile — yerel klasörü yeniden tarar ve ağacı yeniden oluşturur (F5)
@@ -64,7 +64,7 @@ Kurallar:
 * bir klasör bırakabilirsiniz;
 * bir dosya bırakabilirsiniz — bu durumda dosyanın bulunduğu klasör açılır;
 * birden fazla öğe bırakılırsa ilk uygun yerel yol kullanılır;
-* bir yol kullanılamıyorsa veya yoksa “Klasörü aç...” ile aynı erişim denetimleri uygulanır;
+* bir yol kullanılamıyorsa veya yoksa “Klasörü aç…” ile aynı erişim denetimleri uygulanır;
 * desteklenmeyen veya yerel olmayan öğeler yok sayılır.
 
 ### Son kullanılanlar
@@ -120,7 +120,7 @@ Notlar:
 “Yardım → Terminalden başlat”.
 
 ## 5) Git
-“Git → Depoyu klonla...” bir depoyu DevProjex önbelleğine klonlar ve açar. Dal ve Güncellemeleri al yalnızca bu şekilde klonlanan projelerde kullanılabilir. Uygulama dosyalarınıza dokunmaz — yalnızca önbellekle çalışır.
+“Git → Depoyu klonla…” bir depoyu DevProjex önbelleğine klonlar ve açar. Dal ve Güncellemeleri al yalnızca bu şekilde klonlanan projelerde kullanılabilir. Uygulama dosyalarınıza dokunmaz — yalnızca önbellekle çalışır.
 
 Önbellek, kullanıcının sistem önbellek dizininde saklanır. Çözümlenen yolu görmek için `devprojex doctor` çalıştırın.
 

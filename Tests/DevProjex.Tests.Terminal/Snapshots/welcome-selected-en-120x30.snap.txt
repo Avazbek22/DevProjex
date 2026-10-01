@@ -9,7 +9,7 @@
   │  Open current directory                │  │ Select a folder without scanning anything until you confirm it.      │
   │  Recent workspaces                     │  │                                                                      │
   │> Browse folder                         │  │                                                                      │
-  │  Open project with settings file...    │  │                                                                      │
+  │  Open project with settings file…      │  │                                                                      │
   │  Clone repository                      │  │                                                                      │
   │  Open Desktop                          │  │                                                                      │
   │  Help                                  │  │                                                                      │

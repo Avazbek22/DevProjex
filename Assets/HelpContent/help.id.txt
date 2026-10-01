@@ -26,7 +26,7 @@ Klik kanan sebuah node, atau tekan {shift}F10 atau tombol Menu pada node yang se
 Jika jalur tidak lagi ada di disk, membuka item di pengelola file atau menyalin isinya akan menampilkan pesan kesalahan; penyalinan jalur tetap berfungsi.
 
 ## 3) File
-* Buka folder... — membuka folder root ({mod}O)
+* Buka folder… — membuka folder root ({mod}O)
 * Jendela baru — membuka instans DevProjex baru yang independen
 * Terbaru — daftar folder lokal yang baru dibuka
 * Segarkan — memindai ulang folder lokal dan membangun ulang pohon (F5)
@@ -64,7 +64,7 @@ Aturan:
 * Anda dapat melepaskan folder;
 * Anda dapat melepaskan file — dalam hal ini folder yang memuatnya akan dibuka;
 * jika beberapa item dilepaskan, jalur lokal pertama yang sesuai akan digunakan;
-* jika jalur tidak tersedia atau tidak ada, pemeriksaan akses yang sama seperti pada “Buka folder...” diterapkan;
+* jika jalur tidak tersedia atau tidak ada, pemeriksaan akses yang sama seperti pada “Buka folder…” diterapkan;
 * item yang tidak didukung atau bukan lokal diabaikan.
 
 ### Terbaru
@@ -120,7 +120,7 @@ Jika perintah `devprojex` tidak berfungsi, buka di DevProjex:
 “Bantuan → Luncurkan dari terminal”.
 
 ## 5) Git
-“Git → Klon repositori...” mengkloning repositori ke cache DevProjex lalu membukanya. Cabang dan Dapatkan pembaruan hanya tersedia untuk proyek yang dikloning dengan cara ini. Aplikasi tidak menyentuh file Anda — aplikasi hanya bekerja dengan cache.
+“Git → Klon repositori…” mengkloning repositori ke cache DevProjex lalu membukanya. Cabang dan Dapatkan pembaruan hanya tersedia untuk proyek yang dikloning dengan cara ini. Aplikasi tidak menyentuh file Anda — aplikasi hanya bekerja dengan cache.
 
 Cache disimpan di direktori cache sistem milik pengguna. Jalankan `devprojex doctor` untuk melihat jalur yang digunakan.
 

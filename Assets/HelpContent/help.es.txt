@@ -26,7 +26,7 @@ Haga clic derecho en un nodo o pulse {shift}F10 o la tecla Menú sobre el nodo e
 Si la ruta ya no existe en el disco, abrir el elemento en el gestor de archivos o copiar su contenido muestra un mensaje de error; copiar la ruta sigue funcionando.
 
 ## 3) Archivo
-* Abrir carpeta... — abre la carpeta raíz ({mod}O)
+* Abrir carpeta… — abre la carpeta raíz ({mod}O)
 * Nueva ventana — abre una nueva instancia independiente de DevProjex
 * Reciente — lista de carpetas locales abiertas recientemente
 * Actualizar — vuelve a analizar una carpeta local y reconstruye el árbol (F5)
@@ -64,7 +64,7 @@ Reglas:
 * puede soltar una carpeta;
 * puede soltar un archivo; en ese caso se abre la carpeta que lo contiene;
 * si suelta varios elementos, se usa la primera ruta local adecuada;
-* si una ruta no está disponible o no existe, se aplican las mismas comprobaciones de acceso que en «Abrir carpeta...»;
+* si una ruta no está disponible o no existe, se aplican las mismas comprobaciones de acceso que en «Abrir carpeta…»;
 * los elementos no compatibles o no locales se ignoran.
 
 ### Reciente
@@ -120,7 +120,7 @@ Si el comando `devprojex` no funciona, abra en DevProjex:
 «Ayuda → Iniciar desde la terminal».
 
 ## 5) Git
-«Git → Clonar repositorio...» clona un repositorio en la caché de DevProjex y lo abre. «Rama» y «Obtener actualizaciones» solo están disponibles para los proyectos clonados de esta forma. La aplicación no toca sus archivos: solo trabaja con la caché.
+«Git → Clonar repositorio…» clona un repositorio en la caché de DevProjex y lo abre. «Rama» y «Obtener actualizaciones» solo están disponibles para los proyectos clonados de esta forma. La aplicación no toca sus archivos: solo trabaja con la caché.
 
 La caché se guarda en el directorio de caché del sistema del usuario. Ejecute `devprojex doctor` para ver la ruta efectiva.
 

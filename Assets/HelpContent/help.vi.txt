@@ -26,7 +26,7 @@ Nhấp chuột phải vào một nút, hoặc nhấn {shift}F10 hay phím Menu t
 Nếu đường dẫn không còn tồn tại trên đĩa, việc mở mục trong trình quản lý tệp hoặc sao chép nội dung của nó sẽ hiển thị thông báo lỗi; sao chép đường dẫn vẫn hoạt động.
 
 ## 3) Tệp
-* Mở thư mục... — mở thư mục gốc ({mod}O)
+* Mở thư mục… — mở thư mục gốc ({mod}O)
 * Cửa sổ mới — mở một phiên bản DevProjex độc lập mới
 * Gần đây — danh sách các thư mục cục bộ được mở gần đây
 * Làm mới — quét lại thư mục cục bộ và dựng lại cây (F5)
@@ -64,7 +64,7 @@ Quy tắc:
 * bạn có thể thả một thư mục;
 * bạn có thể thả một tệp — khi đó thư mục chứa tệp sẽ được mở;
 * nếu thả nhiều mục, đường dẫn cục bộ phù hợp đầu tiên sẽ được sử dụng;
-* nếu đường dẫn không khả dụng hoặc không tồn tại, các bước kiểm tra quyền truy cập giống như “Mở thư mục...” sẽ được áp dụng;
+* nếu đường dẫn không khả dụng hoặc không tồn tại, các bước kiểm tra quyền truy cập giống như “Mở thư mục…” sẽ được áp dụng;
 * các mục không được hỗ trợ hoặc không phải cục bộ sẽ bị bỏ qua.
 
 ### Gần đây
@@ -120,7 +120,7 @@ Nếu lệnh `devprojex` không hoạt động, hãy mở trong DevProjex:
 “Trợ giúp → Khởi chạy từ terminal”.
 
 ## 5) Git
-“Git → Nhân bản kho lưu trữ...” nhân bản một kho vào bộ nhớ đệm của DevProjex rồi mở nó. Nhánh và Nhận thông tin cập nhật chỉ khả dụng cho các dự án được nhân bản theo cách này. Ứng dụng không chạm vào tệp của bạn — nó chỉ làm việc với bộ nhớ đệm.
+“Git → Nhân bản kho lưu trữ…” nhân bản một kho vào bộ nhớ đệm của DevProjex rồi mở nó. Nhánh và Nhận thông tin cập nhật chỉ khả dụng cho các dự án được nhân bản theo cách này. Ứng dụng không chạm vào tệp của bạn — nó chỉ làm việc với bộ nhớ đệm.
 
 Bộ nhớ đệm được lưu trong thư mục bộ nhớ đệm hệ thống của người dùng. Chạy `devprojex doctor` để xem đường dẫn thực tế.
 
@@ -598,15 +598,15 @@ DevProjex có sẵn một máy chủ MCP cục bộ chỉ đọc. Các tác nhâ
 ### 19.1 Kết nối ứng dụng
 Menu MCP gồm:
 * Live context — máy chủ theo các mục được đánh dấu trong cửa sổ này (phần 19.2);
-* Thông thường — máy chủ không phụ thuộc vào lựa chọn trong cửa sổ;
+* Tiêu chuẩn — máy chủ không phụ thuộc vào lựa chọn trong cửa sổ;
 * Nhật ký… — những gì tác nhân đã yêu cầu và nhận (phần 19.3);
 * Tài liệu — mở tài liệu về máy chủ MCP.
 
-Live context và Thông thường có cùng các thao tác — Mở trong Claude Code, Mở trong Codex, Mở trong Cursor, Mở trong VS Code và Ứng dụng khác… — khả dụng khi một dự án đang mở.
+Live context và Tiêu chuẩn có cùng các thao tác — Mở trong Claude Code, Mở trong Codex, Mở trong Cursor, Mở trong VS Code và Ứng dụng khác… — khả dụng khi một dự án đang mở.
 
 Claude Code và Codex được đăng ký qua lệnh đã cài đặt của chúng, sau đó ứng dụng mở trong một terminal mới tại thư mục dự án. Cursor và VS Code nhận tệp `.cursor/mcp.json` hoặc `.vscode/mcp.json` cục bộ của dự án; các máy chủ khác trong tệp đó được giữ nguyên. Ứng dụng khác… hiển thị cấu hình dùng ngay cho Claude Desktop và các ứng dụng khác. Nếu không tìm thấy lệnh của ứng dụng hoặc kết nối thất bại, DevProjex hiển thị cấu hình thủ công thay thế. Sau khi kết nối thành công, DevProjex có thể đề nghị thêm lệnh `devprojex` vào PATH.
 
-Codex chỉ giữ một kết nối DevProjex dùng chung, vì vậy khi kết nối dự án khác, bạn sẽ được hỏi trước khi thay thế. Phiên ứng dụng đang chạy phải được khởi động lại để tải máy chủ. Trong terminal, `devprojex mcp connect` đăng ký chế độ thông thường theo mặc định; thêm `--mode live` cho Live context hoặc `--print` để chỉ in cấu hình.
+Codex chỉ giữ một kết nối DevProjex dùng chung, vì vậy khi kết nối dự án khác, bạn sẽ được hỏi trước khi thay thế. Phiên ứng dụng đang chạy phải được khởi động lại để tải máy chủ. Trong terminal, `devprojex mcp connect` đăng ký chế độ Tiêu chuẩn theo mặc định; thêm `--mode live` cho Live context hoặc `--print` để chỉ in cấu hình.
 
 ### 19.2 Live context
 Trong Live context, các mục được đánh dấu trên cây xác định trọng tâm của tác nhân: các yêu cầu cây, tìm kiếm, phân tích, tệp liên quan và đóng gói chỉ nằm trong các mục đó. Các bộ lọc của cửa sổ — loại tệp, loại trừ và chế độ Git — là ranh giới truy cập: tác nhân vẫn có thể mở tệp khác theo tên, nhưng chỉ các tệp mà những bộ lọc này cho phép.
@@ -623,7 +623,7 @@ Nhật ký chỉ được lưu trên máy tính này, trong thư mục trạng t
 ### 19.4 Hoạt động của tác nhân
 “Xem → Hoạt động của tác nhân” tắt theo mặc định: chọn mục này để bật dấu, chọn lại để tắt. Khi tùy chọn đang bật và có phiên live đang hoạt động, mọi tệp mà tác nhân đã nhận nội dung trong phiên đó — toàn bộ tệp, một khoảng dòng, các dòng khớp khi tìm kiếm hoặc một khai báo — đều được đánh dấu bằng ✦ trên cây. Tệp mà tác nhân chỉ thấy trong danh sách cây hoặc trong ước tính kích thước sẽ không được đánh dấu. Di chuột lên ✦ để xem tác nhân đã nhận tệp bao nhiêu lần, ví dụ “Tác nhân đã nhận 3 lần”.
 
-Dấu chỉ cho biết những gì đã được gửi: chúng không bao giờ thay đổi hộp kiểm, bộ lọc hay phạm vi mà tác nhân được đọc. Dấu bị xóa khi một phiên live mới hơn bắt đầu, khi phiên live kết thúc, khi tắt Hoạt động của tác nhân và khi mở lại dự án; các tệp tác nhân nhận sau đó sẽ được đánh dấu lại. Các phiên Thông thường xuất hiện trong nhật ký nhưng không thêm dấu.
+Dấu chỉ cho biết những gì đã được gửi: chúng không bao giờ thay đổi hộp kiểm, bộ lọc hay phạm vi mà tác nhân được đọc. Dấu bị xóa khi một phiên live mới hơn bắt đầu, khi phiên live kết thúc, khi tắt Hoạt động của tác nhân và khi mở lại dự án; các tệp tác nhân nhận sau đó sẽ được đánh dấu lại. Các phiên Tiêu chuẩn xuất hiện trong nhật ký nhưng không thêm dấu.
 
 Trong Terminal Workspace, `:set activity on` đánh dấu chính các tệp đó bằng A trên cây, và khi một tệp như vậy được chọn, dòng trạng thái cho biết tác nhân đã nhận tệp đó bao nhiêu lần; `:set activity off` xóa các dấu.
 

@@ -120,7 +120,7 @@ If the `devprojex` command does not work, open in DevProjex:
 “Help → Launch from terminal”.
 
 ## 5) Git
-“Git → Clone repository...” clones a repository into the DevProjex cache and opens it. Branch and Get updates are available only for projects cloned this way. The app does not touch your files — it works only with the cache.
+“Git → Clone repository…” clones a repository into the DevProjex cache and opens it. Branch and Get updates are available only for projects cloned this way. The app does not touch your files — it works only with the cache.
 
 The cache is stored in the user's system cache directory. Run `devprojex doctor` to see the resolved path.
 

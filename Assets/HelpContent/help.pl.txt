@@ -120,7 +120,7 @@ Jeśli polecenie `devprojex` nie działa, otwórz w DevProjex:
 „Pomoc → Uruchom z terminala”.
 
 ## 5) Git
-„Git → Klonuj repozytorium...” klonuje repozytorium do pamięci podręcznej DevProjex i je otwiera. Polecenia „Gałąź” i „Pobierz aktualizacje” są dostępne tylko dla projektów sklonowanych w ten sposób. Aplikacja nie modyfikuje Twoich plików — działa wyłącznie na pamięci podręcznej.
+„Git → Klonuj repozytorium…” klonuje repozytorium do pamięci podręcznej DevProjex i je otwiera. Polecenia „Gałąź” i „Pobierz aktualizacje” są dostępne tylko dla projektów sklonowanych w ten sposób. Aplikacja nie modyfikuje Twoich plików — działa wyłącznie na pamięci podręcznej.
 
 Pamięć podręczna jest przechowywana w systemowym katalogu pamięci podręcznej użytkownika. Uruchom `devprojex doctor`, aby zobaczyć faktyczną ścieżkę.
 
