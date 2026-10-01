@@ -9,8 +9,6 @@ namespace DevProjex.Terminal.Tui;
 
 internal sealed record TerminalAgentJournalSnapshot(
 	AgentJournalSession Session,
-	AgentJournalCall? LatestCall,
-	long TotalCalls,
 	IReadOnlyDictionary<string, long> DeliveredPathCalls)
 {
 	public static TerminalAgentJournalSnapshot Create(
@@ -22,8 +20,7 @@ internal sealed record TerminalAgentJournalSnapshot(
 		var paths = new Dictionary<string, long>(ProjectTreePathIdentity.CanonicalComparer);
 		var rootIndex = ResolveRootIndex(projectRoot, receipt.Session.Roots);
 		var matchingCalls = receipt.Calls
-			.Where(call => call.RootIndex == rootIndex || receipt.Session.Roots.Count == 1 && call.RootIndex is null)
-			.ToArray();
+			.Where(call => call.RootIndex == rootIndex || receipt.Session.Roots.Count == 1 && call.RootIndex is null);
 		foreach (var delivered in matchingCalls
 			.SelectMany(static call => call.DeliveredPaths.Distinct(ProjectTreePathIdentity.CanonicalComparer)))
 		{
@@ -35,11 +32,7 @@ internal sealed record TerminalAgentJournalSnapshot(
 				paths[path] = paths.TryGetValue(path, out var count) ? count + 1 : 1;
 			}
 		}
-		return new TerminalAgentJournalSnapshot(
-			receipt.Session,
-			matchingCalls.OrderBy(static call => call.Sequence).LastOrDefault(),
-			receipt.Totals.Calls,
-			paths);
+		return new TerminalAgentJournalSnapshot(receipt.Session, paths);
 	}
 
 	public static TerminalAgentJournalSnapshot Create(
@@ -61,8 +54,7 @@ internal sealed record TerminalAgentJournalSnapshot(
 		var rootIndex = ResolveRootIndex(projectRoot, activity.Session.Roots);
 		var matchingCalls = activity.AppendedCalls.Where(call =>
 			call.Sequence > baselineSequence &&
-			(call.RootIndex == rootIndex || activity.Session.Roots.Count == 1 && call.RootIndex is null))
-			.ToArray();
+			(call.RootIndex == rootIndex || activity.Session.Roots.Count == 1 && call.RootIndex is null));
 		foreach (var call in matchingCalls)
 		{
 			foreach (var delivered in call.DeliveredPaths.Distinct(ProjectTreePathIdentity.CanonicalComparer))
@@ -71,12 +63,7 @@ internal sealed record TerminalAgentJournalSnapshot(
 					paths[path] = paths.TryGetValue(path, out var count) ? count + 1 : 1;
 			}
 		}
-		return new TerminalAgentJournalSnapshot(
-			activity.Session,
-			matchingCalls.OrderBy(static call => call.Sequence).LastOrDefault() ??
-			(canReusePrevious ? previous!.LatestCall : null),
-			activity.Session.Totals.Calls,
-			paths);
+		return new TerminalAgentJournalSnapshot(activity.Session, paths);
 	}
 
 	// The trace starts with the first call made after the project opened, however late the
@@ -196,37 +183,28 @@ internal static class TerminalAgentJournalPresentation
 		Text(localize, "AgentJournal.Column.Notices", "Notices"),
 		Text(localize, "AgentJournal.Column.Error", "Error"));
 
-	public static string BuildActivityIndicator(
+	// The status line repeats the Desktop delivery-marker tooltip for the file under the tree
+	// cursor; tools and call counts stay in the journal.
+	public static string? BuildFocusedDeliveryHint(
 		TerminalAgentJournalSnapshot snapshot,
 		string? focusedTreePath,
-		bool compact,
 		Func<string, string, string>? localize = null,
 		AppLanguage language = AppLanguage.En)
 	{
 		ArgumentNullException.ThrowIfNull(snapshot);
-		ArgumentNullException.ThrowIfNull(snapshot.LatestCall);
-		var tool = TerminalTextEscaping.EscapeSingleLine(snapshot.LatestCall.Tool);
-		if (!string.IsNullOrWhiteSpace(focusedTreePath) &&
-			snapshot.DeliveredPathCalls.TryGetValue(focusedTreePath, out var deliveredCalls))
+		if (string.IsNullOrWhiteSpace(focusedTreePath) ||
+			!snapshot.DeliveredPathCalls.TryGetValue(focusedTreePath, out var deliveredCalls))
 		{
-			var fileHint = string.Format(
-				CultureInfo.CurrentCulture,
-				Text(
-					localize,
-					"AgentActivity.Tree.ToolTip",
-					deliveredCalls == 1
-						? "focused file delivered in {0} call"
-						: "focused file delivered in {0} calls"),
-				deliveredCalls);
-			return compact
-				? $"A F:{deliveredCalls:N0} {tool} ({snapshot.TotalCalls:N0})"
-				: $"{Text(localize, "Menu.View.AgentActivity", "Agent activity")}: {fileHint}; " +
-				  $"{tool} ({FormatCalls(snapshot.TotalCalls, localize, language)})";
+			return null;
 		}
-		return compact
-			? $"A {tool} ({snapshot.TotalCalls:N0})"
-			: $"{Text(localize, "Menu.View.AgentActivity", "Agent activity")}: " +
-			  $"{tool} ({FormatCalls(snapshot.TotalCalls, localize, language)})";
+
+		return string.Format(
+			CultureInfo.CurrentCulture,
+			Text(
+				localize,
+				LocalizationPluralRules.ResolveKey("AgentActivity.Tree.ToolTip", language, deliveredCalls),
+				deliveredCalls == 1 ? "Agent received {0} time" : "Agent received {0} times"),
+			deliveredCalls);
 	}
 
 	public static string BuildCallDetails(
@@ -325,17 +303,6 @@ internal static class TerminalAgentJournalPresentation
 				totals.Errors));
 		return output.ToString();
 	}
-
-	private static string FormatCalls(
-		long calls,
-		Func<string, string, string>? localize,
-		AppLanguage language) => string.Format(
-		CultureInfo.CurrentCulture,
-		Text(
-			localize,
-			$"AgentActivity.Status.Calls.{LocalizationPluralRules.ResolveCategory(language, calls)}",
-			calls == 1 ? "{0} call" : "{0} calls"),
-		calls);
 
 	private static string Text(
 		Func<string, string, string>? localize,

@@ -1777,14 +1777,14 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 							 $"~{tokens:N0} tok  " +
 							 $"{warningCount:N0} W  {errorCount:N0} E";
 		var selectionPersistence = BuildSelectionPersistenceIndicator();
-		var compactActivity = BuildAgentActivityIndicator(compact: true);
+		var focusedDelivery = BuildFocusedDeliveryIndicator();
 		if (width < 80)
 		{
 			return compactMetrics +
 				   (compressionUnavailable ? "  C!" : string.Empty) +
 				   (_liveSessions.Count > 0 ? "  Live context" : string.Empty) +
 				   (selectionPersistence is null ? string.Empty : $"  {selectionPersistence}") +
-				   (compactActivity is null ? string.Empty : $"  {compactActivity}");
+				   (focusedDelivery is null ? string.Empty : $"  {focusedDelivery}");
 		}
 
 		var metrics = new[]
@@ -1814,10 +1814,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			indicators.Add(selectionPersistence);
 			compactIndicators.Add(selectionPersistence);
 		}
-		if (BuildAgentActivityIndicator(compact: false) is { } activity && compactActivity is not null)
+		if (focusedDelivery is not null)
 		{
-			indicators.Add(activity);
-			compactIndicators.Add(compactActivity);
+			indicators.Add(focusedDelivery);
+			compactIndicators.Add(focusedDelivery);
 		}
 		return FitStatusLine(
 			metrics,
@@ -1830,8 +1830,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 
 	// The full metrics come first when everything fits. Otherwise the metrics shrink to their
 	// compact form so the error count and the indicators stay visible; the Live context
-	// indicator keeps its client name at this width, the activity text shortens, and whatever
-	// still does not fit is cut at the end with an ellipsis.
+	// indicator keeps its client name at this width, and whatever still does not fit is cut at
+	// the end with an ellipsis.
 	internal static string FitStatusLine(
 		IReadOnlyList<string> metrics,
 		string compactMetrics,
@@ -1870,19 +1870,14 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		});
 	}
 
-	private string? BuildAgentActivityIndicator(bool compact)
+	private string? BuildFocusedDeliveryIndicator()
 	{
-		if (!_agentActivityEnabled || _agentJournalSnapshot is not { } snapshot ||
-			snapshot.LatestCall is not { } latest)
-		{
+		if (!_agentActivityEnabled || _agentJournalSnapshot is not { } snapshot)
 			return null;
-		}
 
-		var focusedTreePath = CaptureCurrentTreePath();
-		return TerminalAgentJournalPresentation.BuildActivityIndicator(
+		return TerminalAgentJournalPresentation.BuildFocusedDeliveryHint(
 			snapshot,
-			focusedTreePath,
-			compact,
+			CaptureCurrentTreePath(),
 			AgentJournalText,
 			_services.Localization.CurrentLanguage);
 	}

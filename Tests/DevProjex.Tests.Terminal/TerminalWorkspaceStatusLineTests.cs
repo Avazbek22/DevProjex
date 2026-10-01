@@ -7,8 +7,9 @@ public sealed class TerminalWorkspaceStatusLineTests
 	private const string Separator = " · ";
 	private const string CompactMetrics = "1 200 F  13 D  ~5 740 tok  0 W  0 E";
 	private const string LiveContext = "Live context (Claude Code)";
-	private const string Activity = "Активность агента: get_file (3 вызова)";
-	private const string CompactActivity = "A get_file (3)";
+	private const string Compression = "Сжатие недоступно";
+	private const string CompactCompression = "C!";
+	private const string FocusedDelivery = "Агент получил 3 раза";
 
 	private static readonly string[] RussianMetrics =
 	[
@@ -50,32 +51,36 @@ public sealed class TerminalWorkspaceStatusLineTests
 	}
 
 	[Fact]
-	public void ActivityKeepsItsFullTextWhenCompactMetricsMakeRoom()
+	public void IndicatorsKeepTheirFullTextWhenCompactMetricsMakeRoom()
 	{
 		var status = TerminalWorkspaceSession.FitStatusLine(
 			RussianMetrics,
 			CompactMetrics,
-			[LiveContext, Activity],
-			[LiveContext, CompactActivity],
+			[Compression, LiveContext, FocusedDelivery],
+			[CompactCompression, LiveContext, FocusedDelivery],
 			Separator,
 			availableColumns: 118);
 
-		Assert.Equal($"{CompactMetrics}{Separator}{LiveContext}{Separator}{Activity}", status);
+		Assert.Equal(
+			$"{CompactMetrics}{Separator}{Compression}{Separator}{LiveContext}{Separator}{FocusedDelivery}",
+			status);
 		Assert.True(status.GetColumns() <= 118);
 	}
 
 	[Fact]
-	public void ActivityShortensBeforeTheLiveContextLosesItsClient()
+	public void CompressionNoticeShortensBeforeTheLiveContextLosesItsClient()
 	{
 		var status = TerminalWorkspaceSession.FitStatusLine(
 			RussianMetrics,
 			CompactMetrics,
-			[LiveContext, Activity],
-			[LiveContext, CompactActivity],
+			[Compression, LiveContext, FocusedDelivery],
+			[CompactCompression, LiveContext, FocusedDelivery],
 			Separator,
 			availableColumns: 98);
 
-		Assert.Equal($"{CompactMetrics}{Separator}{LiveContext}{Separator}{CompactActivity}", status);
+		Assert.Equal(
+			$"{CompactMetrics}{Separator}{CompactCompression}{Separator}{LiveContext}{Separator}{FocusedDelivery}",
+			status);
 	}
 
 	[Fact]
@@ -84,12 +89,15 @@ public sealed class TerminalWorkspaceStatusLineTests
 		var status = TerminalWorkspaceSession.FitStatusLine(
 			RussianMetrics,
 			CompactMetrics,
-			[LiveContext, Activity],
-			[LiveContext, CompactActivity],
+			[Compression, LiveContext, FocusedDelivery],
+			[CompactCompression, LiveContext, FocusedDelivery],
 			Separator,
 			availableColumns: 78);
 
-		Assert.StartsWith($"{CompactMetrics}{Separator}{LiveContext}{Separator}A get", status, StringComparison.Ordinal);
+		Assert.StartsWith(
+			$"{CompactMetrics}{Separator}{CompactCompression}{Separator}{LiveContext}{Separator}Аг",
+			status,
+			StringComparison.Ordinal);
 		Assert.EndsWith("...", status, StringComparison.Ordinal);
 		Assert.Equal(78, status.GetColumns());
 	}

@@ -1,4 +1,5 @@
 using Avalonia.Automation;
+using Avalonia.Layout;
 using Avalonia.Media.Imaging;
 using Avalonia.VisualTree;
 using System.Reflection;
@@ -106,13 +107,10 @@ public sealed class MainWindowMcpConnectionUiTests(UiWorkspaceFixture workspace)
 			var viewModel = UiTestDriver.GetViewModel(window);
 			Assert.True(viewModel.SelectionPersistenceStatusVisible);
 			var statusText = GetSelectionPersistenceStatusText(window);
-			var agentActivityText = Assert.Single(
-				window.GetVisualDescendants().OfType<TextBlock>(),
-				static text => text.Name == "AgentActivityStatusText");
 			Assert.True(statusText.IsVisible);
 			Assert.Equal(1, Grid.GetColumn(statusText));
-			Assert.Equal(agentActivityText.Margin, statusText.Margin);
-			Assert.Equal(agentActivityText.VerticalAlignment, statusText.VerticalAlignment);
+			Assert.Equal(new Thickness(14, 0, 0, 0), statusText.Margin);
+			Assert.Equal(VerticalAlignment.Center, statusText.VerticalAlignment);
 			Assert.Contains(
 				"storage unavailable",
 				viewModel.SelectionPersistenceStatusHelpText,

@@ -5,6 +5,9 @@ namespace DevProjex.Application.Services;
 /// </summary>
 public static class LocalizationPluralRules
 {
+	public static string ResolveKey(string key, AppLanguage language, long count) =>
+		$"{key}.{ResolveCategory(language, count)}";
+
 	public static string ResolveCategory(AppLanguage language, long count)
 	{
 		var absolute = count == long.MinValue ? long.MaxValue : Math.Abs(count);

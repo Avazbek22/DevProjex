@@ -10,7 +10,6 @@ public partial class MainWindow
     private CancellationTokenSource? _agentActivityWatchCts;
     private string? _agentActivitySessionId;
     private long _agentActivityLatestSequence;
-    private AgentJournalCall? _agentActivityLatestCall;
     private string? _agentDeliveryBaselineSessionId;
     private long _agentDeliveryBaselineSequence;
     private bool _captureAgentDeliveryBaseline;
@@ -79,7 +78,6 @@ public partial class MainWindow
             }
 
             IReadOnlyList<AgentJournalCall> calls;
-            AgentJournalCall? snapshotLatestCall = null;
             var sameSession = string.Equals(
                 _agentActivitySessionId,
                 session.Id,
@@ -98,10 +96,9 @@ public partial class MainWindow
                     return;
                 session = activity.Session;
                 calls = activity.AppendedCalls;
-                snapshotLatestCall = activity.LatestCall;
                 cursorSequence = Math.Max(
                     cursorSequence,
-                    snapshotLatestCall?.Sequence ?? 0);
+                    activity.LatestCall?.Sequence ?? 0);
                 if (calls.Count > 0)
                 {
                     cursorSequence = Math.Max(
@@ -144,19 +141,6 @@ public partial class MainWindow
                 ? new Dictionary<string, int>(_agentDeliveryCounts, PathComparer.Default)
                 : new Dictionary<string, int>(PathComparer.Default);
             AddDeliveredPathCounts(counts, projectRoot, session, calls, baselineSequence);
-            var rootIndex = ResolveAgentJournalRootIndex(projectRoot, session.Roots);
-            var latestCall = calls
-                .Where(call => MatchesAgentJournalRoot(call, rootIndex, session.Roots.Count))
-                .OrderByDescending(static call => call.Sequence)
-                .FirstOrDefault();
-            if (snapshotLatestCall is not null &&
-                MatchesAgentJournalRoot(snapshotLatestCall, rootIndex, session.Roots.Count) &&
-                (latestCall is null || snapshotLatestCall.Sequence > latestCall.Sequence))
-            {
-                latestCall = snapshotLatestCall;
-            }
-            if (latestCall is null && sameSession && !requiresReset)
-                latestCall = _agentActivityLatestCall;
             refreshCts.Token.ThrowIfCancellationRequested();
 
             await Dispatcher.UIThread.InvokeAsync(() =>
@@ -182,11 +166,9 @@ public partial class MainWindow
                 }
                 _agentActivitySessionId = session.Id;
                 _agentActivityLatestSequence = cursorSequence;
-                _agentActivityLatestCall = latestCall;
                 _captureAgentDeliveryBaseline = false;
                 _agentDeliveryCounts = counts;
                 ApplyAgentDeliveryTrace();
-                _viewModel.SetAgentActivityText(FormatAgentActivity(session, latestCall));
                 if (changedSession)
                     StartAgentActivityWatch(session.Id);
             });
@@ -260,13 +242,11 @@ public partial class MainWindow
         _agentActivityWatchCts = null;
         _agentActivitySessionId = null;
         _agentActivityLatestSequence = 0;
-        _agentActivityLatestCall = null;
         if (!preserveDeliveryBaseline)
         {
             _agentDeliveryBaselineSessionId = null;
             _agentDeliveryBaselineSequence = 0;
         }
-        _viewModel.SetAgentActivityText(null);
         ClearAgentDeliveryTrace();
         if (!preserveEnabledState)
             _viewModel.IsAgentActivityEnabled = false;
@@ -306,58 +286,12 @@ public partial class MainWindow
             count,
             count == 0
                 ? string.Empty
-                : _localization.Format("AgentActivity.Tree.ToolTip", count));
-    }
-
-    private string FormatAgentActivity(
-        AgentJournalSession session,
-        AgentJournalCall? latestCall)
-    {
-        if (latestCall is null)
-            return string.Empty;
-        var argument = TryResolveActivityArgument(latestCall.Arguments);
-        var tool = string.IsNullOrEmpty(argument)
-            ? latestCall.Tool
-            : $"{latestCall.Tool} «{argument}»";
-        return string.Join(
-            " · ",
-            NormalizeClientName(session.ClientName),
-            tool,
-            AgentActivityPresentation.FormatCount(
-                _localization,
-                "AgentActivity.Status.Files",
-                latestCall.FilesDelivered),
-            AgentActivityPresentation.FormatCount(
-                _localization,
-                "AgentActivity.Status.Tokens",
-                session.Totals.EstimatedTokens),
-            AgentActivityPresentation.FormatCount(
-                _localization,
-                "AgentActivity.Status.Calls",
-                session.Totals.Calls));
-    }
-
-    private static string TryResolveActivityArgument(IReadOnlyDictionary<string, string> arguments)
-    {
-        foreach (var key in new[] { "pattern", "query", "symbol", "path", "focus" })
-        {
-            if (!arguments.TryGetValue(key, out var value) || string.IsNullOrWhiteSpace(value))
-                continue;
-            var collapsed = string.Join(' ', value.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries));
-            return collapsed.Length <= 40 ? collapsed : $"{collapsed[..39]}…";
-        }
-        return string.Empty;
-    }
-
-    private static string NormalizeClientName(string clientName)
-    {
-        if (string.IsNullOrWhiteSpace(clientName))
-            return "MCP";
-        return clientName.Equals("codex", StringComparison.OrdinalIgnoreCase)
-            ? "Codex"
-            : clientName.Equals("claude-code", StringComparison.OrdinalIgnoreCase)
-                ? "Claude Code"
-                : clientName;
+                : _localization.Format(
+                    LocalizationPluralRules.ResolveKey(
+                        "AgentActivity.Tree.ToolTip",
+                        _localization.CurrentLanguage,
+                        count),
+                    count));
     }
 
     private static void AddDeliveredPathCounts(

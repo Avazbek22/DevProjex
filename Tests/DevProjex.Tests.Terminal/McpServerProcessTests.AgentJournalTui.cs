@@ -57,17 +57,27 @@ public sealed partial class McpServerProcessTests
 				"get_file",
 				new Dictionary<string, object?> { ["path"] = "src/App.cs" });
 
-			var activity = await terminal.WaitForScreenAsync(
-				"Agent activity: get_file (4 calls)",
-				timeout: TimeSpan.FromSeconds(30),
-				cancellationToken: TestContext.Current.CancellationToken);
-			Assert.Contains("Agent activity: get_file (4 calls)", activity, StringComparison.Ordinal);
 			await terminal.SendAsync(":filter App.cs\r", TestContext.Current.CancellationToken);
 			await terminal.WaitForScreenAsync(
 				"A App.cs",
-				timeout: TimeSpan.FromSeconds(15),
+				timeout: TimeSpan.FromSeconds(30),
 				cancellationToken: TestContext.Current.CancellationToken);
+			// The status line names only how often the focused file was received, like the
+			// Desktop marker tooltip; tools and call counts stay in the journal.
+			await terminal.SendAsync(":reveal src/App.cs\r", TestContext.Current.CancellationToken);
+			var focused = await terminal.WaitForScreenAsync(
+				"Agent received 1 time",
+				timeout: TimeSpan.FromSeconds(30),
+				cancellationToken: TestContext.Current.CancellationToken);
+			Assert.Contains("A App.cs", focused, StringComparison.Ordinal);
+			Assert.DoesNotContain("Agent received 1 times", focused, StringComparison.Ordinal);
+			Assert.DoesNotContain("Agent activity", focused, StringComparison.Ordinal);
+			Assert.DoesNotContain("get_file", focused, StringComparison.Ordinal);
+			Assert.DoesNotContain("get_tree", focused, StringComparison.Ordinal);
+			Assert.DoesNotContain("4 calls", focused, StringComparison.Ordinal);
 
+			// The delivery can be visible before the session totals include the last call.
+			await WaitForJournalCallCountAsync(dataRoot!, project, expectedCalls: 4);
 			await terminal.SendAsync(":mcp log\r", TestContext.Current.CancellationToken);
 			var journal = await terminal.WaitForScreenAsync(
 				"UTC | Tool",
@@ -206,5 +216,27 @@ public sealed partial class McpServerProcessTests
 			await Task.Delay(100, TestContext.Current.CancellationToken);
 		}
 		throw new TimeoutException("The live project profile was not updated by Terminal Workspace.");
+	}
+
+	private static async Task WaitForJournalCallCountAsync(
+		string dataRoot,
+		string project,
+		long expectedCalls)
+	{
+		var liveSessions = new LiveSessionRegistry(() => dataRoot);
+		using var store = new AgentJournalStore(
+			() => dataRoot,
+			activeSessionProvider: () => liveSessions.ReadActive());
+		var timeout = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(30);
+		while (DateTimeOffset.UtcNow < timeout)
+		{
+			var sessions = await store.ListSessionsAsync(
+				project,
+				cancellationToken: TestContext.Current.CancellationToken);
+			if (sessions is [{ Totals.Calls: var calls }] && calls == expectedCalls)
+				return;
+			await Task.Delay(100, TestContext.Current.CancellationToken);
+		}
+		throw new TimeoutException("The agent journal did not record every call of the live session.");
 	}
 }

@@ -80,7 +80,7 @@ public sealed class TerminalAgentJournalPresentationTests
 	}
 
 	[Fact]
-	public void ActivitySnapshotKeepsTheLatestCallAndPerPathCounts()
+	public void ActivitySnapshotKeepsPerPathCountsAndNamesOnlyTheFocusedDelivery()
 	{
 		using var workspace = new TemporaryDirectory();
 		var first = CreateCall(1, "get_tree", ["src/App.cs"]);
@@ -101,23 +101,23 @@ public sealed class TerminalAgentJournalPresentationTests
 
 		var snapshot = TerminalAgentJournalSnapshot.Create(workspace.Path, receipt);
 
-		Assert.Equal("get_file", snapshot.LatestCall?.Tool);
-		Assert.Equal(2, snapshot.TotalCalls);
 		Assert.Equal(
 			2,
 			snapshot.DeliveredPathCalls[Path.GetFullPath(Path.Combine(workspace.Path, "src", "App.cs"))]);
 		Assert.Equal(
-			"Agent activity: focused file delivered in 2 calls; get_file (2 calls)",
-			TerminalAgentJournalPresentation.BuildActivityIndicator(
+			"Agent received 2 times",
+			TerminalAgentJournalPresentation.BuildFocusedDeliveryHint(
 				snapshot,
-				Path.GetFullPath(Path.Combine(workspace.Path, "src", "App.cs")),
-				compact: false));
+				Path.GetFullPath(Path.Combine(workspace.Path, "src", "App.cs"))));
 		Assert.Equal(
-			"A F:1 get_file (2)",
-			TerminalAgentJournalPresentation.BuildActivityIndicator(
+			"Agent received 1 time",
+			TerminalAgentJournalPresentation.BuildFocusedDeliveryHint(
 				snapshot,
-				Path.GetFullPath(Path.Combine(workspace.Path, "README.md")),
-				compact: true));
+				Path.GetFullPath(Path.Combine(workspace.Path, "README.md"))));
+		Assert.Null(TerminalAgentJournalPresentation.BuildFocusedDeliveryHint(
+			snapshot,
+			Path.GetFullPath(Path.Combine(workspace.Path, "docs", "Notes.md"))));
+		Assert.Null(TerminalAgentJournalPresentation.BuildFocusedDeliveryHint(snapshot, focusedTreePath: null));
 	}
 
 	[Fact]
@@ -188,7 +188,7 @@ public sealed class TerminalAgentJournalPresentationTests
 	}
 
 	[Fact]
-	public void ActivitySnapshotUsesTheLatestCallForTheMatchingRoot()
+	public void ActivitySnapshotCountsDeliveriesForTheMatchingRootOnly()
 	{
 		using var workspace = new TemporaryDirectory();
 		var firstRoot = workspace.CreateDirectory("first");
@@ -201,8 +201,8 @@ public sealed class TerminalAgentJournalPresentationTests
 				new AgentJournalRoot(secondRoot, "second")
 			]
 		};
-		var firstRootCall = CreateCall(1, "get_tree", ["src/App.cs"]) with { RootIndex = 0 };
-		var secondRootCall = CreateCall(2, "get_file", ["src/App.cs"]) with { RootIndex = 1 };
+		var firstRootCall = CreateCall(1, "get_file", ["src/App.cs"]) with { RootIndex = 0 };
+		var secondRootCall = CreateCall(2, "get_file", ["src/Other.cs"]) with { RootIndex = 1 };
 		var receipt = new AgentJournalReceipt(
 			session,
 			session.Totals,
@@ -212,12 +212,12 @@ public sealed class TerminalAgentJournalPresentationTests
 		var first = TerminalAgentJournalSnapshot.Create(firstRoot, receipt);
 		var second = TerminalAgentJournalSnapshot.Create(secondRoot, receipt);
 
-		Assert.Equal("get_tree", first.LatestCall?.Tool);
-		Assert.Equal("get_file", second.LatestCall?.Tool);
+		Assert.Equal([Path.Combine(firstRoot, "src", "App.cs")], first.DeliveredPathCalls.Keys);
+		Assert.Equal([Path.Combine(secondRoot, "src", "Other.cs")], second.DeliveredPathCalls.Keys);
 	}
 
 	[Fact]
-	public void AppendedActivityUsesTheLatestCallForTheMatchingRoot()
+	public void AppendedActivityCountsDeliveriesForTheMatchingRootOnly()
 	{
 		using var workspace = new TemporaryDirectory();
 		var firstRoot = workspace.CreateDirectory("first");
@@ -230,8 +230,8 @@ public sealed class TerminalAgentJournalPresentationTests
 				new AgentJournalRoot(secondRoot, "second")
 			]
 		};
-		var firstRootCall = CreateCall(1, "get_tree", ["src/App.cs"]) with { RootIndex = 0 };
-		var secondRootCall = CreateCall(2, "get_file", ["src/App.cs"]) with { RootIndex = 1 };
+		var firstRootCall = CreateCall(1, "get_file", ["src/App.cs"]) with { RootIndex = 0 };
+		var secondRootCall = CreateCall(2, "get_file", ["src/Other.cs"]) with { RootIndex = 1 };
 		var activity = new AgentJournalActivitySnapshot(
 			session,
 			secondRootCall,
@@ -242,8 +242,8 @@ public sealed class TerminalAgentJournalPresentationTests
 		var first = TerminalAgentJournalSnapshot.Create(firstRoot, activity, previous: null, baselineSequence: 0);
 		var second = TerminalAgentJournalSnapshot.Create(secondRoot, activity, previous: null, baselineSequence: 0);
 
-		Assert.Equal("get_tree", first.LatestCall?.Tool);
-		Assert.Equal("get_file", second.LatestCall?.Tool);
+		Assert.Equal([Path.Combine(firstRoot, "src", "App.cs")], first.DeliveredPathCalls.Keys);
+		Assert.Equal([Path.Combine(secondRoot, "src", "Other.cs")], second.DeliveredPathCalls.Keys);
 		Assert.Equal(2, TerminalAgentJournalSnapshot.ResolveReadCursor(activity));
 	}
 
@@ -289,8 +289,6 @@ public sealed class TerminalAgentJournalPresentationTests
 			previous: null,
 			TerminalAgentJournalSnapshot.ResolveOpeningBaseline(activity.AppendedCalls, openedUtc));
 
-		Assert.Equal("get_file", snapshot.LatestCall?.Tool);
-		Assert.Equal(3, snapshot.LatestCall?.Sequence);
 		Assert.Contains(Path.Combine(workspace.Path, "README.md"), snapshot.DeliveredPathCalls.Keys);
 		Assert.Contains(Path.Combine(workspace.Path, "src", "New.cs"), snapshot.DeliveredPathCalls.Keys);
 		Assert.DoesNotContain(Path.Combine(workspace.Path, "src", "Old.cs"), snapshot.DeliveredPathCalls.Keys);
@@ -366,49 +364,88 @@ public sealed class TerminalAgentJournalPresentationTests
 		_ = new TerminalAgentJournalSessionRow(session, Localize).ToString();
 		_ = TerminalAgentJournalPresentation.BuildSessionHeader(Localize);
 		_ = TerminalAgentJournalPresentation.BuildCallDetails(session, [call], Localize);
-		_ = TerminalAgentJournalPresentation.BuildActivityIndicator(
+		_ = TerminalAgentJournalPresentation.BuildFocusedDeliveryHint(
 			snapshot,
 			Path.GetFullPath(Path.Combine(workspace.Path, "src", "App.cs")),
-			compact: false,
 			Localize);
 
 		Assert.Contains("AgentJournal.Mode.Live", keys);
 		Assert.Contains("AgentJournal.Column.Tool", keys);
 		Assert.Contains("AgentJournal.Footer", keys);
-		Assert.Contains("Menu.View.AgentActivity", keys);
-		Assert.Contains("AgentActivity.Tree.ToolTip", keys);
-		Assert.Contains("AgentActivity.Status.Calls.Other", keys);
+		Assert.Contains("AgentActivity.Tree.ToolTip.One", keys);
 		Assert.Contains("AgentJournal.Column.Session", keys);
 		Assert.Contains("AgentJournal.Column.Client", keys);
 	}
 
-	[Theory]
-	[InlineData(1, "get_file (1 вызов)")]
-	[InlineData(3, "get_file (3 вызова)")]
-	[InlineData(5, "get_file (5 вызовов)")]
-	[InlineData(21, "get_file (21 вызов)")]
-	public void ActivityIndicatorUsesTheLanguagePluralForm(long calls, string expectedSuffix)
+	[Fact]
+	public void FocusedDeliveryHintUsesTheWorkspaceLanguageWithoutToolsOrCallCounts()
 	{
 		using var workspace = new TemporaryDirectory();
 		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.Ru);
 		var session = CreateSession() with
 		{
-			Totals = CreateSession().Totals with { Calls = calls },
+			Totals = CreateSession().Totals with { Calls = 5 },
 			Roots = [new AgentJournalRoot(workspace.Path, "project")]
 		};
-		var call = CreateCall(1, "get_file", ["README.md"]);
+		var calls = new[]
+		{
+			CreateCall(1, "get_file", ["README.md"]),
+			CreateCall(2, "search_project", ["README.md"]),
+			CreateCall(3, "pack_context", ["README.md"])
+		};
 		var snapshot = TerminalAgentJournalSnapshot.Create(
 			workspace.Path,
-			new AgentJournalReceipt(session, session.Totals, [], [call]));
+			new AgentJournalReceipt(session, session.Totals, [], calls));
 
-		var indicator = TerminalAgentJournalPresentation.BuildActivityIndicator(
+		var hint = TerminalAgentJournalPresentation.BuildFocusedDeliveryHint(
 			snapshot,
-			focusedTreePath: null,
-			compact: false,
+			Path.GetFullPath(Path.Combine(workspace.Path, "README.md")),
 			(key, _) => localization[key],
 			AppLanguage.Ru);
 
-		Assert.Equal($"{localization["Menu.View.AgentActivity"]}: {expectedSuffix}", indicator);
+		Assert.Equal("Агент получил 3 раза", hint);
+		Assert.All(
+			new[] { "get_file", "search_project", "pack_context", "5", localization["Menu.View.AgentActivity"] },
+			fragment => Assert.DoesNotContain(fragment, hint, StringComparison.Ordinal));
+	}
+
+	[Theory]
+	[InlineData(AppLanguage.Ru, 1, "Агент получил 1 раз")]
+	[InlineData(AppLanguage.Ru, 3, "Агент получил 3 раза")]
+	[InlineData(AppLanguage.Ru, 5, "Агент получил 5 раз")]
+	[InlineData(AppLanguage.Ru, 21, "Агент получил 21 раз")]
+	[InlineData(AppLanguage.En, 1, "Agent received 1 time")]
+	[InlineData(AppLanguage.En, 3, "Agent received 3 times")]
+	[InlineData(AppLanguage.Pl, 1, "Agent otrzymał 1 raz")]
+	[InlineData(AppLanguage.Pl, 3, "Agent otrzymał 3 razy")]
+	[InlineData(AppLanguage.Uk, 1, "Агент отримав 1 раз")]
+	[InlineData(AppLanguage.Uk, 3, "Агент отримав 3 рази")]
+	[InlineData(AppLanguage.Uk, 5, "Агент отримав 5 разів")]
+	public void FocusedDeliveryHintUsesTheLanguagePluralForm(
+		AppLanguage language,
+		int deliveries,
+		string expected)
+	{
+		using var workspace = new TemporaryDirectory();
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), language);
+		var session = CreateSession() with
+		{
+			Roots = [new AgentJournalRoot(workspace.Path, "project")]
+		};
+		var calls = Enumerable.Range(1, deliveries)
+			.Select(static sequence => CreateCall(sequence, "get_file", ["README.md"]))
+			.ToArray();
+		var snapshot = TerminalAgentJournalSnapshot.Create(
+			workspace.Path,
+			new AgentJournalReceipt(session, session.Totals, [], calls));
+
+		var hint = TerminalAgentJournalPresentation.BuildFocusedDeliveryHint(
+			snapshot,
+			Path.GetFullPath(Path.Combine(workspace.Path, "README.md")),
+			(key, _) => localization[key],
+			language);
+
+		Assert.Equal(expected, hint);
 	}
 
 	[Fact]
