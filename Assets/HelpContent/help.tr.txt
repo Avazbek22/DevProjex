@@ -410,7 +410,7 @@ Sayı yalnızca kural eşleşmelerini bildirir. Sıfır, projenin güvenli oldu�
 
 Belgelendirme için ayrılmış adres aralıkları ve ana bilgisayarlar, yaygın CI kullanıcı adları, iyi bilinen genel DNS çözümleyicileri ve belgelenmiş kurgusal telefon aralıkları görünür kalır. Sıfır eşleşme bir gizlilik garantisi değildir. CLI `--hide-private-data` kullanır; tam kurallar ve ilk aşamanın sınırları `Docs/HidePrivateData.md` dosyasındadır.
 
-### 12.5 .gitignore'u kullanın
+### 12.5 .gitignore kullan
 Açıkken DevProjex, `git status` çıktısının çalışma ağacı görünümünü izler: izlenen dosyalar görünür kalır, izlenmeyen dosyalar ise deponun yok sayma kuralları onları hariç tutmadıkça gösterilir. DevProjex yalnızca açılan klasörün kökündeki dosyayı değil, depo köküne kadar üstteki dosyalar dahil erişilebilen her `.gitignore` dosyasını uygular.
 
 Her `.gitignore` şuralara uygulanır:

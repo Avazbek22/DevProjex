@@ -21,28 +21,28 @@ Tugun ustida sichqonchaning o‘ng tugmasini bosing — yoki fokusdagi tugunda {
 * Nisbiy yo‘lni nusxalash — loyiha ildizidan boshlanadigan yo‘l; u ildiz papka nomidan boshlanadi, masalan `project/src/File.cs`.
 * Tarkibni nusxalash — fayllar uchun: tarkibni qo‘llangan o‘zgartirishlar bilan nusxalaydi, xuddi nusxalash va eksport chiqargani kabi.
 * Faqat shuni tanlash — faqat shu tugunni belgilab, qolgan tanlovni bekor qiladi; faqat boshqa element ham belgilangan paytda ko‘rinadi.
-* Tarmoqni yoyish / Tarmoqni yig‘ish — jildlar uchun.
+* Tarmoqni yoyish / Tarmoqni yig‘ish — papkalar uchun.
 
 Agar yo‘l diskda endi mavjud bo‘lmasa, fayl menejerida ochish va tarkibni nusxalash xato xabarini ko‘rsatadi; yo‘llarni nusxalash ishlashda davom etadi.
 
 ## 3) Fayl
-* Jildni ochish… — ildiz papkani ochish ({mod}O)
+* Papkani ochish… — ildiz papkani ochish ({mod}O)
 * Yangi oyna — DevProjex’ning yangi mustaqil nusxasini ochish
-* So‘nggi — yaqinda ochilgan mahalliy jildlar ro‘yxati
-* Yangilash — mahalliy jildni qayta o‘qish va daraxtni qayta qurish (F5)
+* So‘nggi — yaqinda ochilgan mahalliy papkalar ro‘yxati
+* Yangilash — mahalliy papkani qayta o‘qish va daraxtni qayta qurish (F5)
 * Faylga eksport:
   * Daraxtni eksport qilish
   * Mazmunni eksport qilish
   * Daraxt va mazmunni eksport qilish
 * Loyihani eksport qilish:
-  * Jildga…
+  * Papkaga…
   * ZIP arxivga…
 
-Loyihani eksport qilish joriy daraxtdan kataloglar tuzilmasini saqlagan holda alohida jild yoki ZIP arxiv yaratadi.
+Loyihani eksport qilish joriy daraxtdan kataloglar tuzilmasini saqlagan holda alohida papka yoki ZIP arxiv yaratadi.
 
 Tanlangan fayl turlari, istisno qoidalari va belgilangan elementlar hisobga olinadi. Hech narsa belgilanmasa, butun joriy daraxt eksport qilinadi.
 
-Matnli va binar fayllar nusxalanadi, kiritilgan bo‘sh jildlar ham saqlanadi. Asl fayllar o‘zgartirilmaydi. Natijani boshlang‘ich loyiha ichiga saqlab bo‘lmaydi.
+Matnli va binar fayllar nusxalanadi, kiritilgan bo‘sh papkalar ham saqlanadi. Asl fayllar o‘zgartirilmaydi. Natijani boshlang‘ich loyiha ichiga saqlab bo‘lmaydi.
 
 Eksport paytida daraxt yoki parametrlarni o‘zgartirish, filtrdan foydalanish, format yoki ko‘rib chiqish rejimini almashtirish, Git buyruqlarini, yangilashni yoki boshqa loyihani ochishni ishga tushirish mumkin emas.
 
@@ -64,20 +64,20 @@ Qoidalar:
 * papkani tashlash mumkin;
 * faylni tashlash mumkin — bu holda fayl joylashgan papka ochiladi;
 * bir nechta obyekt tashlansa, birinchi mos mahalliy yo‘l ishlatiladi;
-* yo‘l mavjud bo‘lmasa yoki kirish bo‘lmasa, «Jildni ochish…» dagi kabi bir xil kirish tekshiruvlari qo‘llanadi;
+* yo‘l mavjud bo‘lmasa yoki kirish bo‘lmasa, «Papkani ochish…» dagi kabi bir xil kirish tekshiruvlari qo‘llanadi;
 * qo‘llab-quvvatlanmaydigan yoki mahalliy bo‘lmagan obyektlar e’tiborga olinmaydi.
 
 ### So‘nggi
-«Fayl → So‘nggi» bandi yaqinda ochilgan mahalliy jildlar tarixini ko‘rsatadi.
+«Fayl → So‘nggi» bandi yaqinda ochilgan mahalliy papkalar tarixini ko‘rsatadi.
 
 Qoidalar:
-* ro‘yxatga faqat mahalliy jildlar qo‘shiladi;
+* ro‘yxatga faqat mahalliy papkalar qo‘shiladi;
 * DevProjex orqali klonlangan Git repozitoriylari bu ro‘yxatga qo‘shilmaydi;
-* dublikatlar yaratilmaydi — bir xil jildni qayta ochish uni ro‘yxatning yuqorisiga olib chiqadi;
-* 32 tagacha so‘nggi jild saqlanadi;
+* dublikatlar yaratilmaydi — bir xil papkani qayta ochish uni ro‘yxatning yuqorisiga olib chiqadi;
+* 32 tagacha so‘nggi papka saqlanadi;
 * tarix ilova qayta ishga tushirilganda ham saqlanadi.
 
-Har bir elementda yuqori jild va loyiha nomi ko‘rsatiladi, masalan `Projects / App`.
+Har bir elementda yuqori papka va loyiha nomi ko‘rsatiladi, masalan `Projects / App`.
 
 ## 4) Terminaldan ishga tushirish
 DevProjex interaktiv terminal ish maydoni hamda skriptlar va CI uchun to‘g‘ridan-to‘g‘ri buyruqlarni taqdim etadi.
@@ -120,7 +120,7 @@ Agar `devprojex` buyrug‘i ishlamasa, DevProjex ichida oching:
 «Yordam → Terminaldan ishga tushirish».
 
 ## 5) Git
-«Git → Repozitoriyani klonlash...» repozitoriyni DevProjex keshiga klonlaydi va ochadi. «Tarmoq» va «Yangilanishlarni olish» faqat shu tarzda klonlangan loyihalarda mavjud. Ilova fayllaringizga tegmaydi — faqat kesh bilan ishlaydi.
+«Git → Repozitoriyni klonlash...» repozitoriyni DevProjex keshiga klonlaydi va ochadi. «Tarmoq» va «Yangilanishlarni olish» faqat shu tarzda klonlangan loyihalarda mavjud. Ilova fayllaringizga tegmaydi — faqat kesh bilan ishlaydi.
 
 Kesh foydalanuvchining tizim kesh katalogida saqlanadi. Haqiqiy yo‘lni `devprojex doctor` buyrug‘i ko‘rsatadi.
 
@@ -134,7 +134,7 @@ Qoidalar:
 * ro‘yxat faqat tarixda yaqinda klonlangan repozitoriylar bo‘lsa paydo bo‘ladi;
 * ro‘yxatga faqat tarmoq repozitoriy manbalari (`https://`, `ssh://` va SCP sintaksisi) qo‘shiladi;
 * mahalliy yo‘llar va `file://` manbalari bu ro‘yxatga qo‘shilmaydi;
-* dublikatlar yaratilmaydi — bir xil repozitoriyani qayta klonlash uni ro‘yxatning yuqorisiga olib chiqadi;
+* dublikatlar yaratilmaydi — bir xil repozitoriyni qayta klonlash uni ro‘yxatning yuqorisiga olib chiqadi;
 * 16 tagacha so‘nggi repozitoriy saqlanadi;
 * tarix ilova qayta ishga tushirilganda ham saqlanadi.
 
@@ -206,18 +206,18 @@ Daraxt + mazmun:
 * mazmun blokidagi fayl sarlavhalari `/` ajratgichli nisbiy yo‘llardan foydalanadi;
 * eksport `.txt` formatida saqlanadi.
 
-## 7) Preview rejimi
+## 7) Ko‘rib chiqish rejimi
 Yuqori paneldagi ko‘zcha ikonali tugma yoki {mod}B orqali ochiladi.
 
-Sichqonchaning yon tugmalari brauzerdagi kabi ishlaydi: «Oldinga» Preview rejimini ochadi, «Orqaga» esa yopadi. Joriy yo‘nalishni qayta bosish hech narsani o‘zgartirmaydi.
+Sichqonchaning yon tugmalari brauzerdagi kabi ishlaydi: «Oldinga» ko‘rib chiqish rejimini ochadi, «Orqaga» esa yopadi. Joriy yo‘nalishni qayta bosish hech narsani o‘zgartirmaydi.
 
-{mod}{shift}F previewdagi fayllar mazmunidan qidirishni ochadi yoki yopadi. Enter yoki F3 keyingi moslikka, {shift}Enter yoki {shift}F3 oldingi moslikka o‘tadi.
+{mod}{shift}F ko‘rib chiqishdagi fayllar mazmunidan qidirishni ochadi yoki yopadi. Enter yoki F3 keyingi moslikka, {shift}Enter yoki {shift}F3 oldingi moslikka o‘tadi.
 
 Yakuniy natijani daraxt yonidagi alohida ishchi hududda ko‘rsatadi. Bu rejim o‘zi hech narsani almashish buferiga nusxalamaydi va faylga eksport qilmaydi — u faqat ko‘rish uchun xizmat qiladi.
 
 Standart holatda ishchi hudud quyidagicha ochiladi:
 * chapda — loyiha daraxti;
-* markazda — preview oroli;
+* markazda — ko‘rib chiqish oroli;
 * o‘ngda — agar ochiq bo‘lsa, sozlamalar paneli.
 
 Mavjud rejimlar:
@@ -231,24 +231,24 @@ Nusxalash va eksportdagi qoidalar shu yerda ham qo‘llanadi:
 * joriy ignore qoidalari va tanlov parametrlari qo‘llanadi.
 
 Qo‘shimcha:
-* preview ichida fayllar gorizontal chiziqlar bilan ajratiladi;
+* ko‘rib chiqish ichida fayllar gorizontal chiziqlar bilan ajratiladi;
 * skroll paytida joriy fayl yo‘li tepada mahkamlanadi; mahkamlangan yo‘lni bosish o‘sha fayl boshiga olib boradi;
-* preview skroll-bari qidiruv mosliklari va topilgan qiymatlari bor qatorlarni belgilaydi; belgini bosish uning qatoriga olib boradi; saqlab qolingan qiymat belgilangancha qoladi, sarlavhalardagi maskalangan yo‘llar esa birinchi qatorida bitta belgi beradi;
-* daraxt va preview masshtabi bir-biridan mustaqil bo‘lishi mumkin;
-* preview rejimida «Nusxa» menyusiga kirmasdan turib to‘liq joriy natijani ham, joriy ko‘rinib turgan fayl blokini ham nusxalash mumkin.
+* ko‘rib chiqish skroll-bari qidiruv mosliklari va topilgan qiymatlari bor qatorlarni belgilaydi; belgini bosish uning qatoriga olib boradi; saqlab qolingan qiymat belgilangancha qoladi, sarlavhalardagi maskalangan yo‘llar esa birinchi qatorida bitta belgi beradi;
+* daraxt va ko‘rib chiqish masshtabi bir-biridan mustaqil bo‘lishi mumkin;
+* ko‘rib chiqish rejimida «Nusxa» menyusiga kirmasdan turib to‘liq joriy natijani ham, joriy ko‘rinib turgan fayl blokini ham nusxalash mumkin.
 
 Tugmalar:
-* yuqori preview orolining chap tomonidagi nusxa tugmasi — joriy preview rejimini nusxalaydi:
+* yuqori ko‘rib chiqish orolining chap tomonidagi nusxa tugmasi — joriy ko‘rib chiqish rejimini nusxalaydi:
   * Daraxt
   * Mazmun
   * Daraxt va mazmun
-* daraxt orolidagi X — daraxtni yashiradi va faqat preview orolini qoldiradi;
-* preview’ning yuqori orolidagi X — preview rejimini to‘liq yopadi;
-* faylning mahkamlangan yuqori sarlavhasidagi kichik nusxa tugmasi — joriy ko‘rinib turgan fayl blokini previewda ko‘rsatilgan holatda nusxalaydi;
-* ko‘zcha ikonani yana bir marta bosish yoki {mod}B ham preview rejimini yopadi.
+* daraxt orolidagi X — daraxtni yashiradi va faqat ko‘rib chiqish orolini qoldiradi;
+* ko‘rib chiqishning yuqori orolidagi X — ko‘rib chiqish rejimini to‘liq yopadi;
+* faylning mahkamlangan yuqori sarlavhasidagi kichik nusxa tugmasi — joriy ko‘rinib turgan fayl blokini ko‘rib chiqishda ko‘rsatilgan holatda nusxalaydi;
+* ko‘zcha ikonani yana bir marta bosish yoki {mod}B ham ko‘rib chiqish rejimini yopadi.
 
-Qidiruv va filtr preview ichida daraxt oroli ko‘rinib turgan paytda ishlaydi.
-Agar daraxt yashirilsa, qidiruv va filtr daraxtsiz preview rejimidan chiqquncha vaqtincha ishlamaydi.
+Qidiruv va filtr ko‘rib chiqish ichida daraxt oroli ko‘rinib turgan paytda ishlaydi.
+Agar daraxt yashirilsa, qidiruv va filtr daraxtsiz ko‘rib chiqish rejimidan chiqquncha vaqtincha ishlamaydi.
 
 ## 8) Ko‘rinish
 ### Masshtab
@@ -259,15 +259,15 @@ Agar daraxt yashirilsa, qidiruv va filtr daraxtsiz preview rejimidan chiqquncha 
 
 Xulq-atvor:
 * oddiy rejimda daraxt masshtablanadi;
-* daraxt ko‘rinib turgan preview rejimida menyudagi kattalashtirish, kichraytirish va tiklash daraxt va preview’ga bir vaqtda qo‘llanadi;
-* {mod}g‘ildirak bilan daraxt va preview kursor joylashuviga qarab mustaqil masshtablanadi;
-* daraxtsiz preview rejimida faqat preview oroli masshtablanadi.
+* daraxt ko‘rinib turgan ko‘rib chiqish rejimida menyudagi kattalashtirish, kichraytirish va tiklash daraxt va ko‘rib chiqishga bir vaqtda qo‘llanadi;
+* {mod}g‘ildirak bilan daraxt va ko‘rib chiqish kursor joylashuviga qarab mustaqil masshtablanadi;
+* daraxtsiz ko‘rib chiqish rejimida faqat ko‘rib chiqish oroli masshtablanadi.
 
 Oraliq: 6–28, tiklash — 15.
 
 ### Ixcham rejim
 Interfeysni zichroq qiladi: daraxt va sozlamalarda oraliqlar kichikroq.
-Preview ish maydoni faol bo‘lganda ixcham rejim avtomatik ravishda yoqiladi.
+Ko‘rib chiqish ish maydoni faol bo‘lganda ixcham rejim avtomatik ravishda yoqiladi.
 
 ### Animatsiyalar
 «Ko‘rinish → Animatsiyalar» bo‘limida daraxtni ochish, holat hisoblagichlari va asboblarning ilk ko‘rinishi alohida boshqariladi. Uchala animatsiya ham standart holatda yoqilgan; o‘chirilgan animatsiya yakuniy holatni darhol ko‘rsatadi.
@@ -294,7 +294,7 @@ Qidiruv paneli yopilganda, yopilish animatsiyasi tugagach so‘rov tozalanadi.
 
 Cheklovlar:
 * qidiruv ochilganda, filtr avtomatik yopiladi;
-* qidiruv preview ichida daraxt oroli ko‘rinib turgan paytda mavjud;
+* qidiruv ko‘rib chiqish ichida daraxt oroli ko‘rinib turgan paytda mavjud;
 * daraxt yashirilsa, qidiruv vaqtincha mavjud emas.
 
 ## 10) Nom bo‘yicha filtr
@@ -304,7 +304,7 @@ Filtr satriga mos tugunlar va ularning ota‑onalarini ko‘rsatadi. Yangilanish
 
 Cheklovlar:
 * filtr ochilganda, qidiruv avtomatik yopiladi;
-* filtr preview ichida daraxt oroli ko‘rinib turgan paytda mavjud;
+* filtr ko‘rib chiqish ichida daraxt oroli ko‘rinib turgan paytda mavjud;
 * daraxt yashirilsa, filtr vaqtincha mavjud emas.
 
 ## 11) Sozlamalar
@@ -337,12 +337,12 @@ Kontentni qayta ishlash:
 {mod}P — panelni ko‘rsatish/yashirish.
 
 ### 11.1 Mahalliy loyiha parametr profillari
-Mahalliy jildlar uchun DevProjex loyihaning oxirgi qo‘llangan parametrlarini eslab qoladi:
+Mahalliy papkalar uchun DevProjex loyihaning oxirgi qo‘llangan parametrlarini eslab qoladi:
 * tanlangan fayl turlari;
 * «Istisnolar» bo‘limidagi tanlangan qoidalar.
 
 Saqlash «Sozlamalarni qo‘llash» tugmasi bosilganda bajariladi.
-Xuddi shu mahalliy jild qayta ochilganda parametrlar avtomatik tiklanadi.
+Xuddi shu mahalliy papka qayta ochilganda parametrlar avtomatik tiklanadi.
 
 Muhim:
 * profillar faqat mahalliy loyihalar uchun saqlanadi;
@@ -366,13 +366,13 @@ Loyiha tarkibiga qarab quyidagi bandlar ko‘rsatilishi mumkin:
 * Smart Ignore
 * Bo‘sh papkalar
 * Bo‘sh fayllar
-* Yashirin jildlar
+* Yashirin papkalar
 * Yashirin fayllar
-* Nuqta bilan boshlanuvchi jildlar
+* Nuqta bilan boshlanuvchi papkalar
 * Nuqta bilan boshlanuvchi fayllar
 * Kengaytmasiz fayllar
 
-Git filtrlashni qo‘llab bo‘lmaganda GUI selektori va TUI’dagi Git o‘qining radio qatorlari butunlay yashiriladi: repozitoriy chegarasi yo‘q va `.gitignore` filtri joriy daraxtni o‘zgartira olmaydi. O‘q repozitoriydan tashqarida ko‘rinsa, GUI faqat filtrlashsiz rejim va `.gitignore`ni taklif qiladi, TUI esa repozitoriy talab qiladigan qatorlarni o‘chiradi. Git repozitoriyasida beshta odatiy qiymat mavjud: filtrlashsiz, `.gitignore`, kuzatiladigan fayllar, Git indeksiga qo‘shilgan fayllar va barcha joriy o‘zgarishlar; TUI’da faol `diff:<ref>..<ref>` doirasi oltinchi qatorda paydo bo‘ladi. Qiymatni tanlash Smart Ignore va asosiy istisnolarni o‘zgartirmasdan joriy Git rejimini almashtiradi. Boshqa bandlar ularning qoidalari joriy daraxtni o‘zgartira olganda ko‘rsatiladi, shuning uchun boshqa qoida yoki fayl turi almashtirilgach ro‘yxat o‘zgarishi mumkin.
+Git filtrlashni qo‘llab bo‘lmaganda GUI selektori va TUI’dagi Git o‘qining radio qatorlari butunlay yashiriladi: repozitoriy chegarasi yo‘q va `.gitignore` filtri joriy daraxtni o‘zgartira olmaydi. O‘q repozitoriydan tashqarida ko‘rinsa, GUI faqat filtrlashsiz rejim va `.gitignore`ni taklif qiladi, TUI esa repozitoriy talab qiladigan qatorlarni o‘chiradi. Git repozitoriysida beshta odatiy qiymat mavjud: filtrlashsiz, `.gitignore`, kuzatiladigan fayllar, Git indeksiga qo‘shilgan fayllar va barcha joriy o‘zgarishlar; TUI’da faol `diff:<ref>..<ref>` doirasi oltinchi qatorda paydo bo‘ladi. Qiymatni tanlash Smart Ignore va asosiy istisnolarni o‘zgartirmasdan joriy Git rejimini almashtiradi. Boshqa bandlar ularning qoidalari joriy daraxtni o‘zgartira olganda ko‘rsatiladi, shuning uchun boshqa qoida yoki fayl turi almashtirilgach ro‘yxat o‘zgarishi mumkin.
 
 Yangi band birinchi marta paydo bo‘lganda odatda yoqilgan bo‘ladi. Ma’lum band ro‘yxatdan vaqtincha yo‘qolsa ham foydalanuvchi tanlovini saqlaydi.
 
@@ -397,16 +397,16 @@ Katta foydalanuvchi papkasini yuklash har bir katalogni qayta-qayta to‘liq tah
 ### 12.3 Sirlarni yashirish
 «Sirlarni yashirish» odatda o‘chirilgan bo‘ladi. Bu parametr faqat tanlangan matnni tekshiradi va topilgan har bir qiymatni o‘z joyida almashtiradi; fayl va uning atrofidagi kod saqlanadi. Parametr o‘chiq bo‘lsa, tekshiruv ishlamaydi va hisoblagich ko‘rsatilmaydi. Joriy tanlov tekshirilgach, nom topilgan qiymatlar sonini ko‘rsatadi; «o‘zgarishsiz qoldirish» qarorlari yashirilganlar sonini kamaytirsa, ikkala son — topilgan/yashirilgan — ko‘rsatiladi, qatordagi «?» indikatori esa ularni matn bilan bildiradi.
 
-Mos kelgan joylar previewda ajratib ko‘rsatiladi. Faqat bitta uchrashuvni o‘zgarishsiz qoldirish uchun uni bosing; {alt}↓ / {alt}↑ topilmalar bo‘ylab yuradi, Enter faolini almashtiradi. Terminal Workspace ichida `[` va `]` uchrashuvlar bo‘ylab yuradi, `Enter` yoki `Space` esa faol uchrashuvni almashtiradi. Qaror shu seans davomida preview, almashish buferi, kontekst eksporti, jild va ZIP uchun amal qiladi; loyiha profilida saqlanmaydi.
+Mos kelgan joylar ko‘rib chiqishda ajratib ko‘rsatiladi. Faqat bitta uchrashuvni o‘zgarishsiz qoldirish uchun uni bosing; {alt}↓ / {alt}↑ topilmalar bo‘ylab yuradi, Enter faolini almashtiradi. Terminal Workspace ichida `[` va `]` uchrashuvlar bo‘ylab yuradi, `Enter` yoki `Space` esa faol uchrashuvni almashtiradi. Qaror shu seans davomida ko‘rib chiqish, almashish buferi, kontekst eksporti, papka va ZIP uchun amal qiladi; loyiha profilida saqlanmaydi.
 
-Preview kontekst menyusi bu qarorlarni kengaytiradi. Topilgan uchrashuv ustida o‘ng tugmani bosish bitta amal bilan uning qoidasidagi barcha uchrashuvlarni yoki o‘sha fayldagi barcha topilgan uchrashuvlarni saqlab qolish — yoki qayta yashirish — imkonini beradi. Fayl mazmunida tanlangan qiymat ustida o‘ng tugmani bosish qo‘lda belgi qo‘shadi: «…ni shu yerda yashirish» faqat shu uchrashuvni seans davomida yashiradi, «…ni doim yashirish» qiymatning barcha uchrashuvlari uchun doimiy belgi yaratadi, «…ni shaxsiy ma’lumot sifatida yashirish» esa «Shaxsiy ma’lumotni yashirish» parametri boshqaradigan doimiy belgi yaratadi. «Belgini olib tashlash» qo‘lda qo‘yilgan belgida paydo bo‘lib, uni o‘chiradi; detektor hali ham topadigan qiymat yashirin qoladi. Qo‘lda kiritiladigan qiymat — fayl mazmunida tanlangan, 8 dan 512 belgigacha bo‘lgan bitta qator. Belgi yaratish tegishli parametrni avtomatik yoqadi. Doimiy belgilar faqat kalitli qiymat identifikatori va uning sinfini saqlaydi, asl matnni hech qachon saqlamaydi.
+Ko‘rib chiqish kontekst menyusi bu qarorlarni kengaytiradi. Topilgan uchrashuv ustida o‘ng tugmani bosish bitta amal bilan uning qoidasidagi barcha uchrashuvlarni yoki o‘sha fayldagi barcha topilgan uchrashuvlarni saqlab qolish — yoki qayta yashirish — imkonini beradi. Fayl mazmunida tanlangan qiymat ustida o‘ng tugmani bosish qo‘lda belgi qo‘shadi: «…ni shu yerda yashirish» faqat shu uchrashuvni seans davomida yashiradi, «…ni doim yashirish» qiymatning barcha uchrashuvlari uchun doimiy belgi yaratadi, «…ni shaxsiy ma’lumot sifatida yashirish» esa «Shaxsiy ma’lumotni yashirish» parametri boshqaradigan doimiy belgi yaratadi. «Belgini olib tashlash» qo‘lda qo‘yilgan belgida paydo bo‘lib, uni o‘chiradi; detektor hali ham topadigan qiymat yashirin qoladi. Qo‘lda kiritiladigan qiymat — fayl mazmunida tanlangan, 8 dan 512 belgigacha bo‘lgan bitta qator. Belgi yaratish tegishli parametrni avtomatik yoqadi. Doimiy belgilar faqat kalitli qiymat identifikatori va uning sinfini saqlaydi, asl matnni hech qachon saqlamaydi.
 
-Jild yoki ZIP nusxasidagi mos matn ham o‘zgaradi, shu sababli natija yig‘ilmasligi yoki ishga tushmasligi mumkin. Ikkilik fayllar tekshirilmaydi va o‘zgarishsiz ko‘chiriladi. Hajmi 16 MiB dan katta tanlangan matn fayli tashlab ketiladi va bu haqda xabar beriladi, qolgan natijani yaratish esa davom etadi. Aniqlash xatosi butun operatsiyani to‘xtatadi.
+Papka yoki ZIP nusxasidagi mos matn ham o‘zgaradi, shu sababli natija yig‘ilmasligi yoki ishga tushmasligi mumkin. Ikkilik fayllar tekshirilmaydi va o‘zgarishsiz ko‘chiriladi. Hajmi 16 MiB dan katta tanlangan matn fayli tashlab ketiladi va bu haqda xabar beriladi, qolgan natijani yaratish esa davom etadi. Aniqlash xatosi butun operatsiyani to‘xtatadi.
 
 Hisoblagich faqat qoidalarga mos kelgan joylarni bildiradi. Nol loyiha xavfsiz degani emas. CLI’da `--hide-secrets` ishlatiladi; tafsilotlar `Docs/HideSecrets.md` faylida.
 
 ### 12.4 Shaxsiy ma’lumotni yashirish
-«Shaxsiy ma’lumotni yashirish» odatda o‘chirilgan bo‘ladi. Bu parametr tanlangan matn fayllaridagi elektron pochta manzillari, global IP manzillar, yo‘llardagi mahalliy foydalanuvchi nomlari, MAC manzillar va xalqaro telefon raqamlarini aniqlaydi. Topilmalar uchun Sirlarni yashirishdagi kabi oldindan ko‘rish qarorlari va bir xil chiqish konveyeri ishlatiladi; «…ni shaxsiy ma’lumot sifatida yashirish» orqali yaratilgan qo‘lda belgilar shu sinfga tegishli bo‘lib, shu parametrga bo‘ysunadi (12.3-bo‘lim). Yaratiladigan yo‘l sarlavhalaridagi va daraxt ildizidagi mahalliy foydalanuvchi nomlari bitta umumiy topilma sifatida maskalanadi: hisoblagich uni bitta qiymat deb sanaydi, «?» indikatori u yashirilgan yoki ko‘rsatilganini bildiradi, bitta bosish esa barcha maskalangan yo‘llarni birdaniga almashtiradi.
+«Shaxsiy ma’lumotni yashirish» odatda o‘chirilgan bo‘ladi. Bu parametr tanlangan matn fayllaridagi elektron pochta manzillari, global IP manzillar, yo‘llardagi mahalliy foydalanuvchi nomlari, MAC manzillar va xalqaro telefon raqamlarini aniqlaydi. Topilmalar uchun Sirlarni yashirishdagi kabi ko‘rib chiqish qarorlari va bir xil chiqish konveyeri ishlatiladi; «…ni shaxsiy ma’lumot sifatida yashirish» orqali yaratilgan qo‘lda belgilar shu sinfga tegishli bo‘lib, shu parametrga bo‘ysunadi (12.3-bo‘lim). Yaratiladigan yo‘l sarlavhalaridagi va daraxt ildizidagi mahalliy foydalanuvchi nomlari bitta umumiy topilma sifatida maskalanadi: hisoblagich uni bitta qiymat deb sanaydi, «?» indikatori u yashirilgan yoki ko‘rsatilganini bildiradi, bitta bosish esa barcha maskalangan yo‘llarni birdaniga almashtiradi.
 
 Hujjat uchun ajratilgan diapazonlar va hostlar, odatiy CI foydalanuvchilari, taniqli ochiq DNS resolverlari hamda hujjatlashtirilgan uydirma raqamlar ko‘rinib qoladi. Nol moslik maxfiylik kafolati emas. CLI-da `--hide-private-data` ishlatiladi; to‘liq qoidalar va birinchi bosqich chegaralari `Docs/HidePrivateData.md` faylida berilgan.
 
@@ -432,7 +432,7 @@ Repozitoriyning mahalliy `.git/info/exclude` fayli ham qo‘llanadi, uning ustuv
 Ichki `standard` profili `gitignore` rejimini hamda `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files` va `extensionless-files` ni tanlaydi.
 
 ### 12.6 Faqat Git kuzatadigan fayllar
-«Faqat Git kuzatadigan fayllar» daraxtning Git bosqichini har bir o‘qiladigan Git indeksida qayd etilgan, ishchi daraxtda mavjud fayllardan tuzadi. O‘zgartirilgan kuzatiladigan fayllar va indeksga qo‘shilgan yangi fayllar kiritiladi; kuzatilmaydigan fayllar chiqariladi. Bu `HEAD` yoki masofaviy repozitoriyaning tarixiy nusxasi emas, joriy ishchi daraxtdir.
+«Faqat Git kuzatadigan fayllar» daraxtning Git bosqichini har bir o‘qiladigan Git indeksida qayd etilgan, ishchi daraxtda mavjud fayllardan tuzadi. O‘zgartirilgan kuzatiladigan fayllar va indeksga qo‘shilgan yangi fayllar kiritiladi; kuzatilmaydigan fayllar chiqariladi. Bu `HEAD` yoki masofaviy repozitoriyning tarixiy nusxasi emas, joriy ishchi daraxtdir.
 
 Har bir repozitoriy mustaqil qayta ishlanadi: ochilgan papka ichidagi qo‘shni repozitoriylar va e’lon qilingan submodullar har biri o‘z indeksidan foydalanadi, ichki repozitoriy esa ota yoki qo‘shni repozitoriyning kuzatiladigan yo‘llarini meros qilib olmaydi. `.gitmodules` ichida e’lon qilinmagan ichki repozitoriy `.gitignore` rejimidagi kabi shaffof emas bo‘lib qoladi. Bu rejim uchun Git CLI kerak; o‘qiladigan bo‘sh indeks yaroqli. Terminal ish maydoni (TUI) shu rejimda ishga tushirilib, hech bir mos indeks yuklanmasa, ish maydoni ochilmaydi. Rejim allaqachon ochiq TUI ish maydonida interaktiv tarzda tanlanib, hech bir mos indeks yuklanmasa, o‘zgarish rad etiladi va oxirgi ishlaydigan Git rejimi faol qoladi. Xuddi shu holatda to‘g‘ridan-to‘g‘ri buyruqlar siyosat yoki tekshiruv xatosi bilan tugaydi. DevProjex hech qachon yashirincha `.gitignore` ga o‘tmaydi. Boshqa mos indeks o‘qilsa, indeksini o‘qib bo‘lmaydigan ichki sohalar ogohlantirish bilan chiqariladi.
 
@@ -443,14 +443,14 @@ Git rejimlari o‘zaro istisno; `none` Git filtrlashni o‘chiradi. Vaqtinchalik
 ### 12.7 Git filtrlashi va Smart Ignore aloqasi
 Tanlangan Git rejimi va Smart Ignore mustaqil boshqariladi. Avval har bir erishiladigan Git hududida Git rejimi, keyin qolgan elementlarga Smart Ignore, oxirida esa asosiy qoidalar qo‘llanadi.
 
-Tanlangan Git rejimi barcha Smart Ignore nomzodlarini qamrab turganda Smart Ignore yashirin bo‘lishi va Git rejimi o‘zgartirilgach yoki o‘chirilgach paydo bo‘lishi mumkin. Git repozitoriyasida repozitoriyni talab qiladigan barcha Git rejimlari mavjud.
+Tanlangan Git rejimi barcha Smart Ignore nomzodlarini qamrab turganda Smart Ignore yashirin bo‘lishi va Git rejimi o‘zgartirilgach yoki o‘chirilgach paydo bo‘lishi mumkin. Git repozitoriysida repozitoriyni talab qiladigan barcha Git rejimlari mavjud.
 
 `!` Git inkori faqat Git natijasini bekor qiladi; u Smart Ignore yoki asosiy qoidani o‘chirmaydi.
 
 ### 12.8 Asosiy qoidalar
-«Nuqta bilan boshlanuvchi jildlar» va «Nuqta bilan boshlanuvchi fayllar» element nomini tekshiradi.
+«Nuqta bilan boshlanuvchi papkalar» va «Nuqta bilan boshlanuvchi fayllar» element nomini tekshiradi.
 
-«Yashirin jildlar» va «Yashirin fayllar» tizimdagi Hidden atributini tekshiradi. Ayrim platformalarda nuqta bilan boshlanuvchi nom va tizim atributi bir xil yoki turli elementlarni tavsiflashi mumkin.
+«Yashirin papkalar» va «Yashirin fayllar» tizimdagi Hidden atributini tekshiradi. Ayrim platformalarda nuqta bilan boshlanuvchi nom va tizim atributi bir xil yoki turli elementlarni tavsiflashi mumkin.
 
 «Bo‘sh fayllar» hajmi 0 bayt bo‘lgan fayllarni yashiradi.
 
@@ -539,7 +539,7 @@ Effektlar bir vaqtda ishlamaydi. Tanlangan effektni qayta bosish uni o‘chiradi
 
 Mavjud sozlamalar:
 * Fon shaffofligi — Shaffoflik va Xiralashtirish rejimlarida mavjud.
-* Yuqori panel kontrasti — preview, qidiruv, filtr va daraxt formati buyruqlari joylashgan asosiy panelni sozlaydi.
+* Yuqori panel kontrasti — ko‘rib chiqish, qidiruv, filtr va daraxt formati buyruqlari joylashgan asosiy panelni sozlaydi.
 * Menyu shaffofligi — asosiy menyu va uning ichki menyulariga bir xil qo‘llanadi.
 * Chegaralar ko‘rinishi — interfeys chegaralarining qanchalik aniq ko‘rinishini sozlaydi.
 
@@ -565,9 +565,9 @@ Ma’lumotlarni tiklash (Yordam → Ma’lumotlarni tiklash) mahalliy loyiha par
 Shuningdek, agent jurnalining yakunlangan seanslari tozalanadi (19.3-bo‘lim); faol seanslar saqlanadi.
 
 Muhim:
-* mahalliy jildlar uchun «So‘nggi» tarixi tozalanmaydi;
+* mahalliy papkalar uchun «So‘nggi» tarixi tozalanmaydi;
 * Git Clone oynasidagi «So‘nggi havolalar» tarixi tozalanmaydi;
-* diskdagi loyiha fayllari va jildlari o‘zgartirilmaydi va o‘chirilmaydi.
+* diskdagi loyiha fayllari va papkalari o‘zgartirilmaydi va o‘chirilmaydi.
 
 ## 17) Tillar
 Til menyusi orqali tanlanadi.
