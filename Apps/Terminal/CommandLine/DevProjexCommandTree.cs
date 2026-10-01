@@ -240,7 +240,8 @@ public sealed class DevProjexCommandTree
 			catch (StoreUserDataMigrationUnavailableException)
 			{
 				environment.Error.WriteLine(
-					$"error[DPX-STORE-MIGRATION-UNAVAILABLE]: {_localization["Terminal.Error.StoreMigrationUnavailable"]}");
+					$"{TerminalErrorHeader.Format(_localization, "DPX-STORE-MIGRATION-UNAVAILABLE")} " +
+					_localization["Terminal.Error.StoreMigrationUnavailable"]);
 				return CommandLineExitCodes.RuntimeError;
 			}
 			// A root that does not exist is an invalid argument, like a missing PROJECT;
@@ -261,7 +262,8 @@ public sealed class DevProjexCommandTree
 
 	private void WriteMcpStartupError(Exception exception) =>
 		environment.Error.WriteLine(
-			$"error[DPX-MCP-STARTUP]: {TerminalTextEscaping.EscapeSingleLine(exception.Message)}");
+			$"{TerminalErrorHeader.Format(_localization, "DPX-MCP-STARTUP")} " +
+			TerminalTextEscaping.EscapeSingleLine(exception.Message));
 
 	private static bool IsValidSearchBodyCharacters(string? value)
 	{
@@ -2500,7 +2502,7 @@ public sealed class DevProjexCommandTree
 					? string.Empty
 					: requestedPath[^1];
 				environment.Error.WriteLine(
-					$"error[DPX-CLI-UNKNOWN-COMMAND]: " +
+					$"{TerminalErrorHeader.Format(_localization, "DPX-CLI-UNKNOWN-COMMAND")} " +
 					_localization.Format("Terminal.Error.UnknownCommand", unknown));
 				environment.Error.WriteLine(_localization["Terminal.Hint.Help"]);
 				return CommandLineExitCodes.UsageError;
@@ -2634,7 +2636,7 @@ public sealed class DevProjexCommandTree
 			var useNullDelimitedTransport = parseResult.GetValue(nullDelimited);
 			if (useBase64Transport && useNullDelimitedTransport)
 			{
-				environment.Error.WriteLine("error[DPX-CLI-INVALID-SYNTAX]:");
+				environment.Error.WriteLine(TerminalErrorHeader.Format(_localization, "DPX-CLI-INVALID-SYNTAX"));
 				environment.Error.WriteLine(L("Terminal.Error.ParserRejected"));
 				return CommandLineExitCodes.UsageError;
 			}
@@ -2645,7 +2647,7 @@ public sealed class DevProjexCommandTree
 					completionCommandLine,
 					out completionCommandLine))
 			{
-				environment.Error.WriteLine("error[DPX-CLI-INVALID-SYNTAX]:");
+				environment.Error.WriteLine(TerminalErrorHeader.Format(_localization, "DPX-CLI-INVALID-SYNTAX"));
 				environment.Error.WriteLine(L("Terminal.Error.ParserRejected"));
 				return CommandLineExitCodes.UsageError;
 			}
@@ -2655,7 +2657,7 @@ public sealed class DevProjexCommandTree
 					parseResult.GetValue(positionUnit),
 					out var completionPosition))
 			{
-				environment.Error.WriteLine("error[DPX-CLI-INVALID-SYNTAX]:");
+				environment.Error.WriteLine(TerminalErrorHeader.Format(_localization, "DPX-CLI-INVALID-SYNTAX"));
 				environment.Error.WriteLine(L("Terminal.Error.ParserRejected"));
 				return CommandLineExitCodes.UsageError;
 			}
@@ -2667,7 +2669,7 @@ public sealed class DevProjexCommandTree
 					encodedWorkingDirectory,
 					out completionWorkingDirectory))
 			{
-				environment.Error.WriteLine("error[DPX-CLI-INVALID-SYNTAX]:");
+				environment.Error.WriteLine(TerminalErrorHeader.Format(_localization, "DPX-CLI-INVALID-SYNTAX"));
 				environment.Error.WriteLine(L("Terminal.Error.ParserRejected"));
 				return CommandLineExitCodes.UsageError;
 			}
@@ -2708,7 +2710,7 @@ public sealed class DevProjexCommandTree
 	{
 		if (_developerCommandRunner is null)
 		{
-			environment.Error.WriteLine("error[DPX-DEV-RUNNER-UNAVAILABLE]:");
+			environment.Error.WriteLine(TerminalErrorHeader.Format(_localization, "DPX-DEV-RUNNER-UNAVAILABLE"));
 			environment.Error.WriteLine(L("Terminal.Error.DevRunnerUnavailable"));
 			return Task.FromResult(CommandLineExitCodes.RuntimeError);
 		}

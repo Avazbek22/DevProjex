@@ -845,7 +845,11 @@ hint:
 Choose another path or use --force for ZIP replacement.
 ```
 
-The `DPX-*` code is stable and language-independent. Normal verbosity never
+The `error` and `hint` labels follow the interface language selected by
+`--language`, `DEVPROJEX_LANGUAGE`, or the system language, on every error path:
+parser validation and command failures print the same localized header, for example
+`ошибка[DPX-PROJECT-NOT-FOUND]:` in Russian. The `DPX-*` code is stable and
+language-independent. Normal verbosity never
 prints raw `Exception.Message`, an inner exception, or a platform-localized I/O
 message. Diagnostic verbosity may report an exception type, safe path context,
 stack trace, and request identifier, but never file content or secrets.
