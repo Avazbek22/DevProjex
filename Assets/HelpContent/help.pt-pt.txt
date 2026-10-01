@@ -1,189 +1,194 @@
-## 1) O que é e porquê
-O DevProjex prepara rapidamente o contexto do projeto: mostra a estrutura de pastas/ficheiros, permite selecionar itens com caixas de seleção e copiar o conteúdo da árvore e/ou ficheiro para a área de transferência. Útil para revisão de código, suporte, aprendizagem e partilha de estrutura de projeto com um assistente de IA.
+## 1) O que é e para que serve
+O DevProjex prepara rapidamente o contexto de um projeto: mostra a estrutura de pastas e ficheiros, permite selecionar itens com caixas de seleção e copiar para a área de transferência a árvore, o conteúdo dos ficheiros ou ambos. É útil para revisão de código, suporte, aprendizagem e para partilhar a estrutura do projeto com um assistente de IA.
 
-Importante: o DevProjex não modifica os ficheiros do projeto aberto.
+Importante: o DevProjex não modifica os ficheiros do projeto que abre. A única exceção é uma ligação MCP explícita para o Cursor ou o VS Code, que cria ou atualiza `.cursor/mcp.json` ou `.vscode/mcp.json` (secção 19.1).
 
 ## 2) Árvore do projeto
-* Ícones de tipo de ficheiro/pasta.
-* Caixas de seleção em nós.
-* Expandir/recolher.
+* Ícones por tipo de ficheiro ou pasta.
+* Caixas de seleção nos nós.
+* Expandir e recolher.
 
-Caixas de seleção: a seleção de um nó aplica-se aos seus filhos; o estado pai é recalculado automaticamente.
+Caixas de seleção: marcar um nó aplica-se aos seus filhos; o estado do nó pai é recalculado automaticamente.
 
 Teclas de atalho:
-* {mod}E – expandir tudo
-* {collapseAll} – recolhe tudo (a raiz permanece expandida)
+* {mod}E — expandir tudo
+* {collapseAll} — recolher tudo (a raiz permanece expandida)
 
 ### Menu de contexto
-Clique com o botão direito num nó — ou {shift}F10 / tecla Menu no nó em foco:
-* Mostrar no Explorador de Ficheiros / Mostrar no Finder / Abrir no gestor de ficheiros — revela o item no gestor de ficheiros do sistema; o rótulo depende da plataforma.
+Clique com o botão direito num nó ou prima {shift}F10 ou a tecla Menu no nó em foco:
+* Mostrar no Explorador de Ficheiros / Mostrar no Finder / Abrir no gestor de ficheiros — mostra o item no gestor de ficheiros do sistema; o rótulo corresponde à plataforma atual.
 * Copiar caminho completo — o caminho absoluto do item.
 * Copiar caminho relativo — o caminho a partir da raiz do projeto, começando pelo nome da pasta raiz, por exemplo `project/src/File.cs`.
-* Copiar conteúdo — para ficheiros: copia o conteúdo com as transformações aplicadas, exatamente como copiar e exportar produzem.
-* Selecionar apenas este item — marca apenas este nó e limpa o resto da seleção; aparece apenas enquanto outro item também estiver marcado.
+* Copiar conteúdo — para ficheiros: copia o conteúdo com as transformações de conteúdo aplicadas, exatamente como a cópia e a exportação o produzem.
+* Selecionar apenas este item — marca apenas este nó e desmarca os restantes; só aparece enquanto outro item também estiver marcado.
 * Expandir ramo / Recolher ramo — para pastas.
 
-Se o caminho já não existir no disco, abrir o item no gestor de ficheiros ou copiar o seu conteúdo mostra uma mensagem de erro; copiar os caminhos continua a funcionar.
+Se o caminho já não existir no disco, abrir o item no gestor de ficheiros ou copiar o seu conteúdo mostra uma mensagem de erro; copiar o caminho continua a funcionar.
 
-## 3) Arquivo
-* Abrir pasta… — abre a pasta raiz ({mod}O)
-* Nova janela – abrir uma nova instância independente do DevProjex
+## 3) Ficheiro
+* Abrir pasta... — abre a pasta raiz ({mod}O)
+* Nova janela — abre uma nova instância independente do DevProjex
 * Recente — lista de pastas locais abertas recentemente
-* Atualizar – verifique novamente uma pasta local e reconstrua a árvore (F5)
+* Atualizar — volta a analisar uma pasta local e reconstrói a árvore (F5)
 * Exportar para ficheiro:
-  * Árvore de exportação
+  * Exportar árvore
   * Exportar conteúdo
   * Exportar árvore e conteúdo
 * Exportar projeto:
   * Para uma pasta…
   * Para um arquivo ZIP…
 
-A exportação do projeto cria uma pasta separada ou um arquivo ZIP a partir da árvore atual, preservando a estrutura dos diretórios.
+«Exportar projeto» cria uma pasta ou um arquivo ZIP separado a partir da árvore atual, preservando a estrutura de diretórios.
 
-São respeitados os tipos de ficheiro, as regras de exclusão e os itens assinalados. Se nada estiver assinalado, é exportada toda a árvore atual.
+Os tipos de ficheiro selecionados, as regras de exclusão e os itens marcados são respeitados. Se nada estiver marcado, é exportada toda a árvore atual.
 
-Os ficheiros de texto e binários são copiados, e as pastas vazias incluídas são preservadas. Os ficheiros de origem não são alterados. O resultado não pode ser guardado dentro do projeto de origem.
+Os ficheiros de texto e binários são copiados, e as pastas vazias incluídas são preservadas. Os ficheiros de origem não são modificados. O resultado não pode ser guardado dentro do projeto de origem.
 
-Durante a exportação, não é possível alterar a árvore ou as definições, usar o filtro, mudar o formato ou o modo de pré-visualização, executar comandos Git, atualizar ou abrir outro projeto.
+Durante a exportação, não é possível alterar a árvore ou as definições, usar o filtro, mudar o formato ou o modo de visualização, executar comandos Git, atualizar nem abrir outro projeto.
 
 Regras de formato:
-* Árvore de exportação:
+* Exportar árvore:
   * ASCII -> apenas `.txt`.
-  * JSON -> `.json` padrão, com `.json` e `.txt` disponíveis no diálogo Guardar.
-  * XML -> padrão `.xml`, com `.xml` e `.txt` disponíveis no diálogo Guardar.
-  * MD -> `.md` padrão, com `.md` e `.txt` disponíveis no diálogo Guardar.
-* Exportar conteúdo — sempre formato de conteúdo de texto, ficheiro `.txt` (a alternância de formato de árvore não se aplica).
-* Exportar árvore e conteúdo — sempre ficheiro `.txt`; o formato de árvore selecionado apenas afeta o formato do bloco de árvore dentro do resultado.
+  * JSON -> `.json` por predefinição; `.json` e `.txt` estão disponíveis na caixa de diálogo Guardar.
+  * XML -> `.xml` por predefinição; `.xml` e `.txt` estão disponíveis na caixa de diálogo Guardar.
+  * MD -> `.md` por predefinição; `.md` e `.txt` estão disponíveis na caixa de diálogo Guardar.
+* Exportar conteúdo — sempre no formato de conteúdo de texto, ficheiro `.txt` (o seletor de formato da árvore não se aplica).
+* Exportar árvore e conteúdo — sempre um ficheiro `.txt`; o formato de árvore selecionado afeta apenas o bloco da árvore dentro do resultado.
 
-Os ficheiros de exportação são gravados em UTF-8 sem BOM.
+Os ficheiros exportados são escritos em UTF-8 sem BOM.
 
 ### Arrastar e largar
-O arrastar e largar funciona na área de arranque (Drop Zone) quando nenhum projeto está carregado.
+Arrastar e largar funciona na área inicial (zona de largar) quando não há nenhum projeto carregado.
 
 Regras:
 * pode largar uma pasta;
-* pode descartar um ficheiro — neste caso a pasta que o contém é aberta;
-* se forem descartados vários itens, será utilizado o primeiro caminho local adequado;
-* se um caminho não estiver disponível ou não existir, serão aplicadas as mesmas verificações de acesso que “Abrir pasta…”;
+* pode largar um ficheiro — nesse caso, é aberta a pasta que o contém;
+* se largar vários itens, é usado o primeiro caminho local adequado;
+* se um caminho não estiver disponível ou não existir, são aplicadas as mesmas verificações de acesso de «Abrir pasta...»;
 * os itens não suportados ou não locais são ignorados.
 
 ### Recente
-O item “Ficheiro → Recente” mostra o histórico das pastas locais abertas recentemente.
+O item «Ficheiro → Recente» mostra o histórico de pastas locais abertas recentemente.
 
 Regras:
-* apenas as pastas locais são adicionadas à lista;
-* Os repositórios Git clonados via DevProjex não são adicionados a esta lista;
-* não são criados duplicados – abrir a mesma pasta novamente move-a para o topo;
-* são armazenadas até 32 pastas recentes;
-* o histórico é preservado entre as inicializações da aplicação.
+* só são adicionadas à lista pastas locais;
+* os repositórios Git clonados com o DevProjex não são adicionados a esta lista;
+* não são criados duplicados — voltar a abrir a mesma pasta move-a para o topo;
+* são guardadas até 32 pastas recentes;
+* o histórico é preservado entre execuções da aplicação.
 
-Cada item mostra a pasta pai e o nome do projeto, por exemplo `Projects / App`.
+Cada item mostra a pasta principal e o nome do projeto, por exemplo `Projects / App`.
 
-## 4) Inicie a partir do terminal
-O DevProjex oferece um espaço de trabalho interativo no terminal e comandos diretos para scripts e CI.
+## 4) Iniciar a partir do terminal
+O DevProjex oferece um espaço de trabalho interativo no terminal (Terminal Workspace) e comandos diretos para scripts e CI.
 
 Se o comando já estiver configurado, abra um terminal e execute:
 `devprojex --help`
 
-Este mostra os comandos e opções de nível superior. As opções e exemplos de um comando são mostrados com `devprojex help <command>`.
+Isto lista os comandos e as opções de nível superior. Execute `devprojex help <command>` para ver as opções e os exemplos de um comando específico.
 
 Exemplos:
-* `devprojex` — abre o espaço de trabalho interativo do terminal. No espaço de trabalho, as ações são executadas através da linha de comandos `:` (por exemplo, `:copy`, `:analyze`, `:branch`, `:language`); a lista completa de comandos está na ajuda integrada do espaço de trabalho e na documentação do projeto.
+* `devprojex` — abre o espaço de trabalho interativo do terminal. Dentro dele, as ações são executadas através da linha de comandos `:` (por exemplo, `:copy`, `:analyze`, `:branch`, `:language`); a lista completa de comandos está na ajuda integrada do espaço de trabalho e na documentação do projeto.
 * `devprojex tui .` — abre a pasta indicada diretamente no espaço de trabalho do terminal.
 * `devprojex open . --preview` — abre a pasta atual na pré-visualização do Desktop.
-* `devprojex analyze . --format json` — analisa o projeto atual como JSON.
+* `devprojex analyze . --format json` — analisa o projeto atual e devolve JSON.
 * `devprojex tree .` — imprime a árvore do projeto no terminal.
-* `devprojex export context . --format markdown -o ../devprojex-context.md` — guarda contexto pronto para IA fora do projeto de origem.
-* `devprojex export project . --as folder -o ../devprojex-submission` — exporta a árvore efetiva para uma pasta exata.
-* `devprojex export project . --as zip -o ../devprojex-submission.zip` — exporta a árvore efetiva para um arquivo ZIP.
-* `devprojex export context https://github.com/owner/repo -o -` — empacota um repositório remoto sem o clonar manualmente.
-* `devprojex analyze . --git-mode tracked --exclude smart-ignore` — analisa ficheiros seguidos pelo Git com Smart Ignore.
-* `devprojex mcp --root .` — inicia o servidor MCP local só de leitura para os agentes de IA lerem o projeto em segurança.
+* `devprojex export context . --format markdown -o ../devprojex-context.md` — guarda um contexto pronto para IA fora do projeto de origem.
+* `devprojex export project . --as folder -o ../devprojex-submission` — exporta a árvore efetiva do projeto para uma pasta exata.
+* `devprojex export project . --as zip -o ../devprojex-submission.zip` — exporta a árvore efetiva do projeto para um arquivo ZIP.
+* `devprojex export context https://github.com/owner/repo -o -` — empacota um repositório remoto sem que tenha de o clonar.
+* `devprojex analyze . --git-mode tracked --exclude smart-ignore` — analisa os ficheiros controlados pelo Git com o Smart Ignore.
+* `devprojex search Configure . --symbols` — encontra onde uma declaração é definida; `--symbols` aceita nomes de declarações e recusa a sintaxe de expressões regulares, enquanto `--regex` pesquisa texto com uma expressão regular.
+* `devprojex related src/App.cs` — lista os ficheiros que um ficheiro utiliza e os ficheiros que o utilizam.
+* `devprojex mcp --root .` — inicia o servidor MCP local só de leitura para que os agentes de IA leiam o projeto em segurança.
+* `devprojex mcp connect . --client claude-code` — liga um cliente de IA ao projeto (secção 19).
+* `devprojex mcp log . --last` — mostra a sessão mais recente do diário do agente.
 
 Notas:
 * `.` significa a pasta atual do terminal;
-* os caminhos com espaços devem ser colocados entre aspas;
+* os caminhos com espaços devem ficar entre aspas;
 * `--git-mode` seleciona `none`, `gitignore`, `tracked`, `staged`, `changes` ou `diff:<ref>..<ref>`;
 * `--exclude` controla as exclusões comuns separadamente da filtragem Git;
 * os comandos de análise e exportação são determinísticos e não abrem a interface gráfica;
-* `tui`, `open`, `analyze` e os dois comandos `export` também aceitam o URL de um repositório Git; o clone vai para uma cache gerida (`devprojex cache`);
-* os comandos têm aliases e formas curtas documentados, por exemplo `export ctx`, `-f`, `-n`; `devprojex help` mostra-os;
-* `analyze --findings` lista as deteções de ocultação sem os seus valores, e `--fail-on-findings` devolve um código de saída diferente de zero para CI;
-* o comando não modifica os ficheiros do projeto – o DevProjex funciona em modo de leitura apenas.
+* `tui`, `open`, `analyze`, `search`, `tree` e os dois comandos `export` também aceitam o URL de um repositório Git, e `related` aceita-o através de `--project`; o clone vai para uma cache gerida (`devprojex cache`);
+* os comandos têm aliases e opções curtas documentados, por exemplo `export ctx`, `-f`, `-n`; `devprojex help` mostra-os;
+* `analyze --findings` lista as deteções de ocultação sem os valores, e `--fail-on-findings` devolve um código de saída diferente de zero para CI;
+* `export context --max-tokens N` mantém o contexto dentro de um orçamento de tokens, e a opção experimental `--rank importance` admite primeiro os ficheiros mais importantes;
+* os comandos de análise, pesquisa e exportação não modificam os ficheiros do projeto — o DevProjex funciona em modo só de leitura.
 
 Se o comando `devprojex` não funcionar, abra no DevProjex:
-“Ajuda → Iniciar a partir do terminal”.
+«Ajuda → Iniciar a partir do terminal».
 
 ## 5) Git
-O menu Git apenas está disponível para projetos clonados através do DevProjex (Git Clone). A aplicação não mexe nos seus ficheiros – funciona apenas com a cache.
+«Git → Clonar repositório...» clona um repositório para a cache do DevProjex e abre-o. «Ramo» e «Obter atualizações» só estão disponíveis para projetos clonados desta forma. A aplicação não mexe nos seus ficheiros — trabalha apenas com a cache.
 
-A cache é armazenada no diretório de cache do utilizador. `devprojex doctor` mostra o caminho efetivamente utilizado.
+A cache é guardada no diretório de cache do sistema do utilizador. Execute `devprojex doctor` para ver o caminho efetivo.
 
-* Agência — mostra a lista de agências disponíveis com o ativo assinalado; a troca atualiza a árvore para o ramo selecionado. Se a ramificação já existir localmente, a comutação será offline (sem atualização). Se não existir localmente, será obtido e criado.
-* Obter atualizações — atualiza apenas o branch atual: pesquisa e redefine para origin/<branch>. Para um projeto Git Clone, o F5 executa a mesma ação; o comando normal “Ficheiro → Atualizar” está desativado.
+* Ramo — mostra a lista de ramos disponíveis com o ativo assinalado; ao mudar, a árvore é atualizada para o ramo selecionado. Se o ramo já existir localmente, a mudança é feita offline (sem atualização). Se não existir localmente, é obtido e criado.
+* Obter atualizações — atualiza apenas o ramo atual: fetch e reposição para origin/<branch>. Num projeto clonado com o Git Clone, F5 executa a mesma ação; o comando habitual «Ficheiro → Atualizar» fica desativado.
 
-### Clonar janela
-Na janela Git Clone, pode aparecer uma lista de “repositórios recentes” por baixo do campo URL.
+### Janela de clonagem
+Na janela do Git Clone, a lista «Ligações recentes» com os repositórios clonados recentemente pode aparecer por baixo do campo do URL.
 
 Regras:
-* a lista aparece apenas se o histórico já contiver repositórios clonados recentemente;
-* só são adicionadas à lista origens de repositório de rede (`https://`, `ssh://` e sintaxe SCP);
+* a lista só aparece se o histórico já contiver repositórios clonados recentemente;
+* só são adicionadas à lista origens de repositório em rede (`https://`, `ssh://` e a sintaxe SCP);
 * os caminhos locais e as origens `file://` não são adicionados a esta lista;
-* não são criados duplicados — clonar o mesmo repositório novamente move-o para o topo;
-* são armazenados até 16 repositórios recentes;
-* o histórico é preservado entre as inicializações da aplicação.
+* não são criados duplicados — voltar a clonar o mesmo repositório move-o para o topo;
+* são guardados até 16 repositórios recentes;
+* o histórico é preservado entre execuções da aplicação.
 
-A seleção de um item preenche automaticamente o campo URL.
-Enquanto a clonagem está em curso, a lista fica temporariamente oculta.
+Selecionar um item preenche automaticamente o campo do URL.
+Enquanto a clonagem decorre, a lista fica temporariamente oculta.
 
 ## 6) Copiar
-### Alternar formato de árvore (ASCII/JSON/XML/MD)
-A comutação define o formato de representação em árvore para operações em que a árvore faz parte da saída.
+### Seletor de formato da árvore (ASCII / JSON / XML / MD)
+O seletor define o formato de representação da árvore nas operações em que a árvore faz parte do resultado.
 
-* ASCII — árvore de texto com ramificações.
+* ASCII — árvore de texto com ramos.
 * JSON — árvore estruturada em JSON.
 * XML — árvore XML compacta para analisadores e ferramentas.
-* MD – lista aninhada de Markdown para documentação e prompts de IA.
+* MD — lista aninhada de Markdown para documentação e prompts de IA.
 
-A alternância afeta:
+O seletor afeta:
 * Copiar árvore
-* Copiar árvore + conteúdo
-* Árvore de exportação
+* Copiar árvore e conteúdo
+* Exportar árvore
 * Exportar árvore e conteúdo
 
-A alternância não afeta:
+O seletor não afeta:
 * Copiar conteúdo
 * Exportar conteúdo
 
 ### Copiar árvore
 Copia a árvore do projeto.
-Se existirem nós marcados, a árvore é construída a partir da seleção; se a seleção estiver vazia ou inválida, a árvore completa será copiada.
-O formato do resultado é definido pela alternância do formato da árvore.
+Se houver nós marcados, a árvore é construída a partir da seleção; se a seleção estiver vazia ou for inválida, é copiada a árvore completa.
+O formato do resultado é definido pelo seletor de formato da árvore.
 Teclas de atalho: {mod}{shift}C e {mod}{alt}C.
 
 ### Copiar conteúdo
-Copia o conteúdo do ficheiro:
-* se os ficheiros forem verificados — apenas estes; caso contrário — todos os ficheiros do projeto;
-* cada ficheiro é precedido por um cabeçalho com o seu caminho local completo (para projetos Git Clone — o caminho web do repositório);
-* os ficheiros não textuais são ignorados (incluindo binários);
-* para ficheiros de texto vazios, é gerado o caminho e a linha `[No Content, 0 bytes]`;
-* para ficheiros que contenham apenas espaços em branco/quebras de linha, o caminho e a linha `[Whitespace, N bytes]` são gerados.
+Copia o conteúdo dos ficheiros:
+* se houver ficheiros marcados, apenas esses; caso contrário, todos os ficheiros do projeto;
+* cada ficheiro é precedido por um cabeçalho com o caminho local completo (em projetos do Git Clone, o caminho web do repositório);
+* os ficheiros que não são de texto são ignorados (incluindo binários);
+* para ficheiros de texto vazios, são gerados o caminho e a linha `[No Content, 0 bytes]`;
+* para ficheiros que contêm apenas espaços ou quebras de linha, são gerados o caminho e a linha `[Whitespace, N bytes]`.
 Tecla de atalho: {mod}{alt}V.
 
-### Copiar árvore + conteúdo
-Combina árvore e conteúdo:
-* a árvore é construída a partir da seleção; se a seleção estiver vazia/inválida, será utilizada a árvore completa;
-* o conteúdo segue as mesmas regras de “Copiar conteúdo”;
-* o formato do bloco de árvore é definido pela alternância do formato de árvore.
+### Copiar árvore e conteúdo
+Combina a árvore e o conteúdo:
+* a árvore é construída a partir da seleção; se a seleção estiver vazia ou for inválida, é usada a árvore completa;
+* o conteúdo segue as mesmas regras de «Copiar conteúdo»;
+* o formato do bloco da árvore é definido pelo seletor de formato da árvore.
 Tecla de atalho: {mod}{shift}V.
 
-### Representações de árvores
-Os formatos de árvore utilizam representações diferentes para a mesma árvore de projeto selecionada.
+### Representações da árvore
+Os formatos de árvore usam representações diferentes para a mesma árvore de projeto selecionada.
 
 JSON:
-* `rootPath` — caminho raiz absoluto normalizado com `/`.
+* `rootPath` — caminho absoluto da raiz normalizado com `/`.
 * `tree` — conteúdo da pasta raiz.
-* A exportação JSON utiliza este formato de árvore: os arrays contêm ficheiros, os objetos contêm subpastas, `/` contém ficheiros na pasta atual e `[]` representa uma pasta vazia.
+* A exportação JSON usa este formato de árvore: as matrizes contêm ficheiros, os objetos contêm subpastas, `/` contém os ficheiros da pasta atual e `[]` representa uma pasta vazia.
 
 XML:
 * o nó raiz é `<t r="...">`;
@@ -191,379 +196,382 @@ XML:
 * os ficheiros são `<f>File.cs</f>`.
 
 MD:
-* começa por `Root: ...`;
-* utiliza uma lista aninhada Markdown;
+* começa com `Root: ...`;
+* usa uma lista aninhada de Markdown;
 * as pastas terminam com `/`.
 
 Árvore + conteúdo:
-* o formato de árvore selecionado aplica-se ao bloco de árvore;
-* o bloco de conteúdo permanece texto;
-* os cabeçalhos dos ficheiros no bloco de conteúdo utilizam caminhos relativos com `/`;
-* exportado como `.txt`.
+* o formato de árvore selecionado aplica-se ao bloco da árvore;
+* o bloco de conteúdo continua a ser texto;
+* os cabeçalhos de ficheiro no bloco de conteúdo usam caminhos relativos com `/`;
+* é exportado como `.txt`.
 
 ## 7) Modo de visualização
-Aberto com o botão do ícone do olho na barra superior ou com {mod}B.
+Abre-se com o botão do ícone do olho na barra superior ou com {mod}B.
 
-Os botões laterais do rato seguem a navegação do navegador: Avançar abre o modo de visualização e Voltar fecha-o. Repetir a direção já ativa não tem efeito.
+Os botões laterais do rato seguem a navegação de um browser: Avançar abre o modo de visualização e Voltar fecha-o. Repetir a direção atual não tem efeito.
 
-{mod}{shift}F abre ou fecha a pesquisa no conteúdo dos ficheiros da visualização. Enter ou F3 vai para a correspondência seguinte; {shift}Enter ou {shift}F3, para a anterior.
+{mod}{shift}F abre ou fecha a pesquisa no conteúdo dos ficheiros da pré-visualização. Enter ou F3 vai para a correspondência seguinte; {shift}Enter ou {shift}F3, para a anterior.
 
-Mostra o resultado final numa área de trabalho separada junto à árvore. Este modo não copia para a área de transferência e não exporta sozinho para um ficheiro — é um modo de visualização.
+Mostra o resultado final numa área de trabalho separada, junto à árvore. Este modo não copia para a área de transferência nem exporta para um ficheiro por si só — é um modo de visualização.
 
-Por predefinição, o espaço de trabalho é aberto como:
-* esquerda — árvore do projeto;
-* centro — painel de visualização;
-* direita – painel de definições, se estiver aberto.
+Por predefinição, a área de trabalho abre-se assim:
+* à esquerda — árvore do projeto;
+* ao centro — painel de pré-visualização;
+* à direita — painel de definições, se estava aberto.
 
 Modos disponíveis:
 * Árvore
 * Conteúdo
-* Árvore e conteúdo
+* Árvore + conteúdo
 
-São aplicadas as mesmas regras de cópia e exportação:
-* nós verificados são respeitados;
-* se a seleção estiver vazia, será utilizado todo o conjunto de dados;
-* as regras de ignorar atuais e as opções de seleção são aplicadas.
+São aplicadas as mesmas regras da cópia e da exportação:
+* os nós marcados são respeitados;
+* se a seleção estiver vazia, é usado o conjunto de dados completo;
+* são aplicadas as regras de exclusão e as opções de seleção atuais.
 
 Além disso:
-* os ficheiros na visualização estão separados por linhas horizontais;
-* durante a deslocação, o caminho do ficheiro atual é fixado na parte superior; clicar no caminho fixado desloca até ao início desse ficheiro;
-* a barra de deslocação da visualização marca as correspondências de pesquisa e as linhas com valores detetados; clicar numa marca salta para a linha dela; um valor mantido continua marcado, e os caminhos mascarados dos cabeçalhos geram uma única marca na primeira linha;
-* a árvore e o zoom de visualização podem funcionar de forma independente.
-* no modo de visualização, pode copiar o resultado atual completo ou o bloco de ficheiro visível atual sem abrir o menu Copiar.
+* na pré-visualização, os ficheiros são separados por linhas horizontais;
+* durante a deslocação, o caminho do ficheiro atual fica fixado no topo; clicar no caminho fixado volta ao início desse ficheiro;
+* a barra de deslocação da pré-visualização marca as correspondências da pesquisa e as linhas com valores detetados; clicar numa marca salta para a respetiva linha; um valor mantido sem alterações continua marcado, e os cabeçalhos de caminho mascarados geram uma única marca na primeira linha;
+* o zoom da árvore e o da pré-visualização podem ser independentes;
+* no modo de visualização, pode copiar o resultado atual completo ou o bloco do ficheiro visível sem abrir o menu Copiar.
 
 Botões:
-* botão copiar no lado esquerdo da ilha de visualização superior — copia o modo de visualização atual:
+* botão de copiar no lado esquerdo da ilha superior da pré-visualização — copia o modo de pré-visualização atual:
   * Árvore
   * Conteúdo
-  * Árvore e conteúdo
-* X no painel de árvore — oculta a árvore e deixa apenas o painel de visualização;
-* X no painel de visualização superior — fecha completamente o modo de visualização;
-* botão de cópia pequena no cabeçalho do ficheiro fixado — copia o bloco de ficheiro visível atual exatamente como é mostrado na pré-visualização;
+  * Árvore + conteúdo
+* X no painel da árvore — oculta a árvore e deixa apenas o painel de pré-visualização;
+* X no painel superior da pré-visualização — fecha completamente o modo de visualização;
+* pequeno botão de copiar no cabeçalho do ficheiro fixado — copia o bloco do ficheiro visível exatamente como é mostrado na pré-visualização;
 * premir novamente o ícone do olho ou {mod}B também fecha o modo de visualização.
 
-Pesquisa e Filtro estão disponíveis enquanto o painel em árvore estiver visível na Visualização.
-Se a árvore estiver oculta, a Pesquisa e o Filtro ficarão temporariamente indisponíveis até sair do modo de visualização.
+Pesquisar e Filtrar estão disponíveis enquanto o painel da árvore estiver visível na pré-visualização.
+Se a árvore estiver oculta, Pesquisar e Filtrar ficam temporariamente indisponíveis até sair do modo só de pré-visualização.
 
 ## 8) Ver
 ### Zoom
 * {mod}+ / {mod}= — ampliar
-* {mod}- – diminuir o zoom
-* {mod}0 – repor
-* {mod}roda do rato – zoom suave no painel sob o cursor
+* {mod}- — diminuir o zoom
+* {mod}0 — repor
+* {mod}roda do rato — zoom suave no painel sob o cursor
 
 Comportamento:
 * no modo normal, a árvore é ampliada;
-* na visualização com a árvore visível, Aumentar zoom, Diminuir zoom e Repor no menu aplicam-se à árvore e à visualização;
-* com {mod}roda do rato, árvore e zoom de visualização de forma independente dependendo do local onde o cursor se encontra;
-* no modo de visualização apenas, apenas o painel de visualização é ampliado.
+* na pré-visualização com a árvore visível, Ampliar, Diminuir zoom e Repor zoom no menu aplicam-se à árvore e à pré-visualização;
+* com {mod}roda do rato, a árvore e a pré-visualização são ampliadas separadamente, consoante a posição do cursor;
+* no modo só de pré-visualização, apenas o painel de pré-visualização é ampliado.
 
-Intervalo: 6–28, a reposição é 15.
+Intervalo: 6–28; o valor ao repor é 15.
 
-### Modo Compacto
-Torna a UI mais densa: menor espaçamento na árvore e nas definições.
-Enquanto a área de trabalho de visualização estiver ativa, o Modo Compacto será ativado automaticamente.
+### Modo compacto
+Torna a interface mais densa: menos espaçamento na árvore e nas definições.
+Enquanto a área de trabalho de pré-visualização está ativa, o modo compacto é ativado automaticamente.
 
 ### Animações
-“Ver → Animações” controla separadamente a expansão da árvore, os contadores de estado e a apresentação inicial das ferramentas. As três animações estão ativadas por predefinição; quando uma animação é desativada, o estado final é apresentado imediatamente.
+«Ver → Animações» controla separadamente a expansão da árvore, os contadores de estado e o aparecimento inicial das ferramentas. As três estão ativadas por predefinição; uma animação desativada mostra imediatamente o seu estado final.
 
 ### Fonte de árvore
-A fonte da árvore é selecionada em “Ver → Fonte da árvore”.
-“Padrão” restaura a fonte da árvore padrão.
-A fonte selecionada é aplicada após clicar em “Aplicar definições” no painel de definições.
+A fonte da árvore é selecionada em «Ver → Fonte de árvore».
+«Padrão» repõe a fonte predefinida da árvore.
+A fonte selecionada é aplicada depois de clicar em «Aplicar definições» no painel de definições.
+
+### Atividade do agente
+«Ver → Atividade do agente» marca os ficheiros que um agente de IA recebeu durante uma sessão MCP live; consulte a secção 19.4.
 
 ## 9) Pesquisa (árvore)
-Abre a barra de pesquisa, destaca as correspondências e permite a navegação.
-* {mod}F – mostrar/ocultar
-* Entrar – próximo resultado
-* {shift}Enter – anterior
-* Esc – fechar
+Abre a barra de pesquisa, realça as correspondências e permite navegar entre elas.
+* {mod}F — mostrar ou ocultar
+* Enter — resultado seguinte
+* {shift}Enter — resultado anterior
+* Esc — fechar
 
-A pesquisa expande automaticamente apenas as ramificações necessárias; limpar a consulta recolhe a árvore (exceto raiz).
+A pesquisa expande automaticamente apenas os ramos necessários; limpar a consulta recolhe a árvore (exceto a raiz).
 As linhas com correspondências também são marcadas na barra de deslocação da árvore; clicar numa marca salta para essa correspondência.
-Para conjuntos de correspondências muito grandes, a aplicação pode limitar a expansão automática e o realce global para manter a interface de utilizador responsiva.
-Quando a barra de pesquisa é fechada, a consulta é limpa após a conclusão da animação de fecho.
+Com conjuntos muito grandes de correspondências, a aplicação pode limitar a expansão automática e o realce global para manter a interface reativa.
+Quando a barra de pesquisa é fechada, a consulta é limpa depois de terminar a animação de fecho.
 
 Restrições:
-* abrir a Pesquisa fecha o Filtro automaticamente;
-* A pesquisa está disponível na Pré-visualização enquanto o painel em árvore está visível;
-* se a árvore estiver oculta, a Pesquisa ficará temporariamente indisponível.
+* abrir Pesquisar fecha Filtrar automaticamente;
+* Pesquisar está disponível na pré-visualização enquanto o painel da árvore estiver visível;
+* se a árvore estiver oculta, Pesquisar fica temporariamente indisponível.
 
-## 10) Filtrar (por nome)
-Mostra apenas os nós que correspondem à string do filtro e os seus pais. As atualizações são rejeitadas.
-* {mod}{shift}N — mostrar/ocultar filtro
-* Esc – fechar filtro
+## 10) Filtro (por nome)
+Mostra apenas os nós que correspondem ao texto do filtro e os respetivos nós pai. A lista é atualizada com um breve atraso enquanto escreve.
+* {mod}{shift}N — mostrar ou ocultar o filtro
+* Esc — fechar o filtro
 
 Restrições:
-* abrir o Filtro fecha a Pesquisa automaticamente;
-* O filtro está disponível na Visualização enquanto o painel em árvore estiver visível;
-* se a árvore estiver oculta, o Filtro ficará temporariamente indisponível.
+* abrir Filtrar fecha Pesquisar automaticamente;
+* Filtrar está disponível na pré-visualização enquanto o painel da árvore estiver visível;
+* se a árvore estiver oculta, Filtrar fica temporariamente indisponível.
 
 ## 11) Opções (painel de definições)
 Disponível à direita:
 * Aplicar definições
 * Processamento de conteúdo
 * Exclusões
-* Extensões
+* Tipos de ficheiro
 
-As alterações em “Exclusões” e “Extensões” são preparadas no painel e aplicadas após clicar em “Aplicar definições”.
+As alterações em «Exclusões» e «Tipos de ficheiro» ficam pendentes no painel e são aplicadas depois de clicar em «Aplicar definições».
 
-Assim que uma caixa de seleção for alterada, a aplicação poderá atualizar as opções disponíveis e as suas contagens em segundo plano. A árvore resultante é reconstruída apenas após clicar em “Aplicar definições”.
+Depois de alterar uma caixa de seleção, a aplicação pode atualizar em segundo plano as opções disponíveis e as respetivas contagens. A árvore resultante só é reconstruída depois de clicar em «Aplicar definições».
 
-Se uma atualização das opções disponíveis for cancelada com o botão X na barra de estado, as alterações inacabadas não serão aplicadas e o painel regressará ao seu último estado concluído.
+Se uma atualização das opções disponíveis for cancelada com o botão X na barra de estado, as alterações por concluir não são aplicadas e o painel regressa ao último estado concluído.
 
-Cada lista possui uma alternância para Todos.
+Cada lista tem uma opção «Todos».
 
-Nota sobre "Extensões":
-* esta lista mostra apenas os ficheiros que têm uma extensão;
-* os ficheiros sem extensão não são adicionados a esta lista e são controlados por uma opção separada em "Exclusões".
+Nota sobre «Tipos de ficheiro»:
+* esta lista mostra apenas ficheiros que têm extensão;
+* os ficheiros sem extensão não são adicionados a esta lista e são controlados por uma opção separada em «Exclusões».
 
 Processamento de conteúdo:
-* esta secção transforma o conteúdo dos ficheiros de texto selecionados sem mudar a árvore;
+* transforma o conteúdo dos ficheiros de texto selecionados sem alterar a árvore;
 * «Ocultar segredos» e «Ocultar dados privados» substituem os valores detetados (secções 12.3 e 12.4);
-* «Comprimir código» mantém as declarações e encurta as implementações nomeadas em 14 linguagens;
-* «Remover comentários» retira os comentários e os comentários de documentação em 20 pacotes de linguagens;
-* «Remover linhas em branco» retira as linhas só de espaços nos mesmos pacotes, preservando literais multilinha;
-* as alterações entram em vigor após «Aplicar definições».
+* «Comprimir código» mantém as declarações e encurta as implementações com nome em 14 linguagens;
+* «Remover comentários» remove os comentários e os comentários de documentação em 20 pacotes de linguagens;
+* «Remover linhas em branco» remove as linhas que contêm apenas espaços nos mesmos pacotes, preservando os literais de várias linhas;
+* as alterações entram em vigor depois de «Aplicar definições».
 
-{mod}P — mostra/oculta o painel.
+{mod}P — mostrar ou ocultar o painel.
 
 ### 11.1 Perfis de parâmetros de projetos locais
-Para pastas locais, o DevProjex recorda os últimos parâmetros de projeto aplicados:
+Para pastas locais, o DevProjex memoriza os últimos parâmetros de projeto aplicados:
 * tipos de ficheiro selecionados;
-* opções selecionadas na secção "Exclusões".
+* opções selecionadas na secção «Exclusões».
 
-O salvamento é realizado quando clica em "Aplicar definições".
-Quando a mesma pasta local for novamente aberta, os parâmetros serão automaticamente restaurados.
+São guardados quando clica em «Aplicar definições».
+Quando a mesma pasta local é aberta novamente, os parâmetros são repostos automaticamente.
 
 Importante:
-* os perfis são guardados apenas para projetos locais;
-* para projetos abertos através do Git Clone, os perfis não são guardados;
-* se algumas opções guardadas já não estiverem disponíveis no projeto atual, serão ignoradas e os restantes parâmetros serão aplicados.
-* se a atualização ou reabertura revelar um novo tipo de ficheiro ou opção em "Exclusões", esta será ativada por defeito;
+* os perfis só são guardados para projetos locais;
+* para projetos abertos com o Git Clone, os perfis não são guardados;
+* se algumas opções guardadas já não estiverem disponíveis no projeto atual, são ignoradas e os restantes parâmetros são aplicados;
+* se uma atualização ou uma nova abertura revelar um novo tipo de ficheiro ou uma nova opção em «Exclusões», esta fica ativada por predefinição;
 * as opções já vistas mantêm a escolha explícita do utilizador: novos ficheiros de um tipo desativado não voltam a ativar esse tipo.
 
 ## 12) Exclusões
-A secção "Exclusões" controla quais os ficheiros e pastas que são excluídos da árvore, conteúdo, cópia e resultados de exportação.
+A secção «Exclusões» controla que ficheiros e pastas são excluídos da árvore, do conteúdo e dos resultados de cópia e exportação.
 
-Um item é mostrado apenas quando todas estas condições são satisfeitas:
-* o seu tipo de ficheiro é selecionado, se o ficheiro tiver um tipo;
-* nenhuma regra de ignorar ativada a exclui.
+Um item só é mostrado quando todas estas condições são cumpridas:
+* o seu tipo de ficheiro está selecionado, se o ficheiro tiver um tipo;
+* nenhuma regra de exclusão ativada o exclui.
 
-As regras de ignorar são cumulativas. Se pelo menos uma regra ativada ocultar um item, outra regra não poderá torná-lo visível.
+As regras de exclusão são cumulativas. Se pelo menos uma regra ativada ocultar um item, outra regra não o pode tornar visível.
 
 ### 12.1 Regras disponíveis
-Dependendo do conteúdo do projeto, poderão ser apresentadas as seguintes opções:
+Consoante o conteúdo do projeto, podem ser apresentadas as seguintes opções:
 
-* Ignorar inteligente
+* Smart Ignore
 * Pastas vazias
-* Arquivos vazios
+* Ficheiros vazios
 * Pastas ocultas
-* Arquivos ocultos
-* Pastas com prefixo de ponto
-* Ficheiros com prefixo de ponto
+* Ficheiros ocultos
+* Pastas com ponto inicial
+* Ficheiros com ponto inicial
 * Ficheiros sem extensão
 
-O seletor da GUI e as linhas de opção do eixo Git na TUI ficam totalmente ocultos quando a filtragem Git não é aplicável: não existe um limite de repositório e o filtro `.gitignore` não pode alterar a árvore atual. Quando o eixo está visível fora de um repositório, a GUI oferece apenas sem filtragem e `.gitignore`, enquanto a TUI desativa as linhas que exigem um repositório. Num repositório Git estão disponíveis os cinco valores normais: sem filtragem, `.gitignore`, ficheiros controlados, ficheiros em staging e todas as alterações atuais; na TUI, um âmbito `diff:<ref>..<ref>` ativo surge numa sexta linha. Escolher um valor substitui o modo Git atual sem alterar o Smart Ignore nem as exclusões básicas. As restantes opções aparecem quando as suas regras podem afetar a árvore atual.
+O seletor da GUI e as linhas de opção do eixo Git na TUI ficam totalmente ocultos quando a filtragem Git não é aplicável: não há limite de repositório e o filtro `.gitignore` não pode alterar a árvore atual. Quando o eixo está visível fora de um repositório, a GUI oferece apenas «sem filtragem» e `.gitignore`, enquanto a TUI desativa as linhas que exigem um repositório. Dentro de um repositório Git, os cinco valores habituais são: sem filtragem, `.gitignore`, ficheiros controlados, ficheiros preparados e todas as alterações atuais; na TUI, um âmbito `diff:<ref>..<ref>` ativo aparece como sexta linha. Escolher um valor substitui o modo Git atual sem alterar o Smart Ignore nem as exclusões básicas. As restantes opções aparecem quando as respetivas regras podem alterar a árvore atual, pelo que a lista pode mudar depois de alterar outra regra ou um tipo de ficheiro.
 
-Uma nova opção é ativada por defeito quando aparece pela primeira vez. Uma opção conhecida mantém a escolha do utilizador mesmo que desapareça temporariamente da lista.
+Uma opção nova fica ativada por predefinição quando aparece pela primeira vez. Uma opção conhecida mantém a escolha do utilizador mesmo que desapareça temporariamente da lista.
 
 ### 12.2 Smart Ignore
-O Smart Ignore oculta as dependências, a saída de build, as caches e outros artefactos de serviço de projeto.
+O Smart Ignore oculta dependências, resultados de compilação, caches e outros artefactos de serviço do projeto.
 
-O DevProjex identifica primeiro o tipo de projeto a partir da sua estrutura e dos ficheiros de marcadores, por exemplo:
+Primeiro, o DevProjex identifica o tipo de projeto a partir da estrutura e dos ficheiros marcadores, por exemplo:
 
 * `.csproj`
 * `package.json`
 * `pyproject.toml`
 * `Cargo.toml`
 
-As regras para a pilha correspondente são então aplicadas no âmbito do projeto detetado. Por exemplo, as regras .NET não se estendem a um projeto Python ou JavaScript vizinho.
+Em seguida, as regras da stack correspondente são aplicadas dentro do âmbito do projeto detetado. Por exemplo, as regras do .NET não se estendem a um projeto Python ou JavaScript vizinho.
 
-O nome da pasta por si só nem sempre é suficiente. Nomes ambíguos como `build`, `vendor`, `packages`, `cache`, `pkg` ou `Library` também são verificados pelo seu conteúdo. Isto evita que uma pasta de utilizador comum seja ocultada apenas porque tem um nome semelhante.
+O nome de uma pasta nem sempre é suficiente. Nomes ambíguos como `build`, `vendor`, `packages`, `cache`, `pkg` ou `Library` também são verificados pelo conteúdo. Isto evita que uma pasta normal do utilizador seja ocultada só porque tem um nome semelhante.
 
-Alguns armazenamentos de dependências e diretórios de serviços podem ser reconhecidos pela sua estrutura interna característica, mesmo fora de um projeto explicitamente detetado.
+Alguns repositórios de dependências e diretórios de serviço podem ser reconhecidos pela sua estrutura interna característica, mesmo fora de um projeto detetado explicitamente.
 
-A descoberta do âmbito do projeto é limitada, pelo que carregar uma pasta de utilizador grande não se torna uma análise completa e repetida de cada diretório. As estruturas regulares utilizam a descoberta superficial, enquanto os monorepos reconhecidos são pesquisados mais profundamente. Depois de encontrado um âmbito, o Smart Ignore aplica-se a toda a sua subárvore sem limite de profundidade.
+A deteção de âmbitos de projeto é limitada, para que carregar uma pasta grande do utilizador não se transforme numa análise completa e repetida de cada diretório. As estruturas comuns usam uma deteção superficial, enquanto os monorepos reconhecidos são analisados com mais profundidade. Depois de encontrado um âmbito, o Smart Ignore aplica-se a toda a sua subárvore, sem limite de profundidade.
 
 ### 12.3 Ocultar segredos
-«Ocultar segredos» está desativado por predefinição. A opção analisa apenas o texto selecionado e substitui cada valor detetado no próprio local, mantendo o ficheiro e o código envolvente. Enquanto estiver desativada, não é feita qualquer análise nem apresentado um contador. Depois de analisar a seleção atual, o rótulo mostra o número de valores detetados; se as decisões de manter deixarem menos valores ocultos, mostra os dois números — detetados/ocultos — e o indicador ? da linha informa-os em texto.
+«Ocultar segredos» está desativado por predefinição. Analisa apenas o conteúdo de texto selecionado e substitui cada valor detetado no próprio local, mantendo o ficheiro e o código à sua volta. Enquanto a opção estiver desativada, não é executada nenhuma análise nem é mostrada nenhuma contagem. Depois de analisada a seleção atual, o rótulo mostra o número de valores detetados; se as decisões de manter deixarem menos valores ocultos, mostra detetados/ocultos, e o indicador ? da linha indica ambas as contagens.
 
-As ocorrências são realçadas na pré-visualização. Clique numa delas para manter apenas essa ocorrência sem alterações; {alt}↓ / {alt}↑ percorrem os valores detetados e Enter alterna o ativo. No Terminal Workspace, `[` e `]` percorrem as ocorrências e `Enter` ou `Space` alternam a ocorrência ativa. A decisão aplica-se durante a sessão à pré-visualização, área de transferência, exportação de contexto, pasta e ZIP; não é guardada no perfil do projeto.
+Os excertos ocultados são realçados na pré-visualização. Clique num deles para manter apenas essa ocorrência sem alterações; {alt}↓ / {alt}↑ percorrem as deteções e Enter alterna a ativa. No Terminal Workspace, `[` e `]` percorrem as ocorrências e `Enter` ou `Space` alternam a ativa. A decisão aplica-se durante a sessão atual à pré-visualização, à área de transferência, à exportação de contexto, à cópia em pasta e ao ZIP; não é guardada no perfil do projeto.
 
-O menu de contexto da pré-visualização alarga estas decisões. Um clique com o botão direito numa ocorrência detetada permite manter — ou voltar a ocultar — numa única ação todas as ocorrências da sua regra ou todas as ocorrências detetadas no mesmo ficheiro. Um clique com o botão direito num valor selecionado dentro do conteúdo do ficheiro adiciona uma marcação manual: «Ocultar … aqui» oculta apenas essa ocorrência durante a sessão, «Ocultar sempre …» cria uma marcação persistente para todas as ocorrências do valor, e «Ocultar … como dado privado» cria uma marcação persistente controlada por «Ocultar dados privados». «Remover marcação» aparece sobre uma marcação manual e elimina-a; um valor que o detetor continua a encontrar permanece oculto. O valor manual é uma única linha de 8 a 512 carateres selecionada dentro do conteúdo do ficheiro. Criar uma marcação ativa automaticamente a opção correspondente. As marcações persistentes guardam apenas uma identidade do valor com chave e a sua classe, nunca o texto original.
+O menu de contexto da pré-visualização alarga estas decisões. Clique com o botão direito numa ocorrência detetada para manter — ou voltar a ocultar — numa única ação todas as ocorrências da sua regra ou todas as ocorrências detetadas no mesmo ficheiro. Clique com o botão direito num valor selecionado no conteúdo do ficheiro para o marcar manualmente: «Ocultar … aqui» oculta apenas essa ocorrência durante a sessão, «Ocultar sempre …» cria uma marcação persistente para todas as ocorrências do valor, e «Ocultar … como dado privado» cria uma marcação persistente controlada por «Ocultar dados privados». «Remover marcação» aparece numa marcação manual e elimina-a; um valor que o detetor continua a encontrar permanece oculto. Um valor manual tem de ser uma única linha de 8 a 512 caracteres selecionada no conteúdo do ficheiro. Criar uma marcação ativa automaticamente a opção correspondente. As marcações persistentes guardam apenas uma identidade do valor com chave e a sua classe, nunca o texto original.
 
-Uma cópia em pasta ou ZIP também altera o texto correspondente e pode deixar de compilar ou executar. Os ficheiros binários não são analisados e são copiados sem alterações. Um ficheiro de texto selecionado com mais de 16 MiB é omitido e assinalado, enquanto o restante conteúdo de saída é produzido. Uma falha de deteção interrompe toda a operação.
+Uma cópia em pasta ou ZIP também altera o texto correspondente e pode deixar de compilar ou de ser executada. Os ficheiros binários são copiados sem alterações e não são analisados. Um ficheiro de texto selecionado com mais de 16 MiB é omitido e indicado, enquanto o resto da saída é concluído. Uma falha de deteção interrompe toda a operação.
 
-O contador informa apenas sobre correspondências com as regras. Zero não significa que o projeto é seguro. Na CLI, utilize `--hide-secrets`; os detalhes estão em `Docs/HideSecrets.md`.
+A contagem indica apenas correspondências com as regras. Zero não significa que o projeto seja seguro. A CLI usa `--hide-secrets`; os detalhes técnicos e os limites estão em `Docs/HideSecrets.md`.
 
 ### 12.4 Ocultar dados privados
-«Ocultar dados privados» está desativado por predefinição. A opção deteta endereços de e-mail, endereços IP globais, nomes de utilizador locais em caminhos, endereços MAC e números de telefone internacionais nos ficheiros de texto selecionados. Os resultados usam as mesmas decisões da pré-visualização e o mesmo fluxo de saída de Ocultar segredos; as marcações manuais criadas com «Ocultar … como dado privado» pertencem a esta classe e seguem esta opção (secção 12.3). Os nomes de utilizador locais nos cabeçalhos de caminho gerados e na raiz da árvore são mascarados como uma única descoberta partilhada: o contador conta-a como um valor, o indicador ? informa se está oculta ou visível, e um clique alterna todos os caminhos mascarados de uma vez.
+«Ocultar dados privados» está desativado por predefinição. Deteta endereços de e-mail, endereços IP globais, nomes de utilizador locais em caminhos, endereços MAC e números de telefone internacionais nos ficheiros de texto selecionados. As deteções usam as mesmas decisões da pré-visualização e o mesmo fluxo de saída de «Ocultar segredos»; as marcações manuais criadas com «Ocultar … como dado privado» pertencem a esta classe e seguem esta opção (secção 12.3). Os nomes de utilizador locais nos cabeçalhos de caminho gerados e na raiz da árvore são mascarados como uma única deteção partilhada: a contagem inclui-a como um valor, o indicador ? indica se está oculta ou visível, e um clique alterna todos os caminhos mascarados.
 
-Intervalos e anfitriões de documentação, utilizadores comuns de CI, resolvedores DNS públicos conhecidos e números fictícios documentados permanecem visíveis. Zero correspondências não garante privacidade. A CLI usa `--hide-private-data`; as regras completas e os limites da primeira fase estão em `Docs/HidePrivateData.md`.
+Os intervalos e anfitriões de documentação, os nomes de utilizador comuns de CI, os resolvedores DNS públicos conhecidos e os intervalos de telefones fictícios documentados permanecem visíveis. Zero correspondências não é garantia de privacidade. A CLI usa `--hide-private-data`; as regras completas e os limites da primeira fase estão em `Docs/HidePrivateData.md`.
 
-### 12.5 Utilizar .gitignore
-Quando ativado, o DevProjex aplica todos os `.gitignore` acessíveis, e não apenas o ficheiro na raiz da pasta aberta.
+### 12.5 Usar .gitignore
+Quando ativado, o DevProjex segue a vista da árvore de trabalho do `git status`: os ficheiros controlados permanecem visíveis e os não controlados são mostrados, a menos que as regras de exclusão do repositório os excluam. Aplica todos os `.gitignore` acessíveis, e não apenas o ficheiro na raiz da pasta aberta, incluindo os que estão acima dela até à raiz do repositório.
 
 Cada `.gitignore` aplica-se:
 
-* para a pasta que o contém;
-* para todas as pastas acessíveis abaixo do mesmo;
+* à pasta que o contém;
+* a todas as pastas acessíveis abaixo dela;
 * apenas dentro desse âmbito.
 
-As regras de um `.gitignore` aninhado não afetam as pastas pai ou irmã.
+As regras de um `.gitignore` aninhado não afetam as pastas pai nem as irmãs.
 
-Para um caminho específico, as regras são processadas a partir do pai `.gitignore` para ficheiros mais profundos. Dentro de um ficheiro, as regras são processadas de cima para baixo. A última regra correspondente determina o resultado do Git.
+Para um caminho específico, as regras são processadas do `.gitignore` pai em direção aos mais profundos. Dentro de um ficheiro, as regras são processadas de cima para baixo. A última regra correspondente determina o resultado do Git.
 
-Uma regra que começa por `!` cancela uma eliminação anterior do Git apenas dentro do seu âmbito. Não é possível restaurar um ficheiro enquanto a sua pasta pai permanecer eliminada. Um `.gitignore` dentro de uma pasta totalmente eliminada e inacessível não participa na avaliação.
+Uma regra que começa por `!` cancela uma exclusão anterior do Git apenas dentro do seu âmbito. Não pode repor um ficheiro enquanto a sua pasta pai continuar excluída. Um `.gitignore` dentro de uma pasta totalmente excluída e inacessível não participa na avaliação.
 
-Uma linha malformada ou sem suporte é ignorada de forma independente. Outras regras válidas nesse ficheiro e regras em escopos vizinhos continuam a funcionar.
+Uma linha mal formada ou não suportada é ignorada de forma independente. As restantes regras válidas desse ficheiro e as regras dos âmbitos vizinhos continuam a funcionar.
 
-Esta opção apenas abrange os ficheiros `.gitignore` da árvore de trabalho. As regras de exclusão de `.git/info/exclude` e as regras globais de exclusão do Git não são aplicadas; as definições efetivas do repositório para comparação de caminhos, como `core.ignoreCase` e, no macOS, `core.precomposeUnicode`, são respeitadas. Quando existe um índice Git legível para o âmbito do repositório responsável pelo caminho, os ficheiros controlados permanecem visíveis mesmo que correspondam ao `.gitignore`; sem esse índice ou a CLI do Git, esse âmbito regressa em segurança à avaliação apenas por padrões.
+O ficheiro local do repositório `.git/info/exclude` também é aplicado, com prioridade inferior à do `.gitignore` da raiz. Uma pasta aninhada com o seu próprio `.git` também segue o `git status`: um repositório incorporado que não esteja declarado em `.gitmodules` é opaco, pelo que os seus ficheiros não são mostrados, enquanto um submódulo declarado aplica o seu próprio `.gitignore` e `info/exclude`. Selecione `none` para ver os ficheiros dos repositórios incorporados. As regras globais de exclusão do Git (`core.excludesFile`) não são aplicadas; as definições efetivas do repositório para comparação de caminhos, como `core.ignoreCase` e, no macOS, `core.precomposeUnicode`, são respeitadas. Uma ligação simbólica com o nome `.gitignore` não é seguida, tal como o Git faz com este ficheiro de controlo. Se um ficheiro `.gitignore` ou `info/exclude` não puder ser lido, o âmbito do respetivo diretório é excluído em segurança e a análise indica um acesso parcial, em vez de incluir silenciosamente ficheiros sem a avaliação completa das regras. Quando existe um índice legível para o âmbito do repositório a que o caminho pertence, os ficheiros controlados permanecem visíveis mesmo que correspondam ao `.gitignore`; sem esse índice ou sem a CLI do Git, esse âmbito regressa em segurança à avaliação apenas por padrões.
 
-Uma ligação simbólica com o nome `.gitignore` não é seguida, de acordo com o comportamento do Git para este ficheiro de controlo. Se um `.gitignore` normal não puder ser lido, o âmbito do respetivo diretório é excluído por completo de forma segura e a análise comunica acesso parcial em vez de incluir ficheiros sem avaliar todas as regras.
-
-O perfil integrado `standard` seleciona `gitignore` e os oito grupos de exclusão: `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files` e `extensionless-files`.
+O perfil integrado `standard` seleciona `gitignore`, além de `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files` e `extensionless-files`.
 
 ### 12.6 Apenas ficheiros controlados pelo Git
-"Apenas ficheiros controlados pelo Git" constrói a etapa Git da árvore a partir dos ficheiros existentes na árvore de trabalho registados em cada índice Git legível. Os ficheiros controlados modificados e os novos ficheiros adicionados ao índice continuam incluídos; os ficheiros não controlados são excluídos. Esta é a árvore de trabalho atual, não uma captura histórica do `HEAD` nem de um repositório remoto.
+«Apenas ficheiros controlados pelo Git» constrói a etapa Git da árvore a partir dos ficheiros existentes na árvore de trabalho registados em cada índice Git legível. Os ficheiros controlados modificados e os novos ficheiros preparados continuam incluídos; os ficheiros não controlados são excluídos. Esta é a árvore de trabalho atual, não uma captura histórica do `HEAD` nem de um repositório remoto.
 
-Cada repositório aninhado e cada worktree acessível são processados de forma independente em qualquer nível de profundidade acessível. Um repositório filho não herda os caminhos controlados do repositório pai nem de um repositório irmão. Este modo requer a CLI do Git; um índice vazio, mas legível, é válido. Se o espaço de trabalho no terminal (TUI) for iniciado neste modo e nenhum índice aplicável puder ser carregado, o espaço de trabalho não é aberto. Se o modo for selecionado interativamente num espaço de trabalho TUI já aberto e nenhum índice aplicável puder ser carregado, a alteração é rejeitada e o último modo Git utilizável permanece ativo. Na mesma situação, os comandos diretos falham com um erro de política ou verificação. O DevProjex nunca passa silenciosamente para `.gitignore`. Quando outro índice aplicável é legível, os âmbitos aninhados indisponíveis são excluídos com um aviso.
+Cada repositório é resolvido de forma independente: os repositórios irmãos dentro da pasta aberta e os submódulos declarados usam cada um o seu próprio índice, e um repositório filho não herda os caminhos controlados do repositório pai nem de um irmão. Um repositório incorporado que não esteja declarado em `.gitmodules` continua opaco, tal como no modo `.gitignore`. Este modo requer a CLI do Git; um índice vazio, mas legível, é válido. Se o Terminal Workspace (TUI) for iniciado neste modo e nenhum índice aplicável puder ser carregado, o espaço de trabalho não é aberto. Se o modo for selecionado interativamente num espaço de trabalho TUI já aberto e nenhum índice aplicável puder ser carregado, a alteração é rejeitada e o último modo Git utilizável permanece ativo. Na mesma situação, os comandos diretos devolvem uma falha de política ou de verificação. O DevProjex nunca passa silenciosamente para `.gitignore`. Se outro índice aplicável puder ser lido, os âmbitos aninhados indisponíveis são excluídos com um aviso.
 
-Num espaço de trabalho Desktop já aberto, a seleção explícita permanece visível e falha em segurança: a saída e a exportação são bloqueadas quando a prontidão falha, enquanto a prontidão parcial permite continuar com um aviso localizado.
+Num espaço de trabalho do Desktop já aberto, a seleção explícita de ficheiros controlados permanece visível e falha em segurança: a saída e a exportação são bloqueadas quando a prontidão falha, enquanto a prontidão parcial continua com um aviso localizado.
 
-Os modos Git são mutuamente exclusivos; `none` desativa a filtragem Git. Os modos momentâneos `staged`, `changes` e `diff:<ref>..<ref>` não são guardados nos perfis. Enquanto um modo momentâneo está ativo, o perfil local do projeto da GUI mantém o último modo persistente ativado, `gitignore` ou `tracked`. `none` só é guardado quando está ativo no momento da gravação. A TUI e a CLI recusam guardar um perfil portátil enquanto um modo momentâneo está ativo.
+Os modos Git são mutuamente exclusivos; `none` desativa a filtragem Git. Os modos momentâneos `staged`, `changes` e `diff:<ref>..<ref>` não são guardados nos perfis. Enquanto um modo momentâneo está ativo, o perfil local do projeto na GUI mantém o último modo persistente ativado, `gitignore` ou `tracked`. O modo `none` só é guardado quando está ativo no momento da gravação. A TUI e a CLI recusam guardar um perfil portátil enquanto um modo momentâneo está ativo.
 
 ### 12.7 Relação entre a filtragem Git e o Smart Ignore
-O modo Git selecionado e o Smart Ignore são controlos independentes. O modo Git é aplicado primeiro em cada âmbito Git acessível; depois, o Smart Ignore processa os elementos restantes; por fim, atuam as regras básicas.
+O modo Git selecionado e o Smart Ignore são controlos independentes. O modo Git é aplicado primeiro em cada âmbito Git acessível. Depois, o Smart Ignore processa os itens restantes e, por fim, são aplicadas as regras básicas.
 
-O Smart Ignore pode ficar oculto enquanto o modo Git selecionado já abranger todos os seus candidatos e aparecer depois de esse modo ser alterado ou desativado. Num repositório Git, todos os modos que dependem do repositório permanecem disponíveis.
+O Smart Ignore pode ficar oculto enquanto o modo Git selecionado já abranger todos os seus candidatos e aparecer depois de o modo Git ser alterado ou desativado. Dentro de um repositório Git, todos os modos Git que dependem do repositório continuam disponíveis.
 
-Uma regra de negação Git iniciada por `!` cancela apenas o resultado Git. Não desativa o Smart Ignore nem uma regra básica.
+Uma regra de negação do Git que começa por `!` cancela apenas um resultado do Git. Não desativa o Smart Ignore nem uma regra básica.
 
 ### 12.8 Regras básicas
-"Pastas com prefixo de ponto" e "Ficheiros com prefixo de ponto" inspecionam o nome do item.
+«Pastas com ponto inicial» e «Ficheiros com ponto inicial» verificam o nome do item.
 
-"Pastas ocultas" e "Ficheiros ocultos" inspecionam o atributo oculto do sistema. Em algumas plataformas, um nome com prefixo de ponto e o atributo do sistema podem descrever o mesmo item ou itens diferentes.
+«Pastas ocultas» e «Ficheiros ocultos» verificam o atributo oculto do sistema. Em algumas plataformas, um nome iniciado por ponto e o atributo do sistema podem descrever o mesmo item ou itens diferentes.
 
-"Ficheiros vazios" oculta ficheiros cujo tamanho é 0 bytes.
+«Ficheiros vazios» oculta os ficheiros com tamanho de 0 bytes.
 
-"Ficheiros sem extensão" oculta ficheiros como `Dockerfile`, `Makefile` e `README`.
+«Ficheiros sem extensão» oculta ficheiros como `Dockerfile`, `Makefile` e `README`.
 
-"Pastas vazias" oculta as pastas logicamente vazias. Uma pasta está logicamente vazia quando não permanece nenhum ficheiro ou subpasta visível após os tipos de ficheiro selecionados e todas as outras regras serem aplicadas.
+«Pastas vazias» oculta as pastas logicamente vazias. Uma pasta está logicamente vazia quando não resta nenhum ficheiro ou subpasta visível depois de aplicados os tipos de ficheiro selecionados e todas as outras regras.
 
-A contagem de pastas vazias pode, portanto, mudar depois de outra regra ser alterada: ocultar ficheiros pode tornar as pastas que os contêm logicamente vazias.
+Por isso, a contagem de pastas vazias pode mudar depois de alternar outra regra: ocultar ficheiros pode deixar logicamente vazias as pastas que os contêm.
 
 ### 12.9 Contadores
-A contagem junto a uma regra mostra a sua contribuição direta nas definições atuais, e não o número físico de itens semelhantes no disco.
+A contagem junto a uma regra mostra a sua contribuição direta com as definições atuais, e não o número físico de itens semelhantes no disco.
 
-Um item não é atribuído a vários contadores sobrepostos ao mesmo tempo. Por exemplo, a pasta `.git` pode ter um nome com prefixo de ponto e o atributo Hidden do sistema, mas a sua eliminação é atribuída apenas a uma regra.
+Um item não é atribuído ao mesmo tempo a vários contadores sobrepostos. Por exemplo, a pasta `.git` pode ter simultaneamente um nome iniciado por ponto e o atributo Oculto do sistema, mas a sua exclusão é atribuída a uma única regra.
 
-Uma ordem estável é utilizada para selecionar o proprietário de uma eliminação:
+É usada uma ordem estável para escolher a regra à qual uma exclusão é atribuída:
 
-* pastas: `.gitignore`, Smart Ignore, nome com prefixo de ponto, atributo oculto do sistema;
-* ficheiros: `.gitignore`, Smart Ignore, nome com prefixo de ponto, sem extensão, ficheiro vazio, atributo oculto do sistema.
+* pastas: `.gitignore`, Smart Ignore, nome com ponto inicial, atributo Oculto do sistema;
+* ficheiros: `.gitignore`, Smart Ignore, nome com ponto inicial, sem extensão, ficheiro vazio, atributo Oculto do sistema.
 
-Esta ordem afeta apenas os contadores. A visibilidade final segue uma regra mais simples: um item fica oculto se algum mecanismo habilitado o eliminar.
+Esta ordem afeta apenas os contadores. A visibilidade final segue uma regra mais simples: um item fica oculto se qualquer mecanismo ativado o excluir.
 
-### 12.10 Aplicando alterações
-A troca das caixas de seleção atualiza primeiro as definições e os contadores disponíveis no painel. A árvore final é reconstruída após a seleção de "Aplicar definições".
+### 12.10 Aplicar alterações
+Alternar as caixas de seleção atualiza primeiro as definições disponíveis e os contadores do painel. A árvore final é reconstruída depois de selecionar «Aplicar definições».
 
-Se a preparação das definições for cancelada, o DevProjex faz com que o painel regresse ao último estado totalmente concluído. As regras parcialmente calculadas não são aplicadas.
+Se a preparação das definições for cancelada, o DevProjex devolve o painel ao último estado totalmente concluído. As regras calculadas parcialmente não são aplicadas.
 
-## 13) Como são calculadas a árvore e as métricas
+## 13) Como a árvore e as métricas são calculadas
 O resultado depende de:
-* Extensões selecionadas
-* Ignorar regras
+* tipos de ficheiro selecionados
+* regras de exclusão
 * filtro ativo
-* nós de árvore verificados (para operações baseadas em seleção)
+* nós marcados na árvore (para operações baseadas na seleção)
 
 Se o acesso for negado, o nó mantém o nome e o ícone habituais e recebe o sufixo «[acesso negado]».
 
 ### 13.1 O que mostram os contadores da barra de estado
-A barra de estado possui dois blocos:
+A barra de estado tem dois blocos:
 * Árvore — métricas da saída de texto da árvore;
-* Conteúdo — métricas de saída de conteúdo de ficheiro exportado.
+* Conteúdo — métricas da saída do conteúdo dos ficheiros exportados.
 
 Formato:
 * Linhas
 * Caracteres
-* ~Tokens (aproximado)
+* ≈Tokens (aproximado)
 
-Os valores grandes são apresentados com sufixos compactos (K/M).
+Os valores grandes são mostrados com sufixos compactos (K/M).
 
 Importante:
-* "Linhas" no bloco "Árvore" significa o número de linhas na representação final da árvore, e não o número de ficheiros no disco;
-* este valor inclui pastas, ficheiros e elementos de serviço de árvore (por exemplo, nós de acesso negado).
+* «Linhas» no bloco «Árvore» é o número de linhas da representação final da árvore, e não o número de ficheiros no disco;
+* este valor inclui pastas, ficheiros e elementos de serviço da árvore (por exemplo, nós com acesso negado).
 
-### 13.2 Como são calculadas as métricas
-Métricas de árvores:
-* são calculados a partir da produção real da árvore gerada pelo mesmo pipeline de exportação;
-* respeitar o formato de árvore atual.
+### 13.2 Como as métricas são calculadas
+Métricas da árvore:
+* são calculadas a partir da saída real da árvore gerada pelo mesmo pipeline de exportação;
+* respeitam o formato de árvore atual.
 
-Métricas de conteúdo:
-* siga as mesmas regras da cópia/exportação de conteúdos;
-* os ficheiros binários são eliminados;
-* ficheiros vazios e apenas os espaços em branco são contados através de marcadores de serviço (`[No Content, 0 bytes]`, `[Whitespace, N bytes]`).
+Métricas do conteúdo:
+* seguem as mesmas regras da cópia e da exportação de conteúdo;
+* os ficheiros binários são excluídos;
+* os ficheiros vazios e os que contêm apenas espaços são contados através de marcadores de serviço (`[No Content, 0 bytes]`, `[Whitespace, N bytes]`).
 
 ### 13.3 Quando os contadores são atualizados
 O recálculo é executado:
-* depois de abrir/atualizar um projeto;
-* após a aplicação de definições (exclusões e extensões);
-* quando as caixas de seleção da árvore mudam (com debounce);
-* ao mudar o formato de árvore (para operações em que é utilizada a saída de árvore).
-* quando o cálculo em segundo plano é cancelado, os contadores são definidos como 0 até ao próximo recálculo concluído.
+* depois de abrir ou atualizar um projeto;
+* depois de aplicar as definições (exclusões e tipos de ficheiro);
+* quando as caixas de seleção da árvore mudam (com um breve atraso);
+* ao mudar o formato da árvore (para operações em que é usada a saída da árvore);
+* quando o cálculo em segundo plano é cancelado, os contadores ficam a 0 até ao próximo recálculo concluído.
 
 ## 14) Ícones
 Ordem de seleção dos ícones:
-1) tipo de nó (pasta/ficheiro)
-2) nome exato (se a regra existir)
+1) tipo de nó (pasta ou ficheiro)
+2) nome exato (se existir uma regra)
 3) extensão
 4) caso contrário — desconhecido
 
 ## 15) Tema e efeitos
-A secção Tema permite selecionar Sistema, Claro ou Escuro e um efeito de fundo:
+A secção Tema permite escolher Sistema, Claro ou Escuro e um efeito de fundo:
 * Transparência
 * Desfoque
 * Mica
 
-Sistema é selecionado por predefinição e acompanha as alterações do tema do sistema operativo. Após o primeiro arranque ou a reposição das definições, um tema claro do sistema utiliza um fundo opaco regular, enquanto um tema escuro do sistema utiliza Desfoque. Se não for possível determinar a preferência do sistema, o DevProjex utiliza Escuro com Desfoque. Os temas Claro e Escuro memorizam os seus efeitos separadamente. Uma seleção explícita de Claro ou Escuro ignora as alterações do sistema até que Sistema seja novamente selecionado.
+Sistema está selecionado por predefinição e acompanha as alterações de tema do sistema operativo. Após o primeiro arranque ou uma reposição das definições, um tema claro do sistema começa com um fundo opaco normal, enquanto um tema escuro do sistema começa com Desfoque. Se não for possível determinar a preferência do sistema, o DevProjex usa Escuro com Desfoque. Claro e Escuro memorizam os seus efeitos separadamente. Uma seleção explícita de Claro ou Escuro ignora as alterações do sistema até que Sistema seja novamente selecionado.
 
-Os efeitos são mutuamente exclusivos. Clicar novamente no efeito selecionado desativa-o e restaura um fundo opaco regular.
+Os efeitos são mutuamente exclusivos. Clicar novamente no efeito selecionado desativa-o e repõe um fundo opaco normal.
 
-Configurações disponíveis:
-* Transparência de fundo — disponível para Transparência e Desfocagem.
-* Contraste do painel superior — ajusta o painel principal contendo os comandos de visualização, pesquisa, filtro e formato de árvore.
+Definições disponíveis:
+* Transparência de fundo — disponível para Transparência e Desfoque.
+* Contraste da barra superior — ajusta o painel principal que contém os comandos de pré-visualização, pesquisa, filtro e formato da árvore.
 * Transparência do menu — aplica-se igualmente ao menu principal e aos seus submenus.
-* Visibilidade da aresta — ajusta a intensidade com que as arestas da interface são mostradas.
+* Visibilidade do contorno — ajusta a intensidade com que os contornos da interface são mostrados.
 
-O Mica utiliza o material do sistema da plataforma e não tem uma configuração separada de transparência de fundo. Se o efeito Desfoque ou Mica selecionado não estiver disponível, a aplicação tenta primeiro o outro efeito nativo. Um fundo opaco regular é utilizado apenas quando nem o Desfoque nem a Mica estão disponíveis.
+O Mica usa o material do sistema da plataforma e não tem uma definição própria de transparência de fundo. Se o efeito Desfoque ou Mica selecionado não estiver disponível, a aplicação tenta primeiro o outro efeito nativo. Só é usado um fundo opaco normal quando nem o Desfoque nem o Mica estão disponíveis.
 
-No modo Transparência, o fundo da janela principal permanece transparente. Os menus, submenus e outras superfícies pop-up utilizam o Desfoque quando suportados, para que a árvore e os elementos de conteúdo por trás deles não interfiram com a legibilidade.
+No modo Transparência, o fundo da janela principal permanece transparente. Os menus, submenus e outras superfícies pop-up usam Desfoque quando é suportado, para que os elementos da árvore e do conteúdo por trás deles não prejudiquem a leitura.
 
 ## 16) Ajuda
 
 ### 16.1 Atualizações
-«Ajuda → Atualizações» compara a versão atual com a versão estável mais recente publicada no GitHub. As verificações automáticas estão desativadas por predefinição; quando ativadas, o DevProjex verifica no arranque após terem passado pelo menos sete dias desde a última verificação bem-sucedida. A caixa de seleção é aplicada imediatamente. O último resultado bem-sucedido é mantido entre execuções da aplicação e não é apagado por uma falha de rede posterior. A instalação continua a ser uma ação do utilizador.
+«Ajuda → Atualizações» compara a versão atual com a versão estável mais recente publicada no GitHub. As verificações automáticas estão desativadas por predefinição; quando ativadas, o DevProjex verifica no arranque depois de passarem pelo menos sete dias desde a última verificação bem-sucedida. A caixa de seleção tem efeito imediato. O último resultado bem-sucedido é mantido entre execuções da aplicação e não é apagado por uma falha de rede posterior. A instalação continua a ser uma ação do utilizador.
 
-### 16.2 Repor configurações
-Repor definições (Ajuda → Repor definições) restaura o tema predefinido, os efeitos, o modo compacto, as definições de animação e o idioma da interface. Os perfis de projeto, histórico e ficheiros em disco não são alterados.
+### 16.2 Repor definições
+Repor definições («Ajuda → Repor definições») repõe os valores predefinidos do tema, dos efeitos, do modo compacto, das animações e do idioma da interface. Os perfis de projeto, o histórico e os ficheiros no disco não são alterados.
 
 ### 16.3 Repor dados
-Repor dados (Ajuda → Repor dados) remove os perfis de parâmetros de projeto local guardados:
+Repor dados («Ajuda → Repor dados») remove os perfis de parâmetros guardados dos projetos locais:
 * tipos de ficheiro selecionados;
-* opções selecionadas na secção "Exclusões";
+* opções selecionadas na secção «Exclusões»;
 * definições selecionadas de processamento de conteúdo;
 * marcações manuais de segredos.
 
-Importante:
-* O histórico recente das pastas locais não é apagado;
-* O histórico dos repositórios recentes na janela Git Clone não é limpo;
-* ficheiros e pastas no disco não são modificados ou eliminados.
+Também limpa as sessões concluídas do diário do agente (secção 19.3); as sessões ativas são mantidas.
 
-## 17) Línguas
-O idioma é selecionado através do menu Idioma.
-O idioma selecionado é guardado entre inicializações. “Ajuda → Repor definições” limpa a escolha de idioma guardada e devolve o idioma da interface ao padrão.
+Importante:
+* o histórico de pastas locais recentes não é apagado;
+* o histórico de repositórios recentes na janela do Git Clone não é apagado;
+* os ficheiros e as pastas no disco não são modificados nem eliminados.
+
+## 17) Idiomas
+O idioma é selecionado no menu Idioma.
+O idioma selecionado é mantido entre execuções. «Ajuda → Repor definições» limpa o idioma guardado e devolve a interface ao idioma predefinido.
 
 ## 18) Barra de progresso e cancelamento
 O centro da barra de estado mostra a operação ativa e o seu progresso.
@@ -573,16 +581,47 @@ Modos de progresso:
 * Determinado — com percentagem (0–100).
 
 Comportamento:
-* durante o cálculo dos dados de segundo plano, é mostrado o progresso percentual;
-* para algumas operações do Git, a percentagem é apresentada quando a fonte de progresso a fornece;
-* as atualizações das opções disponíveis e a aplicação de definições são mostradas quando a operação demora um tempo percetível;
+* durante o cálculo de dados em segundo plano, o progresso é mostrado em percentagem;
+* em algumas operações do Git, a percentagem é mostrada quando a fonte de progresso a fornece;
+* a atualização das opções disponíveis e a aplicação das definições são mostradas quando a operação demora um tempo percetível;
 * as operações rápidas terminam sem mostrar progresso.
 
 Botão X (cancelar) na barra de estado:
-* realiza cancelamento de melhor esforço para operações que suportem cancelamento;
+* tenta cancelar, na medida do possível, as operações que suportam cancelamento;
 * interrompe o cálculo de dados em segundo plano;
-* quando uma atualização das opções disponíveis é cancelada, faz com que o painel regresse ao seu último estado concluído;
-* para operações sem suporte para cancelamento, interrompe a indicação da barra de estado, enquanto a operação em si pode ainda terminar em segundo plano.
+* quando uma atualização das opções disponíveis é cancelada, devolve o painel ao último estado concluído;
+* nas operações que não suportam cancelamento, interrompe a indicação na barra de estado, embora a própria operação possa ainda terminar em segundo plano.
 
-## 19) Notas
-* Caso as permissões sejam insuficientes, a app pode sugerir reiniciar com elevação; se recusado, será mostrada uma notificação.
+## 19) MCP e agentes de IA
+O DevProjex inclui um servidor MCP local só de leitura. Os agentes de IA, como o Claude Code, o Codex, o Cursor e o VS Code, leem o projeto através dele: a ocultação de segredos está sempre ativa e o agente não pode alterar os ficheiros do projeto. O servidor disponibiliza oito ferramentas: `list_projects`, `get_tree`, `analyze`, `search_project`, `related_files`, `get_file`, `pack_context` e `read_pack`.
+
+### 19.1 Ligar um cliente
+O menu MCP contém:
+* Live context — o servidor segue os itens marcados nesta janela (secção 19.2);
+* Padrão — o servidor não depende da seleção da janela;
+* Diário… — o que os agentes pediram e receberam (secção 19.3);
+* Documentação — abre a documentação do servidor MCP.
+
+Live context e Padrão contêm as mesmas ações — Abrir no Claude Code, Abrir no Codex, Abrir no Cursor, Abrir no VS Code e Outros clientes… —, disponíveis enquanto houver um projeto aberto.
+
+O Claude Code e o Codex são registados através do respetivo comando instalado e, em seguida, o cliente abre-se num novo terminal na pasta do projeto. O Cursor e o VS Code recebem um `.cursor/mcp.json` ou `.vscode/mcp.json` local do projeto; os outros servidores desse ficheiro são mantidos. «Outros clientes…» mostra uma configuração pronta para o Claude Desktop e outros clientes. Se o comando de um cliente não existir ou a ligação falhar, o DevProjex mostra a configuração manual. Depois de uma ligação bem-sucedida, o DevProjex pode propor adicionar o comando `devprojex` ao PATH.
+
+O Codex mantém uma única ligação partilhada ao DevProjex, pelo que ligar outro projeto pede confirmação antes de a substituir. Uma sessão de cliente que já esteja em execução tem de ser reiniciada para carregar o servidor. Num terminal, `devprojex mcp connect` regista o modo Padrão, a menos que adicione `--mode live` para o Live context; `--print` apenas imprime a configuração.
+
+### 19.2 Live context
+No Live context, os itens marcados na árvore definem o foco do agente: os pedidos de árvore, pesquisa, análise, ficheiros relacionados e empacotamento ficam dentro deles. Os filtros da janela — tipos de ficheiro, exclusões e o modo Git — são o limite de acesso: o agente pode ainda abrir outros ficheiros pelo nome, mas apenas os que esses filtros permitem.
+
+A janela não precisa de ficar aberta. O servidor lê a última seleção guardada do projeto em cada pedido, pelo que as novas marcações e as definições aplicadas chegam ao agente no pedido seguinte, sem o reiniciar.
+
+Enquanto uma sessão live está ativa, o título da janela termina com `· Live context (<client>)`, ou com o número de sessões quando estão várias ativas.
+
+### 19.3 Diário
+«MCP → Diário…» mostra o que os agentes pediram e receberam através do DevProjex: as sessões com cliente, modo, chamadas, caracteres, tokens estimados, ficheiros entregues e valores mascarados, e as chamadas da sessão selecionada. Está disponível sem um projeto aberto; com um projeto aberto, «Apenas o projeto atual» está selecionado por predefinição.
+
+O diário é guardado apenas neste computador, na pasta de estado do DevProjex, e mantém no máximo 200 sessões durante 30 dias. Não guarda o conteúdo dos ficheiros, os valores secretos detetados nem o texto das consultas de pesquisa. «Exportar…» guarda uma sessão como recibo em Markdown ou JSON. «Limpar» elimina as sessões concluídas após confirmação; as sessões ativas e as partilhadas com outros projetos são mantidas.
+
+### 19.4 Atividade do agente
+«Ver → Atividade do agente» está desativado por predefinição. Quando está ativado, os ficheiros que o agente recebeu durante a sessão live mais recente são marcados com ✦ na árvore, e a descrição da marca indica quantas vezes o agente recebeu o ficheiro. As marcas nunca alteram filtros nem caixas de seleção. São limpas quando começa uma sessão live mais recente, quando «Atividade do agente» é desativado e quando o projeto é reaberto. As sessões no modo Padrão aparecem no diário, mas não adicionam marcas.
+
+## 20) Notas
+* Se as permissões forem insuficientes, a aplicação pode sugerir reiniciar com privilégios elevados; se recusar, é mostrada uma notificação.

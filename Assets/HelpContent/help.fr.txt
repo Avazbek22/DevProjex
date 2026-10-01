@@ -1,40 +1,40 @@
 ## 1) Qu’est‑ce que c’est et pourquoi
-DevProjex prépare rapidement le contexte d’un projet : affiche la structure dossiers/fichiers, permet de sélectionner des éléments et de copier l’arborescence et/ou le contenu des fichiers dans le presse‑papiers. Utile pour code review, support, formation et partage de structure avec un assistant IA.
+DevProjex prépare rapidement le contexte d’un projet : affiche la structure dossiers/fichiers, permet de sélectionner des éléments et de copier l’arborescence et/ou le contenu des fichiers dans le presse‑papiers. Utile pour la revue de code, le support, la formation et le partage de structure avec un assistant IA.
 
-Important : DevProjex ne modifie pas les fichiers du projet ouvert.
+Important : DevProjex ne modifie pas les fichiers du projet ouvert. La seule exception est une connexion MCP explicite pour Cursor ou VS Code, qui crée ou met à jour `.cursor/mcp.json` ou `.vscode/mcp.json` (section 19.1).
 
 ## 2) Arborescence du projet
 * Icônes de type fichier/dossier.
 * Cases à cocher sur les nœuds.
 * Déplier/replier.
 
-Cases à cocher : cocher un nœud s’applique aux enfants ; l’état des parents se recalculent automatiquement.
+Cases à cocher : cocher un nœud s’applique aux enfants ; l’état des parents est recalculé automatiquement.
 
-Raccourcis :
+Raccourcis :
 * {mod}E — tout déplier
 * {collapseAll} — tout replier (la racine reste ouverte)
 
 ### Menu contextuel
-Clic droit sur un nœud — ou {shift}F10 / touche Menu sur le nœud sélectionné :
-* Afficher dans l’Explorateur de fichiers / Afficher dans le Finder / Ouvrir dans le gestionnaire de fichiers — révèle l’élément dans le gestionnaire de fichiers du système ; le libellé dépend de la plateforme.
+Clic droit sur un nœud — ou {shift}F10 / touche Menu sur le nœud sélectionné :
+* Afficher dans l’Explorateur de fichiers / Afficher dans le Finder / Ouvrir dans le gestionnaire de fichiers — révèle l’élément dans le gestionnaire de fichiers du système ; le libellé dépend de la plateforme.
 * Copier le chemin complet — le chemin absolu de l’élément.
 * Copier le chemin relatif — le chemin depuis la racine du projet, commençant par le nom du dossier racine, par exemple `project/src/File.cs`.
-* Copier le contenu — pour les fichiers : copie le contenu avec les transformations appliquées, exactement comme la copie et l’export.
-* Sélectionner uniquement cet élément — coche uniquement ce nœud et efface le reste de la sélection ; n’apparaît que tant qu’un autre élément est aussi coché.
+* Copier le contenu — pour les fichiers : copie le contenu avec les transformations appliquées, exactement comme la copie et l’export.
+* Sélectionner uniquement cet élément — coche uniquement ce nœud et efface le reste de la sélection ; n’apparaît que tant qu’un autre élément est aussi coché.
 * Développer la branche / Réduire la branche — pour les dossiers.
 
-Si le chemin n’existe plus sur le disque, l’ouverture dans le gestionnaire de fichiers et la copie du contenu affichent un message d’erreur ; la copie des chemins continue de fonctionner.
+Si le chemin n’existe plus sur le disque, l’ouverture dans le gestionnaire de fichiers et la copie du contenu affichent un message d’erreur ; la copie des chemins continue de fonctionner.
 
 ## 3) Fichier
 * Ouvrir le dossier… — ouvrir le dossier racine ({mod}O)
 * Nouvelle fenêtre — ouvrir une nouvelle instance indépendante de DevProjex
 * Récents — liste des dossiers locaux ouverts récemment
 * Actualiser — relire un dossier local et reconstruire l’arborescence (F5)
-* Exporter vers un fichier :
+* Exporter vers un fichier :
   * Exporter l’arborescence
   * Exporter le contenu
   * Exporter arborescence et contenu
-* Exporter le projet :
+* Exporter le projet :
   * Vers un dossier…
   * Vers une archive ZIP…
 
@@ -46,35 +46,35 @@ Les fichiers texte et binaires sont copiés, et les dossiers vides inclus sont c
 
 Pendant l’export, vous ne pouvez pas modifier l’arborescence ou les paramètres, utiliser le filtre, changer le format ou le mode d’aperçu, lancer des commandes Git, actualiser ou ouvrir un autre projet.
 
-Règles de format :
-* Exporter l’arborescence :
+Règles de format :
+* Exporter l’arborescence :
   * ASCII -> uniquement `.txt`.
   * JSON -> `.json` par défaut, avec `.json` et `.txt` disponibles dans la boîte de sauvegarde.
   * XML -> `.xml` par défaut, avec `.xml` et `.txt` disponibles dans la boîte de sauvegarde.
   * MD -> `.md` par défaut, avec `.md` et `.txt` disponibles dans la boîte de sauvegarde.
-* Exporter le contenu — toujours au format texte du contenu, fichier `.txt` (le sélecteur de format d’arborescence n’influence pas).
-* Exporter arborescence et contenu — toujours fichier `.txt` ; le format d’arborescence choisi n’influence que le format du bloc arborescence dans le résultat.
+* Exporter le contenu — toujours au format texte du contenu, fichier `.txt` (le sélecteur de format d’arborescence ne s’applique pas).
+* Exporter arborescence et contenu — toujours fichier `.txt` ; le format d’arborescence choisi n’influence que le format du bloc arborescence dans le résultat.
 
 Les fichiers exportés sont écrits en UTF-8 sans BOM.
 
-### Drag & Drop
+### Glisser-déposer
 Le glisser-déposer fonctionne dans la zone de démarrage (Drop Zone) quand aucun projet n’est chargé.
 
-Règles :
-* vous pouvez déposer un dossier ;
-* vous pouvez déposer un fichier — dans ce cas, le dossier contenant ce fichier est ouvert ;
-* si plusieurs éléments sont déposés, le premier chemin local valide est utilisé ;
-* si un chemin est indisponible ou inexistant, les mêmes vérifications d’accès que pour « Ouvrir le dossier… » sont appliquées ;
+Règles :
+* vous pouvez déposer un dossier ;
+* vous pouvez déposer un fichier — dans ce cas, le dossier contenant ce fichier est ouvert ;
+* si plusieurs éléments sont déposés, le premier chemin local valide est utilisé ;
+* si un chemin est indisponible ou inexistant, les mêmes vérifications d’accès que pour « Ouvrir le dossier… » sont appliquées ;
 * les éléments non pris en charge ou non locaux sont ignorés.
 
 ### Récents
-L’élément « Fichier → Récents » affiche l’historique des dossiers locaux ouverts récemment.
+L’élément « Fichier → Récents » affiche l’historique des dossiers locaux ouverts récemment.
 
-Règles :
-* seuls les dossiers locaux sont ajoutés à la liste ;
-* les dépôts Git clonés via DevProjex ne sont pas ajoutés à cette liste ;
-* aucun doublon n’est créé — rouvrir le même dossier le remonte en haut de la liste ;
-* jusqu’à 32 derniers dossiers sont conservés ;
+Règles :
+* seuls les dossiers locaux sont ajoutés à la liste ;
+* les dépôts Git clonés via DevProjex ne sont pas ajoutés à cette liste ;
+* aucun doublon n’est créé — rouvrir le même dossier le remonte en haut de la liste ;
+* jusqu’à 32 derniers dossiers sont conservés ;
 * l’historique est conservé entre les démarrages de l’application.
 
 Pour chaque élément, le dossier parent et le nom du projet sont affichés, par exemple `Projects / App`.
@@ -82,13 +82,13 @@ Pour chaque élément, le dossier parent et le nom du projet sont affichés, par
 ## 4) Lancement depuis le terminal
 DevProjex fournit un espace de travail interactif dans le terminal et des commandes directes pour les scripts et la CI.
 
-Si la commande est déjà configurée, ouvrez un terminal et exécutez :
+Si la commande est déjà configurée, ouvrez un terminal et exécutez :
 `devprojex --help`
 
 Vous verrez ainsi les commandes et options de premier niveau. Les options et exemples d’une commande s’affichent avec `devprojex help <command>`.
 
-Exemples :
-* `devprojex` — ouvrir l’espace de travail interactif du terminal. Dans cet espace, les actions s’exécutent via la ligne de commande `:` (par exemple `:copy`, `:analyze`, `:branch`, `:language`) ; la liste complète des commandes figure dans l’aide intégrée de l’espace de travail et dans la documentation du projet.
+Exemples :
+* `devprojex` — ouvrir l’espace de travail interactif du terminal. Dans cet espace, les actions s’exécutent via la ligne de commande `:` (par exemple `:copy`, `:analyze`, `:branch`, `:language`) ; la liste complète des commandes figure dans l’aide intégrée de l’espace de travail et dans la documentation du projet.
 * `devprojex tui .` — ouvrir le dossier indiqué directement dans l’espace de travail du terminal.
 * `devprojex open . --preview` — ouvrir le dossier courant dans l’aperçu Desktop.
 * `devprojex analyze . --format json` — analyser le projet courant au format JSON.
@@ -98,39 +98,44 @@ Exemples :
 * `devprojex export project . --as zip -o ../devprojex-submission.zip` — exporter l’arborescence effective vers une archive ZIP.
 * `devprojex export context https://github.com/owner/repo -o -` — empaqueter un dépôt distant sans le cloner soi-même.
 * `devprojex analyze . --git-mode tracked --exclude smart-ignore` — analyser les fichiers suivis par Git avec Smart Ignore.
+* `devprojex search Configure . --symbols` — trouver où une déclaration est définie ; `--symbols` accepte des noms de déclarations et refuse la syntaxe des expressions régulières, tandis que `--regex` recherche du texte avec une expression régulière.
+* `devprojex related src/App.cs` — lister les fichiers qu’un fichier utilise et les fichiers qui l’utilisent.
 * `devprojex mcp --root .` — démarrer le serveur MCP local en lecture seule pour que les agents IA lisent le projet en toute sécurité.
+* `devprojex mcp connect . --client claude-code` — connecter un client IA au projet (section 19).
+* `devprojex mcp log . --last` — afficher la dernière session du journal de l’agent.
 
-Particularités :
-* `.` désigne le dossier courant du terminal ;
-* les chemins contenant des espaces doivent être placés entre guillemets ;
-* `--git-mode` choisit `none`, `gitignore`, `tracked`, `staged`, `changes` ou `diff:<ref>..<ref>` ;
-* `--exclude` gère les exclusions ordinaires séparément de la filtration Git ;
-* les commandes d’analyse et d’exportation sont déterministes et n’ouvrent pas l’interface graphique ;
-* `tui`, `open`, `analyze` et les deux commandes `export` acceptent aussi une URL de dépôt Git ; le clone va dans un cache géré (`devprojex cache`) ;
-* les commandes ont des alias et des formes courtes documentés, par exemple `export ctx`, `-f`, `-n` ; `devprojex help` les affiche ;
-* `analyze --findings` liste les détections de masquage sans leurs valeurs, et `--fail-on-findings` renvoie un code de sortie non nul pour la CI ;
-* la commande ne modifie pas les fichiers du projet — DevProjex fonctionne en lecture seule.
+Particularités :
+* `.` désigne le dossier courant du terminal ;
+* les chemins contenant des espaces doivent être placés entre guillemets ;
+* `--git-mode` choisit `none`, `gitignore`, `tracked`, `staged`, `changes` ou `diff:<ref>..<ref>` ;
+* `--exclude` gère les exclusions ordinaires séparément de la filtration Git ;
+* les commandes d’analyse et d’exportation sont déterministes et n’ouvrent pas l’interface graphique ;
+* `tui`, `open`, `analyze`, `search`, `tree` et les deux commandes `export` acceptent aussi une URL de dépôt Git, et `related` l’accepte via `--project` ; le clone va dans un cache géré (`devprojex cache`) ;
+* les commandes ont des alias et des formes courtes documentés, par exemple `export ctx`, `-f`, `-n` ; `devprojex help` les affiche ;
+* `analyze --findings` liste les détections de masquage sans leurs valeurs, et `--fail-on-findings` renvoie un code de sortie non nul pour la CI ;
+* `export context --max-tokens N` maintient le contexte dans un budget de jetons, et l’option expérimentale `--rank importance` admet d’abord les fichiers les plus importants ;
+* les commandes d’analyse, de recherche et d’exportation ne modifient pas les fichiers du projet — DevProjex fonctionne en lecture seule.
 
-Si la commande `devprojex` ne fonctionne pas, ouvrez dans DevProjex :
-« Aide → Lancement depuis le terminal ».
+Si la commande `devprojex` ne fonctionne pas, ouvrez dans DevProjex :
+« Aide → Lancer depuis le terminal ».
 
 ## 5) Git
-Le menu Git n’est disponible que pour les projets clonés via DevProjex (Git Clone). L’application ne touche pas à vos fichiers — elle travaille uniquement avec le cache.
+« Git → Cloner le dépôt... » clone un dépôt dans le cache de DevProjex et l’ouvre. « Branche » et « Obtenir les mises à jour » ne sont disponibles que pour les projets clonés de cette façon. L’application ne touche pas à vos fichiers — elle travaille uniquement avec le cache.
 
 Le cache est stocké dans le répertoire de cache de l’utilisateur. `devprojex doctor` affiche le chemin effectivement utilisé.
 
-* Branche — affiche la liste des branches disponibles avec indication de la branche active ; le changement met à jour l’arborescence sur la branche choisie. Si la branche existe déjà en local, le changement se fait hors ligne (sans mise à jour). Si elle n’existe pas localement, elle est récupérée (fetch) et créée localement.
-* Obtenir les mises à jour — met à jour uniquement la branche courante : fetch et reset vers origin/<branche>. Pour un projet Git Clone, F5 effectue la même action ; la commande normale « Fichier → Actualiser » est désactivée.
+* Branche — affiche la liste des branches disponibles avec indication de la branche active ; le changement met à jour l’arborescence sur la branche choisie. Si la branche existe déjà en local, le changement se fait hors ligne (sans mise à jour). Si elle n’existe pas localement, elle est récupérée (fetch) et créée localement.
+* Obtenir les mises à jour — met à jour uniquement la branche courante : fetch et reset vers origin/<branche>. Pour un projet cloné, F5 effectue la même action ; la commande normale « Fichier → Actualiser » est désactivée.
 
 ### Fenêtre de clonage
-Dans la fenêtre Git Clone, une liste « Dépôts récents » peut apparaître sous le champ URL.
+Dans la fenêtre « Cloner le dépôt », une liste « Liens récents » peut apparaître sous le champ URL.
 
-Règles :
-* la liste apparaît seulement si l’historique contient déjà des dépôts clonés récemment ;
-* seules les sources réseau de dépôt (`https://`, `ssh://` et la syntaxe SCP) sont ajoutées à la liste ;
-* les chemins locaux et les sources `file://` ne sont pas ajoutés à cette liste ;
-* aucun doublon n’est créé — re-cloner le même dépôt le remonte en haut de la liste ;
-* jusqu’à 16 derniers dépôts sont conservés ;
+Règles :
+* la liste apparaît seulement si l’historique contient déjà des dépôts clonés récemment ;
+* seules les sources réseau de dépôt (`https://`, `ssh://` et la syntaxe SCP) sont ajoutées à la liste ;
+* les chemins locaux et les sources `file://` ne sont pas ajoutés à cette liste ;
+* aucun doublon n’est créé — re-cloner le même dépôt le remonte en haut de la liste ;
+* jusqu’à 16 derniers dépôts sont conservés ;
 * l’historique est conservé entre les démarrages de l’application.
 
 Si vous choisissez un élément dans la liste, l’URL est automatiquement insérée dans le champ de saisie.
@@ -138,108 +143,108 @@ Pendant un clonage actif, la liste est temporairement masquée.
 
 ## 6) Copier
 ### Sélecteur de format de l’arborescence (ASCII / JSON / XML / MD)
-Le sélecteur définit le format de représentation de l’arborescence pour les opérations où l’arbre participe au résultat.
+Le sélecteur définit le format de représentation de l’arborescence pour les opérations où l’arborescence fait partie du résultat.
 
 * ASCII — arborescence textuelle avec branches.
 * JSON — arborescence structurée en JSON.
 * XML — arborescence XML compacte pour les parseurs et outils.
 * MD — liste Markdown imbriquée pour la documentation et les prompts IA.
 
-Le sélecteur influence :
+Le sélecteur influence :
 * Copier l’arborescence
 * Copier l’arborescence + le contenu
 * Exporter l’arborescence
 * Exporter arborescence et contenu
 
-Le sélecteur n’influence pas :
+Le sélecteur n’influence pas :
 * Copier le contenu
 * Exporter le contenu
 
 ### Copier l’arborescence
 Copie l’arborescence du projet.
-S’il y a des nœuds cochés, l’arborescence est construite à partir de la sélection ; si la sélection est vide ou invalide, l’arborescence complète est copiée.
+S’il y a des nœuds cochés, l’arborescence est construite à partir de la sélection ; si la sélection est vide ou invalide, l’arborescence complète est copiée.
 Le format du résultat est défini par le sélecteur de format d’arborescence.
-Raccourcis : {mod}{shift}C et {mod}{alt}C.
+Raccourcis : {mod}{shift}C et {mod}{alt}C.
 
 ### Copier le contenu
-Copie le contenu des fichiers :
-* si des fichiers sont cochés — seuls ceux-ci ; sinon — tous les fichiers du projet ;
-* les fichiers non textuels sont ignorés (y compris les binaires) ;
-* pour les fichiers texte vides, le chemin et la ligne `[No Content, 0 bytes]` sont ajoutés ;
-* pour les fichiers ne contenant que des espaces/retours à la ligne, le chemin et la ligne `[Whitespace, N bytes]` sont ajoutés ;
-* chaque fichier est précédé d’un en-tête avec son chemin local complet (pour les projets Git Clone — le chemin web du dépôt).
-Raccourci : {mod}{alt}V.
+Copie le contenu des fichiers :
+* si des fichiers sont cochés — seuls ceux-ci ; sinon — tous les fichiers du projet ;
+* chaque fichier est précédé d’un en-tête avec son chemin local complet (pour les projets clonés — le chemin web du dépôt) ;
+* les fichiers non textuels sont ignorés (y compris les binaires) ;
+* pour les fichiers texte vides, le chemin et la ligne `[No Content, 0 bytes]` sont ajoutés ;
+* pour les fichiers ne contenant que des espaces/retours à la ligne, le chemin et la ligne `[Whitespace, N bytes]` sont ajoutés.
+Raccourci : {mod}{alt}V.
 
 ### Copier l’arborescence + le contenu
-Combine arborescence et contenu :
-* arborescence depuis la sélection ; si la sélection est vide ou invalide, l’arborescence complète est utilisée ;
-* contenu selon les mêmes règles que « Copier le contenu » ;
+Combine arborescence et contenu :
+* arborescence depuis la sélection ; si la sélection est vide ou invalide, l’arborescence complète est utilisée ;
+* contenu selon les mêmes règles que « Copier le contenu » ;
 * le format du bloc arborescence est défini par le sélecteur de format d’arborescence.
-Raccourci : {mod}{shift}V.
+Raccourci : {mod}{shift}V.
 
 ### Représentations de l’arborescence
 Les formats représentent différemment la même arborescence de projet sélectionnée.
 
-JSON :
+JSON :
 * `rootPath` — chemin racine absolu normalisé avec `/`.
 * `tree` — contenu du dossier racine.
-* L’export JSON utilise ce format d’arborescence : les tableaux contiennent les fichiers, les objets contiennent les sous-dossiers, `/` contient les fichiers du dossier courant, et `[]` représente un dossier vide.
+* L’export JSON utilise ce format d’arborescence : les tableaux contiennent les fichiers, les objets contiennent les sous-dossiers, `/` contient les fichiers du dossier courant, et `[]` représente un dossier vide.
 
-XML :
-* le nœud racine est `<t r="...">` ;
-* les dossiers sont `<d n="...">` ;
+XML :
+* le nœud racine est `<t r="...">` ;
+* les dossiers sont `<d n="...">` ;
 * les fichiers sont `<f>File.cs</f>`.
 
-MD :
-* commence par `Root: ...` ;
-* utilise une liste Markdown imbriquée ;
+MD :
+* commence par `Root: ...` ;
+* utilise une liste Markdown imbriquée ;
 * les dossiers se terminent par `/`.
 
-Arborescence + contenu :
-* le format d’arborescence choisi s’applique au bloc arborescence ;
-* le bloc contenu reste textuel ;
-* les en-têtes de fichiers du bloc contenu utilisent des chemins relatifs avec `/` ;
+Arborescence + contenu :
+* le format d’arborescence choisi s’applique au bloc arborescence ;
+* le bloc contenu reste textuel ;
+* les en-têtes de fichiers du bloc contenu utilisent des chemins relatifs avec `/` ;
 * export en `.txt`.
 
 ## 7) Mode aperçu
 S’ouvre avec le bouton icône œil dans la barre supérieure ou avec {mod}B.
 
-Les boutons latéraux de la souris suivent la navigation du navigateur : Suivant ouvre le mode aperçu et Précédent le ferme. Répéter la direction déjà active n’a aucun effet.
+Les boutons latéraux de la souris suivent la navigation du navigateur : Suivant ouvre le mode aperçu et Précédent le ferme. Répéter la direction déjà active n’a aucun effet.
 
-{mod}{shift}F ouvre ou ferme la recherche dans le contenu des fichiers de l’aperçu. Enter ou F3 passe au résultat suivant ; {shift}Enter ou {shift}F3 au précédent.
+{mod}{shift}F ouvre ou ferme la recherche dans le contenu des fichiers de l’aperçu. Enter ou F3 passe au résultat suivant ; {shift}Enter ou {shift}F3 au précédent.
 
-Affiche le résultat final dans un espace de travail séparé, à côté de l’arborescence. Ce mode ne copie rien dans le presse-papiers et n’exporte rien vers un fichier par lui-même : il sert uniquement à la consultation.
+Affiche le résultat final dans un espace de travail séparé, à côté de l’arborescence. Ce mode ne copie rien dans le presse-papiers et n’exporte rien vers un fichier par lui-même : il sert uniquement à la consultation.
 
-Par défaut, l’espace de travail s’ouvre ainsi :
-* à gauche — l’arborescence du projet ;
-* au centre — le panneau d’aperçu ;
+Par défaut, l’espace de travail s’ouvre ainsi :
+* à gauche — l’arborescence du projet ;
+* au centre — le panneau d’aperçu ;
 * à droite — le panneau des paramètres, s’il était ouvert.
 
-Modes disponibles :
+Modes disponibles :
 * Arborescence
 * Contenu
 * Arborescence et contenu
 
-Les mêmes règles que pour la copie et l’export sont appliquées :
-* les nœuds cochés sont pris en compte ;
-* si la sélection est vide, l’ensemble complet des données est utilisé ;
-* les règles d’ignorance et les paramètres de sélection actuels sont appliqués.
+Les mêmes règles que pour la copie et l’export sont appliquées :
+* les nœuds cochés sont pris en compte ;
+* si la sélection est vide, l’ensemble complet des données est utilisé ;
+* les règles d’exclusion et les paramètres de sélection actuels sont appliqués.
 
-En plus :
-* les fichiers de l’aperçu sont séparés par des lignes horizontales ;
-* pendant le défilement, le chemin du fichier courant reste épinglé en haut ; un clic sur le chemin épinglé fait défiler jusqu’au début de ce fichier ;
-* la barre de défilement de l’aperçu marque les correspondances de recherche et les lignes avec des valeurs détectées ; un clic sur une marque saute à sa ligne ; une valeur conservée reste marquée, et les chemins masqués des en-têtes donnent une seule marque à leur première ligne ;
-* le zoom de l’arborescence et celui de l’aperçu peuvent vivre séparément.
-* en mode aperçu, vous pouvez copier soit le résultat complet actuel, soit le bloc du fichier actuellement visible sans passer par le menu « Copier ».
+En plus :
+* les fichiers de l’aperçu sont séparés par des lignes horizontales ;
+* pendant le défilement, le chemin du fichier courant reste épinglé en haut ; un clic sur le chemin épinglé fait défiler jusqu’au début de ce fichier ;
+* la barre de défilement de l’aperçu marque les correspondances de recherche et les lignes avec des valeurs détectées ; un clic sur une marque saute à sa ligne ; une valeur conservée reste marquée, et les chemins masqués des en-têtes donnent une seule marque à leur première ligne ;
+* le zoom de l’arborescence et celui de l’aperçu peuvent être réglés séparément ;
+* en mode aperçu, vous pouvez copier soit le résultat complet actuel, soit le bloc du fichier actuellement visible sans passer par le menu « Copier ».
 
-Boutons :
-* bouton de copie à gauche dans le panneau supérieur d’aperçu — copie le mode d’aperçu actuel :
+Boutons :
+* bouton de copie à gauche dans le panneau supérieur d’aperçu — copie le mode d’aperçu actuel :
   * Arborescence
   * Contenu
   * Arborescence et contenu
-* X dans le panneau de l’arborescence — masque l’arborescence et laisse uniquement le panneau d’aperçu ;
-* X dans la barre supérieure de l’aperçu — ferme complètement le mode aperçu ;
-* petit bouton de copie dans l’en-tête épinglé du fichier — copie le bloc du fichier actuellement visible tel qu’il est affiché dans l’aperçu ;
+* X dans le panneau de l’arborescence — masque l’arborescence et laisse uniquement le panneau d’aperçu ;
+* X dans la barre supérieure de l’aperçu — ferme complètement le mode aperçu ;
+* petit bouton de copie dans l’en-tête épinglé du fichier — copie le bloc du fichier actuellement visible tel qu’il est affiché dans l’aperçu ;
 * un nouveau clic sur l’icône œil ou {mod}B ferme aussi le mode aperçu.
 
 La recherche et le filtre restent disponibles tant que le panneau de l’arborescence est visible dans l’aperçu.
@@ -248,45 +253,48 @@ Si l’arborescence est masquée, la recherche et le filtre deviennent temporair
 ## 8) Affichage
 ### Zoom
 * {mod}+ / {mod}= — agrandir
-* {mod}- — réduire
+* {mod}- — rétrécir
 * {mod}0 — réinitialiser
 * {mod}molette — zoom fluide dans le panneau sous le curseur
 
-Comportement :
-* en mode normal, c’est l’arborescence qui est zoomée ;
-* en aperçu avec l’arborescence visible, Agrandir, Réduire et Réinitialiser du menu s’appliquent à la fois à l’arborescence et à l’aperçu ;
-* avec {mod}molette, l’arborescence et l’aperçu zooment indépendamment selon la position du curseur ;
+Comportement :
+* en mode normal, c’est l’arborescence qui est zoomée ;
+* en aperçu avec l’arborescence visible, Agrandir, Rétrécir et Réinitialiser le zoom du menu s’appliquent à la fois à l’arborescence et à l’aperçu ;
+* avec {mod}molette, l’arborescence et l’aperçu zooment indépendamment selon la position du curseur ;
 * en mode aperçu seul, seul le panneau d’aperçu est zoomé.
 
-Plage : 6–28, reset : 15.
+Plage : 6–28, réinitialisation : 15.
 
 ### Mode compact
-Rend l’interface plus dense : moins d’espaces dans l’arbre et les paramètres.
+Rend l’interface plus dense : moins d’espaces dans l’arborescence et les paramètres.
 Quand l’espace de travail d’aperçu est actif, le mode compact est activé automatiquement.
 
 ### Animations
-« Affichage → Animations » permet de régler séparément le déploiement de l’arborescence, les compteurs d’état et l’apparition initiale des outils. Les trois animations sont activées par défaut ; lorsqu’une animation est désactivée, son état final s’affiche immédiatement.
+« Affichage → Animations » permet de régler séparément le déploiement de l’arborescence, les compteurs d’état et l’apparition initiale des outils. Les trois animations sont activées par défaut ; lorsqu’une animation est désactivée, son état final s’affiche immédiatement.
 
 ### Police de l’arborescence
-La police de l’arborescence se choisit via « Affichage → Police de l’arborescence ».
-« Par défaut » rétablit la police standard de l’arborescence.
-La police choisie est appliquée après clic sur « Appliquer » dans le panneau des paramètres.
+La police de l’arborescence se choisit via « Affichage → Police de l’arborescence ».
+« Par défaut » rétablit la police standard de l’arborescence.
+La police choisie est appliquée après un clic sur « Appliquer » dans le panneau des paramètres.
 
-## 9) Recherche dans l'arbre
+### Activité de l’agent
+« Affichage → Activité de l’agent » marque les fichiers qu’un agent IA a reçus pendant une session MCP live ; voir la section 19.4.
+
+## 9) Recherche dans l’arborescence
 Ouvre la recherche, met en évidence les correspondances et permet la navigation.
 * {mod}F — afficher/masquer
 * Enter — résultat suivant
 * {shift}Enter — précédent
 * Esc — fermer
 
-La recherche n’ouvre que les branches nécessaires ; en effaçant la requête, l’arbre se replie (sauf la racine).
-Les lignes des correspondances sont aussi marquées sur la barre de défilement de l’arbre ; un clic sur une marque saute à cette correspondance.
+La recherche n’ouvre que les branches nécessaires ; en effaçant la requête, l’arborescence se replie (sauf la racine).
+Les lignes des correspondances sont aussi marquées sur la barre de défilement de l’arborescence ; un clic sur une marque saute à cette correspondance.
 Pour un très grand nombre de correspondances, l’application peut limiter l’ouverture automatique et la mise en évidence globale afin de garder l’interface réactive.
 À la fermeture de la recherche, la requête est effacée après la fin de l’animation de fermeture.
 
-Limitations :
-* à l’ouverture de la recherche, le filtre se ferme automatiquement ;
-* la recherche reste disponible dans l’aperçu tant que le panneau de l’arborescence est visible ;
+Limitations :
+* à l’ouverture de la recherche, le filtre se ferme automatiquement ;
+* la recherche reste disponible dans l’aperçu tant que le panneau de l’arborescence est visible ;
 * si l’arborescence est masquée, la recherche devient temporairement indisponible.
 
 ## 10) Filtrer par nom
@@ -294,109 +302,143 @@ Affiche uniquement les nœuds correspondant au filtre et leurs parents. Mise à 
 * {mod}{shift}N — afficher/masquer le filtre
 * Esc — fermer le filtre
 
-Limitations :
-* à l’ouverture du filtre, la recherche se ferme automatiquement ;
-* le filtre reste disponible dans l’aperçu tant que le panneau de l’arborescence est visible ;
+Limitations :
+* à l’ouverture du filtre, la recherche se ferme automatiquement ;
+* le filtre reste disponible dans l’aperçu tant que le panneau de l’arborescence est visible ;
 * si l’arborescence est masquée, le filtre devient temporairement indisponible.
 
 ## 11) Options
-À droite sont disponibles :
+À droite sont disponibles :
 * Appliquer
 * Traitement du contenu
 * Exclusions
 * Types de fichiers
 
-Les changements dans « Exclusions » et « Types de fichiers » sont préparés dans le panneau et appliqués après clic sur « Appliquer ».
+Les changements dans « Exclusions » et « Types de fichiers » sont préparés dans le panneau et appliqués après un clic sur « Appliquer ».
 
-Après la modification d’une case, l’application peut actualiser en arrière-plan les options disponibles et leurs compteurs. L’arborescence résultante n’est reconstruite qu’après un clic sur « Appliquer ».
+Après la modification d’une case, l’application peut actualiser en arrière-plan les options disponibles et leurs compteurs. L’arborescence résultante n’est reconstruite qu’après un clic sur « Appliquer ».
 
 Si l’actualisation des options disponibles est annulée avec le bouton X de la barre d’état, les changements inachevés ne sont pas appliqués et le panneau revient à son dernier état terminé.
 
 Chaque liste a un bouton Tous.
 
-Remarque sur « Types de fichiers » :
-* cette liste affiche uniquement les fichiers avec extension ;
-* les fichiers sans extension ne sont pas ajoutés à cette liste et sont gérés par une option séparée dans « Exclusions ».
+Remarque sur « Types de fichiers » :
+* cette liste affiche uniquement les fichiers avec extension ;
+* les fichiers sans extension ne sont pas ajoutés à cette liste et sont gérés par une option séparée dans « Exclusions ».
 
-Traitement du contenu :
-* cette section transforme le contenu des fichiers texte sélectionnés sans modifier l’arborescence ;
-* « Masquer les secrets » et « Masquer les données privées » remplacent les valeurs détectées (sections 12.3 et 12.4) ;
-* « Compresser le code » conserve les déclarations et raccourcit les implémentations nommées dans 14 langages ;
-* « Supprimer les commentaires » retire les commentaires et les commentaires de documentation dans 20 packs de langages ;
-* « Supprimer les lignes vides » retire les lignes d’espaces dans les mêmes packs en préservant les littéraux multilignes ;
-* les changements prennent effet après « Appliquer ».
+Traitement du contenu :
+* cette section transforme le contenu des fichiers texte sélectionnés sans modifier l’arborescence ;
+* « Masquer les secrets » et « Masquer les données privées » remplacent les valeurs détectées (sections 12.3 et 12.4) ;
+* « Compresser le code » conserve les déclarations et raccourcit les implémentations nommées dans 14 langages ;
+* « Supprimer les commentaires » retire les commentaires et les commentaires de documentation dans 20 packs de langages ;
+* « Supprimer les lignes vides » retire les lignes d’espaces dans les mêmes packs en préservant les littéraux multilignes ;
+* les changements prennent effet après « Appliquer ».
 
 {mod}P — afficher/masquer le panneau.
 
 ### 11.1 Profils de paramètres des projets locaux
-Pour les dossiers locaux, DevProjex mémorise les derniers paramètres de projet appliqués :
-* types de fichiers sélectionnés ;
-* options sélectionnées dans la section « Exclusions ».
+Pour les dossiers locaux, DevProjex mémorise les derniers paramètres de projet appliqués :
+* types de fichiers sélectionnés ;
+* options sélectionnées dans la section « Exclusions ».
 
-L’enregistrement est effectué après clic sur « Appliquer ».
+L’enregistrement est effectué après un clic sur « Appliquer ».
 Lors de la réouverture du même dossier local, les paramètres sont restaurés automatiquement.
 
-Important :
-* les profils sont enregistrés uniquement pour les projets locaux ;
-* pour les projets ouverts via Git Clone, les profils ne sont pas enregistrés ;
-* si certaines options enregistrées ne sont plus disponibles dans le projet actuel, elles sont ignorées, les autres paramètres sont appliqués.
-* si l’actualisation ou la réouverture fait apparaître un nouveau type de fichiers ou une nouvelle option dans « Exclusions », cet élément est activé par défaut ;
-* les éléments déjà connus conservent le choix explicite de l’utilisateur : de nouveaux fichiers d’un type désactivé ne réactivent pas ce type.
+Important :
+* les profils sont enregistrés uniquement pour les projets locaux ;
+* pour les projets ouverts via « Cloner le dépôt », les profils ne sont pas enregistrés ;
+* si certaines options enregistrées ne sont plus disponibles dans le projet actuel, elles sont ignorées, les autres paramètres sont appliqués ;
+* si l’actualisation ou la réouverture fait apparaître un nouveau type de fichiers ou une nouvelle option dans « Exclusions », cet élément est activé par défaut ;
+* les éléments déjà connus conservent le choix explicite de l’utilisateur : de nouveaux fichiers d’un type désactivé ne réactivent pas ce type.
 
 ## 12) Exclusions
-La section « Exclusions » détermine les fichiers et dossiers exclus de l’arbre, du contenu, de la copie et de l’export.
+La section « Exclusions » détermine les fichiers et dossiers exclus de l’arborescence, du contenu, de la copie et de l’export.
 
-Un élément n’est affiché que si son type de fichier est sélectionné et si aucune règle active ne l’exclut. Les règles se cumulent : si l’une d’elles masque un élément, une autre ne peut pas le rendre visible.
+Un élément n’est affiché que si toutes ces conditions sont remplies :
+* son type de fichier est sélectionné, si le fichier a un type ;
+* aucune règle d’exclusion active ne l’exclut.
+
+Les règles d’exclusion se cumulent. Si au moins une règle active masque un élément, une autre règle ne peut pas le rendre visible.
 
 ### 12.1 Règles disponibles
-Le sélecteur de la GUI et les lignes radio de l’axe Git dans la TUI sont entièrement masqués lorsque la filtration Git ne s’applique pas : il n’existe aucune limite de dépôt et le filtre `.gitignore` ne peut pas modifier l’arborescence actuelle. Lorsque l’axe est visible en dehors d’un dépôt, la GUI propose uniquement l’absence de filtration et `.gitignore`, tandis que la TUI désactive les lignes qui nécessitent un dépôt. Dans un dépôt Git, les cinq valeurs ordinaires sont l’absence de filtration, `.gitignore`, les fichiers suivis, les fichiers indexés et toutes les modifications actuelles ; dans la TUI, une portée `diff:<ref>..<ref>` active apparaît sur une sixième ligne. Choisir une valeur remplace le mode Git courant sans modifier Smart Ignore ni les exclusions de base. Les autres options apparaissent lorsque leurs règles peuvent modifier l’arborescence actuelle.
+Selon le contenu du projet, les options suivantes peuvent apparaître :
 
-Une nouvelle option est activée par défaut lors de sa première apparition ; une option connue conserve le choix de l’utilisateur même si elle disparaît temporairement.
+* Smart Ignore
+* Dossiers vides
+* Fichiers vides
+* Dossiers cachés
+* Fichiers cachés
+* Dossiers commençant par un point
+* Fichiers commençant par un point
+* Fichiers sans extension
+
+Le sélecteur de la GUI et les lignes radio de l’axe Git dans la TUI sont entièrement masqués lorsque la filtration Git ne s’applique pas : il n’existe aucune limite de dépôt et le filtre `.gitignore` ne peut pas modifier l’arborescence actuelle. Lorsque l’axe est visible en dehors d’un dépôt, la GUI propose uniquement l’absence de filtration et `.gitignore`, tandis que la TUI désactive les lignes qui nécessitent un dépôt. Dans un dépôt Git, les cinq valeurs ordinaires sont l’absence de filtration, `.gitignore`, les fichiers suivis, les fichiers indexés et toutes les modifications actuelles ; dans la TUI, une portée `diff:<ref>..<ref>` active apparaît sur une sixième ligne. Choisir une valeur remplace le mode Git courant sans modifier Smart Ignore ni les exclusions de base. Les autres options apparaissent lorsque leurs règles peuvent modifier l’arborescence actuelle ; la liste peut donc changer après la modification d’une autre règle ou d’un type de fichiers.
+
+Une nouvelle option est activée par défaut lors de sa première apparition. Une option connue conserve le choix de l’utilisateur même si elle disparaît temporairement de la liste.
 
 ### 12.2 Smart Ignore
-Smart Ignore masque les dépendances, résultats de build, caches et autres artefacts de service. DevProjex identifie le type du projet à partir de sa structure et de fichiers marqueurs comme `.csproj`, `package.json`, `pyproject.toml` ou `Cargo.toml`. Les règles de la technologie reconnue restent dans la zone du projet et ne s’étendent pas aux projets voisins d’une autre technologie.
+Smart Ignore masque les dépendances, les résultats de build, les caches et les autres artefacts de service du projet.
 
-Pour les noms ambigus comme `build`, `vendor`, `packages`, `cache`, `pkg` ou `Library`, le contenu est également vérifié. Un dossier utilisateur ordinaire n’est donc pas masqué uniquement à cause de son nom. Certains magasins de dépendances et dossiers de service peuvent aussi être reconnus hors d’un projet explicite grâce à leur structure caractéristique.
+DevProjex identifie d’abord le type du projet à partir de sa structure et de ses fichiers marqueurs, par exemple :
 
-La détection de nouvelles zones de projet est limitée afin d’éviter une analyse répétée de chaque dossier dans un grand répertoire utilisateur. La recherche reste peu profonde dans une structure normale et va plus loin dans un monorepo reconnu. Une fois la zone détectée, Smart Ignore s’applique à tout son sous-arbre sans limite de profondeur.
+* `.csproj`
+* `package.json`
+* `pyproject.toml`
+* `Cargo.toml`
+
+Les règles de la technologie correspondante sont ensuite appliquées dans la zone du projet détecté. Par exemple, les règles .NET ne s’étendent pas à un projet Python ou JavaScript voisin.
+
+Le nom d’un dossier ne suffit pas toujours. Les noms ambigus comme `build`, `vendor`, `packages`, `cache`, `pkg` ou `Library` sont aussi vérifiés d’après leur contenu. Un dossier utilisateur ordinaire n’est ainsi pas masqué uniquement parce qu’il porte un nom similaire.
+
+Certains magasins de dépendances et répertoires de service peuvent être reconnus grâce à leur structure interne caractéristique, même en dehors d’un projet explicitement détecté.
+
+La détection des zones de projet est limitée afin que le chargement d’un grand dossier utilisateur ne devienne pas une analyse complète et répétée de chaque répertoire. Les structures ordinaires utilisent une détection peu profonde, tandis que les monorepos reconnus sont explorés plus en profondeur. Une fois la zone trouvée, Smart Ignore s’applique à tout son sous-arbre sans limite de profondeur.
 
 ### 12.3 Masquer les secrets
-« Masquer les secrets » est désactivé par défaut. L’option analyse uniquement le texte sélectionné et remplace chaque valeur détectée sur place, sans retirer le fichier ni son contexte. Lorsqu’elle est désactivée, aucune analyse n’est lancée et aucun compteur n’apparaît. Après l’analyse de la sélection, le libellé indique le nombre de valeurs détectées ; si des décisions « conserver » laissent moins de valeurs masquées, il affiche les deux nombres — détectées/masquées — et l’indicateur ? de la ligne les précise en texte.
+« Masquer les secrets » est désactivé par défaut. L’option analyse uniquement le texte sélectionné et remplace chaque valeur détectée sur place, sans retirer le fichier ni le code qui l’entoure. Lorsqu’elle est désactivée, aucune analyse n’est lancée et aucun compteur n’apparaît. Après l’analyse de la sélection actuelle, le libellé indique le nombre de valeurs détectées ; si des décisions « conserver » laissent moins de valeurs masquées, il affiche détectées/masquées, et l’indicateur ? de la ligne précise les deux nombres.
 
-Les correspondances sont mises en évidence dans l’aperçu. Cliquez sur l’une d’elles pour conserver uniquement cette occurrence ; {alt}↓ / {alt}↑ parcourent les valeurs détectées et Enter bascule la valeur active. Dans Terminal Workspace, `[` et `]` parcourent les occurrences, et `Enter` ou `Space` basculent l’occurrence active. La décision s’applique pendant la session à l’aperçu, au presse-papiers, aux exports de contexte, au dossier et au ZIP ; elle n’est pas enregistrée dans le profil du projet.
+Les valeurs masquées sont mises en évidence dans l’aperçu. Cliquez sur l’une d’elles pour conserver uniquement cette occurrence ; {alt}↓ / {alt}↑ parcourent les valeurs détectées et Enter bascule la valeur active. Dans l’espace de travail du terminal, `[` et `]` parcourent les occurrences, et `Enter` ou `Space` basculent l’occurrence active. La décision s’applique pendant la session à l’aperçu, au presse-papiers, à l’export de contexte, à la copie en dossier et au ZIP ; elle n’est pas enregistrée dans le profil du projet.
 
-Le menu contextuel de l’aperçu étend ces décisions. Un clic droit sur une occurrence détectée permet de conserver — ou de masquer à nouveau — en une seule action toutes les occurrences de sa règle ou toutes les occurrences détectées dans le même fichier. Un clic droit sur une valeur sélectionnée dans le contenu d’un fichier ajoute un marquage manuel : « Masquer … ici » masque uniquement cette occurrence pour la session, « Toujours masquer … » crée un marquage persistant pour toutes les occurrences de la valeur, et « Masquer … comme donnée privée » crée un marquage persistant contrôlé par « Masquer les données privées ». « Supprimer le marquage » apparaît sur un marquage manuel et le supprime ; une valeur toujours reconnue par le détecteur reste masquée. La valeur manuelle est une seule ligne de 8 à 512 caractères sélectionnée dans le contenu du fichier. La création d’un marquage active automatiquement l’option correspondante. Les marquages persistants ne conservent qu’une identité de valeur à clé et sa classe, jamais le texte d’origine.
+Le menu contextuel de l’aperçu étend ces décisions. Un clic droit sur une occurrence détectée permet de conserver — ou de masquer à nouveau — en une seule action toutes les occurrences de sa règle ou toutes les occurrences détectées dans le même fichier. Un clic droit sur une valeur sélectionnée dans le contenu d’un fichier ajoute un marquage manuel : « Masquer … ici » masque uniquement cette occurrence pour la session, « Toujours masquer … » crée un marquage persistant pour toutes les occurrences de la valeur, et « Masquer … comme donnée privée » crée un marquage persistant contrôlé par « Masquer les données privées ». « Supprimer le marquage » apparaît sur un marquage manuel et le supprime ; une valeur toujours reconnue par le détecteur reste masquée. La valeur manuelle doit être une seule ligne de 8 à 512 caractères sélectionnée dans le contenu du fichier. La création d’un marquage active automatiquement l’option correspondante. Les marquages persistants ne conservent qu’une identité de valeur à clé et sa classe, jamais le texte d’origine.
 
-Une copie en dossier ou ZIP modifie également le texte correspondant et peut ne plus se compiler ou s’exécuter. Les fichiers binaires ne sont pas analysés et restent inchangés. Un fichier texte sélectionné de plus de 16 Mio est omis et signalé, tandis que le reste de la sortie est produit. Une erreur de détection arrête toute l’opération.
+Une copie en dossier ou ZIP modifie également le texte correspondant et peut ne plus se compiler ou s’exécuter. Les fichiers binaires sont copiés sans modification et ne sont pas analysés. Un fichier texte sélectionné de plus de 16 Mio est omis et signalé, tandis que le reste de la sortie est produit. Une erreur de détection arrête toute l’opération.
 
-Le compteur indique seulement les correspondances aux règles. Zéro ne signifie pas que le projet est sûr. La CLI utilise `--hide-secrets` ; les détails figurent dans `Docs/HideSecrets.md`.
+Le compteur indique seulement les correspondances aux règles. Zéro ne signifie pas que le projet est sûr. La CLI utilise `--hide-secrets` ; les détails techniques et les limites figurent dans `Docs/HideSecrets.md`.
 
 ### 12.4 Masquer les données privées
-« Masquer les données privées » est désactivé par défaut. Cette option détecte les adresses e-mail, les adresses IP globales, les noms d’utilisateur locaux dans les chemins, les adresses MAC et les numéros de téléphone internationaux dans les fichiers texte sélectionnés. Les résultats utilisent les mêmes décisions d’aperçu et le même pipeline de sortie que Masquer les secrets ; les marquages manuels créés avec « Masquer … comme donnée privée » appartiennent à cette classe et suivent cette option (section 12.3). Les noms d’utilisateur locaux dans les en-têtes de chemins générés et dans la racine de l’arbre sont masqués comme une seule découverte partagée : le compteur la compte comme une valeur, l’indicateur ? précise si elle est masquée ou affichée, et un clic bascule tous les chemins masqués à la fois.
+« Masquer les données privées » est désactivé par défaut. Cette option détecte les adresses e-mail, les adresses IP globales, les noms d’utilisateur locaux dans les chemins, les adresses MAC et les numéros de téléphone internationaux dans les fichiers texte sélectionnés. Les résultats utilisent les mêmes décisions d’aperçu et le même pipeline de sortie que « Masquer les secrets » ; les marquages manuels créés avec « Masquer … comme donnée privée » appartiennent à cette classe et suivent cette option (section 12.3). Les noms d’utilisateur locaux dans les en-têtes de chemins générés et dans la racine de l’arborescence sont masqués comme une seule détection partagée : le compteur la compte comme une valeur, l’indicateur ? précise si elle est masquée ou affichée, et un clic bascule tous les chemins masqués à la fois.
 
-Les plages et hôtes de documentation, les noms d’utilisateur CI courants, les résolveurs DNS publics connus et les numéros fictifs documentés restent visibles. Zéro correspondance ne garantit pas la confidentialité. La CLI utilise `--hide-private-data` ; les règles complètes et les limites de la première phase figurent dans `Docs/HidePrivateData.md`.
+Les plages et hôtes de documentation, les noms d’utilisateur CI courants, les résolveurs DNS publics connus et les plages de numéros fictifs documentées restent visibles. Zéro correspondance ne garantit pas la confidentialité. La CLI utilise `--hide-private-data` ; les règles complètes et les limites de la première phase figurent dans `Docs/HidePrivateData.md`.
 
 ### 12.5 Utiliser .gitignore
-Lorsqu’elle est activée, l’option applique chaque `.gitignore` accessible, et pas seulement celui de la racine. Chaque fichier s’applique à son propre dossier et à tous ses sous-dossiers accessibles, jamais aux dossiers parents ou voisins.
+Lorsque l’option est activée, DevProjex suit la vue de l’arbre de travail de `git status` : les fichiers suivis restent visibles, et les fichiers non suivis sont affichés sauf si les règles d’exclusion du dépôt les excluent. DevProjex applique chaque `.gitignore` accessible, et pas seulement celui de la racine du dossier ouvert, y compris les fichiers situés au-dessus jusqu’à la racine du dépôt.
 
-Pour un chemin donné, les règles sont évaluées du `.gitignore` parent vers les fichiers plus profonds ; dans un même fichier, de haut en bas. La dernière règle correspondante détermine le résultat Git.
+Chaque `.gitignore` s’applique :
 
-Une règle commençant par `!` annule uniquement une exclusion Git antérieure dans sa zone. Elle ne peut pas restaurer un fichier tant que son dossier parent reste exclu. Un `.gitignore` situé dans un dossier entièrement exclu et inaccessible n’est pas évalué.
+* au dossier qui le contient ;
+* à tous les dossiers accessibles en dessous ;
+* uniquement à l’intérieur de cette zone.
 
-Une ligne incorrecte ou non prise en charge est ignorée séparément ; les autres règles valides continuent de fonctionner. L’option couvre uniquement les fichiers `.gitignore` de l’arbre de travail. `.git/info/exclude` et les règles d’exclusion Git globales ne sont pas appliqués ; les paramètres effectifs du dépôt pour la comparaison des chemins, tels que `core.ignoreCase` et, sous macOS, `core.precomposeUnicode`, sont respectés. Lorsqu’un index Git lisible existe pour la zone du dépôt propriétaire du chemin, les fichiers suivis restent visibles même s’ils correspondent à `.gitignore` ; sans cet index ou Git CLI, cette zone revient en toute sécurité à l’évaluation des motifs seuls.
+Les règles d’un `.gitignore` imbriqué n’affectent ni les dossiers parents ni les dossiers voisins.
 
-Un lien symbolique nommé `.gitignore` n’est pas suivi, conformément au comportement de Git pour ce fichier de contrôle. Si un fichier `.gitignore` ordinaire ne peut pas être lu, la zone de son répertoire est entièrement exclue de manière sûre et l’analyse signale un accès partiel au lieu d’inclure des fichiers sans évaluer toutes les règles.
+Pour un chemin donné, les règles sont traitées du `.gitignore` parent vers les fichiers plus profonds. Dans un même fichier, les règles sont traitées de haut en bas. La dernière règle correspondante détermine le résultat Git.
 
-Le profil intégré `standard` sélectionne `gitignore` et les huit groupes d’exclusion : `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files` et `extensionless-files`.
+Une règle commençant par `!` annule une exclusion Git antérieure uniquement dans sa zone. Elle ne peut pas restaurer un fichier tant que son dossier parent reste exclu. Un `.gitignore` situé dans un dossier entièrement exclu et inaccessible ne participe pas à l’évaluation.
+
+Une ligne incorrecte ou non prise en charge est ignorée séparément. Les autres règles valides de ce fichier et les règles des zones voisines continuent de fonctionner.
+
+Le fichier `.git/info/exclude` propre au dépôt est également appliqué, avec une priorité inférieure à celle du `.gitignore` racine. Un dossier imbriqué possédant son propre `.git` suit aussi `git status` : un dépôt intégré qui n’est pas déclaré dans `.gitmodules` est opaque, ses fichiers ne sont donc pas affichés, tandis qu’un sous-module déclaré applique ses propres `.gitignore` et `info/exclude`. Choisissez `none` pour voir les fichiers des dépôts intégrés. Les règles d’exclusion Git globales (`core.excludesFile`) ne sont pas appliquées ; les paramètres effectifs du dépôt pour la comparaison des chemins, tels que `core.ignoreCase` et, sous macOS, `core.precomposeUnicode`, sont respectés. Un lien symbolique nommé `.gitignore` n’est pas suivi, conformément au comportement de Git pour ce fichier de contrôle. Si un fichier `.gitignore` ou `info/exclude` ne peut pas être lu, la zone de son répertoire est exclue de manière sûre et l’analyse signale un accès partiel au lieu d’inclure silencieusement des fichiers sans évaluer toutes les règles. Lorsqu’un index Git lisible existe pour la zone du dépôt propriétaire du chemin, les fichiers suivis restent visibles même s’ils correspondent à `.gitignore` ; sans cet index ou la CLI Git, cette zone revient en toute sécurité à l’évaluation des motifs seuls.
+
+Le profil intégré `standard` sélectionne `gitignore` ainsi que `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files` et `extensionless-files`.
 
 ### 12.6 Uniquement les fichiers suivis par Git
-« Uniquement les fichiers suivis par Git » construit l’étape Git de l’arbre à partir des fichiers existants de l’arbre de travail enregistrés dans chaque index Git lisible. Les fichiers suivis modifiés et les nouveaux fichiers ajoutés à l’index restent inclus ; les fichiers non suivis sont exclus. Il s’agit de l’arbre de travail actuel, et non d’un instantané historique de `HEAD` ou d’un dépôt distant.
+« Uniquement les fichiers suivis par Git » construit l’étape Git de l’arborescence à partir des fichiers existants de l’arbre de travail enregistrés dans chaque index Git lisible. Les fichiers suivis modifiés et les nouveaux fichiers ajoutés à l’index restent inclus ; les fichiers non suivis sont exclus. Il s’agit de l’arbre de travail actuel, et non d’un instantané historique de `HEAD` ou d’un dépôt distant.
 
-Chaque dépôt imbriqué et chaque worktree accessible sont traités indépendamment à chaque niveau d’imbrication accessible. Un dépôt enfant n’hérite pas des chemins suivis de son parent ni d’un dépôt voisin. Ce mode nécessite la CLI Git ; un index vide mais lisible est valide. Si l’espace de travail interactif du terminal (TUI) démarre dans ce mode et qu’aucun index applicable ne peut être chargé, l’espace de travail ne s’ouvre pas. Si ce mode est sélectionné de manière interactive dans un espace de travail TUI déjà ouvert et qu’aucun index applicable ne peut être chargé, la modification est refusée et le dernier mode Git utilisable reste actif. Dans la même situation, les commandes directes renvoient une erreur de stratégie ou de vérification. DevProjex ne bascule jamais silencieusement vers `.gitignore`. Lorsqu’un autre index applicable est lisible, les zones imbriquées indisponibles sont exclues avec un avertissement.
+Chaque dépôt est résolu indépendamment : les dépôts voisins dans le dossier ouvert et les sous-modules déclarés utilisent chacun leur propre index, et un dépôt enfant n’hérite pas des chemins suivis de son parent ni d’un dépôt voisin. Un dépôt intégré qui n’est pas déclaré dans `.gitmodules` reste opaque, comme en mode `.gitignore`. Ce mode nécessite la CLI Git ; un index vide mais lisible est valide. Si l’espace de travail interactif du terminal (TUI) démarre dans ce mode et qu’aucun index applicable ne peut être chargé, l’espace de travail ne s’ouvre pas. Si ce mode est sélectionné de manière interactive dans un espace de travail TUI déjà ouvert et qu’aucun index applicable ne peut être chargé, la modification est refusée et le dernier mode Git utilisable reste actif. Dans la même situation, les commandes directes renvoient une erreur de stratégie ou de vérification. DevProjex ne bascule jamais silencieusement vers `.gitignore`. Lorsqu’un autre index applicable est lisible, les zones imbriquées indisponibles sont exclues avec un avertissement.
 
-Dans un espace de travail Desktop déjà ouvert, la sélection explicite reste visible et échoue de façon sûre : la sortie et l’exportation sont bloquées si la disponibilité échoue, tandis qu’une disponibilité partielle permet de continuer avec un avertissement localisé.
+Dans un espace de travail Desktop déjà ouvert, la sélection explicite reste visible et échoue de façon sûre : la sortie et l’exportation sont bloquées si la disponibilité échoue, tandis qu’une disponibilité partielle permet de continuer avec un avertissement localisé.
 
-Les modes Git sont mutuellement exclusifs ; `none` désactive la filtration Git. Les modes temporaires `staged`, `changes` et `diff:<ref>..<ref>` ne sont pas enregistrés dans les profils. Tant qu’un mode temporaire est actif, le profil de projet local de la GUI conserve le dernier mode persistant activé, `gitignore` ou `tracked`. `none` n’est enregistré que s’il est actif au moment de l’enregistrement. La TUI et la CLI refusent d’enregistrer un profil portable tant qu’un mode temporaire est actif.
+Les modes Git sont mutuellement exclusifs ; `none` désactive la filtration Git. Les modes temporaires `staged`, `changes` et `diff:<ref>..<ref>` ne sont pas enregistrés dans les profils. Tant qu’un mode temporaire est actif, le profil de projet local de la GUI conserve le dernier mode persistant activé, `gitignore` ou `tracked`. `none` n’est enregistré que s’il est actif au moment de l’enregistrement. La TUI et la CLI refusent d’enregistrer un profil portable tant qu’un mode temporaire est actif.
 
 ### 12.7 Relation entre le filtrage Git et Smart Ignore
 Le mode Git sélectionné et Smart Ignore sont contrôlés indépendamment. Le mode Git est appliqué en premier dans chaque zone Git accessible, puis Smart Ignore traite les éléments restants et les règles de base s’appliquent en dernier.
@@ -406,72 +448,87 @@ Smart Ignore peut rester masqué tant que le mode Git sélectionné couvre déj�
 Une négation Git avec `!` annule uniquement le résultat Git. Elle ne désactive ni Smart Ignore ni une règle de base.
 
 ### 12.8 Règles de base
-Les règles « commençant par un point » vérifient le nom ; les règles « caché » vérifient l’attribut système Hidden. Selon la plateforme, elles peuvent viser le même élément ou des éléments différents.
+« Dossiers commençant par un point » et « Fichiers commençant par un point » vérifient le nom de l’élément.
 
-« Fichiers vides » masque les fichiers de 0 octet. « Fichiers sans extension » masque par exemple `Dockerfile`, `Makefile` et `README`.
+« Dossiers cachés » et « Fichiers cachés » vérifient l’attribut système Hidden. Selon la plateforme, un nom commençant par un point et l’attribut système peuvent désigner le même élément ou des éléments différents.
 
-« Dossiers vides » masque les dossiers logiquement vides. Un dossier est logiquement vide lorsqu’aucun fichier ou sous-dossier visible ne reste après l’application des types sélectionnés et de toutes les autres règles. Son compteur peut donc changer lorsqu’une autre règle est modifiée.
+« Fichiers vides » masque les fichiers dont la taille est de 0 octet.
+
+« Fichiers sans extension » masque des fichiers tels que `Dockerfile`, `Makefile` et `README`.
+
+« Dossiers vides » masque les dossiers logiquement vides. Un dossier est logiquement vide lorsqu’aucun fichier ni sous-dossier visible ne reste après l’application des types de fichiers sélectionnés et de toutes les autres règles.
+
+Le compteur des dossiers vides peut donc changer lorsqu’une autre règle est modifiée : masquer des fichiers peut rendre logiquement vides les dossiers qui les contiennent.
 
 ### 12.9 Compteurs
-Un compteur indique la contribution directe d’une règle avec les paramètres actuels, et non le nombre physique d’éléments similaires sur le disque. Un élément n’est pas attribué simultanément à plusieurs compteurs qui se recouvrent.
+Le compteur à côté d’une règle indique sa contribution directe avec les paramètres actuels, et non le nombre physique d’éléments similaires sur le disque.
 
-L’ordre stable d’attribution est : pour les dossiers, `.gitignore`, Smart Ignore, nom commençant par un point, attribut Hidden ; pour les fichiers, `.gitignore`, Smart Ignore, nom commençant par un point, absence d’extension, fichier vide, attribut Hidden. Cet ordre ne concerne que les compteurs. Pour la visibilité, tout mécanisme actif peut exclure l’élément.
+Un élément n’est pas attribué simultanément à plusieurs compteurs qui se recouvrent. Par exemple, le dossier `.git` peut à la fois avoir un nom commençant par un point et l’attribut système Hidden, mais son exclusion n’est attribuée qu’à une seule règle.
+
+Un ordre stable sert à choisir la règle à laquelle une exclusion est attribuée :
+
+* dossiers : `.gitignore`, Smart Ignore, nom commençant par un point, attribut système Hidden ;
+* fichiers : `.gitignore`, Smart Ignore, nom commençant par un point, absence d’extension, fichier vide, attribut système Hidden.
+
+Cet ordre ne concerne que les compteurs. La visibilité finale suit une règle plus simple : un élément est masqué si un mécanisme actif quelconque l’exclut.
 
 ### 12.10 Application des modifications
-Les cases à cocher mettent d’abord à jour les options disponibles et leurs compteurs. L’arbre final est reconstruit après « Appliquer les paramètres ». Si la préparation est annulée, DevProjex revient au dernier état entièrement terminé ; aucune règle partiellement calculée n’est appliquée.
+Les cases à cocher mettent d’abord à jour les options disponibles et leurs compteurs dans le panneau. L’arborescence finale est reconstruite après un clic sur « Appliquer ».
 
-## 13) Comment l'arbre et les métriques sont calculés
-Le résultat dépend de :
+Si la préparation des paramètres est annulée, DevProjex ramène le panneau au dernier état entièrement terminé. Les règles partiellement calculées ne sont pas appliquées.
+
+## 13) Comment l’arborescence et les métriques sont calculées
+Le résultat dépend de :
 * types de fichiers sélectionnés
 * règles d’exclusion
 * filtre actif
-* nœuds cochés dans l’arbre (pour les opérations basées sur la sélection)
+* nœuds cochés dans l’arborescence (pour les opérations basées sur la sélection)
 
-Si l’accès est refusé, le nœud garde son nom et son icône habituels et reçoit le suffixe « [accès refusé] ».
+Si l’accès est refusé, le nœud garde son nom et son icône habituels et reçoit le suffixe « [accès refusé] ».
 
 ### 13.1 Ce que montrent les compteurs de la barre d’état
-La barre d’état contient deux blocs :
-* Arbre — métriques de la sortie texte de l’arborescence ;
+La barre d’état contient deux blocs :
+* Arborescence — métriques de la sortie texte de l’arborescence ;
 * Contenu — métriques de la sortie de contenu des fichiers.
 
-Format :
+Format :
 * Lignes
 * Caractères
-* ~Tokens (approximation)
+* ≈Jetons (approximation)
 
 Les grandes valeurs sont affichées en format compact (K/M).
 
-Important :
-* « Lignes » dans le bloc « Arbre » correspond au nombre de lignes de la représentation finale de l’arborescence, et non au nombre de fichiers sur le disque ;
-* cette valeur inclut les dossiers, les fichiers et les éléments techniques de l’arbre (par exemple, les nœuds avec accès refusé).
+Important :
+* « Lignes » dans le bloc « Arborescence » correspond au nombre de lignes de la représentation finale de l’arborescence, et non au nombre de fichiers sur le disque ;
+* cette valeur inclut les dossiers, les fichiers et les éléments techniques de l’arborescence (par exemple, les nœuds avec accès refusé).
 
 ### 13.2 Comment les métriques sont calculées
-Métriques de l’arbre :
-* sont calculées à partir de la sortie réelle de l’arbre générée par le même pipeline d’export ;
+Métriques de l’arborescence :
+* sont calculées à partir de la sortie réelle de l’arborescence générée par le même pipeline d’export ;
 * respectent le format d’arborescence courant.
 
-Métriques du contenu :
-* suivent les mêmes règles que la copie/export du contenu ;
-* les fichiers binaires sont exclus ;
+Métriques du contenu :
+* suivent les mêmes règles que la copie/export du contenu ;
+* les fichiers binaires sont exclus ;
 * les fichiers vides et uniquement blancs sont comptés via des marqueurs de service (`[No Content, 0 bytes]`, `[Whitespace, N bytes]`).
 
 ### 13.3 Quand les compteurs sont mis à jour
-Le recalcul est effectué :
-* après ouverture/actualisation d’un projet ;
-* après application des paramètres (exclusions, types de fichiers, dossiers racine) ;
-* lors des changements de cases à cocher dans l’arbre (avec debounce) ;
-* lors du basculement du format d’arborescence (pour les opérations utilisant l’arbre).
+Le recalcul est effectué :
+* après ouverture/actualisation d’un projet ;
+* après application des paramètres (exclusions et types de fichiers) ;
+* lors des changements de cases à cocher dans l’arborescence (avec debounce) ;
+* lors du basculement du format d’arborescence (pour les opérations utilisant l’arborescence) ;
 * si le calcul en arrière-plan est annulé, les compteurs sont remis à 0 jusqu’au prochain recalcul terminé.
 
 ## 14) Icônes
-Ordre de sélection :
+Ordre de sélection :
 1) type de nœud (dossier/fichier)
 2) nom exact (s’il existe une règle)
 3) extension
 4) sinon — inconnu
 
 ## 15) Thème et effets
-La section « Thème » permet de choisir Système, Clair ou Sombre et un effet d’arrière-plan :
+La section « Thème » permet de choisir Système, Clair ou Sombre et un effet d’arrière-plan :
 * Transparence
 * Flou
 * Mica
@@ -480,7 +537,7 @@ Système est sélectionné par défaut et suit les changements de thème du syst
 
 Les effets sont mutuellement exclusifs. Un nouveau clic sur l’effet sélectionné le désactive et rétablit un arrière-plan opaque normal.
 
-Paramètres disponibles :
+Paramètres disponibles :
 * Transparence de l’arrière-plan — disponible pour Transparence et Flou.
 * Contraste de la barre supérieure — règle la barre principale contenant les commandes d’aperçu, de recherche, de filtre et de format d’arborescence.
 * Transparence des menus — s’applique de la même manière au menu principal et à ses sous-menus.
@@ -493,45 +550,78 @@ En mode Transparence, l’arrière-plan de la fenêtre principale reste transpar
 ## 16) Aide
 
 ### 16.1 Mises à jour
-« Aide → Mises à jour » compare la version actuelle à la dernière version stable publiée sur GitHub. La vérification automatique est désactivée par défaut ; lorsqu’elle est activée, DevProjex effectue la vérification au démarrage si au moins sept jours se sont écoulés depuis la dernière vérification réussie. La case à cocher est appliquée immédiatement. Le dernier résultat réussi est conservé entre les exécutions de l’application et n’est pas effacé par une erreur réseau ultérieure. L’installation reste une action de l’utilisateur.
+« Aide → Mises à jour » compare la version actuelle à la dernière version stable publiée sur GitHub. La vérification automatique est désactivée par défaut ; lorsqu’elle est activée, DevProjex effectue la vérification au démarrage si au moins sept jours se sont écoulés depuis la dernière vérification réussie. La case à cocher est appliquée immédiatement. Le dernier résultat réussi est conservé entre les exécutions de l’application et n’est pas effacé par une erreur réseau ultérieure. L’installation reste une action de l’utilisateur.
 
 ### 16.2 Réinitialiser les paramètres
 Réinitialiser les paramètres (Aide → Réinitialiser les paramètres) rétablit les valeurs par défaut du thème, des effets, du mode compact, des paramètres d’animation et de la langue de l’interface. Les profils de projet, l’historique et les fichiers sur le disque ne sont pas modifiés.
 
 ### 16.3 Réinitialiser les données
-Réinitialiser les données (Aide → Réinitialiser les données) supprime les profils enregistrés de paramètres des projets locaux :
-* types de fichiers sélectionnés ;
-* options sélectionnées dans la section « Exclusions » ;
-* paramètres de traitement du contenu sélectionnés ;
+Réinitialiser les données (Aide → Réinitialiser les données) supprime les profils enregistrés de paramètres des projets locaux :
+* types de fichiers sélectionnés ;
+* options sélectionnées dans la section « Exclusions » ;
+* paramètres de traitement du contenu sélectionnés ;
 * marquages manuels de secrets.
 
-Important :
-* l’historique « Récents » des dossiers locaux n’est pas effacé ;
-* l’historique des « Dépôts récents » dans la fenêtre Git Clone n’est pas effacé ;
+Elle efface aussi les sessions terminées du journal de l’agent (section 19.3) ; les sessions actives sont conservées.
+
+Important :
+* l’historique « Récents » des dossiers locaux n’est pas effacé ;
+* l’historique « Liens récents » de la fenêtre « Cloner le dépôt » n’est pas effacé ;
 * les fichiers et dossiers des projets sur le disque ne sont ni modifiés ni supprimés.
 
 ## 17) Langues
 La langue se choisit via le menu Langue.
-La langue choisie est conservée entre les lancements. « Aide → Réinitialiser les paramètres » efface ce choix enregistré et revient à la langue par défaut.
+La langue choisie est conservée entre les lancements. « Aide → Réinitialiser les paramètres » efface ce choix enregistré et revient à la langue par défaut.
 
 ## 18) Barre de progression et annulation
 La partie centrale de la barre d’état affiche l’opération active et sa progression.
 
-Modes de progression :
+Modes de progression :
 * Indeterminate — sans pourcentage (durée inconnue).
 * Determinate — avec pourcentage (0–100).
 
-Comportement :
-* pendant le calcul de données en arrière-plan, une progression en pourcentage est affichée ;
-* pour certaines opérations Git, le pourcentage est affiché si la source de progression le fournit ;
-* la mise à jour des options disponibles et l’application des paramètres sont affichées si l’opération prend un temps perceptible ;
+Comportement :
+* pendant le calcul de données en arrière-plan, une progression en pourcentage est affichée ;
+* pour certaines opérations Git, le pourcentage est affiché si la source de progression le fournit ;
+* la mise à jour des options disponibles et l’application des paramètres sont affichées si l’opération prend un temps perceptible ;
 * les opérations rapides se terminent sans afficher de progression.
 
-Bouton X (annuler) dans la barre d’état :
-* exécute une annulation best-effort pour les opérations qui prennent en charge l’annulation ;
-* arrête le calcul de données en arrière-plan ;
-* lors de l’annulation d’une actualisation des options disponibles, rétablit le dernier état terminé du panneau ;
+Bouton X (annuler) dans la barre d’état :
+* exécute une annulation au mieux pour les opérations qui prennent en charge l’annulation ;
+* arrête le calcul de données en arrière-plan ;
+* lors de l’annulation d’une actualisation des options disponibles, rétablit le dernier état terminé du panneau ;
 * pour les opérations sans prise en charge de l’annulation, arrête l’indication dans la barre d’état, tandis que l’opération peut se terminer en arrière-plan.
 
-## 19) Notes
-* Si les permissions sont insuffisantes, l’app peut proposer un redémarrage avec élévation ; sinon un avertissement s’affiche.
+## 19) MCP et agents IA
+DevProjex inclut un serveur MCP local en lecture seule. Les agents IA comme Claude Code, Codex, Cursor et VS Code lisent le projet par son intermédiaire : le masquage des secrets est toujours actif et l’agent ne peut pas modifier les fichiers du projet. Le serveur fournit huit outils : `list_projects`, `get_tree`, `analyze`, `search_project`, `related_files`, `get_file`, `pack_context` et `read_pack`.
+
+### 19.1 Connecter un client
+Le menu « MCP » contient :
+* Live context — le serveur suit les éléments cochés dans cette fenêtre (section 19.2) ;
+* Standard — le serveur ne dépend pas de la sélection de la fenêtre ;
+* Journal… — ce que les agents ont demandé et reçu (section 19.3) ;
+* Documentation — ouvre la documentation du serveur MCP.
+
+« Live context » et « Standard » contiennent les mêmes actions : « Ouvrir dans Claude Code », « Ouvrir dans Codex », « Ouvrir dans Cursor », « Ouvrir dans VS Code » et « Autres clients… ». Elles sont disponibles tant qu’un projet est ouvert.
+
+Claude Code et Codex sont enregistrés via leur commande installée, puis le client s’ouvre dans un nouveau terminal dans le dossier du projet. Cursor et VS Code reçoivent un fichier `.cursor/mcp.json` ou `.vscode/mcp.json` propre au projet ; les autres serveurs de ce fichier sont conservés. « Autres clients… » affiche une configuration prête à l’emploi pour Claude Desktop et d’autres clients. Si la commande d’un client est absente ou si la connexion échoue, DevProjex affiche la configuration manuelle à la place. Après une connexion réussie, DevProjex peut proposer d’ajouter la commande `devprojex` au PATH.
+
+Codex conserve une seule connexion DevProjex partagée : connecter un autre projet demande donc une confirmation avant de la remplacer. Une session de client déjà en cours doit être redémarrée pour charger le serveur. Dans un terminal, `devprojex mcp connect` enregistre le mode standard par défaut ; ajoutez `--mode live` pour Live context ou `--print` pour seulement afficher la configuration.
+
+### 19.2 Live context
+En Live context, les éléments cochés dans l’arborescence définissent le focus de l’agent : les requêtes d’arborescence, de recherche, d’analyse, de fichiers liés et de paquets restent à l’intérieur. Les filtres de la fenêtre — types de fichiers, exclusions et mode Git — forment la limite d’accès : l’agent peut toujours ouvrir d’autres fichiers par leur nom, mais uniquement ceux que ces filtres autorisent.
+
+La fenêtre n’a pas besoin de rester ouverte. Le serveur lit à chaque requête la sélection enregistrée en dernier pour le projet ; les nouvelles cases cochées et les paramètres appliqués atteignent donc l’agent à sa requête suivante, sans le redémarrer.
+
+Tant qu’une session live est active, le titre de la fenêtre se termine par `· Live context (<client>)`, ou par le nombre de sessions lorsque plusieurs sont actives.
+
+### 19.3 Journal
+« MCP → Journal… » affiche ce que les agents ont demandé et reçu via DevProjex : les sessions avec leur client, leur mode, leurs appels, caractères, jetons estimés, fichiers livrés et valeurs masquées, ainsi que les appels de la session sélectionnée. Le journal est disponible sans projet ouvert ; lorsqu’un projet est ouvert, « Projet actuel uniquement » est sélectionné par défaut.
+
+Le journal est stocké uniquement sur cet ordinateur, dans le dossier d’état de DevProjex, et conserve au plus 200 sessions pendant 30 jours. Il ne stocke ni le contenu des fichiers, ni les valeurs secrètes détectées, ni le texte des requêtes de recherche. « Exporter… » enregistre une session sous forme de reçu Markdown ou JSON. « Effacer » supprime les sessions terminées après confirmation ; les sessions actives et celles partagées avec d’autres projets sont conservées.
+
+### 19.4 Activité de l’agent
+« Affichage → Activité de l’agent » est désactivé par défaut. Lorsqu’il est activé, les fichiers que l’agent a reçus pendant la dernière session live sont marqués d’un ✦ dans l’arborescence, et l’info-bulle du marqueur indique combien de fois l’agent a reçu le fichier. Les marqueurs ne modifient jamais les filtres ni les cases cochées. Ils sont effacés lorsqu’une session live plus récente démarre, lorsque l’activité de l’agent est désactivée et lorsque le projet est rouvert. Les sessions Standard apparaissent dans le journal mais n’ajoutent pas de marqueurs.
+
+## 20) Notes
+* Si les permissions sont insuffisantes, l’application peut proposer un redémarrage avec élévation ; en cas de refus, un avertissement s’affiche.
