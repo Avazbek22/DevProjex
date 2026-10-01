@@ -398,7 +398,7 @@ public sealed class CliV1ParserRegressionTests
 	[InlineData("mcp|log|--clear", "DPX-CLI-INVALID-VALUE", "--clear requires --yes.")]
 	[InlineData("mcp|log|--yes", "DPX-CLI-INVALID-VALUE", "--yes requires --clear.")]
 	[InlineData("mcp|log|--session|abc|--last", "DPX-CLI-INVALID-VALUE", "--session and --last cannot be combined.")]
-	[InlineData("mcp|log|-f|markdown", "DPX-CLI-INVALID-VALUE", "Markdown output requires --session or --last.")]
+	[InlineData("mcp|log|-f|markdown", "DPX-CLI-JOURNAL-SESSION-REQUIRED", "Markdown output requires --session or --last.")]
 	[InlineData("mcp|log|--clear|--yes|--last", "DPX-CLI-INVALID-VALUE", "--clear cannot be combined with --session or --last.")]
 	[InlineData("mcp|log|--clear|--yes|-o|journal.txt", "DPX-CLI-INVALID-VALUE", "--clear cannot be combined with --output.")]
 	[InlineData("search|needle|--search-body-chars|0", "DPX-CLI-INVALID-VALUE", "--search-body-chars must be off or an integer from 1 to 16000.")]

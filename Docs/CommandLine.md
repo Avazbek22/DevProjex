@@ -214,7 +214,8 @@ text output lists start time, client, mode, project, calls, result characters,
 estimated tokens, delivered files, masked values, duration, and whether the
 session is live; with no sessions it prints one localized line saying so.
 `--session` and `--last` show the recorded calls; Markdown emits
-the shared context receipt and therefore requires one of those selectors. Text
+the shared context receipt and therefore requires one of those selectors; without
+one it exits `2` with `DPX-CLI-JOURNAL-SESSION-REQUIRED`. Text
 tables follow the shared table rule in [Streams and Exit Codes](#streams-and-exit-codes):
 localized headers only on an interactive stdout, the headerless untruncated shape
 for pipes, redirects, and `--output` files. JSON is

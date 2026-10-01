@@ -342,7 +342,9 @@ public sealed class DevProjexCommandTree
 				!hasSession &&
 				!useLast)
 			{
-				AddJournalError(result, "Terminal.Validation.McpLogMarkdownRequiresSession");
+				result.AddError(LocalizedParseError.Create(
+					"DPX-CLI-JOURNAL-SESSION-REQUIRED",
+					L("Terminal.Validation.McpLogMarkdownRequiresSession")));
 			}
 		});
 		CliExamplesRegistry.Set(

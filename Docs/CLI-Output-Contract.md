@@ -1010,7 +1010,7 @@ code (it may appear in the `diagnostics` array or on stderr).
 |---|---:|---|
 | `DPX-STORE-MIGRATION-UNAVAILABLE` | 1 | Store-packaged user-data migration could not run. |
 | `DPX-CLI-JOURNAL-NOT-FOUND` | 2 | The referenced agent-journal session does not exist. |
-| `DPX-CLI-JOURNAL-SESSION-REQUIRED` | 2 | Markdown journal output requires an explicit session id. |
+| `DPX-CLI-JOURNAL-SESSION-REQUIRED` | 2 | Markdown journal output requires `--session ID` or `--last`. |
 | `DPX-CLI-JOURNAL-WRITE-FAILED` | 1 | The agent-journal output could not be written. |
 | `DPX-MCP-STARTUP` | 1 | The `devprojex mcp` server process failed to start. |
 | `DPX-IO-ACCESS-DENIED` | 1 | The operating system denied access to a file or directory. |
