@@ -1,14 +1,14 @@
 ## 1) Nima va nima uchun
 DevProjex loyiha kontekstini tez tayyorlaydi: papka/fayl tuzilmasini ko‘rsatadi, elementlarni belgilash va daraxtni va/yoki fayl mazmunini buferga nusxalash imkonini beradi. Code review, qo‘llab‑quvvatlash, o‘qitish va loyiha tuzilmasini AI‑yordamchiga berish uchun qulay.
 
-Muhim: DevProjex ochilgan loyihadagi fayllarni o‘zgartirmaydi.
+Muhim: DevProjex ochilgan loyihadagi fayllarni o‘zgartirmaydi. Yagona istisno — Cursor yoki VS Code uchun aniq MCP ulanishi: u `.cursor/mcp.json` yoki `.vscode/mcp.json` faylini yaratadi yoki yangilaydi (19.1-bo‘lim).
 
 ## 2) Loyiha daraxti
 * Fayl/papka ikonkalari.
-* Tugunlardagi checkboxlar.
+* Tugunlardagi belgilash kataklari.
 * Ochish/yopish.
 
-Checkboxlar: tugunni belgilash uning avlodlariga qo‘llanadi; ota holati avtomatik qayta hisoblanadi.
+Belgilash kataklari: tugunni belgilash uning avlodlariga qo‘llanadi; ota holati avtomatik qayta hisoblanadi.
 
 Issiq tugmalar:
 * {mod}E — hammasini ochish
@@ -28,8 +28,8 @@ Agar yo‘l diskda endi mavjud bo‘lmasa, fayl menejerida ochish va tarkibni nu
 ## 3) Fayl
 * Jildni ochish… — ildiz papkani ochish ({mod}O)
 * Yangi oyna — DevProjex’ning yangi mustaqil nusxasini ochish
-* So‘nggilar — yaqinda ochilgan lokal jildlar ro‘yxati
-* Yangilash — lokal jildni qayta o‘qish va daraxtni qayta qurish (F5)
+* So‘nggi — yaqinda ochilgan mahalliy jildlar ro‘yxati
+* Yangilash — mahalliy jildni qayta o‘qish va daraxtni qayta qurish (F5)
 * Faylga eksport:
   * Daraxtni eksport qilish
   * Mazmunni eksport qilish
@@ -63,15 +63,15 @@ Drag & Drop loyiha yuklanmagan holatda boshlang‘ich maydonda (Drop Zone) ishla
 Qoidalar:
 * papkani tashlash mumkin;
 * faylni tashlash mumkin — bu holda fayl joylashgan papka ochiladi;
-* bir nechta obyekt tashlansa, birinchi mos lokal yo‘l ishlatiladi;
+* bir nechta obyekt tashlansa, birinchi mos mahalliy yo‘l ishlatiladi;
 * yo‘l mavjud bo‘lmasa yoki kirish bo‘lmasa, «Jildni ochish…» dagi kabi bir xil kirish tekshiruvlari qo‘llanadi;
-* qo‘llab-quvvatlanmaydigan yoki lokal bo‘lmagan obyektlar e’tiborga olinmaydi.
+* qo‘llab-quvvatlanmaydigan yoki mahalliy bo‘lmagan obyektlar e’tiborga olinmaydi.
 
-### So‘nggilar
-“Fayl → So‘nggilar” bandi yaqinda ochilgan lokal jildlar tarixini ko‘rsatadi.
+### So‘nggi
+«Fayl → So‘nggi» bandi yaqinda ochilgan mahalliy jildlar tarixini ko‘rsatadi.
 
 Qoidalar:
-* ro‘yxatga faqat lokal jildlar qo‘shiladi;
+* ro‘yxatga faqat mahalliy jildlar qo‘shiladi;
 * DevProjex orqali klonlangan Git repozitoriylari bu ro‘yxatga qo‘shilmaydi;
 * dublikatlar yaratilmaydi — bir xil jildni qayta ochish uni ro‘yxatning yuqorisiga olib chiqadi;
 * 32 tagacha so‘nggi jild saqlanadi;
@@ -98,37 +98,42 @@ Misollar:
 * `devprojex export project . --as zip -o ../devprojex-submission.zip` — samarali loyiha daraxtini ZIP arxiviga eksport qilish.
 * `devprojex export context https://github.com/owner/repo -o -` — masofaviy repozitoriyni qo‘lda klonlamasdan qadoqlash.
 * `devprojex analyze . --git-mode tracked --exclude smart-ignore` — Git kuzatuvidagi fayllarni Smart Ignore bilan tahlil qilish.
+* `devprojex search Configure . --symbols` — deklaratsiya qayerda aniqlanganini topish; `--symbols` deklaratsiya nomlarini qabul qiladi va muntazam ifoda sintaksisini rad etadi, `--regex` esa matnni muntazam ifoda bilan qidiradi.
+* `devprojex related src/App.cs` — fayl foydalanadigan fayllarni va undan foydalanadigan fayllarni ro‘yxatlash.
 * `devprojex mcp --root .` — AI agentlar loyihani xavfsiz o‘qishi uchun mahalliy faqat o‘qiladigan MCP serverini ishga tushirish.
+* `devprojex mcp connect . --client claude-code` — AI mijozni loyihaga ulash (19-bo‘lim).
+* `devprojex mcp log . --last` — agent jurnalining oxirgi seansini ko‘rsatish.
 
-Xususiyatlar:
+Eslatmalar:
 * `.` terminaldagi joriy papkani bildiradi;
 * bo‘sh joyli yo‘llar qo‘shtirnoqqa olinishi kerak;
 * `--git-mode` `none`, `gitignore`, `tracked`, `staged`, `changes` yoki `diff:<ref>..<ref>` qiymatini tanlaydi;
 * `--exclude` oddiy istisnolarni Git filtrlashdan alohida boshqaradi;
 * tahlil va eksport buyruqlari deterministik bo‘lib, grafik interfeysni ochmaydi;
-* `tui`, `open`, `analyze` va ikkala `export` buyrug‘i Git repozitoriysi URL manzilini ham qabul qiladi; klon boshqariladigan keshga tushadi (`devprojex cache`);
+* `tui`, `open`, `analyze`, `search`, `tree` va ikkala `export` buyrug‘i Git repozitoriysi URL manzilini ham qabul qiladi, `related` esa uni `--project` orqali qabul qiladi; klon boshqariladigan keshga tushadi (`devprojex cache`);
 * buyruqlarning hujjatlashtirilgan aliaslari va qisqa bayroqlari bor — masalan `export ctx`, `-f`, `-n`; ularni `devprojex help` ko‘rsatadi;
 * `analyze --findings` maskalash topilmalarini qiymatlarisiz ro‘yxatlaydi, `--fail-on-findings` esa CI uchun noldan farqli chiqish kodini qaytaradi;
-* buyruq loyiha fayllarini o‘zgartirmaydi — DevProjex read-only rejimida ishlaydi.
+* `export context --max-tokens N` kontekstni token byudjeti doirasida saqlaydi, tajribaviy `--rank importance` esa eng muhim fayllarni birinchi bo‘lib kiritadi;
+* tahlil, qidiruv va eksport buyruqlari loyiha fayllarini o‘zgartirmaydi — DevProjex faqat o‘qish rejimida ishlaydi.
 
 Agar `devprojex` buyrug‘i ishlamasa, DevProjex ichida oching:
 «Yordam → Terminaldan ishga tushirish».
 
 ## 5) Git
-Git menyusi faqat DevProjex orqali klonlangan loyihalarda mavjud (Git Clone). Ilova fayllaringizga tegmaydi — faqat kesh bilan ishlaydi.
+«Git → Repozitoriyani klonlash...» repozitoriyni DevProjex keshiga klonlaydi va ochadi. «Tarmoq» va «Yangilanishlarni olish» faqat shu tarzda klonlangan loyihalarda mavjud. Ilova fayllaringizga tegmaydi — faqat kesh bilan ishlaydi.
 
 Kesh foydalanuvchining tizim kesh katalogida saqlanadi. Haqiqiy yo‘lni `devprojex doctor` buyrug‘i ko‘rsatadi.
 
-* Tarmoq — mavjud tarmoqlar ro‘yxatini faol tarmoq belgisi bilan ko‘rsatadi; almashganda daraxt tanlangan tarmoqqa yangilanadi. Agar tarmoq allaqachon lokal bo‘lsa, almashish tarmoqsiz (yangilanishsiz) bo‘ladi. Agar tarmoq lokalda bo‘lmasa, u fetch orqali yuklanib, lokal yaratiladi.
+* Tarmoq — mavjud tarmoqlar ro‘yxatini faol tarmoq belgisi bilan ko‘rsatadi; almashganda daraxt tanlangan tarmoqqa yangilanadi. Agar tarmoq allaqachon mahalliy bo‘lsa, almashish internetga ulanmasdan (yangilanishsiz) bajariladi. Agar tarmoq mahalliy bo‘lmasa, u fetch orqali yuklanib, mahalliy yaratiladi.
 * Yangilanishlarni olish — faqat joriy tarmoqni yangilaydi: fetch va origin/<tarmoq> ga reset. Git Clone loyihasida F5 xuddi shu amalni bajaradi; odatiy «Fayl → Yangilash» buyrug‘i o‘chirilgan bo‘ladi.
 
 ### Klonlash oynasi
-Git Clone oynasida URL maydoni ostida “So‘nggi repozitoriylar” ro‘yxati ko‘rsatilishi mumkin.
+Git Clone oynasida URL maydoni ostida «So‘nggi havolalar» ro‘yxati ko‘rsatilishi mumkin.
 
 Qoidalar:
 * ro‘yxat faqat tarixda yaqinda klonlangan repozitoriylar bo‘lsa paydo bo‘ladi;
 * ro‘yxatga faqat tarmoq repozitoriy manbalari (`https://`, `ssh://` va SCP sintaksisi) qo‘shiladi;
-* lokal yo‘llar va `file://` manbalari bu ro‘yxatga qo‘shilmaydi;
+* mahalliy yo‘llar va `file://` manbalari bu ro‘yxatga qo‘shilmaydi;
 * dublikatlar yaratilmaydi — bir xil repozitoriyani qayta klonlash uni ro‘yxatning yuqorisiga olib chiqadi;
 * 16 tagacha so‘nggi repozitoriy saqlanadi;
 * tarix ilova qayta ishga tushirilganda ham saqlanadi.
@@ -164,7 +169,7 @@ Tugmalar: {mod}{shift}C va {mod}{alt}C.
 ### Mazmunni nusxalash
 Fayllar mazmunini nusxalaydi:
 * agar fayllar belgilangan bo‘lsa — faqat ular; aks holda — loyihadagi barcha fayllar;
-* har bir fayl oldidan uning to‘liq lokal yo‘li yozilgan sarlavha chiqariladi (Git Clone loyihalari uchun — repozitoriyning veb-yo‘li);
+* har bir fayl oldidan uning to‘liq mahalliy yo‘li yozilgan sarlavha chiqariladi (Git Clone loyihalari uchun — repozitoriyning veb-yo‘li);
 * matnli bo‘lmagan fayllar e’tiborga olinmaydi (binarlarni ham);
 * bo‘sh matnli fayllar uchun yo‘l va `[No Content, 0 bytes]` yoziladi;
 * faqat bo‘sh joylar/satr uzilishlaridan iborat fayllar uchun yo‘l va `[Whitespace, N bytes]` yoziladi.
@@ -198,7 +203,7 @@ MD:
 Daraxt + mazmun:
 * tanlangan daraxt formati daraxt blokiga qo‘llanadi;
 * mazmun bloki matn bo‘lib qoladi;
-* mazmun blokidagi fayl sarlavhalari `/` orqali relative yo‘llardan foydalanadi;
+* mazmun blokidagi fayl sarlavhalari `/` ajratgichli nisbiy yo‘llardan foydalanadi;
 * eksport `.txt` formatida saqlanadi.
 
 ## 7) Preview rejimi
@@ -208,7 +213,7 @@ Sichqonchaning yon tugmalari brauzerdagi kabi ishlaydi: «Oldinga» Preview reji
 
 {mod}{shift}F previewdagi fayllar mazmunidan qidirishni ochadi yoki yopadi. Enter yoki F3 keyingi moslikka, {shift}Enter yoki {shift}F3 oldingi moslikka o‘tadi.
 
-Yakuniy natijani daraxt yonidagi alohida ishchi hududda ko‘rsatadi. Bu rejim o‘zi hech narsani clipboardga nusxalamaydi va faylga eksport qilmaydi — u faqat ko‘rish uchun xizmat qiladi.
+Yakuniy natijani daraxt yonidagi alohida ishchi hududda ko‘rsatadi. Bu rejim o‘zi hech narsani almashish buferiga nusxalamaydi va faylga eksport qilmaydi — u faqat ko‘rish uchun xizmat qiladi.
 
 Standart holatda ishchi hudud quyidagicha ochiladi:
 * chapda — loyiha daraxti;
@@ -229,8 +234,8 @@ Qo‘shimcha:
 * preview ichida fayllar gorizontal chiziqlar bilan ajratiladi;
 * skroll paytida joriy fayl yo‘li tepada mahkamlanadi; mahkamlangan yo‘lni bosish o‘sha fayl boshiga olib boradi;
 * preview skroll-bari qidiruv mosliklari va topilgan qiymatlari bor qatorlarni belgilaydi; belgini bosish uning qatoriga olib boradi; saqlab qolingan qiymat belgilangancha qoladi, sarlavhalardagi maskalangan yo‘llar esa birinchi qatorida bitta belgi beradi;
-* daraxt va preview masshtabi alohida yashashi mumkin.
-* preview rejimida “Nusxa” menyusiga kirmasdan turib to‘liq joriy natijani ham, joriy ko‘rinib turgan fayl blokini ham nusxalash mumkin.
+* daraxt va preview masshtabi bir-biridan mustaqil bo‘lishi mumkin;
+* preview rejimida «Nusxa» menyusiga kirmasdan turib to‘liq joriy natijani ham, joriy ko‘rinib turgan fayl blokini ham nusxalash mumkin.
 
 Tugmalar:
 * yuqori preview orolining chap tomonidagi nusxa tugmasi — joriy preview rejimini nusxalaydi:
@@ -243,7 +248,7 @@ Tugmalar:
 * ko‘zcha ikonani yana bir marta bosish yoki {mod}B ham preview rejimini yopadi.
 
 Qidiruv va filtr preview ichida daraxt oroli ko‘rinib turgan paytda ishlaydi.
-Agar daraxt yashirilsa, qidiruv va filtr preview-only rejimidan chiqquncha vaqtincha ishlamaydi.
+Agar daraxt yashirilsa, qidiruv va filtr daraxtsiz preview rejimidan chiqquncha vaqtincha ishlamaydi.
 
 ## 8) Ko‘rinish
 ### Masshtab
@@ -256,13 +261,13 @@ Xulq-atvor:
 * oddiy rejimda daraxt masshtablanadi;
 * daraxt ko‘rinib turgan preview rejimida menyudagi kattalashtirish, kichraytirish va tiklash daraxt va preview’ga bir vaqtda qo‘llanadi;
 * {mod}g‘ildirak bilan daraxt va preview kursor joylashuviga qarab mustaqil masshtablanadi;
-* preview-only rejimida faqat preview oroli masshtablanadi.
+* daraxtsiz preview rejimida faqat preview oroli masshtablanadi.
 
 Oraliq: 6–28, tiklash — 15.
 
 ### Ixcham rejim
 Interfeysni zichroq qiladi: daraxt va sozlamalarda oraliqlar kichikroq.
-Preview workspace faol bo‘lganda ixcham rejim avtomatik ravishda yoqiladi.
+Preview ish maydoni faol bo‘lganda ixcham rejim avtomatik ravishda yoqiladi.
 
 ### Animatsiyalar
 «Ko‘rinish → Animatsiyalar» bo‘limida daraxtni ochish, holat hisoblagichlari va asboblarning ilk ko‘rinishi alohida boshqariladi. Uchala animatsiya ham standart holatda yoqilgan; o‘chirilgan animatsiya yakuniy holatni darhol ko‘rsatadi.
@@ -272,7 +277,10 @@ Daraxt shrifti «Ko‘rinish → Daraxt shrifti» orqali tanlanadi.
 «Standart» daraxtning odatiy shriftini qaytaradi.
 Tanlangan shrift sozlamalar panelidagi «Sozlamalarni qo‘llash» tugmasi bosilgandan keyin qo‘llanadi.
 
-## 9) Daraxt bo'yicha qidiruv
+### Agent faolligi
+«Ko‘rinish → Agent faolligi» jonli MCP seansi davomida AI agent olgan fayllarni belgilaydi; 19.4-bo‘limga qarang.
+
+## 9) Daraxt bo‘yicha qidiruv
 Qidiruv panelini ochadi, mosliklarni yoritadi va navigatsiya qiladi.
 * {mod}F — ko‘rsatish/yashirish
 * Enter — keyingi
@@ -323,7 +331,7 @@ Kontentni qayta ishlash:
 * «Sirlarni yashirish» va «Shaxsiy ma’lumotni yashirish» topilgan qiymatlarni almashtiradi (12.3 va 12.4 bo‘limlari);
 * «Kodni siqish» e’lonlarni saqlab, nomlangan implementatsiyalarni 14 tilda qisqartiradi;
 * «Izohlarni olib tashlash» 20 til paketida izohlar va hujjat izohlarini olib tashlaydi;
-* «Bo'sh qatorlarni olib tashlash» o‘sha paketlarda faqat bo‘sh joylardan iborat qatorlarni olib tashlab, ko‘p qatorli literallarni saqlaydi;
+* «Bo‘sh qatorlarni olib tashlash» o‘sha paketlarda faqat bo‘sh joylardan iborat qatorlarni olib tashlab, ko‘p qatorli literallarni saqlaydi;
 * o‘zgarishlar «Sozlamalarni qo‘llash» bosilgandan keyin kuchga kiradi.
 
 {mod}P — panelni ko‘rsatish/yashirish.
@@ -344,24 +352,50 @@ Muhim:
 * avvaldan ma’lum bandlar foydalanuvchining aniq tanlovini saqlaydi: o‘chirilgan turdagi yangi fayllar bu turni qayta yoqmaydi.
 
 ## 12) Istisnolar
-«Istisnolar» bo‘limi daraxt, kontent, nusxalash va eksportdan qaysi fayl hamda papkalar chiqarilishini boshqaradi.
+«Istisnolar» bo‘limi daraxt, mazmun, nusxalash va eksport natijalaridan qaysi fayl va papkalar chiqarib tashlanishini boshqaradi.
 
-Element faqat fayl turi tanlangan va hech bir faol qoida uni yashirmagan bo‘lsa ko‘rsatiladi. Qoidalar birgalikda ishlaydi: kamida bittasi elementni yashirsa, boshqa qoida uni ko‘rsata olmaydi.
+Element faqat quyidagi shartlarning barchasi bajarilganda ko‘rsatiladi:
+* faylning turi bo‘lsa, shu tur tanlangan;
+* hech bir yoqilgan e’tiborsiz qoldirish qoidasi uni chiqarib tashlamaydi.
+
+E’tiborsiz qoldirish qoidalari jamlanadi. Kamida bitta yoqilgan qoida elementni yashirsa, boshqa qoida uni ko‘rinadigan qila olmaydi.
 
 ### 12.1 Mavjud qoidalar
-Git filtrlashni qo‘llab bo‘lmaganda GUI selektori va TUI’dagi Git o‘qining radio qatorlari butunlay yashiriladi: repozitoriy chegarasi yo‘q va `.gitignore` filtri joriy daraxtni o‘zgartira olmaydi. O‘q repozitoriydan tashqarida ko‘rinsa, GUI faqat filtrlashsiz rejim va `.gitignore`ni taklif qiladi, TUI esa repozitoriy talab qiladigan qatorlarni o‘chiradi. Git repozitoriyasida beshta odatiy qiymat mavjud: filtrlashsiz, `.gitignore`, kuzatiladigan fayllar, Git indeksiga qo‘shilgan fayllar va barcha joriy o‘zgarishlar; TUI’da faol `diff:<ref>..<ref>` doirasi oltinchi qatorda paydo bo‘ladi. Qiymatni tanlash Smart Ignore va asosiy istisnolarni o‘zgartirmasdan joriy Git rejimini almashtiradi. Boshqa parametrlar ularning qoidalari joriy daraxtga ta’sir qila olganda ko‘rsatiladi.
+Loyiha tarkibiga qarab quyidagi bandlar ko‘rsatilishi mumkin:
 
-Yangi band birinchi paydo bo‘lganda odatda yoqiladi; avvaldan ma’lum band vaqtincha yo‘qolsa ham foydalanuvchi tanlovini saqlaydi.
+* Smart Ignore
+* Bo‘sh papkalar
+* Bo‘sh fayllar
+* Yashirin jildlar
+* Yashirin fayllar
+* Nuqta bilan boshlanuvchi jildlar
+* Nuqta bilan boshlanuvchi fayllar
+* Kengaytmasiz fayllar
+
+Git filtrlashni qo‘llab bo‘lmaganda GUI selektori va TUI’dagi Git o‘qining radio qatorlari butunlay yashiriladi: repozitoriy chegarasi yo‘q va `.gitignore` filtri joriy daraxtni o‘zgartira olmaydi. O‘q repozitoriydan tashqarida ko‘rinsa, GUI faqat filtrlashsiz rejim va `.gitignore`ni taklif qiladi, TUI esa repozitoriy talab qiladigan qatorlarni o‘chiradi. Git repozitoriyasida beshta odatiy qiymat mavjud: filtrlashsiz, `.gitignore`, kuzatiladigan fayllar, Git indeksiga qo‘shilgan fayllar va barcha joriy o‘zgarishlar; TUI’da faol `diff:<ref>..<ref>` doirasi oltinchi qatorda paydo bo‘ladi. Qiymatni tanlash Smart Ignore va asosiy istisnolarni o‘zgartirmasdan joriy Git rejimini almashtiradi. Boshqa bandlar ularning qoidalari joriy daraxtni o‘zgartira olganda ko‘rsatiladi, shuning uchun boshqa qoida yoki fayl turi almashtirilgach ro‘yxat o‘zgarishi mumkin.
+
+Yangi band birinchi marta paydo bo‘lganda odatda yoqilgan bo‘ladi. Ma’lum band ro‘yxatdan vaqtincha yo‘qolsa ham foydalanuvchi tanlovini saqlaydi.
 
 ### 12.2 Smart Ignore
-Smart Ignore bog‘liqliklar, build natijalari, keshlar va boshqa xizmat artefaktlarini yashiradi. DevProjex loyiha turini tuzilma va `.csproj`, `package.json`, `pyproject.toml`, `Cargo.toml` kabi marker fayllar orqali aniqlaydi. Tegishli stek qoidalari faqat topilgan loyiha hududida ishlaydi va qo‘shni boshqa stek loyihasiga yoyilmaydi.
+Smart Ignore bog‘liqliklar, build natijalari, keshlar va loyihaning boshqa xizmat artefaktlarini yashiradi.
 
-`build`, `vendor`, `packages`, `cache`, `pkg`, `Library` kabi noaniq nomlarda papka mazmuni ham tekshiriladi. Oddiy foydalanuvchi papkasi faqat nomi sababli yashirilmaydi. Ayrim bog‘liqlik omborlari va xizmat papkalari aniq topilgan loyihadan tashqarida ham ichki tuzilishi orqali tanilishi mumkin.
+DevProjex avval loyiha turini tuzilmasi va marker fayllari orqali aniqlaydi, masalan:
 
-Katta foydalanuvchi papkasidagi har bir katalogni qayta tahlil qilmaslik uchun yangi loyiha hududlarini izlash cheklangan. Oddiy tuzilma sayoz, tanilgan monorepo esa chuqurroq tekshiriladi. Hudud topilgach, Smart Ignore uning butun ichki daraxtiga chuqurlik cheklovisiz qo‘llanadi.
+* `.csproj`
+* `package.json`
+* `pyproject.toml`
+* `Cargo.toml`
+
+So‘ng tegishli stek qoidalari aniqlangan loyiha hududi ichida qo‘llanadi. Masalan, .NET qoidalari qo‘shni Python yoki JavaScript loyihasiga yoyilmaydi.
+
+Papka nomining o‘zi har doim ham yetarli emas. `build`, `vendor`, `packages`, `cache`, `pkg` yoki `Library` kabi noaniq nomlar mazmuni bo‘yicha ham tekshiriladi. Bu oddiy foydalanuvchi papkasini faqat nomi o‘xshashligi uchun yashirilishdan saqlaydi.
+
+Ayrim bog‘liqlik omborlari va xizmat kataloglari aniq topilgan loyihadan tashqarida ham o‘ziga xos ichki tuzilishi orqali taniladi.
+
+Katta foydalanuvchi papkasini yuklash har bir katalogni qayta-qayta to‘liq tahlil qilishga aylanmasligi uchun loyiha hududlarini izlash cheklangan. Oddiy tuzilmalar sayoz, tanilgan monorepolar esa chuqurroq tekshiriladi. Hudud topilgach, Smart Ignore uning butun ichki daraxtiga chuqurlik cheklovisiz qo‘llanadi.
 
 ### 12.3 Sirlarni yashirish
-“Sirlarni yashirish” odatda o‘chirilgan bo‘ladi. Bu parametr faqat tanlangan matnni tekshiradi va topilgan har bir qiymatni o‘z joyida almashtiradi; fayl va uning atrofidagi kod saqlanadi. Parametr o‘chiq bo‘lsa, tekshiruv ishlamaydi va hisoblagich ko‘rsatilmaydi. Joriy tanlov tekshirilgach, nom topilgan qiymatlar sonini ko‘rsatadi; «o‘zgarishsiz qoldirish» qarorlari yashirilganlar sonini kamaytirsa, ikkala son — topilgan/yashirilgan — ko‘rsatiladi, qatordagi «?» indikatori esa ularni matn bilan bildiradi.
+«Sirlarni yashirish» odatda o‘chirilgan bo‘ladi. Bu parametr faqat tanlangan matnni tekshiradi va topilgan har bir qiymatni o‘z joyida almashtiradi; fayl va uning atrofidagi kod saqlanadi. Parametr o‘chiq bo‘lsa, tekshiruv ishlamaydi va hisoblagich ko‘rsatilmaydi. Joriy tanlov tekshirilgach, nom topilgan qiymatlar sonini ko‘rsatadi; «o‘zgarishsiz qoldirish» qarorlari yashirilganlar sonini kamaytirsa, ikkala son — topilgan/yashirilgan — ko‘rsatiladi, qatordagi «?» indikatori esa ularni matn bilan bildiradi.
 
 Mos kelgan joylar previewda ajratib ko‘rsatiladi. Faqat bitta uchrashuvni o‘zgarishsiz qoldirish uchun uni bosing; {alt}↓ / {alt}↑ topilmalar bo‘ylab yuradi, Enter faolini almashtiradi. Terminal Workspace ichida `[` va `]` uchrashuvlar bo‘ylab yuradi, `Enter` yoki `Space` esa faol uchrashuvni almashtiradi. Qaror shu seans davomida preview, almashish buferi, kontekst eksporti, jild va ZIP uchun amal qiladi; loyiha profilida saqlanmaydi.
 
@@ -372,27 +406,35 @@ Jild yoki ZIP nusxasidagi mos matn ham o‘zgaradi, shu sababli natija yig‘ilm
 Hisoblagich faqat qoidalarga mos kelgan joylarni bildiradi. Nol loyiha xavfsiz degani emas. CLI’da `--hide-secrets` ishlatiladi; tafsilotlar `Docs/HideSecrets.md` faylida.
 
 ### 12.4 Shaxsiy ma’lumotni yashirish
-“Shaxsiy ma’lumotni yashirish” odatda o‘chirilgan bo‘ladi. Bu parametr tanlangan matn fayllaridagi elektron pochta manzillari, global IP manzillar, yo‘llardagi mahalliy foydalanuvchi nomlari, MAC manzillar va xalqaro telefon raqamlarini aniqlaydi. Topilmalar uchun Sirlarni yashirishdagi kabi oldindan ko‘rish qarorlari va bir xil chiqish konveyeri ishlatiladi; «…ni shaxsiy ma’lumot sifatida yashirish» orqali yaratilgan qo‘lda belgilar shu sinfga tegishli bo‘lib, shu parametrga bo‘ysunadi (12.3-bo‘lim). Yaratiladigan yo‘l sarlavhalaridagi va daraxt ildizidagi mahalliy foydalanuvchi nomlari bitta umumiy topilma sifatida maskalanadi: hisoblagich uni bitta qiymat deb sanaydi, «?» indikatori u yashirilgan yoki ko‘rsatilganini bildiradi, bitta bosish esa barcha maskalangan yo‘llarni birdaniga almashtiradi.
+«Shaxsiy ma’lumotni yashirish» odatda o‘chirilgan bo‘ladi. Bu parametr tanlangan matn fayllaridagi elektron pochta manzillari, global IP manzillar, yo‘llardagi mahalliy foydalanuvchi nomlari, MAC manzillar va xalqaro telefon raqamlarini aniqlaydi. Topilmalar uchun Sirlarni yashirishdagi kabi oldindan ko‘rish qarorlari va bir xil chiqish konveyeri ishlatiladi; «…ni shaxsiy ma’lumot sifatida yashirish» orqali yaratilgan qo‘lda belgilar shu sinfga tegishli bo‘lib, shu parametrga bo‘ysunadi (12.3-bo‘lim). Yaratiladigan yo‘l sarlavhalaridagi va daraxt ildizidagi mahalliy foydalanuvchi nomlari bitta umumiy topilma sifatida maskalanadi: hisoblagich uni bitta qiymat deb sanaydi, «?» indikatori u yashirilgan yoki ko‘rsatilganini bildiradi, bitta bosish esa barcha maskalangan yo‘llarni birdaniga almashtiradi.
 
 Hujjat uchun ajratilgan diapazonlar va hostlar, odatiy CI foydalanuvchilari, taniqli ochiq DNS resolverlari hamda hujjatlashtirilgan uydirma raqamlar ko‘rinib qoladi. Nol moslik maxfiylik kafolati emas. CLI-da `--hide-private-data` ishlatiladi; to‘liq qoidalar va birinchi bosqich chegaralari `Docs/HidePrivateData.md` faylida berilgan.
 
 ### 12.5 .gitignore dan foydalanish
-Yoqilganda DevProjex faqat root faylini emas, barcha yetib boriladigan `.gitignore` fayllarini qo‘llaydi. Har bir fayl o‘z papkasi va uning barcha ochiq ichki papkalariga ta’sir qiladi, lekin ota yoki qo‘shni papkalarga emas.
+Yoqilganda DevProjex ishchi daraxtni `git status` kabi ko‘rsatadi: kuzatiladigan fayllar ko‘rinib turadi, kuzatilmaydigan fayllar esa repozitoriyning e’tiborsiz qoldirish qoidalari ularni chiqarib tashlamasa ko‘rsatiladi. U ochilgan papka ildizidagi faylnigina emas, balki barcha yetib boriladigan `.gitignore` fayllarini, jumladan undan yuqorida repozitoriy ildizigacha bo‘lgan fayllarni ham qo‘llaydi.
 
-Muayyan yo‘l uchun qoidalar ota `.gitignore` faylidan chuqurroq fayllarga, bitta fayl ichida esa yuqoridan pastga qarab ishlanadi. Oxirgi mos qoida Git natijasini belgilaydi.
+Har bir `.gitignore` quyidagilarga qo‘llanadi:
 
-`!` bilan boshlangan qoida faqat o‘z hududidagi oldingi Git istisnosini bekor qiladi. Ota papka hali ham chiqarilgan bo‘lsa, faylni qaytara olmaydi. To‘liq chiqarilgan va yetib bo‘lmaydigan papka ichidagi `.gitignore` ishlanmaydi.
+* o‘zi joylashgan papkaga;
+* uning ostidagi barcha ochiq papkalarga;
+* faqat shu hudud ichida.
 
-Buzilgan yoki qo‘llanmaydigan satr alohida o‘tkazib yuboriladi, qolgan to‘g‘ri qoidalar ishlashda davom etadi. Bu band faqat ishchi daraxtdagi `.gitignore` fayllariga tegishli; `.git/info/exclude` va global Git istisno qoidalari qo‘llanmaydi, lekin yo‘llarni taqqoslash uchun `core.ignoreCase` hamda macOS tizimidagi `core.precomposeUnicode` kabi repozitoriyaning amaldagi sozlamalari hisobga olinadi. Yo‘l tegishli bo‘lgan repozitoriya sohasi uchun o‘qiladigan Git indeksi mavjud bo‘lsa, kuzatiladigan fayllar `.gitignore` ga mos kelsa ham ko‘rinadi; ushbu indeks yoki Git CLI bo‘lmasa, bu soha xavfsiz tarzda faqat andozalarni baholashga qaytadi.
+Ichki `.gitignore` qoidalari ota yoki qo‘shni papkalarga ta’sir qilmaydi.
 
-`.gitignore` nomli ramziy havola o‘qilmaydi — bu Gitning ushbu boshqaruv fayliga nisbatan xatti-harakatiga mos keladi. Oddiy `.gitignore` faylini o‘qib bo‘lmasa, uning katalog doirasi xavfsiz tarzda to‘liq chiqariladi va tekshiruv barcha qoidalarni baholamasdan fayllarni yashirincha kiritish o‘rniga qisman kirish haqida xabar beradi.
+Muayyan yo‘l uchun qoidalar ota `.gitignore` faylidan chuqurroq fayllar tomon ishlanadi. Bitta fayl ichida qoidalar yuqoridan pastga qarab ishlanadi. Oxirgi mos qoida Git natijasini belgilaydi.
 
-Ichki `standard` profili `gitignore` rejimini va barcha sakkizta istisno guruhini tanlaydi: `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files` va `extensionless-files`.
+`!` bilan boshlanadigan qoida oldingi Git istisnosini faqat o‘z hududida bekor qiladi. Ota papka chiqarilgan bo‘lib qolsa, u faylni qaytara olmaydi. To‘liq chiqarilgan va yetib bo‘lmaydigan papka ichidagi `.gitignore` baholashda qatnashmaydi.
+
+Buzilgan yoki qo‘llab-quvvatlanmaydigan satr alohida o‘tkazib yuboriladi. O‘sha fayldagi boshqa to‘g‘ri qoidalar va qo‘shni hududlardagi qoidalar ishlashda davom etadi.
+
+Repozitoriyning mahalliy `.git/info/exclude` fayli ham qo‘llanadi, uning ustuvorligi ildizdagi `.gitignore` faylidan past. O‘z `.git` katalogiga ega ichki papka ham `git status` qoidasiga bo‘ysunadi: `.gitmodules` ichida e’lon qilinmagan ichki repozitoriy shaffof emas, shuning uchun uning fayllari ko‘rsatilmaydi, e’lon qilingan submodul esa o‘zining `.gitignore` va `info/exclude` fayllarini qo‘llaydi. Ichki repozitoriylar fayllarini ko‘rish uchun `none` ni tanlang. Global Git istisno qoidalari (`core.excludesFile`) qo‘llanmaydi; yo‘llarni taqqoslash uchun `core.ignoreCase` hamda macOS tizimida `core.precomposeUnicode` kabi repozitoriyning amaldagi sozlamalari hisobga olinadi. `.gitignore` nomli ramziy havola o‘qilmaydi — bu Gitning ushbu boshqaruv fayliga nisbatan xatti-harakatiga mos keladi. `.gitignore` yoki `info/exclude` faylini o‘qib bo‘lmasa, uning katalog doirasi xavfsiz tarzda to‘liq chiqariladi va tekshiruv barcha qoidalarni baholamasdan fayllarni yashirincha kiritish o‘rniga qisman kirish haqida xabar beradi. Yo‘l tegishli bo‘lgan repozitoriy sohasi uchun o‘qiladigan Git indeksi mavjud bo‘lsa, kuzatiladigan fayllar `.gitignore` ga mos kelsa ham ko‘rinadi; ushbu indeks yoki Git CLI bo‘lmasa, bu soha xavfsiz tarzda faqat andozalarni baholashga qaytadi.
+
+Ichki `standard` profili `gitignore` rejimini hamda `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files` va `extensionless-files` ni tanlaydi.
 
 ### 12.6 Faqat Git kuzatadigan fayllar
 «Faqat Git kuzatadigan fayllar» daraxtning Git bosqichini har bir o‘qiladigan Git indeksida qayd etilgan, ishchi daraxtda mavjud fayllardan tuzadi. O‘zgartirilgan kuzatiladigan fayllar va indeksga qo‘shilgan yangi fayllar kiritiladi; kuzatilmaydigan fayllar chiqariladi. Bu `HEAD` yoki masofaviy repozitoriyaning tarixiy nusxasi emas, joriy ishchi daraxtdir.
 
-Har bir yetib boriladigan ichki repozitoriya va worktree istalgan erishiladigan chuqurlikda mustaqil qayta ishlanadi. Ichki repozitoriya ota yoki qo‘shni repozitoriyaning kuzatiladigan yo‘llarini meros qilib olmaydi. Bu rejim uchun Git CLI kerak; o‘qiladigan bo‘sh indeks yaroqli. Terminal ish maydoni (TUI) shu rejimda ishga tushirilib, hech bir mos indeks yuklanmasa, ish maydoni ochilmaydi. Rejim allaqachon ochiq TUI ish maydonida interaktiv tarzda tanlanib, hech bir mos indeks yuklanmasa, o‘zgarish rad etiladi va oxirgi ishlaydigan Git rejimi faol qoladi. Xuddi shu holatda to‘g‘ridan-to‘g‘ri buyruqlar siyosat yoki tekshiruv xatosi bilan tugaydi. DevProjex hech qachon yashirincha `.gitignore` ga o‘tmaydi. Boshqa mos indeks o‘qilsa, indeksini o‘qib bo‘lmaydigan ichki sohalar ogohlantirish bilan chiqariladi.
+Har bir repozitoriy mustaqil qayta ishlanadi: ochilgan papka ichidagi qo‘shni repozitoriylar va e’lon qilingan submodullar har biri o‘z indeksidan foydalanadi, ichki repozitoriy esa ota yoki qo‘shni repozitoriyning kuzatiladigan yo‘llarini meros qilib olmaydi. `.gitmodules` ichida e’lon qilinmagan ichki repozitoriy `.gitignore` rejimidagi kabi shaffof emas bo‘lib qoladi. Bu rejim uchun Git CLI kerak; o‘qiladigan bo‘sh indeks yaroqli. Terminal ish maydoni (TUI) shu rejimda ishga tushirilib, hech bir mos indeks yuklanmasa, ish maydoni ochilmaydi. Rejim allaqachon ochiq TUI ish maydonida interaktiv tarzda tanlanib, hech bir mos indeks yuklanmasa, o‘zgarish rad etiladi va oxirgi ishlaydigan Git rejimi faol qoladi. Xuddi shu holatda to‘g‘ridan-to‘g‘ri buyruqlar siyosat yoki tekshiruv xatosi bilan tugaydi. DevProjex hech qachon yashirincha `.gitignore` ga o‘tmaydi. Boshqa mos indeks o‘qilsa, indeksini o‘qib bo‘lmaydigan ichki sohalar ogohlantirish bilan chiqariladi.
 
 Allaqachon ochiq Desktop ish maydonida aniq tanlov ko‘rinib turadi va fail-closed ishlaydi: tayyorlik xatosida chiqarish va eksport bloklanadi, qisman tayyorlikda esa amal mahalliylashtirilgan ogohlantirish bilan davom etadi.
 
@@ -406,28 +448,43 @@ Tanlangan Git rejimi barcha Smart Ignore nomzodlarini qamrab turganda Smart Igno
 `!` Git inkori faqat Git natijasini bekor qiladi; u Smart Ignore yoki asosiy qoidani o‘chirmaydi.
 
 ### 12.8 Asosiy qoidalar
-Nuqta bilan boshlanish qoidalari nomni, yashirin element qoidalari esa tizimdagi Hidden atributini tekshiradi. Platformaga qarab ular bir xil yoki turli elementlarga tegishli bo‘lishi mumkin.
+«Nuqta bilan boshlanuvchi jildlar» va «Nuqta bilan boshlanuvchi fayllar» element nomini tekshiradi.
 
-«Bo‘sh fayllar» 0 baytli fayllarni, «Kengaytmasiz fayllar» esa `Dockerfile`, `Makefile`, `README` kabi fayllarni yashiradi.
+«Yashirin jildlar» va «Yashirin fayllar» tizimdagi Hidden atributini tekshiradi. Ayrim platformalarda nuqta bilan boshlanuvchi nom va tizim atributi bir xil yoki turli elementlarni tavsiflashi mumkin.
 
-«Bo‘sh papkalar» mantiqan bo‘sh papkalarni yashiradi. Tanlangan fayl turlari va barcha boshqa qoidalar qo‘llangach ko‘rinadigan fayl yoki ichki papka qolmasa, papka mantiqan bo‘sh hisoblanadi. Shu sababli boshqa qoida o‘zgarganda uning hisoblagichi ham o‘zgarishi mumkin.
+«Bo‘sh fayllar» hajmi 0 bayt bo‘lgan fayllarni yashiradi.
+
+«Kengaytmasiz fayllar» `Dockerfile`, `Makefile` va `README` kabi fayllarni yashiradi.
+
+«Bo‘sh papkalar» mantiqan bo‘sh papkalarni yashiradi. Tanlangan fayl turlari va barcha boshqa qoidalar qo‘llangach, papkada hech qanday ko‘rinadigan fayl yoki ichki papka qolmasa, u mantiqan bo‘sh hisoblanadi.
+
+Shu sababli boshqa qoida almashtirilgach bo‘sh papkalar soni o‘zgarishi mumkin: fayllarni yashirish ularni o‘z ichiga olgan papkalarni mantiqan bo‘sh qilib qo‘yishi mumkin.
 
 ### 12.9 Hisoblagichlar
-Hisoblagich diskdagi fizik sonni emas, joriy sozlamalarda qoidaning bevosita hissasini ko‘rsatadi. Bir element bir vaqtning o‘zida bir nechta ustma-ust hisoblagichga yozilmaydi.
+Qoida yonidagi son diskdagi o‘xshash elementlarning fizik sonini emas, joriy sozlamalarda uning bevosita hissasini ko‘rsatadi.
 
-Barqaror tartib: papkalar uchun `.gitignore`, Smart Ignore, nomdagi nuqta, Hidden atributi; fayllar uchun `.gitignore`, Smart Ignore, nomdagi nuqta, kengaytma yo‘qligi, bo‘sh fayl, Hidden atributi. Bu tartib faqat hisoblagichlarga ta’sir qiladi. Ko‘rinish uchun istalgan faol mexanizm elementni chiqarishi mumkin.
+Bitta element bir vaqtning o‘zida bir nechta ustma-ust tushadigan hisoblagichga yozilmaydi. Masalan, `.git` papkasi ham nuqta bilan boshlanuvchi nomga, ham tizimning Hidden atributiga ega bo‘lishi mumkin, lekin uning chiqarilishi faqat bitta qoidaga yoziladi.
+
+Chiqarilish egasini tanlash uchun barqaror tartib ishlatiladi:
+
+* papkalar: `.gitignore`, Smart Ignore, nuqta bilan boshlanuvchi nom, tizimning Hidden atributi;
+* fayllar: `.gitignore`, Smart Ignore, nuqta bilan boshlanuvchi nom, kengaytma yo‘qligi, bo‘sh fayl, tizimning Hidden atributi.
+
+Bu tartib faqat hisoblagichlarga ta’sir qiladi. Yakuniy ko‘rinish soddaroq qoidaga bo‘ysunadi: istalgan yoqilgan mexanizm elementni chiqarsa, u yashiriladi.
 
 ### 12.10 O‘zgarishlarni qo‘llash
-Belgilarni almashtirish avval mavjud parametrlar va hisoblagichlarni yangilaydi. Yakuniy daraxt «Sozlamalarni qo‘llash» bosilgach qayta quriladi. Tayyorlash bekor qilinsa, DevProjex oxirgi to‘liq tugallangan holatga qaytadi; qisman hisoblangan qoidalar qo‘llanmaydi.
+Belgilash kataklarini almashtirish avval paneldagi mavjud sozlamalar va hisoblagichlarni yangilaydi. Yakuniy daraxt «Sozlamalarni qo‘llash» tanlangach qayta quriladi.
+
+Sozlamalarni tayyorlash bekor qilinsa, DevProjex panelni oxirgi to‘liq yakunlangan holatga qaytaradi. Qisman hisoblangan qoidalar qo‘llanmaydi.
 
 ## 13) Daraxt va metrikalar qanday hisoblanadi
 Natija quyidagilarga bog‘liq:
 * tanlangan fayl turlari
 * e’tiborsiz qoldirish qoidalari
 * faol filtr
-* daraxtdagi checkbox orqali belgilangan tugunlar (tanlovga asoslangan amallar uchun)
+* daraxtda belgilash katagi orqali belgilangan tugunlar (tanlovga asoslangan amallar uchun)
 
-Agar ruxsat bo‘lmasa, tugun odatiy nomi va belgisini saqlab, "[ruxsat yo'q]" qo‘shimchasini oladi.
+Agar ruxsat bo‘lmasa, tugun odatiy nomi va belgisini saqlab, «[ruxsat yo‘q]» qo‘shimchasini oladi.
 
 ### 13.1 Status-bardagi hisoblagichlar nimani ko‘rsatadi
 Status-barda ikki blok bor:
@@ -437,7 +494,7 @@ Status-barda ikki blok bor:
 Format:
 * Satrlar
 * Belgilar
-* ~Tokenlar (taxminiy)
+* ≈Tokenlar (taxminiy)
 
 Katta qiymatlar qisqa formatda (K/M) ko‘rsatiladi.
 
@@ -447,7 +504,7 @@ Muhim:
 
 ### 13.2 Metrikalar qanday hisoblanadi
 Daraxt metrikalari:
-* aynan eksport pipeline’i yaratadigan real daraxt matni bo‘yicha hisoblanadi;
+* aynan eksport konveyeri yaratadigan real daraxt matni bo‘yicha hisoblanadi;
 * joriy daraxt formatini hisobga oladi.
 
 Mazmun metrikalari:
@@ -458,8 +515,8 @@ Mazmun metrikalari:
 ### 13.3 Hisoblagichlar qachon yangilanadi
 Qayta hisoblash quyidagi holatlarda bajariladi:
 * loyiha ochilgandan/yangilangandan keyin;
-* sozlamalar qo‘llangandan keyin (istisnolar, fayl turlari, root jildlar);
-* daraxtdagi checkboxlar o‘zgarganda (debounce bilan);
+* sozlamalar qo‘llangandan keyin (istisnolar va fayl turlari);
+* daraxtdagi belgilash kataklari o‘zgarganda (kechikish bilan);
 * daraxt formati almashtirilganda (daraxt ishlatiladigan amallar uchun).
 * fon hisoblash bekor qilinsa, keyingi to‘liq yakunlangan qayta hisoblashgacha hisoblagichlar 0 ga o‘rnatiladi.
 
@@ -503,11 +560,13 @@ Ma’lumotlarni tiklash (Yordam → Ma’lumotlarni tiklash) mahalliy loyiha par
 * tanlangan fayl turlari;
 * «Istisnolar» bo‘limidagi tanlangan qoidalar;
 * kontentga ishlov berishning tanlangan sozlamalari;
-* qo‘lda qo‘yilgan maxfiy maʼlumot belgilari.
+* qo‘lda qo‘yilgan maxfiy ma’lumot belgilari.
+
+Shuningdek, agent jurnalining yakunlangan seanslari tozalanadi (19.3-bo‘lim); faol seanslar saqlanadi.
 
 Muhim:
-* lokal jildlar uchun “So‘nggilar” tarixi tozalanmaydi;
-* Git Clone oynasidagi “So‘nggi repozitoriylar” tarixi tozalanmaydi;
+* mahalliy jildlar uchun «So‘nggi» tarixi tozalanmaydi;
+* Git Clone oynasidagi «So‘nggi havolalar» tarixi tozalanmaydi;
 * diskdagi loyiha fayllari va jildlari o‘zgartirilmaydi va o‘chirilmaydi.
 
 ## 17) Tillar
@@ -533,5 +592,36 @@ Status-bardagi X (bekor qilish) tugmasi:
 * mavjud parametrlarni yangilash bekor qilinganda panelni oxirgi yakunlangan holatiga qaytaradi;
 * bekor qilishni qo‘llamaydigan amallarda status-bar indikatsiyasini tugatadi, lekin amal fon rejimida yakunlanishi mumkin.
 
-## 19) Eslatmalar
+## 19) MCP va AI agentlar
+DevProjex tarkibida faqat o‘qish uchun mo‘ljallangan mahalliy MCP server bor. Claude Code, Codex, Cursor va VS Code kabi AI agentlar loyihani u orqali o‘qiydi: sirlarni maskalash doim yoqilgan, agent esa loyiha fayllarini o‘zgartira olmaydi. Serverda sakkizta vosita bor: `list_projects`, `get_tree`, `analyze`, `search_project`, `related_files`, `get_file`, `pack_context` va `read_pack`.
+
+### 19.1 Mijozni ulash
+MCP menyusida quyidagilar bor:
+* Live context — server shu oynada belgilangan elementlarga amal qiladi (19.2-bo‘lim);
+* Oddiy — server oynadagi tanlovga bog‘liq emas;
+* Jurnal… — agentlar nimani so‘ragani va nimani olgani (19.3-bo‘lim);
+* Hujjatlar — MCP server hujjatlarini ochadi.
+
+Live context va Oddiy ichki menyularida bir xil amallar bor — Claude Code’da ochish, Codex’da ochish, Cursor’da ochish, VS Code’da ochish va Boshqa mijozlar… — ular loyiha ochiq bo‘lganda mavjud.
+
+Claude Code va Codex o‘zlarining o‘rnatilgan buyrug‘i orqali ro‘yxatdan o‘tkaziladi, so‘ng mijoz loyiha papkasida yangi terminalda ochiladi. Cursor va VS Code loyihaning mahalliy `.cursor/mcp.json` yoki `.vscode/mcp.json` faylini oladi; shu fayldagi boshqa serverlar saqlanadi. «Boshqa mijozlar…» Claude Desktop va boshqa mijozlar uchun tayyor konfiguratsiyani ko‘rsatadi. Mijoz buyrug‘i topilmasa yoki ulanish muvaffaqiyatsiz bo‘lsa, DevProjex buning o‘rniga qo‘lda sozlash konfiguratsiyasini ko‘rsatadi. Muvaffaqiyatli ulanishdan keyin DevProjex `devprojex` buyrug‘ini PATH’ga qo‘shishni taklif qilishi mumkin.
+
+Codex bitta umumiy DevProjex ulanishini saqlaydi, shuning uchun boshqa loyihani ulashda uni almashtirishdan oldin tasdiq so‘raladi. Allaqachon ishlayotgan mijoz seansi serverni yuklashi uchun qayta ishga tushirilishi kerak. Terminalda `devprojex mcp connect` odatda oddiy rejimni ro‘yxatdan o‘tkazadi; Live context uchun `--mode live`, faqat konfiguratsiyani chiqarish uchun esa `--print` qo‘shing.
+
+### 19.2 Live context
+Live context rejimida daraxtda belgilangan elementlar agentning diqqat markazini belgilaydi: daraxt, qidiruv, tahlil, bog‘liq fayllar va jamlash so‘rovlari ular doirasida qoladi. Oyna filtrlari — fayl turlari, istisnolar va Git rejimi — kirish chegarasi hisoblanadi: agent boshqa fayllarni nomi bo‘yicha ocha oladi, lekin faqat shu filtrlar ruxsat bergan fayllarni.
+
+Oyna ochiq turishi shart emas. Server har bir so‘rovda loyiha uchun oxirgi saqlangan tanlovni o‘qiydi, shuning uchun yangi belgilar va qo‘llangan sozlamalar agentni qayta ishga tushirmasdan uning keyingi so‘rovida hisobga olinadi.
+
+Jonli seans faol bo‘lganda oyna sarlavhasi `· Live context (<client>)` bilan, bir nechta seans faol bo‘lsa esa seanslar soni bilan tugaydi.
+
+### 19.3 Jurnal
+«MCP → Jurnal…» agentlar DevProjex orqali nimani so‘ragani va nimani olganini ko‘rsatadi: mijoz, rejim, chaqiruvlar, belgilar, taxminiy tokenlar, yetkazilgan fayllar va maskalangan qiymatlar ko‘rsatilgan seanslar hamda tanlangan seansning chaqiruvlari. U loyiha ochilmaganda ham mavjud; loyiha ochiq bo‘lsa, odatda «Faqat joriy loyiha» tanlangan bo‘ladi.
+
+Jurnal faqat shu kompyuterda, DevProjex holat papkasida saqlanadi va 30 kun davomida ko‘pi bilan 200 ta seansni saqlaydi. Unda fayl mazmuni, topilgan sir qiymatlari yoki qidiruv so‘rovlari matni saqlanmaydi. «Eksport…» seansni Markdown yoki JSON kvitansiyasi sifatida saqlaydi. «Tozalash» tasdiqlangandan keyin yakunlangan seanslarni o‘chiradi; faol seanslar va boshqa loyihalar bilan umumiy seanslar saqlanadi.
+
+### 19.4 Agent faolligi
+«Ko‘rinish → Agent faolligi» odatda o‘chirilgan. U yoqilganda agent oxirgi jonli seans davomida olgan fayllar daraxtda ✦ bilan belgilanadi, belgining maslahat oynasi esa agent faylni necha marta olganini ko‘rsatadi. Belgilar filtrlar yoki belgilash kataklarini hech qachon o‘zgartirmaydi. Ular yangi jonli seans boshlanganda, Agent faolligi o‘chirilganda va loyiha qayta ochilganda tozalanadi. Oddiy seanslar jurnalda ko‘rinadi, lekin belgi qo‘shmaydi.
+
+## 20) Eslatmalar
 * Ruxsat yetarli bo‘lmasa, ilova admin huquqi bilan qayta ishga tushirishni taklif qiladi; rad etilsa, xabar chiqadi.
