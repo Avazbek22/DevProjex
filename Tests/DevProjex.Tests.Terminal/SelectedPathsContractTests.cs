@@ -13,7 +13,7 @@ public sealed class SelectedPathsContractTests
 		using var document = await ExportJsonAsync(workspace.Path);
 
 		Assert.Equal(
-			FullContentPaths(workspace.Path, "docs/readme.md", "src/a.cs", "src/nested/b.cs"),
+			FullContentPaths("docs/readme.md", "src/a.cs", "src/nested/b.cs"),
 			ReadFilePaths(document));
 	}
 
@@ -52,7 +52,7 @@ public sealed class SelectedPathsContractTests
 
 		using var document = await ExportJsonAsync(workspace.Path, "--select", "src");
 
-		Assert.Equal(FullContentPaths(workspace.Path, "src/a.cs", "src/nested/b.cs"), ReadFilePaths(document));
+		Assert.Equal(FullContentPaths("src/a.cs", "src/nested/b.cs"), ReadFilePaths(document));
 		Assert.Equal(["src"], ReadSelectedPaths(document));
 	}
 
@@ -66,7 +66,7 @@ public sealed class SelectedPathsContractTests
 			workspace.Path,
 			"--select", "src/a.cs");
 
-		Assert.Equal(FullContentPaths(workspace.Path, "src/a.cs"), ReadFilePaths(document));
+		Assert.Equal(FullContentPaths("src/a.cs"), ReadFilePaths(document));
 		Assert.Equal(
 			new FileInfo(selectedPath).Length,
 			document.RootElement.GetProperty("metrics").GetProperty("bytes").GetInt64());
@@ -83,7 +83,7 @@ public sealed class SelectedPathsContractTests
 			"--select", "src/nested/b.cs",
 			"--select", "src");
 
-		Assert.Equal(FullContentPaths(workspace.Path, "src/a.cs", "src/nested/b.cs"), ReadFilePaths(document));
+		Assert.Equal(FullContentPaths("src/a.cs", "src/nested/b.cs"), ReadFilePaths(document));
 		Assert.Equal(["src"], ReadSelectedPaths(document));
 	}
 
@@ -95,7 +95,7 @@ public sealed class SelectedPathsContractTests
 		using var document = await ExportJsonAsync(workspace.Path, "--select", ".");
 
 		Assert.Equal(
-			FullContentPaths(workspace.Path, "docs/readme.md", "src/a.cs", "src/nested/b.cs"),
+			FullContentPaths("docs/readme.md", "src/a.cs", "src/nested/b.cs"),
 			ReadFilePaths(document));
 		Assert.Empty(ReadSelectedPaths(document));
 	}
@@ -199,7 +199,7 @@ public sealed class SelectedPathsContractTests
 			workspace.Path,
 			"--select", "данные/привет.cs");
 
-		Assert.Equal(FullContentPaths(workspace.Path, "данные/привет.cs"), ReadFilePaths(document));
+		Assert.Equal(FullContentPaths("данные/привет.cs"), ReadFilePaths(document));
 		Assert.Equal(["данные/привет.cs"], ReadSelectedPaths(document));
 	}
 
@@ -217,7 +217,7 @@ public sealed class SelectedPathsContractTests
 			workspace.Path,
 			"--select", relativePath);
 
-		Assert.Equal(FullContentPaths(workspace.Path, relativePath), ReadFilePaths(document));
+		Assert.Equal(FullContentPaths(relativePath), ReadFilePaths(document));
 		Assert.Equal([relativePath], ReadSelectedPaths(document));
 	}
 
@@ -238,7 +238,7 @@ public sealed class SelectedPathsContractTests
 			workspace.Path,
 			"--select", relativePath);
 
-		Assert.Equal(FullContentPaths(workspace.Path, relativePath), ReadFilePaths(document));
+		Assert.Equal(FullContentPaths(relativePath), ReadFilePaths(document));
 		Assert.Equal([relativePath], ReadSelectedPaths(document));
 	}
 
@@ -273,7 +273,7 @@ public sealed class SelectedPathsContractTests
 			workspace.Path,
 			"--select", relativePath);
 
-		Assert.Equal(FullContentPaths(workspace.Path, relativePath), ReadFilePaths(document));
+		Assert.Equal(FullContentPaths(relativePath), ReadFilePaths(document));
 		Assert.Equal([relativePath], ReadSelectedPaths(document));
 	}
 
@@ -295,7 +295,7 @@ public sealed class SelectedPathsContractTests
 			workspace.Path,
 			"--select", relativePath);
 
-		Assert.Equal(FullContentPaths(workspace.Path, relativePath), ReadFilePaths(document));
+		Assert.Equal(FullContentPaths(relativePath), ReadFilePaths(document));
 		Assert.Equal([relativePath], ReadSelectedPaths(document));
 	}
 
@@ -323,7 +323,7 @@ public sealed class SelectedPathsContractTests
 			"--select", "src/a.cs",
 			"--select", "docs/readme.md");
 
-		Assert.Equal(FullContentPaths(workspace.Path, "docs/readme.md", "src/a.cs"), ReadFilePaths(document));
+		Assert.Equal(FullContentPaths("docs/readme.md", "src/a.cs"), ReadFilePaths(document));
 		Assert.Equal(["docs/readme.md", "src/a.cs"], ReadSelectedPaths(document));
 	}
 
@@ -341,7 +341,7 @@ public sealed class SelectedPathsContractTests
 			"--select-from", selectionFile);
 
 		Assert.Equal(
-			FullContentPaths(workspace.Path, "docs/readme.md", "src/a.cs", "src/nested/b.cs"),
+			FullContentPaths("docs/readme.md", "src/a.cs", "src/nested/b.cs"),
 			ReadFilePaths(document));
 		Assert.Equal(
 			["docs/readme.md", "src/a.cs", "src/nested/b.cs"],
@@ -389,7 +389,7 @@ public sealed class SelectedPathsContractTests
 			"--select-from", selectionFile);
 
 		Assert.Equal(
-			FullContentPaths(workspace.Path, "Foo.cs", "foo.cs"),
+			FullContentPaths("Foo.cs", "foo.cs"),
 			ReadFilePaths(document));
 		Assert.Equal(
 			["Foo.cs", "foo.cs"],
@@ -411,7 +411,7 @@ public sealed class SelectedPathsContractTests
 			workspace.Path,
 			"--select-from", selectionFile);
 
-		Assert.Equal(FullContentPaths(workspace.Path, "src/a.cs"), ReadFilePaths(document));
+		Assert.Equal(FullContentPaths("src/a.cs"), ReadFilePaths(document));
 	}
 
 	[Fact]
@@ -455,7 +455,7 @@ public sealed class SelectedPathsContractTests
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
 		using var document = JsonDocument.Parse(environment.StandardOutput);
 		Assert.Equal(
-			FullContentPaths(workspace.Path, "данные/привет.cs"),
+			FullContentPaths("данные/привет.cs"),
 			ReadFilePaths(document));
 		Assert.Empty(environment.StandardError);
 	}
@@ -557,7 +557,7 @@ public sealed class SelectedPathsContractTests
 		if (OperatingSystem.IsWindows())
 		{
 			using var document = await ExportJsonAsync(workspace.Path, "--select", selectedPath);
-			Assert.Equal(FullContentPaths(workspace.Path, "src/a.cs"), ReadFilePaths(document));
+			Assert.Equal(FullContentPaths("src/a.cs"), ReadFilePaths(document));
 		}
 		else
 		{
@@ -824,10 +824,9 @@ public sealed class SelectedPathsContractTests
 			.Select(static item => item.GetString() ?? string.Empty)
 			.ToArray();
 
-	private static string[] FullContentPaths(string rootPath, params string[] relativePaths) =>
+	// Content entries name each file by its portable project-relative path, as the default view does.
+	private static string[] FullContentPaths(params string[] relativePaths) =>
 		relativePaths
-			.Select(path => PathUtility.NormalizeSeparators(
-				Path.Combine(rootPath, path.Replace('/', Path.DirectorySeparatorChar))))
 			.OrderBy(static path => path, StringComparer.Ordinal)
 			.ToArray();
 

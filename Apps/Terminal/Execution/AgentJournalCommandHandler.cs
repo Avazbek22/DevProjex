@@ -279,5 +279,6 @@ internal sealed class AgentJournalCommandHandler(
 	}
 
 	private void WriteError(string code, string message) =>
-		environment.Error.WriteLine($"error[{code}]: {TerminalTextEscaping.EscapeSingleLine(message)}");
+		environment.Error.WriteLine(
+			$"{TerminalErrorHeader.Format(localization, code)} {TerminalTextEscaping.EscapeSingleLine(message)}");
 }

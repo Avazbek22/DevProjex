@@ -19,6 +19,52 @@ public sealed partial class McpServerIntegrationTests
 		return project;
 	}
 
+	[Theory]
+	[InlineData("json")]
+	[InlineData("xml")]
+	public async Task ContentMachinePacksNameFilesAndSkippedFilesProjectRelative(string format)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = CreateAdmissionFixture(workspace);
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var packText = Text(await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["view"] = "content",
+				["format"] = format,
+				["max_tokens"] = "60"
+			}));
+		var body = ExtractSpotlightBody(packText);
+		string[] filePaths;
+		string? largestSkippedPath;
+		if (format == "json")
+		{
+			using var document = JsonDocument.Parse(body);
+			filePaths = document.RootElement.GetProperty("files").EnumerateArray()
+				.Select(static file => file.GetProperty("path").GetString()!)
+				.ToArray();
+			largestSkippedPath = document.RootElement.GetProperty("tokenBudget")
+				.GetProperty("largestSkippedFiles")[0].GetProperty("path").GetString();
+		}
+		else
+		{
+			var document = System.Xml.Linq.XDocument.Parse(body);
+			filePaths = document.Root!.Element("files")!.Elements("file")
+				.Select(static file => file.Attribute("path")!.Value)
+				.ToArray();
+			largestSkippedPath = document.Root.Element("tokenBudget")!.Element("largestSkippedFiles")!
+				.Element("file")!.Attribute("path")?.Value;
+		}
+
+		Assert.NotEmpty(filePaths);
+		Assert.All(filePaths, path => Assert.Matches(@"^src/f[0-9]{3}\.txt$", path));
+		Assert.Matches(@"^src/f[0-9]{3}\.txt$", largestSkippedPath);
+		Assert.DoesNotContain(project + Path.DirectorySeparatorChar, packText, PathComparison);
+		Assert.DoesNotContain(PathUtility.NormalizeSeparators(project) + "/", packText, PathComparison);
+	}
+
 	private static JsonElement Structured(CallToolResult result)
 	{
 		if (result.StructuredContent is { } structured)

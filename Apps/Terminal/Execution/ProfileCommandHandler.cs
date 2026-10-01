@@ -176,8 +176,12 @@ public sealed class ProfileCommandHandler(
 			return CommandLineExitCodes.Success;
 		}
 
-		environment.Error.WriteLine("error[DPX-CLI-PROFILE-INVALID]:");
-		environment.Error.WriteLine(services.Localization["Terminal.Error.ProfileInvalid"]);
+		var isMissing = result.ErrorCode == "DPX-CLI-PROFILE-NOT-FOUND";
+		environment.Error.WriteLine(TerminalErrorHeader.Format(
+			services.Localization,
+			isMissing ? "DPX-CLI-PROFILE-NOT-FOUND" : "DPX-CLI-PROFILE-INVALID"));
+		environment.Error.WriteLine(services.Localization[
+			isMissing ? "Terminal.Error.ProfileUnresolved" : "Terminal.Error.ProfileInvalid"]);
 		return CommandLineExitCodes.UsageError;
 	}
 

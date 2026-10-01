@@ -141,13 +141,9 @@ public sealed class CliProfileDataSafetyProcessTests
 		Assert.Empty(result.StandardError);
 		using var document = JsonDocument.Parse(result.StandardOutput);
 		var files = document.RootElement.GetProperty("files").EnumerateArray().ToArray();
-		Assert.Equal(2, files.Length);
-		Assert.Contains(
-			files,
-			file => file.GetProperty("path").GetString()!.EndsWith("/first.txt", StringComparison.Ordinal));
-		Assert.Contains(
-			files,
-			file => file.GetProperty("path").GetString()!.EndsWith("/second.txt", StringComparison.Ordinal));
+		Assert.Equal(
+			["first.txt", "second.txt"],
+			files.Select(static file => file.GetProperty("path").GetString()).Order(StringComparer.Ordinal));
 	}
 
 	private static async Task<ProcessResult> RunAsync(

@@ -73,8 +73,8 @@ public sealed class SelectionPathGitProcessTests
 			var paths = document.RootElement.GetProperty("files")
 				.EnumerateArray().Select(file => file.GetProperty("path").GetString()!).ToArray();
 			Assert.Equal(2, paths.Length);
-			Assert.Contains(paths, path => path.EndsWith('/' + quoteName, StringComparison.Ordinal));
-			Assert.Contains(paths, path => path.EndsWith("/Пример.cs", StringComparison.Ordinal));
+			Assert.Contains(quoteName, paths);
+			Assert.Contains("Пример.cs", paths);
 		}
 		finally
 		{

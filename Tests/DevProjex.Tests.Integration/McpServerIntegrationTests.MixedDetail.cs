@@ -251,7 +251,7 @@ public sealed partial class McpServerIntegrationTests
 		var text = Text(await server.CallAsync("pack_context", arguments));
 
 		using var document = JsonDocument.Parse(ExtractSpotlightBody(text));
-		// JSON keeps its machine file-path representation, so entries are matched by suffix.
+		// Entries carry project-relative paths; matching by suffix keeps the lookup separator-agnostic.
 		var byPath = document.RootElement.GetProperty("files").EnumerateArray()
 			.ToDictionary(
 				file => file.GetProperty("path").GetString()!.Replace('\\', '/'),

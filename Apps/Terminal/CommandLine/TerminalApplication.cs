@@ -64,7 +64,7 @@ public sealed class TerminalApplication
 			TerminalLanguageResolver.Resolve(arguments, environment.Variables));
 		if (LegacyCliSyntaxDetector.TryDetect(arguments, out var migration))
 		{
-			runtimeEnvironment.Error.WriteLine("error[DPX-CLI-LEGACY-SYNTAX]:");
+			runtimeEnvironment.Error.WriteLine(TerminalErrorHeader.Format(localization, "DPX-CLI-LEGACY-SYNTAX"));
 			runtimeEnvironment.Error.WriteLine(localization["Terminal.Error.LegacySyntax"]);
 			runtimeEnvironment.Error.WriteLine(localization["Terminal.Label.NewCommand"]);
 			foreach (var line in CliArgumentVectorFormatter
@@ -121,7 +121,7 @@ public sealed class TerminalApplication
 				_ => throw new ArgumentOutOfRangeException()
 			};
 			runtimeEnvironment.Error.WriteLine(
-				$"error[{code}]: " +
+				$"{TerminalErrorHeader.Format(localization, code)} " +
 				localization.Format(
 					messageKey,
 					inputIntegrityError.SymbolName));
@@ -136,7 +136,8 @@ public sealed class TerminalApplication
 			foreach (var error in errors)
 			{
 				runtimeEnvironment.Error.WriteLine(
-					$"error[{error.Code}]: {TerminalTextEscaping.EscapeSingleLine(error.Message)}");
+					$"{TerminalErrorHeader.Format(localization, error.Code)} " +
+					TerminalTextEscaping.EscapeSingleLine(error.Message));
 			}
 			if (TryBuildSuggestion(root, parseResult, out var suggestion))
 				runtimeEnvironment.Error.WriteLine(localization.Format("Terminal.Hint.DidYouMean", suggestion));
@@ -166,13 +167,13 @@ public sealed class TerminalApplication
 		catch (OperationCanceledException)
 		{
 			runtimeEnvironment.Error.WriteLine(
-				$"error[DPX-CLI-CANCELED]: {localization["Terminal.Error.Canceled"]}");
+				$"{TerminalErrorHeader.Format(localization, "DPX-CLI-CANCELED")} {localization["Terminal.Error.Canceled"]}");
 			return CommandLineExitCodes.Canceled;
 		}
 		catch (Exception exception) when (exception is not TerminalBrokenPipeException)
 		{
 			runtimeEnvironment.Error.WriteLine(
-				$"error[DPX-CLI-UNEXPECTED]: {localization["Terminal.Error.Unexpected"]}");
+				$"{TerminalErrorHeader.Format(localization, "DPX-CLI-UNEXPECTED")} {localization["Terminal.Error.Unexpected"]}");
 			if (IsDiagnosticVerbosity(parseResult))
 			{
 				runtimeEnvironment.Error.WriteLine(

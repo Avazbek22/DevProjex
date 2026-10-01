@@ -9,7 +9,8 @@ public sealed record PortableProfileValidationResult(
 	bool IsValid,
 	ProjectSelectionSpec? Selection,
 	IReadOnlyList<string> Errors,
-	int? SourceSchemaVersion = null);
+	int? SourceSchemaVersion = null,
+	string? ErrorCode = null);
 
 public sealed record PortableProfileLoadResult(
 	ProjectSelectionSpec Selection,
@@ -79,6 +80,15 @@ public sealed class PortableProjectProfileService
 		catch (OperationCanceledException)
 		{
 			throw;
+		}
+		// A file that is not there could not be resolved; only a file that exists and cannot be
+		// read or parsed is an invalid profile.
+		catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+		{
+			throw new PortableProjectProfileException(
+				"DPX-CLI-PROFILE-NOT-FOUND",
+				"The portable profile does not exist.",
+				exception);
 		}
 		catch (Exception exception) when (exception is
 			       IOException or
@@ -195,7 +205,11 @@ public sealed class PortableProjectProfileService
 		}
 		catch (PortableProjectProfileException exception)
 		{
-			return new PortableProfileValidationResult(false, null, [exception.Message]);
+			return new PortableProfileValidationResult(
+				false,
+				null,
+				[exception.Message],
+				ErrorCode: exception.Code);
 		}
 	}
 

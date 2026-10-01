@@ -178,11 +178,7 @@ public sealed class ProjectContextDocumentService(
 			throw new ArgumentException("Destination must be writable.", nameof(destination));
 		var effectivePathRedaction = outputPathRedactionDecision ??
 			OutputRootPathPresentation.CaptureRedactionDecision(CreateTransformationContext(plan));
-		var contentPathMapper = CreateContentPathMapper(
-			plan,
-			view,
-			format,
-			useSourceMappedStructuredPaths);
+		var contentPathMapper = CreateContentPathMapper(plan);
 		var orderedPaths = ResolveOrderedPaths(plan.IncludedFiles, ranking);
 		if (ShouldRedact(plan, view))
 		{
@@ -418,11 +414,7 @@ public sealed class ProjectContextDocumentService(
 
 		var effectivePathRedaction = outputPathRedactionDecision ??
 			OutputRootPathPresentation.CaptureRedactionDecision(CreateTransformationContext(plan));
-		var contentPathMapper = CreateContentPathMapper(
-			plan,
-			view,
-			format,
-			useSourceMappedStructuredPaths: true);
+		var contentPathMapper = CreateContentPathMapper(plan);
 		var rankingEntriesByFullPath = CreateRankingEntryLookup(ranking);
 		var detailTokenResolver = CreateDetailTokenResolver(plan);
 		var metricsByPath = measured.TransformedFileMetrics.ToDictionary(
@@ -514,11 +506,7 @@ public sealed class ProjectContextDocumentService(
 	{
 		var effectivePathRedaction = outputPathRedactionDecision ??
 			OutputRootPathPresentation.CaptureRedactionDecision(CreateTransformationContext(plan));
-		var contentPathMapper = CreateContentPathMapper(
-			plan,
-			view,
-			format,
-			useSourceMappedStructuredPaths: true);
+		var contentPathMapper = CreateContentPathMapper(plan);
 		var rankingEntriesByFullPath = CreateRankingEntryLookup(ranking);
 		var detailTokenResolver = CreateDetailTokenResolver(plan);
 		await foreach (var source in OpenSourceSnapshotsInOrderAsync(
@@ -1273,7 +1261,7 @@ public sealed class ProjectContextDocumentService(
 		WriteDiagnostics(
 			writer,
 			plan.Diagnostics,
-			mapDiagnosticPaths ? contentPathMapper : null,
+			mapDiagnosticPaths ? CreateSourceDiagnosticPathMapper(plan, view) : null,
 			pathRedaction);
 		writer.WriteString("fingerprint", plan.Fingerprint);
 		writer.WriteEndObject();
@@ -1416,7 +1404,9 @@ public sealed class ProjectContextDocumentService(
 		if (tokenBudget is not null)
 			WriteTokenBudgetXml(writer, tokenBudget.CreateReport());
 		writer.WriteStartElement("diagnostics");
-		var mapDiagnosticPaths = ShouldMapDiagnosticPathsToSource(plan, useSourceMappedStructuredPaths);
+		var diagnosticPathMapper = ShouldMapDiagnosticPathsToSource(plan, useSourceMappedStructuredPaths)
+			? CreateSourceDiagnosticPathMapper(plan, view)
+			: null;
 		foreach (var diagnostic in plan.Diagnostics)
 		{
 			writer.WriteStartElement("diagnostic");
@@ -1429,7 +1419,7 @@ public sealed class ProjectContextDocumentService(
 					"path",
 					ResolveDiagnosticPath(
 						diagnostic.Path,
-						mapDiagnosticPaths ? contentPathMapper : null,
+						diagnosticPathMapper,
 						pathRedaction));
 			}
 			WriteSanitizedXmlString(writer, diagnostic.Message);
@@ -2996,21 +2986,17 @@ public sealed class ProjectContextDocumentService(
 		return displayRootPath.Length > 0 ? displayRootPath : identity.SourceReference;
 	}
 
-	private static Func<string, string>? CreateContentPathMapper(
-		ProjectContextPlan plan,
-		ProjectContextView view,
-		ProjectContextDocumentFormat format,
-		bool useSourceMappedStructuredPaths) =>
-		format is ProjectContextDocumentFormat.Text or ProjectContextDocumentFormat.Markdown
-			? TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(plan.SourceRoot)
-			: CreateSourceContentPathMapper(plan, useSourceMappedStructuredPaths, view);
+	// Every view and format names files the way the default tree-content view does: portable
+	// project-relative paths. Derived token-budget and ranking entries reuse these names, so
+	// the checkout location never leaks into a document through a file path.
+	private static Func<string, string> CreateContentPathMapper(ProjectContextPlan plan) =>
+		TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(plan.SourceRoot);
 
-	private static Func<string, string>? CreateSourceContentPathMapper(
+	private static Func<string, string>? CreateSourceDiagnosticPathMapper(
 		ProjectContextPlan plan,
-		bool useSourceMappedStructuredPaths,
 		ProjectContextView view)
 	{
-		if (!useSourceMappedStructuredPaths || view != ProjectContextView.Content)
+		if (view != ProjectContextView.Content)
 			return TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(plan.SourceRoot);
 
 		if (plan.SourceIdentity is not

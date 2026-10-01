@@ -214,7 +214,8 @@ text output lists start time, client, mode, project, calls, result characters,
 estimated tokens, delivered files, masked values, duration, and whether the
 session is live; with no sessions it prints one localized line saying so.
 `--session` and `--last` show the recorded calls; Markdown emits
-the shared context receipt and therefore requires one of those selectors. Text
+the shared context receipt and therefore requires one of those selectors; without
+one it exits `2` with `DPX-CLI-JOURNAL-SESSION-REQUIRED`. Text
 tables follow the shared table rule in [Streams and Exit Codes](#streams-and-exit-codes):
 localized headers only on an interactive stdout, the headerless untruncated shape
 for pipes, redirects, and `--output` files. JSON is
@@ -879,6 +880,10 @@ Its `PROJECT` argument may be a local directory or repository URL. `-q` selects 
 cannot be combined with an explicit `--verbosity`; `--plain` conflicts with
 `--color always`.
 
+JSON writes `{ "rootPath": ..., "tree": ... }` and XML writes a compact
+`<t r="...">` element of `d` directories and `f` files; both shapes are described in
+[CLI-Output-Contract.md](CLI-Output-Contract.md#tree-json-and-xml).
+
 Text trees write the project path once and then start directly with its real
 children. They do not repeat the project name as a synthetic top-level node.
 `--plain` changes only the connectors to their ASCII equivalents.
@@ -928,8 +933,9 @@ mark binary entries with metadata.
 For `--view content`, human-readable text and Markdown write one `Root: ...`
 line followed by project-relative file headings. A repository URL source uses its
 safe URL for the Root line instead of the managed checkout path. `tree-content`
-keeps relative content headings. JSON and XML keep their existing machine root
-and file-path representation.
+keeps relative content headings. JSON and XML keep the absolute `project.root` and
+name every file, token-budget entry, and ranking entry by its project-relative `/`
+path in every view, exactly as `tree-content` does.
 
 `--max-tokens N` limits included file content to an estimated token budget of at
 least 1. The estimate is one token per four transformed characters, rounded up

@@ -296,6 +296,7 @@ the JSON document itself is never truncated.
     "encounteredMatches": 1,
     "retainedMatches": 1,
     "writtenMatches": 1,
+    "omittedMatches": 0,
     "namedDeclarationFiles": 1,
     "limits": []
   }
@@ -323,6 +324,12 @@ hold no text to search: they do not make a search partial, except when they are 
 whole selection, which is partial with the `binary-sources` limit. An empty `matches` array is meaningful only together with
 that boundary: a complete empty search and a partial search of no readable sources
 are different results. `writtenMatches` is the number of entries in `matches`.
+`omittedMatches` is `encounteredMatches` minus `writtenMatches` (never negative):
+matches observed in inspected sources that the document does not list. Whenever it
+is greater than zero, text and Markdown add
+`[Search observed] matches=N · matching-files=M within inspected sources`, where `N`
+is `encounteredMatches` and `M` counts the inspected files with at least one match.
+Both counts cover inspected sources only, never sources the boundary left unread.
 When matches were observed but no complete matching line fits, text and Markdown
 emit `[Matches omitted]`; when selected sources were left uninspected, an otherwise
 empty result emits `[Search partial]`. Neither state is described as `[No matches]`.
@@ -368,7 +375,15 @@ stay on stderr. The shape is:
     "extractionFailed": 0,
     "unsupportedLanguages": {},
     "cSharpErrorNodeKinds": {},
-    "partialParseDiagnostics": []
+    "extractionFailedFiles": [],
+    "partialParseDiagnostics": [],
+    "configurationDiagnostics": [
+      {
+        "path": "tsconfig.json",
+        "problem": "corrupt",
+        "affectedScopes": 1
+      }
+    ]
   },
   "resolution": {
     "resolved": 1,
@@ -398,6 +413,15 @@ unsupported-language and C# error-node dictionaries use stable ordinal keys.
 facts remained usable. Each item contains `path`, `droppedConstructs`, bounded `ranges` with
 one-based `startLine`/`endLine`, and `rangesTruncated`. Text output reports the same data as
 `[Dependency partial parse] path=... · dropped=N · lines=...`.
+`extractionFailedFiles` lists, in ordinal order, the project-relative path of every
+manifest file whose facts could not be extracted; its length equals
+`extractionFailed`. `configurationDiagnostics` lists dependency configuration files,
+such as `tsconfig.json`, that could not be used for resolution. Each entry has the
+project-relative `path`, `problem` (the lowercase configuration state: `missing`,
+`corrupt`, or `unsupportedsemantics`), and `affectedScopes`, the number of resolution
+scopes that depend on that file. Text output reports at most eight of each as
+`[Dependency extraction failed] path=...` and
+`[Dependency configuration] affected-scopes=N · problem=... · path=...`.
 `resolution` reports `resolved`, `ambiguous`, `unresolved`, and `external` evidence groups for every
 seed section emitted at the requested depth and direction. Text output carries the same values in `[Resolution]`; consequently an
 empty related-file list does not imply that every observed reference was resolved.
@@ -408,6 +432,57 @@ code `3`, and writes no partial related-files document.
 Git mode, exclusions, and file-size limit. No field can contain a file or candidate
 outside that manifest. See [Dependencies.md](Dependencies.md) for the evidence and
 resolution semantics.
+
+## Tree JSON and XML
+
+`tree --format json` writes one object with two properties: `rootPath`, the absolute
+project path with `/` separators (the safe repository URL for a remote source), and
+`tree`, the effective tree below that root:
+
+```json
+{
+  "rootPath": "/workspace/app",
+  "tree": {
+    "docs": [
+      "guide.md"
+    ],
+    "src": {
+      "nested": [
+        "util.cs"
+      ],
+      "/": [
+        "app.cs"
+      ]
+    },
+    "/": [
+      "README.md"
+    ]
+  }
+}
+```
+
+Each directory is a property named after it. A directory without subdirectories is
+an array of its file names; a directory with subdirectories is an object whose
+properties are those subdirectories and whose `"/"` property, present only when the
+directory has files, lists its own file names. The root follows the same rule
+inside `tree`. Directories precede the `"/"` file list, and both keep the tree's
+deterministic order. An empty directory is an empty array.
+
+`tree --format xml` writes the same tree as compact elements: the root element `t`
+carries the root in its `r` attribute, each directory is a `d` element named by its
+`n` attribute, and each file is an `f` element whose text is the file name:
+
+```xml
+<t r="/workspace/app">
+  <d n="docs">
+    <f>guide.md</f>
+  </d>
+  <f>README.md</f>
+</t>
+```
+
+Both forms contain names only: no file content, metrics, or diagnostics. Context
+documents with `--view tree` use the richer context tree described below.
 
 ## Recent and Cache JSON
 
@@ -624,7 +699,13 @@ The top-level shape is:
 ```
 
 Property order is deterministic where contract tests require it. Paths use `/`
-inside machine documents. A binary entry has `isBinary: true` and null content;
+inside machine documents. Every file path a context document writes is
+project-relative in every view (`tree`, `content`, and `tree-content`) and for local
+and remote sources alike: `files[].path`, `tokenBudget.largestSkippedFiles[].path`,
+and the ranking `top`, `skipped`, `seeds`, and `via` paths. The standard-error budget
+and ranking summaries name files the same way. `project.root` is the only property
+that carries the absolute project location; diagnostic paths keep their own
+representation. A binary entry has `isBinary: true` and null content;
 binary bytes are never inserted into AI context output.
 Context JSON and `tree --format json` escape only what JSON requires: a quote is
 written as `\"`, a backslash as `\\`, and control characters and characters outside
@@ -839,7 +920,11 @@ hint:
 Choose another path or use --force for ZIP replacement.
 ```
 
-The `DPX-*` code is stable and language-independent. Normal verbosity never
+The `error` and `hint` labels follow the interface language selected by
+`--language`, `DEVPROJEX_LANGUAGE`, or the system language, on every error path:
+parser validation and command failures print the same localized header, for example
+`ошибка[DPX-PROJECT-NOT-FOUND]:` in Russian. The `DPX-*` code is stable and
+language-independent. Normal verbosity never
 prints raw `Exception.Message`, an inner exception, or a platform-localized I/O
 message. Diagnostic verbosity may report an exception type, safe path context,
 stack trace, and request identifier, but never file content or secrets.
@@ -909,12 +994,12 @@ code (it may appear in the `diagnostics` array or on stderr).
 
 | Code | Exit code | Meaning |
 |---|---:|---|
-| `DPX-CLI-PROFILE-NOT-FOUND` | 2 | The referenced portable profile could not be resolved. |
+| `DPX-CLI-PROFILE-NOT-FOUND` | 2 | The referenced profile could not be resolved: no local profile exists for the project, or the `--profile` file does not exist. |
 | `DPX-CLI-PROFILE-UNRESOLVED` | 2 | The profile selection could not be resolved against the current project. |
 | `DPX-CLI-PROFILE-BUSY` | 2 | Another operation is currently using the profile store. |
 | `DPX-CLI-PROFILE-CORRUPT` | 2 | The profile file failed to parse or fails its schema. |
 | `DPX-CLI-PROFILE-FUTURE-SCHEMA` | 2 | The profile was written by a newer, unsupported schema version. |
-| `DPX-CLI-PROFILE-INVALID` | 2 | The profile content is structurally invalid. |
+| `DPX-CLI-PROFILE-INVALID` | 2 | The profile file exists but cannot be read or is structurally invalid, or the profile request itself is invalid. |
 | `DPX-CLI-PROFILE-SELECTION-TOO-LARGE` | 2 | The explicit selection is too large to save into a portable profile. |
 | `DPX-CLI-PROFILE-WRITE-FAILED` | 1 | The profile store could not be written. |
 | `DPX-CLI-PROFILE-PARTIAL` | 3 | `profile reset` removed persistent marks but not the selection profile; repeat the command. |
@@ -1004,7 +1089,7 @@ code (it may appear in the `diagnostics` array or on stderr).
 |---|---:|---|
 | `DPX-STORE-MIGRATION-UNAVAILABLE` | 1 | Store-packaged user-data migration could not run. |
 | `DPX-CLI-JOURNAL-NOT-FOUND` | 2 | The referenced agent-journal session does not exist. |
-| `DPX-CLI-JOURNAL-SESSION-REQUIRED` | 2 | Markdown journal output requires an explicit session id. |
+| `DPX-CLI-JOURNAL-SESSION-REQUIRED` | 2 | Markdown journal output requires `--session ID` or `--last`. |
 | `DPX-CLI-JOURNAL-WRITE-FAILED` | 1 | The agent-journal output could not be written. |
 | `DPX-MCP-STARTUP` | 1 | The `devprojex mcp` server process failed to start. |
 | `DPX-IO-ACCESS-DENIED` | 1 | The operating system denied access to a file or directory. |

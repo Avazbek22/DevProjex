@@ -65,7 +65,7 @@ public sealed class TerminalWorkspace
 			!environment.IsOutputInteractive ||
 			environment.IsTermDumb)
 		{
-			environment.Error.WriteLine("error[DPX-TUI-NOT-INTERACTIVE]:");
+			environment.Error.WriteLine(TerminalErrorHeader.Format(services.Localization, "DPX-TUI-NOT-INTERACTIVE"));
 			environment.Error.WriteLine(L("Terminal.Tui.Error.NotInteractive"));
 			environment.Error.WriteLine(L("Terminal.Tui.Hint.DirectCommands"));
 			return CommandLineExitCodes.UsageError;

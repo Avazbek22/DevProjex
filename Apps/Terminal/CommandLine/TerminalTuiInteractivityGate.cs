@@ -1,3 +1,5 @@
+using DevProjex.Terminal.Rendering;
+
 namespace DevProjex.Terminal.CommandLine;
 
 internal static class TerminalTuiInteractivityGate
@@ -13,7 +15,7 @@ internal static class TerminalTuiInteractivityGate
 			return true;
 		}
 
-		environment.Error.WriteLine("error[DPX-TUI-NOT-INTERACTIVE]:");
+		environment.Error.WriteLine(TerminalErrorHeader.Format(localization, "DPX-TUI-NOT-INTERACTIVE"));
 		environment.Error.WriteLine(localization["Terminal.Tui.Error.NotInteractive"]);
 		environment.Error.WriteLine(localization["Terminal.Tui.Hint.DirectCommands"]);
 		return false;
