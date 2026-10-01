@@ -119,7 +119,7 @@ public sealed class MainWindowAccessibilityUiTests(UiWorkspaceFixture workspace)
 
 			AssertAutomationName(
 				FindNamed<Button>(window, "PreviewCloseButton"),
-				"Закрыть превью");
+				"Закрыть предпросмотр");
 			AssertAutomationName(
 				FindNamed<Button>(window, "FilterCloseButton"),
 				"Закрыть фильтр");

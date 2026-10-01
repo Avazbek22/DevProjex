@@ -107,7 +107,7 @@ public sealed class AgentJournalDocumentationContractTests
 		Assert.Contains("installed on Windows", installation, StringComparison.Ordinal);
 		Assert.Contains("WSL", installation, StringComparison.Ordinal);
 		Assert.Contains("Microsoft Store", installation, StringComparison.Ordinal);
-		Assert.Contains("Help → Terminal command setup", installation, StringComparison.Ordinal);
+		Assert.Contains("Help → Launch from terminal", installation, StringComparison.Ordinal);
 		Assert.Contains("/usr/local/bin/devprojex", installation, StringComparison.Ordinal);
 		Assert.DoesNotContain("Move `DevProjex` to a directory on `PATH`", installation, StringComparison.Ordinal);
 

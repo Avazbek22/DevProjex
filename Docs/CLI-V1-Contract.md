@@ -101,8 +101,11 @@ file named by `APPIMAGE` takes precedence over the temporary mounted process pat
 devprojex
 ├── tui
 ├── mcp
+│   ├── connect
+│   └── log
 ├── open
 ├── analyze
+├── search
 ├── related
 ├── tree
 ├── export
@@ -113,13 +116,15 @@ devprojex
 │   ├── export
 │   ├── import
 │   ├── validate
-│   └── reset
+│   ├── reset
+│   └── save
 ├── recent
 ├── cache
 │   ├── path
 │   ├── list
 │   ├── remove
-│   └── clear
+│   ├── clear
+│   └── update
 ├── ui
 │   ├── list
 │   ├── status
@@ -954,6 +959,7 @@ that prevents an accepted option from becoming a no-op.
 | `related` | `--direction` | `both` | emits dependencies, dependents, or both without changing the indexed manifest | values are `dependencies`, `dependents`, `both` | text or JSON payload remains on stdout; invalid value exits `2` | parser, renderer, process |
 | `related` | `--depth` | `1` | walks resolved dependency edges breadth-first and emits each visited file as a seed section | integer `1..10`; ambiguous, unresolved, and external evidence is never traversed; at most 256 distinct seed files may be visited; `1` preserves the prior response bytes | text or JSON payload remains on stdout; invalid value exits `2`; exceeding the seed limit emits `DPX-DEPENDENCY-TRAVERSAL-LIMIT`, no partial payload, and exit `3` | parser, dependency query runner, renderer, process |
 | `related` | `-f`, `--format` | `text` | selects localized text or deterministic `devprojex-related-files` JSON | values are `text`, `json` | one complete payload on stdout; invalid value exits `2` | parser, serializer, process |
+| `search` | `--regex`, `--symbols` | literal text | `--regex` treats `PATTERN` as a timed .NET regular expression; `--symbols` treats it as one or more declaration names separated by `\|` and matches only those declarations | mutually exclusive; a `--symbols` pattern that looks like a regular expression is refused before the project is read | evidence on stdout; an invalid or refused pattern exits `2` with `DPX-CLI-SEARCH-PATTERN` | parser, search handler, process |
 | URL-capable commands | `--branch` | remote default branch | selects a validated repository branch under an operation lease | rejected for local paths and with `open --last` | ordinary command payload remains on stdout; clone/branch failure exits `1` or invalid name exits `2` | parser, resolver, Git fixture |
 | analyze/related/tree/context/project | `--progress` | `auto` | selects automatic, forced, or disabled operational progress on stderr | quiet/minimal suppress optional progress; URL-source Git operations use bounded milestones when rewriting is unavailable | requested payload stays byte-clean on stdout | parser, rendering, process |
 | analyze/related/tree/context/project | `--verbosity`, `-q` | `normal` | controls optional operational stderr from quiet through safe diagnostic context; `-q` selects `quiet` | `-q` conflicts with an explicit `--verbosity`; neither removes requested stdout nor suppresses errors | requested payload stays on stdout; invalid value or conflict exits `2` | parser, rendering, process |

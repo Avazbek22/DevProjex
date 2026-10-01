@@ -730,7 +730,7 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 			"[x] Hide secrets",
 			terminal.CaptureScreen(),
 			StringComparison.Ordinal);
-		await ExecuteAsync(terminal, "set smart-ignore off", "Smart ignore: disabled");
+		await ExecuteAsync(terminal, "set smart-ignore off", "Smart Ignore: disabled");
 		await ExecuteAsync(terminal, "set gitignore off", "Use .gitignore: disabled");
 		await ExecuteAsync(
 			terminal,

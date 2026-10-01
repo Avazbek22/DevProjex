@@ -195,11 +195,13 @@ When an MCP live session exists for the open root and the terminal is at least
 session count when more than one is active. Below 80 columns the compact status
 shows only `Live context`.
 
-`set activity on|off` controls the persisted **Agent activity** projection. When it
-is on, the status line adds the latest MCP tool and the live session's call count.
-Files delivered by that session carry `A` in a dedicated tree marker column; focusing
-one adds its delivery count to the status line. Turning the setting off removes the
-projection without changing or deleting the journal.
+`set activity on|off` controls the persisted **Agent activity** delivery markers. When
+it is on, files delivered by the live session carry `A` in a dedicated tree marker
+column, and focusing one adds its delivery count to the status line, for example
+`Agent received 3 times`, the same text as the Desktop marker tooltip in the interface
+language and its plural form. The status line shows no MCP tool names or call
+counts; `mcp log` lists them. Turning the setting off removes the markers without
+changing or deleting the journal.
 
 When filtering changes which options are available, a newly discovered option is
 selected by default. An option already seen during the session keeps its explicit
@@ -249,7 +251,7 @@ inline ghost suffix as soon as a token can be completed:
 | Syntax | Session action |
 |---|---|
 | `set <option> on\|off` | toggle one content or exclusion option; legacy `set gitignore` and `set tracked` remain supported, and turning either off switches Git filtering off |
-| `set activity on\|off` | show or hide the persisted live agent-activity status and tree markers |
+| `set activity on\|off` | show or hide the persisted tree markers for files the live agent received |
 | `set git off\|gitignore\|tracked\|staged\|changes\|diff:<ref>..<ref>` | select the Git axis without changing profiles |
 | `all types\|exclusions\|content on\|off` | apply the framed **All** action |
 | `type <.ext> [<.ext>...] on\|off` | toggle available file extensions |

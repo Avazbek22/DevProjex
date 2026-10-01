@@ -148,7 +148,7 @@ public sealed class TerminalPtyLifecycleTests
 
 			await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 
-			Assert.Contains("Canceling operation...", terminal.RawOutput, StringComparison.Ordinal);
+			Assert.Contains("Canceling operation…", terminal.RawOutput, StringComparison.Ordinal);
 			Assert.Equal(
 				CommandLineExitCodes.Success,
 				await terminal.WaitForExitAsync(

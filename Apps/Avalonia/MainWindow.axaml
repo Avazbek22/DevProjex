@@ -260,7 +260,7 @@
                           GitBranchSwitchRequested="OnGitBranchSwitch" />
 
     <Border DockPanel.Dock="Bottom" Classes="status-strip" IsVisible="{Binding IsProjectLoaded}">
-      <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto">
+      <Grid ColumnDefinitions="Auto,Auto,*,Auto">
         <!-- Left: Tree metrics -->
         <controls:StatusMetricWaveText Name="StatusTreeMetricsWave"
                                        Grid.Column="0"
@@ -356,19 +356,6 @@
                                        IsVisible="{Binding StatusMetricsVisible}"
                                        AutomationProperties.Name="{Binding StatusContentLabel}"
                                        AutomationProperties.HelpText="{Binding StatusContentStatsText}" />
-
-        <TextBlock Grid.Column="4"
-                   Name="AgentActivityStatusText"
-                   Text="{Binding AgentActivityText}"
-                   IsVisible="{Binding AgentActivityVisible}"
-                   MaxWidth="520"
-                   Margin="14,0,0,0"
-                   TextTrimming="CharacterEllipsis"
-                   FontSize="12"
-                   Foreground="{DynamicResource AppTextBrush}"
-                   VerticalAlignment="Center"
-                   AutomationProperties.Name="{Binding MenuViewAgentActivity}"
-                   AutomationProperties.HelpText="{Binding AgentActivityText}" />
       </Grid>
     </Border>
 

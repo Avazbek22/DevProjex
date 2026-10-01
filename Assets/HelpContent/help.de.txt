@@ -1,7 +1,7 @@
 ## 1) Was ist das und wozu
 DevProjex bereitet den Projektkontext schnell auf: zeigt die Ordner/Dateistruktur, erlaubt das Markieren von Elementen und das Kopieren des Baums und/oder von Dateiinhalten in die Zwischenablage. Nützlich für Code‑Reviews, Support, Schulung und das Teilen der Struktur mit einem KI‑Assistenten.
 
-Wichtig: DevProjex ändert keine Dateien im geöffneten Projekt.
+Wichtig: DevProjex ändert keine Dateien im geöffneten Projekt. Die einzige Ausnahme ist eine ausdrückliche MCP-Verbindung für Cursor oder VS Code, die `.cursor/mcp.json` oder `.vscode/mcp.json` erstellt oder aktualisiert (Abschnitt 19.1).
 
 ## 2) Projektbaum
 * Symbole für Datei/Ordner‑Typen.
@@ -28,7 +28,7 @@ Existiert der Pfad nicht mehr auf der Festplatte, zeigen das Öffnen im Dateiman
 ## 3) Datei
 * Ordner öffnen… — Wurzelordner öffnen ({mod}O)
 * Neues Fenster — eine neue unabhängige DevProjex-Instanz öffnen
-* Zuletzt verwendet — Liste zuletzt geöffneter lokaler Ordner
+* Zuletzt — Liste zuletzt geöffneter lokaler Ordner
 * Aktualisieren — einen lokalen Ordner neu einlesen und den Baum aufbauen (F5)
 * In Datei exportieren:
   * Baum exportieren
@@ -67,12 +67,12 @@ Regeln:
 * wenn ein Pfad nicht verfügbar ist oder nicht existiert, gelten dieselben Zugriffsprüfungen wie bei „Ordner öffnen…“;
 * nicht unterstützte oder nicht-lokale Objekte werden ignoriert.
 
-### Zuletzt verwendet
-Der Punkt „Datei → Zuletzt verwendet“ zeigt den Verlauf der zuletzt geöffneten lokalen Ordner.
+### Zuletzt
+Der Punkt „Datei → Zuletzt“ zeigt den Verlauf der zuletzt geöffneten lokalen Ordner.
 
 Regeln:
 * in die Liste werden nur lokale Ordner aufgenommen;
-* über DevProjex geklonte Git-Repositories werden dieser Liste nicht hinzugefügt;
+* über DevProjex geklonte Git-Repositorys werden dieser Liste nicht hinzugefügt;
 * es werden keine Duplikate erzeugt — das erneute Öffnen desselben Ordners verschiebt ihn nach oben;
 * es werden bis zu 32 letzte Ordner gespeichert;
 * der Verlauf bleibt zwischen App-Starts erhalten.
@@ -98,7 +98,11 @@ Beispiele:
 * `devprojex export project . --as zip -o ../devprojex-submission.zip` — den effektiven Projektbaum in ein ZIP-Archiv exportieren.
 * `devprojex export context https://github.com/owner/repo -o -` — ein entferntes Repository packen, ohne es selbst zu klonen.
 * `devprojex analyze . --git-mode tracked --exclude smart-ignore` — von Git verfolgte Dateien mit Smart Ignore analysieren.
+* `devprojex search Configure . --symbols` — finden, wo eine Deklaration definiert ist; `--symbols` erwartet Deklarationsnamen und lehnt die Syntax regulärer Ausdrücke ab, während `--regex` Text mit einem regulären Ausdruck durchsucht.
+* `devprojex related src/App.cs` — die Dateien auflisten, die eine Datei verwendet, und die Dateien, die sie verwenden.
 * `devprojex mcp --root .` — den lokalen MCP-Server im Nur-Lese-Modus starten, damit KI-Agenten das Projekt sicher lesen.
+* `devprojex mcp connect . --client claude-code` — einen KI-Client mit dem Projekt verbinden (Abschnitt 19).
+* `devprojex mcp log . --last` — die letzte Sitzung des Agentenjournals anzeigen.
 
 Hinweise:
 * `.` bedeutet den aktuellen Terminal-Ordner;
@@ -106,31 +110,32 @@ Hinweise:
 * `--git-mode` wählt `none`, `gitignore`, `tracked`, `staged`, `changes` oder `diff:<ref>..<ref>`;
 * `--exclude` steuert gewöhnliche Ausschlüsse getrennt von der Git-Filterung;
 * Analyse- und Exportbefehle sind deterministisch und öffnen die Desktop-Oberfläche nicht;
-* `tui`, `open`, `analyze` und beide `export`-Befehle akzeptieren auch eine Git-Repository-URL; der Klon landet in einem verwalteten Cache (`devprojex cache`);
+* `tui`, `open`, `analyze`, `search`, `tree` und beide `export`-Befehle akzeptieren auch eine Git-Repository-URL, `related` über `--project`; der Klon landet in einem verwalteten Cache (`devprojex cache`);
 * Befehle haben dokumentierte Aliasse und Kurzformen — zum Beispiel `export ctx`, `-f`, `-n`; `devprojex help` zeigt sie an;
 * `analyze --findings` listet Maskierungsfunde ohne ihre Werte auf, und `--fail-on-findings` liefert für CI einen Exit-Code ungleich null;
-* der Befehl ändert keine Projektdateien — DevProjex arbeitet im Lesemodus.
+* `export context --max-tokens N` hält den Kontext innerhalb eines Token-Budgets, und das experimentelle `--rank importance` nimmt die wichtigsten Dateien zuerst auf;
+* Analyse-, Such- und Exportbefehle ändern keine Projektdateien — DevProjex arbeitet im Lesemodus.
 
 Wenn der Befehl `devprojex` nicht funktioniert, öffnen Sie in DevProjex:
 „Hilfe → Aus dem Terminal starten“.
 
 ## 5) Git
-Das Git‑Menü ist nur für Projekte verfügbar, die über DevProjex geklont wurden (Git Clone). Die App berührt Ihre Dateien nicht — sie arbeitet nur mit dem Cache.
+„Git → Repository klonen…“ klont ein Repository in den DevProjex-Cache und öffnet es. „Branch“ und „Aktualisierungen abrufen“ sind nur für auf diese Weise geklonte Projekte verfügbar. Die App berührt Ihre Dateien nicht — sie arbeitet nur mit dem Cache.
 
 Der Cache wird im Cacheverzeichnis des Benutzers gespeichert. Den tatsächlich verwendeten Pfad zeigt `devprojex doctor` an.
 
 * Branch — zeigt die Liste verfügbarer Branches mit Markierung der aktiven Branch; beim Wechsel wird der Baum auf die gewählte Branch umgestellt. Wenn die Branch bereits lokal existiert, erfolgt der Wechsel offline (ohne Update). Wenn sie lokal noch nicht existiert, wird sie per fetch geladen und lokal erstellt.
-* Updates abrufen — aktualisiert nur die aktuelle Branch: fetch und reset auf origin/<branch>. Bei einem Git-Clone-Projekt führt F5 dieselbe Aktion aus; der normale Befehl „Datei → Aktualisieren“ ist deaktiviert.
+* Aktualisierungen abrufen — aktualisiert nur die aktuelle Branch: fetch und reset auf origin/<branch>. Bei einem geklonten Projekt führt F5 dieselbe Aktion aus; der normale Befehl „Datei → Aktualisieren“ ist deaktiviert.
 
 ### Klonfenster
-Im Git-Clone-Fenster kann unter dem URL-Feld eine Liste „Zuletzt verwendete Repositories“ angezeigt werden.
+Im Fenster „Repository klonen“ kann unter dem URL-Feld eine Liste „Letzte Links“ angezeigt werden.
 
 Regeln:
-* die Liste erscheint nur, wenn im Verlauf bereits zuletzt geklonte Repositories vorhanden sind;
+* die Liste erscheint nur, wenn im Verlauf bereits zuletzt geklonte Repositorys vorhanden sind;
 * nur Netzwerkquellen für Repositorys (`https://`, `ssh://` und SCP-Syntax) werden der Liste hinzugefügt;
 * lokale Pfade und `file://`-Quellen werden dieser Liste nicht hinzugefügt;
-* es werden keine Duplikate erzeugt — das erneute Klonen desselben Repositories verschiebt es nach oben;
-* es werden bis zu 16 letzte Repositories gespeichert;
+* es werden keine Duplikate erzeugt — das erneute Klonen desselben Repositorys verschiebt es nach oben;
+* es werden bis zu 16 letzte Repositorys gespeichert;
 * der Verlauf bleibt zwischen App-Starts erhalten.
 
 Wenn Sie einen Eintrag auswählen, wird die URL automatisch in das Eingabefeld eingesetzt.
@@ -143,7 +148,7 @@ Der Schalter legt das Baumdarstellungsformat für Operationen fest, bei denen de
 * ASCII — Textbaum mit Zweigen.
 * JSON — strukturierter Baum in JSON.
 * XML — kompakter XML-Baum für Parser und Werkzeuge.
-* MD — verschachtelte Markdown-Liste für Dokumentation und AI-Prompts.
+* MD — verschachtelte Markdown-Liste für Dokumentation und KI-Prompts.
 
 Der Schalter beeinflusst:
 * Baum kopieren
@@ -164,7 +169,7 @@ Tastenkürzel: {mod}{shift}C und {mod}{alt}C.
 ### Inhalt kopieren
 Kopiert Dateiinhalte:
 * wenn Dateien markiert sind — nur diese; sonst — alle Projektdateien;
-* vor jeder Datei steht eine Kopfzeile mit ihrem vollständigen lokalen Pfad (bei Git-Clone-Projekten — dem Web-Pfad des Repositories);
+* vor jeder Datei steht eine Kopfzeile mit ihrem vollständigen lokalen Pfad (bei geklonten Projekten — dem Web-Pfad des Repositorys);
 * Nicht-Textdateien werden ignoriert (einschließlich Binärdateien);
 * bei leeren Textdateien werden Pfad und die Zeile `[No Content, 0 bytes]` ausgegeben;
 * bei Dateien, die nur aus Leerzeichen/Zeilenumbrüchen bestehen, werden Pfad und die Zeile `[Whitespace, N bytes]` ausgegeben.
@@ -272,6 +277,9 @@ Die Baum-Schrift wird über „Ansicht → Baum-Schrift“ ausgewählt.
 „Standard“ stellt die normale Baum-Schrift wieder her.
 Die ausgewählte Schrift wird nach dem Klick auf „Anwenden“ im Einstellungen-Panel angewendet.
 
+### Agentenaktivität
+Mit „Ansicht → Agentenaktivität“ sehen Sie, welche Dateien ein KI-Agent in einer Live-Sitzung erhalten hat: Diese Dateien werden im Baum mit ✦ markiert (Abschnitt 19.4).
+
 ## 9) Suche im Baum
 Öffnet die Suche, hebt Treffer hervor und erlaubt Navigation.
 * {mod}F — anzeigen/ausblenden
@@ -338,61 +346,95 @@ Beim erneuten Öffnen desselben lokalen Ordners werden die Parameter automatisch
 
 Wichtig:
 * Profile werden nur für lokale Projekte gespeichert;
-* für Projekte, die über Git Clone geöffnet wurden, werden keine Profile gespeichert;
-* wenn einzelne gespeicherte Punkte im aktuellen Projekt nicht mehr verfügbar sind, werden sie übersprungen, die übrigen Parameter werden angewendet.
+* für Projekte, die über „Repository klonen“ geöffnet wurden, werden keine Profile gespeichert;
+* wenn einzelne gespeicherte Punkte im aktuellen Projekt nicht mehr verfügbar sind, werden sie übersprungen, die übrigen Parameter werden angewendet;
 * wenn nach Aktualisieren oder erneutem Öffnen ein neuer Dateityp oder eine neue Option in „Ausschlüsse“ erscheint, ist dieser Punkt standardmäßig aktiviert;
 * bereits bekannte Punkte behalten die ausdrückliche Auswahl des Benutzers: neue Dateien eines deaktivierten Typs aktivieren diesen Typ nicht erneut.
 
 ## 12) Ausschlüsse
 Der Bereich „Ausschlüsse“ steuert, welche Dateien und Ordner aus Baum, Inhalt, Kopier- und Exportergebnissen ausgeschlossen werden.
 
-Ein Element wird nur angezeigt, wenn sein Dateityp ausgewählt ist und keine aktivierte Ignore-Regel es ausschließt. Die Regeln wirken gemeinsam: Blendet mindestens eine Regel ein Element aus, kann eine andere Regel es nicht wieder sichtbar machen.
+Ein Element wird nur angezeigt, wenn alle folgenden Bedingungen erfüllt sind:
+* sein Dateityp ist ausgewählt, sofern die Datei einen Typ hat;
+* keine aktivierte Ignorierregel schließt es aus.
+
+Ignorierregeln wirken kumulativ. Blendet mindestens eine aktivierte Regel ein Element aus, kann eine andere Regel es nicht wieder sichtbar machen.
 
 ### 12.1 Verfügbare Regeln
-Das GUI-Auswahlfeld und die Optionsfeldzeilen der Git-Achse in der TUI werden vollständig ausgeblendet, wenn die Git-Filterung nicht anwendbar ist: Es gibt keine Repository-Grenze und der `.gitignore`-Filter kann den aktuellen Baum nicht verändern. Ist die Achse außerhalb eines Repositorys sichtbar, bietet die GUI nur keine Filterung und `.gitignore` an, während die TUI die repositorygebundenen Zeilen deaktiviert. In einem Git-Repository stehen fünf reguläre Werte zur Verfügung: keine Filterung, `.gitignore`, verfolgte Dateien, zum Commit vorgemerkte Dateien und alle aktuellen Änderungen; in der TUI erscheint ein aktiver Bereich `diff:<ref>..<ref>` als sechste Zeile. Eine Auswahl ersetzt den aktuellen Git-Modus, ohne Smart Ignore oder die grundlegenden Ausschlüsse zu ändern. Weitere Optionen werden angezeigt, wenn ihre Regeln den aktuellen Baum beeinflussen können.
+Je nach Projektinhalt können folgende Optionen angezeigt werden:
 
-Eine neue Option ist beim ersten Erscheinen standardmäßig aktiviert; eine bekannte Option behält die Auswahl des Benutzers, auch wenn sie vorübergehend verschwindet.
+* Smart Ignore
+* Leere Ordner
+* Leere Dateien
+* Versteckte Ordner
+* Versteckte Dateien
+* Ordner mit Punkt
+* Dateien mit Punkt
+* Dateien ohne Erweiterung
+
+Das GUI-Auswahlfeld und die Optionsfeldzeilen der Git-Achse in der TUI werden vollständig ausgeblendet, wenn die Git-Filterung nicht anwendbar ist: Es gibt keine Repository-Grenze und der `.gitignore`-Filter kann den aktuellen Baum nicht verändern. Ist die Achse außerhalb eines Repositorys sichtbar, bietet die GUI nur keine Filterung und `.gitignore` an, während die TUI die repositorygebundenen Zeilen deaktiviert. In einem Git-Repository stehen fünf reguläre Werte zur Verfügung: keine Filterung, `.gitignore`, verfolgte Dateien, zum Commit vorgemerkte Dateien und alle aktuellen Änderungen; in der TUI erscheint ein aktiver Bereich `diff:<ref>..<ref>` als sechste Zeile. Eine Auswahl ersetzt den aktuellen Git-Modus, ohne Smart Ignore oder die grundlegenden Ausschlüsse zu ändern. Weitere Optionen werden angezeigt, wenn ihre Regeln den aktuellen Baum verändern können; daher kann sich die Liste nach dem Umschalten einer anderen Regel oder eines Dateityps ändern.
+
+Eine neue Option ist beim ersten Erscheinen standardmäßig aktiviert. Eine bekannte Option behält die Auswahl des Benutzers, auch wenn sie vorübergehend aus der Liste verschwindet.
 
 ### 12.2 Smart Ignore
-Smart Ignore blendet Abhängigkeiten, Build-Ausgaben, Caches und andere Projektartefakte aus. DevProjex erkennt den Projekttyp anhand der Struktur und Markerdateien wie `.csproj`, `package.json`, `pyproject.toml` oder `Cargo.toml`. Die Regeln des entsprechenden Stacks gelten nur innerhalb des erkannten Projektbereichs und nicht für benachbarte Projekte anderer Stacks.
+Smart Ignore blendet Abhängigkeiten, Build-Ausgaben, Caches und andere Dienstartefakte des Projekts aus.
 
-Bei mehrdeutigen Namen wie `build`, `vendor`, `packages`, `cache`, `pkg` oder `Library` wird zusätzlich der Ordnerinhalt geprüft. Ein gewöhnlicher Benutzerordner wird daher nicht allein wegen seines Namens ausgeblendet. Einige Abhängigkeitsspeicher und Systemordner lassen sich anhand ihrer charakteristischen Struktur auch außerhalb eines ausdrücklich erkannten Projekts bestimmen.
+DevProjex erkennt zuerst den Projekttyp anhand seiner Struktur und seiner Markerdateien, zum Beispiel:
 
-Die Erkennung neuer Projektbereiche ist begrenzt, damit große Benutzerordner nicht vollständig wiederholt analysiert werden. Normale Strukturen werden flach, erkannte Monorepos tiefer durchsucht. Nach der Erkennung gilt Smart Ignore ohne Tiefenbegrenzung für den gesamten Unterbaum des Bereichs.
+* `.csproj`
+* `package.json`
+* `pyproject.toml`
+* `Cargo.toml`
+
+Anschließend werden die Regeln des entsprechenden Stacks innerhalb des erkannten Projektbereichs angewendet. So reichen .NET-Regeln beispielsweise nicht in ein benachbartes Python- oder JavaScript-Projekt hinein.
+
+Ein Ordnername allein reicht nicht immer aus. Mehrdeutige Namen wie `build`, `vendor`, `packages`, `cache`, `pkg` oder `Library` werden zusätzlich anhand ihres Inhalts geprüft. So wird ein gewöhnlicher Benutzerordner nicht nur deshalb ausgeblendet, weil er einen ähnlichen Namen hat.
+
+Einige Abhängigkeitsspeicher und Dienstverzeichnisse lassen sich anhand ihrer charakteristischen inneren Struktur auch außerhalb eines ausdrücklich erkannten Projekts erkennen.
+
+Die Erkennung von Projektbereichen ist begrenzt, damit das Laden eines großen Benutzerordners nicht zu einer vollständigen, wiederholten Analyse jedes Verzeichnisses wird. Normale Strukturen werden flach durchsucht, erkannte Monorepos tiefer. Nachdem ein Bereich gefunden wurde, gilt Smart Ignore ohne Tiefenbegrenzung für seinen gesamten Unterbaum.
 
 ### 12.3 Geheimnisse verbergen
-„Geheimnisse verbergen“ ist standardmäßig deaktiviert. Die Option prüft nur ausgewählte Textinhalte und ersetzt jeden erkannten Wert an seiner Stelle; Datei und umgebender Code bleiben erhalten. Solange sie ausgeschaltet ist, erfolgt keine Prüfung und es erscheint kein Zähler. Nach der Prüfung zeigt die Bezeichnung die Anzahl der erkannten Werte; bleiben durch „Beibehalten“-Entscheidungen weniger Werte verborgen, erscheinen beide Zahlen — erkannt/verborgen — und der ?-Indikator der Zeile nennt beide im Text.
+„Geheimnisse verbergen“ ist standardmäßig deaktiviert. Die Option prüft nur ausgewählte Textinhalte und ersetzt jeden erkannten Wert an seiner Stelle; Datei und umgebender Code bleiben erhalten. Solange sie ausgeschaltet ist, erfolgt keine Prüfung und es erscheint kein Zähler. Nach der Prüfung der aktuellen Auswahl zeigt die Bezeichnung die Anzahl der erkannten Werte; bleiben durch „Beibehalten“-Entscheidungen weniger Werte verborgen, erscheinen beide Zahlen — erkannt/verborgen — und der ?-Indikator der Zeile nennt beide.
 
-Erkannte Stellen werden in der Vorschau hervorgehoben. Ein Klick behält nur dieses Vorkommen unverändert; {alt}↓ / {alt}↑ wechseln zwischen den Funden, Enter schaltet den aktiven um. Im Terminal Workspace wechseln `[` und `]` zwischen den Vorkommen; `Enter` oder `Space` schalten das aktive um. Die Entscheidung gilt während der aktuellen Sitzung für Vorschau, Zwischenablage, Kontextexport, Ordner und ZIP und wird nicht im Projektprofil gespeichert.
+Erkannte Stellen werden in der Vorschau hervorgehoben. Ein Klick behält nur dieses Vorkommen unverändert; {alt}↓ / {alt}↑ wechseln zwischen den Funden, Enter schaltet den aktiven um. Im Terminal-Arbeitsbereich wechseln `[` und `]` zwischen den Vorkommen; `Enter` oder `Space` schalten das aktive um. Die Entscheidung gilt während der aktuellen Sitzung für Vorschau, Zwischenablage, Kontextexport, Ordner und ZIP und wird nicht im Projektprofil gespeichert.
 
-Das Kontextmenü der Vorschau erweitert diese Entscheidungen. Ein Rechtsklick auf ein erkanntes Vorkommen behält — oder verbirgt wieder — in einer Aktion alle Vorkommen seiner Regel oder alle erkannten Vorkommen in derselben Datei. Ein Rechtsklick auf einen markierten Wert im Dateiinhalt setzt eine manuelle Markierung: „… hier ausblenden“ verbirgt nur dieses Vorkommen für die Sitzung, „… immer ausblenden“ erstellt eine dauerhafte Markierung für jedes Vorkommen des Werts, und „… als private Daten ausblenden“ erstellt eine dauerhafte Markierung, die von „Private Daten verbergen“ gesteuert wird. „Markierung entfernen“ erscheint auf einer manuellen Markierung und löscht sie; ein weiterhin vom Detektor erkannter Wert bleibt verborgen. Ein manueller Wert ist eine einzelne Zeile von 8 bis 512 Zeichen, markiert im Dateiinhalt. Das Erstellen einer Markierung aktiviert die entsprechende Option automatisch. Dauerhafte Markierungen speichern nur eine schlüsselbasierte Wertidentität und ihre Klasse, niemals den Originaltext.
+Das Kontextmenü der Vorschau erweitert diese Entscheidungen. Ein Rechtsklick auf ein erkanntes Vorkommen behält — oder verbirgt wieder — in einer Aktion alle Vorkommen seiner Regel oder alle erkannten Vorkommen in derselben Datei. Ein Rechtsklick auf einen markierten Wert im Dateiinhalt setzt eine manuelle Markierung: „… hier ausblenden“ verbirgt nur dieses Vorkommen für die Sitzung, „… immer ausblenden“ erstellt eine dauerhafte Markierung für jedes Vorkommen des Werts, und „… als private Daten ausblenden“ erstellt eine dauerhafte Markierung, die von „Private Daten verbergen“ gesteuert wird. „Markierung entfernen“ erscheint auf einer manuellen Markierung und löscht sie; ein weiterhin vom Detektor erkannter Wert bleibt verborgen. Ein manueller Wert muss eine einzelne Zeile von 8 bis 512 Zeichen sein, die im Dateiinhalt markiert wurde. Das Erstellen einer Markierung aktiviert die entsprechende Option automatisch. Dauerhafte Markierungen speichern nur eine schlüsselbasierte Wertidentität und ihre Klasse, niemals den Originaltext.
 
 Auch eine Ordner- oder ZIP-Kopie ändert passenden Text und lässt sich möglicherweise nicht mehr erstellen oder ausführen. Binärdateien werden unverändert kopiert und nicht geprüft. Eine ausgewählte Textdatei über 16 MiB wird ausgelassen und gemeldet, während die übrige Ausgabe abgeschlossen wird. Ein Erkennungsfehler beendet den gesamten Vorgang.
 
-Der Zähler meldet nur Regelübereinstimmungen. Null bedeutet nicht, dass das Projekt sicher ist. In der CLI gilt `--hide-secrets`; Einzelheiten stehen in `Docs/HideSecrets.md`.
+Der Zähler meldet nur Regelübereinstimmungen. Null bedeutet nicht, dass das Projekt sicher ist. Die CLI verwendet `--hide-secrets`; technische Einzelheiten und Grenzen stehen in `Docs/HideSecrets.md`.
 
 ### 12.4 Private Daten verbergen
-"Private Daten verbergen" ist standardmäßig deaktiviert. Die Option erkennt E-Mail-Adressen, globale IP-Adressen, lokale Benutzernamen in Pfaden, MAC-Adressen und internationale Telefonnummern in ausgewählten Textdateien. Für Treffer gelten dieselben Vorschauentscheidungen und dieselbe Ausgabepipeline wie für Geheimnisse; manuelle Markierungen, die mit „… als private Daten ausblenden“ erstellt wurden, gehören zu dieser Klasse und folgen dieser Option (Abschnitt 12.3). Lokale Benutzernamen in generierten Pfad-Kopfzeilen und in der Baumwurzel werden als ein gemeinsamer Fund maskiert: Der Zähler zählt ihn als einen Wert, der ?-Indikator meldet, ob er verborgen oder sichtbar ist, und ein Klick schaltet alle maskierten Pfade zugleich um.
+„Private Daten verbergen“ ist standardmäßig deaktiviert. Die Option erkennt E-Mail-Adressen, globale IP-Adressen, lokale Benutzernamen in Pfaden, MAC-Adressen und internationale Telefonnummern in ausgewählten Textdateien. Für Treffer gelten dieselben Vorschauentscheidungen und dieselbe Ausgabepipeline wie für „Geheimnisse verbergen“; manuelle Markierungen, die mit „… als private Daten ausblenden“ erstellt wurden, gehören zu dieser Klasse und folgen dieser Option (Abschnitt 12.3). Lokale Benutzernamen in generierten Pfad-Kopfzeilen und in der Baumwurzel werden als ein gemeinsamer Fund maskiert: Der Zähler zählt ihn als einen Wert, der ?-Indikator meldet, ob er verborgen oder sichtbar ist, und ein Klick schaltet alle maskierten Pfade zugleich um.
 
-Dokumentationsbereiche und -hosts, gängige CI-Benutzernamen, bekannte öffentliche DNS-Resolver und dokumentierte fiktive Telefonnummern bleiben sichtbar. Null Treffer sind keine Datenschutzgarantie. Die CLI verwendet `--hide-private-data`; vollständige Regeln und Grenzen der ersten Phase stehen in `Docs/HidePrivateData.md`.
+Dokumentationsbereiche und -hosts, gängige CI-Benutzernamen, bekannte öffentliche DNS-Resolver und dokumentierte fiktive Telefonnummernbereiche bleiben sichtbar. Null Treffer sind keine Datenschutzgarantie. Die CLI verwendet `--hide-private-data`; vollständige Regeln und Grenzen der ersten Phase stehen in `Docs/HidePrivateData.md`.
 
 ### 12.5 .gitignore verwenden
-Wenn aktiviert, berücksichtigt DevProjex jede erreichbare `.gitignore`, nicht nur die Datei im Wurzelordner. Jede Datei gilt für ihren eigenen Ordner und alle erreichbaren Unterordner, jedoch nicht für übergeordnete oder benachbarte Ordner.
+Wenn aktiviert, folgt DevProjex der Arbeitsbaum-Sicht von `git status`: Verfolgte Dateien bleiben sichtbar, und nicht verfolgte Dateien werden angezeigt, sofern die Ignorierregeln des Repositorys sie nicht ausschließen. DevProjex berücksichtigt jede erreichbare `.gitignore`, nicht nur die Datei im Wurzelordner des geöffneten Ordners, einschließlich der Dateien darüber bis zur Repository-Wurzel.
 
-Für einen Pfad werden die Regeln von der übergeordneten zur tieferen `.gitignore` ausgewertet; innerhalb einer Datei von oben nach unten. Die letzte passende Regel bestimmt das Git-Ergebnis.
+Jede `.gitignore` gilt:
 
-Eine Regel mit `!` hebt nur einen früheren Git-Ausschluss in ihrem Bereich auf. Sie kann keine Datei zurückholen, solange deren übergeordneter Ordner ausgeschlossen bleibt. Eine `.gitignore` in einem vollständig ausgeschlossenen und unerreichbaren Ordner wird nicht ausgewertet.
+* für den Ordner, der sie enthält;
+* für alle zugänglichen Ordner darunter;
+* nur innerhalb dieses Bereichs.
 
-Eine fehlerhafte oder nicht unterstützte Zeile wird einzeln übersprungen; andere gültige Regeln bleiben aktiv. Die Option umfasst nur `.gitignore`-Dateien des Arbeitsbaums. `.git/info/exclude` und globale Git-Ausschlussregeln werden nicht berücksichtigt; wirksame Repository-Einstellungen für Pfadvergleiche wie `core.ignoreCase` und unter macOS `core.precomposeUnicode` werden beachtet. Ist für den zuständigen Repository-Bereich eines Pfads ein lesbarer Git-Index verfügbar, bleiben verfolgte Dateien trotz eines Treffers in `.gitignore` sichtbar; ohne diesen Index oder Git CLI fällt dieser Bereich sicher auf die reine Musterauswertung zurück.
+Regeln aus einer verschachtelten `.gitignore` wirken nicht auf übergeordnete oder benachbarte Ordner.
 
-Ein symbolischer Link namens `.gitignore` wird entsprechend dem Verhalten von Git für diese Steuerdatei nicht verfolgt. Kann eine reguläre `.gitignore` nicht gelesen werden, wird ihr Verzeichnisbereich sicher vollständig ausgeschlossen und der Scan meldet einen Teilzugriff, statt Dateien ohne vollständige Regelauswertung still einzuschließen.
+Für einen bestimmten Pfad werden die Regeln von der übergeordneten `.gitignore` hin zu tieferen Dateien verarbeitet. Innerhalb einer Datei werden die Regeln von oben nach unten verarbeitet. Die letzte passende Regel bestimmt das Git-Ergebnis.
 
-Das integrierte Profil `standard` wählt `gitignore` und alle acht Ausschlussgruppen: `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files` und `extensionless-files`.
+Eine Regel, die mit `!` beginnt, hebt einen früheren Git-Ausschluss nur innerhalb ihres Bereichs auf. Sie kann keine Datei zurückholen, solange deren übergeordneter Ordner ausgeschlossen bleibt. Eine `.gitignore` in einem vollständig ausgeschlossenen und unerreichbaren Ordner wird nicht ausgewertet.
+
+Eine fehlerhafte oder nicht unterstützte Zeile wird einzeln übersprungen. Andere gültige Regeln in dieser Datei und Regeln in benachbarten Bereichen funktionieren weiter.
+
+Die repositorylokale Datei `.git/info/exclude` wird ebenfalls angewendet, mit niedrigerer Priorität als die `.gitignore` im Wurzelordner des Repositorys. Ein verschachtelter Ordner mit eigenem `.git` folgt ebenfalls `git status`: Ein eingebettetes Repository, das nicht in `.gitmodules` deklariert ist, ist undurchsichtig, seine Dateien werden also nicht angezeigt, während ein deklariertes Submodul seine eigene `.gitignore` und `info/exclude` anwendet. Wählen Sie `none`, um die Dateien eingebetteter Repositorys zu sehen. Globale Git-Ausschlussregeln (`core.excludesFile`) werden nicht angewendet; wirksame Repository-Einstellungen für Pfadvergleiche wie `core.ignoreCase` und unter macOS `core.precomposeUnicode` werden beachtet. Ein symbolischer Link namens `.gitignore` wird entsprechend dem Verhalten von Git für diese Steuerdatei nicht verfolgt. Kann eine `.gitignore`- oder `info/exclude`-Datei nicht gelesen werden, wird ihr Verzeichnisbereich sicher ausgeschlossen, und der Scan meldet einen Teilzugriff, statt Dateien ohne vollständige Regelauswertung stillschweigend einzuschließen. Ist für den zuständigen Repository-Bereich eines Pfads ein lesbarer Git-Index verfügbar, bleiben verfolgte Dateien sichtbar, auch wenn sie zu `.gitignore` passen; ohne diesen Index oder die Git CLI fällt dieser Bereich sicher auf die reine Musterauswertung zurück.
+
+Das integrierte Profil `standard` wählt `gitignore` sowie `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files` und `extensionless-files`.
 
 ### 12.6 Nur von Git verfolgte Dateien
 „Nur von Git verfolgte Dateien“ baut die Git-Stufe des Baums aus vorhandenen Arbeitsbaumdateien auf, die in jedem lesbaren Git-Index eingetragen sind. Geänderte verfolgte Dateien und neu zum Index hinzugefügte Dateien bleiben enthalten; nicht verfolgte Dateien werden ausgeschlossen. Dies ist der aktuelle Arbeitsbaum, kein historischer Snapshot von `HEAD` oder einem entfernten Repository.
 
-Jedes erreichbare verschachtelte Repository und jeder erreichbare Worktree wird auf jeder erreichbaren Verschachtelungsebene unabhängig verarbeitet. Ein untergeordnetes Repository übernimmt keine verfolgten Pfade vom übergeordneten oder einem benachbarten Repository. Dieser Modus benötigt die Git CLI; ein lesbarer leerer Index ist gültig. Wird der Terminal-Arbeitsbereich (TUI) in diesem Modus gestartet und kann kein passender Index geladen werden, wird der Arbeitsbereich nicht geöffnet. Wird der Modus interaktiv in einem bereits geöffneten TUI-Arbeitsbereich gewählt und kann kein passender Index geladen werden, wird die Änderung abgelehnt und der letzte verwendbare Git-Modus bleibt aktiv. Direkte Befehle enden in diesem Fall mit einem Richtlinien- oder Prüfungsfehler. DevProjex wechselt niemals stillschweigend zu `.gitignore`. Ist ein anderer passender Index lesbar, werden nicht verfügbare verschachtelte Bereiche mit einer Warnung ausgeschlossen.
+Jedes Repository wird unabhängig aufgelöst: Benachbarte Repositorys im geöffneten Ordner und deklarierte Submodule verwenden jeweils ihren eigenen Index, und ein untergeordnetes Repository übernimmt keine verfolgten Pfade vom übergeordneten oder einem benachbarten Repository. Ein eingebettetes Repository, das nicht in `.gitmodules` deklariert ist, bleibt wie im `.gitignore`-Modus undurchsichtig. Dieser Modus benötigt die Git CLI; ein lesbarer leerer Index ist gültig. Wird der Terminal-Arbeitsbereich (TUI) in diesem Modus gestartet und kann kein passender Index geladen werden, wird der Arbeitsbereich nicht geöffnet. Wird der Modus interaktiv in einem bereits geöffneten TUI-Arbeitsbereich gewählt und kann kein passender Index geladen werden, wird die Änderung abgelehnt und der letzte verwendbare Git-Modus bleibt aktiv. Direkte Befehle enden in diesem Fall mit einem Richtlinien- oder Prüfungsfehler. DevProjex wechselt niemals stillschweigend zu `.gitignore`. Ist ein anderer passender Index lesbar, werden nicht verfügbare verschachtelte Bereiche mit einer Warnung ausgeschlossen.
 
 In einem bereits geöffneten Desktop-Arbeitsbereich bleibt die explizite Auswahl sichtbar und ausfallsicher: Bei fehlender Bereitschaft sind Ausgabe und Export gesperrt; bei teilweiser Bereitschaft wird mit einer lokalisierten Warnung fortgefahren.
 
@@ -406,24 +448,39 @@ Smart Ignore kann ausgeblendet bleiben, solange der gewählte Git-Modus bereits 
 Eine Git-Negation mit `!` hebt nur das Git-Ergebnis auf. Smart Ignore und Grundregeln bleiben wirksam.
 
 ### 12.8 Grundregeln
-Regeln für führende Punkte prüfen den Namen; Regeln für versteckte Elemente prüfen das Hidden-Systemattribut. Beides kann je nach Plattform dasselbe oder verschiedene Elemente betreffen.
+„Ordner mit Punkt“ und „Dateien mit Punkt“ prüfen den Namen des Elements.
 
-„Leere Dateien“ blendet Dateien mit 0 Byte aus. „Dateien ohne Erweiterung“ betrifft beispielsweise `Dockerfile`, `Makefile` und `README`.
+„Versteckte Ordner“ und „Versteckte Dateien“ prüfen das Hidden-Systemattribut. Auf manchen Plattformen können ein Name mit führendem Punkt und das Systemattribut dasselbe Element oder verschiedene Elemente betreffen.
 
-„Leere Ordner“ blendet logisch leere Ordner aus. Ein Ordner ist logisch leer, wenn nach Anwendung der ausgewählten Dateitypen und aller anderen Regeln keine sichtbaren Dateien oder Unterordner verbleiben. Deshalb kann sich sein Zähler ändern, wenn eine andere Regel umgeschaltet wird.
+„Leere Dateien“ blendet Dateien mit einer Größe von 0 Byte aus.
+
+„Dateien ohne Erweiterung“ blendet Dateien wie `Dockerfile`, `Makefile` und `README` aus.
+
+„Leere Ordner“ blendet logisch leere Ordner aus. Ein Ordner ist logisch leer, wenn nach Anwendung der ausgewählten Dateitypen und aller anderen Regeln keine sichtbare Datei und kein sichtbarer Unterordner verbleibt.
+
+Der Zähler für leere Ordner kann sich daher ändern, wenn eine andere Regel umgeschaltet wird: Das Ausblenden von Dateien kann die Ordner, die sie enthalten, logisch leer machen.
 
 ### 12.9 Zähler
-Ein Zähler zeigt den direkten Beitrag einer Regel unter den aktuellen Einstellungen, nicht die physische Anzahl ähnlicher Elemente auf dem Datenträger. Ein Element wird nicht gleichzeitig mehreren überlappenden Zählern zugeordnet.
+Der Zähler neben einer Regel zeigt ihren direkten Beitrag unter den aktuellen Einstellungen, nicht die physische Anzahl ähnlicher Elemente auf dem Datenträger.
 
-Die feste Zuordnung lautet: für Ordner `.gitignore`, Smart Ignore, führender Punkt, Hidden-Attribut; für Dateien `.gitignore`, Smart Ignore, führender Punkt, keine Erweiterung, leere Datei, Hidden-Attribut. Diese Reihenfolge betrifft nur die Zähler. Für die Sichtbarkeit genügt jeder aktivierte Mechanismus, der das Element ausschließt.
+Ein Element wird nicht gleichzeitig mehreren überlappenden Zählern zugeordnet. Der Ordner `.git` kann zum Beispiel sowohl einen Namen mit führendem Punkt als auch das Hidden-Systemattribut haben, sein Ausschluss wird aber nur einer Regel zugeordnet.
+
+Für die Zuordnung eines Ausschlusses gilt eine feste Reihenfolge:
+
+* Ordner: `.gitignore`, Smart Ignore, Name mit führendem Punkt, Hidden-Systemattribut;
+* Dateien: `.gitignore`, Smart Ignore, Name mit führendem Punkt, keine Erweiterung, leere Datei, Hidden-Systemattribut.
+
+Diese Reihenfolge betrifft nur die Zähler. Für die endgültige Sichtbarkeit gilt eine einfachere Regel: Ein Element ist ausgeblendet, wenn irgendein aktivierter Mechanismus es ausschließt.
 
 ### 12.10 Änderungen anwenden
-Das Umschalten von Kontrollkästchen aktualisiert zuerst die verfügbaren Einstellungen und Zähler. Der endgültige Baum wird nach „Einstellungen anwenden“ neu aufgebaut. Wird die Vorbereitung abgebrochen, kehrt DevProjex zum letzten vollständig abgeschlossenen Zustand zurück; teilweise berechnete Regeln werden nicht angewendet.
+Das Umschalten von Kontrollkästchen aktualisiert zuerst die verfügbaren Einstellungen und Zähler im Panel. Der endgültige Baum wird neu aufgebaut, nachdem „Anwenden“ gewählt wurde.
+
+Wird die Vorbereitung der Einstellungen abgebrochen, setzt DevProjex das Panel auf den letzten vollständig abgeschlossenen Zustand zurück. Teilweise berechnete Regeln werden nicht angewendet.
 
 ## 13) Wie Baum und Kennzahlen berechnet werden
 Das Ergebnis hängt ab von:
-* ausgewählte Dateitypen
-* Ignorier‑Regeln
+* ausgewählten Dateitypen
+* Ignorierregeln
 * aktivem Filter
 * markierten Knoten im Baum (für auswahlbasierte Operationen)
 
@@ -437,7 +494,7 @@ Die Statusleiste hat zwei Blöcke:
 Format:
 * Zeilen
 * Zeichen
-* ~Tokens (ungefähr)
+* ≈Token (ungefähr)
 
 Große Werte werden kompakt mit K/M angezeigt.
 
@@ -458,9 +515,9 @@ Inhalt-Kennzahlen:
 ### 13.3 Wann die Zähler aktualisiert werden
 Neu berechnet wird:
 * nach dem Öffnen/Aktualisieren eines Projekts;
-* nach dem Anwenden von Einstellungen (Ausschlüsse, Dateitypen, Root-Ordner);
-* bei Änderungen von Checkboxen im Baum (mit Debounce);
-* beim Umschalten des Baumformats (für Operationen mit Baum-Ausgabe).
+* nach dem Anwenden von Einstellungen (Ausschlüsse und Dateitypen);
+* bei Änderungen von Kontrollkästchen im Baum (mit Debounce);
+* beim Umschalten des Baumformats (für Operationen mit Baum-Ausgabe);
 * wenn die Hintergrundberechnung abgebrochen wird, werden die Zähler auf 0 gesetzt, bis die nächste vollständige Neuberechnung abgeschlossen ist.
 
 ## 14) Symbole
@@ -470,13 +527,13 @@ Auswahlreihenfolge:
 3) Erweiterung
 4) sonst — unbekannt
 
-## 15) Thema und Effekte
-Im Bereich „Thema“ können System, Hell oder Dunkel und ein Hintergrundeffekt gewählt werden:
+## 15) Design und Effekte
+Im Bereich „Design“ können System, Hell oder Dunkel und ein Hintergrundeffekt gewählt werden:
 * Transparenz
 * Weichzeichnen
 * Mica
 
-„System“ ist standardmäßig ausgewählt und folgt Änderungen des Betriebssystem-Themas. Nach dem ersten Start oder einem Zurücksetzen beginnt ein helles System-Theme mit einem normalen undurchsichtigen Hintergrund, ein dunkles System-Theme mit Weichzeichnen. Kann die Systempräferenz nicht ermittelt werden, verwendet DevProjex Dunkel mit Weichzeichnen. Helles und dunkles Theme speichern ihre Effekte getrennt. Eine ausdrückliche Auswahl von Hell oder Dunkel ignoriert Systemänderungen, bis erneut System gewählt wird.
+„System“ ist standardmäßig ausgewählt und folgt Änderungen des Betriebssystem-Designs. Nach dem ersten Start oder einem Zurücksetzen der Einstellungen beginnt ein helles Systemdesign mit einem normalen undurchsichtigen Hintergrund, ein dunkles Systemdesign mit Weichzeichnen. Kann die Systempräferenz nicht ermittelt werden, verwendet DevProjex Dunkel mit Weichzeichnen. Hell und Dunkel speichern ihre Effekte getrennt. Eine ausdrückliche Auswahl von Hell oder Dunkel ignoriert Systemänderungen, bis erneut System gewählt wird.
 
 Die Effekte schließen sich gegenseitig aus. Ein erneuter Klick auf den ausgewählten Effekt deaktiviert ihn und stellt einen normalen undurchsichtigen Hintergrund wieder her.
 
@@ -493,10 +550,10 @@ Im Transparenzmodus bleibt der Hintergrund des Hauptfensters transparent. Menüs
 ## 16) Hilfe
 
 ### 16.1 Updates
-„Hilfe → Updates“ vergleicht die aktuelle Version mit dem neuesten stabilen GitHub-Release. Automatische Prüfungen sind standardmäßig deaktiviert; wenn sie aktiviert sind, prüft DevProjex beim Start, sobald seit der letzten erfolgreichen Prüfung mindestens sieben Tage vergangen sind. Die Checkbox wird sofort angewendet. Das letzte erfolgreiche Ergebnis bleibt zwischen Anwendungsstarts erhalten und wird durch einen späteren Netzwerkfehler nicht gelöscht. Die Installation bleibt eine Benutzeraktion.
+„Hilfe → Updates“ vergleicht die aktuelle Version mit dem neuesten stabilen GitHub-Release. Automatische Prüfungen sind standardmäßig deaktiviert; wenn sie aktiviert sind, prüft DevProjex beim Start, sobald seit der letzten erfolgreichen Prüfung mindestens sieben Tage vergangen sind. Das Kontrollkästchen wird sofort angewendet. Das letzte erfolgreiche Ergebnis bleibt zwischen Anwendungsstarts erhalten und wird durch einen späteren Netzwerkfehler nicht gelöscht. Die Installation bleibt eine Benutzeraktion.
 
 ### 16.2 Einstellungen zurücksetzen
-Einstellungen zurücksetzen (Hilfe → Einstellungen zurücksetzen) stellt Theme, Effekte, Kompaktmodus, Animationseinstellungen und Oberflächensprache auf die Standardwerte zurück. Projektprofile, Verlauf und Dateien auf dem Datenträger bleiben unverändert.
+Einstellungen zurücksetzen (Hilfe → Einstellungen zurücksetzen) stellt Design, Effekte, Kompaktmodus, Animationseinstellungen und Oberflächensprache auf die Standardwerte zurück. Projektprofile, Verlauf und Dateien auf dem Datenträger bleiben unverändert.
 
 ### 16.3 Daten zurücksetzen
 Daten zurücksetzen (Hilfe → Daten zurücksetzen) löscht gespeicherte Profile lokaler Projektparameter:
@@ -505,9 +562,11 @@ Daten zurücksetzen (Hilfe → Daten zurücksetzen) löscht gespeicherte Profile
 * ausgewählte Einstellungen zur Inhaltsverarbeitung;
 * manuelle Geheimnismarkierungen.
 
+Außerdem werden abgeschlossene Sitzungen des Agentenjournals gelöscht (Abschnitt 19.3); aktive Sitzungen bleiben erhalten.
+
 Wichtig:
-* der Verlauf „Zuletzt verwendet“ für lokale Ordner wird nicht gelöscht;
-* der Verlauf „Zuletzt verwendete Repositories“ im Git-Clone-Fenster wird nicht gelöscht;
+* der Verlauf „Zuletzt“ für lokale Ordner wird nicht gelöscht;
+* der Verlauf „Letzte Links“ im Fenster „Repository klonen“ wird nicht gelöscht;
 * Dateien und Ordner der Projekte auf dem Datenträger werden nicht geändert und nicht gelöscht.
 
 ## 17) Sprachen
@@ -533,5 +592,40 @@ X-Schaltfläche (Abbrechen) in der Statusleiste:
 * setzt das Panel beim Abbrechen einer Aktualisierung verfügbarer Optionen auf den letzten abgeschlossenen Zustand zurück;
 * bei Operationen ohne Abbruchunterstützung wird nur die Statusleisten-Anzeige beendet, die Operation selbst kann im Hintergrund weiterlaufen.
 
-## 19) Hinweise
+## 19) MCP und KI-Agenten
+DevProjex enthält einen lokalen MCP-Server im Nur-Lese-Modus. KI-Agenten wie Claude Code, Codex, Cursor und VS Code lesen das Projekt über ihn: Die Maskierung von Geheimnissen ist immer aktiv, und der Agent kann keine Projektdateien ändern. Der Server stellt acht Werkzeuge bereit: `list_projects`, `get_tree`, `analyze`, `search_project`, `related_files`, `get_file`, `pack_context` und `read_pack`.
+
+### 19.1 Einen Client verbinden
+Das Menü „MCP“ enthält:
+* Live context — der Server folgt den in diesem Fenster markierten Elementen (Abschnitt 19.2);
+* Standard — der Server hängt nicht von der Auswahl im Fenster ab;
+* Journal… — was Agenten angefordert und erhalten haben (Abschnitt 19.3);
+* Dokumentation — öffnet die Dokumentation des MCP-Servers.
+
+„Live context“ und „Standard“ enthalten dieselben Aktionen: „In Claude Code öffnen“, „In Codex öffnen“, „In Cursor öffnen“, „In VS Code öffnen“ und „Andere Clients…“. Sie sind verfügbar, solange ein Projekt geöffnet ist.
+
+Claude Code und Codex werden über ihren installierten Befehl registriert; anschließend öffnet sich der Client in einem neuen Terminal im Projektordner. Cursor und VS Code erhalten eine projektlokale `.cursor/mcp.json` bzw. `.vscode/mcp.json`; andere Server in dieser Datei bleiben erhalten. „Andere Clients…“ zeigt eine fertige Konfiguration für Claude Desktop und andere Clients. Fehlt der Befehl eines Clients oder schlägt die Verbindung fehl, zeigt DevProjex stattdessen die manuelle Konfiguration. Nach einer erfolgreichen Verbindung kann DevProjex anbieten, den Befehl `devprojex` zu PATH hinzuzufügen.
+
+Codex verwendet eine einzige gemeinsame DevProjex-Verbindung; beim Verbinden eines anderen Projekts fragt DevProjex daher nach, bevor sie ersetzt wird. Eine bereits laufende Client-Sitzung muss neu gestartet werden, um den Server zu laden. Im Terminal registriert `devprojex mcp connect` standardmäßig den Standardmodus; mit `--mode live` wird Live context verwendet, mit `--print` wird nur die Konfiguration ausgegeben.
+
+### 19.2 Live context
+Im Live context bestimmen die im Baum markierten Elemente den Fokus des Agenten: Anfragen für Baum, Suche, Analyse, verwandte Dateien und Pakete bleiben innerhalb dieser Elemente. Die Filter des Fensters — Dateitypen, Ausschlüsse und der Git-Modus — bilden die Zugriffsgrenze: Der Agent kann weitere Dateien über ihren Namen öffnen, aber nur Dateien, die diese Filter zulassen.
+
+Das Fenster muss nicht geöffnet bleiben. Der Server liest bei jeder Anfrage die zuletzt für das Projekt gespeicherte Auswahl, sodass neue Markierungen und angewendete Einstellungen den Agenten bei seiner nächsten Anfrage ohne Neustart erreichen.
+
+Solange eine Live-Sitzung aktiv ist, endet der Fenstertitel mit `· Live context (<client>)` bzw. mit der Anzahl der Sitzungen, wenn mehrere aktiv sind.
+
+### 19.3 Journal
+„MCP → Journal…“ zeigt, was Agenten über DevProjex angefordert und erhalten haben: Sitzungen mit Client, Modus, Aufrufen, Zeichen, geschätzten Token, übermittelten Dateien und maskierten Werten sowie die Aufrufe der ausgewählten Sitzung. Das Journal ist auch ohne geöffnetes Projekt verfügbar; bei geöffnetem Projekt ist „Nur aktuelles Projekt“ standardmäßig ausgewählt.
+
+Das Journal wird nur auf diesem Computer im Statusordner von DevProjex gespeichert und enthält höchstens 200 Sitzungen der letzten 30 Tage. Es speichert keine Dateiinhalte, keine erkannten geheimen Werte und keinen Text von Suchanfragen. „Exportieren…“ speichert eine Sitzung als Beleg in Markdown oder JSON. „Leeren“ löscht nach einer Bestätigung abgeschlossene Sitzungen; aktive Sitzungen und Sitzungen, die mit anderen Projekten geteilt werden, bleiben erhalten.
+
+### 19.4 Agentenaktivität
+„Ansicht → Agentenaktivität“ ist standardmäßig deaktiviert: Ein Klick auf den Menüpunkt schaltet die Markierungen ein, ein weiterer schaltet sie wieder aus. Solange die Option aktiv ist und eine Live-Sitzung läuft, wird jede Datei, deren Inhalt der Agent in dieser Sitzung erhalten hat — die ganze Datei, ein Zeilenbereich, Suchtreffer oder eine Deklaration —, im Baum mit ✦ markiert. Eine Datei, die der Agent nur in einer Baumauflistung oder in einer Größenschätzung gesehen hat, wird nicht markiert. Wenn Sie den Mauszeiger auf ✦ bewegen, sehen Sie, wie oft der Agent die Datei erhalten hat, zum Beispiel „Agent erhielt die Datei 3-mal“.
+
+Die Markierungen zeigen nur, was geliefert wurde: Sie ändern niemals Kontrollkästchen, Filter oder das, was der Agent lesen darf. Sie werden entfernt, wenn eine neuere Live-Sitzung beginnt, wenn die Live-Sitzung endet, wenn die Agentenaktivität ausgeschaltet wird und wenn das Projekt erneut geöffnet wird; Dateien, die der Agent danach erhält, werden wieder markiert. Standard-Sitzungen erscheinen im Journal, fügen aber keine Markierungen hinzu.
+
+Im Terminal-Arbeitsbereich markiert `:set activity on` dieselben Dateien im Baum mit A; ist eine solche Datei fokussiert, zeigt die Statuszeile, wie oft der Agent sie erhalten hat. `:set activity off` entfernt die Markierungen.
+
+## 20) Hinweise
 * Bei fehlenden Rechten kann die App einen Neustart mit erhöhten Rechten vorschlagen; bei Ablehnung erscheint eine Meldung.

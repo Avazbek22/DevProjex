@@ -11,7 +11,7 @@
 │                │ Folders           3                                                               │                 │
 │                │ Size              76 B                                                            │                 │
 │                │ Estimated tokens  46                                                              │                 │
-│                │ Filters           Use .gitignore; Smart ignore, Hidden folders, Hidden files,…    │                 │
+│                │ Filters           Use .gitignore; Smart Ignore, Hidden folders, Hidden files,…    │                 │
 │                │ Diagnostics       0                                                               │                 │
 │                │                                                                                   │                 │
 │                │                                                                                   │                 │
