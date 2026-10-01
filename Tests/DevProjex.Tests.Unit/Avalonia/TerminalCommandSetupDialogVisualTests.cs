@@ -71,18 +71,16 @@ public sealed class TerminalCommandSetupDialogVisualTests
 		var pathSetupManual = TerminalCommandDialogDimensions.ForContent(isAutomaticPrompt: false, pathSetup);
 
 		Assert.Equal(480, automatic.Width);
-		Assert.Equal(180, automatic.Height);
 		Assert.Equal(600, pathSetupAutomatic.Width);
-		Assert.Equal(180, pathSetupAutomatic.Height);
+		Assert.Equal(560, manual.Width);
 		Assert.True(automatic.Width < manual.Width);
-		Assert.True(automatic.Height < manual.Height);
 		Assert.True(compactManual.Width < manual.Width);
-		Assert.True(compactManual.Height < manual.Height);
-		Assert.Equal(190, compactManual.Height);
+		Assert.Equal(500, compactManual.Width);
 		Assert.Equal(compactManual, compactManualAction);
-		Assert.Equal(190, pathSetupManual.Height);
-		Assert.True(pathSetupManual.Height * 2 <= manual.Height + 60);
-		Assert.True(compactManual.Height > automatic.Height);
+		Assert.Equal(compactManual, pathSetupManual);
+		Assert.All(
+			new[] { automatic, pathSetupAutomatic, manual, compactManual },
+			dimensions => Assert.True(dimensions.MinWidth < dimensions.Width));
 	}
 
 	[AvaloniaFact]

@@ -14,7 +14,7 @@ public sealed class MessageDialogBehaviorTests
         var content = InvokeBuildContent("Saved", "Close");
         var panel = Assert.IsType<DockPanel>(content);
 
-        Assert.Equal("Saved", Assert.Single(panel.Children.OfType<TextBlock>()).Text);
+        Assert.Equal("Saved", ExtractMessage(panel).Text);
         Assert.Equal("Close", Assert.Single(panel.Children.OfType<Button>()).Content);
     }
 
@@ -62,7 +62,7 @@ public sealed class MessageDialogBehaviorTests
     public void BuildConfirmationContent_ScrollableMessageUsesScrollViewer()
     {
         var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var content = InvokeBuildConfirmationContent("Long message", "Confirm", "Cancel", completion, scrollMessage: true);
+        var content = InvokeBuildConfirmationContent("Long message", "Confirm", "Cancel", completion);
 
         var panel = Assert.IsType<DockPanel>(content);
         var scrollViewer = Assert.Single(panel.Children.OfType<ScrollViewer>());
@@ -82,8 +82,6 @@ public sealed class MessageDialogBehaviorTests
             confirmButtonText: "Anwenden",
             cancelButtonText: "Abbrechen",
             width: 520,
-            height: 230,
-            fitContentHeight: true,
             completion: completion);
 
         try
@@ -101,7 +99,7 @@ public sealed class MessageDialogBehaviorTests
     }
 
     [AvaloniaFact]
-    public void CreateConfirmationWindow_ExistingDialogsKeepFixedHeight()
+    public void CreateConfirmationWindow_KeepsRequestedWidthAndCapsContentHeight()
     {
         var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var window = MessageDialog.CreateConfirmationWindow(
@@ -110,15 +108,15 @@ public sealed class MessageDialogBehaviorTests
             message: "Continue?",
             confirmButtonText: "Continue",
             cancelButtonText: "Cancel",
-            width: 520,
-            height: 260,
-            fitContentHeight: false,
+            width: 450,
             completion: completion);
 
         try
         {
-            Assert.Equal(SizeToContent.Manual, window.SizeToContent);
-            Assert.Equal(260, window.Height);
+            Assert.Equal(SizeToContent.Height, window.SizeToContent);
+            Assert.True(double.IsNaN(window.Height));
+            Assert.Equal(450, window.Width);
+            Assert.Equal(DialogSurfaceFactory.ContentSizedFallbackMaxHeight, window.MaxHeight);
         }
         finally
         {
@@ -130,15 +128,14 @@ public sealed class MessageDialogBehaviorTests
         string message,
         string confirmButtonText,
         string cancelButtonText,
-        TaskCompletionSource<bool> completion,
-        bool scrollMessage = false)
+        TaskCompletionSource<bool> completion)
     {
         var method = typeof(MessageDialog).GetMethod(
             "BuildConfirmationContent",
             BindingFlags.NonPublic | BindingFlags.Static);
 
         Assert.NotNull(method);
-        var content = (Control?)method!.Invoke(null, [message, confirmButtonText, cancelButtonText, completion, scrollMessage]);
+        var content = (Control?)method!.Invoke(null, [message, confirmButtonText, cancelButtonText, completion]);
         Assert.NotNull(content);
         return content!;
     }
@@ -159,11 +156,14 @@ public sealed class MessageDialogBehaviorTests
     {
         var panel = Assert.IsType<DockPanel>(content);
         var buttonPanel = Assert.Single(panel.Children.OfType<StackPanel>());
-        var message = Assert.Single(panel.Children.OfType<TextBlock>());
+        var message = ExtractMessage(panel);
 
         var buttons = buttonPanel.Children.OfType<Button>().ToArray();
         Assert.Equal(2, buttons.Length);
 
         return (buttons[0], buttons[1], message);
     }
+
+    private static TextBlock ExtractMessage(DockPanel panel) =>
+        Assert.IsType<TextBlock>(Assert.Single(panel.Children.OfType<ScrollViewer>()).Content);
 }

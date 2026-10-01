@@ -357,6 +357,28 @@ public sealed class CommandTreeContractTests
 	}
 
 	[Fact]
+	public void OpenForwardsOnlyATypedLanguageSoTheSavedDesktopLanguageWins()
+	{
+		var environment = new TestTerminalEnvironment
+		{
+			Variables = new Dictionary<string, string?> { ["DEVPROJEX_LANGUAGE"] = "de" }
+		};
+		var root = new DevProjexCommandTree(environment).Build();
+		var language = Assert.IsAssignableFrom<Option<AppLanguage>>(
+			root.Options.Single(static option => option.Name == "--language"));
+		var untyped = root.Parse(["open", "."]);
+
+		Assert.Equal(AppLanguage.De, untyped.GetValue(language));
+		Assert.Null(DevProjexCommandTree.GetExplicitLanguage(untyped, language));
+		Assert.Equal(
+			AppLanguage.Ru,
+			DevProjexCommandTree.GetExplicitLanguage(root.Parse(["open", ".", "--language", "ru"]), language));
+		Assert.Equal(
+			AppLanguage.Ru,
+			DevProjexCommandTree.GetExplicitLanguage(root.Parse(["--language", "ru", "open", "."]), language));
+	}
+
+	[Fact]
 	public async Task HelpTokenAfterDelimiterIsTreatedAsAnArgument()
 	{
 		var environment = new TestTerminalEnvironment();

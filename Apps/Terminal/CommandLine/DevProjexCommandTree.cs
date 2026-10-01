@@ -1682,7 +1682,7 @@ public sealed class DevProjexCommandTree
 								parseResult.GetValue(filter),
 								parseResult.GetValue(search),
 								spec,
-								parseResult.GetValue(_language),
+								GetExplicitLanguage(parseResult, _language),
 								parseResult.GetValue(elevationAttempted)),
 							cancellationToken,
 							resolvedSource is { IsRepositoryUrl: true }
@@ -2756,17 +2756,20 @@ public sealed class DevProjexCommandTree
 
 	private void ApplyTuiLanguage(ParseResult parseResult, TerminalServices services)
 	{
-		var commandLineLanguage = parseResult.GetValue(_language);
-		var explicitLanguage = parseResult.GetResult(_language) is { Implicit: false }
-			? commandLineLanguage
-			: (AppLanguage?)null;
 		var language = TerminalWorkspaceLanguagePolicy.Resolve(
-			commandLineLanguage,
-			explicitLanguage,
+			parseResult.GetValue(_language),
+			GetExplicitLanguage(parseResult, _language),
 			services.TerminalSettingsStore.LoadLanguage());
 		_localization.SetLanguage(language);
 		services.Localization.SetLanguage(language);
 	}
+
+	// Without a typed --language the option still carries DEVPROJEX_LANGUAGE or the terminal
+	// culture. That automatic value must not override a language the user saved on purpose.
+	internal static AppLanguage? GetExplicitLanguage(ParseResult parseResult, Option<AppLanguage> languageOption) =>
+		parseResult.GetResult(languageOption) is { Implicit: false }
+			? parseResult.GetValue(languageOption)
+			: null;
 
 	private Argument<string?> ProjectArgument() =>
 		new(ProjectArgumentName)

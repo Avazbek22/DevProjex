@@ -254,8 +254,7 @@ public partial class MainWindow
 			_localization["Dialog.ProjectCopy.Redaction.Title"],
 			string.Join(Environment.NewLine + Environment.NewLine, reasons),
 			_localization["Dialog.ProjectCopy.Redaction.Continue"],
-			_localization["Dialog.Cancel"],
-			height: reasons.Count > 1 ? 300 : 230);
+			_localization["Dialog.Cancel"]);
 	}
 
     private async Task<ProjectCopyConflictPolicy?> ConfirmZipReplacementIfNeededAsync(string destinationPath)

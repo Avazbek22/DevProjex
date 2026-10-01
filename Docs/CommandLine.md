@@ -612,6 +612,10 @@ Without `--new-window`, DevProjex reuses a suitable desktop instance through
 local per-user IPC. The default returns after the desktop accepts the request;
 `--wait` waits until the requested project and state are applied.
 
+The desktop uses the interface language chosen in its Language menu, or the
+system language when none was chosen. Only an explicitly typed `--language`
+overrides it, for that session; `DEVPROJEX_LANGUAGE` does not.
+
 Examples:
 
 ```shell

@@ -1,3 +1,5 @@
+using Avalonia.Platform;
+
 namespace DevProjex.Avalonia.Services;
 
 internal sealed record DialogSurfaceBrushes(
@@ -12,6 +14,9 @@ internal static class DialogSurfaceFactory
     [
         WindowTransparencyLevel.None
     ];
+
+    internal const double ContentSizedFallbackMaxHeight = 560;
+    private const double ContentSizedWorkingAreaShare = 0.7;
 
     public static ThemeVariant ResolveThemeVariant(Window? owner)
     {
@@ -100,6 +105,43 @@ internal static class DialogSurfaceFactory
             dialog.MinHeight = minHeight.Value;
 
         return dialog;
+    }
+
+    // A message-style dialog grows with its text up to a share of the owner's screen; past that
+    // the content must scroll its message area so the buttons stay on screen.
+    public static Window CreateContentSizedWindow(
+        Window? owner,
+        string title,
+        ThemeVariant themeVariant,
+        DialogSurfaceBrushes brushes,
+        Control content,
+        double width,
+        double? minWidth = null)
+    {
+        var dialog = CreateWindow(title, themeVariant, brushes, content, width, height: null, minWidth);
+        dialog.MaxHeight = ResolveContentSizedMaxHeight(owner);
+        return dialog;
+    }
+
+    internal static double ResolveContentSizedMaxHeight(Window? owner)
+    {
+        Screen? screen;
+        try
+        {
+            screen = owner?.Screens is { } screens
+                ? screens.ScreenFromWindow(owner) ?? screens.Primary
+                : null;
+        }
+        catch (ObjectDisposedException)
+        {
+            screen = null;
+        }
+
+        if (screen is null || !(screen.Scaling > 0))
+            return ContentSizedFallbackMaxHeight;
+
+        var maxHeight = screen.WorkingArea.Height / screen.Scaling * ContentSizedWorkingAreaShare;
+        return double.IsFinite(maxHeight) && maxHeight > 0 ? maxHeight : ContentSizedFallbackMaxHeight;
     }
 
     public static void ApplyWindowSurface(

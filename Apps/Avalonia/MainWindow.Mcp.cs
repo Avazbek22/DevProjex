@@ -179,7 +179,7 @@ public partial class MainWindow
                 return new McpConnectionResult(McpConnectionStatus.Canceled, string.Empty);
             }
 
-            var entryReplacementConfirmed = await MessageDialog.ShowScrollableConfirmationAsync(
+            var entryReplacementConfirmed = await MessageDialog.ShowConfirmationAsync(
                 this,
                 _localization["Mcp.Connect.ProjectEntryReplaceTitle"],
                 _localization.Format(
@@ -187,7 +187,8 @@ public partial class MainWindow
                     GetMcpClientDisplayName(request.Client),
                     string.Join(", ", initial.FieldsToReplace.Select(SingleLineTextEscaping.Escape))),
                 _localization["Mcp.Connect.ProjectEntryReplaceConfirm"],
-                _localization["Dialog.Cancel"]);
+                _localization["Dialog.Cancel"],
+                width: 560);
             cancellationToken.ThrowIfCancellationRequested();
             if (!CanPresentMcpDialog(projectWindowLifetime))
                 return new McpConnectionResult(McpConnectionStatus.Canceled, string.Empty);
