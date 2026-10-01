@@ -448,7 +448,7 @@ Smart Ignore kann ausgeblendet bleiben, solange der gewählte Git-Modus bereits 
 Eine Git-Negation mit `!` hebt nur das Git-Ergebnis auf. Smart Ignore und Grundregeln bleiben wirksam.
 
 ### 12.8 Grundregeln
-„Ordner mit Punkt“ und „Dateien mit Punkt“ prüfen den Namen des Elements.
+„Ordner mit Punkt“ und „Dateien mit Punkt“ prüfen, ob der Name des Elements mit einem Punkt beginnt.
 
 „Versteckte Ordner“ und „Versteckte Dateien“ prüfen das Hidden-Systemattribut. Auf manchen Plattformen können ein Name mit führendem Punkt und das Systemattribut dasselbe Element oder verschiedene Elemente betreffen.
 

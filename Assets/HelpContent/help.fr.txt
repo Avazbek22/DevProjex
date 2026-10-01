@@ -328,7 +328,7 @@ Remarque sur « Types de fichiers » :
 
 Traitement du contenu :
 * cette section transforme le contenu des fichiers texte sélectionnés sans modifier l’arborescence ;
-* « Masquer les secrets » et « Masquer les données privées » remplacent les valeurs détectées (sections 12.3 et 12.4) ;
+* « Masquer les secrets » et « Masquer les infos privées » remplacent les valeurs détectées (sections 12.3 et 12.4) ;
 * « Compresser le code » conserve les déclarations et raccourcit les implémentations nommées dans 14 langages ;
 * « Supprimer les commentaires » retire les commentaires et les commentaires de documentation dans 20 packs de langages ;
 * « Supprimer les lignes vides » retire les lignes d’espaces dans les mêmes packs en préservant les littéraux multilignes ;
@@ -368,8 +368,8 @@ Selon le contenu du projet, les options suivantes peuvent apparaître :
 * Fichiers vides
 * Dossiers cachés
 * Fichiers cachés
-* Dossiers commençant par un point
-* Fichiers commençant par un point
+* Dossiers avec un point
+* Fichiers avec un point
 * Fichiers sans extension
 
 Le sélecteur de la GUI et les lignes radio de l’axe Git dans la TUI sont entièrement masqués lorsque la filtration Git ne s’applique pas : il n’existe aucune limite de dépôt et le filtre `.gitignore` ne peut pas modifier l’arborescence actuelle. Lorsque l’axe est visible en dehors d’un dépôt, la GUI propose uniquement l’absence de filtration et `.gitignore`, tandis que la TUI désactive les lignes qui nécessitent un dépôt. Dans un dépôt Git, les cinq valeurs ordinaires sont l’absence de filtration, `.gitignore`, les fichiers suivis, les fichiers indexés et toutes les modifications actuelles ; dans la TUI, une portée `diff:<ref>..<ref>` active apparaît sur une sixième ligne. Choisir une valeur remplace le mode Git courant sans modifier Smart Ignore ni les exclusions de base. Les autres options apparaissent lorsque leurs règles peuvent modifier l’arborescence actuelle ; la liste peut donc changer après la modification d’une autre règle ou d’un type de fichiers.
@@ -399,14 +399,14 @@ La détection des zones de projet est limitée afin que le chargement d’un gra
 
 Les valeurs masquées sont mises en évidence dans l’aperçu. Cliquez sur l’une d’elles pour conserver uniquement cette occurrence ; {alt}↓ / {alt}↑ parcourent les valeurs détectées et Enter bascule la valeur active. Dans l’espace de travail du terminal, `[` et `]` parcourent les occurrences, et `Enter` ou `Space` basculent l’occurrence active. La décision s’applique pendant la session à l’aperçu, au presse-papiers, à l’export de contexte, à la copie en dossier et au ZIP ; elle n’est pas enregistrée dans le profil du projet.
 
-Le menu contextuel de l’aperçu étend ces décisions. Un clic droit sur une occurrence détectée permet de conserver — ou de masquer à nouveau — en une seule action toutes les occurrences de sa règle ou toutes les occurrences détectées dans le même fichier. Un clic droit sur une valeur sélectionnée dans le contenu d’un fichier ajoute un marquage manuel : « Masquer … ici » masque uniquement cette occurrence pour la session, « Toujours masquer … » crée un marquage persistant pour toutes les occurrences de la valeur, et « Masquer … comme donnée privée » crée un marquage persistant contrôlé par « Masquer les données privées ». « Supprimer le marquage » apparaît sur un marquage manuel et le supprime ; une valeur toujours reconnue par le détecteur reste masquée. La valeur manuelle doit être une seule ligne de 8 à 512 caractères sélectionnée dans le contenu du fichier. La création d’un marquage active automatiquement l’option correspondante. Les marquages persistants ne conservent qu’une identité de valeur à clé et sa classe, jamais le texte d’origine.
+Le menu contextuel de l’aperçu étend ces décisions. Un clic droit sur une occurrence détectée permet de conserver — ou de masquer à nouveau — en une seule action toutes les occurrences de sa règle ou toutes les occurrences détectées dans le même fichier. Un clic droit sur une valeur sélectionnée dans le contenu d’un fichier ajoute un marquage manuel : « Masquer … ici » masque uniquement cette occurrence pour la session, « Toujours masquer … » crée un marquage persistant pour toutes les occurrences de la valeur, et « Masquer … comme donnée privée » crée un marquage persistant contrôlé par « Masquer les infos privées ». « Supprimer le marquage » apparaît sur un marquage manuel et le supprime ; une valeur toujours reconnue par le détecteur reste masquée. La valeur manuelle doit être une seule ligne de 8 à 512 caractères sélectionnée dans le contenu du fichier. La création d’un marquage active automatiquement l’option correspondante. Les marquages persistants ne conservent qu’une identité de valeur à clé et sa classe, jamais le texte d’origine.
 
 Une copie en dossier ou ZIP modifie également le texte correspondant et peut ne plus se compiler ou s’exécuter. Les fichiers binaires sont copiés sans modification et ne sont pas analysés. Un fichier texte sélectionné de plus de 16 Mio est omis et signalé, tandis que le reste de la sortie est produit. Une erreur de détection arrête toute l’opération.
 
 Le compteur indique seulement les correspondances aux règles. Zéro ne signifie pas que le projet est sûr. La CLI utilise `--hide-secrets` ; les détails techniques et les limites figurent dans `Docs/HideSecrets.md`.
 
-### 12.4 Masquer les données privées
-« Masquer les données privées » est désactivé par défaut. Cette option détecte les adresses e-mail, les adresses IP globales, les noms d’utilisateur locaux dans les chemins, les adresses MAC et les numéros de téléphone internationaux dans les fichiers texte sélectionnés. Les résultats utilisent les mêmes décisions d’aperçu et le même pipeline de sortie que « Masquer les secrets » ; les marquages manuels créés avec « Masquer … comme donnée privée » appartiennent à cette classe et suivent cette option (section 12.3). Les noms d’utilisateur locaux dans les en-têtes de chemins générés et dans la racine de l’arborescence sont masqués comme une seule détection partagée : le compteur la compte comme une valeur, l’indicateur ? précise si elle est masquée ou affichée, et un clic bascule tous les chemins masqués à la fois.
+### 12.4 Masquer les infos privées
+« Masquer les infos privées » est désactivé par défaut. Cette option détecte les adresses e-mail, les adresses IP globales, les noms d’utilisateur locaux dans les chemins, les adresses MAC et les numéros de téléphone internationaux dans les fichiers texte sélectionnés. Les résultats utilisent les mêmes décisions d’aperçu et le même pipeline de sortie que « Masquer les secrets » ; les marquages manuels créés avec « Masquer … comme donnée privée » appartiennent à cette classe et suivent cette option (section 12.3). Les noms d’utilisateur locaux dans les en-têtes de chemins générés et dans la racine de l’arborescence sont masqués comme une seule détection partagée : le compteur la compte comme une valeur, l’indicateur ? précise si elle est masquée ou affichée, et un clic bascule tous les chemins masqués à la fois.
 
 Les plages et hôtes de documentation, les noms d’utilisateur CI courants, les résolveurs DNS publics connus et les plages de numéros fictifs documentées restent visibles. Zéro correspondance ne garantit pas la confidentialité. La CLI utilise `--hide-private-data` ; les règles complètes et les limites de la première phase figurent dans `Docs/HidePrivateData.md`.
 
@@ -431,8 +431,8 @@ Le fichier `.git/info/exclude` propre au dépôt est également appliqué, avec 
 
 Le profil intégré `standard` sélectionne `gitignore` ainsi que `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files` et `extensionless-files`.
 
-### 12.6 Uniquement les fichiers suivis par Git
-« Uniquement les fichiers suivis par Git » construit l’étape Git de l’arborescence à partir des fichiers existants de l’arbre de travail enregistrés dans chaque index Git lisible. Les fichiers suivis modifiés et les nouveaux fichiers ajoutés à l’index restent inclus ; les fichiers non suivis sont exclus. Il s’agit de l’arbre de travail actuel, et non d’un instantané historique de `HEAD` ou d’un dépôt distant.
+### 12.6 Fichiers suivis par Git
+« Fichiers suivis par Git » construit l’étape Git de l’arborescence à partir des fichiers existants de l’arbre de travail enregistrés dans chaque index Git lisible. Les fichiers suivis modifiés et les nouveaux fichiers ajoutés à l’index restent inclus ; les fichiers non suivis sont exclus. Il s’agit de l’arbre de travail actuel, et non d’un instantané historique de `HEAD` ou d’un dépôt distant.
 
 Chaque dépôt est résolu indépendamment : les dépôts voisins dans le dossier ouvert et les sous-modules déclarés utilisent chacun leur propre index, et un dépôt enfant n’hérite pas des chemins suivis de son parent ni d’un dépôt voisin. Un dépôt intégré qui n’est pas déclaré dans `.gitmodules` reste opaque, comme en mode `.gitignore`. Ce mode nécessite la CLI Git ; un index vide mais lisible est valide. Si l’espace de travail interactif du terminal (TUI) démarre dans ce mode et qu’aucun index applicable ne peut être chargé, l’espace de travail ne s’ouvre pas. Si ce mode est sélectionné de manière interactive dans un espace de travail TUI déjà ouvert et qu’aucun index applicable ne peut être chargé, la modification est refusée et le dernier mode Git utilisable reste actif. Dans la même situation, les commandes directes renvoient une erreur de stratégie ou de vérification. DevProjex ne bascule jamais silencieusement vers `.gitignore`. Lorsqu’un autre index applicable est lisible, les zones imbriquées indisponibles sont exclues avec un avertissement.
 
@@ -448,7 +448,7 @@ Smart Ignore peut rester masqué tant que le mode Git sélectionné couvre déj�
 Une négation Git avec `!` annule uniquement le résultat Git. Elle ne désactive ni Smart Ignore ni une règle de base.
 
 ### 12.8 Règles de base
-« Dossiers commençant par un point » et « Fichiers commençant par un point » vérifient le nom de l’élément.
+« Dossiers avec un point » et « Fichiers avec un point » vérifient si le nom de l’élément commence par un point.
 
 « Dossiers cachés » et « Fichiers cachés » vérifient l’attribut système Hidden. Selon la plateforme, un nom commençant par un point et l’attribut système peuvent désigner le même élément ou des éléments différents.
 

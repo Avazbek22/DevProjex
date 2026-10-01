@@ -330,7 +330,7 @@
   "Settings.Ignore.GitChanges": "Perubahan Git saat ini",
   "Settings.Ignore.TrackedGitFilesOnly": "Hanya file Git yang dilacak",
   "Settings.Ignore.SmartIgnore": "Abaikan dengan cerdas",
-  "Settings.Ignore.HideSecrets": "Sembunyikan informasi rahasia",
+  "Settings.Ignore.HideSecrets": "Sembunyikan rahasia",
   "Settings.Ignore.HideSecrets.Scanning": "Mencari rahasia…",
   "Settings.Ignore.HideSecrets.NoMatches": "DevProjex tidak menemukan rahasia",
   "Settings.Ignore.HidePrivateData": "Sembunyikan data pribadi",

@@ -448,7 +448,7 @@ Smart Ignore can stay hidden while the selected Git mode already covers all of i
 A Git negation rule starting with `!` cancels only a Git result. It does not disable Smart Ignore or a basic rule.
 
 ### 12.8 Basic rules
-“Dot folders” and “Dot files” inspect the item name.
+“Dot folders” and “Dot files” check whether the item name starts with a dot.
 
 “Hidden folders” and “Hidden files” inspect the system hidden attribute. On some platforms, a dot-prefixed name and the system attribute may describe the same item or different items.
 

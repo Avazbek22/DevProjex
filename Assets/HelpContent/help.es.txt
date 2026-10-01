@@ -368,8 +368,8 @@ Según el contenido del proyecto, pueden mostrarse las siguientes opciones:
 * Archivos vacíos
 * Carpetas ocultas
 * Archivos ocultos
-* Carpetas con punto inicial
-* Archivos con punto inicial
+* Carpetas con punto
+* Archivos con punto
 * Archivos sin extensión
 
 El selector de la GUI y las filas de opción del eje Git en la TUI se ocultan por completo cuando el filtrado de Git no es aplicable: no hay un límite de repositorio y el filtro `.gitignore` no puede cambiar el árbol actual. Cuando el eje es visible fuera de un repositorio, la GUI ofrece solo «sin filtrado» y `.gitignore`, mientras que la TUI desactiva las filas que requieren un repositorio. Dentro de un repositorio Git, los cinco valores habituales son: sin filtrado, `.gitignore`, archivos rastreados, archivos preparados y todos los cambios actuales; en la TUI, un ámbito `diff:<ref>..<ref>` activo aparece como sexta fila. Elegir un valor sustituye el modo Git actual sin cambiar Smart Ignore ni las exclusiones básicas. Las demás opciones aparecen cuando sus reglas pueden cambiar el árbol actual, por lo que la lista puede cambiar después de cambiar otra regla o un tipo de archivo.
@@ -431,8 +431,8 @@ También se aplica el archivo local del repositorio `.git/info/exclude`, con men
 
 El perfil integrado `standard` selecciona `gitignore` además de `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files` y `extensionless-files`.
 
-### 12.6 Solo archivos rastreados por Git
-«Solo archivos rastreados por Git» construye la etapa Git del árbol a partir de los archivos existentes del árbol de trabajo registrados en cada índice Git legible. Los archivos rastreados modificados y los archivos nuevos preparados siguen incluidos; los archivos no rastreados se excluyen. Se trata del árbol de trabajo actual, no de una instantánea histórica de `HEAD` ni de un repositorio remoto.
+### 12.6 Solo archivos rastreados
+«Solo archivos rastreados» construye la etapa Git del árbol a partir de los archivos existentes del árbol de trabajo registrados en cada índice Git legible. Los archivos rastreados modificados y los archivos nuevos preparados siguen incluidos; los archivos no rastreados se excluyen. Se trata del árbol de trabajo actual, no de una instantánea histórica de `HEAD` ni de un repositorio remoto.
 
 Cada repositorio se resuelve de forma independiente: los repositorios hermanos dentro de la carpeta abierta y los submódulos declarados usan cada uno su propio índice, y un repositorio hijo no hereda las rutas rastreadas de su repositorio padre ni de uno hermano. Un repositorio incrustado que no está declarado en `.gitmodules` sigue siendo opaco, como en el modo `.gitignore`. Este modo requiere la CLI de Git; un índice vacío pero legible es válido. Si el Terminal Workspace (TUI) se inicia en este modo y no se puede cargar ningún índice aplicable, el espacio de trabajo no se abre. Si el modo se selecciona de forma interactiva en un espacio de trabajo TUI ya abierto y no se puede cargar ningún índice aplicable, el cambio se rechaza y sigue activo el último modo Git utilizable. En la misma situación, los comandos directos devuelven un fallo de política o de comprobación. DevProjex nunca cambia en silencio a `.gitignore`. Si se puede leer otro índice aplicable, los ámbitos anidados no disponibles se excluyen con una advertencia.
 
@@ -448,7 +448,7 @@ Smart Ignore puede permanecer oculto mientras el modo Git seleccionado ya cubra 
 Una regla de negación de Git que empieza por `!` anula solo un resultado de Git. No desactiva Smart Ignore ni una regla básica.
 
 ### 12.8 Reglas básicas
-«Carpetas con punto inicial» y «Archivos con punto inicial» examinan el nombre del elemento.
+«Carpetas con punto» y «Archivos con punto» comprueban si el nombre del elemento empieza por un punto.
 
 «Carpetas ocultas» y «Archivos ocultos» examinan el atributo oculto del sistema. En algunas plataformas, un nombre que empieza por punto y el atributo del sistema pueden describir el mismo elemento o elementos distintos.
 

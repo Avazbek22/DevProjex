@@ -328,7 +328,7 @@ Har bir ro‘yxatda Barchasi tugmasi bor.
 
 Tarkibni qayta ishlash:
 * bu bo‘lim tanlangan matn fayllari tarkibini daraxtni o‘zgartirmasdan o‘zgartiradi;
-* «Sirlarni yashirish» va «Shaxsiy ma’lumotni yashirish» topilgan qiymatlarni almashtiradi (12.3 va 12.4 bo‘limlari);
+* «Sirlarni yashirish» va «Shaxsiy ma’lumot yashirish» topilgan qiymatlarni almashtiradi (12.3 va 12.4 bo‘limlari);
 * «Kodni siqish» e’lonlarni saqlab, nomlangan implementatsiyalarni 14 tilda qisqartiradi;
 * «Izohlarni olib tashlash» 20 til paketida izohlar va hujjat izohlarini olib tashlaydi;
 * «Bo‘sh qatorlarni olib tashlash» o‘sha paketlarda faqat bo‘sh joylardan iborat qatorlarni olib tashlab, ko‘p qatorli literallarni saqlaydi;
@@ -368,11 +368,11 @@ Loyiha tarkibiga qarab quyidagi bandlar ko‘rsatilishi mumkin:
 * Bo‘sh fayllar
 * Yashirin jildlar
 * Yashirin fayllar
-* Nuqta bilan boshlanuvchi jildlar
-* Nuqta bilan boshlanuvchi fayllar
+* Nuqtali jildlar
+* Nuqtali fayllar
 * Kengaytmasiz fayllar
 
-Git filtrlashni qo‘llab bo‘lmaganda GUI selektori va TUI’dagi Git o‘qining radio qatorlari butunlay yashiriladi: repozitoriy chegarasi yo‘q va `.gitignore` filtri joriy daraxtni o‘zgartira olmaydi. O‘q repozitoriydan tashqarida ko‘rinsa, GUI faqat filtrlashsiz rejim va `.gitignore`ni taklif qiladi, TUI esa repozitoriy talab qiladigan qatorlarni o‘chiradi. Git repozitoriysida beshta odatiy qiymat mavjud: filtrlashsiz, `.gitignore`, kuzatiladigan fayllar, Git indeksiga qo‘shilgan fayllar va barcha joriy o‘zgarishlar; TUI’da faol `diff:<ref>..<ref>` doirasi oltinchi qatorda paydo bo‘ladi. Qiymatni tanlash Smart Ignore va asosiy istisnolarni o‘zgartirmasdan joriy Git rejimini almashtiradi. Boshqa bandlar ularning qoidalari joriy daraxtni o‘zgartira olganda ko‘rsatiladi, shuning uchun boshqa qoida yoki fayl turi almashtirilgach ro‘yxat o‘zgarishi mumkin.
+Git filtrlashni qo‘llab bo‘lmaganda GUI selektori va TUI’dagi Git o‘qining radio qatorlari butunlay yashiriladi: repozitoriy chegarasi yo‘q va `.gitignore` filtri joriy daraxtni o‘zgartira olmaydi. O‘q repozitoriydan tashqarida ko‘rinsa, GUI faqat filtrlashsiz rejim va `.gitignore`ni taklif qiladi, TUI esa repozitoriy talab qiladigan qatorlarni o‘chiradi. Git repozitoriysida beshta odatiy qiymat mavjud: filtrlashsiz, `.gitignore`, kuzatiladigan fayllar, Indeksdagi Git fayllari va barcha joriy o‘zgarishlar; TUI’da faol `diff:<ref>..<ref>` doirasi oltinchi qatorda paydo bo‘ladi. Qiymatni tanlash Smart Ignore va asosiy istisnolarni o‘zgartirmasdan joriy Git rejimini almashtiradi. Boshqa bandlar ularning qoidalari joriy daraxtni o‘zgartira olganda ko‘rsatiladi, shuning uchun boshqa qoida yoki fayl turi almashtirilgach ro‘yxat o‘zgarishi mumkin.
 
 Yangi band birinchi marta paydo bo‘lganda odatda yoqilgan bo‘ladi. Ma’lum band ro‘yxatdan vaqtincha yo‘qolsa ham foydalanuvchi tanlovini saqlaydi.
 
@@ -399,14 +399,14 @@ Katta foydalanuvchi jildini yuklash har bir katalogni qayta-qayta to‘liq tahli
 
 Mos kelgan joylar ko‘rib chiqishda ajratib ko‘rsatiladi. Faqat bitta uchrashuvni o‘zgarishsiz qoldirish uchun uni bosing; {alt}↓ / {alt}↑ topilmalar bo‘ylab yuradi, Enter faolini almashtiradi. Terminal Workspace ichida `[` va `]` uchrashuvlar bo‘ylab yuradi, `Enter` yoki `Space` esa faol uchrashuvni almashtiradi. Qaror shu seans davomida ko‘rib chiqish, almashish buferi, kontekst eksporti, jild va ZIP uchun amal qiladi; loyiha profilida saqlanmaydi.
 
-Ko‘rib chiqish kontekst menyusi bu qarorlarni kengaytiradi. Topilgan uchrashuv ustida o‘ng tugmani bosish bitta amal bilan uning qoidasidagi barcha uchrashuvlarni yoki o‘sha fayldagi barcha topilgan uchrashuvlarni saqlab qolish — yoki qayta yashirish — imkonini beradi. Fayl tarkibida tanlangan qiymat ustida o‘ng tugmani bosish qo‘lda belgi qo‘shadi: «…ni shu yerda yashirish» faqat shu uchrashuvni seans davomida yashiradi, «…ni doim yashirish» qiymatning barcha uchrashuvlari uchun doimiy belgi yaratadi, «…ni shaxsiy ma’lumot sifatida yashirish» esa «Shaxsiy ma’lumotni yashirish» parametri boshqaradigan doimiy belgi yaratadi. «Belgini olib tashlash» qo‘lda qo‘yilgan belgida paydo bo‘lib, uni o‘chiradi; detektor hali ham topadigan qiymat yashirin qoladi. Qo‘lda kiritiladigan qiymat — fayl tarkibida tanlangan, 8 dan 512 belgigacha bo‘lgan bitta qator. Belgi yaratish tegishli parametrni avtomatik yoqadi. Doimiy belgilar faqat kalitli qiymat identifikatori va uning sinfini saqlaydi, asl matnni hech qachon saqlamaydi.
+Ko‘rib chiqish kontekst menyusi bu qarorlarni kengaytiradi. Topilgan uchrashuv ustida o‘ng tugmani bosish bitta amal bilan uning qoidasidagi barcha uchrashuvlarni yoki o‘sha fayldagi barcha topilgan uchrashuvlarni saqlab qolish — yoki qayta yashirish — imkonini beradi. Fayl tarkibida tanlangan qiymat ustida o‘ng tugmani bosish qo‘lda belgi qo‘shadi: «…ni shu yerda yashirish» faqat shu uchrashuvni seans davomida yashiradi, «…ni doim yashirish» qiymatning barcha uchrashuvlari uchun doimiy belgi yaratadi, «…ni shaxsiy ma’lumot sifatida yashirish» esa «Shaxsiy ma’lumot yashirish» parametri boshqaradigan doimiy belgi yaratadi. «Belgini olib tashlash» qo‘lda qo‘yilgan belgida paydo bo‘lib, uni o‘chiradi; detektor hali ham topadigan qiymat yashirin qoladi. Qo‘lda kiritiladigan qiymat — fayl tarkibida tanlangan, 8 dan 512 belgigacha bo‘lgan bitta qator. Belgi yaratish tegishli parametrni avtomatik yoqadi. Doimiy belgilar faqat kalitli qiymat identifikatori va uning sinfini saqlaydi, asl matnni hech qachon saqlamaydi.
 
 Jild yoki ZIP nusxasidagi mos matn ham o‘zgaradi, shu sababli natija yig‘ilmasligi yoki ishga tushmasligi mumkin. Ikkilik fayllar tekshirilmaydi va o‘zgarishsiz ko‘chiriladi. Hajmi 16 MiB dan katta tanlangan matn fayli tashlab ketiladi va bu haqda xabar beriladi, qolgan natijani yaratish esa davom etadi. Aniqlash xatosi butun operatsiyani to‘xtatadi.
 
 Hisoblagich faqat qoidalarga mos kelgan joylarni bildiradi. Nol loyiha xavfsiz degani emas. CLI’da `--hide-secrets` ishlatiladi; tafsilotlar `Docs/HideSecrets.md` faylida.
 
-### 12.4 Shaxsiy ma’lumotni yashirish
-«Shaxsiy ma’lumotni yashirish» odatda o‘chirilgan bo‘ladi. Bu parametr tanlangan matn fayllaridagi elektron pochta manzillari, global IP manzillar, yo‘llardagi mahalliy foydalanuvchi nomlari, MAC manzillar va xalqaro telefon raqamlarini aniqlaydi. Topilmalar uchun Sirlarni yashirishdagi kabi ko‘rib chiqish qarorlari va bir xil chiqish konveyeri ishlatiladi; «…ni shaxsiy ma’lumot sifatida yashirish» orqali yaratilgan qo‘lda belgilar shu sinfga tegishli bo‘lib, shu parametrga bo‘ysunadi (12.3-bo‘lim). Yaratiladigan yo‘l sarlavhalaridagi va daraxt ildizidagi mahalliy foydalanuvchi nomlari bitta umumiy topilma sifatida maskalanadi: hisoblagich uni bitta qiymat deb sanaydi, «?» indikatori u yashirilgan yoki ko‘rsatilganini bildiradi, bitta bosish esa barcha maskalangan yo‘llarni birdaniga almashtiradi.
+### 12.4 Shaxsiy ma’lumot yashirish
+«Shaxsiy ma’lumot yashirish» odatda o‘chirilgan bo‘ladi. Bu parametr tanlangan matn fayllaridagi elektron pochta manzillari, global IP manzillar, yo‘llardagi mahalliy foydalanuvchi nomlari, MAC manzillar va xalqaro telefon raqamlarini aniqlaydi. Topilmalar uchun Sirlarni yashirishdagi kabi ko‘rib chiqish qarorlari va bir xil chiqish konveyeri ishlatiladi; «…ni shaxsiy ma’lumot sifatida yashirish» orqali yaratilgan qo‘lda belgilar shu sinfga tegishli bo‘lib, shu parametrga bo‘ysunadi (12.3-bo‘lim). Yaratiladigan yo‘l sarlavhalaridagi va daraxt ildizidagi mahalliy foydalanuvchi nomlari bitta umumiy topilma sifatida maskalanadi: hisoblagich uni bitta qiymat deb sanaydi, «?» indikatori u yashirilgan yoki ko‘rsatilganini bildiradi, bitta bosish esa barcha maskalangan yo‘llarni birdaniga almashtiradi.
 
 Hujjat uchun ajratilgan diapazonlar va hostlar, odatiy CI foydalanuvchilari, taniqli ochiq DNS resolverlari hamda hujjatlashtirilgan uydirma raqamlar ko‘rinib qoladi. Nol moslik maxfiylik kafolati emas. CLI-da `--hide-private-data` ishlatiladi; to‘liq qoidalar va birinchi bosqich chegaralari `Docs/HidePrivateData.md` faylida berilgan.
 
@@ -448,7 +448,7 @@ Tanlangan Git rejimi barcha Smart Ignore nomzodlarini qamrab turganda Smart Igno
 `!` Git inkori faqat Git natijasini bekor qiladi; u Smart Ignore yoki asosiy qoidani o‘chirmaydi.
 
 ### 12.8 Asosiy qoidalar
-«Nuqta bilan boshlanuvchi jildlar» va «Nuqta bilan boshlanuvchi fayllar» element nomini tekshiradi.
+«Nuqtali jildlar» va «Nuqtali fayllar» element nomi nuqta bilan boshlanishini tekshiradi.
 
 «Yashirin jildlar» va «Yashirin fayllar» tizimdagi Hidden atributini tekshiradi. Ayrim platformalarda nuqta bilan boshlanuvchi nom va tizim atributi bir xil yoki turli elementlarni tavsiflashi mumkin.
 
