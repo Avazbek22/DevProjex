@@ -368,8 +368,8 @@ Consoante o conteúdo do projeto, podem ser apresentadas as seguintes opções:
 * Ficheiros vazios
 * Pastas ocultas
 * Ficheiros ocultos
-* Pastas ponto
-* Ficheiros ponto
+* Pastas com ponto
+* Ficheiros com ponto
 * Ficheiros sem extensão
 
 O seletor da GUI e as linhas de opção do eixo Git na TUI ficam totalmente ocultos quando a filtragem Git não é aplicável: não há limite de repositório e o filtro `.gitignore` não pode alterar a árvore atual. Quando o eixo está visível fora de um repositório, a GUI oferece apenas «sem filtragem» e `.gitignore`, enquanto a TUI desativa as linhas que exigem um repositório. Dentro de um repositório Git, os cinco valores habituais são: sem filtragem, `.gitignore`, ficheiros controlados, ficheiros preparados e todas as alterações atuais; na TUI, um âmbito `diff:<ref>..<ref>` ativo aparece como sexta linha. Escolher um valor substitui o modo Git atual sem alterar o Smart Ignore nem as exclusões básicas. As restantes opções aparecem quando as respetivas regras podem alterar a árvore atual, pelo que a lista pode mudar depois de alterar outra regra ou um tipo de ficheiro.
@@ -448,7 +448,7 @@ O Smart Ignore pode ficar oculto enquanto o modo Git selecionado já abranger to
 Uma regra de negação do Git que começa por `!` cancela apenas um resultado do Git. Não desativa o Smart Ignore nem uma regra básica.
 
 ### 12.8 Regras básicas
-«Pastas ponto» e «Ficheiros ponto» verificam se o nome do item começa por um ponto.
+«Pastas com ponto» e «Ficheiros com ponto» verificam se o nome do item começa por um ponto.
 
 «Pastas ocultas» e «Ficheiros ocultos» verificam o atributo oculto do sistema. Em algumas plataformas, um nome iniciado por ponto e o atributo do sistema podem descrever o mesmo item ou itens diferentes.
 

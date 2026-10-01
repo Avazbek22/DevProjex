@@ -368,8 +368,8 @@ Según el contenido del proyecto, pueden mostrarse las siguientes opciones:
 * Archivos vacíos
 * Carpetas ocultas
 * Archivos ocultos
-* Carpetas punto
-* Archivos punto
+* Carpetas con punto
+* Archivos con punto
 * Archivos sin extensión
 
 El selector de la GUI y las filas de opción del eje Git en la TUI se ocultan por completo cuando el filtrado de Git no es aplicable: no hay un límite de repositorio y el filtro `.gitignore` no puede cambiar el árbol actual. Cuando el eje es visible fuera de un repositorio, la GUI ofrece solo «sin filtrado» y `.gitignore`, mientras que la TUI desactiva las filas que requieren un repositorio. Dentro de un repositorio Git, los cinco valores habituales son: sin filtrado, `.gitignore`, archivos rastreados, archivos preparados y todos los cambios actuales; en la TUI, un ámbito `diff:<ref>..<ref>` activo aparece como sexta fila. Elegir un valor sustituye el modo Git actual sin cambiar Smart Ignore ni las exclusiones básicas. Las demás opciones aparecen cuando sus reglas pueden cambiar el árbol actual, por lo que la lista puede cambiar después de cambiar otra regla o un tipo de archivo.
@@ -448,7 +448,7 @@ Smart Ignore puede permanecer oculto mientras el modo Git seleccionado ya cubra 
 Una regla de negación de Git que empieza por `!` anula solo un resultado de Git. No desactiva Smart Ignore ni una regla básica.
 
 ### 12.8 Reglas básicas
-«Carpetas punto» y «Archivos punto» comprueban si el nombre del elemento empieza por un punto.
+«Carpetas con punto» y «Archivos con punto» comprueban si el nombre del elemento empieza por un punto.
 
 «Carpetas ocultas» y «Archivos ocultos» examinan el atributo oculto del sistema. En algunas plataformas, un nombre que empieza por punto y el atributo del sistema pueden describir el mismo elemento o elementos distintos.
 

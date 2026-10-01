@@ -368,8 +368,8 @@ Selon le contenu du projet, les options suivantes peuvent apparaître :
 * Fichiers vides
 * Dossiers cachés
 * Fichiers cachés
-* Dossiers à point initial
-* Fichiers à point initial
+* Dossiers avec un point
+* Fichiers avec un point
 * Fichiers sans extension
 
 Le sélecteur de la GUI et les lignes radio de l’axe Git dans la TUI sont entièrement masqués lorsque la filtration Git ne s’applique pas : il n’existe aucune limite de dépôt et le filtre `.gitignore` ne peut pas modifier l’arborescence actuelle. Lorsque l’axe est visible en dehors d’un dépôt, la GUI propose uniquement l’absence de filtration et `.gitignore`, tandis que la TUI désactive les lignes qui nécessitent un dépôt. Dans un dépôt Git, les cinq valeurs ordinaires sont l’absence de filtration, `.gitignore`, les fichiers suivis, les fichiers indexés et toutes les modifications actuelles ; dans la TUI, une portée `diff:<ref>..<ref>` active apparaît sur une sixième ligne. Choisir une valeur remplace le mode Git courant sans modifier Smart Ignore ni les exclusions de base. Les autres options apparaissent lorsque leurs règles peuvent modifier l’arborescence actuelle ; la liste peut donc changer après la modification d’une autre règle ou d’un type de fichiers.
@@ -448,7 +448,7 @@ Smart Ignore peut rester masqué tant que le mode Git sélectionné couvre déj�
 Une négation Git avec `!` annule uniquement le résultat Git. Elle ne désactive ni Smart Ignore ni une règle de base.
 
 ### 12.8 Règles de base
-« Dossiers à point initial » et « Fichiers à point initial » vérifient si le nom de l’élément commence par un point.
+« Dossiers avec un point » et « Fichiers avec un point » vérifient si le nom de l’élément commence par un point.
 
 « Dossiers cachés » et « Fichiers cachés » vérifient l’attribut système Hidden. Selon la plateforme, un nom commençant par un point et l’attribut système peuvent désigner le même élément ou des éléments différents.
 

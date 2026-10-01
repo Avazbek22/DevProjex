@@ -368,8 +368,8 @@ A seconda del contenuto del progetto possono comparire le seguenti opzioni:
 * File vuoti
 * Cartelle nascoste
 * File nascosti
-* Cartelle punto
-* File punto
+* Cartelle con punto
+* File con punto
 * File senza estensione
 
 Il selettore della GUI e le righe radio dell’asse Git nella TUI vengono nascosti completamente quando il filtro Git non è applicabile: non esiste un confine di repository e il filtro `.gitignore` non può modificare l’albero corrente. Quando l’asse è visibile fuori da un repository, la GUI offre solo nessun filtro e `.gitignore`, mentre la TUI disabilita le righe che richiedono un repository. In un repository Git sono disponibili i cinque valori normali: nessun filtro, `.gitignore`, file tracciati, file in staging e tutte le modifiche correnti; nella TUI, un ambito `diff:<ref>..<ref>` attivo compare come sesta riga. La scelta di un valore sostituisce la modalità Git corrente senza modificare Smart Ignore o le esclusioni di base. Le altre opzioni compaiono quando le relative regole possono cambiare l’albero corrente, quindi l’elenco può cambiare dopo aver modificato un’altra regola o un tipo di file.
@@ -448,7 +448,7 @@ Smart Ignore può restare nascosto finché la modalità Git selezionata copre gi
 Una negazione Git con `!` annulla solo il risultato Git. Non disattiva Smart Ignore né una regola di base.
 
 ### 12.8 Regole di base
-«Cartelle punto» e «File punto» controllano se il nome dell’elemento inizia con un punto.
+«Cartelle con punto» e «File con punto» controllano se il nome dell’elemento inizia con un punto.
 
 «Cartelle nascoste» e «File nascosti» controllano l’attributo di sistema Hidden. Su alcune piattaforme, un nome con punto iniziale e l’attributo di sistema possono descrivere lo stesso elemento oppure elementi diversi.
 
