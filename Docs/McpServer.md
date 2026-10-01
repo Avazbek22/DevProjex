@@ -1452,7 +1452,7 @@ range of the name in file order in the form an ambiguous `get_file.symbol` repor
 most six ranges, then `and N more`, as in
 `src/click/decorators.py command 138-138, 143-151, 152-161, 162-166, 167-250`. The name is accepted unchanged by
 `get_file.symbol`. C#, JavaScript, TypeScript, Go, Python, Java, Rust, Kotlin, Ruby, PHP,
-C, and C++ include supported members and functions, with their owner chain when names
+C, C++, Scala, and Bash include supported members and functions, with their owner chain when names
 repeat within a file. When more than one root is configured, the printed `get_file`
 arguments also include `project`; a remote selector includes its source project and
 branch. The complete printed object can therefore be passed back without editing.

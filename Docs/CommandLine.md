@@ -576,9 +576,10 @@ Options:
 
 The TUI default `auto` profile uses the local project profile when one exists,
 otherwise the standard profile. It provides recent local and Git workspaces, a lazy project tree,
-readable and exact Raw Preview, Context Controls, a searchable Action Palette,
-selection, search, roots, extensions, Git filtering, Exclusions, metrics,
-profiles, and context/folder/ZIP export.
+Context Preview, the Parameters panel (Content Processing, Exclusions, and File Types),
+a searchable Action Palette, the `:` workspace command line, selection, search,
+Git filtering, metrics, profiles, MCP client connection and the agent journal,
+and context/folder/ZIP export.
 See [TerminalWorkspace.md](TerminalWorkspace.md).
 
 ## Open Desktop
