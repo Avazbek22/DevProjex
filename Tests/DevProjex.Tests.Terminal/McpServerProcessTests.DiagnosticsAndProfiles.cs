@@ -696,8 +696,10 @@ public sealed partial class McpServerProcessTests
 		{
 			process.StandardInput.Close();
 			await Client.DisposeAsync();
+			// The host may legitimately spend its default 30-second graceful shutdown window on
+			// background cleanup; a shorter wait fails on loaded Windows runners without a real hang.
 			await process.WaitForExitAsync(TestContext.Current.CancellationToken)
-				.WaitAsync(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken);
+				.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
 			var error = await standardError;
 			try
 			{

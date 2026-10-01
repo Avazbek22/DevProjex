@@ -9572,7 +9572,9 @@ public sealed partial class McpServerIntegrationTests
 			await Client.DisposeAsync();
 			await _clientToServer.Writer.CompleteAsync();
 			await _serverToClient.Reader.CompleteAsync();
-			await _serverTask.WaitAsync(TimeSpan.FromSeconds(10));
+			// The host may legitimately spend its default 30-second graceful shutdown window on
+			// background cleanup; a shorter wait fails on loaded Windows runners without a real hang.
+			await _serverTask.WaitAsync(TimeSpan.FromSeconds(30));
 		}
 
 		private sealed class RecordingWriteStream(Stream destination) : Stream
