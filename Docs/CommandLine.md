@@ -32,9 +32,8 @@ detail and is not the supported shell entry point.
 
 ## CI without a persistent install (from v5.2)
 
-The v5.2 headless packages expose this command contract without the desktop app.
-They are published independently; before their first publication, use a direct
-GitHub release binary. The npm route requires Node 20 or later:
+The headless packages on npm and NuGet expose this command contract without the
+desktop app. The npm route requires Node 20 or later:
 
 ```yaml
 - uses: actions/setup-node@v4

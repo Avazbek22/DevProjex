@@ -1,7 +1,9 @@
 # Headless release channels
 
-The implementation and workflow are ready before registry names are reserved.
-Nothing in this document claims that the packages have already been published.
+Both channels are live from v5.2: [`devprojex` on npm](https://www.npmjs.com/package/devprojex)
+with six `@devprojex/cli-*` platform packages, and
+[`devprojex` on NuGet](https://www.nuget.org/packages/devprojex) with six RID packages.
+The server is listed in the MCP Registry as `io.github.Avazbek22/devprojex`.
 The workflow always builds and gates both channels; `channels` only selects which
 publish jobs run after the gates, and `dry_run` defaults to `true`.
 
@@ -61,25 +63,25 @@ Perform these steps in order:
 package `version`. Update them together with `DevProjexVersion`; the contract tests
 and the static package gate reject a manifest that differs from the packages.
 
-## Dry-run package sizes
+## Published 5.2.0 package sizes
 
-The checked-in table below is refreshed from
-`artifacts/headless/package-sizes.md` after the final local v5.2 dry run. It reports
-compressed registry artifacts, not installed sizes.
+Compressed registry artifacts as served by npm and nuget.org, not installed sizes.
+nuget.org adds its repository signature, so its files are slightly larger than the
+workflow artifacts.
 
 | Package | Bytes | MiB |
 |---|---:|---:|
-| `devprojex-5.2.0.tgz` | 5,208 | 0.00 |
-| `devprojex-cli-darwin-arm64-5.2.0.tgz` | 60,165,625 | 57.38 |
-| `devprojex-cli-darwin-x64-5.2.0.tgz` | 63,410,007 | 60.47 |
-| `devprojex-cli-linux-arm64-5.2.0.tgz` | 59,155,468 | 56.42 |
-| `devprojex-cli-linux-x64-5.2.0.tgz` | 62,541,116 | 59.64 |
-| `devprojex-cli-win32-arm64-5.2.0.tgz` | 62,294,400 | 59.41 |
-| `devprojex-cli-win32-x64-5.2.0.tgz` | 65,464,085 | 62.43 |
-| `devprojex.5.2.0.nupkg` | 29,914 | 0.03 |
-| `devprojex.linux-arm64.5.2.0.nupkg` | 47,163,705 | 44.98 |
-| `devprojex.linux-x64.5.2.0.nupkg` | 49,442,111 | 47.15 |
-| `devprojex.osx-arm64.5.2.0.nupkg` | 46,156,060 | 44.02 |
-| `devprojex.osx-x64.5.2.0.nupkg` | 48,302,367 | 46.06 |
-| `devprojex.win-arm64.5.2.0.nupkg` | 48,405,056 | 46.16 |
-| `devprojex.win-x64.5.2.0.nupkg` | 50,379,210 | 48.05 |
+| `devprojex-5.2.0.tgz` | 7,169 | 0.01 |
+| `devprojex-cli-darwin-arm64-5.2.0.tgz` | 65,220,004 | 62.20 |
+| `devprojex-cli-darwin-x64-5.2.0.tgz` | 68,789,374 | 65.60 |
+| `devprojex-cli-linux-arm64-5.2.0.tgz` | 64,084,142 | 61.12 |
+| `devprojex-cli-linux-x64-5.2.0.tgz` | 67,796,043 | 64.66 |
+| `devprojex-cli-win32-arm64-5.2.0.tgz` | 67,378,450 | 64.26 |
+| `devprojex-cli-win32-x64-5.2.0.tgz` | 70,814,774 | 67.53 |
+| `devprojex.5.2.0.nupkg` | 45,933 | 0.04 |
+| `devprojex.linux-arm64.5.2.0.nupkg` | 48,263,581 | 46.03 |
+| `devprojex.linux-x64.5.2.0.nupkg` | 50,539,841 | 48.20 |
+| `devprojex.osx-arm64.5.2.0.nupkg` | 47,249,233 | 45.06 |
+| `devprojex.osx-x64.5.2.0.nupkg` | 49,394,338 | 47.11 |
+| `devprojex.win-arm64.5.2.0.nupkg` | 49,571,039 | 47.27 |
+| `devprojex.win-x64.5.2.0.nupkg` | 51,546,710 | 49.16 |
