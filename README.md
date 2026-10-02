@@ -375,7 +375,7 @@ Detection runs a pinned, reviewed [Gitleaks](https://github.com/gitleaks/gitleak
   <img alt=".NET 10" src="https://img.shields.io/badge/.NET-10-purple">
   <img alt="WinGet" src="https://img.shields.io/badge/winget-available-blue">
   <img alt="Repository size" src="https://img.shields.io/github/repo-size/Avazbek22/DevProjex">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-17000%2B-brightgreen">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-20000%2B-brightgreen">
 </p>
 
 * **.NET 10**
@@ -383,7 +383,7 @@ Detection runs a pinned, reviewed [Gitleaks](https://github.com/gitleaks/gitleak
 * **Tree-sitter** parsing · **Gitleaks** rule source · official **MCP** C# SDK — attributions in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)
 * Clean Architecture layers (Kernel / Application / Infrastructure / Terminal / Avalonia)
 * JSON-based resources (localization, icon mappings, presets)
-* 17,000+ automated tests (unit + integration + terminal + UI), run on Windows, Linux, and macOS
+* 20,000+ automated tests (unit + integration + terminal + UI), run on Windows, Linux, and macOS
 
 **Build from source**
 
