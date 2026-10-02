@@ -24,7 +24,7 @@ Choose what you need in an interactive file tree, check the result in a live pre
 
 ## App Demo 🖼️
 
-<img src="Docs/Media/readme-demo/devprojex-demo-04-readme.gif" alt="DevProjex desktop app demo" width="100%" />
+<img src="Docs/Media/readme-demo/devprojex-demo.gif" alt="DevProjex demo: the desktop app and Terminal Workspace" width="100%" />
 
 ---
 
