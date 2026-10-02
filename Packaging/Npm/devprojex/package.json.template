@@ -5,19 +5,29 @@
   "keywords": [
     "mcp",
     "mcp-server",
+    "model-context-protocol",
     "ai",
+    "ai-agents",
     "llm",
     "context",
+    "code-context",
+    "codebase-context",
+    "code-to-prompt",
+    "secret-redaction",
     "cli",
-    "tui",
-    "code-context"
+    "tui"
   ],
+  "author": "Avazbek Olimov",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Avazbek22/DevProjex.git"
   },
   "homepage": "https://github.com/Avazbek22/DevProjex",
+  "bugs": {
+    "url": "https://github.com/Avazbek22/DevProjex/issues"
+  },
+  "mcpName": "io.github.Avazbek22/devprojex",
   "bin": {
     "devprojex": "bin/devprojex.js"
   },

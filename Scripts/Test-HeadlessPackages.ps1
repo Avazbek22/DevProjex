@@ -42,6 +42,10 @@ foreach ($sentinel in @("tree-sitter-c-sharp", "tree-sitter-kotlin")) {
         throw "Headless payload manifest is missing sentinel grammar '$sentinel'."
     }
 }
+$mcpServer = Get-Content -LiteralPath (Join-Path $repoRoot "server.json") -Raw | ConvertFrom-Json
+if ($mcpServer.version -cne $Version) {
+    throw "server.json declares MCP server version '$($mcpServer.version)', but the packages are '$Version'."
+}
 
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -156,6 +160,23 @@ try {
         Assert-Artifact ($matches.Count -eq 1) $pointerName "RID link '$($rid.rid)' -> '$dependencyId@$Version'"
     }
     Assert-Artifact ($dependencies.Count -eq 6) $pointerName "exactly six same-version RID links"
+
+    # The MCP Registry and nuget.org both read these files from the published package, which can
+    # never be replaced, so a mismatch has to stop the build here.
+    [xml] $pointerNuspec = [System.Text.Encoding]::UTF8.GetString((Get-ZipEntryBytes $nuspecEntry[0])).TrimStart([char]0xFEFF)
+    $packageTypes = @($pointerNuspec.SelectNodes("//*[local-name()='packageType']") | ForEach-Object { $_.GetAttribute('name') })
+    Assert-Artifact ('DotnetTool' -cin $packageTypes -and 'McpServer' -cin $packageTypes) $pointerName "DotnetTool and McpServer package types"
+    $serverEntry = @($pointerZip.Entries | Where-Object { $_.FullName -ceq '.mcp/server.json' })
+    Assert-Artifact ($serverEntry.Count -eq 1) $pointerName ".mcp/server.json"
+    $packedServer = [System.Text.Encoding]::UTF8.GetString((Get-ZipEntryBytes $serverEntry[0])).TrimStart([char]0xFEFF) | ConvertFrom-Json
+    Assert-Artifact ($packedServer.name -ceq $mcpServer.name -and $packedServer.version -ceq $Version) $pointerName "MCP server manifest '$($mcpServer.name)@$Version'"
+    $packedNuGet = @($packedServer.packages | Where-Object { $_.registryType -ceq 'nuget' })
+    Assert-Artifact ($packedNuGet.Count -eq 1 -and $packedNuGet[0].identifier -ceq 'devprojex' -and $packedNuGet[0].version -ceq $Version) `
+        $pointerName "MCP server manifest NuGet entry 'devprojex@$Version'"
+    $readmeEntry = @($pointerZip.Entries | Where-Object { $_.FullName -ceq 'README.md' })
+    Assert-Artifact ($readmeEntry.Count -eq 1) $pointerName "README.md"
+    $pointerReadme = [System.Text.Encoding]::UTF8.GetString((Get-ZipEntryBytes $readmeEntry[0]))
+    Assert-Artifact ($pointerReadme -cmatch "mcp-name: $([regex]::Escape($mcpServer.name))(\s|-->)") $pointerName "MCP Registry ownership marker 'mcp-name: $($mcpServer.name)'"
 }
 finally {
     $pointerZip.Dispose()
@@ -249,6 +270,12 @@ try {
         Assert-Artifact (Test-Path -LiteralPath $packageJsonPath -PathType Leaf) $packageName "package.json"
         Assert-Artifact (Test-Path -LiteralPath $binaryPath -PathType Leaf) $packageName "binary '$($rid.binary)'"
         Assert-Artifact (Test-Path -LiteralPath (Join-Path $packageRoot "LICENSE") -PathType Leaf) $packageName "LICENSE"
+        $platformReadmePath = Join-Path $packageRoot "README.md"
+        Assert-Artifact `
+            ((Test-Path -LiteralPath $platformReadmePath -PathType Leaf) -and
+                (Get-Content -LiteralPath $platformReadmePath -Raw).Contains("# @devprojex/cli-$($rid.npmPlatform)", [System.StringComparison]::Ordinal)) `
+            $packageName `
+            "README.md naming '@devprojex/cli-$($rid.npmPlatform)'"
         if ($rid.os -cne "win32") {
             Assert-Artifact `
                 (Test-TarEntryExecutable $packagePath "package/bin/$($rid.binary)") `
@@ -324,6 +351,8 @@ try {
     Assert-Artifact ($mainJson.name -ceq "devprojex") $mainName "package name 'devprojex'"
     Assert-Artifact ($mainJson.version -ceq $Version) $mainName "version '$Version'"
     Assert-Artifact ($mainJson.engines.node -ceq ">=20") $mainName "Node engine >=20"
+    Assert-Artifact (($mainJson.PSObject.Properties.Name -contains "mcpName") -and $mainJson.mcpName -ceq $mcpServer.name) `
+        $mainName "MCP Registry ownership field 'mcpName: $($mcpServer.name)'"
     Assert-Artifact (-not ($mainJson.PSObject.Properties.Name -contains "dependencies")) $mainName "absence of dependencies"
     Assert-Artifact (-not ($mainJson.PSObject.Properties.Name -contains "scripts")) $mainName "absence of lifecycle scripts"
     $optional = $mainJson.optionalDependencies

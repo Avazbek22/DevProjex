@@ -1,0 +1,15 @@
+# @devprojex/cli-__PLATFORM__
+
+The self-contained DevProjex binary for `__PLATFORM__`.
+
+npm installs this package automatically as an optional dependency of
+[`devprojex`](https://www.npmjs.com/package/devprojex) on matching systems. Run or install
+that package instead of this one:
+
+```shell
+npx -y devprojex --help
+```
+
+DevProjex turns a folder or repository into focused context for AI from the CLI, the
+interactive Terminal Workspace, or a read-only MCP server. Documentation and source:
+[github.com/Avazbek22/DevProjex](https://github.com/Avazbek22/DevProjex).

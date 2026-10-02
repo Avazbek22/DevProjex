@@ -171,6 +171,11 @@ foreach ($rid in $manifest.rids) {
         (Join-Path $platformStage "package.json"),
         (($platformJson | ConvertTo-Json -Depth 10) + [Environment]::NewLine),
         [System.Text.UTF8Encoding]::new($false))
+    $platformReadme = Get-Content -LiteralPath (Join-Path $repoRoot "Packaging/Npm/platform/README.md.template") -Raw
+    [System.IO.File]::WriteAllText(
+        (Join-Path $platformStage "README.md"),
+        $platformReadme.Replace("__PLATFORM__", [string]$rid.npmPlatform),
+        [System.Text.UTF8Encoding]::new($false))
     Copy-Item -LiteralPath $publishedFiles[0].FullName -Destination (Join-Path $platformBin $rid.binary)
     Copy-Item -LiteralPath (Join-Path $repoRoot "LICENSE") -Destination (Join-Path $platformStage "LICENSE")
     if (-not $IsWindows) {

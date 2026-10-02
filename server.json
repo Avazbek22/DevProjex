@@ -1,0 +1,67 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.Avazbek22/devprojex",
+  "title": "DevProjex",
+  "description": "Read-only MCP server that turns a folder or repository into redacted, token-efficient context.",
+  "version": "5.2.0",
+  "websiteUrl": "https://github.com/Avazbek22/DevProjex",
+  "repository": {
+    "url": "https://github.com/Avazbek22/DevProjex",
+    "source": "github"
+  },
+  "icons": [
+    {
+      "src": "https://raw.githubusercontent.com/Avazbek22/DevProjex/master/Assets/AppIcon/Linux/png/256.png",
+      "mimeType": "image/png",
+      "sizes": ["256x256"]
+    }
+  ],
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "devprojex",
+      "version": "5.2.0",
+      "runtimeHint": "npx",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp"
+        },
+        {
+          "type": "named",
+          "name": "--root",
+          "description": "Absolute path of the project folder the agent may read.",
+          "format": "filepath",
+          "isRequired": true
+        }
+      ]
+    },
+    {
+      "registryType": "nuget",
+      "registryBaseUrl": "https://api.nuget.org/v3/index.json",
+      "identifier": "devprojex",
+      "version": "5.2.0",
+      "runtimeHint": "dnx",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp"
+        },
+        {
+          "type": "named",
+          "name": "--root",
+          "description": "Absolute path of the project folder the agent may read.",
+          "format": "filepath",
+          "isRequired": true
+        }
+      ]
+    }
+  ]
+}

@@ -33,9 +33,11 @@ Perform these steps in order:
    later; a scope limited to new packages or to new versions only blocks one of the two.
 6. Add the GitHub repository variable `NUGET_USER` with the NuGet account username;
    do not add a long-lived NuGet API-key secret.
-7. Run **Publish Headless Packages** on the release branch with the intended
-    `version`, `channels=both`, and `dry_run=true`. Confirm that build, static gate,
-    mutation gate, and all three OS smoke jobs are green.
+7. Run **Publish Headless Packages** on `master` with the intended `version`,
+    `channels=both`, and `dry_run=true`. Confirm that build, static gate, mutation
+    gate, and all three OS smoke jobs are green. The `npm` and `nuget` environments
+    accept deployments from `master` only, so the publishing run in step 8 must
+    start there too.
 8. Re-run the same workflow and version with `dry_run=false`. For the first
     publication use `channels=nuget`: the npm packages of this version were already
     published by hand in step 3, and a rebuilt tarball is not guaranteed to be
@@ -45,6 +47,19 @@ Perform these steps in order:
     platform packages before the launcher. A retry verifies an existing NuGet
     payload receipt or npm `dist.integrity` and skips only identical content; a
     mismatch fails closed and no package is overwritten.
+9. Register the release in the [MCP Registry](https://registry.modelcontextprotocol.io)
+    after both channels serve the new version. From the repository root, run
+    `mcp-publisher login github` as the repository owner, then `mcp-publisher publish`.
+    The registry reads `server.json`, confirms that the npm `devprojex` package
+    declares the same `mcpName`, and that the NuGet README contains the matching
+    `mcp-name:` line. Both are fixed inside published versions, so the static gate
+    and the documentation contract tests check them before anything is published.
+
+## Version bump
+
+`server.json` carries the package version twice: the top-level `version` and each
+package `version`. Update them together with `DevProjexVersion`; the contract tests
+and the static package gate reject a manifest that differs from the packages.
 
 ## Dry-run package sizes
 

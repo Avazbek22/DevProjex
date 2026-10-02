@@ -741,6 +741,123 @@ public sealed class DocumentationAndPackagingContractTests
 	}
 
 	[Fact]
+	public void McpRegistryManifestMatchesEveryPackageThatCarriesIt()
+	{
+		// Published package versions are immutable: a registry name or version that drifts from the
+		// packages can only be repaired by the next release.
+		var rootPath = FindRepositoryRoot();
+		var packageVersion = ReadHeadlessPackageVersion(rootPath);
+		using var server = JsonDocument.Parse(File.ReadAllText(Path.Combine(rootPath, "server.json")));
+		var serverRoot = server.RootElement;
+		var serverName = serverRoot.GetProperty("name").GetString()!;
+
+		Assert.Equal("io.github.Avazbek22/devprojex", serverName);
+		Assert.Equal(packageVersion, serverRoot.GetProperty("version").GetString());
+		Assert.InRange(serverRoot.GetProperty("description").GetString()!.Length, 1, 100);
+		var packages = serverRoot.GetProperty("packages").EnumerateArray().ToArray();
+		Assert.Equal(["npm", "nuget"], packages.Select(static package => package.GetProperty("registryType").GetString()));
+		Assert.Equal(["npx", "dnx"], packages.Select(static package => package.GetProperty("runtimeHint").GetString()));
+		foreach (var package in packages)
+		{
+			Assert.Equal("devprojex", package.GetProperty("identifier").GetString());
+			Assert.Equal(packageVersion, package.GetProperty("version").GetString());
+			Assert.Equal("stdio", package.GetProperty("transport").GetProperty("type").GetString());
+		}
+
+		using var launcher = JsonDocument.Parse(File.ReadAllText(Path.Combine(
+			rootPath, "Packaging", "Npm", "devprojex", "package.json.template")));
+		Assert.Equal(serverName, launcher.RootElement.GetProperty("mcpName").GetString());
+		Assert.Equal("Avazbek Olimov", launcher.RootElement.GetProperty("author").GetString());
+		var nugetReadme = File.ReadAllText(Path.Combine(rootPath, "Apps", "TerminalHost", "NuGet.README.md"));
+		Assert.Matches($@"mcp-name: {Regex.Escape(serverName)}(\s|-->)", nugetReadme);
+
+		var host = XDocument.Load(Path.Combine(rootPath, "Apps", "TerminalHost", "DevProjex.TerminalHost.csproj"));
+		Assert.Equal("McpServer", host.Descendants("PackageType").Single().Value);
+		Assert.Equal("Avazbek Olimov", host.Descendants("Authors").Single().Value);
+		var packedManifest = host.Descendants("None")
+			.Single(static element => element.Attribute("Include")?.Value == @"..\..\server.json");
+		Assert.Equal(".mcp/server.json", packedManifest.Attribute("PackagePath")?.Value);
+	}
+
+	[Fact]
+	public void PackageReadmesAndRegistryArgumentsParseAgainstTheProductionCommandTree()
+	{
+		var rootPath = FindRepositoryRoot();
+		var commandTree = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();
+		var invocations = new List<(string Source, string[] Arguments)>();
+		foreach (var (relativePath, launcherPrefix) in new[]
+				 {
+					 (Path.Combine("Packaging", "Npm", "devprojex", "README.md"), "npx -y devprojex"),
+					 (Path.Combine("Packaging", "Npm", "platform", "README.md.template"), "npx -y devprojex"),
+					 (Path.Combine("Apps", "TerminalHost", "NuGet.README.md"), "dnx devprojex")
+				 })
+		{
+			var found = 0;
+			foreach (var line in File.ReadLines(Path.Combine(rootPath, relativePath)))
+			{
+				var arguments = ReadPackageInvocation(line, launcherPrefix);
+				if (arguments is null)
+					continue;
+				invocations.Add(($"{relativePath}: {line.Trim()}", arguments));
+				found++;
+			}
+			Assert.True(found > 0, $"{relativePath} shows no '{launcherPrefix}' invocation.");
+		}
+
+		using var server = JsonDocument.Parse(File.ReadAllText(Path.Combine(rootPath, "server.json")));
+		foreach (var package in server.RootElement.GetProperty("packages").EnumerateArray())
+		{
+			var arguments = package.GetProperty("packageArguments").EnumerateArray()
+				.SelectMany(static argument => argument.GetProperty("type").GetString() == "positional"
+					? [argument.GetProperty("value").GetString()!]
+					: new[] { argument.GetProperty("name").GetString()!, "/absolute/path/to/project" })
+				.ToArray();
+			invocations.Add(($"server.json {package.GetProperty("registryType").GetString()}", arguments));
+		}
+
+		foreach (var (source, arguments) in invocations)
+		{
+			var parseResult = commandTree.Parse(arguments);
+			Assert.True(
+				parseResult.Errors.Count == 0,
+				$"Package example does not parse: {source}{Environment.NewLine}" +
+				string.Join(Environment.NewLine, parseResult.Errors.Select(static error => error.Message)));
+		}
+	}
+
+	/// <summary>
+	/// Reads the DevProjex arguments from a shell line such as <c>npx -y devprojex tree .</c> or from a
+	/// client configuration line such as <c>"args": ["-y", "devprojex", "mcp"]</c>.
+	/// </summary>
+	private static string[]? ReadPackageInvocation(string line, string launcherPrefix)
+	{
+		var commandStart = line.IndexOf(launcherPrefix + " ", StringComparison.Ordinal);
+		if (commandStart >= 0)
+		{
+			return line[(commandStart + launcherPrefix.Length)..]
+				.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+		}
+
+		var configuration = Regex.Match(line, @"^\s*""?args""?\s*[:=]\s*(\[.*\])\s*,?\s*$");
+		if (!configuration.Success)
+			return null;
+		var tokens = JsonSerializer.Deserialize<string[]>(configuration.Groups[1].Value)!;
+		var launcherTokens = launcherPrefix.Split(' ').Skip(1).ToArray();
+		Assert.Equal(launcherTokens, tokens.Take(launcherTokens.Length));
+		return tokens.Skip(launcherTokens.Length).ToArray();
+	}
+
+	private static string ReadHeadlessPackageVersion(string rootPath)
+	{
+		var displayVersion = XDocument.Load(Path.Combine(rootPath, "Directory.Build.props"))
+			.Descendants("DevProjexVersion")
+			.First()
+			.Value
+			.Trim();
+		return Regex.IsMatch(displayVersion, @"^\d+\.\d+$") ? displayVersion + ".0" : displayVersion;
+	}
+
+	[Fact]
 	public void ReleasePayloadContractsTrackGrammarsStoreResourcesAndSdkPublishItems()
 	{
 		var rootPath = FindRepositoryRoot();

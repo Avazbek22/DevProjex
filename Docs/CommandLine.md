@@ -53,7 +53,8 @@ The NuGet route requires .NET SDK 10.0.100 or later:
 ```
 
 `dnx` performs a non-interactive first download by default; its opt-in switch is
-`--interactive`, and it has no `--yes` option. The DevProjex arguments above do not
+`--interactive`. It also accepts the `--yes` that nuget.org adds to generated client
+configurations and does not pass it to DevProjex. The DevProjex arguments above do not
 require a delimiter. Both examples return policy exit code `3` when an effective
 secret finding exists and never print the detected value. npm installs with
 `--omit=optional` cannot run the binary; see [Installation.md](Installation.md)
