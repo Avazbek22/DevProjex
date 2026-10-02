@@ -2,15 +2,18 @@
   "name": "@devprojex/cli-__PLATFORM__",
   "version": "__VERSION__",
   "description": "DevProjex headless binary for __PLATFORM__.",
+  "author": "Avazbek Olimov",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Avazbek22/DevProjex.git"
   },
+  "homepage": "https://github.com/Avazbek22/DevProjex",
   "os": ["__OS__"],
   "cpu": ["__CPU__"],
   "files": [
     "bin/__BINARY__",
+    "README.md",
     "LICENSE"
   ],
   "publishConfig": {

@@ -14,6 +14,8 @@ any build begins. After removing the conventional leading `v`, the tag must matc
 `DevProjexVersion` in `Directory.Build.props` exactly. AppImage, headless archive,
 container, and NuGet/npm workflow runs all use
 `Scripts/ci/Test-ReleaseVersion.ps1`, so a mismatch stops with the same diagnostic.
+The MCP Registry manifest `server.json` must carry the same version, with a `.0`
+patch added to a two-part version; the headless package gate rejects a mismatch.
 A `workflow_dispatch` run may use an explicit version instead; the selected
 override and the repository version are then written to the job summary.
 

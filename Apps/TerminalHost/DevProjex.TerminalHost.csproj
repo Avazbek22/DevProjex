@@ -24,8 +24,12 @@
     <HeadlessPackageVersion Condition="'$(_HeadlessVersionNeedsPatch)'=='True'">$(DevProjexVersion).0</HeadlessPackageVersion>
     <HeadlessPackageVersion Condition="'$(HeadlessPackageVersion)'==''">$(DevProjexVersion)</HeadlessPackageVersion>
     <PackageVersion>$(HeadlessPackageVersion)</PackageVersion>
+    <!-- The SDK prepends DotnetTool to the outer package; RID packages stay DotnetToolRidPackage. -->
+    <PackageType>McpServer</PackageType>
+    <Authors>Avazbek Olimov</Authors>
     <Description>Turn a folder or repository into focused context for AI from the CLI, TUI, or MCP server.</Description>
-    <PackageTags>mcp;mcp-server;ai;llm;context;cli;tui;code-context;dotnet-tool</PackageTags>
+    <PackageTags>mcp;mcp-server;model-context-protocol;ai;ai-agents;llm;context;code-context;codebase-context;code-to-prompt;secret-redaction;cli;tui;dotnet-tool</PackageTags>
+    <PackageReleaseNotes>https://github.com/Avazbek22/DevProjex/releases/tag/v$(DevProjexVersion)</PackageReleaseNotes>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/Avazbek22/DevProjex</PackageProjectUrl>
     <RepositoryUrl>https://github.com/Avazbek22/DevProjex</RepositoryUrl>
@@ -53,6 +57,8 @@
   <ItemGroup>
     <None Include="..\..\Assets\AppIcon\Linux\png\128.png" Pack="true" PackagePath="icon.png" />
     <None Include="NuGet.README.md" Pack="true" PackagePath="README.md" />
+    <!-- nuget.org reads the MCP server manifest from the outer package only. -->
+    <None Include="..\..\server.json" Pack="true" PackagePath=".mcp/server.json" Condition="'$(RuntimeIdentifier)' == ''" />
   </ItemGroup>
 
   <Target
