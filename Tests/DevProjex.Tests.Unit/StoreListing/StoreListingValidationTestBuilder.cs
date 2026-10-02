@@ -346,8 +346,8 @@ internal sealed class StoreListingValidationTestBuilder
     {
         return locale switch
         {
-            "en-us" or "en" => "EN",
-            "ru" or "ru-ru" => "RU",
+            "en-us" => "EN",
+            "ru-ru" => "RU",
             "kk-kz" => "KK",
             "de-de" => "DE",
             "it-it" => "IT",

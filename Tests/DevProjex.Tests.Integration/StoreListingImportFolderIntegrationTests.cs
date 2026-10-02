@@ -117,8 +117,6 @@ public sealed class StoreListingImportFolderIntegrationTests
         {
             var row = document.RowsByField[$"DesktopScreenshotCaption{slot}"];
             Assert.Equal(english, row.GetValue("en-us"));
-            Assert.Equal(english, row.GetValue("en"));
-            Assert.Equal(russian, row.GetValue("ru"));
             Assert.Equal(russian, row.GetValue("ru-ru"));
         }
     }
@@ -383,8 +381,6 @@ public sealed class StoreListingImportFolderIntegrationTests
         var expectedValues = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["en-us"] = "Smart Ignore, .gitignore, and Git-tracked mode",
-            ["en"] = "Smart Ignore, .gitignore, and Git-tracked mode",
-            ["ru"] = "Smart Ignore, .gitignore и режим отслеживаемых файлов",
             ["ru-ru"] = "Smart Ignore, .gitignore и режим отслеживаемых файлов",
             ["kk-kz"] = "Smart Ignore, .gitignore және қадағаланатын файлдар режимі",
             ["de-de"] = "Smart Ignore, .gitignore und Git-Tracked-Modus",

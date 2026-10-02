@@ -26,8 +26,6 @@ internal static class StoreListingPaths
     internal static readonly string[] LocaleColumns =
     [
         "en-us",
-        "en",
-        "ru",
         "ru-ru",
         "kk-kz",
         "de-de",
