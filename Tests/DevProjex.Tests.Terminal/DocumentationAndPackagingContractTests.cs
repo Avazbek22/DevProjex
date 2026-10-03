@@ -785,23 +785,24 @@ public sealed class DocumentationAndPackagingContractTests
 		var rootPath = FindRepositoryRoot();
 		var commandTree = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();
 		var invocations = new List<(string Source, string[] Arguments)>();
-		foreach (var (relativePath, launcherPrefix) in new[]
+		foreach (var (relativePath, expectedLaunchers) in new[]
 				 {
-					 (Path.Combine("Packaging", "Npm", "devprojex", "README.md"), "npx -y devprojex"),
-					 (Path.Combine("Packaging", "Npm", "platform", "README.md.template"), "npx -y devprojex"),
-					 (Path.Combine("Apps", "TerminalHost", "NuGet.README.md"), "dnx devprojex")
+					 (Path.Combine("Packaging", "Npm", "devprojex", "README.md"), new[] { NpxLauncher }),
+					 (Path.Combine("Packaging", "Npm", "platform", "README.md.template"), [NpxLauncher]),
+					 (Path.Combine("Apps", "TerminalHost", "NuGet.README.md"), [DnxLauncher]),
+					 (Path.Combine("Packaging", "Glama", "README.md"), [NpxLauncher, DnxLauncher, DockerLauncher])
 				 })
 		{
-			var found = 0;
+			var foundLaunchers = new HashSet<string>(StringComparer.Ordinal);
 			foreach (var line in File.ReadLines(Path.Combine(rootPath, relativePath)))
 			{
-				var arguments = ReadPackageInvocation(line, launcherPrefix);
-				if (arguments is null)
+				var invocation = ReadPackageInvocation(line);
+				if (invocation is null)
 					continue;
-				invocations.Add(($"{relativePath}: {line.Trim()}", arguments));
-				found++;
+				foundLaunchers.Add(invocation.Value.Launcher);
+				invocations.Add(($"{relativePath}: {line.Trim()}", invocation.Value.Arguments));
 			}
-			Assert.True(found > 0, $"{relativePath} shows no '{launcherPrefix}' invocation.");
+			Assert.Equal(expectedLaunchers.Order(StringComparer.Ordinal), foundLaunchers.Order(StringComparer.Ordinal));
 		}
 
 		using var server = JsonDocument.Parse(File.ReadAllText(Path.Combine(rootPath, "server.json")));
@@ -825,26 +826,64 @@ public sealed class DocumentationAndPackagingContractTests
 		}
 	}
 
-	/// <summary>
-	/// Reads the DevProjex arguments from a shell line such as <c>npx -y devprojex tree .</c> or from a
-	/// client configuration line such as <c>"args": ["-y", "devprojex", "mcp"]</c>.
-	/// </summary>
-	private static string[]? ReadPackageInvocation(string line, string launcherPrefix)
+	[Fact]
+	public void GlamaReadmeIsPlainMarkdownAndTablesEveryMcpTool()
 	{
-		var commandStart = line.IndexOf(launcherPrefix + " ", StringComparison.Ordinal);
-		if (commandStart >= 0)
+		// Glama drops raw HTML from a README, so images and badges there must be Markdown with
+		// absolute URLs, and the tool table must follow the catalog the server registers.
+		var rootPath = FindRepositoryRoot();
+		var readme = File.ReadAllText(Path.Combine(rootPath, "Packaging", "Glama", "README.md"));
+
+		Assert.DoesNotMatch(@"<\s*/?\s*(img|a|p|h\d|div|br|picture|source)\b[^>]*>", readme);
+		foreach (Match image in Regex.Matches(readme, @"!\[[^\]]*\]\((?<url>[^)\s]+)\)"))
+			Assert.StartsWith("https://", image.Groups["url"].Value, StringComparison.Ordinal);
+		Assert.Contains(
+			"https://raw.githubusercontent.com/Avazbek22/DevProjex/master/Docs/Media/readme-demo/devprojex-demo.gif",
+			readme,
+			StringComparison.Ordinal);
+		Assert.True(File.Exists(Path.Combine(rootPath, "Docs", "Media", "readme-demo", "devprojex-demo.gif")));
+
+		var tabledTools = Regex.Matches(readme, @"^\| `(?<name>[a-z_]+)` \|", RegexOptions.Multiline)
+			.Select(static match => match.Groups["name"].Value)
+			.Order(StringComparer.Ordinal)
+			.ToArray();
+		Assert.Equal(ReadCatalogToolNames(rootPath).Order(StringComparer.Ordinal), tabledTools);
+	}
+
+	private const string NpxLauncher = "npx -y devprojex";
+	private const string DnxLauncher = "dnx devprojex";
+	private const string DockerLauncher = "ghcr.io/avazbek22/devprojex";
+
+	/// <summary>
+	/// Reads the DevProjex arguments from a shell line such as <c>npx -y devprojex tree .</c>, including
+	/// one quoted inline in prose, or from a client configuration line such as
+	/// <c>"args": ["-y", "devprojex", "mcp"]</c>.
+	/// </summary>
+	private static (string Launcher, string[] Arguments)? ReadPackageInvocation(string line)
+	{
+		foreach (var launcher in new[] { NpxLauncher, DnxLauncher, DockerLauncher })
 		{
-			return line[(commandStart + launcherPrefix.Length)..]
-				.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+			var commandStart = line.IndexOf(launcher + " ", StringComparison.Ordinal);
+			if (commandStart < 0)
+				continue;
+			var command = line[(commandStart + launcher.Length)..];
+			var inlineCodeEnd = command.IndexOf('`');
+			if (inlineCodeEnd >= 0)
+				command = command[..inlineCodeEnd];
+			return (launcher, command.Split(' ', StringSplitOptions.RemoveEmptyEntries));
 		}
 
 		var configuration = Regex.Match(line, @"^\s*""?args""?\s*[:=]\s*(\[.*\])\s*,?\s*$");
 		if (!configuration.Success)
 			return null;
 		var tokens = JsonSerializer.Deserialize<string[]>(configuration.Groups[1].Value)!;
-		var launcherTokens = launcherPrefix.Split(' ').Skip(1).ToArray();
-		Assert.Equal(launcherTokens, tokens.Take(launcherTokens.Length));
-		return tokens.Skip(launcherTokens.Length).ToArray();
+		if (tokens is ["-y", "devprojex", ..])
+			return (NpxLauncher, tokens[2..]);
+		if (tokens is ["devprojex", ..])
+			return (DnxLauncher, tokens[1..]);
+		var image = Array.IndexOf(tokens, DockerLauncher);
+		Assert.True(image >= 0, $"Client configuration starts DevProjex through an unknown launcher: {line.Trim()}");
+		return (DockerLauncher, tokens[(image + 1)..]);
 	}
 
 	private static string ReadHeadlessPackageVersion(string rootPath)
