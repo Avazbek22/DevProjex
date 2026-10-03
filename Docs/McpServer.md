@@ -2006,10 +2006,12 @@ Add to `.vscode/mcp.json`:
 
 ### Headless package launch (from v5.2)
 
-The v5.2 package channels run the same MCP server without installing the desktop
-application. They are published separately; until their first publication, keep
-using the installed/direct `devprojex` command above. Node 20+ clients can use
-`npx -y`, while machines with .NET SDK 10.0.100+ can use `dnx`.
+The [npm](https://www.npmjs.com/package/devprojex) and
+[NuGet](https://www.nuget.org/packages/devprojex) packages run the same MCP server
+without installing the desktop application. Node 20+ clients can use `npx -y`,
+while machines with .NET SDK 10.0.100+ can use `dnx`. The server is also listed in
+the [MCP Registry](https://registry.modelcontextprotocol.io) as
+`io.github.Avazbek22/devprojex`.
 
 For Claude Code, choose either command:
 

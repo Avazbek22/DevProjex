@@ -87,9 +87,9 @@ still use the existing IPC contract. `devprojex open` cannot start Desktop from 
 headless package; install one of the desktop distributions above when that workflow
 is needed.
 
-The package names must be reserved and published separately from the repository
-changes. Before the first v5.2 package publication, use a matching binary from the
-GitHub release page.
+Both packages are published for every release from v5.2:
+[`devprojex` on npm](https://www.npmjs.com/package/devprojex) and
+[`devprojex` on NuGet](https://www.nuget.org/packages/devprojex).
 
 ### Run through Node
 

@@ -4,6 +4,8 @@
 
 <p align="center">
   <a href="https://github.com/Avazbek22/DevProjex/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/Avazbek22/DevProjex/total"></a>
+  <a href="https://www.npmjs.com/package/devprojex"><img alt="npm" src="https://img.shields.io/npm/v/devprojex"></a>
+  <a href="https://www.nuget.org/packages/devprojex"><img alt="NuGet" src="https://img.shields.io/nuget/v/devprojex"></a>
   <a href="https://github.com/Avazbek22/DevProjex/actions"><img alt="Build" src="https://img.shields.io/github/actions/workflow/status/Avazbek22/DevProjex/dotnet.yml"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
   <img alt="Last commit" src="https://img.shields.io/github/last-commit/Avazbek22/DevProjex">
@@ -42,8 +44,8 @@ All install options per OS are covered in [Docs/Installation.md](Docs/Installati
 
 ### Run without installing
 
-These headless channels are available from release v5.2. Until the v5.2 packages
-have completed their first publication, use the direct GitHub release binary.
+The CLI, TUI, and MCP server run straight from [npm](https://www.npmjs.com/package/devprojex)
+or [NuGet](https://www.nuget.org/packages/devprojex), or from a direct release binary:
 
 ```shell
 npx devprojex tree .
