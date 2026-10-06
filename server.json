@@ -3,7 +3,7 @@
   "name": "io.github.Avazbek22/devprojex",
   "title": "DevProjex",
   "description": "Read-only MCP server that turns a folder or repository into redacted, token-efficient context.",
-  "version": "5.2.0",
+  "version": "5.2.1",
   "websiteUrl": "https://github.com/Avazbek22/DevProjex",
   "repository": {
     "url": "https://github.com/Avazbek22/DevProjex",
@@ -21,7 +21,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "devprojex",
-      "version": "5.2.0",
+      "version": "5.2.1",
       "runtimeHint": "npx",
       "transport": {
         "type": "stdio"
@@ -44,7 +44,7 @@
       "registryType": "nuget",
       "registryBaseUrl": "https://api.nuget.org/v3/index.json",
       "identifier": "devprojex",
-      "version": "5.2.0",
+      "version": "5.2.1",
       "runtimeHint": "dnx",
       "transport": {
         "type": "stdio"

@@ -5,36 +5,28 @@ namespace DevProjex.Tests.Unit.AppInstances;
 public sealed class StoreProfileVirtualizationContractTests
 {
 	[Fact]
-	public void ManifestDisablesProfileStorageVirtualization()
+	public void ManifestKeepsDefaultAppDataVirtualization()
 	{
+		// Microsoft Store certification denied the unvirtualizedResources restricted capability
+		// (policy 10.6.3), and every AppData or registry virtualization override requires it.
 		var document = XDocument.Load(ResolveStoreManifestPath());
-		var foundation = XNamespace.Get(
-			"http://schemas.microsoft.com/appx/manifest/foundation/windows10");
-		var desktop6 = XNamespace.Get(
-			"http://schemas.microsoft.com/appx/manifest/desktop/windows10/6");
-		var restricted = XNamespace.Get(
-			"http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities");
+		var overrideNames = new[]
+		{
+			"FileSystemWriteVirtualization",
+			"RegistryWriteVirtualization",
+			"ExcludedDirectories",
+			"ExcludedKeys"
+		};
 
-		Assert.Equal(
-			"disabled",
-			Assert.Single(document.Descendants(desktop6 + "FileSystemWriteVirtualization")).Value);
-		Assert.Single(document.Descendants(restricted + "Capability"), element =>
-			element.Attribute("Name")?.Value == "unvirtualizedResources");
-		var target = Assert.Single(document.Descendants(foundation + "TargetDeviceFamily"), element =>
-			element.Attribute("Name")?.Value == "Windows.Desktop");
-		Assert.True(
-			Version.Parse(target.Attribute("MinVersion")!.Value) >= new Version(10, 0, 18362, 0));
-		Assert.Contains(
-			"desktop6",
-			document.Root!.Attribute("IgnorableNamespaces")!.Value.Split(
-				' ',
-				StringSplitOptions.RemoveEmptyEntries));
+		Assert.DoesNotContain(document.Descendants(), element => overrideNames.Contains(element.Name.LocalName));
+		var capabilities = Assert.Single(document.Root!.Elements(), element => element.Name.LocalName == "Capabilities");
+		var capability = Assert.Single(capabilities.Elements());
+		Assert.Equal("runFullTrust", capability.Attribute("Name")?.Value);
 	}
 
 	[Fact]
 	public void ProjectAndManifestAgreeOnMinimumPlatformVersion()
 	{
-		var requiredMinimumVersion = new Version(10, 0, 18362, 0);
 		var msbuild = XNamespace.Get("http://schemas.microsoft.com/developer/msbuild/2003");
 		var foundation = XNamespace.Get(
 			"http://schemas.microsoft.com/appx/manifest/foundation/windows10");
@@ -47,18 +39,14 @@ public sealed class StoreProfileVirtualizationContractTests
 		Assert.False(
 			string.IsNullOrWhiteSpace(projectMinVersionText),
 			"Store project must declare TargetPlatformMinVersion.");
-		var projectMinVersion = Version.Parse(projectMinVersionText!);
 
 		var manifestDocument = XDocument.Load(ResolveStoreManifestPath());
 		var manifestTarget = Assert.Single(manifestDocument.Descendants(foundation + "TargetDeviceFamily"), element =>
 			element.Attribute("Name")?.Value == "Windows.Desktop");
-		var manifestMinVersion = Version.Parse(manifestTarget.Attribute("MinVersion")!.Value);
 
-		Assert.Equal(manifestMinVersion, projectMinVersion);
-		Assert.True(
-			projectMinVersion >= requiredMinimumVersion,
-			"Store project TargetPlatformMinVersion must satisfy the desktop6:FileSystemWriteVirtualization " +
-			"requirement (Windows 10 version 1903 / build 18362 or newer).");
+		Assert.Equal(
+			Version.Parse(manifestTarget.Attribute("MinVersion")!.Value),
+			Version.Parse(projectMinVersionText!));
 	}
 
 	private static string ResolveStoreManifestPath()

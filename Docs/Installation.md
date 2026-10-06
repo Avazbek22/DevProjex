@@ -20,6 +20,18 @@ is not supported in v5.2. These notes do not apply to the Microsoft Store build.
 - Install the packaged version from Microsoft Store when it is available in your
   region.
 
+### Microsoft Store build data
+
+The Store build keeps the standard Windows storage for packaged apps. Its own
+`devprojex` command, the `WindowsApps` alias that the **MCP** menu registers with
+agents, sees the same settings, project profiles, Live Context selections, and agent
+journal as the window. A GitHub, WinGet, npm, or NuGet copy shares that data only
+when `%APPDATA%\DevProjex` and `%LOCALAPPDATA%\DevProjex` already existed before the
+Store build first ran, on Windows 10 version 1903 or later. Folders that the Store
+build creates itself stay private to it and are removed when it is uninstalled. For
+Live Context with the Store build, connect agents from its **MCP** menu or run
+`devprojex mcp connect` through the Store's `devprojex` command.
+
 ## Linux
 
 ### AppImage
