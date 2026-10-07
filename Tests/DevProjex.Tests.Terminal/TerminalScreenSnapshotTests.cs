@@ -3,6 +3,29 @@ namespace DevProjex.Tests.Terminal;
 public sealed class TerminalScreenSnapshotTests
 {
 	[Theory]
+	[InlineData("v5.2")]
+	[InlineData("v5.2.1")]
+	[InlineData("v12.10.3")]
+	public void Normalize_RightAlignedVersionDoesNotDependOnVersionLength(string version)
+	{
+		const string Title = "  DevProjex Terminal";
+		const int ScreenWidth = 60;
+		var screen = Title + new string(' ', ScreenWidth - Title.Length - version.Length) + version + "\n  Next line";
+
+		Assert.Equal(
+			"  DevProjex Terminal  v<VERSION>\n  Next line",
+			TerminalScreenSnapshot.Normalize(screen, []));
+	}
+
+	[Fact]
+	public void Normalize_KeepsInlineVersionSpacing()
+	{
+		Assert.Equal(
+			"About DevProjex v<VERSION> for agents",
+			TerminalScreenSnapshot.Normalize("About DevProjex v5.2.1 for agents", []));
+	}
+
+	[Theory]
 	[InlineData(
 		"Project: /var/folders/session/project",
 		"/private/var/folders/session/project",

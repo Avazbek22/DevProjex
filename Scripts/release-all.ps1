@@ -624,16 +624,14 @@ function Assert-StoreExecutionAliasManifestContract(
     Assert-Condition (Test-Path $manifestPath) "Store manifest was not found: $manifestPath"
 
     [xml]$manifest = Get-Content -Path $manifestPath
-	$desktop6Namespace = "http://schemas.microsoft.com/appx/manifest/desktop/windows10/6"
-	$fileSystemVirtualization = @($manifest.SelectNodes("//*[local-name()='FileSystemWriteVirtualization' and namespace-uri()='$desktop6Namespace']"))
-	Assert-Condition ($fileSystemVirtualization.Count -eq 1) "Store package must declare exactly one desktop6:FileSystemWriteVirtualization element."
-	Assert-Condition ([string]$fileSystemVirtualization[0].InnerText -eq "disabled") "Store file-system write virtualization must stay disabled so packaged and unpackaged processes share project profiles."
-	$unvirtualizedCapabilities = @($manifest.SelectNodes("//*[local-name()='Capability' and @Name='unvirtualizedResources']"))
-	Assert-Condition ($unvirtualizedCapabilities.Count -eq 1) "Store package must declare the unvirtualizedResources capability required by desktop6:FileSystemWriteVirtualization."
+	# Microsoft Store certification denies unvirtualizedResources for this app (policy 10.6.3), and every
+	# AppData virtualization override depends on it. The Store build keeps the default virtualization.
+	$virtualizationOverrides = @($manifest.SelectNodes("//*[local-name()='FileSystemWriteVirtualization' or local-name()='RegistryWriteVirtualization' or local-name()='ExcludedDirectories' or local-name()='ExcludedKeys']"))
+	Assert-Condition ($virtualizationOverrides.Count -eq 0) "Store package must keep the default AppData and registry write virtualization; remove the virtualization override elements."
+	$capabilityNames = @($manifest.SelectNodes("//*[local-name()='Capabilities']/*") | ForEach-Object { [string]$_.GetAttribute("Name") })
+	Assert-Condition (($capabilityNames.Count -eq 1) -and ($capabilityNames[0] -ceq "runFullTrust")) "Store package must declare only the runFullTrust capability. Found: $($capabilityNames -join ', ')."
 	$targetDeviceFamily = @($manifest.SelectNodes("//*[local-name()='TargetDeviceFamily' and @Name='Windows.Desktop']"))
 	Assert-Condition ($targetDeviceFamily.Count -eq 1) "Store package must declare exactly one Windows.Desktop target."
-	$minimumVersion = [System.Version]::Parse([string]$targetDeviceFamily[0].GetAttribute("MinVersion"))
-	Assert-Condition ($minimumVersion -ge [System.Version]::new(10, 0, 18362, 0)) "desktop6:FileSystemWriteVirtualization requires Windows 10 version 1903 / build 18362 or newer."
     $applications = @($manifest.SelectNodes("//*[local-name()='Application']"))
     Assert-Condition ($applications.Count -eq 1) "Store package must expose exactly one Application. Found: $($applications.Count)."
 

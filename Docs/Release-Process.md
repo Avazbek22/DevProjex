@@ -80,6 +80,11 @@ The default invocation selects both local channels:
   application packages and all Store resource languages, plus the generated
   `.msixbundle` and x64 `.msix` companions used by local validation and WACK.
 
+The Store manifest declares only `runFullTrust`. Partner Center certification
+denied the `unvirtualizedResources` restricted capability for 5.2 under policy
+10.6.3, and every AppData or registry virtualization override depends on it, so
+release validation rejects those overrides and any other capability.
+
 The build still runs in an isolated temporary workspace. Only validated outputs
 are copied back to:
 

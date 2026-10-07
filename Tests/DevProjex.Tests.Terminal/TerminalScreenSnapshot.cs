@@ -137,6 +137,8 @@ internal static partial class TerminalScreenSnapshot
 			OperatingSystem.IsMacOS());
 
 		normalized = VersionPattern().Replace(normalized, "v<VERSION>");
+		// The header right-aligns the version, so its padding changes with the version's length.
+		normalized = RightAlignedVersionPaddingPattern().Replace(normalized, "  v<VERSION>");
 		normalized = IdentifierPattern().Replace(normalized, "<ID>");
 		normalized = TruncatedProjectIdentifierPattern().Replace(normalized, "<PROJECT>");
 		normalized = TestProjectIdentifierPattern().Replace(normalized, "<PROJECT>");
@@ -365,6 +367,9 @@ internal static partial class TerminalScreenSnapshot
 
 	[GeneratedRegex(@"\bv\d+(?:\.\d+){1,3}(?:[-+][0-9A-Za-z.-]+)?\b")]
 	private static partial Regex VersionPattern();
+
+	[GeneratedRegex(@" {2,}v<VERSION>(?= *$)", RegexOptions.Multiline)]
+	private static partial Regex RightAlignedVersionPaddingPattern();
 
 	[GeneratedRegex(@"\b[0-9a-f]{32}\b", RegexOptions.IgnoreCase)]
 	private static partial Regex IdentifierPattern();
