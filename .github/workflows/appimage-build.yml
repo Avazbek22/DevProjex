@@ -45,11 +45,11 @@ jobs:
           - runner: ubuntu-22.04
             rid: linux-x64
             appimage_arch: x86_64
-            appimagetool_sha256: a6d71e2b6cd66f8e8d16c37ad164658985e0cf5fcaa950c90a482890cb9d13e0
+            appimagetool_sha256: ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
           - runner: ubuntu-22.04-arm
             rid: linux-arm64
             appimage_arch: aarch64
-            appimagetool_sha256: 1b00524ba8c6b678dc15ef88a5c25ec24def36cdfc7e3abb32ddcd068e8007fe
+            appimagetool_sha256: f0837e7448a0c1e4e650a93bb3e85802546e60654ef287576f46c71c126a9158
 
     steps:
       - uses: actions/checkout@v7
@@ -289,12 +289,15 @@ jobs:
       - name: Download and verify appimagetool
         shell: bash
         env:
+          # A tagged release, not "continuous": continuous assets are rebuilt in place,
+          # which silently invalidates any pinned checksum.
+          APPIMAGETOOL_VERSION: 1.9.1
           APPIMAGETOOL_SHA256: ${{ matrix.appimagetool_sha256 }}
         run: |
           set -euo pipefail
           tool_path="${RUNNER_TEMP}/appimagetool-${{ matrix.appimage_arch }}.AppImage"
           curl --fail --location --retry 3 \
-            "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${{ matrix.appimage_arch }}.AppImage" \
+            "https://github.com/AppImage/appimagetool/releases/download/${APPIMAGETOOL_VERSION}/appimagetool-${{ matrix.appimage_arch }}.AppImage" \
             --output "${tool_path}"
           echo "${APPIMAGETOOL_SHA256}  ${tool_path}" | sha256sum --check --strict
           chmod 755 "${tool_path}"

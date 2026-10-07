@@ -121,9 +121,9 @@ curl -fL https://raw.githubusercontent.com/AppImage/AppImages/19e30b276ffedf4d3b
   -o "${BUILD_ROOT}/excludelist"
 bash "${BUILD_ROOT}/appdir-lint.sh" "${APP_DIR}"
 
-curl -fL https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage \
+curl -fL https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage \
   -o "${BUILD_ROOT}/appimagetool.AppImage"
-echo "a6d71e2b6cd66f8e8d16c37ad164658985e0cf5fcaa950c90a482890cb9d13e0  ${BUILD_ROOT}/appimagetool.AppImage" \
+echo "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0  ${BUILD_ROOT}/appimagetool.AppImage" \
   | sha256sum --check --strict
 chmod +x "${BUILD_ROOT}/appimagetool.AppImage"
 ARCH="${APPIMAGE_ARCH}" VERSION="${VERSION}" APPIMAGE_EXTRACT_AND_RUN=1 \
@@ -139,7 +139,7 @@ commands above.
 
 For native aarch64, use `RID=linux-arm64`, `APPIMAGE_ARCH=aarch64`, the
 `appimagetool-aarch64.AppImage` URL, and SHA-256
-`1b00524ba8c6b678dc15ef88a5c25ec24def36cdfc7e3abb32ddcd068e8007fe`.
+`f0837e7448a0c1e4e650a93bb3e85802546e60654ef287576f46c71c126a9158`.
 Do not cross-build the catalog artifact: the CI matrix uses native
 `ubuntu-22.04-arm`.
 
