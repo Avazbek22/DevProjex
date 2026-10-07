@@ -3,6 +3,8 @@
 These measurements are reproducible observations, not general performance
 claims. The harness and pinned inputs are in
 [`tools/ScanBenchmark`](../tools/ScanBenchmark/README.md).
+How these numbers, and the agent-session comparisons with Repomix, changed between
+5.1 and 5.2 is told in [Benchmark-History.md](Benchmark-History.md).
 
 ## Cold scan against Repomix
 

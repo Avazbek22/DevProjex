@@ -279,6 +279,8 @@ Want to audit what the agent gets? Open the same project in the GUI: the engine 
 
 See [Docs/McpServer.md](Docs/McpServer.md) for client setup, the full tool reference, and the security model.
 
+The measurements behind this comparison, from 5.1 to 5.2, with the agents' and the blind judge's verdicts, are in [Docs/Benchmark-History.md](Docs/Benchmark-History.md).
+
 ---
 
 ## Safety boundaries 🛡️
