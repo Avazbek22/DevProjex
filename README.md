@@ -22,15 +22,13 @@ Choose what you need in an interactive file tree, check the result in a live pre
 
 ## Download 🚀
 
-**Download from Microsoft Store:**
+**Microsoft Store:**
 👉 [DevProjex](https://apps.microsoft.com/detail/9ndq3nq5m354)
 
-**Latest GitHub release:**
-👉 [https://github.com/Avazbek22/DevProjex/releases/latest](https://github.com/Avazbek22/DevProjex/releases/latest)
+**Latest GitHub release (Windows, macOS, Linux):**
+👉 [github.com/Avazbek22/DevProjex/releases/latest](https://github.com/Avazbek22/DevProjex/releases/latest)
 
-**Install via WinGet (Windows):** `winget install OlimoffDev.DevProjex`
-
-All install options per OS are covered in [Docs/Installation.md](Docs/Installation.md).
+**WinGet (Windows):** `winget install OlimoffDev.DevProjex`
 
 ### Run without installing
 
@@ -38,18 +36,14 @@ The CLI, TUI, and MCP server run straight from [npm](https://www.npmjs.com/packa
 or [NuGet](https://www.nuget.org/packages/devprojex), or from a direct release binary:
 
 ```shell
-npx devprojex tree .
-dnx devprojex tree .
-./DevProjex tree .
+npx devprojex tree .    # Node.js 20+
+dnx devprojex tree .    # .NET SDK 10
+./DevProjex tree .      # release binary
 ```
 
 The npm and NuGet packages contain the CLI, TUI, and MCP server, but not the
-desktop application. See [Docs/Installation.md](Docs/Installation.md) for the
-Node/.NET requirements and supported platforms.
-
-Release automation also prepares direct headless archives and a non-root Docker
-image; their commands and availability boundary are documented in
-[Docs/Installation.md](Docs/Installation.md).
+desktop application. Requirements per platform, the direct headless archives, and
+the non-root Docker image are all covered in [Docs/Installation.md](Docs/Installation.md).
 
 ---
 
@@ -117,27 +111,6 @@ Works with any language, repository, or project structure.
 
 ---
 
-## DevProjex vs the alternatives ⚖️
-
-| Feature | DevProjex | Repomix | gitingest | code2prompt | GPTree | files-to-prompt |
-|---|---|---|---|---|---|---|
-| GUI + TUI + CLI + MCP — all in one app | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Built-in MCP server for AI agents | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Live preview that updates while you select | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Tracked-files-only Git mode | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Scope-aware, evidence-based Smart Ignore (monorepo-safe) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Value-level secret masking that keeps the file in output | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Private-data masking (emails, IPs, MAC, phones, user paths) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Signature-level code compression | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| CI secret pre-flight gate (fail build on findings) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Export a clean project copy as folder/ZIP | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| GUI-managed Git workflow (clone, branch switch, cache updates) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Run with no install (npx / dnx / direct binary) | ✅ (v5.2+) | ✅ | ✅ | ❌ | ❌ | ✅ |
-
-*Based on publicly documented features, last verified September 2026. DevProjex no-install package channels are available from v5.2.*
-
----
-
 ## Project Copy Export 📦
 
 Use **File → Export project → To folder…** or **To ZIP archive…** to create a separate copy of your current selection.
@@ -152,25 +125,26 @@ The source project is never modified, and the result can't be written inside it.
 
 ## Command Line ⚙️
 
-DevProjex isn't only a desktop context builder. The same app runs from the terminal too, for repeatable, script-friendly project analysis and AI-context export.
+DevProjex isn't only a desktop context builder. The same app runs from the terminal too: a keyboard-first **Terminal Workspace** for interactive work, and a CLI for repeatable, script-friendly project analysis and AI-context export.
+
+![DevProjex Terminal Workspace: the project tree with checkboxes, the context preview, and the parameters panel with content processing, exclusions, and file types](Docs/Media/terminal-workspace/workspace.png)
 
 ```bash
-devprojex
-devprojex open . --preview
-devprojex tree .
-devprojex tree https://github.com/owner/repo --branch main
-devprojex analyze . --format json
-devprojex analyze . --hide-secrets --hide-private-data --findings --fail-on-findings
-devprojex export context . --format markdown -o ../devprojex-context.md
-devprojex export context https://github.com/owner/repo -o -
-git diff --name-only | devprojex export context . --select-from - -o -
-devprojex export project . --as zip --hide-secrets -o ../devprojex-submission.zip
-$ devprojex export project . --as zip -o - > devprojex-submission.zip
-devprojex analyze . --git-mode tracked --exclude smart-ignore
-devprojex search Configure . --symbols
-devprojex related src/App.cs --direction both
-devprojex profile save . --hide-secrets on
-devprojex cache update https://github.com/owner/repo
+devprojex                                                      # open the Terminal Workspace
+devprojex open . --preview                                     # open this folder in the desktop app with the preview pane
+devprojex tree .                                               # project tree
+devprojex tree https://github.com/owner/repo --branch main     # tree of a remote repository
+devprojex analyze . --format json                              # files, lines, tokens, largest files
+devprojex analyze . --git-mode tracked --exclude smart-ignore  # tracked files only, with Smart Ignore applied
+devprojex analyze . --hide-secrets --hide-private-data --findings --fail-on-findings   # CI gate: findings, never values
+devprojex export context . --format markdown -o ../devprojex-context.md   # packed context for a chat
+devprojex export context https://github.com/owner/repo -o -    # straight from a Git URL to stdout
+git diff --name-only | devprojex export context . --select-from - -o -   # only the changed files
+devprojex export project . --as zip --hide-secrets -o ../devprojex-submission.zip   # redacted project copy
+devprojex search Configure . --symbols                         # declarations by name
+devprojex related src/App.cs --direction both                  # what a file uses, and who uses it
+devprojex profile save . --hide-secrets on                     # remember these settings for this project
+devprojex cache update https://github.com/owner/repo           # refresh a cached clone
 ```
 
 ### What the CLI adds
@@ -191,46 +165,58 @@ See [Docs/CommandLine.md](Docs/CommandLine.md) for the full command reference, a
 
 ## MCP Server 🤖
 
-DevProjex ships a built-in **secure [Model Context Protocol](https://modelcontextprotocol.io) server** (on the official [C# MCP SDK](https://github.com/modelcontextprotocol/csharp-sdk)) that turns any local folder or Git repository into safe, token-efficient codebase context for AI agents — **Claude Code, Claude Desktop, Cursor, Windsurf, VS Code, or any MCP client** — through the same engine as the GUI, TUI, and CLI:
+DevProjex ships a built-in **secure [Model Context Protocol](https://modelcontextprotocol.io) server** (on the official [C# MCP SDK](https://github.com/modelcontextprotocol/csharp-sdk)) that turns any local folder or Git repository into safe, token-efficient codebase context for AI agents — **Claude Code, Codex, Claude Desktop, Cursor, Windsurf, VS Code, or any MCP client** — through the same engine as the GUI, TUI, and CLI:
 
 ```bash
 devprojex mcp --root /path/to/project
 ```
 
-Connect from the Desktop **MCP → Live context** or **MCP → Standard** submenu,
-from Terminal Workspace with `mcp connect <client> [live|standard]`, or from the CLI with
-`devprojex mcp connect . --client <client>` (standard mode unless `--mode live` is given). Desktop registers the selected server mode and
-opens Claude Code, Codex, Cursor, or VS Code; the chosen submenu controls whether
-the registration follows the checked tree. Terminal Workspace registers without
-opening another terminal, while the CLI opens the client only when `--open` is given.
-Claude Code and Codex are configured through their installed command; Cursor and
-VS Code receive a project-local `.cursor/mcp.json` or `.vscode/mcp.json`. Existing
-files are merged without changing other servers. Use `--print` when only a manual
-configuration fragment is needed.
+### Connect a client
 
-**Live context** makes the tree checked in the DevProjex window the agent's focus
-through the shared local project profile; the window's filters remain the limit of
-what it can read. The compact **MCP** menu, between
-File and Git, has **Live context**, **Standard**, **Journal**, and documentation
-entries. Live context uses `--live`; Standard does not follow the window selection.
-After a successful connection,
-an optional PATH dialog can offer the platform-appropriate terminal setup. The window
-title names an active client or session count, and saved focused paths are restored on reopen.
-Live mode has three separate rules: **focus** keeps tree, search, analysis, dependency,
-and pack operations inside the checked selection; **access boundaries** still enforce
-the configured filters and secret protection, while a directly named readable file may
-be returned with an outside-focus notice; **saved results** stay pinned to the revision
-that created them and must be rebuilt explicitly after the window selection changes.
+* **Desktop:** **MCP → Live context** or **MCP → Standard**, then **Open in Claude Code**, Codex, Cursor, or VS Code. The submenu you pick decides whether the registration follows the checked tree.
+* **Terminal Workspace:** `mcp connect <client> [live|standard]` registers the server without opening another terminal.
+* **CLI:** `devprojex mcp connect . --client <client>` (standard mode unless `--mode live` is given). Add `--open` to launch the client, or `--print` when only a manual configuration fragment is needed.
+* **Without the desktop app:** `claude mcp add devprojex -- npx -y devprojex mcp --root /absolute/path/to/project`. Snippets for Codex, Claude Desktop, Cursor, and VS Code are in [Docs/McpServer.md](Docs/McpServer.md#client-configuration).
+
+Claude Code and Codex are configured through their installed command; Cursor and VS Code receive a project-local `.cursor/mcp.json` or `.vscode/mcp.json`, merged without changing other servers.
 
 For a first-call check, inspect DevProjex with `/mcp` in Claude Code or run
 `codex mcp list`. Then ask: “Through DevProjex, show the tree of the current selection.”
 That call appears in the agent journal.
 
-Eight read-only tools cover the whole workflow: `list_projects`, `get_tree`, `analyze`, `search_project`, `related_files`, `get_file`, `pack_context`, and `read_pack`. `related_files` answers "what does this file actually use, and who uses it" from a static dependency index over up to 16 seed files, so following a thread never widens the selection. `pack_context` and `related_files` store an oversized result as a session pack; `read_pack` reads it back in line ranges instead of flooding the agent's context. Long operations report standard MCP progress notifications.
+### Live Context: your checkboxes become the agent's focus
+
+![Live Context: the DevProjex window title shows the connected Claude Code session, the ticked files are the agent's focus, and a tooltip on a received file reads "Agent received 5 times"](Docs/Media/readme-demo/live-context.png)
+
+Open the project in the DevProjex window and connect through **MCP → Live context**. From then on the tree you tick is what the agent works with:
+
+* **Tick, untick, done.** The agent sees the new selection on its very next call, through the shared local project profile. No restart, no new prompt.
+* **Focus, not a cage.** Tree, search, analysis, dependency, and pack operations stay inside the checked selection. A file outside the ticks can still be read by name, with an outside-focus notice.
+* **Your filters stay the limit.** The window's filters and secret protection apply to everything the agent reads; files your filters exclude stay out of reach.
+* **Saved results stay honest.** A stored pack is pinned to the revision that created it and must be rebuilt explicitly after the selection changes.
+* **See what the agent took.** Every file the agent received is marked in the tree with a count, the window title names the active client or session count, and focused paths are restored when you reopen the project.
+
+Live context uses `--live`; **Standard** connects the same server but does not follow the window selection. The compact **MCP** menu, between File and Git, also holds **Journal** and documentation entries, and after a successful connection an optional PATH dialog can offer the platform-appropriate terminal setup.
+
+### Eight read-only tools
+
+Eight read-only tools cover the whole workflow: `list_projects`, `get_tree`, `analyze`, `search_project`, `related_files`, `get_file`, `pack_context`, and `read_pack`.
+
+* `search_project` finds text or declarations by name, and `get_file` reads an exact line range or one declaration instead of a whole file.
+* `related_files` answers "what does this file actually use, and who uses it" from a static dependency index over up to 16 seed files, so following a thread never widens the selection.
+* `pack_context` packs a selection under `max_tokens`: files are considered in deterministic order, each is included if its estimated transformed-content tokens fit the remaining budget, otherwise it is reported as skipped and packing continues. `top_files` shows where the tokens go.
+* `pack_context` and `related_files` store an oversized result as a session pack; `read_pack` reads it back in line ranges instead of flooding the agent's context. Long operations report standard MCP progress notifications.
+* Trees default to compact markdown, content declares the root once and uses relative paths, and every tree ends with a trusted line naming the active filters. `git_scope` narrows any tool to staged files, current changes, or a ref-to-ref diff; `profile` switches between built-in defaults, your saved Desktop selections, or a portable profile file.
+
+### Agent journal: a receipt for every session
+
+![Agent journal: sessions per client with mode, calls, characters, tokens, files, and masked values, and the list of tool calls inside the selected session](Docs/Media/readme-demo/agent-journal.png)
 
 The local **agent journal** records metadata and counts for MCP sessions, never file
-bodies or detected secret values. Read it from the GUI, TUI, or CLI, and export a
-Markdown or JSON **context receipt** showing calls, delivered paths, and totals.
+bodies or detected secret values. Each session shows the client, the mode, and its totals: calls, characters, estimated tokens, delivered files, masked values, and duration. Open a session and every tool call is listed with its arguments summary, revision, timing, and notices. Read it from the GUI (**MCP → Journal**), TUI, or CLI, and export a
+Markdown or JSON **context receipt** showing calls, delivered paths, and totals. Want to audit what the agent gets? Open the same project in the GUI: the engine and redaction pipeline are shared, and filters match when the same profile and parameters are used.
+
+### Security boundaries
 
 The server enforces hard security boundaries on top of DevProjex's read-only design:
 
@@ -238,38 +224,15 @@ The server enforces hard security boundaries on top of DevProjex's read-only des
 * **Secret redaction is always on in MCP mode and has no off switch** — not in the server flags, not in the tool schemas, so neither a config mistake nor the agent itself can turn it off
 * **Optional private-data masking** via `devprojex mcp --hide-private-data`, mirroring the CLI flag
 * **Root jail** — local access is pinned to startup roots; opt-in remote Git URL checkouts are pinned on first use; symlink and junction escapes are rejected
-* Agent paths and globs can only narrow the selection, and the `.git` administrative area is never exposed. By default the agent sees the repository the way Git does — Smart Ignore and `.gitignore` apply, while `Dockerfile`, `.github/`, dot-files, and empty files stay visible — and every tree ends with a trusted line naming the active filters. Widening or narrowing that view is your startup decision, never the agent's by default: a `--exclude` baseline, the widest-baseline `--unrestricted` preset, or per-call agent control behind the opt-in `--allow-agent-exclusions` flag
-* Returned file contents are wrapped in untrusted-data markers to resist prompt injection
+* **The agent can only narrow the view** — agent paths and globs can only narrow the selection, and the `.git` administrative area is never exposed
+* **Git's view by default** — Smart Ignore and `.gitignore` apply, while `Dockerfile`, `.github/`, dot-files, and empty files stay visible; widening or narrowing that view is your startup decision, never the agent's by default: a `--exclude` baseline, the widest-baseline `--unrestricted` preset, or per-call agent control behind the opt-in `--allow-agent-exclusions` flag
+* **Prompt-injection hardening** — returned file contents are wrapped in untrusted-data markers
 
 The missing off switch is a control guarantee, not a detection guarantee. DevProjex
 detects common secret formats, but detection is heuristic; review each pack before
 publishing it outside your environment.
 
-**Built for agent efficiency.** Trees default to compact markdown, content declares the root once and uses relative paths — no tokens wasted on scaffolding. With `max_tokens`, files are considered in deterministic selection order; each is included if its estimated transformed-content tokens fit the remaining budget, otherwise it is reported as skipped and packing continues. `top_files` shows where the tokens go, `git_scope` narrows `get_tree`, `analyze`, `pack_context`, `search_project`, or `related_files` to staged files, current changes, or a ref-to-ref diff, and `profile` switches between built-in defaults, your saved Desktop selections, or a portable profile file.
-
-Want to audit what the agent gets? Open the same project in the GUI: the engine and redaction pipeline are shared, and filters match when the same profile and parameters are used.
-
-### How DevProjex compares as an MCP server
-
-| Capability | DevProjex | Repomix | Repo Prompt | code2prompt | gitingest |
-|---|---|---|---|---|---|
-| Cross-platform: Windows + Linux + macOS | ✅ | ✅ | ❌ macOS only | ✅ | ✅ |
-| MCP server ships built into the app | ✅ | ✅ | ✅ | ⚠️ separate server | ❌ community only |
-| Secret masking that cannot be disabled | ✅ | ⚠️ always-on check in MCP; flagged files are excluded, not masked | ❌ | ❌ | ❌ |
-| Agent cannot widen the effective file selection (default) | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Root jail with symlink-escape rejection | ✅ default | ✅ opt-in `--sandbox` | ❌ | ❌ | ❌ |
-| Prompt-injection hardening (untrusted-data wrapping) | ✅ | — not documented | ❌ | ❌ | ❌ |
-| Built-in MCP file-selection scopes: tracked / staged / changes / ref diff | ✅ | ❌ | ⚠️ diffs in context | ❌ | ❌ |
-| Automatic file fitting under a content-token budget, with a skipped-file report | ✅ | ❌ | ✅ | ❌ | ❌ |
-| CLI failure when generated output exceeds a tokenizer-based limit | ❌ | ✅ `--token-budget`; output is still produced | — | — | — |
-| Oversized results stored, read back in ranges | ✅ | ✅ | ❌ | ❌ | ❌ |
-| Remote Git repositories by URL | ✅ opt-in | ✅ | ❌ | ❌ | ✅ |
-
-*Based on publicly documented features; Repomix v1.17.0 source and documentation verified September 6, 2026.*
-
-See [Docs/McpServer.md](Docs/McpServer.md) for client setup, the full tool reference, and the security model.
-
-The measurements behind this comparison, from 5.1 to 5.2, with the agents' and the blind judge's verdicts, are in [Docs/Benchmark-History.md](Docs/Benchmark-History.md).
+See [Docs/McpServer.md](Docs/McpServer.md) for client setup, the full tool reference, and the security model. The measurements behind the MCP server, from 5.1 to 5.2, with the agents' and the blind judge's verdicts verbatim, are in [Docs/Benchmark-History.md](Docs/Benchmark-History.md).
 
 ---
 
