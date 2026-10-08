@@ -66,24 +66,20 @@ and the static package gate reject a manifest that differs from the packages.
 ## Glama listing
 
 [Glama](https://glama.ai/mcp/servers/Avazbek22/DevProjex) builds its hosted server from the
-Linux headless release archive and shows the README of the commit pinned in its settings.
-Glama drops raw HTML from a README, so the listing uses its own Markdown-only, MCP-first
-README in `Packaging/Glama/README.md`; the contract tests parse its commands and check its
-tool table against the catalog. The card in Glama search, the page description, and link
-previews use the Description field in the Glama settings instead.
+Linux headless release archive. Its server page shows the README of the current head of
+`master`, not of the commit pinned for the build, and refreshes it after every push. Glama
+drops raw HTML, so the main README is plain Markdown: title, badges, the demo GIF, and
+banners use Markdown syntax, and a contract test rejects HTML tags outside code. The card in
+Glama search, the page description, and link previews use the Description field in the
+Glama settings instead.
 
 Glama pins only the current head of the default branch; an older commit is rejected with
-"Commit not found" even when Glama already knows a newer one. After each release:
-
-1. Update `Packaging/Glama/README.md` if tools, flags, or launch commands changed.
-2. On an up-to-date `master`, run `./Scripts/New-GlamaReadmeSnapshot.ps1 -Push`. It pushes the
-   Glama README as `README.md` at the head of `master` with `[skip ci]` and prints the SHA.
-3. Wait until Glama shows that SHA as the repository head (this has taken from one to several
-   hours), pin it, and point the second build step at the new
-   `DevProjex-headless.v<version>.linux-x64.tar.gz` (the archive holds a single `devprojex`
-   file). Keep the start command `/opt/devprojex/devprojex mcp --root /app`, build, create the
-   Glama release with the package version, and press Sync.
-4. Run `./Scripts/New-GlamaReadmeSnapshot.ps1 -Restore -Push` to put the main README back.
+"Commit not found" even when Glama already knows a newer one, and its copy of the repository
+can lag GitHub by one to several hours. After each release, once Glama shows the current
+`master` head, pin it and point the second build step at the new
+`DevProjex-headless.v<version>.linux-x64.tar.gz` (the archive holds a single `devprojex`
+file). Keep the start command `/opt/devprojex/devprojex mcp --root /app`, build, create the
+Glama release with the package version, and press Sync.
 
 Glama's Auto-Release can publish a release from a stale configuration on its own, and the
 owner cannot delete or rename a release. Check the release list after every change.

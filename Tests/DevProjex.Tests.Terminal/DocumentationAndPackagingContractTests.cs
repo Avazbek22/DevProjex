@@ -790,8 +790,7 @@ public sealed class DocumentationAndPackagingContractTests
 				 {
 					 (Path.Combine("Packaging", "Npm", "devprojex", "README.md"), new[] { NpxLauncher }),
 					 (Path.Combine("Packaging", "Npm", "platform", "README.md.template"), [NpxLauncher]),
-					 (Path.Combine("Apps", "TerminalHost", "NuGet.README.md"), [DnxLauncher]),
-					 (Path.Combine("Packaging", "Glama", "README.md"), [NpxLauncher, DnxLauncher, DockerLauncher])
+					 (Path.Combine("Apps", "TerminalHost", "NuGet.README.md"), [DnxLauncher])
 				 })
 		{
 			var foundLaunchers = new HashSet<string>(StringComparer.Ordinal);
@@ -828,27 +827,30 @@ public sealed class DocumentationAndPackagingContractTests
 	}
 
 	[Fact]
-	public void GlamaReadmeIsPlainMarkdownAndTablesEveryMcpTool()
+	public void MainReadmeIsPlainMarkdownSoListingsRenderItWhole()
 	{
-		// Glama drops raw HTML from a README, so images and badges there must be Markdown with
-		// absolute URLs, and the tool table must follow the catalog the server registers.
+		// Glama shows the README of the default branch and drops raw HTML, so the title, badges,
+		// demo and banners must stay Markdown for the listing to show them.
 		var rootPath = FindRepositoryRoot();
-		var readme = File.ReadAllText(Path.Combine(rootPath, "Packaging", "Glama", "README.md"));
+		var readme = File.ReadAllText(Path.Combine(rootPath, "README.md"));
+		var prose = Regex.Replace(readme, "```.*?```", string.Empty, RegexOptions.Singleline);
+		prose = Regex.Replace(prose, "`[^`\n]*`", string.Empty);
 
-		Assert.DoesNotMatch(@"<\s*/?\s*(img|a|p|h\d|div|br|picture|source)\b[^>]*>", readme);
-		foreach (Match image in Regex.Matches(readme, @"!\[[^\]]*\]\((?<url>[^)\s]+)\)"))
-			Assert.StartsWith("https://", image.Groups["url"].Value, StringComparison.Ordinal);
+		Assert.StartsWith("# DevProjex", readme, StringComparison.Ordinal);
+		Assert.DoesNotMatch(@"<\s*/?\s*(img|a|p|h\d|div|br|picture|source|sub|sup|strong|center)\b[^>]*>", prose);
 		Assert.Contains(
-			"https://raw.githubusercontent.com/Avazbek22/DevProjex/master/Docs/Media/readme-demo/devprojex-demo.gif",
+			"![DevProjex demo: the desktop app and Terminal Workspace](Docs/Media/readme-demo/devprojex-demo.gif)",
 			readme,
 			StringComparison.Ordinal);
-		Assert.True(File.Exists(Path.Combine(rootPath, "Docs", "Media", "readme-demo", "devprojex-demo.gif")));
-
-		var tabledTools = Regex.Matches(readme, @"^\| `(?<name>[a-z_]+)` \|", RegexOptions.Multiline)
-			.Select(static match => match.Groups["name"].Value)
-			.Order(StringComparer.Ordinal)
-			.ToArray();
-		Assert.Equal(ReadCatalogToolNames(rootPath).Order(StringComparer.Ordinal), tabledTools);
+		foreach (Match image in Regex.Matches(prose, @"!\[[^\]]*\]\((?<url>[^)\s]+)\)"))
+		{
+			var url = image.Groups["url"].Value;
+			if (url.StartsWith("https://", StringComparison.Ordinal))
+				continue;
+			Assert.True(
+				File.Exists(Path.Combine(rootPath, url.Replace('/', Path.DirectorySeparatorChar))),
+				$"README image is missing from the repository: {url}");
+		}
 	}
 
 	private const string NpxLauncher = "npx -y devprojex";

@@ -1,20 +1,10 @@
-<h1 align="center">DevProjex 📁🌳</h1>
+# DevProjex 📁🌳
 
-<h2 align="center">🏆 Officially Selected by the Avalonia UI Team for the <a href="https://avaloniaui.net/showcase">App Showcase</a></h2>
+**🏆 Officially selected by the Avalonia UI team for the [App Showcase](https://avaloniaui.net/showcase)**
 
-<p align="center">
-  <a href="https://github.com/Avazbek22/DevProjex/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/Avazbek22/DevProjex/total"></a>
-  <a href="https://www.npmjs.com/package/devprojex"><img alt="npm" src="https://img.shields.io/npm/v/devprojex"></a>
-  <a href="https://www.nuget.org/packages/devprojex"><img alt="NuGet" src="https://img.shields.io/nuget/v/devprojex"></a>
-  <a href="https://github.com/Avazbek22/DevProjex/actions"><img alt="Build" src="https://img.shields.io/github/actions/workflow/status/Avazbek22/DevProjex/dotnet.yml"></a>
-  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
-  <img alt="Last commit" src="https://img.shields.io/github/last-commit/Avazbek22/DevProjex">
-  <img alt="Platforms" src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-green">
-</p>
+[![Downloads](https://img.shields.io/github/downloads/Avazbek22/DevProjex/total)](https://github.com/Avazbek22/DevProjex/releases) [![npm](https://img.shields.io/npm/v/devprojex)](https://www.npmjs.com/package/devprojex) [![NuGet](https://img.shields.io/nuget/v/devprojex)](https://www.nuget.org/packages/devprojex) [![Build](https://img.shields.io/github/actions/workflow/status/Avazbek22/DevProjex/dotnet.yml)](https://github.com/Avazbek22/DevProjex/actions) [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE) ![Last commit](https://img.shields.io/github/last-commit/Avazbek22/DevProjex) ![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-green) [![Glama score](https://glama.ai/mcp/servers/Avazbek22/DevProjex/badges/score.svg)](https://glama.ai/mcp/servers/Avazbek22/DevProjex)
 
-<p align="center">
-  <strong>Turn a real codebase into clean, AI-ready context — and see exactly what you're sending.</strong>
-</p>
+**Turn a real codebase into clean, AI-ready context — and see exactly what you're sending.**
 
 DevProjex turns any folder or codebase into clean, ready-to-use context for AI chats, code reviews, and documentation. Use it as a **GUI**, a **TUI**, a **CLI**, or an **MCP server** for AI agents — whatever fits your workflow.
 
@@ -26,7 +16,7 @@ Choose what you need in an interactive file tree, check the result in a live pre
 
 ## App Demo 🖼️
 
-<img src="Docs/Media/readme-demo/devprojex-demo.gif" alt="DevProjex demo: the desktop app and Terminal Workspace" width="100%" />
+![DevProjex demo: the desktop app and Terminal Workspace](Docs/Media/readme-demo/devprojex-demo.gif)
 
 ---
 
@@ -144,7 +134,7 @@ Works with any language, repository, or project structure.
 | GUI-managed Git workflow (clone, branch switch, cache updates) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Run with no install (npx / dnx / direct binary) | ✅ (v5.2+) | ✅ | ✅ | ❌ | ❌ | ✅ |
 
-<sub>Based on publicly documented features, last verified September 2026. DevProjex no-install package channels are available from v5.2.</sub>
+*Based on publicly documented features, last verified September 2026. DevProjex no-install package channels are available from v5.2.*
 
 ---
 
@@ -275,7 +265,7 @@ Want to audit what the agent gets? Open the same project in the GUI: the engine 
 | Oversized results stored, read back in ranges | ✅ | ✅ | ❌ | ❌ | ❌ |
 | Remote Git repositories by URL | ✅ opt-in | ✅ | ❌ | ❌ | ✅ |
 
-<sub>Based on publicly documented features; Repomix v1.17.0 source and documentation verified September 6, 2026.</sub>
+*Based on publicly documented features; Repomix v1.17.0 source and documentation verified September 6, 2026.*
 
 See [Docs/McpServer.md](Docs/McpServer.md) for client setup, the full tool reference, and the security model.
 
@@ -375,12 +365,7 @@ Detection runs a pinned, reviewed [Gitleaks](https://github.com/gitleaks/gitleak
 
 ## Tech stack 🧩
 
-<p>
-  <img alt=".NET 10" src="https://img.shields.io/badge/.NET-10-purple">
-  <img alt="WinGet" src="https://img.shields.io/badge/winget-available-blue">
-  <img alt="Repository size" src="https://img.shields.io/github/repo-size/Avazbek22/DevProjex">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-20000%2B-brightgreen">
-</p>
+![.NET 10](https://img.shields.io/badge/.NET-10-purple) ![WinGet](https://img.shields.io/badge/winget-available-blue) ![Repository size](https://img.shields.io/github/repo-size/Avazbek22/DevProjex) ![Tests](https://img.shields.io/badge/tests-20000%2B-brightgreen)
 
 * **.NET 10**
 * **Avalonia UI** (cross-platform)
@@ -410,11 +395,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 ## Support 💛
 
-<p align="center">
-  <a href="https://boosty.to/avazbek22">
-    <img src=".github/assets/boosty-support.svg" width="800" alt="Support DevProjex on Boosty">
-  </a>
-</p>
+[![Support DevProjex on Boosty](.github/assets/boosty-support.svg)](https://boosty.to/avazbek22)
 
 ---
 
