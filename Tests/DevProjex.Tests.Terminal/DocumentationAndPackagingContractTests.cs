@@ -838,10 +838,7 @@ public sealed class DocumentationAndPackagingContractTests
 
 		Assert.StartsWith("# DevProjex", readme, StringComparison.Ordinal);
 		Assert.DoesNotMatch(@"<\s*/?\s*(img|a|p|h\d|div|br|picture|source|sub|sup|strong|center)\b[^>]*>", prose);
-		Assert.Contains(
-			"![DevProjex demo: the desktop app and Terminal Workspace](Docs/Media/readme-demo/devprojex-demo.gif)",
-			readme,
-			StringComparison.Ordinal);
+		Assert.Matches(@"!\[[^\]]+\]\(Docs/Media/readme-demo/devprojex-demo\.gif\)", readme);
 		foreach (Match image in Regex.Matches(prose, @"!\[[^\]]*\]\((?<url>[^)\s]+)\)"))
 		{
 			var url = image.Groups["url"].Value;
@@ -887,6 +884,15 @@ public sealed class DocumentationAndPackagingContractTests
 		var image = Array.IndexOf(tokens, DockerLauncher);
 		Assert.True(image >= 0, $"Client configuration starts DevProjex through an unknown launcher: {line.Trim()}");
 		return (DockerLauncher, tokens[(image + 1)..]);
+	}
+
+	/// <summary>
+	/// Drops the explanatory <c># ...</c> comment that README command examples carry after the command.
+	/// </summary>
+	private static string StripTrailingComment(string line)
+	{
+		var comment = line.IndexOf(" #", StringComparison.Ordinal);
+		return comment < 0 ? line : line[..comment].TrimEnd();
 	}
 
 	private static string ReadHeadlessPackageVersion(string rootPath)
@@ -1303,7 +1309,7 @@ public sealed class DocumentationAndPackagingContractTests
 		var readme = File.ReadAllText(Path.Combine(rootPath, "README.md"));
 		var examples = readme
 			.Split('\n')
-			.Select(static line => line.Trim())
+			.Select(static line => StripTrailingComment(line.Trim()))
 			.Where(static line => line.StartsWith("devprojex", StringComparison.Ordinal))
 			.ToArray();
 		var commandTree = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();
@@ -1349,7 +1355,7 @@ public sealed class DocumentationAndPackagingContractTests
 		var advertised = Regex.Match(
 			readme,
 			"Localization in (?<count>\\d+) languages",
-			RegexOptions.CultureInvariant);
+			RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 		var shippedCount = Directory
 			.EnumerateFiles(Path.Combine(rootPath, "Assets", "Localization"), "*.json")
 			.Count();

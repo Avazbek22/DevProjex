@@ -116,7 +116,7 @@ public sealed class DocumentationExecutionRegressionTests
 	{
 		foreach (var command in content
 			         .Split('\n')
-			         .Select(static line => line.Trim())
+			         .Select(static line => StripTrailingComment(line.Trim()))
 			         .Where(IsConcreteDirectCommand))
 		{
 			destination.Add(command);
@@ -125,6 +125,13 @@ public sealed class DocumentationExecutionRegressionTests
 
 	// Shell redirections are not an argument vector, and ranked exports report their
 	// ranking summary on stderr by design, so neither fits the clean-stderr contract here.
+	// README command examples end with an explanatory "# ..." comment that is not part of the command.
+	private static string StripTrailingComment(string line)
+	{
+		var comment = line.IndexOf(" #", StringComparison.Ordinal);
+		return comment < 0 ? line : line[..comment].TrimEnd();
+	}
+
 	private static bool IsConcreteDirectCommand(string line) =>
 		(line.StartsWith("devprojex analyze ", StringComparison.Ordinal) ||
 		 line.StartsWith("devprojex export context ", StringComparison.Ordinal) ||
