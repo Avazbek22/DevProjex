@@ -1,4 +1,4 @@
-# DevProjex 📁🌳
+# DevProjex: MCP / GUI / CLI / TUI all in one
 
 **🏆 Selected by the Avalonia UI team for the [App Showcase](https://avaloniaui.net/showcase)**
 
@@ -25,8 +25,6 @@ Tick what you need in a file tree, check the live preview and its token estimate
 👉 [github.com/Avazbek22/DevProjex/releases/latest](https://github.com/Avazbek22/DevProjex/releases/latest)
 
 **WinGet (Windows):** `winget install OlimoffDev.DevProjex`
-
-**Connect your coding agent:** `claude mcp add devprojex -- npx -y devprojex mcp --root /absolute/path/to/project`. Other clients are in the [MCP server](#mcp-server-) section.
 
 ### Run without installing
 
