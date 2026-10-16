@@ -71,25 +71,25 @@ Works with any language, repository, or project structure.
 ## Feature overview ✨
 
 **Choose and control**
-* **Smart Ignore:** hides build output, dependency folders, and caches, and checks for evidence before hiding anything. [How it works ↓](#how-smart-ignore-works-)
-* **Hide Secrets:** masks detected credential values where they stand, in everything you export and in every MCP response. [How it works ↓](#how-hide-secrets-and-hide-private-data-work-)
-* **Hide private data:** optionally masks emails, IPs, MACs, phones, and user paths. [How it works ↓](#how-hide-secrets-and-hide-private-data-work-)
-* **Code compression:** keeps declarations and signatures, empties implementation bodies; pure code gets about 3× smaller. [How it works ↓](#how-code-compression-works-)
-* **Strip comments** and **strip blank lines:** syntax-aware cleanup across 20 language packs, without modifying source files.
+* **[Smart Ignore](#how-smart-ignore-works-):** hides build output, dependency folders, and caches, only when it finds evidence.
+* **[Hide Secrets](#how-hide-secrets-and-hide-private-data-work-):** masks detected credentials in place, in every export and every MCP response.
+* **[Hide private data](#how-hide-secrets-and-hide-private-data-work-):** optionally masks emails, IPs, MACs, phones, and user paths.
+* **[Code compression](#how-code-compression-works-):** keeps signatures, empties function bodies; pure code gets about 3× smaller.
+* **[Strip comments and blank lines](#how-code-compression-works-):** syntax-aware cleanup in 20 language packs; source files untouched.
 * File tree with checkboxes, search, and name filters.
-* **Git modes:** `.gitignore`, tracked files, staged files, all current changes, or a ref-to-ref diff.
+* **[Git modes](#how-smart-ignore-works-):** `.gitignore`, tracked files, staged files, all current changes, or a ref-to-ref diff.
 
 **AI agents**
-* **Read-only MCP server:** eight tools for any MCP client, on the same engine as the desktop app. [Details ↓](#mcp-server-)
-* **Live Context:** tick files in the desktop app and the agent works with that selection on its very next call. [How it works ↓](#live-context-your-checkboxes-become-the-agents-focus)
-* **Agent journal:** a receipt for every session with calls, delivered paths, tokens, and masked values, never file bodies. [Details ↓](#agent-journal-a-receipt-for-every-session)
-* **Hard boundaries:** root jail, untrusted-data markers against prompt injection, and an agent that can only narrow what it sees. [Details ↓](#security-boundaries)
+* **[Read-only MCP server](#mcp-server-):** eight tools for any MCP client, on the same engine as the desktop app.
+* **[Live Context](#live-context-your-checkboxes-become-the-agents-focus):** tick files in the desktop app and the agent works with that selection on its very next call.
+* **[Agent journal](#agent-journal-a-receipt-for-every-session):** a receipt for every session with calls, delivered paths, tokens, and masked values, never file bodies.
+* **[Hard boundaries](#security-boundaries):** root jail, untrusted-data markers, and an agent that can only narrow what it sees.
 
 **Preview and export**
 * Live preview (tree, content, or both) with live counters for lines, characters, and a token estimate.
 * Scrollbar markers show search matches and masking findings at a glance.
 * Export as ASCII, Markdown, JSON, or XML, to a file or the clipboard, tree only, content only, or both.
-* Export a clean copy of your project to a folder or ZIP archive. [Details ↓](#project-copy-export)
+* Export a [clean copy of your project](#project-copy-export) to a folder or ZIP archive.
 
 **Workflow and interface**
 * Desktop app, Terminal Workspace, CLI, and MCP server: the same engine, four ways to work.
