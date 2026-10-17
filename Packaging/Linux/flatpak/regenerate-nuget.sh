@@ -18,7 +18,8 @@ curl --fail --location --silent --show-error \
 python3 "$generator_dir/flatpak-dotnet-generator.py" \
   "$output" Apps/Avalonia/DevProjex.Avalonia.csproj \
   --runtime "$rid" --only-arches "$arch" --freedesktop 26.08 --dotnet 10 \
-  --dotnet-args -p:RuntimeIdentifiers="$rid" -p:NETCoreSdkRuntimeIdentifier="$rid" -p:SelfContained=true \
+  --dotnet-args -p:RuntimeIdentifiers="$rid" -p:NETCoreSdkRuntimeIdentifier="$rid" \
+  -p:NETCoreSdkPortableRuntimeIdentifier="$rid" -p:SelfContained=true \
   -p:PublishReadyToRun=true -p:PublishSingleFile=false -p:DevProjexGrammarDelivery=Content
 python3 - "$rid" "$output" <<'PY'
 import json, sys

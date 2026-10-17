@@ -71,22 +71,29 @@ jobs:
           build-dir: flatpak_app
           mirror-screenshots-url: https://dl.flathub.org/media
           upload-artifact: true
-      - name: Check installed sandbox CLI and grammar delivery
+      - name: Check installed sandbox metadata
         shell: bash
         run: |
           set -euo pipefail
           python3 Packaging/Linux/flatpak/check-lint.py builddir flatpak_app
           python3 Packaging/Linux/flatpak/check-lint.py repo repo
           flatpak install --user --noninteractive ./DevProjex-"$(uname -m)".flatpak
-          bash Packaging/Linux/flatpak/smoke.sh
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
-      - name: Check installed MCP through a separate client process
+      - name: Check installed CLI, MCP, live context and desktop
         shell: bash
         run: |
           set -euo pipefail
-          fixture="$(mktemp -d "$HOME/devprojex-mcp-smoke.XXXXXX")"
-          trap 'rm -f -- "$fixture/Main.kt"; rmdir -- "$fixture"' EXIT
-          printf 'class Greeting {}\n' > "$fixture/Main.kt"
-          dotnet run --project Packaging/Linux/flatpak/SmokeClient/SmokeClient.csproj -c Release -- "$fixture"
+          python3 -m venv "$RUNNER_TEMP/flatpak-smoke-python"
+          "$RUNNER_TEMP/flatpak-smoke-python/bin/pip" install -r Packaging/Linux/flatpak/smoke-requirements.txt
+          export PATH="$RUNNER_TEMP/flatpak-smoke-python/bin:$PATH"
+          xvfb-run -a -s '-screen 0 1920x1080x24' dbus-run-session -- \
+            bash Packaging/Linux/flatpak/smoke.sh "$GITHUB_WORKSPACE/flatpak-smoke-evidence"
+      - name: Upload sandbox check evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flatpak-checks-${{ matrix.arch }}
+          path: flatpak-smoke-evidence/
+          if-no-files-found: ignore

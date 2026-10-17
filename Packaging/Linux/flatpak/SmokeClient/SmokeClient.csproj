@@ -6,5 +6,6 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="ModelContextProtocol" />
+    <ProjectReference Include="../../../../Infrastructure/Infrastructure.csproj" />
   </ItemGroup>
 </Project>

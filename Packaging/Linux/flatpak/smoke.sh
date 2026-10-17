@@ -1,29 +1,18 @@
 #!/bin/bash
 set -euo pipefail
-app=io.github.Avazbek22.DevProjex
-fixture="$(mktemp -d "$HOME/devprojex-flatpak-smoke.XXXXXX")"
-trap 'rm -f -- "$fixture"/*; rmdir -- "$fixture"' EXIT
-printf '// flatpak-smoke-comment-kotlin\nclass Greeting { fun hello(): String { return "flatpak-smoke-body" } }\n' > "$fixture/Main.kt"
-printf '# flatpak-smoke-comment-toml\ntitle = "Example"\n' > "$fixture/config.toml"
-printf '<!-- flatpak-smoke-comment-xml --><project><name>Example</name></project>\n' > "$fixture/project.xml"
-printf '# flatpak-smoke-comment-yaml\nproject:\n  name: Example\n' > "$fixture/config.yaml"
-cd "$fixture"
-flatpak run "$app" doctor --json > doctor.json
-python3 - <<'PY'
-import json
-from pathlib import Path
-report = json.loads(Path('doctor.json').read_text())
-assert report['packageType'] == 'flatpak', report
-assert next(check['path'] for check in report['checks'] if check['name'] == 'current-directory') == str(Path.cwd())
-assert any('flatpak run io.github.Avazbek22.DevProjex mcp' in check['detail'] for check in report['checks'])
-PY
-flatpak run "$app" export context . --compress-code --strip-comments --format json --output "$fixture/context.json" 2> compression.stderr
-test -s "$fixture/context.json"
-python3 - <<'PY'
-from pathlib import Path
-content = Path('context.json').read_text()
-assert 'flatpak-smoke-body' not in content, content
-assert 'flatpak-smoke-comment-' not in content, content
-assert 'DPX-COMPRESSION-UNAVAILABLE' not in Path('compression.stderr').read_text()
-PY
-flatpak run --command=sh "$app" -c 'test -x /app/bin/git; for language in kotlin toml xml yaml; do test -f /app/lib/devprojex/grammars/libtree-sitter-$language.so || exit 1; done'
+cd "$(dirname "$0")/../../.."
+dotnet="${DOTNET:-dotnet}"
+evidence="${1:-$PWD/flatpak-smoke-evidence}"
+client_directory="$(mktemp -d "$HOME/devprojex-flatpak-check-client.XXXXXX")"
+trap 'rm -rf -- "$client_directory"' EXIT
+case "$(uname -m)" in
+  x86_64) rid=linux-x64 ;;
+  aarch64) rid=linux-arm64 ;;
+  *) printf 'Unsupported check-client architecture\n' >&2; exit 1 ;;
+esac
+"$dotnet" publish Packaging/Linux/flatpak/SmokeClient/SmokeClient.csproj -c Release -m:1 --nologo \
+  -r "$rid" --self-contained true -p:PublishSingleFile=false -o "$client_directory"
+export DOTNET="$dotnet"
+export DEVPROJEX_FLATPAK_CHECK_CLIENT="$client_directory/SmokeClient"
+export DEVPROJEX_FLATPAK_TRANSPORT="$PWD/Packaging/Linux/flatpak/transport.py"
+python3 Packaging/Linux/flatpak/smoke.py --evidence "$evidence"
