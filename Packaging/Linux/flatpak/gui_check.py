@@ -9,6 +9,56 @@ from x11_check import Desktop
 APP = 'io.github.Avazbek22.DevProjex'
 
 
+def check_path_window(checks, root, loaded):
+    desktop = Desktop()
+    previous = {window.id for window, _, _ in desktop.windows()}
+    process = None
+    name = 'outside-gui-' + ('allowed' if loaded else 'denied')
+    try:
+        with (checks.evidence / (name + '.log')).open('w') as output:
+            process = subprocess.Popen(['flatpak', 'run', APP, 'open', str(root), '--new-window', '--preview', '--language', 'en'],
+                                       stdout=output, stderr=output)
+            deadline = time.monotonic() + 30
+            main = None
+            error = None
+            while time.monotonic() < deadline:
+                for window, title, wmclass in desktop.windows():
+                    if window.id in previous or not wmclass or wmclass[1] != APP:
+                        continue
+                    if title == 'Error':
+                        error = window
+                    if window.get_geometry().width >= 900:
+                        main = window
+                if main is not None and (loaded and str(root) in (main.get_wm_name() or '') or not loaded and error is not None):
+                    break
+                time.sleep(.1)
+            assert main is not None, 'The folder check did not open a desktop window'
+            if loaded:
+                state = checks.app(['ui', 'status', '--project', root], name + '-status')
+                state = json.loads(state.stdout)['state']
+                assert state['projectLoaded'] and state['projectPath'] == str(root), state
+                time.sleep(.5)
+                desktop.screenshot(main, checks.evidence / (name + '.png'))
+            else:
+                assert error is not None, 'An inaccessible root did not show the desktop error dialog'
+                desktop.screenshot(error, checks.evidence / (name + '.png'))
+                desktop.dismiss(error)
+            desktop.dismiss(main)
+            process.wait(timeout=20)
+            assert process.returncode == 0, process.returncode
+    finally:
+        if process is not None and process.poll() is None:
+            for window, _, wmclass in desktop.windows():
+                if window.id not in previous and wmclass and wmclass[1] == APP:
+                    desktop.dismiss(window)
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.terminate()
+                process.wait(timeout=10)
+        desktop.close()
+
+
 def check_gui(checks):
     desktop = Desktop()
     process = None

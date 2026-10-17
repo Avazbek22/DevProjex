@@ -118,8 +118,8 @@ The workflow runs the same script on both native architectures under Xvfb.
 4. Enable the managed shim through the window and run it from the host shell.
    A disposable self-contained check client calls the same setup service outside
    and inside Flatpak to check ordinary/Flatpak/ordinary migration byte-for-byte.
-5. Check inaccessible CLI, MCP and PTY roots, apply the suggested user override,
-   reopen the folder and reset access. An empty mount-point directory can remain
+5. Check inaccessible GUI, CLI, MCP and PTY roots, apply the suggested user override,
+   reopen the folder in a real window and reset access. An empty mount-point directory can remain
    in Flatpak's private `/var/tmp` after reset; the check verifies that its real
    host file is no longer readable, not that the mount-point name disappears.
 6. Exercise Kotlin/TOML/XML/YAML compression and verify the resulting transformations,

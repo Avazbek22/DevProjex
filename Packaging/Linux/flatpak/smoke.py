@@ -3,10 +3,8 @@ import argparse
 import json
 import os
 from pathlib import Path
-import shlex
 import shutil
 import subprocess
-import sys
 import tempfile
 import time
 from pty_check import Terminal
@@ -15,23 +13,12 @@ APP = 'io.github.Avazbek22.DevProjex'
 SOURCE = Path(__file__).resolve().parent
 
 
-def wait(predicate, label, timeout=30):
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        result = predicate()
-        if result:
-            return result
-        time.sleep(.1)
-    raise AssertionError('Timed out: ' + label)
-
-
 class Checks:
     def __init__(self, evidence):
         self.evidence = evidence
         evidence.mkdir(parents=True, exist_ok=True)
         self.fixture = Path(tempfile.mkdtemp(prefix='devprojex-flatpak-smoke.', dir=Path.home()))
         self.results = {}
-        self.counter = 0
         self.dotnet = os.environ.get('DOTNET', 'dotnet')
         self.client = SOURCE / 'SmokeClient/bin/Release/net10.0/SmokeClient.dll'
         self.client_command = [os.environ['DEVPROJEX_FLATPAK_CHECK_CLIENT']] if os.environ.get('DEVPROJEX_FLATPAK_CHECK_CLIENT') else [self.dotnet, str(self.client)]
@@ -157,6 +144,7 @@ class Checks:
             terminal.close()
 
     def paths(self):
+        from gui_check import check_path_window
         outside = Path(tempfile.mkdtemp(prefix='devprojex-flatpak-outside.', dir='/var/tmp'))
         (outside / 'example.cs').write_text('class OutsideSandbox {}\n')
         changed = False
@@ -166,6 +154,7 @@ class Checks:
             mcp = self.app(['mcp', '--root', outside, '--language', 'en'], 'outside-mcp-denied', success=False)
             assert 'flatpak override --user' in mcp.stderr, mcp.stderr
             assert not mcp.stdout, mcp.stdout
+            check_path_window(self, outside, loaded=False)
             terminal = Terminal(['flatpak', 'run', APP, 'tui', str(self.fixture), '--screen', 'inline',
                                  '--no-mouse', '--language', 'en'], self.evidence / 'outside-tui')
             try:
@@ -180,6 +169,7 @@ class Checks:
             changed = True
             allowed = self.app(['tree', outside], 'outside-allowed')
             assert 'example.cs' in allowed.stdout, allowed.stdout
+            check_path_window(self, outside, loaded=True)
         finally:
             if changed:
                 self.run(['flatpak', 'override', '--user', '--reset', APP], 'reset-overrides')
