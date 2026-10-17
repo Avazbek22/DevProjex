@@ -73,7 +73,7 @@ public static class MessageDialog
         CreateDialogWindow(
             owner,
             title,
-            BuildContent(message, closeButtonText, command),
+            command is null ? BuildContent(message, closeButtonText) : BuildContentWithCommand(message, closeButtonText, command),
             width: command is null ? 420 : 520);
 
     internal static Window CreateConfirmationWindow(
@@ -90,7 +90,9 @@ public static class MessageDialog
         return CreateDialogWindow(
             owner,
             title,
-            BuildConfirmationContent(message, confirmButtonText, cancelButtonText, completion, command),
+            command is null
+                ? BuildConfirmationContent(message, confirmButtonText, cancelButtonText, completion)
+                : BuildConfirmationContentWithCommand(message, confirmButtonText, cancelButtonText, completion, command),
             width);
     }
 
@@ -113,7 +115,7 @@ public static class MessageDialog
         return DialogSurfaceFactory.CreateContentSizedWindow(owner, title, themeVariant, brushes, content, width);
     }
 
-    private static Control BuildContent(string message, string closeButtonText, MessageDialogCommand? command)
+    private static Control BuildContent(string message, string closeButtonText)
     {
         var button = new Button
         {
@@ -124,27 +126,10 @@ public static class MessageDialog
         };
 
         var panel = new DockPanel();
-        if (command is null)
-        {
-            DockPanel.SetDock(button, Dock.Bottom);
-            panel.Children.Add(button);
-        }
-        else
-        {
-            button.Margin = new Thickness(6, 12, 12, 12);
-            var copyButton = CreateCopyButton(panel, command);
-            var buttonPanel = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                HorizontalAlignment = HorizontalAlignment.Right
-            };
-            buttonPanel.Children.Add(copyButton);
-            buttonPanel.Children.Add(button);
-            DockPanel.SetDock(buttonPanel, Dock.Bottom);
-            panel.Children.Add(buttonPanel);
-        }
+        DockPanel.SetDock(button, Dock.Bottom);
 
-        panel.Children.Add(BuildMessageArea(message, command));
+        panel.Children.Add(button);
+        panel.Children.Add(BuildMessageArea(message));
 
         button.Click += (_, _) =>
             (TopLevel.GetTopLevel(panel) as Window)?.Close();
@@ -156,8 +141,7 @@ public static class MessageDialog
         string message,
         string confirmButtonText,
         string cancelButtonText,
-        TaskCompletionSource<bool> completion,
-        MessageDialogCommand? command)
+        TaskCompletionSource<bool> completion)
     {
         var confirmButton = new Button
         {
@@ -185,19 +169,14 @@ public static class MessageDialog
             Orientation = Orientation.Horizontal,
             HorizontalAlignment = HorizontalAlignment.Right
         };
-        var panel = new DockPanel();
-        if (command is not null)
-        {
-            buttonPanel.Children.Add(CreateCopyButton(panel, command));
-            confirmButton.Margin = new Thickness(6, 12, 6, 12);
-        }
         buttonPanel.Children.Add(confirmButton);
         buttonPanel.Children.Add(cancelButton);
 
+        var panel = new DockPanel();
         DockPanel.SetDock(buttonPanel, Dock.Bottom);
 
         panel.Children.Add(buttonPanel);
-        panel.Children.Add(BuildMessageArea(message, command));
+        panel.Children.Add(BuildMessageArea(message));
 
         confirmButton.Click += (_, _) =>
         {
@@ -211,6 +190,40 @@ public static class MessageDialog
             (TopLevel.GetTopLevel(panel) as Window)?.Close();
         };
 
+        return panel;
+    }
+
+    private static Control BuildContentWithCommand(string message, string closeButtonText, MessageDialogCommand command)
+    {
+        var panel = (DockPanel)BuildContent(message, closeButtonText);
+        var closeButton = (Button)panel.Children[0];
+        panel.Children.RemoveAt(0);
+        closeButton.Margin = new Thickness(6, 12, 12, 12);
+        var buttonPanel = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right
+        };
+        buttonPanel.Children.Add(CreateCopyButton(panel, command));
+        buttonPanel.Children.Add(closeButton);
+        DockPanel.SetDock(buttonPanel, Dock.Bottom);
+        panel.Children.Insert(0, buttonPanel);
+        ((ScrollViewer)panel.Children[1]).Content = BuildMessageWithCommand(message, command);
+        return panel;
+    }
+
+    private static Control BuildConfirmationContentWithCommand(
+        string message,
+        string confirmButtonText,
+        string cancelButtonText,
+        TaskCompletionSource<bool> completion,
+        MessageDialogCommand command)
+    {
+        var panel = (DockPanel)BuildConfirmationContent(message, confirmButtonText, cancelButtonText, completion);
+        var buttonPanel = (StackPanel)panel.Children[0];
+        ((Button)buttonPanel.Children[0]).Margin = new Thickness(6, 12, 6, 12);
+        buttonPanel.Children.Insert(0, CreateCopyButton(panel, command));
+        ((ScrollViewer)panel.Children[1]).Content = BuildMessageWithCommand(message, command);
         return panel;
     }
 
@@ -280,18 +293,16 @@ public static class MessageDialog
 
     // The window sizes itself to this area until it reaches its height cap; from then on the
     // message scrolls while the docked buttons keep their place.
-    private static ScrollViewer BuildMessageArea(string message, MessageDialogCommand? command = null) =>
+    private static ScrollViewer BuildMessageArea(string message) =>
         new()
         {
-            Content = command is null
-                ? new TextBlock
-                {
-                    Text = message,
-                    TextWrapping = TextWrapping.Wrap,
-                    Margin = new Thickness(12),
-                    VerticalAlignment = VerticalAlignment.Center
-                }
-                : BuildMessageWithCommand(message, command),
+            Content = new TextBlock
+            {
+                Text = message,
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(12),
+                VerticalAlignment = VerticalAlignment.Center
+            },
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
         };
