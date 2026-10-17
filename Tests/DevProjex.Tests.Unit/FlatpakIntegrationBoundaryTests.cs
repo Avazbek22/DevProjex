@@ -83,11 +83,21 @@ public sealed class FlatpakIntegrationBoundaryTests
 		{
 			Platform = TerminalCommandHostPlatform.Linux,
 			HomeDirectoryProvider = () => directory.Path,
+			LocalAppDataPathProvider = () => Path.Combine(directory.Path, ".local", "share"),
+			IsWindowsPackagedApp = () => false,
 			ExecutablePathProvider = () => executable,
 			PathVariableProvider = () => bin,
-			ProcessPathVariableWriter = _ => { }
+			ProcessPathVariableWriter = _ => { },
+			PathListSeparator = Path.PathSeparator,
+			UserPathVariableProvider = () => string.Empty,
+			MachinePathVariableProvider = () => string.Empty,
+			PathExtensionsProvider = () => ".COM;.EXE;.BAT;.CMD",
+			ShellPathProvider = () => "/bin/bash",
+			XdgConfigHomeProvider = () => Path.Combine(directory.Path, ".config"),
+			ZdotDirectoryProvider = () => directory.Path
 		});
 		Assert.True(service.InstallOrRepair().Success);
+		Assert.Equal(TerminalCommandSetupState.Installed, service.Probe().State);
 		var path = Path.Combine(bin, "devprojex");
 		var original = File.ReadAllText(path);
 		using (Sandbox())
@@ -100,6 +110,7 @@ public sealed class FlatpakIntegrationBoundaryTests
 		Assert.Equal(TerminalCommandSetupState.Stale, service.Probe().State);
 		Assert.True(service.InstallOrRepair().Success);
 		Assert.Equal(original, File.ReadAllText(path));
+		Assert.Equal(TerminalCommandSetupState.Installed, service.Probe().State);
 		File.WriteAllText(path, "foreign command");
 		using (Sandbox())
 			Assert.False(service.InstallOrRepair().Success);
