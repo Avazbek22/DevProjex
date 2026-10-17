@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Avalonia.VisualTree;
 
 namespace DevProjex.Tests.UI;
@@ -10,7 +11,7 @@ public sealed class FlatpakPathUiTests(UiWorkspaceFixture workspace)
 	{
 		using var sandbox = FlatpakEnvironment.UseForTesting(new(true, "io.github.Avazbek22.DevProjex"));
 		var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
-		var originalTitle = window.Title;
+		var originalTitle = WithoutLoadTiming(window.Title);
 		try
 		{
 			var missing = Path.Combine(workspace.Project.RootPath, "unavailable-'project");
@@ -23,7 +24,8 @@ public sealed class FlatpakPathUiTests(UiWorkspaceFixture workspace)
 			Assert.Contains(FlatpakEnvironment.OverrideCommand(missing), text);
 			await UiTestDriver.CloseTopLevelWindowAsync(dialog);
 			Assert.False(await Assert.IsAssignableFrom<Task<bool>>(opening));
-			Assert.Equal(originalTitle, window.Title);
+			Assert.Equal(originalTitle, WithoutLoadTiming(window.Title));
+			Assert.DoesNotContain("unavailable-", window.Title, StringComparison.Ordinal);
 			Assert.True(UiTestDriver.GetViewModel(window).IsProjectLoaded);
 		}
 		finally
@@ -69,4 +71,9 @@ public sealed class FlatpakPathUiTests(UiWorkspaceFixture workspace)
 			await UiTestDriver.CloseWindowAsync(window);
 		}
 	}
+
+	// Builds with project-load timing append the measured durations to the title after the load
+	// completes, so the suffix may or may not be present when the title is first read.
+	private static string WithoutLoadTiming(string? title) =>
+		Regex.Replace(title ?? string.Empty, @" \[\d+\.\d{3} \+ \d+\.\d{3} = \d+\.\d{3}\]$", string.Empty);
 }
