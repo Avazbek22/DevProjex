@@ -102,9 +102,18 @@ public partial class MainWindow
                 return;
             }
 
+            McpClientLaunchResult? sandboxLaunch = null;
+            if (FlatpakEnvironment.Current.IsActive && request.Client != McpConnectionClient.Json)
+            {
+                sandboxLaunch = await _mcpClientLaunchService.OpenAsync(
+                    new McpClientLaunchRequest(request.Client, request.ProjectRoot), cancellationToken);
+                if (sandboxLaunch.Status == McpClientLaunchStatus.CopyCommand && sandboxLaunch.ManualCommand is not null)
+                    await SetClipboardTextAsync(sandboxLaunch.ManualCommand);
+            }
+
             if (result.Succeeded)
             {
-                var launchResult = await _mcpClientLaunchService.OpenAsync(
+                var launchResult = sandboxLaunch ?? await _mcpClientLaunchService.OpenAsync(
                     new McpClientLaunchRequest(request.Client, request.ProjectRoot),
                     cancellationToken);
                 cancellationToken.ThrowIfCancellationRequested();
