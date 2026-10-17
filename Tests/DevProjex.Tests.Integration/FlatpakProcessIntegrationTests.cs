@@ -81,6 +81,70 @@ public sealed class FlatpakProcessIntegrationTests
 		Assert.EndsWith("-" + sandboxId + ".jsonl", journalPath);
 	}
 
+	[Theory]
+	[InlineData("claude-code")]
+	[InlineData("codex")]
+	public async Task MissingHostClientPrintsAManualCommandWithoutTouchingConfiguration(string clientName)
+	{
+		using var fixture = new TemporaryDirectory();
+		var marker = fixture.CreateFile("flatpak-info", "[Application]\n");
+		var start = Start(marker, fixture.Path, ["mcp", "connect", fixture.Path, "--client", clientName, "--open", "--language", "en"]);
+		start.Environment["PATH"] = string.Empty;
+		using var process = Process.Start(start)!;
+		var stdout = process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
+		var stderr = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+		await process.WaitForExitAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(0, process.ExitCode);
+		var text = await stdout;
+		Assert.Contains("Could not verify", text);
+		Assert.Contains("-- flatpak run io.github.Avazbek22.DevProjex mcp --root", text);
+		Assert.Equal(string.Empty, await stderr);
+		Assert.False(File.Exists(Path.Combine(fixture.Path, ".claude.json")));
+		Assert.False(Directory.Exists(Path.Combine(fixture.Path, ".codex")));
+	}
+
+	[Theory]
+	[InlineData("cursor")]
+	[InlineData("vscode")]
+	public async Task OpenEditorReturnsTheHostCommandThroughTheRealCli(string clientName)
+	{
+		using var fixture = new TemporaryDirectory();
+		var marker = fixture.CreateFile("flatpak-info", "[Application]\n");
+		using var process = Process.Start(Start(marker, fixture.Path,
+			["mcp", "connect", fixture.Path, "--client", clientName, "--open"]))!;
+		var stdout = process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
+		var stderr = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+		await process.WaitForExitAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(0, process.ExitCode);
+		Assert.Contains((clientName == "vscode" ? "code " : "cursor ") + FlatpakEnvironment.QuoteArgument(fixture.Path), await stdout);
+		Assert.Equal(string.Empty, await stderr);
+		using var config = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(fixture.Path,
+			clientName == "vscode" ? ".vscode" : ".cursor", "mcp.json"), TestContext.Current.CancellationToken));
+		var entry = config.RootElement.GetProperty(clientName == "vscode" ? "servers" : "mcpServers").GetProperty("devprojex");
+		Assert.Equal("flatpak", entry.GetProperty("command").GetString());
+		Assert.Equal("run", entry.GetProperty("args")[0].GetString());
+	}
+
+	[Theory]
+	[InlineData("connect")]
+	[InlineData("server")]
+	public async Task MissingRootsNeverPrintAConfigurationOrProtocolMessage(string mode)
+	{
+		using var fixture = new TemporaryDirectory();
+		var marker = fixture.CreateFile("flatpak-info", "[Application]\n");
+		var missing = Path.Combine(fixture.Path, "missing directory");
+		var arguments = mode == "server"
+			? new[] { "mcp", "--root", missing }
+			: new[] { "mcp", "connect", missing, "--client", "vscode", "--print" };
+		using var process = Process.Start(Start(marker, fixture.Path, arguments))!;
+		var stdout = process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
+		var stderr = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+		await process.WaitForExitAsync(TestContext.Current.CancellationToken);
+		Assert.NotEqual(0, process.ExitCode);
+		Assert.Equal(string.Empty, await stdout);
+		Assert.Contains("flatpak override --user", await stderr);
+	}
+
 	private static ProcessStartInfo Start(string marker, string root, string[] arguments)
 	{
 		var directory = new DirectoryInfo(AppContext.BaseDirectory);

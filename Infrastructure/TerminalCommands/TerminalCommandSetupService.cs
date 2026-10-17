@@ -55,6 +55,7 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 	private const string FishPathSetupLine = "fish_add_path --move \"$HOME/.local/bin\"";
 	private const string WindowsLauncherMarker = "rem DevProjex terminal command wrapper";
 	private const string UnixTargetPrefix = "# target: ";
+	private const string UnixEncodedTargetPrefix = "# target-base64: ";
 	private const string WindowsTargetPrefix = "rem target: ";
 	private const string WindowsEncodedTargetPrefix = "rem target-base64: ";
 	private const string WindowsPathHint =
@@ -348,11 +349,14 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 	{
 		// The target comment is intentionally plain text so stale wrappers can be
 		// repaired without parsing shell syntax or executing anything.
+		var targetComment = FlatpakEnvironment.Current.IsActive && targetPath.IndexOfAny(['\r', '\n']) >= 0
+			? UnixEncodedTargetPrefix + Convert.ToBase64String(Encoding.UTF8.GetBytes(targetPath))
+			: UnixTargetPrefix + targetPath;
 		var script = string.Join(
 			"\n",
 			"#!/bin/sh",
 			UnixWrapperMarker,
-			UnixTargetPrefix + targetPath,
+			targetComment,
 			"export DEVPROJEX_TERMINAL_HOST=1",
 			"exec " + (FlatpakEnvironment.Current.ExternalLaunchCommand ?? ShellQuote(targetPath)) + " \"$@\"",
 			string.Empty);
@@ -849,12 +853,14 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 			if (!IsManagedWrapperMarker(marker) || target is null)
 				return new ManagedWrapperReadResult(ManagedWrapperReadStatus.Foreign, null);
 
-			if (string.Equals(marker, WindowsLauncherMarker, StringComparison.OrdinalIgnoreCase) &&
-			    target.StartsWith(WindowsEncodedTargetPrefix, StringComparison.OrdinalIgnoreCase))
+			var encodedTargetPrefix = string.Equals(marker, WindowsLauncherMarker, StringComparison.OrdinalIgnoreCase)
+				? WindowsEncodedTargetPrefix
+				: UnixEncodedTargetPrefix;
+			if (target.StartsWith(encodedTargetPrefix, StringComparison.OrdinalIgnoreCase))
 			{
 				try
 				{
-					var encoded = target[WindowsEncodedTargetPrefix.Length..];
+					var encoded = target[encodedTargetPrefix.Length..];
 					var decoded = new UTF8Encoding(
 						encoderShouldEmitUTF8Identifier: false,
 						throwOnInvalidBytes: true).GetString(Convert.FromBase64String(encoded));

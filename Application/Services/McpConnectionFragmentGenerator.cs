@@ -286,7 +286,7 @@ public static class McpConnectionFragmentGenerator
 
 	private static void ValidateSingleLine(string value, string parameterName)
 	{
-		if (value.IndexOfAny(['\r', '\n', '\0']) >= 0)
+		if (value.Contains('\0') || !FlatpakEnvironment.Current.IsActive && value.IndexOfAny(['\r', '\n']) >= 0)
 			throw new ArgumentException("Connection fragment paths must be single-line text.", parameterName);
 	}
 }

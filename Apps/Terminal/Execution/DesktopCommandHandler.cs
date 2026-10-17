@@ -11,7 +11,8 @@ public sealed class DesktopCommandHandler(
 	DesktopProcessLauncher? launcher = null,
 	bool writeOutput = true,
 	LocalizationService? localization = null,
-	TimeProvider? timeProvider = null)
+	TimeProvider? timeProvider = null,
+	bool holdSandboxForDesktop = false)
 {
 	private static readonly JsonSerializerOptions MachineJsonOptions = new()
 	{
@@ -54,6 +55,7 @@ public sealed class DesktopCommandHandler(
 				throw;
 			}
 			WriteOutput(ResolveAcceptedProjectPath(request, state, repositoryUrlSource));
+			await WaitForSandboxDesktopAsync(launched.ProcessId, holdSandboxForDesktop, cancellationToken).ConfigureAwait(false);
 			return CommandLineExitCodes.Success;
 		}
 
@@ -83,6 +85,7 @@ public sealed class DesktopCommandHandler(
 				throw;
 			}
 			WriteOutput(ResolveAcceptedProjectPath(request, state, repositoryUrlSource));
+			await WaitForSandboxDesktopAsync(launched.ProcessId, holdSandboxForDesktop, cancellationToken).ConfigureAwait(false);
 			return CommandLineExitCodes.Success;
 		}
 
@@ -95,6 +98,22 @@ public sealed class DesktopCommandHandler(
 		EnsureSuccess(response);
 		WriteOutput(ResolveAcceptedProjectPath(request, response.State, repositoryUrlSource));
 		return CommandLineExitCodes.Success;
+	}
+
+	internal static async Task WaitForSandboxDesktopAsync(int processId, bool holdSandbox, CancellationToken cancellationToken)
+	{
+		if (!holdSandbox)
+			return;
+		try
+		{
+			// Flatpak tears down this launch's PID namespace when its initial CLI command exits.
+			using var process = System.Diagnostics.Process.GetProcessById(processId);
+			await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+		}
+		catch (ArgumentException)
+		{
+			// The child may have closed between completing its open request and this lookup.
+		}
 	}
 
 	public Task<int> ListAsync(

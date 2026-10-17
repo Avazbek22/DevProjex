@@ -363,10 +363,10 @@ public sealed class McpClientLaunchService : IMcpClientLaunchService
 		{
 			var command = request.Client switch
 			{
-				McpConnectionClient.ClaudeCode => "cd " + QuoteForShell(request.ProjectRoot) + " && claude",
-				McpConnectionClient.Codex => "cd " + QuoteForShell(request.ProjectRoot) + " && codex",
-				McpConnectionClient.Cursor => "cursor " + QuoteForShell(request.ProjectRoot),
-				_ => "code " + QuoteForShell(request.ProjectRoot)
+				McpConnectionClient.ClaudeCode => "cd " + FlatpakEnvironment.QuoteArgument(request.ProjectRoot) + " && claude",
+				McpConnectionClient.Codex => "cd " + FlatpakEnvironment.QuoteArgument(request.ProjectRoot) + " && codex",
+				McpConnectionClient.Cursor => "cursor " + FlatpakEnvironment.QuoteArgument(request.ProjectRoot),
+				_ => "code " + FlatpakEnvironment.QuoteArgument(request.ProjectRoot)
 			};
 			return Task.FromResult(new McpClientLaunchResult(McpClientLaunchStatus.CopyCommand,
 				_localization["Flatpak.CopyCommand"], command));

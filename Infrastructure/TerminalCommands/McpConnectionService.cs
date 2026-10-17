@@ -703,13 +703,13 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 				_localization.Format("Mcp.Connect.ClientNotFound", DisplayName(request.Client)));
 		}
 
+		if (FlatpakEnvironment.Current.IsActive && !(await RunClientCommandAsync(
+				executable, ["--version"], request.ProjectRoot, cancellationToken).ConfigureAwait(false)).Succeeded)
+			return new McpConnectionInspection(false, null, false, _localization["Flatpak.ConnectionUnverified"]);
 		var read = await ReadExistingConnectionAsync(
 			request,
 			executable,
 			cancellationToken).ConfigureAwait(false);
-		if (FlatpakEnvironment.Current.IsActive && !(await RunClientCommandAsync(
-				executable, ["--version"], request.ProjectRoot, cancellationToken).ConfigureAwait(false)).Succeeded)
-			return new McpConnectionInspection(false, null, false, _localization["Flatpak.ConnectionUnverified"]);
 		if (read.Error is not null)
 			return new McpConnectionInspection(false, null, false, read.Error);
 		if (read.Snapshot is null)
@@ -1197,7 +1197,9 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 				executablePath,
 				arguments,
 				projectRoot,
-				ClientCommandTimeout),
+				FlatpakEnvironment.Current.IsActive && arguments is ["--version"]
+					? TimeSpan.FromSeconds(2)
+					: ClientCommandTimeout),
 			cancellationToken);
 
 	private async Task<ExistingConnectionRead> ReadExistingConnectionAsync(

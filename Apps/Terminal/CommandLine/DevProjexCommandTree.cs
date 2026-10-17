@@ -1688,7 +1688,8 @@ public sealed class DevProjexCommandTree
 						: null;
 					return await new DesktopCommandHandler(
 							environment,
-							launcher: new DesktopProcessLauncher(_serviceFactory.HostCapabilities))
+							launcher: new DesktopProcessLauncher(_serviceFactory.HostCapabilities),
+							holdSandboxForDesktop: FlatpakEnvironment.Current.IsActive)
 						.OpenAsync(
 							DesktopOpenRequestFactory.Create(
 								projectPath,
