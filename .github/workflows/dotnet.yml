@@ -121,6 +121,7 @@ jobs:
           .github/workflows/container-build.yml
           .github/workflows/packages-build.yml
           .github/workflows/appimage-build.yml
+            .github/workflows/flatpak-build.yml
           .github/workflows/package-headless.yml
           .github/workflows/publish-container.yml
           .github/workflows/publish-packages.yml

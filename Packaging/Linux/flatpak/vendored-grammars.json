@@ -1,0 +1,67 @@
+{
+  "name": "vendored-grammars",
+  "buildsystem": "simple",
+  "build-commands": [],
+  "modules": [
+    {
+      "name": "tree-sitter-kotlin",
+      "buildsystem": "simple",
+      "build-commands": [
+        "cc -fPIC -shared -O2 -DNDEBUG -fno-ident -fvisibility=hidden -g0 -s -Isrc src/parser.c src/scanner.c -o libtree-sitter-kotlin.so",
+        "install -Dm644 libtree-sitter-kotlin.so /app/lib/devprojex/grammars/libtree-sitter-kotlin.so"
+      ],
+      "sources": [
+        {
+          "type": "archive",
+          "url": "https://codeload.github.com/tree-sitter-grammars/tree-sitter-kotlin/zip/refs/tags/v1.1.0",
+          "sha256": "73c45375934dcb1a764a7c1c3b03059ec78d0755e0bf4874ddb06b4df4fbd091"
+        }
+      ]
+    },
+    {
+      "name": "tree-sitter-toml",
+      "buildsystem": "simple",
+      "build-commands": [
+        "cc -fPIC -shared -O2 -DNDEBUG -fno-ident -fvisibility=hidden -g0 -s -Isrc src/parser.c src/scanner.c -o libtree-sitter-toml.so",
+        "install -Dm644 libtree-sitter-toml.so /app/lib/devprojex/grammars/libtree-sitter-toml.so"
+      ],
+      "sources": [
+        {
+          "type": "archive",
+          "url": "https://codeload.github.com/tree-sitter/tree-sitter-toml/zip/342d9be207c2dba869b9967124c679b5e6fd0ebe",
+          "sha256": "ba4055ea8bff2c17d4eb5454ce965a52d073f246ce0a7d3d915d57c4746d676a"
+        }
+      ]
+    },
+    {
+      "name": "tree-sitter-xml",
+      "buildsystem": "simple",
+      "build-commands": [
+        "cc -fPIC -shared -O2 -DNDEBUG -fno-ident -fvisibility=hidden -g0 -s -Ixml/src xml/src/parser.c xml/src/scanner.c -o libtree-sitter-xml.so",
+        "install -Dm644 libtree-sitter-xml.so /app/lib/devprojex/grammars/libtree-sitter-xml.so"
+      ],
+      "sources": [
+        {
+          "type": "archive",
+          "url": "https://codeload.github.com/tree-sitter-grammars/tree-sitter-xml/zip/refs/tags/v0.7.0",
+          "sha256": "991d121cd1217b488aa1f831a1ed07041c126bf1bc4c9069a025c704014c6fb2"
+        }
+      ]
+    },
+    {
+      "name": "tree-sitter-yaml",
+      "buildsystem": "simple",
+      "build-commands": [
+        "cc -fPIC -shared -O2 -DNDEBUG -fno-ident -fvisibility=hidden -g0 -s -Isrc src/parser.c src/scanner.c -o libtree-sitter-yaml.so",
+        "install -Dm644 libtree-sitter-yaml.so /app/lib/devprojex/grammars/libtree-sitter-yaml.so"
+      ],
+      "sources": [
+        {
+          "type": "archive",
+          "url": "https://codeload.github.com/tree-sitter-grammars/tree-sitter-yaml/zip/refs/tags/v0.7.2",
+          "sha256": "f995e22d02efba52b06d527376f51cfd31ec3029c8f70a8e1132281ae0c1e7fd"
+        }
+      ]
+    }
+  ]
+}

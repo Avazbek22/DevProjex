@@ -123,6 +123,13 @@ jobs:
       checkout_ref: ${{ needs.validate-sha.outputs.candidate_sha }}
       version: ${{ needs.validate-sha.outputs.display_version }}
 
+  flatpak:
+    name: Flatpak dry-run
+    needs: validate-sha
+    uses: ./.github/workflows/flatpak-build.yml
+    with:
+      checkout_ref: ${{ needs.validate-sha.outputs.candidate_sha }}
+
   grammar-delivery:
     name: Grammar Delivery
     needs: validate-sha
@@ -149,6 +156,7 @@ jobs:
       - container
       - packages
       - appimage
+      - flatpak
       - grammar-delivery
       - store-smoke
     runs-on: ubuntu-latest
@@ -165,6 +173,7 @@ jobs:
           CONTAINER_RESULT: ${{ needs.container.result }}
           PACKAGES_RESULT: ${{ needs.packages.result }}
           APPIMAGE_RESULT: ${{ needs.appimage.result }}
+          FLATPAK_RESULT: ${{ needs.flatpak.result }}
           GRAMMAR_RESULT: ${{ needs.grammar-delivery.result }}
           STORE_RESULT: ${{ needs.store-smoke.result }}
         run: |
@@ -176,6 +185,7 @@ jobs:
             'Container dry-run' = $env:CONTAINER_RESULT
             'Package dry-run' = $env:PACKAGES_RESULT
             'AppImage dry-run' = $env:APPIMAGE_RESULT
+            'Flatpak dry-run' = $env:FLATPAK_RESULT
             'Grammar Delivery' = $env:GRAMMAR_RESULT
             'Store Package Smoke' = $env:STORE_RESULT
           }

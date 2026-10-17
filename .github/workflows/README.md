@@ -51,6 +51,12 @@ pull request shows them without running anything twice.
 
 ## Where a new check belongs
 
+`flatpak-build.yml` is the combined read-only packaging gate for the Flatpak
+channel: packaging-path pull requests (excluding master), pushes to master/v*,
+dispatch and reusable calls share one definition. It uses the Flathub SDK
+container, does not publish to Flathub and adds no GitHub release assets. Its
+release-candidate call pins `checkout_ref` like the other packaging gates.
+
 Pick the cheapest tier that can prove the property. In order:
 
 1. A test for product code goes into an existing suite (Unit, Integration, Terminal, UI). The
