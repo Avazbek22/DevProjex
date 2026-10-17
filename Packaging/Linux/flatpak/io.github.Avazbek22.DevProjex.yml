@@ -15,7 +15,6 @@ finish-args:
   # Avalonia's existing global menu integration registers its menu with this service.
   - --talk-name=com.canonical.AppMenu.Registrar
   # Desktop and Documents portals are already allowed by Flatpak's default bus policy.
-  - --env=GTK_USE_PORTAL=1
 build-options:
   append-path: /usr/lib/sdk/dotnet10/bin
   env:
@@ -27,8 +26,8 @@ modules:
   - name: git
     buildsystem: simple
     build-commands:
-      - make -j2 prefix=/app NO_PERL=YesPlease NO_TCLTK=YesPlease NO_GETTEXT=YesPlease NO_INSTALL_HARDLINKS=YesPlease all
-      - make prefix=/app NO_PERL=YesPlease NO_TCLTK=YesPlease NO_GETTEXT=YesPlease NO_INSTALL_HARDLINKS=YesPlease install
+      - make -j2 prefix=/app NO_RUST=YesPlease NO_PERL=YesPlease NO_TCLTK=YesPlease NO_GETTEXT=YesPlease NO_INSTALL_HARDLINKS=YesPlease INSTALL_SYMLINKS=YesPlease all
+      - make prefix=/app NO_RUST=YesPlease NO_PERL=YesPlease NO_TCLTK=YesPlease NO_GETTEXT=YesPlease NO_INSTALL_HARDLINKS=YesPlease INSTALL_SYMLINKS=YesPlease install
       - install -Dm644 COPYING /app/share/licenses/git/COPYING
     sources:
       - type: archive

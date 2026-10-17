@@ -11,9 +11,11 @@ for language in kotlin toml xml yaml; do
     "Infrastructure/Grammars/vendored/$rid/libtree-sitter-$language.so"
 done
 dotnet restore Apps/Avalonia/DevProjex.Avalonia.csproj --source nuget-sources \
+  -p:NuGetPackageRoot="${NUGET_PACKAGES%/}/" \
   -r "$rid" -p:RuntimeIdentifiers="$rid" -p:SelfContained=true \
   -p:PublishReadyToRun=true -p:PublishSingleFile=false -p:DevProjexGrammarDelivery=Content
 dotnet publish Apps/Avalonia/DevProjex.Avalonia.csproj --no-restore -c Release -m:1 \
+  -p:NuGetPackageRoot="${NUGET_PACKAGES%/}/" \
   -r "$rid" --self-contained true -p:RuntimeIdentifiers="$rid" \
   -p:PublishReadyToRun=true -p:PublishSingleFile=false -p:DevProjexGrammarDelivery=Content \
   -p:EnableProjectLoadTiming=false -p:PublishTrimmed=false -p:DebugType=None \
