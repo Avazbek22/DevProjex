@@ -7,6 +7,7 @@
   "Flatpak.Environment": "Flatpak · 访问范围：主文件夹 · 内置 git：{0} · 数据：{1} · 客户端连接命令：{2}",
   "Flatpak.PrivateClone": "沙盒中可能无法验证私有仓库身份。请打开已在计算机上克隆的文件夹。",
   "Flatpak.CopyClientCommand": "复制 {0} 命令",
+  "Flatpak.CopyOverrideCommand": "复制命令",
   "Mcp.Connect.ProjectEntryReplaceTitle": "替换 DevProjex 客户端设置",
   "Mcp.Connect.ProjectEntryReplacePrompt": "{0} 的现有 devprojex 条目包含将被删除或覆盖的字段：\n{1}\n\n替换该条目？",
   "Mcp.Connect.ProjectEntryReplaceConfirm": "替换",

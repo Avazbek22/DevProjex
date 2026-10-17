@@ -7,6 +7,7 @@
   "Flatpak.Environment": "Flatpak · дастрасӣ: ҷузвдони хонагӣ · git-и дохилӣ: {0} · маълумот: {1} · фармони пайвасти муштариён: {2}",
   "Flatpak.PrivateClone": "Тасдиқи дастрасӣ ба репозиторийҳои хусусӣ дар муҳити ҷудошуда шояд имконнопазир бошад. Ҷузвдони қаблан дар компютер клоншударо кушоед.",
   "Flatpak.CopyClientCommand": "Нусхабардории фармони {0}",
+  "Flatpak.CopyOverrideCommand": "Нусхабардории фармон",
   "Mcp.Connect.ProjectEntryReplaceTitle": "Иваз кардани танзимоти муштарии DevProjex",
   "Mcp.Connect.ProjectEntryReplacePrompt": "Сабти мавҷудаи devprojex барои {0} майдонҳое дорад, ки ҳазф ё аз нав навишта мешаванд:\n{1}\n\nСабт иваз шавад?",
   "Mcp.Connect.ProjectEntryReplaceConfirm": "Иваз кардан",

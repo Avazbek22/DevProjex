@@ -7,6 +7,7 @@
   "Flatpak.Environment": "Flatpak · accès : dossier personnel · git intégré : {0} · données : {1} · connexion des clients : {2}",
   "Flatpak.PrivateClone": "L’authentification aux dépôts privés peut être indisponible dans le bac à sable. Ouvrez un dossier déjà cloné sur votre ordinateur.",
   "Flatpak.CopyClientCommand": "Copier la commande {0}",
+  "Flatpak.CopyOverrideCommand": "Copier la commande",
   "Mcp.Connect.ProjectEntryReplaceTitle": "Remplacer les paramètres client DevProjex",
   "Mcp.Connect.ProjectEntryReplacePrompt": "L’entrée devprojex existante pour {0} contient des champs qui seront supprimés ou écrasés :\n{1}\n\nLa remplacer ?",
   "Mcp.Connect.ProjectEntryReplaceConfirm": "Remplacer",

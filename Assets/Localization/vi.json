@@ -7,6 +7,7 @@
   "Flatpak.Environment": "Flatpak · truy cập: thư mục cá nhân · git tích hợp: {0} · dữ liệu: {1} · lệnh kết nối ứng dụng khách: {2}",
   "Flatpak.PrivateClone": "Xác thực kho riêng tư có thể không khả dụng trong môi trường cách ly. Hãy mở thư mục đã được sao chép trên máy tính.",
   "Flatpak.CopyClientCommand": "Sao chép lệnh {0}",
+  "Flatpak.CopyOverrideCommand": "Sao chép lệnh",
   "Mcp.Connect.ProjectEntryReplaceTitle": "Thay thế cài đặt ứng dụng DevProjex",
   "Mcp.Connect.ProjectEntryReplacePrompt": "Mục devprojex hiện có cho {0} chứa các trường sẽ bị xóa hoặc ghi đè:\n{1}\n\nThay thế mục này?",
   "Mcp.Connect.ProjectEntryReplaceConfirm": "Thay thế",

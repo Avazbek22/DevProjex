@@ -7,6 +7,7 @@
   "Flatpak.Environment": "Flatpak · akses: folder beranda · git bawaan: {0} · data: {1} · hubungkan klien dengan: {2}",
   "Flatpak.PrivateClone": "Autentikasi repositori privat mungkin tidak tersedia di sandbox. Buka folder yang sudah diklon di komputer Anda.",
   "Flatpak.CopyClientCommand": "Salin perintah {0}",
+  "Flatpak.CopyOverrideCommand": "Salin perintah",
   "Mcp.Connect.ProjectEntryReplaceTitle": "Ganti pengaturan klien DevProjex",
   "Mcp.Connect.ProjectEntryReplacePrompt": "Entri devprojex yang ada untuk {0} memiliki kolom yang akan dihapus atau ditimpa:\n{1}\n\nGanti entri ini?",
   "Mcp.Connect.ProjectEntryReplaceConfirm": "Ganti",

@@ -285,6 +285,39 @@ public sealed class FlatpakIntegrationBoundaryTests
 		Assert.Contains("flatpak override --user '--filesystem=/mnt/missing project' " + AppId, message);
 	}
 
+	[Fact]
+	public void DialogNoticeSeparatesTheOverrideCommandFromItsLeadInInEveryLanguage()
+	{
+		using var sandbox = Sandbox();
+		const string path = "/mnt/data/it's a \"project\" $HOME";
+		var catalog = new JsonLocalizationCatalog();
+		foreach (var language in Enum.GetValues<AppLanguage>())
+		{
+			var localization = new LocalizationService(catalog, language);
+			var full = FlatpakPresentation.UnavailablePath(localization, path);
+			var notice = FlatpakPresentation.UnavailablePathNotice(localization, path);
+
+			Assert.Equal(FlatpakEnvironment.OverrideCommand(path), notice.Command);
+			Assert.StartsWith(notice.Message, full, StringComparison.Ordinal);
+			Assert.EndsWith(notice.Command!, full, StringComparison.Ordinal);
+			Assert.InRange(full.Length - notice.Message.Length - notice.Command!.Length, 0, 1);
+			Assert.Equal(notice.Message.TrimEnd(), notice.Message);
+			Assert.DoesNotContain("flatpak", notice.Message, StringComparison.Ordinal);
+			Assert.DoesNotContain("{0}", notice.Message, StringComparison.Ordinal);
+			Assert.False(string.IsNullOrWhiteSpace(localization["Flatpak.CopyOverrideCommand"]));
+		}
+	}
+
+	[Fact]
+	public void DialogNoticeForAPortalDocumentOffersNoCommand()
+	{
+		using var sandbox = Sandbox();
+		var notice = FlatpakPresentation.UnavailablePathNotice(Localization(), "/run/user/1000/doc/abc123/project");
+
+		Assert.Null(notice.Command);
+		Assert.Equal(Localization()["Flatpak.PortalPathUnavailable"], notice.Message);
+	}
+
 	private sealed class FailedRunner : IMcpConnectionProcessRunner
 	{
 		public Task<McpConnectionProcessResult> RunAsync(McpConnectionProcessRequest request, CancellationToken cancellationToken) =>

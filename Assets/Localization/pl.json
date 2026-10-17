@@ -7,6 +7,7 @@
   "Flatpak.Environment": "Flatpak · dostęp: katalog domowy · dołączony git: {0} · dane: {1} · połącz klientów poleceniem: {2}",
   "Flatpak.PrivateClone": "Uwierzytelnianie prywatnych repozytoriów może być niedostępne w piaskownicy. Otwórz folder już sklonowany na komputerze.",
   "Flatpak.CopyClientCommand": "Kopiuj polecenie {0}",
+  "Flatpak.CopyOverrideCommand": "Kopiuj polecenie",
   "Mcp.Connect.ProjectEntryReplaceTitle": "Zastąp ustawienia klienta DevProjex",
   "Mcp.Connect.ProjectEntryReplacePrompt": "Istniejący wpis devprojex dla {0} zawiera pola, które zostaną usunięte lub nadpisane:\n{1}\n\nZastąpić wpis?",
   "Mcp.Connect.ProjectEntryReplaceConfirm": "Zastąp",

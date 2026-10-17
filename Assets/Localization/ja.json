@@ -7,6 +7,7 @@
   "Flatpak.Environment": "Flatpak · アクセス: ホームフォルダー · 同梱 git: {0} · データ: {1} · クライアント接続コマンド: {2}",
   "Flatpak.PrivateClone": "サンドボックス内ではプライベートリポジトリの認証を利用できない場合があります。コンピューターにクローン済みのフォルダーを開いてください。",
   "Flatpak.CopyClientCommand": "{0} のコマンドをコピー",
+  "Flatpak.CopyOverrideCommand": "コマンドをコピー",
   "Mcp.Connect.ProjectEntryReplaceTitle": "DevProjexのクライアント設定を置き換え",
   "Mcp.Connect.ProjectEntryReplacePrompt": "{0} の既存の devprojex エントリには、削除または上書きされるフィールドがあります：\n{1}\n\n置き換えますか？",
   "Mcp.Connect.ProjectEntryReplaceConfirm": "置き換え",

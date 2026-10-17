@@ -1,5 +1,7 @@
 namespace DevProjex.Avalonia.Services;
 
+public sealed record MessageDialogCommand(string Text, string CopyButtonText);
+
 public static class MessageDialog
 {
     public static async Task<int> ShowChoiceAsync(
@@ -21,9 +23,10 @@ public static class MessageDialog
         Window owner,
         string title,
         string message,
-        string closeButtonText)
+        string closeButtonText,
+        MessageDialogCommand? command = null)
     {
-        var dialog = CreateMessageWindow(owner, title, message, closeButtonText);
+        var dialog = CreateMessageWindow(owner, title, message, closeButtonText, command);
 
         if (owner is not null)
             await dialog.ShowDialog(owner);
@@ -37,7 +40,8 @@ public static class MessageDialog
         string message,
         string confirmButtonText,
         string cancelButtonText,
-        double width = 520)
+        double width = 520,
+        MessageDialogCommand? command = null)
     {
         var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var dialog = CreateConfirmationWindow(
@@ -47,7 +51,8 @@ public static class MessageDialog
             confirmButtonText,
             cancelButtonText,
             width,
-            completion);
+            completion,
+            command);
 
         dialog.Closed += (_, _) => completion.TrySetResult(false);
 
@@ -63,8 +68,13 @@ public static class MessageDialog
         Window? owner,
         string title,
         string message,
-        string closeButtonText) =>
-        CreateDialogWindow(owner, title, BuildContent(message, closeButtonText), width: 420);
+        string closeButtonText,
+        MessageDialogCommand? command = null) =>
+        CreateDialogWindow(
+            owner,
+            title,
+            BuildContent(message, closeButtonText, command),
+            width: command is null ? 420 : 520);
 
     internal static Window CreateConfirmationWindow(
         Window? owner,
@@ -73,13 +83,14 @@ public static class MessageDialog
         string confirmButtonText,
         string cancelButtonText,
         double width,
-        TaskCompletionSource<bool> completion)
+        TaskCompletionSource<bool> completion,
+        MessageDialogCommand? command = null)
     {
         ArgumentNullException.ThrowIfNull(completion);
         return CreateDialogWindow(
             owner,
             title,
-            BuildConfirmationContent(message, confirmButtonText, cancelButtonText, completion),
+            BuildConfirmationContent(message, confirmButtonText, cancelButtonText, completion, command),
             width);
     }
 
@@ -102,7 +113,7 @@ public static class MessageDialog
         return DialogSurfaceFactory.CreateContentSizedWindow(owner, title, themeVariant, brushes, content, width);
     }
 
-    private static Control BuildContent(string message, string closeButtonText)
+    private static Control BuildContent(string message, string closeButtonText, MessageDialogCommand? command)
     {
         var button = new Button
         {
@@ -113,10 +124,27 @@ public static class MessageDialog
         };
 
         var panel = new DockPanel();
-        DockPanel.SetDock(button, Dock.Bottom);
+        if (command is null)
+        {
+            DockPanel.SetDock(button, Dock.Bottom);
+            panel.Children.Add(button);
+        }
+        else
+        {
+            button.Margin = new Thickness(6, 12, 12, 12);
+            var copyButton = CreateCopyButton(panel, command);
+            var buttonPanel = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right
+            };
+            buttonPanel.Children.Add(copyButton);
+            buttonPanel.Children.Add(button);
+            DockPanel.SetDock(buttonPanel, Dock.Bottom);
+            panel.Children.Add(buttonPanel);
+        }
 
-        panel.Children.Add(button);
-        panel.Children.Add(BuildMessageArea(message));
+        panel.Children.Add(BuildMessageArea(message, command));
 
         button.Click += (_, _) =>
             (TopLevel.GetTopLevel(panel) as Window)?.Close();
@@ -128,7 +156,8 @@ public static class MessageDialog
         string message,
         string confirmButtonText,
         string cancelButtonText,
-        TaskCompletionSource<bool> completion)
+        TaskCompletionSource<bool> completion,
+        MessageDialogCommand? command)
     {
         var confirmButton = new Button
         {
@@ -156,14 +185,19 @@ public static class MessageDialog
             Orientation = Orientation.Horizontal,
             HorizontalAlignment = HorizontalAlignment.Right
         };
+        var panel = new DockPanel();
+        if (command is not null)
+        {
+            buttonPanel.Children.Add(CreateCopyButton(panel, command));
+            confirmButton.Margin = new Thickness(6, 12, 6, 12);
+        }
         buttonPanel.Children.Add(confirmButton);
         buttonPanel.Children.Add(cancelButton);
 
-        var panel = new DockPanel();
         DockPanel.SetDock(buttonPanel, Dock.Bottom);
 
         panel.Children.Add(buttonPanel);
-        panel.Children.Add(BuildMessageArea(message));
+        panel.Children.Add(BuildMessageArea(message, command));
 
         confirmButton.Click += (_, _) =>
         {
@@ -219,19 +253,65 @@ public static class MessageDialog
         return panel;
     }
 
+    private static Button CreateCopyButton(Control dialogContent, MessageDialogCommand command)
+    {
+        var copyButton = new Button
+        {
+            Content = command.CopyButtonText,
+            Margin = new Thickness(12, 12, 6, 12),
+            MinWidth = 110,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center
+        };
+        copyButton.Click += async (_, _) =>
+        {
+            try
+            {
+                if (TopLevel.GetTopLevel(dialogContent)?.Clipboard is { } clipboard)
+                    await clipboard.SetTextAsync(command.Text);
+            }
+            catch
+            {
+                // Clipboard access can be unavailable in headless or restricted sessions.
+            }
+        };
+        return copyButton;
+    }
+
     // The window sizes itself to this area until it reaches its height cap; from then on the
     // message scrolls while the docked buttons keep their place.
-    private static ScrollViewer BuildMessageArea(string message) =>
+    private static ScrollViewer BuildMessageArea(string message, MessageDialogCommand? command = null) =>
         new()
         {
-            Content = new TextBlock
-            {
-                Text = message,
-                TextWrapping = TextWrapping.Wrap,
-                Margin = new Thickness(12),
-                VerticalAlignment = VerticalAlignment.Center
-            },
+            Content = command is null
+                ? new TextBlock
+                {
+                    Text = message,
+                    TextWrapping = TextWrapping.Wrap,
+                    Margin = new Thickness(12),
+                    VerticalAlignment = VerticalAlignment.Center
+                }
+                : BuildMessageWithCommand(message, command),
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
+        };
+
+    private static StackPanel BuildMessageWithCommand(string message, MessageDialogCommand command) =>
+        new()
+        {
+            Margin = new Thickness(12),
+            Spacing = 10,
+            VerticalAlignment = VerticalAlignment.Center,
+            Children =
+            {
+                new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap },
+                new SelectableTextBlock
+                {
+                    Text = command.Text,
+                    TextWrapping = TextWrapping.Wrap,
+                    FontFamily = FontFamily.Parse("Consolas,Menlo,Monospace"),
+                    FontSize = 13
+                }
+            }
         };
 }

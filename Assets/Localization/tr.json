@@ -7,6 +7,7 @@
   "Flatpak.Environment": "Flatpak · erişim: ev klasörü · yerleşik git: {0} · veriler: {1} · istemci bağlantı komutu: {2}",
   "Flatpak.PrivateClone": "Korumalı alanda özel depo kimlik doğrulaması kullanılamayabilir. Bilgisayarınızda önceden klonlanmış bir klasörü açın.",
   "Flatpak.CopyClientCommand": "{0} komutunu kopyala",
+  "Flatpak.CopyOverrideCommand": "Komutu kopyala",
   "Mcp.Connect.ProjectEntryReplaceTitle": "DevProjex istemci ayarlarını değiştir",
   "Mcp.Connect.ProjectEntryReplacePrompt": "{0} için mevcut devprojex girdisinde kaldırılacak veya üzerine yazılacak alanlar var:\n{1}\n\nGirdi değiştirilsin mi?",
   "Mcp.Connect.ProjectEntryReplaceConfirm": "Değiştir",

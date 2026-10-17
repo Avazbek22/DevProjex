@@ -7,6 +7,7 @@
   "Flatpak.Environment": "Flatpak · kirish: uy jildi · ichki git: {0} · ma’lumotlar: {1} · mijozlarni ulash buyrug‘i: {2}",
   "Flatpak.PrivateClone": "Ajratilgan muhitda xususiy repozitoriyga kirishni tasdiqlash imkoni bo‘lmasligi mumkin. Kompyuterda avval klonlangan jildni oching.",
   "Flatpak.CopyClientCommand": "{0} buyrug‘ini nusxalash",
+  "Flatpak.CopyOverrideCommand": "Buyruqni nusxalash",
   "Mcp.Connect.ProjectEntryReplaceTitle": "DevProjex mijoz sozlamalarini almashtirish",
   "Mcp.Connect.ProjectEntryReplacePrompt": "{0} uchun mavjud devprojex yozuvida o‘chiriladigan yoki ustiga yoziladigan maydonlar bor:\n{1}\n\nYozuv almashtirilsinmi?",
   "Mcp.Connect.ProjectEntryReplaceConfirm": "Almashtirish",

@@ -7,6 +7,7 @@
   "Flatpak.Environment": "Flatpak · Zugriff: persönlicher Ordner · mitgeliefertes git: {0} · Daten: {1} · Clients verbinden mit: {2}",
   "Flatpak.PrivateClone": "Die Anmeldung an privaten Repositorys ist in der Sandbox möglicherweise nicht verfügbar. Öffnen Sie einen bereits auf Ihrem Computer geklonten Ordner.",
   "Flatpak.CopyClientCommand": "Befehl für {0} kopieren",
+  "Flatpak.CopyOverrideCommand": "Befehl kopieren",
   "Mcp.Connect.ProjectEntryReplaceTitle": "DevProjex-Clienteinstellungen ersetzen",
   "Mcp.Connect.ProjectEntryReplacePrompt": "Der vorhandene devprojex-Eintrag für {0} enthält Felder, die entfernt oder überschrieben werden:\n{1}\n\nEintrag ersetzen?",
   "Mcp.Connect.ProjectEntryReplaceConfirm": "Ersetzen",

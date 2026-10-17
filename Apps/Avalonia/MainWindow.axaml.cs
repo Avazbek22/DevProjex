@@ -284,6 +284,21 @@ public partial class MainWindow : Window
             _localization["Dialog.OK"]);
     }
 
+    private async Task ShowFlatpakUnavailablePathAsync(string path)
+    {
+        var notice = FlatpakPresentation.UnavailablePathNotice(_localization, path);
+        var owner = _gitCloneWindow ?? (Window)this;
+        await MessageDialog.ShowAsync(
+            owner,
+            _localization["Msg.ErrorTitle"],
+            notice.Message,
+            _localization["Dialog.OK"],
+            CreateFlatpakOverrideCommand(notice));
+    }
+
+    private MessageDialogCommand? CreateFlatpakOverrideCommand(FlatpakUnavailablePathNotice notice) =>
+        notice.Command is null ? null : new(notice.Command, _localization["Flatpak.CopyOverrideCommand"]);
+
     private async Task ShowInfoAsync(string message) =>
         await MessageDialog.ShowAsync(
             this,
@@ -1154,9 +1169,10 @@ public partial class MainWindow : Window
             if (ownsCandidateSession)
                 candidateSession?.Dispose();
             _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "folder-not-found");
-            await ShowErrorAsync(FlatpakEnvironment.Current.IsActive
-                ? FlatpakPresentation.UnavailablePath(_localization, normalizedPath)
-                : _localization.Format("Msg.PathNotFound", path));
+            if (FlatpakEnvironment.Current.IsActive)
+                await ShowFlatpakUnavailablePathAsync(normalizedPath);
+            else
+                await ShowErrorAsync(_localization.Format("Msg.PathNotFound", path));
             return false;
         }
 
@@ -1166,7 +1182,7 @@ public partial class MainWindow : Window
                 candidateSession?.Dispose();
             if (FlatpakEnvironment.Current.IsActive)
             {
-                await ShowErrorAsync(FlatpakPresentation.UnavailablePath(_localization, normalizedPath));
+                await ShowFlatpakUnavailablePathAsync(normalizedPath);
                 return false;
             }
             if (rootAccess.IsReparsePoint)

@@ -7,6 +7,7 @@
   "Flatpak.Environment": "Flatpak · access: home folder · bundled git: {0} · data: {1} · connect clients with: {2}",
   "Flatpak.PrivateClone": "Private repository authentication may be unavailable in the sandbox. Open a folder already cloned on your computer.",
   "Flatpak.CopyClientCommand": "Copy {0} command",
+  "Flatpak.CopyOverrideCommand": "Copy command",
   "Mcp.Connect.ProjectEntryReplaceTitle": "Replace DevProjex client settings",
   "Mcp.Connect.ProjectEntryReplacePrompt": "The existing devprojex entry for {0} has fields that will be removed or overwritten:\n{1}\n\nReplace it?",
   "Mcp.Connect.ProjectEntryReplaceConfirm": "Replace",

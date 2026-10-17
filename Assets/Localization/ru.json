@@ -7,6 +7,7 @@
   "Flatpak.Environment": "Flatpak · доступ: домашняя папка · встроенный git: {0} · данные: {1} · команда подключения клиентов: {2}",
   "Flatpak.PrivateClone": "Авторизация в приватном репозитории может быть недоступна в песочнице. Откройте папку, уже клонированную на компьютере.",
   "Flatpak.CopyClientCommand": "Скопировать команду {0}",
+  "Flatpak.CopyOverrideCommand": "Скопировать команду",
   "Mcp.Connect.ProjectEntryReplaceTitle": "Заменить настройки клиента DevProjex",
   "Mcp.Connect.ProjectEntryReplacePrompt": "В существующей записи devprojex для {0} есть поля, которые будут удалены или перезаписаны:\n{1}\n\nЗаменить запись?",
   "Mcp.Connect.ProjectEntryReplaceConfirm": "Заменить",

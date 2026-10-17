@@ -69,7 +69,7 @@ public partial class MainWindow
                 agentRoot = await _flatpakHostPaths.ResolveAsync(_currentPath, cancellationToken);
                 if (FlatpakHostPathResolver.TryGetDocument(agentRoot, out _, out _) || !Directory.Exists(agentRoot))
                 {
-                    await ShowErrorAsync(FlatpakPresentation.UnavailablePath(_localization, agentRoot));
+                    await ShowFlatpakUnavailablePathAsync(agentRoot);
                     return;
                 }
             }

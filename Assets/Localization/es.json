@@ -7,6 +7,7 @@
   "Flatpak.Environment": "Flatpak · acceso: carpeta personal · git incluido: {0} · datos: {1} · conecta los clientes con: {2}",
   "Flatpak.PrivateClone": "Es posible que la autenticación en repositorios privados no esté disponible en el entorno aislado. Abre una carpeta ya clonada en tu equipo.",
   "Flatpak.CopyClientCommand": "Copiar comando de {0}",
+  "Flatpak.CopyOverrideCommand": "Copiar comando",
   "Mcp.Connect.ProjectEntryReplaceTitle": "Reemplazar la configuración del cliente DevProjex",
   "Mcp.Connect.ProjectEntryReplacePrompt": "La entrada devprojex existente para {0} contiene campos que se eliminarán o sobrescribirán:\n{1}\n\n¿Reemplazarla?",
   "Mcp.Connect.ProjectEntryReplaceConfirm": "Reemplazar",

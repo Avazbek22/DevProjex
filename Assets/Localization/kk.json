@@ -7,6 +7,7 @@
   "Flatpak.Environment": "Flatpak · қолжетімділік: үй бумасы · кіріктірілген git: {0} · деректер: {1} · клиенттерді қосу пәрмені: {2}",
   "Flatpak.PrivateClone": "Оқшауланған ортада жеке репозиторийдің аутентификациясы қолжетімсіз болуы мүмкін. Компьютерде бұрын клондалған буманы ашыңыз.",
   "Flatpak.CopyClientCommand": "{0} пәрменін көшіру",
+  "Flatpak.CopyOverrideCommand": "Пәрменді көшіру",
   "Mcp.Connect.ProjectEntryReplaceTitle": "DevProjex клиентінің баптауларын ауыстыру",
   "Mcp.Connect.ProjectEntryReplacePrompt": "{0} үшін бар devprojex жазбасында жойылатын немесе үстінен жазылатын өрістер бар:\n{1}\n\nЖазба ауыстырылсын ба?",
   "Mcp.Connect.ProjectEntryReplaceConfirm": "Ауыстыру",

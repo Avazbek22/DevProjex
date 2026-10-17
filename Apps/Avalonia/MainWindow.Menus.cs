@@ -189,14 +189,17 @@ public partial class MainWindow
         ApplyRecentFolderAvailabilityToMenu();
         if (!isAvailable)
         {
+            var flatpakNotice = FlatpakEnvironment.Current.IsActive
+                ? FlatpakPresentation.UnavailablePathNotice(_localization, path)
+                : null;
             var shouldRemove = await MessageDialog.ShowConfirmationAsync(
                 this,
                 _localization["Dialog.RecentFolderUnavailable.Title"],
-                FlatpakEnvironment.Current.IsActive ? FlatpakPresentation.UnavailablePath(_localization, path) :
-                    _localization.Format("Dialog.RecentFolderUnavailable.Message", path),
+                flatpakNotice?.Message ?? _localization.Format("Dialog.RecentFolderUnavailable.Message", path),
                 _localization["Dialog.RecentFolderUnavailable.Remove"],
                 _localization["Dialog.RecentFolderUnavailable.Keep"],
-                width: 450);
+                width: flatpakNotice?.Command is null ? 450 : 560,
+                command: flatpakNotice is null ? null : CreateFlatpakOverrideCommand(flatpakNotice));
 
             if (shouldRemove)
                 await RemoveRecentFolderAsync(path, lifetimeToken);

@@ -7,6 +7,7 @@
   "Flatpak.Environment": "Flatpak · 存取範圍：家目錄 · 內建 git：{0} · 資料：{1} · 用戶端連線命令：{2}",
   "Flatpak.PrivateClone": "沙箱中可能無法驗證私人儲存庫身分。請開啟已在電腦上複製的資料夾。",
   "Flatpak.CopyClientCommand": "複製 {0} 命令",
+  "Flatpak.CopyOverrideCommand": "複製命令",
   "Mcp.Connect.ProjectEntryReplaceTitle": "取代 DevProjex 用戶端設定",
   "Mcp.Connect.ProjectEntryReplacePrompt": "{0} 的現有 devprojex 項目包含將被移除或覆寫的欄位：\n{1}\n\n要取代此項目嗎？",
   "Mcp.Connect.ProjectEntryReplaceConfirm": "取代",

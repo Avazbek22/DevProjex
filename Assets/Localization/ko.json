@@ -7,6 +7,7 @@
   "Flatpak.Environment": "Flatpak · 접근: 홈 폴더 · 내장 git: {0} · 데이터: {1} · 클라이언트 연결 명령: {2}",
   "Flatpak.PrivateClone": "샌드박스에서는 비공개 저장소 인증을 사용할 수 없을 수 있습니다. 컴퓨터에 이미 복제한 폴더를 여세요.",
   "Flatpak.CopyClientCommand": "{0} 명령 복사",
+  "Flatpak.CopyOverrideCommand": "명령 복사",
   "Mcp.Connect.ProjectEntryReplaceTitle": "DevProjex 클라이언트 설정 바꾸기",
   "Mcp.Connect.ProjectEntryReplacePrompt": "{0}의 기존 devprojex 항목에 제거되거나 덮어써질 필드가 있습니다:\n{1}\n\n항목을 바꾸시겠습니까?",
   "Mcp.Connect.ProjectEntryReplaceConfirm": "바꾸기",
