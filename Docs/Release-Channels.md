@@ -7,6 +7,17 @@ The server is listed in the MCP Registry as `io.github.Avazbek22/devprojex`.
 The workflow always builds and gates both channels; `channels` only selects which
 publish jobs run after the gates, and `dry_run` defaults to `true`.
 
+## Flatpak desktop channel
+
+The repository's [Flatpak build](../Packaging/Linux/flatpak/README.md) is separate
+from npm, NuGet, MCP Registry publication and GitHub release assets. It targets
+native x86_64 and aarch64 with Freedesktop 26.08 and dotnet10. A separate Flathub
+repository and listing are required before public installation is available.
+`flatpak-build.yml` is a read-only packaging gate and participates in the pinned
+release candidate; it does not publish to Flathub or change `SHA256SUMS`.
+The runtime differences apply only inside a detected Flatpak sandbox; see
+[Installation](Installation.md#flatpak).
+
 ## Owner checklist for the first publication
 
 Perform these steps in order:

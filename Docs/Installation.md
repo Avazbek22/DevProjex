@@ -74,6 +74,51 @@ or create an executable launcher with the expected name:
 sudo ln -s "$(pwd)/DevProjex" /usr/local/bin/devprojex
 ```
 
+### Flatpak
+
+The Flatpak channel is built from `Packaging/Linux/flatpak/`. Its Flathub listing
+must be published separately; building this repository does not publish it. Once
+the listing is available, install and launch it with:
+
+```bash
+flatpak install flathub io.github.Avazbek22.DevProjex
+flatpak run io.github.Avazbek22.DevProjex
+flatpak run io.github.Avazbek22.DevProjex mcp --root "$HOME/projects/example"
+```
+
+The sandbox grants home-directory access, not the whole host filesystem. A missing
+folder outside that access may be absent or hidden by the sandbox; DevProjex cannot
+reliably distinguish the two. Grant a specific folder, then launch again:
+
+```bash
+flatpak override --user --filesystem=/mnt/projects io.github.Avazbek22.DevProjex
+```
+
+Folders selected through the system dialog may use document-portal paths. The
+Documents portal's version-5 `GetHostPaths` method supplies host paths for display
+when available; otherwise the document path remains visible. A document path is
+never registered as an MCP root for a host client. If the host path is not directly
+accessible to a fresh sandbox launch, grant its real folder first.
+
+MCP configurations and the managed `~/.local/bin/devprojex` shim use `flatpak run
+io.github.Avazbek22.DevProjex`, never `/app/...`. Internal desktop launches retain
+the sandbox's apphost path. Client launch actions copy a command for your own
+terminal instead of starting host applications. If Claude Code or Codex cannot run
+inside the sandbox, connection setup supplies a command and reports that it could
+not verify the connection; it does not claim the client is disconnected.
+
+Git is bundled, but host credential managers and SSH agents may be unavailable.
+For a private repository, open a folder already cloned on the host, or supply the
+application's supported explicit clone authentication. Git safety isolation is not
+relaxed. Updates are managed through Flathub; the GitHub update controls are hidden.
+`doctor` and the desktop About panel report the sandbox and its application data
+directory under `~/.var/app/io.github.Avazbek22.DevProjex/`. Terminal Workspace's
+help shows the same environment line.
+
+See [the build instructions](../Packaging/Linux/flatpak/README.md) for native
+x86_64/aarch64 builds and the checks required before publication. These sandbox
+rules do not apply to AppImage, tar.gz or the other existing distribution channels.
+
 ## macOS
 
 DevProjex requires macOS 14 or newer. Replace `<version>` and `<architecture>` (`x64`

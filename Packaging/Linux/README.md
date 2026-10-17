@@ -1,7 +1,7 @@
 # Linux Packaging
 
-This folder contains the shared Linux metadata used by AppImage and prepared for
-future Flatpak and Snap packaging.
+This folder contains the shared Linux metadata used by AppImage and
+[Flatpak packaging](flatpak/README.md), and prepared for future Snap packaging.
 
 ## Files
 
