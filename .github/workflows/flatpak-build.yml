@@ -53,6 +53,7 @@ jobs:
         run: |
           set -euo pipefail
           flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user --noninteractive flathub org.flatpak.Builder
           bash Packaging/Linux/flatpak/prepare-source.sh
           bash Packaging/Linux/flatpak/regenerate-nuget.sh "$TARGET_ARCH"
           python3 Packaging/Linux/flatpak/generate-grammar-modules.py
@@ -61,20 +62,21 @@ jobs:
         run: |
           set -euo pipefail
           appstreamcli validate --strict --explain Packaging/Linux/io.github.Avazbek22.DevProjex.metainfo.xml
-          flatpak-builder-lint manifest Packaging/Linux/flatpak/io.github.Avazbek22.DevProjex.yml
+          python3 Packaging/Linux/flatpak/check-lint.py manifest Packaging/Linux/flatpak/io.github.Avazbek22.DevProjex.yml
       - uses: flatpak/flatpak-github-actions/flatpak-builder@79327416609af08178ad73b352877e51450790b3 # v6
         with:
           manifest-path: Packaging/Linux/flatpak/io.github.Avazbek22.DevProjex.yml
           arch: ${{ matrix.arch }}
           bundle: DevProjex-${{ matrix.arch }}.flatpak
           build-dir: flatpak_app
+          mirror-screenshots-url: https://dl.flathub.org/media
           upload-artifact: true
       - name: Check installed sandbox CLI and grammar delivery
         shell: bash
         run: |
           set -euo pipefail
-          flatpak-builder-lint builddir flatpak_app
-          flatpak-builder-lint repo repo
+          python3 Packaging/Linux/flatpak/check-lint.py builddir flatpak_app
+          python3 Packaging/Linux/flatpak/check-lint.py repo repo
           flatpak install --user --noninteractive ./DevProjex-"$(uname -m)".flatpak
           bash Packaging/Linux/flatpak/smoke.sh
       - uses: actions/setup-dotnet@v6

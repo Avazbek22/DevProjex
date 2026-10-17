@@ -20,5 +20,4 @@ dotnet publish Apps/Avalonia/DevProjex.Avalonia.csproj --no-restore -c Release -
   -p:PublishReadyToRun=true -p:PublishSingleFile=false -p:DevProjexGrammarDelivery=Content \
   -p:EnableProjectLoadTiming=false -p:PublishTrimmed=false -p:DebugType=None \
   -p:DebugSymbols=false -p:UseSharedCompilation=false -o /app/lib/devprojex
-mkdir -p /app/bin
-ln -s ../lib/devprojex/DevProjex /app/bin/devprojex
+install -Dm755 Packaging/Linux/flatpak/devprojex.sh /app/bin/devprojex

@@ -5,6 +5,10 @@ sdk: org.freedesktop.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.dotnet10
 command: devprojex
+cleanup:
+  - /include
+  - /lib/pkgconfig
+  - /share/man
 finish-args:
   - --filesystem=home
   - --socket=x11
