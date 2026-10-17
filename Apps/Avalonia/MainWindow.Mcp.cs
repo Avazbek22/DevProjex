@@ -2,6 +2,7 @@ using DevProjex.Avalonia.Services;
 using DevProjex.Avalonia.Views;
 using DevProjex.Application;
 using DevProjex.Infrastructure.TerminalCommands;
+using DevProjex.Infrastructure.FileSystem;
 
 namespace DevProjex.Avalonia;
 
@@ -62,11 +63,21 @@ public partial class MainWindow
             var executablePath = McpConnectionExecutablePathResolver.Resolve(
                 snapshot,
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+            var agentRoot = _currentPath;
+            if (FlatpakEnvironment.Current.IsActive)
+            {
+                agentRoot = await _flatpakHostPaths.ResolveAsync(_currentPath, cancellationToken);
+                if (FlatpakHostPathResolver.TryGetDocument(agentRoot, out _, out _) || !Directory.Exists(agentRoot))
+                {
+                    await ShowErrorAsync(FlatpakPresentation.UnavailablePath(_localization, agentRoot));
+                    return;
+                }
+            }
             request = new McpConnectionRequest(
                 e.Client,
                 e.Mode,
                 executablePath,
-                Path.GetFullPath(_currentPath));
+                Path.GetFullPath(agentRoot));
             var result = await RunAfterSelectionPersistenceAsync(
                 e.Mode,
                 _treeSelectionProfiles.FlushAsync,
@@ -99,6 +110,12 @@ public partial class MainWindow
                 cancellationToken.ThrowIfCancellationRequested();
                 if (!CanPresentMcpDialog(windowLifetime))
                     return;
+                if (launchResult.Status == McpClientLaunchStatus.CopyCommand && launchResult.ManualCommand is not null)
+                {
+                    await SetClipboardTextAsync(launchResult.ManualCommand);
+                    await ShowInfoAsync(_localization["Flatpak.CopyCommand"]);
+                    return;
+                }
                 if (!launchResult.Succeeded)
                 {
                     await ShowMcpLaunchFailureAsync(request, launchResult);

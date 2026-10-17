@@ -17,6 +17,13 @@ internal static class ExternalLinkLauncher
 
 		try
 		{
+			if (FlatpakEnvironment.Current.IsActive)
+			{
+				var portalOpen = new ProcessStartInfo("xdg-open") { UseShellExecute = false, CreateNoWindow = true };
+				portalOpen.ArgumentList.Add(url);
+				using var portalProcess = startProcess(portalOpen);
+				return portalProcess is not null;
+			}
 			using var process = startProcess(new ProcessStartInfo
 			{
 				FileName = url,

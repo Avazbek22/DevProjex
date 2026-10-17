@@ -62,7 +62,8 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 		bool hidePrivateData,
 		TimeProvider? timeProvider = null,
 		int? pid = null,
-		DateTimeOffset? processStartUtc = null)
+		DateTimeOffset? processStartUtc = null,
+		string? sandboxSessionId = null)
 	{
 		this.writer = writer ?? throw new ArgumentNullException(nameof(writer));
 		this.roots = roots ?? throw new ArgumentNullException(nameof(roots));
@@ -70,8 +71,9 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 		var startedUtc = clock.GetUtcNow();
 		var processId = pid ?? Environment.ProcessId;
 		var processStart = processStartUtc ?? GetCurrentProcessStartUtc();
+		var sandboxId = FlatpakEnvironment.Current.IsActive ? sandboxSessionId ?? Guid.NewGuid().ToString("N") : null;
 		session = new AgentJournalSession(
-			AgentJournalStore.CreateSessionId(startedUtc, processId),
+			AgentJournalStore.CreateSessionId(startedUtc, processId, sandboxId),
 			startedUtc,
 			EndedUtc: null,
 			processId,
@@ -85,7 +87,10 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 			serverVersion,
 			hidePrivateData,
 			AgentJournalTotals.Empty,
-			IsLive: true);
+			IsLive: true)
+		{
+			SandboxSessionId = sandboxId
+		};
 		pump = RunPumpAsync();
 	}
 

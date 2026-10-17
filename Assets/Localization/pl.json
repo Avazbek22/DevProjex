@@ -1,4 +1,12 @@
 {
+  "Flatpak.PortalPathUnavailable": "Portal dokumentów nie udostępnił dostępnej ścieżki hosta. Wybierz folder w katalogu domowym lub zezwól Flatpak na dostęp do rzeczywistego folderu przed połączeniem klienta.",
+  "Flatpak.Updates": "Aktualizacje przez Flathub",
+  "Flatpak.CopyCommand": "Uruchom to polecenie we własnym terminalu.",
+  "Flatpak.ConnectionUnverified": "Nie można sprawdzić połączenia z piaskownicy.",
+  "Flatpak.PathUnavailable": "Folder może nie istnieć lub być niedostępny w piaskownicy Flatpak. Aby przyznać dostęp, uruchom: {0}",
+  "Flatpak.Environment": "Flatpak · dostęp: katalog domowy · dołączony git: {0} · dane: {1} · połącz klientów poleceniem: {2}",
+  "Flatpak.PrivateClone": "Uwierzytelnianie prywatnych repozytoriów może być niedostępne w piaskownicy. Otwórz folder już sklonowany na komputerze.",
+  "Flatpak.CopyClientCommand": "Kopiuj polecenie {0}",
   "Mcp.Connect.ProjectEntryReplaceTitle": "Zastąp ustawienia klienta DevProjex",
   "Mcp.Connect.ProjectEntryReplacePrompt": "Istniejący wpis devprojex dla {0} zawiera pola, które zostaną usunięte lub nadpisane:\n{1}\n\nZastąpić wpis?",
   "Mcp.Connect.ProjectEntryReplaceConfirm": "Zastąp",

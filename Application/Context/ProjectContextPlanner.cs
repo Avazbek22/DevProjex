@@ -732,7 +732,8 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		{
 			throw new ProjectContextValidationException(
 				"DPX-PROJECT-NOT-FOUND",
-				"Project directory was not found.");
+				"Project directory was not found.",
+				FlatpakEnvironment.Current.IsActive ? normalized : null);
 		}
 
 		return normalized;

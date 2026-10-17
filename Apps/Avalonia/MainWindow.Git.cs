@@ -235,7 +235,8 @@ public partial class MainWindow
                         _taskbarProgress.MarkGitCloneError();
                         await ShowErrorAsync(_localization.Format(
                             "Git.Error.CloneFailed",
-							DesktopExceptionPresentation.Format(_localization, exception: null)));
+							DesktopExceptionPresentation.Format(_localization, exception: null)) +
+                            (FlatpakEnvironment.Current.IsActive ? "\n" + _localization["Flatpak.PrivateClone"] : string.Empty));
                         _toastService.Show(_localization["Toast.Git.CloneError"]);
                         return;
                     }

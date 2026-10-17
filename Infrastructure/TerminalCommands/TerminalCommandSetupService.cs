@@ -280,7 +280,7 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 					? TerminalCommandInstallOutcome.Repaired
 					: TerminalCommandInstallOutcome.Created;
 
-			if (forceReinstall && refreshed.State == TerminalCommandSetupState.Installed)
+			if (forceReinstall && refreshed.State == TerminalCommandSetupState.Installed && !FlatpakEnvironment.Current.IsActive)
 			{
 				var validation = _options.LauncherValidator(commandPath, LauncherValidationTimeout);
 				if (!validation.Success)
@@ -354,7 +354,7 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 			UnixWrapperMarker,
 			UnixTargetPrefix + targetPath,
 			"export DEVPROJEX_TERMINAL_HOST=1",
-			"exec " + ShellQuote(targetPath) + " \"$@\"",
+			"exec " + (FlatpakEnvironment.Current.ExternalLaunchCommand ?? ShellQuote(targetPath)) + " \"$@\"",
 			string.Empty);
 
 		// Unix kernels parse the shebang before a shell sees the file; CRLF in the

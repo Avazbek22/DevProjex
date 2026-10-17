@@ -178,6 +178,19 @@ public static class UserDataPathResolver
 			var xdgPath = environmentProvider(GetXdgVariable(kind));
 			if (IsUsableAbsolutePath(xdgPath))
 				return Path.GetFullPath(xdgPath!);
+
+			if (FlatpakEnvironment.Current.IsActive)
+			{
+				var flatpakHome = environmentProvider("HOME");
+				if (IsUsableAbsolutePath(flatpakHome))
+					return Path.Combine(flatpakHome!, ".var", "app", FlatpakEnvironment.Current.AppId!, kind switch
+					{
+						UserDataDirectoryKind.Configuration => "config",
+						UserDataDirectoryKind.Data => "data",
+						UserDataDirectoryKind.State => "state",
+						_ => "cache"
+					});
+			}
 		}
 
 		if (isWindows ||

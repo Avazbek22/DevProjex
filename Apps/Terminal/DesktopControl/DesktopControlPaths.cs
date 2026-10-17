@@ -23,6 +23,15 @@ public sealed class DesktopControlPaths(Func<string>? dataRootProvider = null)
 		if (Encoding.UTF8.GetByteCount(candidate) <= 96)
 			return candidate;
 
+		if (FlatpakEnvironment.Current.IsActive)
+		{
+			var sharedDirectory = _dataRootProvider();
+			Directory.CreateDirectory(sharedDirectory);
+			var sharedPath = Path.Combine(sharedDirectory, fileName);
+			if (Encoding.UTF8.GetByteCount(sharedPath) > 96)
+				throw new IOException("The shared Flatpak socket path exceeds the Unix socket path limit.");
+			return sharedPath;
+		}
 		return Path.Combine(Path.GetTempPath(), fileName);
 	}
 
@@ -34,6 +43,9 @@ public sealed class DesktopControlPaths(Func<string>? dataRootProvider = null)
 			return isolatedRoot;
 
 		var xdgRuntime = Environment.GetEnvironmentVariable("XDG_RUNTIME_DIR");
+		if (FlatpakEnvironment.Current.IsActive &&
+			!string.IsNullOrWhiteSpace(xdgRuntime) && Path.IsPathFullyQualified(xdgRuntime))
+			return Path.Combine(xdgRuntime, "app", FlatpakEnvironment.Current.AppId!);
 		if (!OperatingSystem.IsWindows() &&
 		    !string.IsNullOrWhiteSpace(xdgRuntime) &&
 		    Path.IsPathFullyQualified(xdgRuntime))

@@ -59,6 +59,9 @@ internal static class Program
         if (OperatingSystem.IsWindows())
             builder = builder.With(CreateWin32PlatformOptions());
 
+        if (FlatpakEnvironment.Current.IsActive)
+            builder = builder.With(new X11PlatformOptions { WmClass = FlatpakEnvironment.Current.AppId });
+
 #if DEBUG
         builder = builder.LogToTrace();
 #endif

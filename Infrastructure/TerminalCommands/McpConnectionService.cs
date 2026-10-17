@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using DevProjex.Application.Services;
 using DevProjex.Infrastructure.Processes;
+using DevProjex.Infrastructure.FileSystem;
 
 namespace DevProjex.Infrastructure.TerminalCommands;
 
@@ -640,6 +641,9 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 
 	public string CreatePrintableConfiguration(McpConnectionRequest request)
 	{
+		ArgumentNullException.ThrowIfNull(request);
+		if (FlatpakEnvironment.Current.IsActive && FlatpakHostPathResolver.TryGetDocument(request.ProjectRoot, out _, out _))
+			return _localization["Flatpak.PortalPathUnavailable"];
 		ValidateRequest(request);
 		return McpConnectionFragmentGenerator.Generate(
 			request.Client,
@@ -655,6 +659,8 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 		ValidateRequest(request);
 		if (McpConnectionProjectRoot.CreateRefusal(_localization, request.ProjectRoot) is { } refusal)
 			return refusal;
+		if (FlatpakEnvironment.Current.IsActive && FlatpakHostPathResolver.TryGetDocument(request.ProjectRoot, out _, out _))
+			return new McpConnectionResult(McpConnectionStatus.ProjectNotFound, _localization["Flatpak.PortalPathUnavailable"]);
 		return request.Client switch
 		{
 			McpConnectionClient.ClaudeCode => await ConnectCommandLineClientAsync(
@@ -688,6 +694,8 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 		var executable = _locator.Find(commandName);
 		if (executable is null)
 		{
+			if (FlatpakEnvironment.Current.IsActive)
+				return new McpConnectionInspection(false, null, false, _localization["Flatpak.ConnectionUnverified"]);
 			return new McpConnectionInspection(
 				false,
 				null,
@@ -699,6 +707,9 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 			request,
 			executable,
 			cancellationToken).ConfigureAwait(false);
+		if (FlatpakEnvironment.Current.IsActive && !(await RunClientCommandAsync(
+				executable, ["--version"], request.ProjectRoot, cancellationToken).ConfigureAwait(false)).Succeeded)
+			return new McpConnectionInspection(false, null, false, _localization["Flatpak.ConnectionUnverified"]);
 		if (read.Error is not null)
 			return new McpConnectionInspection(false, null, false, read.Error);
 		if (read.Snapshot is null)
@@ -738,6 +749,17 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 	{
 		var executable = _locator.Find(commandName);
 		var manual = CreatePrintableConfiguration(request);
+		if (FlatpakEnvironment.Current.IsActive)
+		{
+			manual = McpConnectionFragmentGenerator.GenerateHostClientCommand(request);
+			if (executable is null || !(await RunClientCommandAsync(
+					executable, ["--version"], request.ProjectRoot, cancellationToken).ConfigureAwait(false)).Succeeded)
+			{
+				return new McpConnectionResult(McpConnectionStatus.ManualConfiguration,
+					_localization["Flatpak.ConnectionUnverified"] + " " + _localization["Flatpak.CopyCommand"],
+					ManualConfiguration: manual);
+			}
+		}
 		if (executable is null)
 		{
 			return new McpConnectionResult(
@@ -935,7 +957,7 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 		var requiredEnvironment = McpConnectionFragmentGenerator.GetRequiredServerEnvironment();
 		var write = await store.UpdateConnectionAsync(
 			configuration,
-			request.ExecutablePath,
+			McpConnectionFragmentGenerator.ResolveServerExecutable(request.ExecutablePath),
 			arguments,
 			requiredEnvironment,
 			cancellationToken).ConfigureAwait(false);
@@ -1121,6 +1143,10 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 		bool previousConnectionRemoved,
 		bool previousConnectionRestored = false)
 	{
+		if (FlatpakEnvironment.Current.IsActive)
+			return new McpConnectionResult(McpConnectionStatus.ManualConfiguration,
+				_localization["Flatpak.ConnectionUnverified"] + " " + _localization["Flatpak.CopyCommand"],
+				ManualConfiguration: McpConnectionFragmentGenerator.GenerateHostClientCommand(request));
 		var status = processResult.TimedOut
 			? McpConnectionStatus.TimedOut
 			: McpConnectionStatus.ProcessFailed;
@@ -1372,16 +1398,13 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 			}
 			arguments.Add("--");
 		}
-		arguments.AddRange([executablePath, "mcp", "--root", projectRoot]);
-		if (mode == McpConnectionMode.Live)
-			arguments.Add("--live");
+		arguments.Add(McpConnectionFragmentGenerator.ResolveServerExecutable(executablePath));
+		arguments.AddRange(CreateServerArguments(projectRoot, mode));
 		return arguments;
 	}
 
 	private static string[] CreateServerArguments(string projectRoot, McpConnectionMode mode) =>
-		mode == McpConnectionMode.Live
-			? ["mcp", "--root", projectRoot, "--live"]
-			: ["mcp", "--root", projectRoot];
+		McpConnectionFragmentGenerator.BuildServerArguments(mode, projectRoot);
 
 	private static bool ConnectionMatches(
 		CommandLineConnectionSnapshot actual,
@@ -1391,7 +1414,7 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 	{
 		if (!string.Equals(
 				actual.Command,
-				expectedCommand,
+				McpConnectionFragmentGenerator.ResolveServerExecutable(expectedCommand),
 				OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal) ||
 			!actual.Arguments.SequenceEqual(expectedArguments, StringComparer.Ordinal))
 		{
@@ -1572,7 +1595,9 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 			.index;
 		if (string.IsNullOrWhiteSpace(command) ||
 			arguments.Count < 3 ||
-			arguments[0] != "mcp" ||
+			!(arguments[0] == "mcp" || FlatpakEnvironment.Current.IsActive && command == "flatpak" &&
+				arguments.Count >= 6 && arguments[0] == "run" &&
+				arguments[1] == FlatpakEnvironment.Current.AppId && arguments[2] == "mcp") ||
 			rootIndex <= 0 ||
 			rootIndex + 1 >= arguments.Count ||
 			!Path.IsPathFullyQualified(arguments[rootIndex + 1]))

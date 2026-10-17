@@ -76,7 +76,7 @@ internal sealed partial class TerminalWorkspaceSession
 				{
 					var remove = ShowChoice(
 						L("Terminal.Tui.Error"),
-						$"{L("Terminal.Tui.Error.ProjectUnavailable")}\n\n" +
+						$"{(FlatpakEnvironment.Current.IsActive ? FlatpakPresentation.UnavailablePath(_services.Localization, workspace.Source) : L("Terminal.Tui.Error.ProjectUnavailable"))}\n\n" +
 						TerminalRecentWorkspacePresentation.DisplaySource(workspace),
 						L("Terminal.Tui.Back"),
 						L("Terminal.Tui.Recent.Remove"));

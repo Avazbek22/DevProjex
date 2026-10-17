@@ -33,6 +33,8 @@ internal sealed class ApplicationUpdateCoordinator : IDisposable
 
     public async Task OpenManualCheckAsync(CancellationToken cancellationToken)
     {
+        if (FlatpakEnvironment.Current.IsActive)
+            return;
         // Opening the popover is a UI action and must not wait behind disk locking.
         // The persisted opt-in state is loaded asynchronously after the surface is visible.
         _viewModel.UpdatePopoverOpen = true;
@@ -57,6 +59,8 @@ internal sealed class ApplicationUpdateCoordinator : IDisposable
 
     public async Task CheckManuallyAsync(CancellationToken cancellationToken)
     {
+        if (FlatpakEnvironment.Current.IsActive)
+            return;
         if (Interlocked.CompareExchange(ref _manualCheckPending, 1, 0) != 0)
             return;
 
@@ -120,6 +124,8 @@ internal sealed class ApplicationUpdateCoordinator : IDisposable
 
     public async Task RunAutomaticCheckIfDueAsync(CancellationToken cancellationToken)
     {
+        if (FlatpakEnvironment.Current.IsActive)
+            return;
         await _operationGate.WaitAsync(cancellationToken);
         try
         {

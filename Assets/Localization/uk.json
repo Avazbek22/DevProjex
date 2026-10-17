@@ -1,4 +1,12 @@
 {
+  "Flatpak.PortalPathUnavailable": "Портал документів не надав доступного шляху хоста. Виберіть папку в домашньому каталозі або надайте Flatpak доступ до справжньої папки на хості перед підключенням клієнта.",
+  "Flatpak.Updates": "Оновлюється через Flathub",
+  "Flatpak.CopyCommand": "Виконайте цю команду у власному терміналі.",
+  "Flatpak.ConnectionUnverified": "Не вдалося перевірити підключення з пісочниці.",
+  "Flatpak.PathUnavailable": "Папка може не існувати або бути недоступною в пісочниці Flatpak. Щоб надати доступ, виконайте: {0}",
+  "Flatpak.Environment": "Flatpak · доступ: домашня папка · вбудований git: {0} · дані: {1} · команда підключення клієнтів: {2}",
+  "Flatpak.PrivateClone": "Авторизація у приватному репозиторії може бути недоступна в пісочниці. Відкрийте папку, вже клоновану на комп’ютері.",
+  "Flatpak.CopyClientCommand": "Скопіювати команду {0}",
   "Mcp.Connect.ProjectEntryReplaceTitle": "Замінити налаштування клієнта DevProjex",
   "Mcp.Connect.ProjectEntryReplacePrompt": "У наявному записі devprojex для {0} є поля, які буде видалено або перезаписано:\n{1}\n\nЗамінити запис?",
   "Mcp.Connect.ProjectEntryReplaceConfirm": "Замінити",

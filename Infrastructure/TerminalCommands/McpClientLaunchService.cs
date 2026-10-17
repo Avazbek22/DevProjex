@@ -359,6 +359,18 @@ public sealed class McpClientLaunchService : IMcpClientLaunchService
 	{
 		ValidateRequest(request);
 		cancellationToken.ThrowIfCancellationRequested();
+		if (FlatpakEnvironment.Current.IsActive && request.Client != McpConnectionClient.Json)
+		{
+			var command = request.Client switch
+			{
+				McpConnectionClient.ClaudeCode => "cd " + QuoteForShell(request.ProjectRoot) + " && claude",
+				McpConnectionClient.Codex => "cd " + QuoteForShell(request.ProjectRoot) + " && codex",
+				McpConnectionClient.Cursor => "cursor " + QuoteForShell(request.ProjectRoot),
+				_ => "code " + QuoteForShell(request.ProjectRoot)
+			};
+			return Task.FromResult(new McpClientLaunchResult(McpClientLaunchStatus.CopyCommand,
+				_localization["Flatpak.CopyCommand"], command));
+		}
 		return request.Client switch
 		{
 			McpConnectionClient.ClaudeCode => OpenTerminalClientAsync(

@@ -1,4 +1,12 @@
 {
+  "Flatpak.PortalPathUnavailable": "Құжаттар порталы хосттағы қолжетімді жолды бермеді. Үй каталогынан бума таңдаңыз немесе клиентті қоспас бұрын Flatpak үшін хосттағы нақты бумаға рұқсат беріңіз.",
+  "Flatpak.Updates": "Flathub арқылы жаңартылады",
+  "Flatpak.CopyCommand": "Бұл пәрменді өз терминалыңызда орындаңыз.",
+  "Flatpak.ConnectionUnverified": "Оқшауланған ортадан қосылымды тексеру мүмкін болмады.",
+  "Flatpak.PathUnavailable": "Бума болмауы немесе Flatpak оқшауланған ортасынан қолжетімсіз болуы мүмкін. Рұқсат беру үшін орындаңыз: {0}",
+  "Flatpak.Environment": "Flatpak · қолжетімділік: үй бумасы · кіріктірілген git: {0} · деректер: {1} · клиенттерді қосу пәрмені: {2}",
+  "Flatpak.PrivateClone": "Оқшауланған ортада жеке репозиторийдің аутентификациясы қолжетімсіз болуы мүмкін. Компьютерде бұрын клондалған буманы ашыңыз.",
+  "Flatpak.CopyClientCommand": "{0} пәрменін көшіру",
   "Mcp.Connect.ProjectEntryReplaceTitle": "DevProjex клиентінің баптауларын ауыстыру",
   "Mcp.Connect.ProjectEntryReplacePrompt": "{0} үшін бар devprojex жазбасында жойылатын немесе үстінен жазылатын өрістер бар:\n{1}\n\nЖазба ауыстырылсын ба?",
   "Mcp.Connect.ProjectEntryReplaceConfirm": "Ауыстыру",

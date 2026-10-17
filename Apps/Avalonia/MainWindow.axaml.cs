@@ -1068,6 +1068,13 @@ public partial class MainWindow : Window
         {
             normalizedPath = PathUtility.Normalize(path);
 
+            if (FlatpakEnvironment.Current.IsActive)
+            {
+                var hostPath = await _flatpakHostPaths.ResolveAsync(normalizedPath, _windowLifetimeCts?.Token ?? CancellationToken.None);
+                if (hostPath != normalizedPath && await Task.Run(() => Directory.Exists(hostPath)))
+                    normalizedPath = hostPath;
+            }
+
             if (candidateSession is null && _repoCacheService.IsInCache(normalizedPath))
             {
                 if (_currentRepositorySession is not null &&
@@ -1147,7 +1154,9 @@ public partial class MainWindow : Window
             if (ownsCandidateSession)
                 candidateSession?.Dispose();
             _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "folder-not-found");
-            await ShowErrorAsync(_localization.Format("Msg.PathNotFound", path));
+            await ShowErrorAsync(FlatpakEnvironment.Current.IsActive
+                ? FlatpakPresentation.UnavailablePath(_localization, normalizedPath)
+                : _localization.Format("Msg.PathNotFound", path));
             return false;
         }
 
@@ -1155,6 +1164,11 @@ public partial class MainWindow : Window
         {
             if (ownsCandidateSession)
                 candidateSession?.Dispose();
+            if (FlatpakEnvironment.Current.IsActive)
+            {
+                await ShowErrorAsync(FlatpakPresentation.UnavailablePath(_localization, normalizedPath));
+                return false;
+            }
             if (rootAccess.IsReparsePoint)
             {
                 _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "reparse-root");
@@ -2136,7 +2150,7 @@ public partial class MainWindow : Window
             ? _localization.Format("LiveContext.Title.Sessions", _liveSessions.Count)
             : null;
         _viewModel.Title = ApplyStoreCaptureTitlePolicy(BuildWindowTitle(
-            _currentPath,
+            GetFlatpakDisplayPath(_currentPath),
             _viewModel.IsGitMode,
             _currentRepositoryUrl,
             _viewModel.CurrentBranch,

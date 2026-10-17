@@ -100,6 +100,12 @@ internal static class ProjectPathStartInfoFactory
 		string path,
 		bool isDirectory)
 	{
+		if (FlatpakEnvironment.Current.IsActive)
+		{
+			var portalOpen = CreateStartInfo("xdg-open");
+			portalOpen.ArgumentList.Add(isDirectory ? path : GetPosixParentPath(path));
+			return [new ProjectPathLaunchCandidate(portalOpen, RequiresSuccessfulExit: true)];
+		}
 		if (isDirectory)
 		{
 			var openDirectory = CreateStartInfo("xdg-open");

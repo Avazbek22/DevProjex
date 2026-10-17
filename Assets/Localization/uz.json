@@ -1,4 +1,12 @@
 {
+  "Flatpak.PortalPathUnavailable": "Hujjatlar portali asosiy tizimdagi ochiladigan yo‘lni bermadi. Uy jildidan jild tanlang yoki mijozni ulashdan oldin Flatpak uchun haqiqiy jildga kirishga ruxsat bering.",
+  "Flatpak.Updates": "Flathub orqali yangilanadi",
+  "Flatpak.CopyCommand": "Bu buyruqni o‘z terminalingizda bajaring.",
+  "Flatpak.ConnectionUnverified": "Ajratilgan muhitdan ulanishni tekshirib bo‘lmadi.",
+  "Flatpak.PathUnavailable": "Jild mavjud bo‘lmasligi yoki Flatpak ajratilgan muhitidan unga kirib bo‘lmasligi mumkin. Ruxsat berish uchun bajaring: {0}",
+  "Flatpak.Environment": "Flatpak · kirish: uy jildi · ichki git: {0} · ma’lumotlar: {1} · mijozlarni ulash buyrug‘i: {2}",
+  "Flatpak.PrivateClone": "Ajratilgan muhitda xususiy repozitoriyga kirishni tasdiqlash imkoni bo‘lmasligi mumkin. Kompyuterda avval klonlangan jildni oching.",
+  "Flatpak.CopyClientCommand": "{0} buyrug‘ini nusxalash",
   "Mcp.Connect.ProjectEntryReplaceTitle": "DevProjex mijoz sozlamalarini almashtirish",
   "Mcp.Connect.ProjectEntryReplacePrompt": "{0} uchun mavjud devprojex yozuvida o‘chiriladigan yoki ustiga yoziladigan maydonlar bor:\n{1}\n\nYozuv almashtirilsinmi?",
   "Mcp.Connect.ProjectEntryReplaceConfirm": "Almashtirish",
