@@ -129,6 +129,21 @@ jobs:
           .github/workflows/grammar-delivery.yml
           .github/workflows/store-package-smoke.yml
 
+      - name: Check Flatpak packaging scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v shellcheck >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y shellcheck
+          fi
+          command -v shellcheck
+          for script in Packaging/Linux/flatpak/*.sh; do
+            bash -n "$script"
+            shellcheck "$script"
+          done
+          python3 -m unittest discover -s Packaging/Linux/flatpak -p 'test_*.py' -v
+
   indentation:
     name: Indentation
     runs-on: ubuntu-latest
@@ -209,6 +224,19 @@ jobs:
             sudo apt-get update
             sudo apt-get install -y "${missing_packages[@]}"
           fi
+
+      - name: Setup Python for packaging contracts
+        if: ${{ matrix.suite_id == 'terminal' }}
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+
+      - name: Check grammar module generation
+        if: ${{ matrix.suite_id == 'terminal' }}
+        shell: pwsh
+        run: |
+          python -m unittest discover -s Packaging/Linux/flatpak -p 'test_generate_grammar_modules.py' -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Run ${{ matrix.suite_name }} Tests
         if: ${{ matrix.os_id != 'linux' && matrix.suite_id != 'ui' }}
