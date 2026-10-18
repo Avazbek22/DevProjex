@@ -6,20 +6,21 @@ namespace DevProjex.Tests.Unit;
 
 public sealed class FlatpakSessionIdentityTests
 {
+	private static readonly DateTimeOffset Epoch = new(2026, 10, 18, 0, 0, 0, TimeSpan.Zero);
 	[Fact]
 	public async Task JournalSessionsWithTheSamePidAndSecondRemainIndependent()
 	{
 		using var sandbox = FlatpakEnvironment.UseForTesting(new(true, "io.github.Avazbek22.DevProjex"));
 		using var directory = new TemporaryDirectory();
-		var now = DateTimeOffset.UtcNow;
-		var first = CreateJournalSession(directory.Path, now, Guid.NewGuid().ToString("N"));
-		var second = CreateJournalSession(directory.Path, now, Guid.NewGuid().ToString("N"));
+		var now = Epoch;
+		var first = CreateJournalSession(directory.Path, now, "00000000000000000000000000000001");
+		var second = CreateJournalSession(directory.Path, now, "00000000000000000000000000000002");
 		var active = new List<LiveSessionRecord>
 		{
 			new(2, now, null, null, [directory.Path], now) { SandboxSessionId = first.SandboxSessionId },
 			new(2, now, null, null, [directory.Path], now) { SandboxSessionId = second.SandboxSessionId }
 		};
-		using var store = new AgentJournalStore(() => directory.Path, activeSessionProvider: () => active);
+		using var store = new AgentJournalStore(() => directory.Path, new MutableClock(now), activeSessionProvider: () => active);
 		await store.StartSession(first, TestContext.Current.CancellationToken);
 		await store.StartSession(second, TestContext.Current.CancellationToken);
 		var sessions = await store.ListSessionsAsync(cancellationToken: TestContext.Current.CancellationToken);
@@ -39,7 +40,7 @@ public sealed class FlatpakSessionIdentityTests
 		var now = new DateTimeOffset(2026, 10, 17, 1, 2, 3, TimeSpan.Zero);
 		var session = CreateJournalSession(directory.Path, now, null);
 		Assert.Equal("20261017-010203-2", session.Id);
-		using var store = new AgentJournalStore(() => directory.Path);
+		using var store = new AgentJournalStore(() => directory.Path, new MutableClock(now));
 		await store.StartSession(session, TestContext.Current.CancellationToken);
 		Assert.DoesNotContain("sandboxSessionId", await File.ReadAllTextAsync(
 			Path.Combine(store.DirectoryPath, session.Id + ".jsonl"), TestContext.Current.CancellationToken));
@@ -52,11 +53,11 @@ public sealed class FlatpakSessionIdentityTests
 		{ SandboxSessionId = sandboxId };
 
 	[Fact]
-	public void SeparateNamespacesWithTheSamePidAndStartTimeCannotOverwriteEachOther()
+	public async Task SeparateNamespacesWithTheSamePidAndStartTimeCannotOverwriteEachOther()
 	{
 		using var sandbox = FlatpakEnvironment.UseForTesting(new(true, "io.github.Avazbek22.DevProjex"));
 		using var directory = new TemporaryDirectory();
-		var clock = new MutableClock(DateTimeOffset.UtcNow);
+		var clock = new MutableClock(Epoch);
 		var registry = new LiveSessionRegistry(() => directory.Path, clock,
 			_ => throw new InvalidOperationException("Another PID namespace cannot be inspected."));
 		using var first = registry.Start(2, clock.GetUtcNow(), [directory.Path], AgentJournalMode.Live);
@@ -66,6 +67,9 @@ public sealed class FlatpakSessionIdentityTests
 		first.Dispose();
 		Assert.Single(registry.ReadActive());
 		Assert.True(File.Exists(second.Path));
+		var abandonedRecord = File.ReadAllText(second.Path);
+		await second.DisposeAsync();
+		File.WriteAllText(second.Path, abandonedRecord);
 		clock.Advance(LiveSessionRegistry.StaleHeartbeatAge + TimeSpan.FromSeconds(1));
 		Assert.Empty(registry.ReadActive());
 	}
@@ -75,8 +79,8 @@ public sealed class FlatpakSessionIdentityTests
 	{
 		using var ordinary = FlatpakEnvironment.UseForTesting(new(false, null));
 		using var directory = new TemporaryDirectory();
-		var now = DateTimeOffset.UtcNow;
-		var registry = new LiveSessionRegistry(() => directory.Path, processStartProvider: _ => now);
+		var now = Epoch;
+		var registry = new LiveSessionRegistry(() => directory.Path, new MutableClock(now), processStartProvider: _ => now);
 		using var writer = registry.Start(123, now, [directory.Path], AgentJournalMode.Live);
 		Assert.Equal("123.json", Path.GetFileName(writer.Path));
 		Assert.DoesNotContain("SandboxSessionId", File.ReadAllText(writer.Path));

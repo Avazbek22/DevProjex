@@ -13,11 +13,11 @@ public sealed class FlatpakPortalStageTests
 	{
 		var session = new Session(stage);
 		using var cancellation = new CancellationTokenSource();
-		var pending = FlatpakDocumentPortal.QueryHostPathAsync("test", "abc", _ => session, cancellation.Token);
+		var pending = FlatpakDocumentPortal.QueryHostPathAsync("test", "abc", _ => session, cancellation.Token, Timeout.InfiniteTimeSpan);
 		await session.Entered.Task.WaitAsync(TestContext.Current.CancellationToken);
 		Assert.False(pending.IsCompleted);
 		cancellation.Cancel();
-		await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending);
+		await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
 		Assert.Equal(1, session.Disposals);
 		session.Release.TrySetResult();
 	}
@@ -30,7 +30,7 @@ public sealed class FlatpakPortalStageTests
 	{
 		var session = new Session(stage);
 		Assert.Null(await FlatpakDocumentPortal.QueryHostPathAsync("test", "abc", _ => session,
-			TestContext.Current.CancellationToken, TimeSpan.FromMilliseconds(30)));
+			TestContext.Current.CancellationToken, TimeSpan.FromMilliseconds(30)).WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
 		Assert.True(session.Entered.Task.IsCompletedSuccessfully);
 		Assert.Equal(1, session.Disposals);
 		session.Release.TrySetResult();
@@ -43,10 +43,11 @@ public sealed class FlatpakPortalStageTests
 	public async Task EveryAsyncStageFallsBackOnIoFailureWithoutLeakingTheSession(int stage)
 	{
 		var session = new Session(stage);
-		var pending = FlatpakDocumentPortal.QueryHostPathAsync("test", "abc", _ => session, TestContext.Current.CancellationToken);
+		var pending = FlatpakDocumentPortal.QueryHostPathAsync("test", "abc", _ => session, TestContext.Current.CancellationToken, Timeout.InfiniteTimeSpan);
 		await session.Entered.Task.WaitAsync(TestContext.Current.CancellationToken);
+		Assert.False(pending.IsCompleted);
 		session.Release.SetException(new IOException("unavailable"));
-		Assert.Null(await pending);
+		Assert.Null(await pending.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
 		Assert.Equal(1, session.Disposals);
 	}
 

@@ -8,11 +8,7 @@ public sealed class FlatpakDesktopRegistryTests
 	[Fact]
 	public async Task DiscoveryUsesTheSharedSocketInsteadOfAnotherNamespacesPid()
 	{
-		if (!Socket.OSSupportsUnixDomainSockets)
-		{
-			Assert.Skip("Unix sockets are unavailable on this platform.");
-			return;
-		}
+		Assert.True(Socket.OSSupportsUnixDomainSockets, "The supported desktop platforms must provide Unix domain sockets.");
 		using var sandbox = FlatpakEnvironment.UseForTesting(new(true, "io.github.Avazbek22.DevProjex"));
 		var directory = Directory.CreateTempSubdirectory("dpx-");
 		try
@@ -25,8 +21,9 @@ public sealed class FlatpakDesktopRegistryTests
 			using var listener = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
 			listener.Bind(new UnixDomainSocketEndPoint(endpoint));
 			listener.Listen(4);
+			var now = new DateTimeOffset(2026, 10, 18, 0, 0, 0, TimeSpan.Zero);
 			await registry.RegisterAsync(new(DesktopProtocol.CurrentVersion, id, int.MaxValue,
-				DateTime.UtcNow.Ticks, directory.FullName, DateTimeOffset.UtcNow, "unix", endpoint),
+				now.Ticks, directory.FullName, now, "unix", endpoint),
 				TestContext.Current.CancellationToken);
 			var snapshot = await registry.ProbeAsync(false, TestContext.Current.CancellationToken);
 			Assert.Equal(id, Assert.Single(snapshot.Instances).InstanceId);

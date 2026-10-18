@@ -5,7 +5,7 @@ using Tomlyn.Model;
 
 namespace DevProjex.Tests.Unit;
 
-public sealed class FlatpakGeneratedCommandTests
+public sealed class FlatpakGeneratedCommandTests(ITestOutputHelper output)
 {
 	private const int Seed = 4812026;
 	private const string AppId = "io.github.Avazbek22.DevProjex";
@@ -13,6 +13,7 @@ public sealed class FlatpakGeneratedCommandTests
 	[Fact]
 	public void ThousandsOfRootsRoundTripThroughJsonAndToml()
 	{
+		output.WriteLine("Seed: {0}", Seed);
 		using var sandbox = FlatpakEnvironment.UseForTesting(new(true, AppId));
 		foreach (var path in Paths())
 		{
@@ -38,6 +39,7 @@ public sealed class FlatpakGeneratedCommandTests
 	[Fact]
 	public async Task ThousandsOfCommandsPreserveArgumentsInARealPosixShell()
 	{
+		output.WriteLine("Seed: {0}", Seed);
 		using var sandbox = FlatpakEnvironment.UseForTesting(new(true, AppId));
 		var script = new StringBuilder("capture() { printf '%s\\000' \"$#\" \"$@\"; }\ncd() { capture cd \"$@\"; }\nflatpak() { capture flatpak \"$@\"; }\nclaude() { capture claude \"$@\"; }\ncodex() { capture codex \"$@\"; }\ncode() { capture code \"$@\"; }\ncursor() { capture cursor \"$@\"; }\n");
 		var expected = new List<string[]>();
