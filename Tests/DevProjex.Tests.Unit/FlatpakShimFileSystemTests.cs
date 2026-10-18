@@ -77,8 +77,11 @@ public sealed class FlatpakShimFileSystemTests
 			var targetDirectory = directory.CreateFolder("foreign-directory");
 			var start = new System.Diagnostics.ProcessStartInfo("cmd.exe")
 			{
-				Arguments = $"/d /c mklink /J \"{launcher}\" \"{targetDirectory}\"", UseShellExecute = false,
-				CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true
+				Arguments = $"/d /c mklink /J \"{launcher}\" \"{targetDirectory}\"",
+				UseShellExecute = false,
+				CreateNoWindow = true,
+				RedirectStandardOutput = true,
+				RedirectStandardError = true
 			};
 			using var process = System.Diagnostics.Process.Start(start)!;
 			await process.WaitForExitAsync(TestContext.Current.CancellationToken);
@@ -126,11 +129,20 @@ public sealed class FlatpakShimFileSystemTests
 	private static TerminalCommandSetupService Create(string home, string executable, TerminalCommandHostPlatform platform,
 		string shell, Func<string> path, Action<string> writePath) => new(new TerminalCommandSetupServiceOptions
 		{
-			Platform = platform, HomeDirectoryProvider = () => home, LocalAppDataPathProvider = () => Path.Combine(home, "data"),
-			ExecutablePathProvider = () => executable, IsWindowsPackagedApp = () => false,
-			PathVariableProvider = path, ProcessPathVariableWriter = writePath, UserPathVariableProvider = () => "",
-			MachinePathVariableProvider = () => "", UserPathVariableWriter = _ => throw new InvalidOperationException(),
-			PathExtensionsProvider = () => ".EXE;.CMD", PathListSeparator = Path.PathSeparator,
-			ShellPathProvider = () => "/bin/" + shell, XdgConfigHomeProvider = () => Path.Combine(home, ".config"), ZdotDirectoryProvider = () => home
+			Platform = platform,
+			HomeDirectoryProvider = () => home,
+			LocalAppDataPathProvider = () => Path.Combine(home, "data"),
+			ExecutablePathProvider = () => executable,
+			IsWindowsPackagedApp = () => false,
+			PathVariableProvider = path,
+			ProcessPathVariableWriter = writePath,
+			UserPathVariableProvider = () => "",
+			MachinePathVariableProvider = () => "",
+			UserPathVariableWriter = _ => throw new InvalidOperationException(),
+			PathExtensionsProvider = () => ".EXE;.CMD",
+			PathListSeparator = Path.PathSeparator,
+			ShellPathProvider = () => "/bin/" + shell,
+			XdgConfigHomeProvider = () => Path.Combine(home, ".config"),
+			ZdotDirectoryProvider = () => home
 		});
 }

@@ -73,9 +73,14 @@ public sealed class FlatpakGeneratedCommandTests
 		}
 		var start = new ProcessStartInfo(OperatingSystem.IsWindows() ? "wsl.exe" : "/bin/sh")
 		{
-			RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true,
-			UseShellExecute = false, CreateNoWindow = true, StandardInputEncoding = new UTF8Encoding(false),
-			StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8
+			RedirectStandardInput = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			UseShellExecute = false,
+			CreateNoWindow = true,
+			StandardInputEncoding = new UTF8Encoding(false),
+			StandardOutputEncoding = Encoding.UTF8,
+			StandardErrorEncoding = Encoding.UTF8
 		};
 		if (OperatingSystem.IsWindows())
 		{

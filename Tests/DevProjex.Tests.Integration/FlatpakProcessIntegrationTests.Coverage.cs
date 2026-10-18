@@ -60,7 +60,10 @@ public sealed partial class FlatpakProcessIntegrationTests
 		var start = Start(marker, fixture.Path, ["mcp", "--root", fixture.Path]);
 		await using var client = await McpClient.CreateAsync(new StdioClientTransport(new StdioClientTransportOptions
 		{
-			Name = "Sandbox content", Command = start.FileName, Arguments = start.ArgumentList.ToArray(), WorkingDirectory = fixture.Path,
+			Name = "Sandbox content",
+			Command = start.FileName,
+			Arguments = start.ArgumentList.ToArray(),
+			WorkingDirectory = fixture.Path,
 			EnvironmentVariables = start.Environment.ToDictionary(pair => pair.Key, pair => pair.Value)
 		}), cancellationToken: TestContext.Current.CancellationToken);
 		foreach (var (tool, arguments, expected) in new[]

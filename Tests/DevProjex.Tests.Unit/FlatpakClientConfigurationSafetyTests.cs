@@ -38,7 +38,10 @@ public sealed class FlatpakClientConfigurationSafetyTests
 			new McpClientExecutableLocator(new McpClientExecutableLocatorOptions
 			{
 				Platform = OperatingSystem.IsWindows() ? TerminalCommandHostPlatform.Windows : TerminalCommandHostPlatform.Linux,
-				PathVariableProvider = () => directory.Path, PathExtensionsProvider = () => ".EXE", FileExists = _ => true, IsExecutable = _ => true
+				PathVariableProvider = () => directory.Path,
+				PathExtensionsProvider = () => ".EXE",
+				FileExists = _ => true,
+				IsExecutable = _ => true
 			}), runner, new McpProjectConfigurationWriter(), claudeUserConfigurationReader: new RejectReader());
 		var request = new McpConnectionRequest(client, McpConnectionMode.Live, Path.Combine(directory.Path, "DevProjex"), directory.Path);
 		var result = await service.ConnectAsync(request, TestContext.Current.CancellationToken);

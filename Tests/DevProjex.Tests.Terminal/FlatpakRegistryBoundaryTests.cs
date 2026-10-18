@@ -70,8 +70,11 @@ public sealed class FlatpakRegistryBoundaryTests
 				var target = Directory.CreateDirectory(Path.Combine(directory.FullName, "external-directory"));
 				var start = new System.Diagnostics.ProcessStartInfo("cmd.exe")
 				{
-					Arguments = $"/d /c mklink /J \"{owned}\" \"{target.FullName}\"", UseShellExecute = false,
-					CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true
+					Arguments = $"/d /c mklink /J \"{owned}\" \"{target.FullName}\"",
+					UseShellExecute = false,
+					CreateNoWindow = true,
+					RedirectStandardOutput = true,
+					RedirectStandardError = true
 				};
 				using var process = System.Diagnostics.Process.Start(start)!;
 				await process.WaitForExitAsync(TestContext.Current.CancellationToken);

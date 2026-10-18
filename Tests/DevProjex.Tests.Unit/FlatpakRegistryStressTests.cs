@@ -148,8 +148,11 @@ public sealed class FlatpakRegistryStressTests
 		{
 			var start = new System.Diagnostics.ProcessStartInfo("cmd.exe")
 			{
-				Arguments = $"/d /c mklink /J \"{link}\" \"{Path.GetDirectoryName(outside)}\"", UseShellExecute = false,
-				CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true
+				Arguments = $"/d /c mklink /J \"{link}\" \"{Path.GetDirectoryName(outside)}\"",
+				UseShellExecute = false,
+				CreateNoWindow = true,
+				RedirectStandardOutput = true,
+				RedirectStandardError = true
 			};
 			using var process = System.Diagnostics.Process.Start(start)!;
 			await process.WaitForExitAsync(TestContext.Current.CancellationToken);
