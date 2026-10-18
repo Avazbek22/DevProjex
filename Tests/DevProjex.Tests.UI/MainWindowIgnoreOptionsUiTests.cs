@@ -5017,6 +5017,8 @@ public sealed class MainWindowIgnoreOptionsUiTests
 		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
 		try
 		{
+			// Finish the initial load before Apply can enable compression for its deferred prewarm.
+			await UiTestDriver.WaitForInitialMetricsBaselineAsync(window);
 			var viewModel = UiTestDriver.GetViewModel(window);
 			await UiTestDriver.WaitForConditionAsync(
 				window,
