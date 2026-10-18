@@ -3,7 +3,7 @@ using ModelContextProtocol.Protocol;
 
 namespace DevProjex.Tests.Integration;
 
-public sealed class FlatpakProcessIntegrationTests
+public sealed partial class FlatpakProcessIntegrationTests
 {
 	[Fact]
 	public async Task CliPrintsAHostExecutableThroughTheRealCommandConsumer()
@@ -152,7 +152,8 @@ public sealed class FlatpakProcessIntegrationTests
 			directory = directory.Parent;
 		var host = Path.Combine(directory!.FullName, "Tests", "DevProjex.Tests.FlatpakHost", "bin",
 			"Release", "net10.0", "DevProjex.Tests.FlatpakHost.dll");
-		var start = new ProcessStartInfo("dotnet")
+		var start = new ProcessStartInfo(Path.GetFullPath(Path.Combine(System.Runtime.InteropServices.RuntimeEnvironment.GetRuntimeDirectory(),
+			"..", "..", "..", OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet")))
 		{
 			RedirectStandardOutput = true,
 			RedirectStandardError = true,
@@ -167,6 +168,11 @@ public sealed class FlatpakProcessIntegrationTests
 		start.Environment["FLATPAK_ID"] = "io.github.Avazbek22.DevProjex";
 		start.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = root;
 		start.Environment["DEVPROJEX_LANG"] = "en";
+		foreach (var name in new[] { "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME" })
+			start.Environment[name] = root;
+		start.Environment["XDG_RUNTIME_DIR"] = string.Empty;
+		start.Environment["APPIMAGE"] = string.Empty;
+		start.Environment["APPIMAGE_EXTRACT_AND_RUN"] = string.Empty;
 		return start;
 	}
 }
