@@ -22,6 +22,7 @@ public static class FlatpakPresentation
 				FlatpakEnvironment.Current.ExternalLaunchCommand + " mcp")
 			: string.Empty;
 
-	private static bool IsPortalDocumentPath(string path) =>
-		path.StartsWith("/run/user/", StringComparison.Ordinal) && path.Contains("/doc/", StringComparison.Ordinal);
+	public static bool IsPortalDocumentPath(string path) =>
+		path.StartsWith("/run/user/", StringComparison.Ordinal) &&
+		(path.Contains("/doc/", StringComparison.Ordinal) || path.EndsWith("/doc", StringComparison.Ordinal));
 }

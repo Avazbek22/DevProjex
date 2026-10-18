@@ -5,6 +5,24 @@ namespace DevProjex.Tests.Unit;
 public sealed class FlatpakClientConfigurationSafetyTests
 {
 	[Theory]
+	[InlineData("/run/user/1000/doc")]
+	[InlineData("/run/user/1000/doc/")]
+	[InlineData("/run/user/1000/doc/abc")]
+	[InlineData("/run/user/1000/doc/abc/")]
+	[InlineData("/run/user/1000/doc/abc/project")]
+	[InlineData("/run/user/1000/doc/abc/project/../outside")]
+	public void EveryDocumentPortalRootIsRefusedBeforeGeneratingAHostClientConfiguration(string root)
+	{
+		using var sandbox = FlatpakEnvironment.UseForTesting(new(true, "test.app"));
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En);
+		var service = new DevProjex.Infrastructure.TerminalCommands.McpConnectionService(localization);
+		var text = service.CreatePrintableConfiguration(new(McpConnectionClient.Cursor, McpConnectionMode.Live, "/app/DevProjex", root));
+		Assert.Equal(localization["Flatpak.PortalPathUnavailable"], text);
+		Assert.DoesNotContain(root, text);
+		Assert.DoesNotContain("flatpak run", text);
+	}
+
+	[Theory]
 	[InlineData(0, "2.1.71 (Claude Code)", false, true)]
 	[InlineData(0, "codex-cli 0.115.0", false, true)]
 	[InlineData(0, "v1.2.3-beta.4", false, true)]

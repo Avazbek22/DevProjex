@@ -67,7 +67,7 @@ public partial class MainWindow
             if (FlatpakEnvironment.Current.IsActive)
             {
                 agentRoot = await _flatpakHostPaths.ResolveAsync(_currentPath, cancellationToken);
-                if (FlatpakHostPathResolver.TryGetDocument(agentRoot, out _, out _) || !Directory.Exists(agentRoot))
+                if (FlatpakPresentation.IsPortalDocumentPath(agentRoot) || !Directory.Exists(agentRoot))
                 {
                     await ShowFlatpakUnavailablePathAsync(agentRoot);
                     return;

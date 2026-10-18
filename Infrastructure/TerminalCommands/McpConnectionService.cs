@@ -642,7 +642,7 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 	public string CreatePrintableConfiguration(McpConnectionRequest request)
 	{
 		ArgumentNullException.ThrowIfNull(request);
-		if (FlatpakEnvironment.Current.IsActive && FlatpakHostPathResolver.TryGetDocument(request.ProjectRoot, out _, out _))
+		if (FlatpakEnvironment.Current.IsActive && FlatpakPresentation.IsPortalDocumentPath(request.ProjectRoot))
 			return _localization["Flatpak.PortalPathUnavailable"];
 		ValidateRequest(request);
 		return McpConnectionFragmentGenerator.Generate(
@@ -659,7 +659,7 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 		ValidateRequest(request);
 		if (McpConnectionProjectRoot.CreateRefusal(_localization, request.ProjectRoot) is { } refusal)
 			return refusal;
-		if (FlatpakEnvironment.Current.IsActive && FlatpakHostPathResolver.TryGetDocument(request.ProjectRoot, out _, out _))
+		if (FlatpakEnvironment.Current.IsActive && FlatpakPresentation.IsPortalDocumentPath(request.ProjectRoot))
 			return new McpConnectionResult(McpConnectionStatus.ProjectNotFound, _localization["Flatpak.PortalPathUnavailable"]);
 		return request.Client switch
 		{
