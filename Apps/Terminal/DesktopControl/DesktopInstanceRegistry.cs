@@ -151,6 +151,8 @@ public sealed class DesktopInstanceRegistry
 	{
 		try
 		{
+			if (FlatpakEnvironment.Current.IsActive && File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint))
+				return null;
 			await using var source = new FileStream(
 				path,
 				FileMode.Open,

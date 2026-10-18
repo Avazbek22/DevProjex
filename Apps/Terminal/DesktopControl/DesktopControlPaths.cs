@@ -35,22 +35,25 @@ public sealed class DesktopControlPaths(Func<string>? dataRootProvider = null)
 		return Path.Combine(Path.GetTempPath(), fileName);
 	}
 
-	private static string ResolveDataRoot()
+	private static string ResolveDataRoot() => ResolveDataRoot(
+		Environment.GetEnvironmentVariable, UserDataPathResolver.GetStateRoot, OperatingSystem.IsWindows());
+
+	internal static string ResolveDataRoot(Func<string, string?> environment, Func<string> stateRoot, bool isWindows)
 	{
 		var isolatedRoot = UserDataPathResolver.ResolveInternalDataRoot(
-			Environment.GetEnvironmentVariable(InvocationEnvironment.InternalDataRootVariable));
+			environment(InvocationEnvironment.InternalDataRootVariable));
 		if (isolatedRoot is not null)
 			return isolatedRoot;
 
-		var xdgRuntime = Environment.GetEnvironmentVariable("XDG_RUNTIME_DIR");
+		var xdgRuntime = environment("XDG_RUNTIME_DIR");
 		if (FlatpakEnvironment.Current.IsActive &&
 			!string.IsNullOrWhiteSpace(xdgRuntime) && Path.IsPathFullyQualified(xdgRuntime))
 			return Path.Combine(xdgRuntime, "app", FlatpakEnvironment.Current.AppId!);
-		if (!OperatingSystem.IsWindows() &&
+		if (!isWindows &&
 		    !string.IsNullOrWhiteSpace(xdgRuntime) &&
 		    Path.IsPathFullyQualified(xdgRuntime))
 			return xdgRuntime;
 
-		return UserDataPathResolver.GetStateRoot();
+		return stateRoot();
 	}
 }

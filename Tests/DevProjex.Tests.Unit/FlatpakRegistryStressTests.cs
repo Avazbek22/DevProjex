@@ -6,13 +6,14 @@ namespace DevProjex.Tests.Unit;
 public sealed class FlatpakRegistryStressTests
 {
 	private static IDisposable Sandbox() => FlatpakEnvironment.UseForTesting(new(true, "io.github.Avazbek22.DevProjex"));
+	private static readonly DateTimeOffset Epoch = new(2026, 10, 18, 0, 0, 0, TimeSpan.Zero);
 
 	[Fact]
 	public async Task FortyEightConcurrentSessionsKeepIndependentLiveRecordsAndJournals()
 	{
 		using var sandbox = Sandbox();
 		using var directory = new TemporaryDirectory();
-		var clock = new Clock(DateTimeOffset.UtcNow);
+		var clock = new Clock(Epoch);
 		var registry = new LiveSessionRegistry(() => directory.Path, clock,
 			_ => throw new InvalidOperationException("PID namespaces are private."));
 		var writers = await Task.WhenAll(Enumerable.Range(0, 48).Select(_ => Task.Run(
@@ -57,10 +58,10 @@ public sealed class FlatpakRegistryStressTests
 	{
 		using var sandbox = Sandbox();
 		using var directory = new TemporaryDirectory();
-		var registry = new LiveSessionRegistry(() => directory.Path);
-		var path = Path.Combine(registry.DirectoryPath, Guid.NewGuid().ToString("N") + ".json");
+		var registry = new LiveSessionRegistry(() => directory.Path, new Clock(Epoch));
+		var path = Path.Combine(registry.DirectoryPath, "00000000000000000000000000000001.json");
 		File.WriteAllText(path, content);
-		var subdirectory = Path.Combine(registry.DirectoryPath, Guid.NewGuid().ToString("N") + ".json");
+		var subdirectory = Path.Combine(registry.DirectoryPath, "00000000000000000000000000000002.json");
 		Directory.CreateDirectory(subdirectory);
 		Assert.Empty(registry.ReadActive());
 		Assert.False(File.Exists(path));
@@ -75,10 +76,10 @@ public sealed class FlatpakRegistryStressTests
 	{
 		using var sandbox = Sandbox();
 		using var directory = new TemporaryDirectory();
-		var registry = new LiveSessionRegistry(() => directory.Path);
-		using var writer = registry.Start(2, DateTimeOffset.UtcNow.AddSeconds(-1), [directory.Path]);
+		var registry = new LiveSessionRegistry(() => directory.Path, new Clock(Epoch));
+		using var writer = registry.Start(2, Epoch.AddSeconds(-1), [directory.Path]);
 		var record = Assert.Single(registry.ReadActive());
-		var filename = variant == "pid-name" ? "2.json" : Guid.NewGuid().ToString("N") + ".json";
+		var filename = variant == "pid-name" ? "2.json" : "00000000000000000000000000000003.json";
 		var path = Path.Combine(registry.DirectoryPath, filename);
 		File.Copy(writer.Path, path);
 		if (variant == "foreign")
@@ -93,10 +94,10 @@ public sealed class FlatpakRegistryStressTests
 	{
 		using var sandbox = Sandbox();
 		using var directory = new TemporaryDirectory();
-		var now = DateTimeOffset.UtcNow;
-		var registry = new LiveSessionRegistry(() => directory.Path);
+		var now = Epoch;
+		var registry = new LiveSessionRegistry(() => directory.Path, new Clock(now));
 		var record = new LiveSessionRecord(2, now, null, null, [directory.Path], now)
-		{ SandboxSessionId = Guid.NewGuid().ToString("N") };
+		{ SandboxSessionId = "00000000000000000000000000000004" };
 		await Task.WhenAll(Enumerable.Range(0, 3).Select(worker => Task.Run(() =>
 		{
 			for (var iteration = 0; iteration < 80; iteration++)
@@ -122,11 +123,11 @@ public sealed class FlatpakRegistryStressTests
 	{
 		using var sandbox = Sandbox();
 		using var directory = new TemporaryDirectory();
-		var now = DateTimeOffset.UtcNow;
+		var now = Epoch;
 		var clock = new Clock(now);
 		var registry = new LiveSessionRegistry(() => directory.Path, clock);
 		var record = new LiveSessionRecord(2, now, null, null, [directory.Path], now)
-		{ SandboxSessionId = Guid.NewGuid().ToString("N") };
+		{ SandboxSessionId = "00000000000000000000000000000005" };
 		registry.Write(record);
 		clock.Advance(LiveSessionRegistry.StaleHeartbeatAge);
 		Assert.Single(registry.ReadActive());
@@ -136,19 +137,33 @@ public sealed class FlatpakRegistryStressTests
 	}
 
 	[Fact]
-	public void SymbolicLinkRecordNeverReadsOrChangesItsTarget()
+	public async Task SymbolicLinkRecordNeverReadsOrChangesItsTarget()
 	{
-		if (OperatingSystem.IsWindows())
-			Assert.Skip("Unix symbolic-link permissions are checked on Linux.");
 		using var sandbox = Sandbox();
 		using var directory = new TemporaryDirectory();
-		var registry = new LiveSessionRegistry(() => directory.Path);
-		var outside = directory.CreateFile("outside.txt", "keep");
-		var link = Path.Combine(registry.DirectoryPath, Guid.NewGuid().ToString("N") + ".json");
-		File.CreateSymbolicLink(link, outside);
+		var registry = new LiveSessionRegistry(() => directory.Path, new Clock(Epoch));
+		var outside = directory.CreateFile("external/outside.txt", "keep");
+		var link = Path.Combine(registry.DirectoryPath, "00000000000000000000000000000006.json");
+		if (OperatingSystem.IsWindows())
+		{
+			var start = new System.Diagnostics.ProcessStartInfo("cmd.exe")
+			{
+				Arguments = $"/d /c mklink /J \"{link}\" \"{Path.GetDirectoryName(outside)}\"", UseShellExecute = false,
+				CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true
+			};
+			using var process = System.Diagnostics.Process.Start(start)!;
+			await process.WaitForExitAsync(TestContext.Current.CancellationToken);
+			Assert.Equal(0, process.ExitCode);
+		}
+		else File.CreateSymbolicLink(link, outside);
 		Assert.Empty(registry.ReadActive());
 		Assert.Equal("keep", File.ReadAllText(outside));
 		Assert.False(File.Exists(link));
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.True(Directory.Exists(link));
+			Directory.Delete(link);
+		}
 	}
 
 	private sealed class Clock(DateTimeOffset now) : TimeProvider
