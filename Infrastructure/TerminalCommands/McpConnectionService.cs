@@ -703,8 +703,8 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 				_localization.Format("Mcp.Connect.ClientNotFound", DisplayName(request.Client)));
 		}
 
-		if (FlatpakEnvironment.Current.IsActive && !(await RunClientCommandAsync(
-				executable, ["--version"], request.ProjectRoot, cancellationToken).ConfigureAwait(false)).Succeeded)
+		if (FlatpakEnvironment.Current.IsActive && !IsUsableFlatpakClientVersion(await RunClientCommandAsync(
+				executable, ["--version"], request.ProjectRoot, cancellationToken).ConfigureAwait(false)))
 			return new McpConnectionInspection(false, null, false, _localization["Flatpak.ConnectionUnverified"]);
 		var read = await ReadExistingConnectionAsync(
 			request,
@@ -752,8 +752,8 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 		if (FlatpakEnvironment.Current.IsActive)
 		{
 			manual = McpConnectionFragmentGenerator.GenerateHostClientCommand(request);
-			if (executable is null || !(await RunClientCommandAsync(
-					executable, ["--version"], request.ProjectRoot, cancellationToken).ConfigureAwait(false)).Succeeded)
+			if (executable is null || !IsUsableFlatpakClientVersion(await RunClientCommandAsync(
+					executable, ["--version"], request.ProjectRoot, cancellationToken).ConfigureAwait(false)))
 			{
 				return new McpConnectionResult(McpConnectionStatus.ManualConfiguration,
 					_localization["Flatpak.ConnectionUnverified"] + " " + _localization["Flatpak.CopyCommand"],
@@ -1186,6 +1186,11 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 		McpProjectConfigurationError.OperationFailed => _localization["Desktop.Error.OperationFailed"],
 		_ => _localization["Mcp.Connect.UnknownError"]
 	};
+
+	private static bool IsUsableFlatpakClientVersion(McpConnectionProcessResult result) =>
+		result.Succeeded && !result.OutputIncomplete &&
+		System.Text.RegularExpressions.Regex.IsMatch(result.StandardOutput, @"[0-9]+\.[0-9]+\.[0-9]+",
+			System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.NonBacktracking);
 
 	private Task<McpConnectionProcessResult> RunClientCommandAsync(
 		string executablePath,

@@ -267,6 +267,8 @@ public static class McpConnectionFragmentGenerator
 				'\n' => "\\n",
 				'\f' => "\\f",
 				'\r' => "\\r",
+				_ when FlatpakEnvironment.Current.IsActive && (character < ' ' || character == '\u007f') =>
+					"\\u" + ((int)character).ToString("X4", System.Globalization.CultureInfo.InvariantCulture),
 				_ => character.ToString()
 			});
 		}
