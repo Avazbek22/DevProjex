@@ -1838,7 +1838,8 @@ clients…**; those five actions are enabled only with an open project. Standard
 registrations omit `--live`, and their manual-configuration window shows the same
 standard command.
 The first two actions invoke the installed client command, capture its output, replace
-an existing `devprojex` entry, and then open a new terminal at the project root.
+an existing `devprojex` entry that DevProjex wrote, and then open a new terminal at the
+project root.
 Claude Code stores the entry in the project-local scope selected by its working
 directory. DevProjex inspects that entry directly in the project's section of
 `.claude.json`, removes it with local scope, and restores its complete original JSON
@@ -1856,6 +1857,23 @@ Desktop and Terminal Workspace ask first and show both roots, and the CLI requir
 optional setting and does not document which directory it starts a stdio server
 in when `cwd` is absent, so an entry without `--root` could serve an unexpected
 folder.
+
+A Claude Code or Codex `devprojex` entry that DevProjex did not write is never
+replaced silently:
+
+- An entry that already starts DevProjex for this project and mode through `npx`,
+  `dnx`, or `flatpak run` is left unchanged and reported as connected. A live entry
+  counts only when its launcher shares this installation's selection: `npx` and
+  `dnx` do not share it with the Store or Flatpak app, and `flatpak run` shares it
+  only with the Flatpak app.
+- Any other entry is shown next to the replacement command, together with the
+  arguments the replacement would drop. That covers a launcher for another project,
+  mode, or arguments, and a command DevProjex does not recognize. Desktop and
+  Terminal Workspace offer **Keep my entry**, **Copy command**, and **Replace**;
+  closing the question keeps the entry. The CLI exits with `1`, prints both commands
+  and the manual configuration, and replaces the entry only with `--replace`.
+- A confirmed replacement is refused if the entry changed while the question was
+  open. If a replacement fails, the original entry is restored.
 
 **Open in Cursor** recreates the `devprojex` entry in `.cursor/mcp.json`;
 **Open in VS Code** does the same in `.vscode/mcp.json`, then each action opens

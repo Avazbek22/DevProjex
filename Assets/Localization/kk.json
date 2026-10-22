@@ -25,7 +25,7 @@
   "Mcp.Connect.ExistingEntry.Changed": "Растау ашық кезде {0} үшін devprojex жазбасы өзгерді. Ештеңе ауыстырылмады; қайталап көріңіз.",
   "Mcp.Connect.ExistingEntry.CommandCopied": "Қосылу пәрмені көшірілді. devprojex жазбаңыз өзгертілмеді.",
   "Mcp.Connect.ProjectEntryFieldsReplaced": "Ауыстырылған өрістер: {0}.",
-  "Terminal.Option.McpReplace": "Бар devprojex жазбасын ауыстыруды растайды: Cursor немесе VS Code жазбасындағы қосымша өрістерді не басқа жобаны көрсететін жалғыз Codex жазбасын.",
+  "Terminal.Option.McpReplace": "Бар devprojex жазбасын ауыстыруды растайды: Cursor немесе VS Code жазбасындағы қосымша өрістерді, басқа жобаны көрсететін жалғыз Codex жазбасын не DevProjex жасамаған Claude Code немесе Codex жазбасын.",
   "Dialog.ProjectCopy.ZipReplace.Title": "Бар ZIP файлын ауыстыру керек пе?",
   "Dialog.ProjectCopy.ZipReplace.Message": "ZIP файлы бұрыннан бар:\n{0}\n\nАуыстыру керек пе?",
   "Dialog.StoreMigration.Title": "Store деректерін дайындау мүмкін болмады",

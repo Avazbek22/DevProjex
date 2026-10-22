@@ -25,7 +25,7 @@
   "Mcp.Connect.ExistingEntry.Changed": "Mục devprojex cho {0} đã thay đổi khi hộp xác nhận đang mở. Không có gì bị thay; hãy thử lại.",
   "Mcp.Connect.ExistingEntry.CommandCopied": "Đã sao chép lệnh kết nối. Mục devprojex của bạn không bị thay đổi.",
   "Mcp.Connect.ProjectEntryFieldsReplaced": "Các trường đã thay thế: {0}.",
-  "Terminal.Option.McpReplace": "Xác nhận thay thế một mục devprojex hiện có: các trường bổ sung trong mục của Cursor hoặc VS Code, hoặc mục Codex duy nhất khi nó trỏ tới dự án khác.",
+  "Terminal.Option.McpReplace": "Xác nhận thay thế một mục devprojex hiện có: các trường bổ sung trong mục của Cursor hoặc VS Code, mục Codex duy nhất khi nó trỏ tới dự án khác, hoặc mục Claude Code hay Codex không do DevProjex tạo.",
   "Dialog.ProjectCopy.ZipReplace.Title": "Thay thế tệp ZIP hiện có?",
   "Dialog.ProjectCopy.ZipReplace.Message": "Tệp ZIP đã tồn tại:\n{0}\n\nThay thế?",
   "Dialog.StoreMigration.Title": "Không thể chuẩn bị dữ liệu Store",

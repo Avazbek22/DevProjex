@@ -25,7 +25,7 @@
   "Mcp.Connect.ExistingEntry.Changed": "确认期间 {0} 的 devprojex 条目已更改。未执行替换；请重试。",
   "Mcp.Connect.ExistingEntry.CommandCopied": "已复制连接命令。你的 devprojex 条目未更改。",
   "Mcp.Connect.ProjectEntryFieldsReplaced": "已替换的字段：{0}。",
-  "Terminal.Option.McpReplace": "确认替换现有的 devprojex 条目：Cursor 或 VS Code 条目中的其他字段，或指向其他项目的唯一 Codex 条目。",
+  "Terminal.Option.McpReplace": "确认替换现有的 devprojex 条目：Cursor 或 VS Code 条目中的其他字段、指向其他项目的唯一 Codex 条目，或并非由 DevProjex 创建的 Claude Code 或 Codex 条目。",
   "Dialog.ProjectCopy.ZipReplace.Title": "替换现有 ZIP 文件？",
   "Dialog.ProjectCopy.ZipReplace.Message": "ZIP 文件已存在：\n{0}\n\n要替换吗？",
   "Dialog.StoreMigration.Title": "无法准备 Store 数据",

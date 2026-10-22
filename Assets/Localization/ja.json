@@ -25,7 +25,7 @@
   "Mcp.Connect.ExistingEntry.Changed": "確認中に {0} の devprojex エントリが変更されました。置き換えは行っていません。もう一度お試しください。",
   "Mcp.Connect.ExistingEntry.CommandCopied": "接続コマンドをコピーしました。devprojex エントリは変更していません。",
   "Mcp.Connect.ProjectEntryFieldsReplaced": "置き換えたフィールド：{0}。",
-  "Terminal.Option.McpReplace": "既存の devprojex エントリの置き換えを確定します。対象はCursorまたはVS Codeのエントリにある追加フィールドと、別のプロジェクトを指しているCodexの唯一のエントリです。",
+  "Terminal.Option.McpReplace": "既存の devprojex エントリの置き換えを確定します。対象はCursorまたはVS Codeのエントリにある追加フィールド、別のプロジェクトを指しているCodexの唯一のエントリ、DevProjexが作成していないClaude CodeまたはCodexのエントリです。",
   "Dialog.ProjectCopy.ZipReplace.Title": "既存のZIPを置き換えますか？",
   "Dialog.ProjectCopy.ZipReplace.Message": "ZIPは既に存在します：\n{0}\n\n置き換えますか？",
   "Dialog.StoreMigration.Title": "Storeデータを準備できませんでした",

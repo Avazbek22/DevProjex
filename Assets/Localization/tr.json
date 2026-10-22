@@ -25,7 +25,7 @@
   "Mcp.Connect.ExistingEntry.Changed": "Onay açıkken {0} için devprojex girdisi değişti. Hiçbir şey değiştirilmedi; yeniden deneyin.",
   "Mcp.Connect.ExistingEntry.CommandCopied": "Bağlantı komutu kopyalandı. devprojex girdiniz değiştirilmedi.",
   "Mcp.Connect.ProjectEntryFieldsReplaced": "Değiştirilen alanlar: {0}.",
-  "Terminal.Option.McpReplace": "Mevcut bir devprojex girdisinin değiştirilmesini onaylar: Cursor veya VS Code girdisindeki ek alanlar ya da başka bir projeyi gösteren tek Codex girdisi.",
+  "Terminal.Option.McpReplace": "Mevcut bir devprojex girdisinin değiştirilmesini onaylar: Cursor veya VS Code girdisindeki ek alanlar, başka bir projeyi gösteren tek Codex girdisi ya da DevProjex'in oluşturmadığı bir Claude Code veya Codex girdisi.",
   "Dialog.ProjectCopy.ZipReplace.Title": "Mevcut ZIP değiştirilsin mi?",
   "Dialog.ProjectCopy.ZipReplace.Message": "ZIP dosyası zaten var:\n{0}\n\nDeğiştirilsin mi?",
   "Dialog.StoreMigration.Title": "Store verileri hazırlanamadı",

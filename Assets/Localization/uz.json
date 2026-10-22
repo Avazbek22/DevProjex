@@ -25,7 +25,7 @@
   "Mcp.Connect.ExistingEntry.Changed": "Tasdiqlash ochiq paytda {0} uchun devprojex yozuvi o‘zgardi. Hech narsa almashtirilmadi; qayta urinib ko‘ring.",
   "Mcp.Connect.ExistingEntry.CommandCopied": "Ulanish buyrug‘i nusxalandi. devprojex yozuvingiz o‘zgartirilmadi.",
   "Mcp.Connect.ProjectEntryFieldsReplaced": "Almashtirilgan maydonlar: {0}.",
-  "Terminal.Option.McpReplace": "Mavjud devprojex yozuvini almashtirishni tasdiqlaydi: Cursor yoki VS Code yozuvidagi qo‘shimcha maydonlar yoki boshqa loyihani ko‘rsatayotgan yagona Codex yozuvi.",
+  "Terminal.Option.McpReplace": "Mavjud devprojex yozuvini almashtirishni tasdiqlaydi: Cursor yoki VS Code yozuvidagi qo‘shimcha maydonlar, boshqa loyihani ko‘rsatayotgan yagona Codex yozuvi yoki DevProjex yaratmagan Claude Code yoki Codex yozuvi.",
   "Dialog.ProjectCopy.ZipReplace.Title": "Mavjud ZIP fayl almashtirilsinmi?",
   "Dialog.ProjectCopy.ZipReplace.Message": "ZIP fayl allaqachon mavjud:\n{0}\n\nUni almashtirasizmi?",
   "Dialog.StoreMigration.Title": "Store ma’lumotlarini tayyorlab bo‘lmadi",

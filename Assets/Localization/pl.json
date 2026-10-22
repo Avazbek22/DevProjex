@@ -25,7 +25,7 @@
   "Mcp.Connect.ExistingEntry.Changed": "Wpis devprojex dla {0} zmienił się podczas potwierdzania. Niczego nie zastąpiono; spróbuj ponownie.",
   "Mcp.Connect.ExistingEntry.CommandCopied": "Skopiowano polecenie połączenia. Twój wpis devprojex pozostał bez zmian.",
   "Mcp.Connect.ProjectEntryFieldsReplaced": "Zastąpione pola: {0}.",
-  "Terminal.Option.McpReplace": "Potwierdza zastąpienie istniejącego wpisu devprojex: dodatkowych pól we wpisie Cursor lub VS Code albo jedynego wpisu Codex, gdy wskazuje inny projekt.",
+  "Terminal.Option.McpReplace": "Potwierdza zastąpienie istniejącego wpisu devprojex: dodatkowych pól we wpisie Cursor lub VS Code, jedynego wpisu Codex, gdy wskazuje inny projekt, albo wpisu Claude Code lub Codex, którego nie utworzył DevProjex.",
   "Dialog.ProjectCopy.ZipReplace.Title": "Zastąpić istniejący plik ZIP?",
   "Dialog.ProjectCopy.ZipReplace.Message": "Plik ZIP już istnieje:\n{0}\n\nZastąpić go?",
   "Dialog.StoreMigration.Title": "Nie można przygotować danych Store",

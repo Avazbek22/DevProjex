@@ -25,7 +25,7 @@
   "Mcp.Connect.ExistingEntry.Changed": "확인 창이 열려 있는 동안 {0}의 devprojex 항목이 변경되었습니다. 아무것도 바꾸지 않았습니다. 다시 시도하세요.",
   "Mcp.Connect.ExistingEntry.CommandCopied": "연결 명령을 복사했습니다. devprojex 항목은 변경하지 않았습니다.",
   "Mcp.Connect.ProjectEntryFieldsReplaced": "바뀐 필드: {0}.",
-  "Terminal.Option.McpReplace": "기존 devprojex 항목의 교체를 확인합니다. Cursor 또는 VS Code 항목의 추가 필드나, 다른 프로젝트를 가리키는 유일한 Codex 항목이 대상입니다.",
+  "Terminal.Option.McpReplace": "기존 devprojex 항목의 교체를 확인합니다. Cursor 또는 VS Code 항목의 추가 필드, 다른 프로젝트를 가리키는 유일한 Codex 항목, DevProjex가 만들지 않은 Claude Code 또는 Codex 항목이 대상입니다.",
   "Dialog.ProjectCopy.ZipReplace.Title": "기존 ZIP 파일을 바꾸시겠습니까?",
   "Dialog.ProjectCopy.ZipReplace.Message": "ZIP 파일이 이미 있습니다:\n{0}\n\n바꾸시겠습니까?",
   "Dialog.StoreMigration.Title": "Store 데이터를 준비할 수 없습니다",

@@ -25,7 +25,7 @@
   "Mcp.Connect.ExistingEntry.Changed": "確認期間 {0} 的 devprojex 項目已變更。未執行替換；請重試。",
   "Mcp.Connect.ExistingEntry.CommandCopied": "已複製連線命令。你的 devprojex 項目未變更。",
   "Mcp.Connect.ProjectEntryFieldsReplaced": "已取代的欄位：{0}。",
-  "Terminal.Option.McpReplace": "確認取代現有的 devprojex 項目：Cursor 或 VS Code 項目中的其他欄位，或指向其他專案的唯一 Codex 項目。",
+  "Terminal.Option.McpReplace": "確認取代現有的 devprojex 項目：Cursor 或 VS Code 項目中的其他欄位、指向其他專案的唯一 Codex 項目，或並非由 DevProjex 建立的 Claude Code 或 Codex 項目。",
   "Dialog.ProjectCopy.ZipReplace.Title": "取代現有 ZIP 檔案？",
   "Dialog.ProjectCopy.ZipReplace.Message": "ZIP 檔案已存在：\n{0}\n\n要取代嗎？",
   "Dialog.StoreMigration.Title": "無法準備 Store 資料",

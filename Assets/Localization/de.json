@@ -25,7 +25,7 @@
   "Mcp.Connect.ExistingEntry.Changed": "Der devprojex-Eintrag für {0} wurde während der Bestätigung geändert. Es wurde nichts ersetzt; versuchen Sie es erneut.",
   "Mcp.Connect.ExistingEntry.CommandCopied": "Verbindungsbefehl kopiert. Ihr devprojex-Eintrag blieb unverändert.",
   "Mcp.Connect.ProjectEntryFieldsReplaced": "Ersetzte Felder: {0}.",
-  "Terminal.Option.McpReplace": "Ersetzen eines vorhandenen devprojex-Eintrags bestätigen: zusätzliche Felder in einem Eintrag für Cursor oder VS Code oder den einzigen Codex-Eintrag, wenn er auf ein anderes Projekt zeigt.",
+  "Terminal.Option.McpReplace": "Ersetzen eines vorhandenen devprojex-Eintrags bestätigen: zusätzliche Felder in einem Eintrag für Cursor oder VS Code, den einzigen Codex-Eintrag, wenn er auf ein anderes Projekt zeigt, oder einen Eintrag in Claude Code oder Codex, den DevProjex nicht angelegt hat.",
   "Dialog.ProjectCopy.ZipReplace.Title": "Vorhandene ZIP-Datei ersetzen?",
   "Dialog.ProjectCopy.ZipReplace.Message": "Die ZIP-Datei ist bereits vorhanden:\n{0}\n\nErsetzen?",
   "Dialog.StoreMigration.Title": "Store-Daten konnten nicht vorbereitet werden",

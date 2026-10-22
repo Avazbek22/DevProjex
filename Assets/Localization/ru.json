@@ -25,7 +25,7 @@
   "Mcp.Connect.ExistingEntry.Changed": "Запись devprojex для {0} изменилась, пока было открыто подтверждение. Замена не выполнена; повторите попытку.",
   "Mcp.Connect.ExistingEntry.CommandCopied": "Команда подключения скопирована. Ваша запись devprojex осталась без изменений.",
   "Mcp.Connect.ProjectEntryFieldsReplaced": "Заменённые поля: {0}.",
-  "Terminal.Option.McpReplace": "Подтвердить замену существующей записи devprojex: дополнительных полей в записи Cursor или VS Code либо единственной записи Codex, если она указывает на другой проект.",
+  "Terminal.Option.McpReplace": "Подтвердить замену существующей записи devprojex: дополнительных полей в записи Cursor или VS Code, единственной записи Codex, если она указывает на другой проект, либо записи Claude Code или Codex, которую создал не DevProjex.",
   "Dialog.ProjectCopy.ZipReplace.Title": "Заменить существующий ZIP-архив?",
   "Dialog.ProjectCopy.ZipReplace.Message": "ZIP-архив уже существует:\n{0}\n\nЗаменить его?",
   "Dialog.StoreMigration.Title": "Не удалось подготовить данные Store",

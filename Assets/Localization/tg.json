@@ -25,7 +25,7 @@
   "Mcp.Connect.ExistingEntry.Changed": "Ҳангоми тасдиқ сабти devprojex барои {0} тағйир ёфт. Ҳеҷ чиз иваз нашуд; боз кӯшиш кунед.",
   "Mcp.Connect.ExistingEntry.CommandCopied": "Фармони пайвастшавӣ нусхабардорӣ шуд. Сабти devprojex-и шумо бетағйир монд.",
   "Mcp.Connect.ProjectEntryFieldsReplaced": "Майдонҳои ивазшуда: {0}.",
-  "Terminal.Option.McpReplace": "Иваз кардани сабти мавҷудаи devprojex-ро тасдиқ мекунад: майдонҳои иловагӣ дар сабти Cursor ё VS Code ё ягона сабти Codex, агар он ба лоиҳаи дигар ишора кунад.",
+  "Terminal.Option.McpReplace": "Иваз кардани сабти мавҷудаи devprojex-ро тасдиқ мекунад: майдонҳои иловагӣ дар сабти Cursor ё VS Code, ягона сабти Codex, агар он ба лоиҳаи дигар ишора кунад, ё сабти Claude Code ё Codex, ки онро DevProjex насохтааст.",
   "Dialog.ProjectCopy.ZipReplace.Title": "Файли ZIP-и мавҷударо иваз кунед?",
   "Dialog.ProjectCopy.ZipReplace.Message": "Файли ZIP аллакай вуҷуд дорад:\n{0}\n\nОнро иваз кунед?",
   "Dialog.StoreMigration.Title": "Омода кардани маълумоти Store имкон надод",

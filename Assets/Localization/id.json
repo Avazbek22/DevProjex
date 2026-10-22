@@ -25,7 +25,7 @@
   "Mcp.Connect.ExistingEntry.Changed": "Entri devprojex untuk {0} berubah saat konfirmasi terbuka. Tidak ada yang diganti; coba lagi.",
   "Mcp.Connect.ExistingEntry.CommandCopied": "Perintah koneksi disalin. Entri devprojex Anda tidak diubah.",
   "Mcp.Connect.ProjectEntryFieldsReplaced": "Kolom yang diganti: {0}.",
-  "Terminal.Option.McpReplace": "Konfirmasi penggantian entri devprojex yang sudah ada: kolom tambahan pada entri Cursor atau VS Code, atau satu-satunya entri Codex saat mengarah ke proyek lain.",
+  "Terminal.Option.McpReplace": "Konfirmasi penggantian entri devprojex yang sudah ada: kolom tambahan pada entri Cursor atau VS Code, satu-satunya entri Codex saat mengarah ke proyek lain, atau entri Claude Code atau Codex yang tidak dibuat oleh DevProjex.",
   "Dialog.ProjectCopy.ZipReplace.Title": "Ganti ZIP yang ada?",
   "Dialog.ProjectCopy.ZipReplace.Message": "File ZIP sudah ada:\n{0}\n\nGanti?",
   "Dialog.StoreMigration.Title": "Data Store tidak dapat disiapkan",
