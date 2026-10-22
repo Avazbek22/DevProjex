@@ -2,9 +2,14 @@ using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
 using System.Text.Json;
 using DevProjex.Infrastructure.TerminalCommands;
+using DevProjex.Kernel;
 
 if (args[0] == "--shim")
 {
+	// This client runs from a temporary folder, not the application prefix the product requires, so it decides
+	// by the real sandbox markers alone: inside `flatpak run` they are present, on the host they are not.
+	using var sandbox = FlatpakEnvironment.UseForTesting(
+		FlatpakEnvironment.Detect(OperatingSystem.IsLinux(), Environment.GetEnvironmentVariable, File.Exists));
 	var home = Path.GetFullPath(args[1]);
 	var service = new TerminalCommandSetupService(new()
 	{
