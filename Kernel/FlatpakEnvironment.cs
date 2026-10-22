@@ -30,9 +30,9 @@ public static class FlatpakEnvironment
 	{
 		var sandbox = Detect(isLinux, environment, fileExists);
 		return sandbox.IsActive &&
-		       processPath is not null &&
-		       processPath.StartsWith(ApplicationPrefix, StringComparison.Ordinal) &&
-		       !processPath.Contains("/../", StringComparison.Ordinal)
+			   processPath is not null &&
+			   processPath.StartsWith(ApplicationPrefix, StringComparison.Ordinal) &&
+			   !processPath.Contains("/../", StringComparison.Ordinal)
 			? sandbox
 			: new(false, null);
 	}
