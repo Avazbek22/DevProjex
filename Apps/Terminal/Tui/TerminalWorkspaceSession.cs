@@ -1434,6 +1434,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			BorderStyle = _presentation.BorderStyle,
 			SchemeName = TerminalWorkspaceTheme.Panel
 		};
+		// Titles are fitted to their frames. The workspace can be shown and focused before its first layout,
+		// while every frame is still zero wide, so a title fitted then must be refitted once the frame is sized.
+		treeFrame.ViewportChanged += (_, _) => UpdatePanelTitles();
+		previewFrame.ViewportChanged += (_, _) => UpdatePanelTitles();
 		var treePanelHeading = new TerminalLiteralLabel
 		{
 			X = 0,

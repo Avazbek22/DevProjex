@@ -7,6 +7,56 @@ namespace DevProjex.Tests.Terminal;
 [Collection(TerminalProcessCollection.Name)]
 public sealed class TerminalPtyLifecycleTests
 {
+	[Fact(Timeout = 90_000)]
+	public async Task PanelTitlesAreFittedToTheFrameWidthAfterAResize()
+	{
+		// Titles are fitted to the width of their frame. A title fitted to a stale width would stay cut once
+		// the frame grows, or be clipped by the border instead of ending in "..." once it shrinks.
+		const string Query = "a-very-long-descriptive-file-name-for-titles";
+		const string FilterSuffix = "/" + Query + " (1)";
+		using var project = new TemporaryDirectory();
+		project.WriteFile(Query + ".txt", "content");
+		// 120x24 is the split layout, where the tree frame is too narrow for the filtered title.
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			project.Path,
+			["tui", project.Path, "--profile", "standard", "--screen", "alternate", "--no-mouse", "--language", "en"],
+			columns: 120,
+			rows: 24,
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"> PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync("/", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Name contains:",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync(Query, TestContext.Current.CancellationToken);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenWithoutAsync(
+			"Name contains:",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await WaitForTreeTitleAsync(terminal, static title => title.EndsWith("...", StringComparison.Ordinal));
+
+		// 100x24 is the tabbed layout, where the tree frame takes the whole width.
+		await terminal.ResizeAsync(100, 24, TestContext.Current.CancellationToken);
+		var tabbed = await WaitForTreeTitleAsync(
+			terminal,
+			static title => title.EndsWith(FilterSuffix, StringComparison.Ordinal));
+		AssertViewportWidth(tabbed, 100);
+
+		await terminal.ResizeAsync(120, 24, TestContext.Current.CancellationToken);
+		var split = await WaitForTreeTitleAsync(
+			terminal,
+			static title => title.EndsWith("...", StringComparison.Ordinal));
+		Assert.DoesNotContain(FilterSuffix, split, StringComparison.Ordinal);
+		AssertViewportWidth(split, 120);
+
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(cancellationToken: TestContext.Current.CancellationToken));
+	}
+
 	[Fact(Timeout = 60_000)]
 	public async Task ExplicitTuiOpensReadableMarkerlessDirectory()
 	{
@@ -765,6 +815,33 @@ public sealed class TerminalPtyLifecycleTests
 		project.WriteFile("global.json", "{}");
 		project.WriteFile("src/App.cs", "internal sealed class App {}");
 		return project;
+	}
+
+	private static async Task<string> WaitForTreeTitleAsync(TerminalPtyHarness terminal, Func<string, bool> condition)
+	{
+		var stopwatch = Stopwatch.StartNew();
+		var screen = terminal.CaptureScreen();
+		while (stopwatch.Elapsed < TimeSpan.FromSeconds(15))
+		{
+			screen = terminal.CaptureScreen();
+			if (TreeTitle(screen) is { } title && condition(title))
+				return screen;
+			await Task.Delay(50, TestContext.Current.CancellationToken);
+		}
+
+		throw new TimeoutException($"The tree title never matched; it was '{TreeTitle(screen)}'.\n{screen}");
+	}
+
+	/// <summary>The tree frame title as drawn between the border's title delimiters.</summary>
+	private static string? TreeTitle(string screen)
+	{
+		const string Marker = "> PROJECT TREE";
+		var line = screen.Split('\n').FirstOrDefault(static line => line.Contains(Marker, StringComparison.Ordinal));
+		if (line is null)
+			return null;
+		var start = line.IndexOf(Marker, StringComparison.Ordinal);
+		var end = line.IndexOf('├', start);
+		return (end < 0 ? line[start..] : line[start..end]).TrimEnd();
 	}
 
 	private static void AssertViewportWidth(string screen, int columns)
