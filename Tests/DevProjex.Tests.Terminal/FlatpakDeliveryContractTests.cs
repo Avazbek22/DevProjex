@@ -44,6 +44,21 @@ public sealed class FlatpakDeliveryContractTests
 		Assert.Contains("uses: ./.github/workflows/flatpak-build.yml", candidate);
 	}
 
+	[Fact]
+	public void ContainerTrustsTheCheckoutBeforeTheFirstGitCommand()
+	{
+		var workflow = File.ReadAllText(Path.Combine(Root(), ".github/workflows/flatpak-build.yml"));
+		var checkout = workflow.IndexOf("uses: actions/checkout@", StringComparison.Ordinal);
+		var trust = workflow.IndexOf("git config --global --add safe.directory \"$GITHUB_WORKSPACE\"", StringComparison.Ordinal);
+		// prepare-source.sh runs git archive, the first Git command in the container job.
+		var firstGitUse = workflow.IndexOf("Packaging/Linux/flatpak/prepare-source.sh", StringComparison.Ordinal);
+
+		Assert.Contains("container:", workflow);
+		Assert.True(checkout >= 0 && trust > checkout, "The safe.directory step must follow the checkout.");
+		Assert.True(firstGitUse > trust, "The checkout must be trusted before prepare-source.sh runs git archive.");
+		Assert.Contains("git archive", File.ReadAllText(Path.Combine(Root(), "Packaging/Linux/flatpak/prepare-source.sh")));
+	}
+
 	private static string Root()
 	{
 		var root = new DirectoryInfo(AppContext.BaseDirectory);

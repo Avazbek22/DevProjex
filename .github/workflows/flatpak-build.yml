@@ -46,6 +46,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.checkout_ref || github.sha }}
+      # The container user does not own the runner's checkout, so Git refuses it as dubious ownership.
+      - name: Trust the checkout inside the container
+        shell: bash
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Generate native-architecture offline NuGet sources
         shell: bash
         env:
