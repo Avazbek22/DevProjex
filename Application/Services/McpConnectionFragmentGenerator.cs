@@ -211,7 +211,8 @@ public static class McpConnectionFragmentGenerator
 		var client = request.Client == McpConnectionClient.ClaudeCode
 			? "claude mcp add --scope local devprojex -- "
 			: "codex mcp add devprojex -- ";
-		return "cd " + QuotePosixShellArgument(request.ProjectRoot) + " && " + client +
+		// Single quotes everywhere: a pasted command meets interactive bash, which expands '!' inside double quotes.
+		return "cd " + FlatpakEnvironment.QuoteArgument(request.ProjectRoot) + " && " + client +
 			FlatpakEnvironment.Current.ExternalLaunchCommand + " " +
 			string.Join(' ', (request.Mode == McpConnectionMode.Live
 				? new[] { "mcp", "--root", request.ProjectRoot, "--live" }

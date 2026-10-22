@@ -537,4 +537,22 @@ public sealed class McpConnectionFragmentGeneratorTests
 			CanInstall: false,
 			CanRepair: false,
 			ShellProfileHint: null);
+
+	[Fact]
+	public void FlatpakHostClientCommandSingleQuotesEveryPathForInteractiveShells()
+	{
+		using var sandbox = FlatpakEnvironment.UseForTesting(new(true, "io.github.Avazbek22.DevProjex"));
+		const string root = "/home/person/wow! $HOME `id` \"x" + "\"";
+		var quoted = FlatpakEnvironment.QuoteArgument(root);
+
+		var command = McpConnectionFragmentGenerator.GenerateHostClientCommand(
+			new(McpConnectionClient.ClaudeCode, McpConnectionMode.Live, "/app/DevProjex", root));
+
+		// Interactive bash expands '!' inside double quotes, so the pasted command must not use them for paths.
+		Assert.StartsWith("'", quoted, StringComparison.Ordinal);
+		Assert.Equal(
+			"cd " + quoted + " && claude mcp add --scope local devprojex -- flatpak run io.github.Avazbek22.DevProjex mcp --root " +
+			quoted + " --live",
+			command);
+	}
 }

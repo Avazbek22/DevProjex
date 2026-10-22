@@ -1,6 +1,7 @@
 """Drive real native controls; captures are unmodified X11 window pixels."""
 import json
 from pathlib import Path
+import re
 import shlex
 import subprocess
 import time
@@ -184,8 +185,16 @@ def check_gui(checks):
                     dialog = popup(420, 95)
                 pause()
                 value = desktop.clipboard()
-                expected = 'code ' + shlex.quote(str(checks.fixture)) if client == 'code' else 'cd ' + shlex.quote(str(checks.fixture)) + ' && ' + client
-                assert value == expected, (client, value, expected)
+                root = shlex.quote(str(checks.fixture))
+                if client == 'code':
+                    assert value == 'code ' + root, (client, value)
+                else:
+                    # The client CLI cannot run in the sandbox, so the copied text is the registration the dialog shows.
+                    scope = '--scope local ' if client == 'claude' else ''
+                    registration = ('cd ' + re.escape(root) + ' && ' + client + ' mcp add ' + re.escape(scope) +
+                                    re.escape('devprojex -- flatpak run io.github.Avazbek22.DevProjex mcp --root ') +
+                                    re.escape(root) + '( --live)?')
+                    assert re.fullmatch(registration, value), (client, value, registration)
                 (checks.evidence / ('clipboard-' + client + '.txt')).write_text(value)
                 desktop.screenshot(dialog, checks.evidence / ('clipboard-' + client + '.png'))
                 desktop.dismiss(dialog)
