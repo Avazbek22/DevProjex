@@ -318,6 +318,53 @@ public sealed class McpExistingEntryConnectionTests
 		Assert.Equal(new[] { "mcp", "--root", setup.Project }, setup.Cli.Arguments);
 	}
 
+	[Fact]
+	public async Task CodexReplacesAConfirmedEntryWithExtraSettingsInPlaceAndKeepsThem()
+	{
+		using var setup = new CodexSetup();
+		setup.WriteEntry("npx", ["-y", "devprojex", "mcp", "--root", setup.OtherProject], "startup_timeout_sec = 45");
+		var service = setup.Service();
+		var request = setup.Request(McpConnectionMode.Standard);
+		var first = await service.ConnectAsync(request, Token);
+		Assert.NotNull(first.ExistingEntryConflict);
+		Assert.Empty(setup.Cli.Requests);
+
+		var confirmed = await service.ConnectAsync(
+			request with { ReplaceExistingFields = true, ExpectedExistingEntryFingerprint = first.ExistingEntryFingerprint },
+			Token);
+
+		Assert.Equal(McpConnectionStatus.Updated, confirmed.Status);
+		Assert.Equal(new[] { "get" }, setup.Cli.Requests.Select(static item => item.Arguments[1]));
+		var connection = setup.ReadConnection();
+		Assert.NotNull(connection);
+		Assert.Equal(request.ExecutablePath, connection.Command);
+		Assert.Equal(new[] { "mcp", "--root", setup.Project }, connection.Arguments);
+		var configuration = setup.ReadConfiguration();
+		Assert.Contains("startup_timeout_sec = 45", configuration, StringComparison.Ordinal);
+		Assert.StartsWith("model = \"gpt-5\"", configuration, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task CodexRestoresAnEntryWithExtraSettingsByteForByteWhenVerificationFails()
+	{
+		using var setup = new CodexSetup();
+		setup.WriteEntry("node", ["server.js"], "startup_timeout_sec = 45");
+		var before = setup.ReadConfiguration();
+		var service = setup.Service();
+		var request = setup.Request(McpConnectionMode.Standard);
+		var first = await service.ConnectAsync(request, Token);
+		Assert.NotNull(first.ExistingEntryConflict);
+		setup.Cli.FailGet = true;
+
+		var confirmed = await service.ConnectAsync(
+			request with { ReplaceExistingFields = true, ExpectedExistingEntryFingerprint = first.ExistingEntryFingerprint },
+			Token);
+
+		Assert.Equal(McpConnectionStatus.ProcessFailed, confirmed.Status);
+		Assert.Equal(new[] { "get" }, setup.Cli.Requests.Select(static item => item.Arguments[1]));
+		Assert.Equal(before, setup.ReadConfiguration());
+	}
+
 	private static CancellationToken Token => TestContext.Current.CancellationToken;
 
 	private static JsonObject Entry(string command, params string[] arguments) => Entry(command, arguments, []);
@@ -476,16 +523,24 @@ public sealed class McpExistingEntryConnectionTests
 		public McpConnectionRequest Request(McpConnectionMode mode) =>
 			new(McpConnectionClient.Codex, mode, Path.Combine(Project, "app", "DevProjex.exe"), Project);
 
-		public void WriteEntry(string? command, IReadOnlyList<string>? arguments)
+		public void WriteEntry(string? command, IReadOnlyList<string>? arguments, string? extraSetting = null)
 		{
 			var text = new StringBuilder("model = \"gpt-5\"\n");
 			if (command is not null)
 			{
 				text.Append("\n[mcp_servers.devprojex]\ncommand = ").Append(Toml(command)).Append('\n')
 					.Append("args = [").Append(string.Join(", ", arguments!.Select(Toml))).Append("]\n");
+				if (extraSetting is not null)
+					text.Append(extraSetting).Append('\n');
 			}
 			File.WriteAllText(ConfigurationPath, text.ToString());
 		}
+
+		public McpCodexUserConnection? ReadConnection() =>
+			new McpCodexUserConfigurationReader(new McpCodexUserConfigurationReaderOptions
+			{
+				CodexHomeProvider = () => CodexHome
+			}).Read().Connection;
 
 		public string ReadConfiguration() => File.ReadAllText(ConfigurationPath);
 
@@ -501,6 +556,7 @@ public sealed class McpExistingEntryConnectionTests
 		public List<McpConnectionProcessRequest> Requests { get; } = [];
 		public string? Command { get; private set; }
 		public string[] Arguments { get; private set; } = [];
+		public bool FailGet { get; set; }
 
 		public Task<McpConnectionProcessResult> RunAsync(McpConnectionProcessRequest request, CancellationToken cancellationToken)
 		{
@@ -513,11 +569,15 @@ public sealed class McpExistingEntryConnectionTests
 					return Task.FromResult(new McpConnectionProcessResult(0, "Removed global MCP server 'devprojex'.", string.Empty));
 				case "add":
 					var separator = arguments.ToList().IndexOf("--");
-					Command = arguments[separator + 1];
-					Arguments = arguments.Skip(separator + 2).ToArray();
-					setup.WriteEntry(Command, Arguments);
+					setup.WriteEntry(arguments[separator + 1], arguments.Skip(separator + 2).ToArray());
 					return Task.FromResult(new McpConnectionProcessResult(0, "Added global MCP server 'devprojex'.", string.Empty));
+				case "get" when FailGet:
+					return Task.FromResult(new McpConnectionProcessResult(1, string.Empty, "Error: failed to load configuration"));
 				case "get":
+					// Codex answers from config.toml, so an entry edited in place is reported like an added one.
+					var connection = setup.ReadConnection();
+					Command = connection?.Command;
+					Arguments = connection?.Arguments.ToArray() ?? [];
 					var payload = JsonSerializer.Serialize(new
 					{
 						name = "devprojex",
