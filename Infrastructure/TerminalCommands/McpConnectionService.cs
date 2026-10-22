@@ -1603,7 +1603,7 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 		if (string.IsNullOrWhiteSpace(command) ||
 			arguments.Count < 3 ||
 			!(arguments[0] == "mcp" || FlatpakEnvironment.Current.IsActive && command == "flatpak" &&
-				arguments.Count >= 6 && arguments[0] == "run" &&
+				arguments.Count >= 5 && arguments[0] == "run" &&
 				arguments[1] == FlatpakEnvironment.Current.AppId && arguments[2] == "mcp") ||
 			rootIndex <= 0 ||
 			rootIndex + 1 >= arguments.Count ||
