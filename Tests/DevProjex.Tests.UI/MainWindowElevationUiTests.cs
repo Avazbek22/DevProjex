@@ -48,6 +48,49 @@ public sealed class MainWindowElevationUiTests
 	}
 
 	[AvaloniaFact]
+	public async Task OpeningReparseRootInsideFlatpakKeepsTheAliasExplanation()
+	{
+		using var sandbox = FlatpakEnvironment.UseForTesting(new(true, "io.github.Avazbek22.DevProjex"));
+		using var project = UiTestProject.CreateDefault();
+		using var aliases = new TemporaryTestDirectory();
+		var target = aliases.CreateFolder("target");
+		File.WriteAllText(Path.Combine(target, "App.cs"), "internal sealed class App { }\n");
+		var alias = Path.Combine(aliases.Path, "alias");
+		if (!TryCreateDirectoryAlias(alias, target))
+			Assert.Skip("Directory aliases are unavailable in this test environment.");
+		var elevation = new RecordingElevationService(isAdministrator: false);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			configureServices: services => services with { Elevation = elevation });
+		Window? dialog = null;
+
+		try
+		{
+			var openTask = await UiTestDriver.BeginOpenFolderAsync(window, alias);
+			dialog = await WaitForOwnedDialogAsync(window);
+
+			var text = GetDialogText(dialog);
+			Assert.Contains(
+				"This folder is a junction or symbolic link. Open the target folder instead.",
+				text,
+				StringComparison.Ordinal);
+			Assert.DoesNotContain("flatpak override", text, StringComparison.Ordinal);
+			Assert.Equal(0, elevation.RelaunchCount);
+
+			await UiTestDriver.CloseTopLevelWindowAsync(dialog);
+			dialog = null;
+			await openTask;
+			Assert.Equal(0, elevation.RelaunchCount);
+		}
+		finally
+		{
+			if (dialog?.IsVisible == true)
+				await UiTestDriver.CloseTopLevelWindowAsync(dialog);
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task BackgroundReloadOfAReparseRootNeverElevates()
 	{
 		using var project = UiTestProject.CreateDefault();

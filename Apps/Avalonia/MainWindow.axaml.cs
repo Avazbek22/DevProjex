@@ -1180,11 +1180,6 @@ public partial class MainWindow : Window
         {
             if (ownsCandidateSession)
                 candidateSession?.Dispose();
-            if (FlatpakEnvironment.Current.IsActive)
-            {
-                await ShowFlatpakUnavailablePathAsync(normalizedPath);
-                return false;
-            }
             if (rootAccess.IsReparsePoint)
             {
                 _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "reparse-root");
@@ -1193,6 +1188,12 @@ public partial class MainWindow : Window
             }
 
             _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "access-denied");
+            if (FlatpakEnvironment.Current.IsActive)
+            {
+                // A sandboxed process cannot elevate; the missing permission is a Flatpak override.
+                await ShowFlatpakUnavailablePathAsync(normalizedPath);
+                return false;
+            }
             if (_elevation.IsAdministrator)
             {
                 await ShowErrorAsync(_localization["Desktop.Error.AccessDenied"]);
