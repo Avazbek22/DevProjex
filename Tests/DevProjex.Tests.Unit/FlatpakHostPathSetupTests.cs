@@ -100,8 +100,8 @@ public sealed class FlatpakHostPathSetupTests
 
 		Assert.NotEmpty(promptedOutside);
 		foreach (var platform in platforms)
-		foreach (var state in Enum.GetValues<TerminalCommandSetupState>())
-			Assert.False(McpConnectionPathPromptPolicy.ShouldShow(state, platform), $"{platform}/{state}");
+			foreach (var state in Enum.GetValues<TerminalCommandSetupState>())
+				Assert.False(McpConnectionPathPromptPolicy.ShouldShow(state, platform), $"{platform}/{state}");
 	}
 
 	private static TerminalCommandSetupService CreateService(string home, string executable, Func<string?> path) =>
