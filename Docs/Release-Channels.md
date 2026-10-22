@@ -110,9 +110,10 @@ Publish the bundle after npm serves the same version. The manifest names that ve
 npx starts whatever version npm serves:
 
 1. `pwsh Scripts/Build-SmitheryBundle.ps1` writes `artifacts/smithery/devprojex.mcpb`. It
-   refuses a manifest whose version differs from `DevProjexVersion`, validates it with
-   `@anthropic-ai/mcpb`, and checks that the archive holds only the manifest, the entry point,
-   and the icon and stays under 25 MB.
+   refuses a manifest whose version differs from `DevProjexVersion` or that npm does not serve
+   yet, validates it with `@anthropic-ai/mcpb`, and checks that the archive holds only the
+   manifest, the entry point, and the icon and stays under 25 MB. `-AllowUnpublishedVersion`
+   checks the bundle before the npm release; that bundle is not for publication.
 2. `npx -y @smithery/cli@4.11.1 auth login`, then
    `npx -y @smithery/cli@4.11.1 namespace show` to confirm the namespace.
 3. `npx -y @smithery/cli@4.11.1 mcp publish artifacts/smithery/devprojex.mcpb -n <namespace>/devprojex`.

@@ -35,9 +35,14 @@ public sealed partial class DocumentationAndPackagingContractTests
 		var registered = new DevProjexMcpToolCatalog(target, allowRemote: false)
 			.Select(static tool => tool.ProtocolTool)
 			.ToArray();
-		var declared = SmitheryManifest(FindRepositoryRoot())["tools"]!.AsArray()
+		var manifest = SmitheryManifest(FindRepositoryRoot());
+		var declared = manifest["tools"]!.AsArray()
 			.Select(static tool => tool!.AsObject())
 			.ToArray();
+		Assert.Contains(
+			$"{CountWord(registered.Length)} read-only tools",
+			SmitheryText(manifest, "long_description"),
+			StringComparison.OrdinalIgnoreCase);
 
 		Assert.Equal(
 			registered.Select(static tool => tool.Name),

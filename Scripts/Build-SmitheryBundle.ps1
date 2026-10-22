@@ -6,12 +6,18 @@
     The bundle holds Packaging/Smithery/manifest.json, server/index.js, and the application icon. It
     carries no DevProjex binary: the manifest starts the npm package with npx, which selects the
     build for the user's platform. The script refuses a manifest whose version differs from
-    DevProjexVersion, validates it with the MCPB tooling, and checks that the packed archive holds
-    exactly those files and stays under the size Smithery accepts.
+    DevProjexVersion or that npm does not serve yet, validates it with the MCPB tooling, and checks
+    that the packed archive holds exactly those files and stays under the size Smithery accepts.
+
+.PARAMETER AllowUnpublishedVersion
+    Builds the bundle even though npm does not serve its version yet, to check it before a release.
+    Such a bundle must not be published.
 #>
 [CmdletBinding()]
 param(
-    [string] $OutputPath
+    [string] $OutputPath,
+
+    [switch] $AllowUnpublishedVersion
 )
 
 $ErrorActionPreference = "Stop"
@@ -61,6 +67,15 @@ try {
     $productVersion = Get-ProductVersion
     if ($manifest.version -cne $productVersion) {
         throw "Packaging/Smithery/manifest.json declares version '$($manifest.version)', but DevProjexVersion is '$productVersion'."
+    }
+    # The listing names this version while npx starts whatever npm serves, so it must not name a
+    # version that npm does not have yet.
+    if (-not $AllowUnpublishedVersion) {
+        $published = @(& npm view "devprojex@$productVersion" version 2>$null)
+        $publishedVersion = if ($published.Count -gt 0) { "$($published[-1])".Trim() } else { "" }
+        if ($LASTEXITCODE -ne 0 -or $publishedVersion -cne $productVersion) {
+            throw "npm does not serve devprojex $productVersion yet. Publish the npm release first, or pass -AllowUnpublishedVersion to check the bundle without publishing it."
+        }
     }
 
     foreach ($file in $bundleFiles.GetEnumerator()) {
