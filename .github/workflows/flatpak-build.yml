@@ -46,10 +46,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.checkout_ref || github.sha }}
-      # The container user does not own the runner's checkout, so Git refuses it as dubious ownership.
-      - name: Trust the checkout inside the container
+      # The runner owns the checkout and HOME, not the container user. Git refuses such a checkout, and
+      # processes in the flatpak sandbox lose root's permission override, so dotnet cannot write there.
+      - name: Hand the checkout and home to the container user
         shell: bash
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+        run: |
+          set -euo pipefail
+          chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE" "$HOME"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Generate native-architecture offline NuGet sources
         shell: bash
         env:
