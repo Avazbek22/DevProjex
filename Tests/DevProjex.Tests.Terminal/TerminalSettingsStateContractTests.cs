@@ -909,11 +909,19 @@ public sealed class TerminalSettingsStateContractTests
 		string displayName)
 	{
 		state.SelectNone();
-		var rowIndex = state.VisibleRows
+		var matches = state.VisibleRows
 			.Select((row, index) => (row, index))
-			.Single(item => item.row.Node.DisplayName == displayName)
-			.index;
-		state.ToggleSelection(rowIndex);
+			.Where(item => item.row.Node.DisplayName == displayName)
+			.ToArray();
+		// Name what the plan held, so a missing folder says whether the scan or the presentation dropped it.
+		Assert.True(
+			matches.Length == 1,
+			$"Expected one visible row named '{displayName}'; rows=[" +
+			string.Join(", ", state.VisibleRows.Select(static row => row.Node.DisplayName)) +
+			"], plan root=[" +
+			string.Join(", ", state.Plan.EffectiveTree.Children.Select(static child => child.DisplayName)) +
+			$"], git={state.Plan.GitReadiness}.");
+		state.ToggleSelection(matches[0].index);
 	}
 
 	private static void AssertSelectedSubtreePresentation(
