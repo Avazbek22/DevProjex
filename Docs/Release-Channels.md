@@ -73,6 +73,8 @@ Perform these steps in order:
 `server.json` carries the package version twice: the top-level `version` and each
 package `version`. Update them together with `DevProjexVersion`; the contract tests
 and the static package gate reject a manifest that differs from the packages.
+`Packaging/Smithery/manifest.json` carries the same version and is updated with them;
+its contract test fails until it matches.
 
 ## Glama listing
 
@@ -94,6 +96,32 @@ Glama release with the package version, and press Sync.
 
 Glama's Auto-Release can publish a release from a stale configuration on its own, and the
 owner cannot delete or rename a release. Check the release list after every change.
+
+## Smithery listing
+
+[Smithery](https://smithery.ai) lists a local server as an MCPB bundle of at most 25 MB.
+Every DevProjex platform build is larger than that, so the bundle carries no binary:
+`Packaging/Smithery/manifest.json` starts `npx -y devprojex mcp --root <folder>`, and npx
+installs the build for the user's platform. Smithery asks for the project folder when the
+server is added. Its page shows the tools the manifest declares and does not run the server
+to list them; a contract test keeps that list equal to the tools the server registers.
+
+Publish the bundle after npm serves the same version. The manifest names that version, while
+npx starts whatever version npm serves:
+
+1. `pwsh Scripts/Build-SmitheryBundle.ps1` writes `artifacts/smithery/devprojex.mcpb`. It
+   refuses a manifest whose version differs from `DevProjexVersion`, validates it with
+   `@anthropic-ai/mcpb`, and checks that the archive holds only the manifest, the entry point,
+   and the icon and stays under 25 MB.
+2. `npx -y @smithery/cli@4.11.1 auth login`, then
+   `npx -y @smithery/cli@4.11.1 namespace show` to confirm the namespace.
+3. `npx -y @smithery/cli@4.11.1 mcp publish artifacts/smithery/devprojex.mcpb -n <namespace>/devprojex`.
+
+A client that adds DevProjex through Smithery gets an entry named `devprojex` that runs
+`npx -y @smithery/cli@latest run <namespace>/devprojex`; the Smithery runner reads the saved
+folder and starts the bundle command. That entry does not show the project folder, so
+**Open in Claude Code**, **Open in Codex**, and `devprojex mcp connect` treat it as an entry
+DevProjex did not write and change it only after **Replace** or `--replace`.
 
 ## Published 5.2.0 package sizes
 
