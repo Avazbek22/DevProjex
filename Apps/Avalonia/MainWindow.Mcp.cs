@@ -102,18 +102,19 @@ public partial class MainWindow
                 return;
             }
 
-            McpClientLaunchResult? sandboxLaunch = null;
-            if (FlatpakEnvironment.Current.IsActive && request.Client != McpConnectionClient.Json)
+            if (FlatpakEnvironment.Current.IsActive && request.Client != McpConnectionClient.Json && !result.Succeeded)
             {
-                sandboxLaunch = await _mcpClientLaunchService.OpenAsync(
-                    new McpClientLaunchRequest(request.Client, request.ProjectRoot), cancellationToken);
-                if (sandboxLaunch.Status == McpClientLaunchStatus.CopyCommand && sandboxLaunch.ManualCommand is not null)
-                    await SetClipboardTextAsync(sandboxLaunch.ManualCommand);
+                // The sandbox menu item promises a copied command; it must be the one the dialog below asks to run.
+                var registration = string.IsNullOrWhiteSpace(result.ManualConfiguration)
+                    ? TryCreatePrintableConfiguration(request)
+                    : result.ManualConfiguration;
+                if (!string.IsNullOrWhiteSpace(registration))
+                    await SetClipboardTextAsync(registration);
             }
 
             if (result.Succeeded)
             {
-                var launchResult = sandboxLaunch ?? await _mcpClientLaunchService.OpenAsync(
+                var launchResult = await _mcpClientLaunchService.OpenAsync(
                     new McpClientLaunchRequest(request.Client, request.ProjectRoot),
                     cancellationToken);
                 cancellationToken.ThrowIfCancellationRequested();

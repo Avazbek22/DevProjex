@@ -42,13 +42,14 @@ public sealed class FlatpakClipboardUiTests(UiWorkspaceFixture workspace)
 	[AvaloniaTheory]
 	[InlineData("McpStandardConnectClaudeCodeMenuItem", "claude")]
 	[InlineData("McpStandardConnectCodexMenuItem", "codex")]
-	public async Task ManualRegistrationStillCopiesTheRequestedClientCommand(string menuName, string command)
+	public async Task ManualRegistrationCopiesTheRegistrationCommandTheDialogShows(string menuName, string command)
 	{
 		using var sandbox = FlatpakEnvironment.UseForTesting(new(true, "io.github.Avazbek22.DevProjex"));
+		var connection = new ManualConnectionService();
 		var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project,
 			configureServices: services => services with
 			{
-				McpConnectionService = new ManualConnectionService(),
+				McpConnectionService = connection,
 				McpClientLaunchService = new DevProjex.Infrastructure.TerminalCommands.McpClientLaunchService(services.Localization)
 			});
 		try
@@ -57,9 +58,15 @@ public sealed class FlatpakClipboardUiTests(UiWorkspaceFixture workspace)
 			await UiTestDriver.RaiseMenuItemClickAsync(UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, menuName));
 			await UiTestDriver.WaitForConditionAsync(window, () => window.OwnedWindows.Count != 0,
 				"the manual registration dialog");
-			Assert.Equal("cd " + FlatpakEnvironment.QuoteArgument(workspace.Project.RootPath) + " && " + command,
-				await ClipboardExtensions.TryGetTextAsync(window.Clipboard!));
-			Assert.Equal("Manual MCP configuration", Assert.Single(window.OwnedWindows).Title);
+			var dialog = Assert.Single(window.OwnedWindows);
+			var registration = McpConnectionFragmentGenerator.GenerateHostClientCommand(Assert.Single(connection.Requests));
+			// Pasting the clipboard must register DevProjex, not start a client that has no DevProjex server.
+			Assert.Equal(registration, await ClipboardExtensions.TryGetTextAsync(window.Clipboard!));
+			Assert.Contains(command + " mcp add", registration, StringComparison.Ordinal);
+			Assert.Contains("flatpak run io.github.Avazbek22.DevProjex mcp --root", registration, StringComparison.Ordinal);
+			Assert.Contains(dialog.GetVisualDescendants().OfType<TextBox>(),
+				box => string.Equals(box.Text, registration, StringComparison.Ordinal));
+			Assert.Equal("Manual MCP configuration", dialog.Title);
 		}
 		finally
 		{
@@ -70,9 +77,14 @@ public sealed class FlatpakClipboardUiTests(UiWorkspaceFixture workspace)
 
 	private sealed class ManualConnectionService : IMcpConnectionService
 	{
-		public Task<McpConnectionResult> ConnectAsync(McpConnectionRequest request, CancellationToken cancellationToken = default) =>
-			Task.FromResult(new McpConnectionResult(McpConnectionStatus.ManualConfiguration, "Run this command in your own terminal.",
+		public List<McpConnectionRequest> Requests { get; } = [];
+
+		public Task<McpConnectionResult> ConnectAsync(McpConnectionRequest request, CancellationToken cancellationToken = default)
+		{
+			Requests.Add(request);
+			return Task.FromResult(new McpConnectionResult(McpConnectionStatus.ManualConfiguration, "Run this command in your own terminal.",
 				ManualConfiguration: McpConnectionFragmentGenerator.GenerateHostClientCommand(request)));
+		}
 		public string CreatePrintableConfiguration(McpConnectionRequest request) => McpConnectionFragmentGenerator.GenerateHostClientCommand(request);
 	}
 
