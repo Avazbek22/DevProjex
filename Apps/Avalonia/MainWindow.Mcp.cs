@@ -133,7 +133,9 @@ public partial class MainWindow
                     if (!CanPresentMcpDialog(windowLifetime))
                         return;
                 }
-                await ShowMcpConnectionPathPromptAsync(snapshot, windowLifetime);
+                // A kept launcher entry does not start the executable the PATH command would point at.
+                if (!result.KeptExistingEntry)
+                    await ShowMcpConnectionPathPromptAsync(snapshot, windowLifetime);
                 return;
             }
 
@@ -238,7 +240,10 @@ public partial class MainWindow
         if (request.Client != McpConnectionClient.Codex ||
             _mcpConnectionService is not IMcpConnectionReplacementService replacementService)
         {
-            return await _mcpConnectionService.ConnectAsync(request, cancellationToken);
+            return await ResolveExistingEntryConflictAsync(
+                request,
+                await _mcpConnectionService.ConnectAsync(request, cancellationToken),
+                cancellationToken);
         }
 
         var inspection = await replacementService.InspectAsync(request, cancellationToken);
@@ -252,7 +257,10 @@ public partial class MainWindow
         if (!inspection.RequiresProjectReplacement ||
             string.IsNullOrWhiteSpace(inspection.ExistingProjectRoot))
         {
-            return await _mcpConnectionService.ConnectAsync(request, cancellationToken);
+            return await ResolveExistingEntryConflictAsync(
+                request,
+                await _mcpConnectionService.ConnectAsync(request, cancellationToken),
+                cancellationToken);
         }
 
         var confirmed = await MessageDialog.ShowConfirmationAsync(
@@ -278,10 +286,68 @@ public partial class MainWindow
                 _localization["Mcp.Connect.ReplaceCanceled"]);
         }
 
-        return await replacementService.ReplaceAsync(
+        return await ResolveExistingEntryConflictAsync(
             request,
-            inspection.ExistingProjectRoot,
+            await replacementService.ReplaceAsync(
+                request,
+                inspection.ExistingProjectRoot,
+                cancellationToken),
             cancellationToken);
+    }
+
+    private const int KeepExistingEntryChoice = 0;
+    private const int CopyConnectionCommandChoice = 1;
+    private const int ReplaceExistingEntryChoice = 2;
+
+    /// <summary>
+    /// Asks before replacing a devprojex entry that DevProjex did not write in its own form. Closing the dialog
+    /// keeps the entry, so only an explicit Replace changes the client configuration.
+    /// </summary>
+    private async Task<McpConnectionResult> ResolveExistingEntryConflictAsync(
+        McpConnectionRequest request,
+        McpConnectionResult result,
+        CancellationToken cancellationToken)
+    {
+        if (result.ExistingEntryConflict is not { } conflict)
+            return result;
+
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_windowLifetimeCts is not { } windowLifetime || !CanPresentMcpDialog(windowLifetime))
+            return new McpConnectionResult(McpConnectionStatus.Canceled, string.Empty);
+
+        var choice = await MessageDialog.ShowChoiceAsync(
+            this,
+            _localization["Mcp.Connect.ExistingEntry.Title"],
+            McpExistingEntryConflictPresentation.Describe(
+                _localization,
+                GetMcpClientDisplayName(request.Client),
+                conflict),
+            _localization["Mcp.Connect.ExistingEntry.Keep"],
+            _localization["Mcp.Connect.ExistingEntry.CopyCommand"],
+            _localization["Mcp.Connect.ExistingEntry.Replace"]);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!CanPresentMcpDialog(windowLifetime))
+            return new McpConnectionResult(McpConnectionStatus.Canceled, string.Empty);
+
+        switch (choice)
+        {
+            case ReplaceExistingEntryChoice:
+                return await _mcpConnectionService.ConnectAsync(
+                    request with
+                    {
+                        ReplaceExistingFields = true,
+                        ExpectedExistingEntryFingerprint = result.ExistingEntryFingerprint
+                    },
+                    cancellationToken);
+            case CopyConnectionCommandChoice when !string.IsNullOrWhiteSpace(result.ManualConfiguration):
+                await SetClipboardTextAsync(result.ManualConfiguration);
+                _toastService.Show(_localization["Mcp.Connect.ExistingEntry.CommandCopied"]);
+                return new McpConnectionResult(McpConnectionStatus.Canceled, string.Empty);
+            default:
+                return new McpConnectionResult(
+                    McpConnectionStatus.Canceled,
+                    _localization["Mcp.Connect.ProjectEntryReplaceCanceled"]);
+        }
     }
 
     private void OnMcpDocumentationRequested(object? sender, RoutedEventArgs e)

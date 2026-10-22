@@ -183,7 +183,11 @@ VS Code, `--replace` confirms replacing additional fields in an existing
 affected field names. Codex keeps one global `devprojex` entry with a fixed root,
 so it serves one project at a time; when that entry points at another project,
 `--replace` confirms moving it to this one, and without it the CLI names both
-roots and changes nothing. The Cursor and VS Code project files name the root as
+roots and changes nothing. A Claude Code or Codex `devprojex` entry that DevProjex
+did not write is left unchanged when it already starts DevProjex for this project
+and mode through `npx`, `dnx`, or `flatpak run`. Any other such entry is reported
+with the replacement command and the arguments it would drop; `--replace` confirms
+replacing it, and without it the CLI exits with `1` and changes nothing. The Cursor and VS Code project files name the root as
 `${workspaceFolder}`; their executable path stays absolute, so the result notes
 that the file belongs to this computer.
 

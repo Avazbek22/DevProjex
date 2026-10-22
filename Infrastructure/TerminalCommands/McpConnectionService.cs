@@ -609,6 +609,7 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 	private readonly McpProjectConfigurationWriter _configurationWriter;
 	private readonly IMcpCodexUserConfigurationReader _codexUserConfigurationReader;
 	private readonly IMcpClaudeUserConfigurationReader _claudeUserConfigurationReader;
+	private readonly Func<bool> _applicationDataIsIsolated;
 
 	public McpConnectionService(LocalizationService localization)
 		: this(
@@ -627,7 +628,8 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 		IMcpConnectionProcessRunner processRunner,
 		McpProjectConfigurationWriter configurationWriter,
 		IMcpCodexUserConfigurationReader? codexUserConfigurationReader = null,
-		IMcpClaudeUserConfigurationReader? claudeUserConfigurationReader = null)
+		IMcpClaudeUserConfigurationReader? claudeUserConfigurationReader = null,
+		Func<bool>? applicationDataIsIsolated = null)
 	{
 		_localization = localization ?? throw new ArgumentNullException(nameof(localization));
 		_locator = locator ?? throw new ArgumentNullException(nameof(locator));
@@ -637,6 +639,8 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 			codexUserConfigurationReader ?? new McpCodexUserConfigurationReader();
 		_claudeUserConfigurationReader =
 			claudeUserConfigurationReader ?? new McpClaudeUserConfigurationReader();
+		_applicationDataIsIsolated = applicationDataIsIsolated ??
+			(static () => FlatpakEnvironment.Current.IsActive || WindowsPackageIdentityProbe.IsPackagedApp());
 	}
 
 	public string CreatePrintableConfiguration(McpConnectionRequest request)
@@ -712,6 +716,9 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 			cancellationToken).ConfigureAwait(false);
 		if (read.Error is not null)
 			return new McpConnectionInspection(false, null, false, read.Error);
+		// The connection itself shows such an entry, with everything a replacement changes, before touching it.
+		if (read.Unrecognized is { } unrecognized)
+			return new McpConnectionInspection(true, unrecognized.ProjectRoot, false);
 		if (read.Snapshot is null)
 			return new McpConnectionInspection(false, null, false);
 
@@ -792,9 +799,44 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 				previousConnectionRemoved: false);
 		}
 
+		if (request.ExpectedExistingEntryFingerprint is not null &&
+			!string.Equals(
+				existing.Unrecognized?.Fingerprint,
+				request.ExpectedExistingEntryFingerprint,
+				StringComparison.Ordinal))
+		{
+			return new McpConnectionResult(
+				McpConnectionStatus.InvalidConfiguration,
+				_localization.Format("Mcp.Connect.ExistingEntry.Changed", DisplayName(request.Client)),
+				ManualConfiguration: manual,
+				CommandOutput: string.Join(Environment.NewLine, output));
+		}
+
 		var snapshot = existing.Snapshot;
+		var existingEntryReplacementConfirmed = false;
+		if (existing.Unrecognized is { } unrecognized)
+		{
+			var resolution = ResolveExistingEntry(
+				request,
+				unrecognized,
+				nextCommand,
+				manual,
+				output,
+				expectedExistingProjectRoot);
+			if (resolution is not null)
+				return resolution;
+			snapshot = new CommandLineConnectionSnapshot(
+				unrecognized.Command,
+				unrecognized.Arguments,
+				unrecognized.Environment,
+				unrecognized.ProjectRoot ?? request.ProjectRoot,
+				unrecognized.Mode,
+				unrecognized.RawConfiguration);
+			existingEntryReplacementConfirmed = true;
+		}
 		if (request.Client == McpConnectionClient.Codex &&
 			snapshot is not null &&
+			!existingEntryReplacementConfirmed &&
 			!PathsEqual(snapshot.ProjectRoot, request.ProjectRoot))
 		{
 			if (expectedExistingProjectRoot is null)
@@ -941,6 +983,67 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 			CommandOutput: string.Join(Environment.NewLine, output),
 			Replaced: replaced);
 	}
+
+	/// <summary>
+	/// Decides what happens to an entry DevProjex did not write in its own form: an equivalent launcher is kept,
+	/// anything else is shown with its replacement and changed only after an explicit confirmation.
+	/// </summary>
+	private McpConnectionResult? ResolveExistingEntry(
+		McpConnectionRequest request,
+		McpExistingEntry entry,
+		string nextCommand,
+		string manual,
+		IReadOnlyCollection<string> output,
+		string? expectedExistingProjectRoot)
+	{
+		var clientName = DisplayName(request.Client);
+		if (!request.ReplaceExistingFields &&
+			McpExistingEntryParser.IsEquivalent(entry, request, LauncherSharesApplicationData(entry)))
+		{
+			var message = _localization.Format(
+				"Mcp.Connect.ExistingEntry.AlreadyConnected",
+				clientName,
+				SingleLineTextEscaping.Escape(entry.DisplayCommand));
+			if (request.Client == McpConnectionClient.Codex)
+				message += " " + _localization["Mcp.Connect.Codex.ResponseHint"];
+			return new McpConnectionResult(
+				McpConnectionStatus.Connected,
+				message,
+				NextCommand: nextCommand,
+				KeptExistingEntry: true);
+		}
+
+		var confirmedByProject = expectedExistingProjectRoot is not null &&
+			entry.ProjectRoot is not null &&
+			PathsEqual(entry.ProjectRoot, expectedExistingProjectRoot);
+		if (request.ReplaceExistingFields || confirmedByProject)
+			return null;
+
+		return new McpConnectionResult(
+			McpConnectionStatus.InvalidConfiguration,
+			// The command comes from the client configuration; keep it on one line wherever the message is printed.
+			_localization.Format(
+				"Mcp.Connect.ExistingEntry.ReplaceRequired",
+				clientName,
+				SingleLineTextEscaping.Escape(entry.DisplayCommand)),
+			ManualConfiguration: manual,
+			CommandOutput: string.Join(Environment.NewLine, output),
+			ExistingEntryFingerprint: entry.Fingerprint,
+			ExistingEntryConflict: new McpExistingEntryConflict(
+				entry.DisplayCommand,
+				McpExistingEntryParser.FormatCommandLine(
+					McpConnectionFragmentGenerator.ResolveServerExecutable(request.ExecutablePath),
+					CreateServerArguments(request.ProjectRoot, request.Mode)),
+				entry.UnsupportedArguments,
+				entry.IsDevProjexLauncher));
+	}
+
+	// A Flatpak launch shares data with the Flatpak application only; npx and dnx share it with an application
+	// that is neither a Store package nor a Flatpak, because those keep their data apart.
+	private bool LauncherSharesApplicationData(McpExistingEntry entry) =>
+		entry.Launcher == "flatpak"
+			? FlatpakEnvironment.Current.IsActive
+			: !_applicationDataIsIsolated();
 
 	private async Task<McpConnectionResult> UpdateExtendedCodexConnectionAsync(
 		McpConnectionRequest request,
@@ -1238,10 +1341,12 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 				return new ExistingConnectionRead(
 					localRead,
 					null,
-					_localization.Format(
-						"Mcp.Connect.CommandFailed",
-						DisplayName(request.Client),
-						_localization["Mcp.Connect.InspectionFailed"]));
+					null,
+					Unrecognized: McpExistingEntryParser.Parse(
+						read.Connection.Command,
+						read.Connection.Arguments,
+						read.Connection.Environment,
+						read.Connection.RawJson));
 			}
 			return new ExistingConnectionRead(localRead, claudeSnapshot, null);
 		}
@@ -1271,10 +1376,12 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 				return new ExistingConnectionRead(
 					localRead,
 					null,
-					_localization.Format(
-						"Mcp.Connect.CommandFailed",
-						DisplayName(request.Client),
-						_localization["Mcp.Connect.InspectionFailed"]));
+					null,
+					read,
+					McpExistingEntryParser.Parse(
+						read.Connection.Command,
+						read.Connection.Arguments,
+						read.Connection.Environment));
 			}
 			return new ExistingConnectionRead(localRead, codexSnapshot, null, read);
 		}
@@ -1328,6 +1435,21 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 			recoveryCts.Token).ConfigureAwait(false);
 		if (actual.Error is not null)
 			return false;
+		// An entry in a form DevProjex did not write is never removed during recovery; it either is the original
+		// entry, which means nothing was lost, or something else that must stay untouched.
+		if (actual.Unrecognized is { } current)
+		{
+			return snapshot is not null &&
+				SnapshotsMatch(
+					new CommandLineConnectionSnapshot(
+						current.Command,
+						current.Arguments,
+						current.Environment,
+						snapshot.ProjectRoot,
+						current.Mode,
+						current.RawConfiguration),
+					snapshot);
+		}
 		if (snapshot is not null &&
 			actual.Snapshot is not null &&
 			SnapshotsMatch(actual.Snapshot, snapshot))
@@ -1782,5 +1904,6 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 		McpConnectionProcessResult ProcessResult,
 		CommandLineConnectionSnapshot? Snapshot,
 		string? Error,
-		McpCodexUserConfigurationRead? CodexConfiguration = null);
+		McpCodexUserConfigurationRead? CodexConfiguration = null,
+		McpExistingEntry? Unrecognized = null);
 }

@@ -768,9 +768,12 @@ internal sealed partial class TerminalWorkspaceSession
 		if (request.Client != McpConnectionClient.Codex ||
 			_services.McpConnectionService is not IMcpConnectionReplacementService replacementService)
 		{
-			return await _services.McpConnectionService
-				.ConnectAsync(request, operationCts.Token)
-				.ConfigureAwait(false);
+			return await ResolveExistingEntryConflictAsync(
+				request,
+				await _services.McpConnectionService
+					.ConnectAsync(request, operationCts.Token)
+					.ConfigureAwait(false),
+				operationCts).ConfigureAwait(false);
 		}
 
 		var inspection = await replacementService
@@ -779,9 +782,12 @@ internal sealed partial class TerminalWorkspaceSession
 		if (!inspection.RequiresProjectReplacement ||
 			string.IsNullOrWhiteSpace(inspection.ExistingProjectRoot))
 		{
-			return await _services.McpConnectionService
-				.ConnectAsync(request, operationCts.Token)
-				.ConfigureAwait(false);
+			return await ResolveExistingEntryConflictAsync(
+				request,
+				await _services.McpConnectionService
+					.ConnectAsync(request, operationCts.Token)
+					.ConfigureAwait(false),
+				operationCts).ConfigureAwait(false);
 		}
 
 		var confirmed = await InvokeAsync(() => Confirm(
@@ -797,10 +803,60 @@ internal sealed partial class TerminalWorkspaceSession
 				L("Mcp.Connect.ReplaceCanceled"));
 		}
 
-		return await replacementService.ReplaceAsync(
+		return await ResolveExistingEntryConflictAsync(
 			request,
-			inspection.ExistingProjectRoot,
-			operationCts.Token).ConfigureAwait(false);
+			await replacementService.ReplaceAsync(
+				request,
+				inspection.ExistingProjectRoot,
+				operationCts.Token).ConfigureAwait(false),
+			operationCts).ConfigureAwait(false);
+	}
+
+	/// <summary>
+	/// Asks before replacing a devprojex entry that DevProjex did not write in its own form; Escape keeps it.
+	/// </summary>
+	private async Task<McpConnectionResult> ResolveExistingEntryConflictAsync(
+		McpConnectionRequest request,
+		McpConnectionResult result,
+		CancellationTokenSource operationCts)
+	{
+		if (result.ExistingEntryConflict is not { } conflict)
+			return result;
+
+		var clientName = request.Client == McpConnectionClient.Codex ? "Codex" : "Claude Code";
+		var choice = await InvokeAsync(() => ShowChoice(
+			L("Mcp.Connect.ExistingEntry.Title"),
+			McpExistingEntryConflictPresentation.Describe(_services.Localization, clientName, conflict),
+			L("Mcp.Connect.ExistingEntry.Keep"),
+			L("Mcp.Connect.ExistingEntry.CopyCommand"),
+			L("Mcp.Connect.ExistingEntry.Replace"))).ConfigureAwait(false);
+		if (choice == 2)
+		{
+			return await _services.McpConnectionService.ConnectAsync(
+				request with
+				{
+					ReplaceExistingFields = true,
+					ExpectedExistingEntryFingerprint = result.ExistingEntryFingerprint
+				},
+				operationCts.Token).ConfigureAwait(false);
+		}
+		if (choice == 1 && !string.IsNullOrWhiteSpace(result.ManualConfiguration))
+		{
+			var manual = result.ManualConfiguration;
+			var copied = await InvokeAsync(() => _clipboardWriter.Write(manual).IsSuccess).ConfigureAwait(false);
+			// Without a clipboard the command is shown instead, so it can still be copied by hand.
+			return copied
+				? new McpConnectionResult(
+					McpConnectionStatus.ManualConfiguration,
+					L("Mcp.Connect.ExistingEntry.CommandCopied"))
+				: new McpConnectionResult(
+					McpConnectionStatus.ManualConfiguration,
+					L("Mcp.Connect.ProjectEntryReplaceCanceled"),
+					ManualConfiguration: manual);
+		}
+		return new McpConnectionResult(
+			McpConnectionStatus.InvalidConfiguration,
+			L("Mcp.Connect.ProjectEntryReplaceCanceled"));
 	}
 
 	private void ShowMcpConnectionResult(McpConnectionResult result)

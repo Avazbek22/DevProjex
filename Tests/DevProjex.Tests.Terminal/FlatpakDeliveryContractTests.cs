@@ -44,6 +44,25 @@ public sealed class FlatpakDeliveryContractTests
 		Assert.Contains("uses: ./.github/workflows/flatpak-build.yml", candidate);
 	}
 
+	[Fact]
+	public void ContainerOwnsTheCheckoutAndHomeBeforeGitOrSandboxedDotnetRun()
+	{
+		var workflow = File.ReadAllText(Path.Combine(Root(), ".github/workflows/flatpak-build.yml"));
+		var checkout = workflow.IndexOf("uses: actions/checkout@", StringComparison.Ordinal);
+		var ownership = workflow.IndexOf("chown -R \"$(id -u):$(id -g)\" \"$GITHUB_WORKSPACE\" \"$HOME\"", StringComparison.Ordinal);
+		var trust = workflow.IndexOf("git config --global --add safe.directory \"$GITHUB_WORKSPACE\"", StringComparison.Ordinal);
+		// prepare-source.sh runs git archive; regenerate-nuget.sh runs dotnet restore inside a flatpak sandbox.
+		var firstGitUse = workflow.IndexOf("Packaging/Linux/flatpak/prepare-source.sh", StringComparison.Ordinal);
+		var firstSandboxedDotnet = workflow.IndexOf("Packaging/Linux/flatpak/regenerate-nuget.sh", StringComparison.Ordinal);
+
+		Assert.Contains("container:", workflow);
+		Assert.True(checkout >= 0 && ownership > checkout, "The ownership step must follow the checkout.");
+		Assert.True(trust > ownership, "Git configuration is written to HOME after HOME belongs to the container user.");
+		Assert.True(firstGitUse > trust, "The checkout must be trusted before prepare-source.sh runs git archive.");
+		Assert.True(firstSandboxedDotnet > ownership, "Sandboxed dotnet needs a writable HOME and checkout.");
+		Assert.Contains("git archive", File.ReadAllText(Path.Combine(Root(), "Packaging/Linux/flatpak/prepare-source.sh")));
+	}
+
 	private static string Root()
 	{
 		var root = new DirectoryInfo(AppContext.BaseDirectory);
