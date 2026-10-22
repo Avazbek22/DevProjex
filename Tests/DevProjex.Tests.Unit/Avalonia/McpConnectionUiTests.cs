@@ -11,6 +11,7 @@ using Avalonia.VisualTree;
 
 namespace DevProjex.Tests.Unit.Avalonia;
 
+[Collection("AvaloniaUI")]
 public sealed class McpConnectionUiTests
 {
 	private static readonly string[] RequiredLocalizationKeys =

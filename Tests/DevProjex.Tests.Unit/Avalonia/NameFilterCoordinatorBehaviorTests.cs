@@ -1,5 +1,6 @@
 namespace DevProjex.Tests.Unit.Avalonia;
 
+[Collection("AvaloniaUI")]
 public sealed class NameFilterCoordinatorBehaviorTests
 {
     [Fact]
