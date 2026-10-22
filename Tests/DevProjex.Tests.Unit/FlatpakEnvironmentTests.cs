@@ -29,6 +29,49 @@ public sealed class FlatpakEnvironmentTests
 			_ => throw new InvalidOperationException()).IsActive);
 	}
 
+	[Theory]
+	[InlineData("io.github.Avazbek22.DevProjex", "/app/lib/devprojex/DevProjex", true)]
+	[InlineData("io.github.Avazbek22.DevProjex.Devel", "/app/lib/devprojex/DevProjex", true)]
+	// An editor installed from Flathub runs DevProjex from npm or a release archive inside its own sandbox.
+	[InlineData("com.visualstudio.code", "/home/person/.npm/_npx/abc/node_modules/@devprojex/cli-linux-x64/DevProjex", false)]
+	[InlineData("com.visualstudio.code", "/home/person/Downloads/DevProjex/DevProjex", false)]
+	[InlineData("com.visualstudio.code", "/tmp/.mount_DevProjexAbc/usr/bin/DevProjex", false)]
+	[InlineData("io.github.Avazbek22.DevProjex", "/usr/lib/dotnet/dotnet", false)]
+	[InlineData("io.github.Avazbek22.DevProjex", "/application/DevProjex", false)]
+	[InlineData("io.github.Avazbek22.DevProjex", "/app", false)]
+	[InlineData("io.github.Avazbek22.DevProjex", "/app/../home/person/DevProjex", false)]
+	[InlineData("io.github.Avazbek22.DevProjex", "/App/lib/devprojex/DevProjex", false)]
+	[InlineData("io.github.Avazbek22.DevProjex", null, false)]
+	public void OnlyABinaryInsideTheApplicationPrefixIsTheDevProjexFlatpak(string id, string? processPath, bool expected)
+	{
+		var result = FlatpakEnvironment.Detect(true, name => name == "FLATPAK_ID" ? id : null,
+			path => path == "/.flatpak-info", processPath);
+
+		Assert.Equal(expected, result.IsActive);
+		Assert.Equal(expected ? id : null, result.AppId);
+		Assert.Equal(expected ? "flatpak run " + id : null, result.ExternalLaunchCommand);
+	}
+
+	[Theory]
+	[InlineData(false, "io.github.Avazbek22.DevProjex", true)]
+	[InlineData(true, null, true)]
+	[InlineData(true, "io.github.Avazbek22.DevProjex", false)]
+	public void TheApplicationPrefixAloneIsNotASandbox(bool linux, string? id, bool marker)
+	{
+		var result = FlatpakEnvironment.Detect(linux, name => name == "FLATPAK_ID" ? id : null,
+			path => path == "/.flatpak-info" && marker, "/app/lib/devprojex/DevProjex");
+
+		Assert.False(result.IsActive);
+		Assert.Null(result.ExternalLaunchCommand);
+	}
+
+	[Fact]
+	public void TheTestHostIsNeverDetectedAsTheDevProjexFlatpak()
+	{
+		Assert.False(FlatpakEnvironment.Current.IsActive);
+		Assert.Null(FlatpakEnvironment.Current.ExternalLaunchCommand);
+	}
+
 	[Fact]
 	public void ShellArgumentsCannotInjectACommand()
 	{
