@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Runtime.InteropServices;
+using System.Security;
 using DevProjex.Infrastructure.Persistence;
 using DevProjex.Infrastructure.Processes;
 
@@ -995,9 +996,40 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 	private CommandPathResolution ResolveUnixCommand(string managedDirectory, bool resolveCommand)
 	{
 		var path = SafeGetPathVariable();
-		return new CommandPathResolution(
+		var resolution = new CommandPathResolution(
 			IsDirectoryInPathValue(managedDirectory, path),
 			resolveCommand ? FindFirstUnixCommand(path, managedDirectory) : null);
+		if (!FlatpakEnvironment.Current.IsActive ||
+		    resolution.IsManagedDirectoryInPath ||
+		    !HostShellProfilesContainPathSetup())
+			return resolution;
+
+		// The sandbox PATH is not the host shell's PATH. The profile line DevProjex writes is the
+		// only evidence of the host PATH available here, and a sandbox cannot detect host shadowing.
+		return new CommandPathResolution(
+			true,
+			resolveCommand ? Path.Combine(managedDirectory, CommandLineExecutableAliases.UnixCommand) : null);
+	}
+
+	private bool HostShellProfilesContainPathSetup()
+	{
+		var home = SafeGetHomeDirectory();
+		if (string.IsNullOrWhiteSpace(home))
+			return false;
+		try
+		{
+			return ResolveUnixShellProfiles(home).All(static profile =>
+			{
+				var file = new FileInfo(profile.Path);
+				return file.Exists &&
+				       file.Length <= MaximumShellProfileBytes &&
+				       ContainsProfileLine(File.ReadAllText(file.FullName), profile.SetupLine);
+			});
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or SecurityException)
+		{
+			return false;
+		}
 	}
 
 	private string? FindFirstUnixCommand(string? path, string managedDirectory)
