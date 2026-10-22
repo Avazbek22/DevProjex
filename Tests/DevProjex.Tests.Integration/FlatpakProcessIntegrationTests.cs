@@ -76,7 +76,10 @@ public sealed partial class FlatpakProcessIntegrationTests
 		var sandboxId = Path.GetFileNameWithoutExtension(livePath);
 		Assert.True(Guid.TryParseExact(sandboxId, "N", out _));
 		var journalPath = Assert.Single(Directory.GetFiles(Path.Combine(state, "agent-journal"), "*.jsonl"));
-		using var header = JsonDocument.Parse(File.ReadLines(journalPath).First());
+		// The server is still running and appends to its journal; read with the sharing the journal reader uses.
+		using var journal = new FileStream(journalPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+		using var journalReader = new StreamReader(journal);
+		using var header = JsonDocument.Parse(journalReader.ReadLine()!);
 		Assert.Equal(sandboxId, header.RootElement.GetProperty("session").GetProperty("sandboxSessionId").GetString());
 		Assert.EndsWith("-" + sandboxId + ".jsonl", journalPath);
 	}
