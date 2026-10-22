@@ -42,8 +42,17 @@ def check_path_window(checks, root, loaded):
                 desktop.screenshot(main, checks.evidence / (name + '.png'))
             else:
                 assert error is not None, 'An inaccessible root did not show the desktop error dialog'
+                time.sleep(.5)
                 desktop.screenshot(error, checks.evidence / (name + '.png'))
                 desktop.dismiss(error)
+            # The launching command prints the accepted project once it has reached the new window. Closing the
+            # window earlier makes that command fail to find it, so wait for the handshake before closing.
+            log = checks.evidence / (name + '.log')
+            handshake_deadline = time.monotonic() + 30
+            while str(root) not in log.read_text(errors='replace'):
+                assert process.poll() is None, 'The launching command exited before reaching the window'
+                assert time.monotonic() < handshake_deadline, 'The launching command did not reach the window'
+                time.sleep(.1)
             desktop.dismiss(main)
             process.wait(timeout=20)
             assert process.returncode == 0, process.returncode
@@ -207,9 +216,24 @@ def check_gui(checks):
             setup = find(lambda window, title, wmclass, size: size.width > 400 and 'terminal' in title.lower())
             desktop.screenshot(setup, checks.evidence / 'terminal-setup.png')
             desktop.click(setup, 341, 231)
-            pause()
-            if any(window.id == setup.id for window, _, _ in desktop.windows()):
-                desktop.dismiss(setup)
+            # A first setup closes the dialog. When the command is already set up, the same button reinstalls it
+            # and a confirmation follows after the work finishes, so wait until no dialog has been open for a while.
+            deadline = time.monotonic() + 20
+            quiet_since = None
+            while True:
+                dialogs = [window for window, title, wmclass in desktop.windows()
+                           if window.id != main.id and wmclass and wmclass[1] == APP]
+                for window in dialogs:
+                    desktop.dismiss(window)
+                now = time.monotonic()
+                if dialogs:
+                    quiet_since = None
+                elif quiet_since is None:
+                    quiet_since = now
+                elif now - quiet_since >= 2:
+                    break
+                assert now < deadline, 'Terminal setup dialogs did not close'
+                pause()
             shim = Path.home() / '.local/bin/devprojex'
             assert 'exec flatpak run ' + APP + ' "$@"' in shim.read_text(), shim.read_text()
             checks.run(['bash', '-lc', 'devprojex --version; devprojex mcp --help'], 'host-shim')
