@@ -1,4 +1,13 @@
 {
+  "Flatpak.PortalPathUnavailable": "O portal de documentos não forneceu um caminho acessível do sistema. Escolha uma pasta pessoal ou permita ao Flatpak acessar a pasta real antes de conectar um cliente.",
+  "Flatpak.Updates": "Atualizado pelo Flathub",
+  "Flatpak.CopyCommand": "Execute este comando no seu próprio terminal.",
+  "Flatpak.ConnectionUnverified": "Não foi possível verificar a conexão a partir da sandbox.",
+  "Flatpak.PathUnavailable": "A pasta pode não existir ou estar inacessível na sandbox do Flatpak. Para permitir o acesso, execute: {0}",
+  "Flatpak.Environment": "Flatpak · acesso: pasta pessoal · git incluído: {0} · dados: {1} · conecte clientes com: {2}",
+  "Flatpak.PrivateClone": "A autenticação em repositórios privados pode estar indisponível na sandbox. Abra uma pasta já clonada no computador.",
+  "Flatpak.CopyClientCommand": "Copiar comando de {0}",
+  "Flatpak.CopyOverrideCommand": "Copiar comando",
   "Mcp.Connect.ProjectEntryReplaceTitle": "Substituir configurações do cliente DevProjex",
   "Mcp.Connect.ProjectEntryReplacePrompt": "A entrada devprojex existente para {0} contém campos que serão removidos ou sobrescritos:\n{1}\n\nSubstituí-la?",
   "Mcp.Connect.ProjectEntryReplaceConfirm": "Substituir",

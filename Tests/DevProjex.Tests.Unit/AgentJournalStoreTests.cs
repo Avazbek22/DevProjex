@@ -256,10 +256,12 @@ public sealed class AgentJournalStoreTests(ITestOutputHelper output)
 	{
 		var cancellationToken = TestContext.Current.CancellationToken;
 		using var temporary = new TemporaryDirectory();
+		var started = new DateTimeOffset(2026, 9, 20, 1, 2, 3, TimeSpan.Zero);
+		// Pin the clock so only the session-count limit applies, not the age limit.
 		using var store = CreateStore(
 			temporary.Path,
-			new AgentJournalRetentionPolicy(TimeSpan.FromDays(30), 2));
-		var started = new DateTimeOffset(2026, 9, 20, 1, 2, 3, TimeSpan.Zero);
+			new AgentJournalRetentionPolicy(TimeSpan.FromDays(30), 2),
+			timeProvider: new FixedTimeProvider(started.AddHours(1)));
 		for (var index = 0; index < 3; index++)
 		{
 			var session = CreateSession(temporary.Path, 50 + index, started.AddSeconds(index));
@@ -285,7 +287,8 @@ public sealed class AgentJournalStoreTests(ITestOutputHelper output)
 		using var store = CreateStore(
 			temporary.Path,
 			new AgentJournalRetentionPolicy(TimeSpan.FromDays(30), 2),
-			() => [CreateActiveRecord(active)]);
+			() => [CreateActiveRecord(active)],
+			new FixedTimeProvider(started.AddHours(1)));
 		foreach (var session in new[]
 				 {
 					 active,
@@ -933,9 +936,11 @@ public sealed class AgentJournalStoreTests(ITestOutputHelper output)
 	private static AgentJournalStore CreateStore(
 		string stateRoot,
 		AgentJournalRetentionPolicy? retention = null,
-		Func<IReadOnlyList<LiveSessionRecord>>? activeSessionProvider = null) =>
+		Func<IReadOnlyList<LiveSessionRecord>>? activeSessionProvider = null,
+		TimeProvider? timeProvider = null) =>
 		new(
 			() => stateRoot,
+			timeProvider,
 			activeSessionProvider: activeSessionProvider ?? (static () => []),
 			retention: retention);
 

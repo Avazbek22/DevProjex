@@ -39,6 +39,9 @@ internal sealed partial class TerminalWorkspaceSession
 
 		if (!RepositoryUrlUtility.IsSupportedCloneSource(source))
 		{
+			if (FlatpakEnvironment.Current.IsActive && !source.Contains("://", StringComparison.Ordinal))
+				return TerminalWorkspaceCommandExecutionResult.Failure(
+					FlatpakPresentation.UnavailablePath(_services.Localization, localCandidate));
 			return TerminalWorkspaceCommandExecutionResult.Failure(
 				source.Contains("://", StringComparison.Ordinal)
 					? L("Git.Error.InvalidUrl")

@@ -60,6 +60,11 @@ public partial class MainWindow
         }
 
         _recentProjectsDb = result.Database;
+        if (FlatpakEnvironment.Current.IsActive)
+        {
+            foreach (var entry in _recentProjectsDb.RecentFolders)
+                _flatpakDisplayPaths[entry.Path] = await _flatpakHostPaths.ResolveAsync(entry.Path, cancellationToken);
+        }
         _recentProjectsLoaded = true;
         SyncRecentProjectsToViewModel();
     }
@@ -83,8 +88,8 @@ public partial class MainWindow
         {
             _viewModel.RecentFolders.Add(new RecentProjectEntryViewModel(
                 workspace.Source,
-                RecentProjectPresentationService.CreateFolderDisplayText(workspace.Source),
-                RecentProjectPresentationService.CreateFolderToolTip(workspace.Source)));
+                RecentProjectPresentationService.CreateFolderDisplayText(GetFlatpakDisplayPath(workspace.Source) ?? workspace.Source),
+                RecentProjectPresentationService.CreateFolderToolTip(GetFlatpakDisplayPath(workspace.Source) ?? workspace.Source)));
         }
 
         _viewModel.RecentRepositories.Clear();
@@ -184,13 +189,17 @@ public partial class MainWindow
         ApplyRecentFolderAvailabilityToMenu();
         if (!isAvailable)
         {
+            var flatpakNotice = FlatpakEnvironment.Current.IsActive
+                ? FlatpakPresentation.UnavailablePathNotice(_localization, path)
+                : null;
             var shouldRemove = await MessageDialog.ShowConfirmationAsync(
                 this,
                 _localization["Dialog.RecentFolderUnavailable.Title"],
-                _localization.Format("Dialog.RecentFolderUnavailable.Message", path),
+                flatpakNotice?.Message ?? _localization.Format("Dialog.RecentFolderUnavailable.Message", path),
                 _localization["Dialog.RecentFolderUnavailable.Remove"],
                 _localization["Dialog.RecentFolderUnavailable.Keep"],
-                width: 450);
+                width: flatpakNotice?.Command is null ? 450 : 560,
+                command: flatpakNotice is null ? null : CreateFlatpakOverrideCommand(flatpakNotice));
 
             if (shouldRemove)
                 await RemoveRecentFolderAsync(path, lifetimeToken);

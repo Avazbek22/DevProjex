@@ -341,6 +341,7 @@
         <MenuItem Header="{Binding MenuHelpTerminalCommand}" Click="OnTerminalCommandSetup" />
         <MenuItem Name="AboutMenuItem" Header="{Binding MenuHelpAbout}" Click="OnAbout" />
         <MenuItem Name="UpdateMenuItem"
+                  IsVisible="{Binding IsUpdateCheckButtonVisible}"
                   Click="OnCheckForUpdates">
           <MenuItem.Header>
             <StackPanel Orientation="Horizontal" Spacing="8">

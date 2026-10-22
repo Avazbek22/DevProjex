@@ -1,4 +1,13 @@
 {
+  "Flatpak.PortalPathUnavailable": "Das Dokumentenportal konnte keinen zugänglichen Host-Pfad liefern. Wählen Sie einen Ordner im persönlichen Ordner oder erlauben Sie Flatpak vor dem Verbinden den Zugriff auf den tatsächlichen Host-Ordner.",
+  "Flatpak.Updates": "Wird über Flathub aktualisiert",
+  "Flatpak.CopyCommand": "Führen Sie diesen Befehl in Ihrem eigenen Terminal aus.",
+  "Flatpak.ConnectionUnverified": "Die Verbindung konnte aus der Sandbox nicht geprüft werden.",
+  "Flatpak.PathUnavailable": "Der Ordner existiert möglicherweise nicht oder ist in der Flatpak-Sandbox nicht zugänglich. Zugriff erlauben: {0}",
+  "Flatpak.Environment": "Flatpak · Zugriff: persönlicher Ordner · mitgeliefertes git: {0} · Daten: {1} · Clients verbinden mit: {2}",
+  "Flatpak.PrivateClone": "Die Anmeldung an privaten Repositorys ist in der Sandbox möglicherweise nicht verfügbar. Öffnen Sie einen bereits auf Ihrem Computer geklonten Ordner.",
+  "Flatpak.CopyClientCommand": "Befehl für {0} kopieren",
+  "Flatpak.CopyOverrideCommand": "Befehl kopieren",
   "Mcp.Connect.ProjectEntryReplaceTitle": "DevProjex-Clienteinstellungen ersetzen",
   "Mcp.Connect.ProjectEntryReplacePrompt": "Der vorhandene devprojex-Eintrag für {0} enthält Felder, die entfernt oder überschrieben werden:\n{1}\n\nEintrag ersetzen?",
   "Mcp.Connect.ProjectEntryReplaceConfirm": "Ersetzen",

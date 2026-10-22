@@ -62,11 +62,14 @@ public partial class MainWindow : IProjectLoadPipelineHost
     void IProjectLoadPipelineHost.UpdateTitle() =>
         UpdateTitle();
 
-    Task<bool> IProjectLoadPipelineHost.ReloadProjectAsync(CancellationToken cancellationToken, bool applyStoredProfile) =>
-        ReloadProjectAsync(
+    async Task<bool> IProjectLoadPipelineHost.ReloadProjectAsync(CancellationToken cancellationToken, bool applyStoredProfile)
+    {
+        await ResolveFlatpakProjectPresentationAsync(cancellationToken);
+        return await ReloadProjectAsync(
             cancellationToken,
             applyStoredProfile,
             preserveTreeState: false);
+    }
 
     Task IProjectLoadPipelineHost.RecordRecentFolderAsync(
         string path,

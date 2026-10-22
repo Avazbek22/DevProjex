@@ -1,4 +1,13 @@
 {
+  "Flatpak.PortalPathUnavailable": "Belge portalı erişilebilir bir ana sistem yolu sağlayamadı. Ev klasörünüzden bir klasör seçin veya istemciyi bağlamadan önce Flatpak'e gerçek klasör için erişim verin.",
+  "Flatpak.Updates": "Flathub üzerinden güncellenir",
+  "Flatpak.CopyCommand": "Bu komutu kendi terminalinizde çalıştırın.",
+  "Flatpak.ConnectionUnverified": "Bağlantı korumalı alandan doğrulanamadı.",
+  "Flatpak.PathUnavailable": "Klasör mevcut olmayabilir veya Flatpak korumalı alanından erişilemiyor olabilir. Erişim vermek için çalıştırın: {0}",
+  "Flatpak.Environment": "Flatpak · erişim: ev klasörü · yerleşik git: {0} · veriler: {1} · istemci bağlantı komutu: {2}",
+  "Flatpak.PrivateClone": "Korumalı alanda özel depo kimlik doğrulaması kullanılamayabilir. Bilgisayarınızda önceden klonlanmış bir klasörü açın.",
+  "Flatpak.CopyClientCommand": "{0} komutunu kopyala",
+  "Flatpak.CopyOverrideCommand": "Komutu kopyala",
   "Mcp.Connect.ProjectEntryReplaceTitle": "DevProjex istemci ayarlarını değiştir",
   "Mcp.Connect.ProjectEntryReplacePrompt": "{0} için mevcut devprojex girdisinde kaldırılacak veya üzerine yazılacak alanlar var:\n{1}\n\nGirdi değiştirilsin mi?",
   "Mcp.Connect.ProjectEntryReplaceConfirm": "Değiştir",

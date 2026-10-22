@@ -58,7 +58,9 @@ internal static class CommandExecution
 		{
 			return WriteError(environment, outputOptions, text, new TerminalError(
 				exception.Code,
-				SafeMessageFor(exception.Code, text),
+				FlatpakEnvironment.Current.IsActive && exception.Code == "DPX-PROJECT-NOT-FOUND" && exception.ContextPath is not null
+					? FlatpakPresentation.UnavailablePath(text, exception.ContextPath)
+					: SafeMessageFor(exception.Code, text),
 				HintFor(exception.Code, text),
 				ExitCode: CommandLineExitCodes.UsageError,
 				Exception: exception,
@@ -182,7 +184,8 @@ internal static class CommandExecution
 		"DPX-CLI-GIT-BRANCH-LOCAL" => localization["Terminal.Error.BranchLocal"],
 		"DPX-CLI-GIT-BRANCH-UNAVAILABLE" => localization["Terminal.Error.BranchUnavailable"],
 		"DPX-CLI-GIT-UNAVAILABLE" => localization["Terminal.Error.GitUnavailable"],
-		"DPX-CLI-GIT-CLONE-FAILED" => localization["Terminal.Error.CloneFailed"],
+		"DPX-CLI-GIT-CLONE-FAILED" => localization["Terminal.Error.CloneFailed"] +
+			(FlatpakEnvironment.Current.IsActive ? " " + localization["Flatpak.PrivateClone"] : string.Empty),
 		"DPX-CLI-GIT-CACHE-FAILED" => localization["Terminal.Error.CloneCacheFailed"],
 		"DPX-CLI-PROFILE-NOT-FOUND" => localization["Terminal.Error.ProfileUnresolved"],
 		"DPX-CLI-PROFILE-UNRESOLVED" => localization["Terminal.Error.ProfileUnresolved"],

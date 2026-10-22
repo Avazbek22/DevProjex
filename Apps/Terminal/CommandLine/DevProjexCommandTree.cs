@@ -201,6 +201,15 @@ public sealed class DevProjexCommandTree
 				explicitRoots,
 				environment.Variables,
 				Directory.GetCurrentDirectory());
+			if (FlatpakEnvironment.Current.IsActive)
+			{
+				var unavailable = resolvedRoots.FirstOrDefault(static root => !Directory.Exists(root));
+				if (unavailable is not null)
+				{
+					environment.Error.WriteLine(FlatpakPresentation.UnavailablePath(_localization, unavailable));
+					return CommandLineExitCodes.UsageError;
+				}
+			}
 			var excludeValues = parseResult.GetValue(exclude);
 			IReadOnlyCollection<ProjectExclusion>? baselineExclusions;
 			GitFilteringMode? gitModeValue;
@@ -496,6 +505,12 @@ public sealed class DevProjexCommandTree
 								TerminalTextEscaping.WriteSingleLine(
 									environment.Output,
 									_localization.Format("Mcp.Open.Succeeded", DisplayConnectionClient(connectionClient)));
+								return CommandLineExitCodes.Success;
+							}
+							if (launchResult.Status == McpClientLaunchStatus.CopyCommand)
+							{
+								environment.Output.WriteLine(launchResult.ErrorMessage);
+								environment.Output.WriteLine(launchResult.ManualCommand);
 								return CommandLineExitCodes.Success;
 							}
 
@@ -1673,7 +1688,8 @@ public sealed class DevProjexCommandTree
 						: null;
 					return await new DesktopCommandHandler(
 							environment,
-							launcher: new DesktopProcessLauncher(_serviceFactory.HostCapabilities))
+							launcher: new DesktopProcessLauncher(_serviceFactory.HostCapabilities),
+							holdSandboxForDesktop: FlatpakEnvironment.Current.IsActive)
 						.OpenAsync(
 							DesktopOpenRequestFactory.Create(
 								projectPath,

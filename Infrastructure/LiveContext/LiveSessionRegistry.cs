@@ -13,7 +13,11 @@ public sealed record LiveSessionRecord(
 	string? ClientVersion,
 	IReadOnlyList<string> Roots,
 	DateTimeOffset HeartbeatUtc,
-	AgentJournalMode Mode = AgentJournalMode.Live);
+	AgentJournalMode Mode = AgentJournalMode.Live)
+{
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string? SandboxSessionId { get; init; }
+}
 
 public sealed class LiveSessionRegistry(
 	Func<string>? stateRootProvider = null,
@@ -62,13 +66,15 @@ public sealed class LiveSessionRegistry(
 
 	public LiveSessionWriter Start(
 		IReadOnlyList<string> roots,
-		AgentJournalMode mode = AgentJournalMode.Live) =>
+		AgentJournalMode mode = AgentJournalMode.Live,
+		string? sandboxSessionId = null) =>
 		new(
 			this,
 			Environment.ProcessId,
 			GetCurrentProcessStartUtc(),
 			roots,
-			mode);
+			mode,
+			sandboxSessionId);
 
 	internal LiveSessionWriter Start(
 		int pid,
@@ -121,6 +127,7 @@ public sealed class LiveSessionRegistry(
 		return records
 			.OrderBy(static record => record.ProcessStartUtc)
 			.ThenBy(static record => record.Pid)
+			.ThenBy(static record => record.SandboxSessionId, StringComparer.Ordinal)
 			.ToArray();
 	}
 
@@ -134,11 +141,15 @@ public sealed class LiveSessionRegistry(
 
 	internal DateTimeOffset UtcNow => clock.GetUtcNow();
 	internal string GetPath(int pid) => Path.Combine(DirectoryPath, $"{pid}.json");
+	internal string GetPath(LiveSessionRecord record) => FlatpakEnvironment.Current.IsActive
+		? Guid.TryParseExact(record.SandboxSessionId, "N", out _)
+			? Path.Combine(DirectoryPath, record.SandboxSessionId + ".json")
+			: throw new InvalidOperationException("A Flatpak session requires a unique registration identifier.")
+		: GetPath(record.Pid);
 
 	internal void Write(LiveSessionRecord record)
 	{
-		var directory = DirectoryPath;
-		var path = Path.Combine(directory, $"{record.Pid}.json");
+		var path = GetPath(record);
 		var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
 		try
 		{
@@ -192,14 +203,33 @@ public sealed class LiveSessionRegistry(
 		}
 	}
 
+	internal void Delete(LiveSessionRecord record)
+	{
+		if (!FlatpakEnvironment.Current.IsActive)
+		{
+			Delete(record.Pid);
+			return;
+		}
+		try
+		{
+			TryDelete(GetPath(record));
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or SecurityException)
+		{
+		}
+	}
+
 	private LiveSessionRecord? TryRead(string path, out bool invalid)
 	{
 		invalid = false;
 		try
 		{
 			var attributes = File.GetAttributes(path);
+			var filePid = 0;
 			if ((attributes & (FileAttributes.ReparsePoint | FileAttributes.Directory)) != 0 ||
-				!TryParsePidFileName(path, out var filePid))
+				(FlatpakEnvironment.Current.IsActive
+					? !Guid.TryParseExact(Path.GetFileNameWithoutExtension(path), "N", out _)
+					: !TryParsePidFileName(path, out filePid)))
 			{
 				invalid = true;
 				return null;
@@ -230,7 +260,9 @@ public sealed class LiveSessionRegistry(
 				bytes,
 				InfrastructureJsonSerializerContext.Default.LiveSessionRecord);
 			if (record is { Roots: not null } &&
-				record.Pid == filePid &&
+				(FlatpakEnvironment.Current.IsActive
+					? record.SandboxSessionId == Path.GetFileNameWithoutExtension(path)
+					: record.Pid == filePid) &&
 				record.Roots.Count is > 0 and <= 256 &&
 				record.Roots.All(static root => !string.IsNullOrWhiteSpace(root) && root.Length <= MaximumRootCharacters) &&
 				(record.ClientName?.Length ?? 0) <= MaximumClientNameCharacters &&
@@ -304,6 +336,10 @@ public sealed class LiveSessionRegistry(
 			now - record.HeartbeatUtc > StaleHeartbeatAge)
 			return false;
 		DateTimeOffset? observedStart;
+		// A separate Flatpak launch cannot inspect another launch's PID namespace.
+		// Private, uniquely named records remain live only within the existing heartbeat bound.
+		if (FlatpakEnvironment.Current.IsActive)
+			return true;
 		try
 		{
 			observedStart = processStart(record.Pid);
@@ -365,7 +401,8 @@ public sealed class LiveSessionWriter : IAsyncDisposable, IDisposable
 		int pid,
 		DateTimeOffset processStartUtc,
 		IReadOnlyList<string> roots,
-		AgentJournalMode mode)
+		AgentJournalMode mode,
+		string? sandboxSessionId = null)
 	{
 		this.registry = registry;
 		record = new LiveSessionRecord(
@@ -375,12 +412,15 @@ public sealed class LiveSessionWriter : IAsyncDisposable, IDisposable
 			ClientVersion: null,
 			roots.Select(PathUtility.Normalize).Distinct(PathComparer.Default).ToArray(),
 			registry.UtcNow,
-			mode);
+			mode)
+		{
+			SandboxSessionId = FlatpakEnvironment.Current.IsActive ? sandboxSessionId ?? Guid.NewGuid().ToString("N") : null
+		};
 		registry.TryWrite(record);
 		heartbeat = RunHeartbeatAsync();
 	}
 
-	public string Path => registry.GetPath(record.Pid);
+	public string Path => registry.GetPath(record);
 
 	public void UpdateClient(string? name, string? version)
 	{
@@ -450,7 +490,7 @@ public sealed class LiveSessionWriter : IAsyncDisposable, IDisposable
 		}
 		finally
 		{
-			registry.Delete(record.Pid);
+			registry.Delete(record);
 			cancellation.Dispose();
 		}
 	}

@@ -5,7 +5,8 @@ public enum McpClientLaunchStatus
 	Opened,
 	ClientNotFound,
 	Failed,
-	UnsupportedClient
+	UnsupportedClient,
+	CopyCommand
 }
 
 public sealed record McpClientLaunchRequest(

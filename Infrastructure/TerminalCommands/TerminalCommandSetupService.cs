@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Runtime.InteropServices;
+using System.Security;
 using DevProjex.Infrastructure.Persistence;
 using DevProjex.Infrastructure.Processes;
 
@@ -55,6 +56,7 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 	private const string FishPathSetupLine = "fish_add_path --move \"$HOME/.local/bin\"";
 	private const string WindowsLauncherMarker = "rem DevProjex terminal command wrapper";
 	private const string UnixTargetPrefix = "# target: ";
+	private const string UnixEncodedTargetPrefix = "# target-base64: ";
 	private const string WindowsTargetPrefix = "rem target: ";
 	private const string WindowsEncodedTargetPrefix = "rem target-base64: ";
 	private const string WindowsPathHint =
@@ -280,7 +282,7 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 					? TerminalCommandInstallOutcome.Repaired
 					: TerminalCommandInstallOutcome.Created;
 
-			if (forceReinstall && refreshed.State == TerminalCommandSetupState.Installed)
+			if (forceReinstall && refreshed.State == TerminalCommandSetupState.Installed && !FlatpakEnvironment.Current.IsActive)
 			{
 				var validation = _options.LauncherValidator(commandPath, LauncherValidationTimeout);
 				if (!validation.Success)
@@ -348,13 +350,16 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 	{
 		// The target comment is intentionally plain text so stale wrappers can be
 		// repaired without parsing shell syntax or executing anything.
+		var targetComment = FlatpakEnvironment.Current.IsActive && targetPath.IndexOfAny(['\r', '\n']) >= 0
+			? UnixEncodedTargetPrefix + Convert.ToBase64String(Encoding.UTF8.GetBytes(targetPath))
+			: UnixTargetPrefix + targetPath;
 		var script = string.Join(
 			"\n",
 			"#!/bin/sh",
 			UnixWrapperMarker,
-			UnixTargetPrefix + targetPath,
+			targetComment,
 			"export DEVPROJEX_TERMINAL_HOST=1",
-			"exec " + ShellQuote(targetPath) + " \"$@\"",
+			"exec " + (FlatpakEnvironment.Current.ExternalLaunchCommand ?? ShellQuote(targetPath)) + " \"$@\"",
 			string.Empty);
 
 		// Unix kernels parse the shebang before a shell sees the file; CRLF in the
@@ -849,12 +854,14 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 			if (!IsManagedWrapperMarker(marker) || target is null)
 				return new ManagedWrapperReadResult(ManagedWrapperReadStatus.Foreign, null);
 
-			if (string.Equals(marker, WindowsLauncherMarker, StringComparison.OrdinalIgnoreCase) &&
-			    target.StartsWith(WindowsEncodedTargetPrefix, StringComparison.OrdinalIgnoreCase))
+			var encodedTargetPrefix = string.Equals(marker, WindowsLauncherMarker, StringComparison.OrdinalIgnoreCase)
+				? WindowsEncodedTargetPrefix
+				: UnixEncodedTargetPrefix;
+			if (target.StartsWith(encodedTargetPrefix, StringComparison.OrdinalIgnoreCase))
 			{
 				try
 				{
-					var encoded = target[WindowsEncodedTargetPrefix.Length..];
+					var encoded = target[encodedTargetPrefix.Length..];
 					var decoded = new UTF8Encoding(
 						encoderShouldEmitUTF8Identifier: false,
 						throwOnInvalidBytes: true).GetString(Convert.FromBase64String(encoded));
@@ -989,9 +996,40 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 	private CommandPathResolution ResolveUnixCommand(string managedDirectory, bool resolveCommand)
 	{
 		var path = SafeGetPathVariable();
-		return new CommandPathResolution(
+		var resolution = new CommandPathResolution(
 			IsDirectoryInPathValue(managedDirectory, path),
 			resolveCommand ? FindFirstUnixCommand(path, managedDirectory) : null);
+		if (!FlatpakEnvironment.Current.IsActive ||
+		    resolution.IsManagedDirectoryInPath ||
+		    !HostShellProfilesContainPathSetup())
+			return resolution;
+
+		// The sandbox PATH is not the host shell's PATH. The profile line DevProjex writes is the
+		// only evidence of the host PATH available here, and a sandbox cannot detect host shadowing.
+		return new CommandPathResolution(
+			true,
+			resolveCommand ? Path.Combine(managedDirectory, CommandLineExecutableAliases.UnixCommand) : null);
+	}
+
+	private bool HostShellProfilesContainPathSetup()
+	{
+		var home = SafeGetHomeDirectory();
+		if (string.IsNullOrWhiteSpace(home))
+			return false;
+		try
+		{
+			return ResolveUnixShellProfiles(home).All(static profile =>
+			{
+				var file = new FileInfo(profile.Path);
+				return file.Exists &&
+				       file.Length <= MaximumShellProfileBytes &&
+				       ContainsProfileLine(File.ReadAllText(file.FullName), profile.SetupLine);
+			});
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or SecurityException)
+		{
+			return false;
+		}
 	}
 
 	private string? FindFirstUnixCommand(string? path, string managedDirectory)

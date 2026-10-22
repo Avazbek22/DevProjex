@@ -220,12 +220,16 @@ public sealed class McpRootRegistry
 		}
 		catch (FileNotFoundException)
 		{
+			if (FlatpakEnvironment.Current.IsActive)
+				throw FlatpakPathUnavailable(lexicalPath);
 			throw new McpToolException(
 				McpErrorCodes.PathNotFound,
 				$"{McpErrorCodes.PathNotFound}: path '{path}' does not exist inside project '{projectRoot}'.");
 		}
 		catch (DirectoryNotFoundException)
 		{
+			if (FlatpakEnvironment.Current.IsActive)
+				throw FlatpakPathUnavailable(lexicalPath);
 			throw new McpToolException(
 				McpErrorCodes.PathNotFound,
 				$"{McpErrorCodes.PathNotFound}: path '{path}' does not exist inside project '{projectRoot}'.");
@@ -275,7 +279,11 @@ public sealed class McpRootRegistry
 		var fullPath = Path.GetFullPath(path);
 		McpProjectPathProbe.Record();
 		if (requireDirectory && !Directory.Exists(fullPath))
+		{
+			if (FlatpakEnvironment.Current.IsActive)
+				throw FlatpakPathUnavailable(fullPath);
 			throw new DirectoryNotFoundException(fullPath);
+		}
 		if (!requireDirectory && !Directory.Exists(fullPath) && !File.Exists(fullPath))
 			throw new FileNotFoundException("Path was not found.", fullPath);
 
@@ -382,4 +390,8 @@ public sealed class McpRootRegistry
 		var name = Path.GetFileName(Path.TrimEndingDirectorySeparator(root));
 		return string.IsNullOrEmpty(name) ? root : name;
 	}
+
+	private static McpToolException FlatpakPathUnavailable(string path) =>
+		new(McpErrorCodes.PathNotFound, FlatpakPresentation.UnavailablePath(
+			new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En), path));
 }

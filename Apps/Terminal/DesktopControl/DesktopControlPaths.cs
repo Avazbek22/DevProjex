@@ -23,22 +23,37 @@ public sealed class DesktopControlPaths(Func<string>? dataRootProvider = null)
 		if (Encoding.UTF8.GetByteCount(candidate) <= 96)
 			return candidate;
 
+		if (FlatpakEnvironment.Current.IsActive)
+		{
+			var sharedDirectory = _dataRootProvider();
+			Directory.CreateDirectory(sharedDirectory);
+			var sharedPath = Path.Combine(sharedDirectory, fileName);
+			if (Encoding.UTF8.GetByteCount(sharedPath) > 96)
+				throw new IOException("The shared Flatpak socket path exceeds the Unix socket path limit.");
+			return sharedPath;
+		}
 		return Path.Combine(Path.GetTempPath(), fileName);
 	}
 
-	private static string ResolveDataRoot()
+	private static string ResolveDataRoot() => ResolveDataRoot(
+		Environment.GetEnvironmentVariable, UserDataPathResolver.GetStateRoot, OperatingSystem.IsWindows());
+
+	internal static string ResolveDataRoot(Func<string, string?> environment, Func<string> stateRoot, bool isWindows)
 	{
 		var isolatedRoot = UserDataPathResolver.ResolveInternalDataRoot(
-			Environment.GetEnvironmentVariable(InvocationEnvironment.InternalDataRootVariable));
+			environment(InvocationEnvironment.InternalDataRootVariable));
 		if (isolatedRoot is not null)
 			return isolatedRoot;
 
-		var xdgRuntime = Environment.GetEnvironmentVariable("XDG_RUNTIME_DIR");
-		if (!OperatingSystem.IsWindows() &&
+		var xdgRuntime = environment("XDG_RUNTIME_DIR");
+		if (FlatpakEnvironment.Current.IsActive &&
+			!string.IsNullOrWhiteSpace(xdgRuntime) && Path.IsPathFullyQualified(xdgRuntime))
+			return Path.Combine(xdgRuntime, "app", FlatpakEnvironment.Current.AppId!);
+		if (!isWindows &&
 		    !string.IsNullOrWhiteSpace(xdgRuntime) &&
 		    Path.IsPathFullyQualified(xdgRuntime))
 			return xdgRuntime;
 
-		return UserDataPathResolver.GetStateRoot();
+		return stateRoot();
 	}
 }

@@ -1976,6 +1976,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         MenuMcpOpenCodex = _localization["Menu.Mcp.OpenCodex"];
         MenuMcpOpenCursor = _localization["Menu.Mcp.OpenCursor"];
         MenuMcpOpenVsCode = _localization["Menu.Mcp.OpenVsCode"];
+        if (FlatpakEnvironment.Current.IsActive)
+        {
+            MenuMcpOpenClaudeCode = _localization.Format("Flatpak.CopyClientCommand", "Claude Code");
+            MenuMcpOpenCodex = _localization.Format("Flatpak.CopyClientCommand", "Codex");
+            MenuMcpOpenCursor = _localization.Format("Flatpak.CopyClientCommand", "Cursor");
+            MenuMcpOpenVsCode = _localization.Format("Flatpak.CopyClientCommand", "VS Code");
+        }
         MenuMcpOtherClients = _localization["Menu.Mcp.OtherClients"];
         MenuMcpOpenClaudeCodeLiveHelp = _localization.Format("Menu.Mcp.OpenTerminal.Live.Help", "Claude Code");
         MenuMcpOpenCodexLiveHelp = _localization.Format("Menu.Mcp.OpenTerminal.Live.Help", "Codex");
@@ -1985,6 +1992,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         MenuMcpOpenCodexStandardHelp = _localization.Format("Menu.Mcp.OpenTerminal.Standard.Help", "Codex");
         MenuMcpOpenCursorStandardHelp = _localization.Format("Menu.Mcp.OpenProject.Standard.Help", "Cursor");
         MenuMcpOpenVsCodeStandardHelp = _localization.Format("Menu.Mcp.OpenProject.Standard.Help", "VS Code");
+        if (FlatpakEnvironment.Current.IsActive)
+        {
+            MenuMcpOpenClaudeCodeLiveHelp = MenuMcpOpenCodexLiveHelp =
+                MenuMcpOpenCursorLiveHelp = MenuMcpOpenVsCodeLiveHelp =
+                MenuMcpOpenClaudeCodeStandardHelp = MenuMcpOpenCodexStandardHelp =
+                MenuMcpOpenCursorStandardHelp = MenuMcpOpenVsCodeStandardHelp = _localization["Flatpak.CopyCommand"];
+        }
         MenuMcpOtherClientsHelp = _localization["Menu.Mcp.OtherClients.Help"];
         MenuMcpJournalHelp = _localization["Menu.Mcp.Journal.Help"];
         if (HideSecretsOption is not null)
@@ -2024,6 +2038,12 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         HelpHelpCloseSearch = _localization["Help.Help.CloseSearch"];
         HelpAboutTitle = _localization["Help.About.Title"];
         HelpAboutBody = _localization.Format("Help.About.Body", DateTime.Now.Year);
+        if (FlatpakEnvironment.Current.IsActive)
+        {
+            HelpAboutBody += "\n\n" + _localization["Flatpak.Updates"];
+            if (_flatpakGitVersion.Length > 0)
+                HelpAboutBody += "\n" + FlatpakPresentation.EnvironmentLine(_localization, _flatpakGitVersion, _flatpakDataPath);
+        }
         HelpAboutSupport = _localization["Help.About.Support"];
         HelpAboutOpenLink = _localization["Help.About.OpenLink"];
         UpdateApplicationUpdateLocalization();

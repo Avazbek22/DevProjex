@@ -1183,12 +1183,14 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("uses: ./.github/workflows/container-build.yml", releaseCandidate, StringComparison.Ordinal);
 		Assert.Contains("uses: ./.github/workflows/packages-build.yml", releaseCandidate, StringComparison.Ordinal);
 		Assert.Contains("uses: ./.github/workflows/appimage-build.yml", releaseCandidate, StringComparison.Ordinal);
+		Assert.Contains("uses: ./.github/workflows/flatpak-build.yml", releaseCandidate, StringComparison.Ordinal);
 		Assert.Contains("uses: ./.github/workflows/grammar-delivery.yml", releaseCandidate, StringComparison.Ordinal);
 		Assert.Contains("uses: ./.github/workflows/store-package-smoke.yml", releaseCandidate, StringComparison.Ordinal);
 		Assert.Contains("Release candidate report", releaseCandidate, StringComparison.Ordinal);
 		foreach (var gate in new[]
 				 {
 					 "'AppImage dry-run' = $env:APPIMAGE_RESULT",
+					 "'Flatpak dry-run' = $env:FLATPAK_RESULT",
 					 "'Grammar Delivery' = $env:GRAMMAR_RESULT",
 					 "'Store Package Smoke' = $env:STORE_RESULT"
 				 })

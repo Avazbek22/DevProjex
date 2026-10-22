@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\Infrastructure\Infrastructure.csproj" />
+    <ProjectReference Include="../DevProjex.Tests.FlatpakHost/DevProjex.Tests.FlatpakHost.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\Kernel\Kernel.csproj" />
     <ProjectReference Include="..\..\Assets\Assets.csproj" />
     <ProjectReference Include="..\..\Application\Application.csproj" />

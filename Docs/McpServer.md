@@ -1814,6 +1814,23 @@ DevProjex runs through `APPIMAGE_EXTRACT_AND_RUN=1` or
 `--appimage-extract-and-run`, generated registrations carry
 `APPIMAGE_EXTRACT_AND_RUN=1` into the MCP server process.
 
+The Flatpak channel is an exception to the executable-path rule above: its host
+registrations use `flatpak` with arguments `run`, `io.github.Avazbek22.DevProjex`,
+`mcp`, `--root`, the host project path, and optionally `--live`. For example:
+
+```bash
+flatpak run io.github.Avazbek22.DevProjex mcp --root "$HOME/projects/example" --live
+```
+
+The sandbox grants home access. For another host folder, grant a specific
+`flatpak override --user --filesystem=/mnt/projects io.github.Avazbek22.DevProjex`
+before connecting a client. Document-portal paths are not suitable host-client
+roots. If a client CLI cannot be started or its connection cannot be checked from
+the sandbox, DevProjex provides a command to run in your terminal and says that
+verification was unavailable. It never edits `~/.claude.json` directly. Client
+launch actions copy commands instead of spawning host terminals or editors. See
+[Flatpak installation](Installation.md#flatpak) for the remaining sandbox rules.
+
 The Desktop **MCP** menu contains **Live context ▸**, **Standard ▸**, **Journal…**,
 and **Documentation**. The live and standard submenus both contain **Open in Claude
 Code**, **Open in Codex**, **Open in Cursor**, **Open in VS Code**, and **Other

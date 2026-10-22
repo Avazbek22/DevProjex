@@ -119,6 +119,7 @@ public partial class MainWindow
         for (var index = 0; index < current.Count; index++)
         {
             if (current[index].Pid != next[index].Pid ||
+                current[index].SandboxSessionId != next[index].SandboxSessionId ||
                 current[index].ProcessStartUtc != next[index].ProcessStartUtc ||
                 !StringComparer.Ordinal.Equals(current[index].ClientName, next[index].ClientName) ||
                 !StringComparer.Ordinal.Equals(current[index].ClientVersion, next[index].ClientVersion))

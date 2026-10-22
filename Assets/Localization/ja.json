@@ -1,4 +1,13 @@
 {
+  "Flatpak.PortalPathUnavailable": "ドキュメントポータルからアクセス可能なホスト側のパスを取得できませんでした。ホーム内のフォルダーを選ぶか、クライアント接続前に実際のホスト側フォルダーへのアクセスを Flatpak に許可してください。",
+  "Flatpak.Updates": "Flathub 経由で更新されます",
+  "Flatpak.CopyCommand": "このコマンドをお使いの端末で実行してください。",
+  "Flatpak.ConnectionUnverified": "サンドボックス内から接続を確認できませんでした。",
+  "Flatpak.PathUnavailable": "フォルダーが存在しないか、Flatpak のサンドボックスからアクセスできない可能性があります。アクセスを許可するには、次を実行してください: {0}",
+  "Flatpak.Environment": "Flatpak · アクセス: ホームフォルダー · 同梱 git: {0} · データ: {1} · クライアント接続コマンド: {2}",
+  "Flatpak.PrivateClone": "サンドボックス内ではプライベートリポジトリの認証を利用できない場合があります。コンピューターにクローン済みのフォルダーを開いてください。",
+  "Flatpak.CopyClientCommand": "{0} のコマンドをコピー",
+  "Flatpak.CopyOverrideCommand": "コマンドをコピー",
   "Mcp.Connect.ProjectEntryReplaceTitle": "DevProjexのクライアント設定を置き換え",
   "Mcp.Connect.ProjectEntryReplacePrompt": "{0} の既存の devprojex エントリには、削除または上書きされるフィールドがあります：\n{1}\n\n置き換えますか？",
   "Mcp.Connect.ProjectEntryReplaceConfirm": "置き換え",

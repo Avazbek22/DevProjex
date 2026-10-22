@@ -31,6 +31,8 @@ public static class McpConnectionFragmentGenerator
 
 	public static IReadOnlyDictionary<string, string> GetRequiredServerEnvironment()
 	{
+		if (FlatpakEnvironment.Current.IsActive)
+			return new Dictionary<string, string>(StringComparer.Ordinal);
 		var enabledByEnvironment = string.Equals(
 			Environment.GetEnvironmentVariable(AppImageExtractAndRunVariable),
 			"1",
@@ -110,7 +112,7 @@ public static class McpConnectionFragmentGenerator
 		builder.Append("claude mcp add --scope local devprojex");
 		AppendClaudeEnvironment(builder, GetRequiredServerEnvironment());
 		builder.Append(" -- ");
-		builder.Append(quoteArgument(executablePath));
+		builder.Append(FlatpakEnvironment.Current.ExternalLaunchCommand ?? quoteArgument(executablePath));
 		builder.Append(" mcp --root ");
 		builder.Append(quoteArgument(projectRoot));
 		if (mode == McpConnectionMode.Live)
@@ -126,7 +128,7 @@ public static class McpConnectionFragmentGenerator
 		var arguments = BuildArguments(mode, projectRoot);
 		var builder = new StringBuilder()
 			.Append("[mcp_servers.devprojex]").AppendLine()
-			.Append("command = ").Append(ToTomlString(executablePath)).AppendLine()
+			.Append("command = ").Append(ToTomlString(ResolveServerExecutable(executablePath))).AppendLine()
 			.Append("args = [").Append(string.Join(", ", arguments.Select(ToTomlString))).Append(']');
 		var environment = GetRequiredServerEnvironment();
 		if (environment.Count > 0)
@@ -146,7 +148,7 @@ public static class McpConnectionFragmentGenerator
 		var environment = GetRequiredServerEnvironment();
 		var server = new Dictionary<string, object?>(StringComparer.Ordinal)
 		{
-			["command"] = executablePath,
+			["command"] = ResolveServerExecutable(executablePath),
 			["args"] = BuildArguments(mode, projectRoot)
 		};
 		if (environment.Count > 0)
@@ -173,7 +175,7 @@ public static class McpConnectionFragmentGenerator
 		var server = new Dictionary<string, object?>(StringComparer.Ordinal)
 		{
 			["type"] = "stdio",
-			["command"] = executablePath,
+			["command"] = ResolveServerExecutable(executablePath),
 			["args"] = BuildArguments(mode, projectRoot)
 		};
 		if (environment.Count > 0)
@@ -191,10 +193,34 @@ public static class McpConnectionFragmentGenerator
 		});
 	}
 
-	private static string[] BuildArguments(McpConnectionMode mode, string projectRoot) =>
-		mode == McpConnectionMode.Live
+	public static string ResolveServerExecutable(string executablePath) =>
+		FlatpakEnvironment.Current.IsActive ? "flatpak" : executablePath;
+
+	public static string[] BuildServerArguments(McpConnectionMode mode, string projectRoot)
+	{
+		string[] arguments = mode == McpConnectionMode.Live
 			? ["mcp", "--root", projectRoot, "--live"]
 			: ["mcp", "--root", projectRoot];
+		return FlatpakEnvironment.Current.IsActive
+			? ["run", FlatpakEnvironment.Current.AppId!, .. arguments]
+			: arguments;
+	}
+
+	public static string GenerateHostClientCommand(McpConnectionRequest request)
+	{
+		var client = request.Client == McpConnectionClient.ClaudeCode
+			? "claude mcp add --scope local devprojex -- "
+			: "codex mcp add devprojex -- ";
+		// Single quotes everywhere: a pasted command meets interactive bash, which expands '!' inside double quotes.
+		return "cd " + FlatpakEnvironment.QuoteArgument(request.ProjectRoot) + " && " + client +
+			FlatpakEnvironment.Current.ExternalLaunchCommand + " " +
+			string.Join(' ', (request.Mode == McpConnectionMode.Live
+				? new[] { "mcp", "--root", request.ProjectRoot, "--live" }
+				: ["mcp", "--root", request.ProjectRoot]).Select(FlatpakEnvironment.QuoteArgument));
+	}
+
+	private static string[] BuildArguments(McpConnectionMode mode, string projectRoot) =>
+		BuildServerArguments(mode, projectRoot);
 
 	private static void AppendClaudeEnvironment(
 		StringBuilder builder,
@@ -242,6 +268,8 @@ public static class McpConnectionFragmentGenerator
 				'\n' => "\\n",
 				'\f' => "\\f",
 				'\r' => "\\r",
+				_ when FlatpakEnvironment.Current.IsActive && (character < ' ' || character == '\u007f') =>
+					"\\u" + ((int)character).ToString("X4", System.Globalization.CultureInfo.InvariantCulture),
 				_ => character.ToString()
 			});
 		}
@@ -261,7 +289,7 @@ public static class McpConnectionFragmentGenerator
 
 	private static void ValidateSingleLine(string value, string parameterName)
 	{
-		if (value.IndexOfAny(['\r', '\n', '\0']) >= 0)
+		if (value.Contains('\0') || !FlatpakEnvironment.Current.IsActive && value.IndexOfAny(['\r', '\n']) >= 0)
 			throw new ArgumentException("Connection fragment paths must be single-line text.", parameterName);
 	}
 }

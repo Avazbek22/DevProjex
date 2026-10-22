@@ -1,5 +1,7 @@
 namespace DevProjex.Avalonia.Services;
 
+public sealed record MessageDialogCommand(string Text, string CopyButtonText);
+
 public static class MessageDialog
 {
     public static async Task<int> ShowChoiceAsync(
@@ -21,9 +23,10 @@ public static class MessageDialog
         Window owner,
         string title,
         string message,
-        string closeButtonText)
+        string closeButtonText,
+        MessageDialogCommand? command = null)
     {
-        var dialog = CreateMessageWindow(owner, title, message, closeButtonText);
+        var dialog = CreateMessageWindow(owner, title, message, closeButtonText, command);
 
         if (owner is not null)
             await dialog.ShowDialog(owner);
@@ -37,7 +40,8 @@ public static class MessageDialog
         string message,
         string confirmButtonText,
         string cancelButtonText,
-        double width = 520)
+        double width = 520,
+        MessageDialogCommand? command = null)
     {
         var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var dialog = CreateConfirmationWindow(
@@ -47,7 +51,8 @@ public static class MessageDialog
             confirmButtonText,
             cancelButtonText,
             width,
-            completion);
+            completion,
+            command);
 
         dialog.Closed += (_, _) => completion.TrySetResult(false);
 
@@ -63,8 +68,13 @@ public static class MessageDialog
         Window? owner,
         string title,
         string message,
-        string closeButtonText) =>
-        CreateDialogWindow(owner, title, BuildContent(message, closeButtonText), width: 420);
+        string closeButtonText,
+        MessageDialogCommand? command = null) =>
+        CreateDialogWindow(
+            owner,
+            title,
+            command is null ? BuildContent(message, closeButtonText) : BuildContentWithCommand(message, closeButtonText, command),
+            width: command is null ? 420 : 520);
 
     internal static Window CreateConfirmationWindow(
         Window? owner,
@@ -73,13 +83,16 @@ public static class MessageDialog
         string confirmButtonText,
         string cancelButtonText,
         double width,
-        TaskCompletionSource<bool> completion)
+        TaskCompletionSource<bool> completion,
+        MessageDialogCommand? command = null)
     {
         ArgumentNullException.ThrowIfNull(completion);
         return CreateDialogWindow(
             owner,
             title,
-            BuildConfirmationContent(message, confirmButtonText, cancelButtonText, completion),
+            command is null
+                ? BuildConfirmationContent(message, confirmButtonText, cancelButtonText, completion)
+                : BuildConfirmationContentWithCommand(message, confirmButtonText, cancelButtonText, completion, command),
             width);
     }
 
@@ -180,6 +193,40 @@ public static class MessageDialog
         return panel;
     }
 
+    private static Control BuildContentWithCommand(string message, string closeButtonText, MessageDialogCommand command)
+    {
+        var panel = (DockPanel)BuildContent(message, closeButtonText);
+        var closeButton = (Button)panel.Children[0];
+        panel.Children.RemoveAt(0);
+        closeButton.Margin = new Thickness(6, 12, 12, 12);
+        var buttonPanel = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right
+        };
+        buttonPanel.Children.Add(CreateCopyButton(panel, command));
+        buttonPanel.Children.Add(closeButton);
+        DockPanel.SetDock(buttonPanel, Dock.Bottom);
+        panel.Children.Insert(0, buttonPanel);
+        ((ScrollViewer)panel.Children[1]).Content = BuildMessageWithCommand(message, command);
+        return panel;
+    }
+
+    private static Control BuildConfirmationContentWithCommand(
+        string message,
+        string confirmButtonText,
+        string cancelButtonText,
+        TaskCompletionSource<bool> completion,
+        MessageDialogCommand command)
+    {
+        var panel = (DockPanel)BuildConfirmationContent(message, confirmButtonText, cancelButtonText, completion);
+        var buttonPanel = (StackPanel)panel.Children[0];
+        ((Button)buttonPanel.Children[0]).Margin = new Thickness(6, 12, 6, 12);
+        buttonPanel.Children.Insert(0, CreateCopyButton(panel, command));
+        ((ScrollViewer)panel.Children[1]).Content = BuildMessageWithCommand(message, command);
+        return panel;
+    }
+
     private static Control BuildChoiceContent(
         string message,
         IReadOnlyList<string> choices,
@@ -219,6 +266,31 @@ public static class MessageDialog
         return panel;
     }
 
+    private static Button CreateCopyButton(Control dialogContent, MessageDialogCommand command)
+    {
+        var copyButton = new Button
+        {
+            Content = command.CopyButtonText,
+            Margin = new Thickness(12, 12, 6, 12),
+            MinWidth = 110,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center
+        };
+        copyButton.Click += async (_, _) =>
+        {
+            try
+            {
+                if (TopLevel.GetTopLevel(dialogContent)?.Clipboard is { } clipboard)
+                    await clipboard.SetTextAsync(command.Text);
+            }
+            catch
+            {
+                // Clipboard access can be unavailable in headless or restricted sessions.
+            }
+        };
+        return copyButton;
+    }
+
     // The window sizes itself to this area until it reaches its height cap; from then on the
     // message scrolls while the docked buttons keep their place.
     private static ScrollViewer BuildMessageArea(string message) =>
@@ -233,5 +305,24 @@ public static class MessageDialog
             },
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
+        };
+
+    private static StackPanel BuildMessageWithCommand(string message, MessageDialogCommand command) =>
+        new()
+        {
+            Margin = new Thickness(12),
+            Spacing = 10,
+            VerticalAlignment = VerticalAlignment.Center,
+            Children =
+            {
+                new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap },
+                new SelectableTextBlock
+                {
+                    Text = command.Text,
+                    TextWrapping = TextWrapping.Wrap,
+                    FontFamily = FontFamily.Parse("Consolas,Menlo,Monospace"),
+                    FontSize = 13
+                }
+            }
         };
 }

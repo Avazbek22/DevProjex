@@ -1712,6 +1712,77 @@ public sealed class McpConnectionServiceTests
 		Assert.Equal("DPX-PROJECT-NOT-FOUND", McpConnectionProjectRoot.ErrorCode);
 	}
 
+	[Theory]
+	[InlineData(McpConnectionClient.ClaudeCode, McpConnectionMode.Standard)]
+	[InlineData(McpConnectionClient.ClaudeCode, McpConnectionMode.Live)]
+	[InlineData(McpConnectionClient.Codex, McpConnectionMode.Standard)]
+	[InlineData(McpConnectionClient.Codex, McpConnectionMode.Live)]
+	public async Task Inspect_Flatpak_RecognizesItsOwnRegistrationInEveryMode(
+		McpConnectionClient client,
+		McpConnectionMode mode)
+	{
+		using var sandbox = FlatpakEnvironment.UseForTesting(new(true, "io.github.Avazbek22.DevProjex"));
+		using var currentProject = new TemporaryDirectory();
+		var registration = McpConnectionFragmentGenerator.BuildServerArguments(mode, currentProject.Path);
+		var service = CreateFlatpakInspectionService(currentProject.Path, client, registration);
+
+		var inspection = await service.InspectAsync(
+			Request(client, mode, Path.Combine(currentProject.Path, "DevProjex.exe"), currentProject.Path),
+			TestContext.Current.CancellationToken);
+
+		Assert.True(inspection.Succeeded, inspection.ErrorMessage);
+		Assert.True(inspection.Exists);
+		Assert.False(inspection.RequiresProjectReplacement);
+		Assert.Equal(currentProject.Path, inspection.ExistingProjectRoot);
+	}
+
+	[Theory]
+	[InlineData(McpConnectionClient.ClaudeCode, McpConnectionMode.Standard)]
+	[InlineData(McpConnectionClient.Codex, McpConnectionMode.Standard)]
+	[InlineData(McpConnectionClient.ClaudeCode, McpConnectionMode.Live)]
+	[InlineData(McpConnectionClient.Codex, McpConnectionMode.Live)]
+	public async Task Inspect_Flatpak_RegistrationForAnotherProjectFollowsTheClientScope(
+		McpConnectionClient client,
+		McpConnectionMode mode)
+	{
+		using var sandbox = FlatpakEnvironment.UseForTesting(new(true, "io.github.Avazbek22.DevProjex"));
+		using var currentProject = new TemporaryDirectory();
+		using var previousProject = new TemporaryDirectory();
+		var registration = McpConnectionFragmentGenerator.BuildServerArguments(mode, previousProject.Path);
+		var service = CreateFlatpakInspectionService(currentProject.Path, client, registration);
+
+		var inspection = await service.InspectAsync(
+			Request(client, mode, Path.Combine(currentProject.Path, "DevProjex.exe"), currentProject.Path),
+			TestContext.Current.CancellationToken);
+
+		Assert.True(inspection.Succeeded, inspection.ErrorMessage);
+		Assert.True(inspection.Exists);
+		// Codex keeps one user-level entry; a Claude Code local-scope entry belongs to its project.
+		Assert.Equal(client == McpConnectionClient.Codex, inspection.RequiresProjectReplacement);
+		Assert.Equal(previousProject.Path, inspection.ExistingProjectRoot);
+	}
+
+	private static McpConnectionService CreateFlatpakInspectionService(
+		string projectRoot,
+		McpConnectionClient client,
+		IReadOnlyList<string> registeredArguments)
+	{
+		var empty = new Dictionary<string, string>();
+		var version = new McpConnectionProcessResult(0, client == McpConnectionClient.Codex
+			? "codex-cli 0.115.0"
+			: "2.1.71 (Claude Code)", "");
+		return CreateCommandLineService(
+			projectRoot,
+			client == McpConnectionClient.Codex ? "codex" : "claude",
+			new RecordingProcessRunner(version),
+			client == McpConnectionClient.Codex
+				? CreateCodexConfigurationReader("flatpak", registeredArguments, empty)
+				: null,
+			client == McpConnectionClient.ClaudeCode
+				? CreateClaudeConfigurationReader("flatpak", registeredArguments, empty)
+				: null).Service;
+	}
+
 	private static (McpConnectionService Service, string ClientExecutable) CreateCommandLineService(
 		string projectRoot,
 		string commandName,

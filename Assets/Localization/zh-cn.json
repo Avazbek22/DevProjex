@@ -1,4 +1,13 @@
 {
+  "Flatpak.PortalPathUnavailable": "文档门户未能提供可访问的主机路径。请选择主文件夹内的目录，或在连接客户端前允许 Flatpak 访问实际的主机文件夹。",
+  "Flatpak.Updates": "通过 Flathub 更新",
+  "Flatpak.CopyCommand": "请在您自己的终端中运行此命令。",
+  "Flatpak.ConnectionUnverified": "无法从沙盒内验证连接。",
+  "Flatpak.PathUnavailable": "文件夹可能不存在，或无法在 Flatpak 沙盒中访问。要授予访问权限，请运行：{0}",
+  "Flatpak.Environment": "Flatpak · 访问范围：主文件夹 · 内置 git：{0} · 数据：{1} · 客户端连接命令：{2}",
+  "Flatpak.PrivateClone": "沙盒中可能无法验证私有仓库身份。请打开已在计算机上克隆的文件夹。",
+  "Flatpak.CopyClientCommand": "复制 {0} 命令",
+  "Flatpak.CopyOverrideCommand": "复制命令",
   "Mcp.Connect.ProjectEntryReplaceTitle": "替换 DevProjex 客户端设置",
   "Mcp.Connect.ProjectEntryReplacePrompt": "{0} 的现有 devprojex 条目包含将被删除或覆盖的字段：\n{1}\n\n替换该条目？",
   "Mcp.Connect.ProjectEntryReplaceConfirm": "替换",

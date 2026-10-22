@@ -1,4 +1,13 @@
 {
+  "Flatpak.PortalPathUnavailable": "Cổng tài liệu không cung cấp được đường dẫn máy chủ có thể truy cập. Chọn thư mục trong thư mục cá nhân hoặc cấp cho Flatpak quyền truy cập thư mục thật trước khi kết nối ứng dụng khách.",
+  "Flatpak.Updates": "Cập nhật qua Flathub",
+  "Flatpak.CopyCommand": "Chạy lệnh này trong thiết bị đầu cuối của bạn.",
+  "Flatpak.ConnectionUnverified": "Không thể kiểm tra kết nối từ môi trường cách ly.",
+  "Flatpak.PathUnavailable": "Thư mục có thể không tồn tại hoặc không thể truy cập từ môi trường cách ly Flatpak. Để cấp quyền truy cập, hãy chạy: {0}",
+  "Flatpak.Environment": "Flatpak · truy cập: thư mục cá nhân · git tích hợp: {0} · dữ liệu: {1} · lệnh kết nối ứng dụng khách: {2}",
+  "Flatpak.PrivateClone": "Xác thực kho riêng tư có thể không khả dụng trong môi trường cách ly. Hãy mở thư mục đã được sao chép trên máy tính.",
+  "Flatpak.CopyClientCommand": "Sao chép lệnh {0}",
+  "Flatpak.CopyOverrideCommand": "Sao chép lệnh",
   "Mcp.Connect.ProjectEntryReplaceTitle": "Thay thế cài đặt ứng dụng DevProjex",
   "Mcp.Connect.ProjectEntryReplacePrompt": "Mục devprojex hiện có cho {0} chứa các trường sẽ bị xóa hoặc ghi đè:\n{1}\n\nThay thế mục này?",
   "Mcp.Connect.ProjectEntryReplaceConfirm": "Thay thế",

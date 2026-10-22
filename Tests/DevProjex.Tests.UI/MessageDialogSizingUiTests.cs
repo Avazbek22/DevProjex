@@ -68,6 +68,46 @@ public sealed class MessageDialogSizingUiTests
 		}
 	}
 
+	[AvaloniaFact]
+	public async Task CommandBlockKeepsEveryActionInsideTheWindowAndCopyDoesNotDecide()
+	{
+		var owner = ShowOwner();
+		var command = new MessageDialogCommand(
+			"flatpak override --user '--filesystem=/mnt/data/a rather long project folder name that has to wrap' io.github.Avazbek22.DevProjex",
+			"Copy command");
+		var completion = new TaskCompletionSource<bool>();
+		var message = MessageDialog.CreateMessageWindow(
+			owner, "Error", "The folder may be inaccessible in the Flatpak sandbox. To grant access, run:", "OK", command);
+		var confirmation = MessageDialog.CreateConfirmationWindow(
+			owner, "Recent folder unavailable", "The folder may be inaccessible in the Flatpak sandbox. To grant access, run:",
+			"Remove", "Keep", width: 560, completion, command);
+		try
+		{
+			foreach (var (dialog, buttonCount) in new[] { (message, 2), (confirmation, 3) })
+			{
+				ShowAndLayout(dialog);
+
+				Assert.False(MessageScrolls(dialog));
+				AssertButtonsInsideWindow(dialog, buttonCount);
+				Assert.Equal(command.Text, Assert.Single(dialog.GetVisualDescendants().OfType<SelectableTextBlock>()).Text);
+			}
+
+			var copy = Assert.Single(confirmation.GetVisualDescendants().OfType<Button>(),
+				static button => Equals(button.Content, "Copy command"));
+			await UiTestDriver.RaiseButtonClickAsync(copy);
+			Dispatcher.UIThread.RunJobs();
+
+			Assert.False(completion.Task.IsCompleted);
+			Assert.True(confirmation.IsVisible);
+		}
+		finally
+		{
+			message.Close();
+			confirmation.Close();
+			owner.Close();
+		}
+	}
+
 	private static Window ShowOwner()
 	{
 		var owner = new Window { Width = 900, Height = 700 };

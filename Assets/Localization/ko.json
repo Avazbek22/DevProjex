@@ -1,4 +1,13 @@
 {
+  "Flatpak.PortalPathUnavailable": "문서 포털에서 접근 가능한 호스트 경로를 얻지 못했습니다. 홈 폴더를 선택하거나 클라이언트 연결 전에 실제 호스트 폴더에 대한 Flatpak 접근을 허용하세요。",
+  "Flatpak.Updates": "Flathub을 통해 업데이트됩니다",
+  "Flatpak.CopyCommand": "이 명령을 자신의 터미널에서 실행하세요.",
+  "Flatpak.ConnectionUnverified": "샌드박스 안에서 연결을 확인할 수 없습니다.",
+  "Flatpak.PathUnavailable": "폴더가 없거나 Flatpak 샌드박스에서 접근할 수 없습니다. 접근을 허용하려면 다음을 실행하세요: {0}",
+  "Flatpak.Environment": "Flatpak · 접근: 홈 폴더 · 내장 git: {0} · 데이터: {1} · 클라이언트 연결 명령: {2}",
+  "Flatpak.PrivateClone": "샌드박스에서는 비공개 저장소 인증을 사용할 수 없을 수 있습니다. 컴퓨터에 이미 복제한 폴더를 여세요.",
+  "Flatpak.CopyClientCommand": "{0} 명령 복사",
+  "Flatpak.CopyOverrideCommand": "명령 복사",
   "Mcp.Connect.ProjectEntryReplaceTitle": "DevProjex 클라이언트 설정 바꾸기",
   "Mcp.Connect.ProjectEntryReplacePrompt": "{0}의 기존 devprojex 항목에 제거되거나 덮어써질 필드가 있습니다:\n{1}\n\n항목을 바꾸시겠습니까?",
   "Mcp.Connect.ProjectEntryReplaceConfirm": "바꾸기",

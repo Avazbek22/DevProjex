@@ -21,9 +21,11 @@ internal sealed record McpConnectionPathDialogContent(
 
 internal static class McpConnectionPathPromptPolicy
 {
+    // Inside Flatpak every client starts the server through `flatpak run`, so the PATH command is irrelevant to MCP.
     public static bool ShouldShow(
         TerminalCommandSetupState state,
         TerminalCommandHostPlatform platform) =>
+        !FlatpakEnvironment.Current.IsActive &&
         platform is (TerminalCommandHostPlatform.Windows or
             TerminalCommandHostPlatform.Linux or
             TerminalCommandHostPlatform.MacOS) &&

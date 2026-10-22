@@ -196,15 +196,17 @@ public static class McpServerHost
 			? AgentJournalToolSet.Full
 			: AgentJournalToolSet.Reduced;
 		using var journalStore = new AgentJournalStore(appDataPathProvider);
+		var sandboxSessionId = FlatpakEnvironment.Current.IsActive ? Guid.NewGuid().ToString("N") : null;
 		await using var journal = new McpAgentJournal(
 			journalStore,
 			rootRegistry,
 			journalMode,
 			journalToolSet,
 			ResolveVersion(),
-			hidePrivateData);
+			hidePrivateData,
+			sandboxSessionId: sandboxSessionId);
 		await using var liveSession = new LiveSessionRegistry(appDataPathProvider)
-			.Start(rootRegistry.ConfiguredRoots, journalMode);
+			.Start(rootRegistry.ConfiguredRoots, journalMode, sandboxSessionId);
 		await using var packs = new McpPackRegistry(tempRoot, toolSet: toolSet);
 		var projectService = new Lazy<McpProjectService>(
 			() =>

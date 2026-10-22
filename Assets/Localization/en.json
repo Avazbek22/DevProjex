@@ -1,4 +1,13 @@
 {
+  "Flatpak.PortalPathUnavailable": "The document portal could not provide an accessible host path. Choose a folder in your home directory, or grant Flatpak access to its real host folder before connecting a client.",
+  "Flatpak.Updates": "Updated through Flathub",
+  "Flatpak.CopyCommand": "Run this command in your own terminal.",
+  "Flatpak.ConnectionUnverified": "Could not verify the connection from the sandbox.",
+  "Flatpak.PathUnavailable": "The folder may not exist or may be inaccessible in the Flatpak sandbox. To grant access, run: {0}",
+  "Flatpak.Environment": "Flatpak · access: home folder · bundled git: {0} · data: {1} · connect clients with: {2}",
+  "Flatpak.PrivateClone": "Private repository authentication may be unavailable in the sandbox. Open a folder already cloned on your computer.",
+  "Flatpak.CopyClientCommand": "Copy {0} command",
+  "Flatpak.CopyOverrideCommand": "Copy command",
   "Mcp.Connect.ProjectEntryReplaceTitle": "Replace DevProjex client settings",
   "Mcp.Connect.ProjectEntryReplacePrompt": "The existing devprojex entry for {0} has fields that will be removed or overwritten:\n{1}\n\nReplace it?",
   "Mcp.Connect.ProjectEntryReplaceConfirm": "Replace",

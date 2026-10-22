@@ -175,7 +175,9 @@ public static class AvaloniaCompositionRoot
         var gitRepositoryService = new GitRepositoryService();
         var repoCacheService = new RepoCacheService();
         var zipDownloadService = new ZipDownloadService();
-        var applicationUpdateService = new GitHubReleaseUpdateService();
+        DevProjex.Application.Updates.IApplicationUpdateService applicationUpdateService = FlatpakEnvironment.Current.IsActive
+            ? new FlathubApplicationUpdateService()
+            : new GitHubReleaseUpdateService();
         var mcpConnectionService = new McpConnectionService(localization);
         var mcpClientLaunchService = new McpClientLaunchService(localization);
         ITaskbarProgressService taskbarProgressService = OperatingSystem.IsWindows()

@@ -95,10 +95,15 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 		}
 	}
 
-	public static string CreateSessionId(DateTimeOffset startedUtc, int pid)
+	public static string CreateSessionId(DateTimeOffset startedUtc, int pid, string? sandboxSessionId = null)
 	{
 		ArgumentOutOfRangeException.ThrowIfLessThan(pid, 1);
-		return $"{startedUtc.UtcDateTime:yyyyMMdd-HHmmss}-{pid}";
+		var id = $"{startedUtc.UtcDateTime:yyyyMMdd-HHmmss}-{pid}";
+		if (!FlatpakEnvironment.Current.IsActive || sandboxSessionId is null)
+			return id;
+		if (!Guid.TryParseExact(sandboxSessionId, "N", out _))
+			throw new ArgumentException("A Flatpak journal requires a unique registration identifier.", nameof(sandboxSessionId));
+		return id + "-" + sandboxSessionId;
 	}
 
 	public async ValueTask StartSession(
@@ -200,7 +205,7 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 
 	private async ValueTask<SessionSummary?> ReadSummaryAsync(
 		string path,
-		IReadOnlySet<(int Pid, long StartTicks)> live,
+		IReadOnlySet<(int Pid, long StartTicks, string? SandboxId)> live,
 		CancellationToken cancellationToken)
 	{
 		if (!File.Exists(path))
@@ -930,7 +935,7 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 
 	private AgentJournalSession MaterializeSession(
 		JournalContent content,
-		IReadOnlySet<(int Pid, long StartTicks)> live)
+		IReadOnlySet<(int Pid, long StartTicks, string? SandboxId)> live)
 	{
 		var header = content.Session!;
 		var totals = content.End?.Totals ?? SumTotals(content.Calls);
@@ -938,24 +943,25 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 		{
 			EndedUtc = content.End?.EndedUtc,
 			Totals = totals,
-			IsLive = content.End is null && live.Contains((header.Pid, header.ProcessStartUtc.UtcTicks))
+			IsLive = content.End is null && IsActive(header, live)
 		};
 		AgentJournalSessionHistory.Attach(session, AgentJournalSessionHistory.FromCalls(content.Calls));
 		return session;
 	}
 
-	private IReadOnlySet<(int Pid, long StartTicks)> ActiveSessionKeys()
+	private IReadOnlySet<(int Pid, long StartTicks, string? SandboxId)> ActiveSessionKeys()
 	{
 		try
 		{
 			return activeSessions()
-				.Select(static record => (record.Pid, record.ProcessStartUtc.UtcTicks))
+				.Select(static record => (record.Pid, record.ProcessStartUtc.UtcTicks,
+					FlatpakEnvironment.Current.IsActive ? record.SandboxSessionId : null))
 				.ToHashSet();
 		}
 		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
 		{
 			Trace.TraceWarning("Journal live-session state could not be read: {0}", exception.GetType().Name);
-			return new HashSet<(int, long)>();
+			return new HashSet<(int, long, string?)>();
 		}
 	}
 
@@ -1023,8 +1029,8 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 			if ((attributes & (FileAttributes.ReparsePoint | FileAttributes.Directory)) != 0 ||
 				!TryReadSessionHeader(path, out var session) ||
 				session is null ||
-				!SessionIdPattern().IsMatch(session.Id) ||
-				!StringComparer.Ordinal.Equals(session.Id, CreateSessionId(session.StartedUtc, session.Pid)) ||
+				!IsValidSessionId(session.Id) ||
+				!StringComparer.Ordinal.Equals(session.Id, CreateSessionId(session.StartedUtc, session.Pid, session.SandboxSessionId)) ||
 				!StringComparer.Ordinal.Equals(Path.GetFileName(path), session.Id + ".jsonl") ||
 				session.Pid <= 0 ||
 				session.Roots is null or { Count: 0 } ||
@@ -1096,7 +1102,7 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 
 	private string ResolveSessionPath(string sessionId)
 	{
-		if (!SessionIdPattern().IsMatch(sessionId))
+		if (!IsValidSessionId(sessionId))
 			throw new ArgumentException("The journal session ID is invalid.", nameof(sessionId));
 		return Path.Combine(DirectoryPath, sessionId + ".jsonl");
 	}
@@ -1156,7 +1162,7 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 	private static void ValidateSession(AgentJournalSession session)
 	{
 		ArgumentNullException.ThrowIfNull(session);
-		if (!SessionIdPattern().IsMatch(session.Id))
+		if (!IsValidSessionId(session.Id))
 			throw new ArgumentException("The journal session ID is invalid.", nameof(session));
 		ArgumentOutOfRangeException.ThrowIfLessThan(session.Pid, 1);
 		if (session.Roots.Count is 0 or > 256)
@@ -1229,8 +1235,9 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 
 	private static bool IsActive(
 		AgentJournalSession session,
-		IReadOnlySet<(int Pid, long StartTicks)> live) =>
-		live.Contains((session.Pid, session.ProcessStartUtc.UtcTicks));
+		IReadOnlySet<(int Pid, long StartTicks, string? SandboxId)> live) =>
+		live.Contains((session.Pid, session.ProcessStartUtc.UtcTicks,
+			FlatpakEnvironment.Current.IsActive ? session.SandboxSessionId : null));
 
 	private static string? TryNormalizeRoot(string? path)
 	{
@@ -1266,6 +1273,12 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 
 	[GeneratedRegex("^[0-9]{8}-[0-9]{6}-[1-9][0-9]*$", RegexOptions.CultureInvariant)]
 	private static partial Regex SessionIdPattern();
+
+	[GeneratedRegex("^[0-9]{8}-[0-9]{6}-[1-9][0-9]*-[0-9a-f]{32}$", RegexOptions.CultureInvariant)]
+	private static partial Regex SandboxSessionIdPattern();
+
+	private static bool IsValidSessionId(string id) => SessionIdPattern().IsMatch(id) ||
+		FlatpakEnvironment.Current.IsActive && SandboxSessionIdPattern().IsMatch(id);
 
 	private sealed class JournalContent
 	{
@@ -1334,14 +1347,14 @@ public sealed partial class AgentJournalStore : IAgentJournalWriter, IAgentJourn
 			return totals;
 		}
 
-		public void RefreshLive(IReadOnlySet<(int Pid, long StartTicks)> live) =>
+		public void RefreshLive(IReadOnlySet<(int Pid, long StartTicks, string? SandboxId)> live) =>
 			RefreshSession(live);
 
-		private void RefreshSession(IReadOnlySet<(int Pid, long StartTicks)> live)
+		private void RefreshSession(IReadOnlySet<(int Pid, long StartTicks, string? SandboxId)> live)
 		{
 			Session = Session with
 			{
-				IsLive = End is null && live.Contains((Session.Pid, Session.ProcessStartUtc.UtcTicks))
+				IsLive = End is null && IsActive(Session, live)
 			};
 			AgentJournalSessionHistory.Attach(Session, AgentJournalSessionHistory.FromCalls(calls));
 		}

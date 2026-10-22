@@ -1,0 +1,53 @@
+app-id: io.github.Avazbek22.DevProjex
+runtime: org.freedesktop.Platform
+runtime-version: '26.08'
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.dotnet10
+command: devprojex
+cleanup:
+  - /include
+  - /lib/pkgconfig
+  - /share/man
+finish-args:
+  - --filesystem=home
+  - --socket=x11
+  - --share=ipc
+  - --device=dri
+  - --share=network
+  # Flatpak provides AT_SPI_BUS_ADDRESS for Avalonia's accessibility backend.
+  # Avalonia's existing global menu integration registers its menu with this service.
+  - --talk-name=com.canonical.AppMenu.Registrar
+  # Desktop and Documents portals are already allowed by Flatpak's default bus policy.
+build-options:
+  append-path: /usr/lib/sdk/dotnet10/bin
+  env:
+    DOTNET_ROOT: /usr/lib/sdk/dotnet10/lib
+    DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+    DOTNET_NOLOGO: 'true'
+    NUGET_PACKAGES: /run/build/devprojex/.nuget/packages
+modules:
+  - name: git
+    buildsystem: simple
+    build-commands:
+      - make -j2 prefix=/app NO_RUST=YesPlease NO_PERL=YesPlease NO_TCLTK=YesPlease NO_GETTEXT=YesPlease NO_INSTALL_HARDLINKS=YesPlease INSTALL_SYMLINKS=YesPlease all
+      - make prefix=/app NO_RUST=YesPlease NO_PERL=YesPlease NO_TCLTK=YesPlease NO_GETTEXT=YesPlease NO_INSTALL_HARDLINKS=YesPlease INSTALL_SYMLINKS=YesPlease install
+      - install -Dm644 COPYING /app/share/licenses/git/COPYING
+    sources:
+      - type: archive
+        url: https://www.kernel.org/pub/software/scm/git/git-2.56.0.tar.xz
+        sha256: 26c56c296b38c0695b26fa95f475f1d01704d2d38e73465ca30b0b2f5dc789d3
+  - vendored-grammars.json
+  - name: devprojex
+    buildsystem: simple
+    build-commands:
+      - bash Packaging/Linux/flatpak/publish.sh
+      - install -Dm644 Packaging/Linux/io.github.Avazbek22.DevProjex.desktop /app/share/applications/io.github.Avazbek22.DevProjex.desktop
+      - sed -i 's/^StartupWMClass=.*/StartupWMClass=io.github.Avazbek22.DevProjex/' /app/share/applications/io.github.Avazbek22.DevProjex.desktop
+      - install -Dm644 Packaging/Linux/io.github.Avazbek22.DevProjex.metainfo.xml /app/share/metainfo/io.github.Avazbek22.DevProjex.metainfo.xml
+      - install -Dm644 LICENSE /app/share/licenses/devprojex/LICENSE
+      - install -Dm644 THIRD-PARTY-NOTICES.md /app/share/licenses/devprojex/THIRD-PARTY-NOTICES.md
+      - for size in 128 256 512; do install -Dm644 "Assets/AppIcon/Linux/png/$size.png" "/app/share/icons/hicolor/${size}x${size}/apps/io.github.Avazbek22.DevProjex.png"; done
+    sources:
+      - app-source.json
+      - nuget-sources.json

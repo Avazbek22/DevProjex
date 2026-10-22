@@ -26,6 +26,7 @@ public sealed partial class MainWindowViewModel
         get => _updatePopoverOpen;
         set
         {
+            value = value && !FlatpakEnvironment.Current.IsActive;
             if (_updatePopoverOpen == value)
                 return;
 
@@ -69,7 +70,7 @@ public sealed partial class MainWindowViewModel
         UpdateCheckState == UpdateCheckPresentationState.CurrentVersionNewer;
     public bool HasUpdateCheckFailed => UpdateCheckState == UpdateCheckPresentationState.Failed;
     public bool IsKnownUpdateAvailable => _isKnownUpdateAvailable;
-    public bool IsUpdateCheckButtonVisible => true;
+    public bool IsUpdateCheckButtonVisible => !FlatpakEnvironment.Current.IsActive;
     public bool IsLatestApplicationVersionVisible =>
         IsUpdateAvailable || IsApplicationUpToDate || IsCurrentApplicationVersionNewer;
 

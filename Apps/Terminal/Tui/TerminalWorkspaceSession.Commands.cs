@@ -953,6 +953,9 @@ internal sealed partial class TerminalWorkspaceSession
 			definitions.Select(definition =>
 				$"{definition.Syntax}\n{L(definition.DescriptionKey)}\n" +
 				$"{L("Terminal.Tui.Command.Help.Example")}: {definition.Example}"));
+		if (FlatpakEnvironment.Current.IsActive)
+			body += "\n\n" + FlatpakPresentation.EnvironmentLine(_services.Localization,
+				_flatpakGitVersion, DevProjex.Infrastructure.Persistence.UserDataPathResolver.GetLocalDataRoot());
 		ShowScrollableOverlay(
 			L("Terminal.Tui.Command.Help.OverlayTitle"),
 			body,

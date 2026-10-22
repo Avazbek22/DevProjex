@@ -409,9 +409,15 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	}
 
 	public bool ExitRequested { get; private set; }
+	private string _flatpakGitVersion = string.Empty;
 
 	public void Start()
 	{
+		if (FlatpakEnvironment.Current.IsActive)
+		{
+			_backgroundTasks.Track(Task.Run(() =>
+				_flatpakGitVersion = GitRuntimeInformation.VersionDisplay));
+		}
 		_layoutMode = ResolveLayout();
 		if (_layoutMode == TerminalWorkspaceLayoutMode.TooSmall)
 		{
@@ -807,7 +813,9 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			return;
 		if (!TryResolveDirectory(path, out var project))
 		{
-			ShowError("DPX-TUI-PROJECT-UNAVAILABLE", L("Terminal.Tui.Error.ProjectUnavailable"));
+			ShowError("DPX-TUI-PROJECT-UNAVAILABLE", FlatpakEnvironment.Current.IsActive
+				? FlatpakPresentation.UnavailablePath(_services.Localization, path)
+				: L("Terminal.Tui.Error.ProjectUnavailable"));
 			return;
 		}
 
@@ -845,7 +853,9 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			return;
 		if (!TryResolveDirectory(projectPath, out var project))
 		{
-			ShowError("DPX-TUI-PROJECT-UNAVAILABLE", L("Terminal.Tui.Error.ProjectUnavailable"));
+			ShowError("DPX-TUI-PROJECT-UNAVAILABLE", FlatpakEnvironment.Current.IsActive
+				? FlatpakPresentation.UnavailablePath(_services.Localization, projectPath)
+				: L("Terminal.Tui.Error.ProjectUnavailable"));
 			return;
 		}
 

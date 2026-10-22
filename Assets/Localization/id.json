@@ -1,4 +1,13 @@
 {
+  "Flatpak.PortalPathUnavailable": "Portal dokumen tidak memberikan jalur host yang dapat diakses. Pilih folder di direktori beranda atau izinkan Flatpak mengakses folder host sebenarnya sebelum menghubungkan klien.",
+  "Flatpak.Updates": "Diperbarui melalui Flathub",
+  "Flatpak.CopyCommand": "Jalankan perintah ini di terminal Anda sendiri.",
+  "Flatpak.ConnectionUnverified": "Koneksi tidak dapat diperiksa dari sandbox.",
+  "Flatpak.PathUnavailable": "Folder mungkin tidak ada atau tidak dapat diakses dari sandbox Flatpak. Untuk memberikan akses, jalankan: {0}",
+  "Flatpak.Environment": "Flatpak · akses: folder beranda · git bawaan: {0} · data: {1} · hubungkan klien dengan: {2}",
+  "Flatpak.PrivateClone": "Autentikasi repositori privat mungkin tidak tersedia di sandbox. Buka folder yang sudah diklon di komputer Anda.",
+  "Flatpak.CopyClientCommand": "Salin perintah {0}",
+  "Flatpak.CopyOverrideCommand": "Salin perintah",
   "Mcp.Connect.ProjectEntryReplaceTitle": "Ganti pengaturan klien DevProjex",
   "Mcp.Connect.ProjectEntryReplacePrompt": "Entri devprojex yang ada untuk {0} memiliki kolom yang akan dihapus atau ditimpa:\n{1}\n\nGanti entri ini?",
   "Mcp.Connect.ProjectEntryReplaceConfirm": "Ganti",

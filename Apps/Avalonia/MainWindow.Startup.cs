@@ -554,6 +554,7 @@ public partial class MainWindow
             }
 
             _repoCacheService.RequestStaleCacheCleanupOnStartup();
+            ObserveDetachedTask(InitializeFlatpakDiagnosticsAsync(cancellationToken), "FlatpakDiagnostics");
             ObserveDetachedTask(
                 _applicationUpdates.RunAutomaticCheckIfDueAsync(cancellationToken),
                 "AutomaticUpdateCheck");

@@ -284,6 +284,21 @@ public partial class MainWindow : Window
             _localization["Dialog.OK"]);
     }
 
+    private async Task ShowFlatpakUnavailablePathAsync(string path)
+    {
+        var notice = FlatpakPresentation.UnavailablePathNotice(_localization, path);
+        var owner = _gitCloneWindow ?? (Window)this;
+        await MessageDialog.ShowAsync(
+            owner,
+            _localization["Msg.ErrorTitle"],
+            notice.Message,
+            _localization["Dialog.OK"],
+            CreateFlatpakOverrideCommand(notice));
+    }
+
+    private MessageDialogCommand? CreateFlatpakOverrideCommand(FlatpakUnavailablePathNotice notice) =>
+        notice.Command is null ? null : new(notice.Command, _localization["Flatpak.CopyOverrideCommand"]);
+
     private async Task ShowInfoAsync(string message) =>
         await MessageDialog.ShowAsync(
             this,
@@ -1068,6 +1083,13 @@ public partial class MainWindow : Window
         {
             normalizedPath = PathUtility.Normalize(path);
 
+            if (FlatpakEnvironment.Current.IsActive)
+            {
+                var hostPath = await _flatpakHostPaths.ResolveAsync(normalizedPath, _windowLifetimeCts?.Token ?? CancellationToken.None);
+                if (hostPath != normalizedPath && await Task.Run(() => Directory.Exists(hostPath)))
+                    normalizedPath = hostPath;
+            }
+
             if (candidateSession is null && _repoCacheService.IsInCache(normalizedPath))
             {
                 if (_currentRepositorySession is not null &&
@@ -1147,7 +1169,10 @@ public partial class MainWindow : Window
             if (ownsCandidateSession)
                 candidateSession?.Dispose();
             _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "folder-not-found");
-            await ShowErrorAsync(_localization.Format("Msg.PathNotFound", path));
+            if (FlatpakEnvironment.Current.IsActive)
+                await ShowFlatpakUnavailablePathAsync(normalizedPath);
+            else
+                await ShowErrorAsync(_localization.Format("Msg.PathNotFound", path));
             return false;
         }
 
@@ -1163,6 +1188,12 @@ public partial class MainWindow : Window
             }
 
             _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "access-denied");
+            if (FlatpakEnvironment.Current.IsActive)
+            {
+                // A sandboxed process cannot elevate; the missing permission is a Flatpak override.
+                await ShowFlatpakUnavailablePathAsync(normalizedPath);
+                return false;
+            }
             if (_elevation.IsAdministrator)
             {
                 await ShowErrorAsync(_localization["Desktop.Error.AccessDenied"]);
@@ -2136,7 +2167,7 @@ public partial class MainWindow : Window
             ? _localization.Format("LiveContext.Title.Sessions", _liveSessions.Count)
             : null;
         _viewModel.Title = ApplyStoreCaptureTitlePolicy(BuildWindowTitle(
-            _currentPath,
+            GetFlatpakDisplayPath(_currentPath),
             _viewModel.IsGitMode,
             _currentRepositoryUrl,
             _viewModel.CurrentBranch,

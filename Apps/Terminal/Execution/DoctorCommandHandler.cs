@@ -116,7 +116,7 @@ public sealed class DoctorCommandHandler(
 			currentDirectory,
 			cancellationToken);
 		var desktopIpc = await ProbeDesktopIpcAsync(cancellationToken).ConfigureAwait(false);
-		return
+		List<DoctorCheck> checks =
 		[
 			new DoctorCheck(
 				"terminal-launcher",
@@ -243,6 +243,10 @@ public sealed class DoctorCommandHandler(
 				$"CI={IsVariableSet("CI").ToString().ToLowerInvariant()}",
 				environment.IsTermDumb ? L("Terminal.Doctor.Hint.DumbTerminal") : null)
 		];
+		if (FlatpakEnvironment.Current.IsActive)
+			checks.Add(new DoctorCheck("environment", DoctorCheckStatus.Pass,
+				FlatpakPresentation.EnvironmentLine(services.Localization, gitAvailable.Version, storageRoots.Data), null));
+		return checks;
 	}
 
 	private DoctorCheck BuildWritableCheck(
@@ -590,6 +594,7 @@ public sealed class DoctorCommandHandler(
 		"unknown";
 
 	private string ResolvePackageType() =>
+		FlatpakEnvironment.Current.IsActive ? "flatpak" :
 		services.TerminalCommandSetupService.Probe().State == TerminalCommandSetupState.ManagedByOperatingSystem
 			? "store"
 			: "portable";

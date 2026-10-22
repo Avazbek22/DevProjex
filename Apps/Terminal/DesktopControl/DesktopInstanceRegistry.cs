@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using System.Net.Sockets;
 using DevProjex.Kernel.IO;
 
 namespace DevProjex.Terminal.DesktopControl;
@@ -99,7 +100,10 @@ public sealed class DesktopInstanceRegistry
 				staleEntryCount++;
 				continue;
 			}
-			if (!IsLiveProcess(registration))
+			var isLive = FlatpakEnvironment.Current.IsActive
+				? await IsLiveFlatpakEndpointAsync(registration, cancellationToken).ConfigureAwait(false)
+				: IsLiveProcess(registration);
+			if (!isLive)
 			{
 				if (removeStale)
 				{
@@ -147,6 +151,8 @@ public sealed class DesktopInstanceRegistry
 	{
 		try
 		{
+			if (FlatpakEnvironment.Current.IsActive && File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint))
+				return null;
 			await using var source = new FileStream(
 				path,
 				FileMode.Open,
@@ -281,6 +287,31 @@ public sealed class DesktopInstanceRegistry
 		catch (NotSupportedException)
 		{
 			File.Move(temporaryPath, targetPath, overwrite: true);
+		}
+	}
+
+	private async Task<bool> IsLiveFlatpakEndpointAsync(
+		DesktopInstanceRegistration registration,
+		CancellationToken cancellationToken)
+	{
+		if (!IsOwnedUnixEndpoint(registration))
+			return false;
+		using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+		timeout.CancelAfter(TimeSpan.FromMilliseconds(300));
+		try
+		{
+			using var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+			await socket.ConnectAsync(new UnixDomainSocketEndPoint(registration.Endpoint), timeout.Token).ConfigureAwait(false);
+			return true;
+		}
+		catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+		{
+			// A full accept backlog is not proof of death; never unlink a possibly live endpoint.
+			return true;
+		}
+		catch (Exception exception) when (exception is SocketException or IOException or ArgumentException)
+		{
+			return false;
 		}
 	}
 

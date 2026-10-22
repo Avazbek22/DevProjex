@@ -43,7 +43,9 @@ public static class McpConnectionProjectRoot
 		ArgumentNullException.ThrowIfNull(localization);
 		return Inspect(projectRoot) switch
 		{
-			McpConnectionProjectRootState.Missing => localization["Mcp.Connect.ProjectMissing"],
+			McpConnectionProjectRootState.Missing => FlatpakEnvironment.Current.IsActive
+				? FlatpakPresentation.UnavailablePath(localization, projectRoot)
+				: localization["Mcp.Connect.ProjectMissing"],
 			McpConnectionProjectRootState.NotDirectory => localization["Mcp.Connect.ProjectNotDirectory"],
 			_ => null
 		};

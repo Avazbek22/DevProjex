@@ -59,7 +59,11 @@ public sealed record AgentJournalSession(
 	string ServerVersion,
 	bool HidePrivateData,
 	AgentJournalTotals Totals,
-	bool IsLive);
+	bool IsLive)
+{
+	[System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+	public string? SandboxSessionId { get; init; }
+}
 
 public sealed record AgentJournalCall(
 	long Sequence,
