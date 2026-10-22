@@ -9,6 +9,7 @@ public sealed record FlatpakEnvironmentSnapshot(bool IsActive, string? AppId)
 
 public static class FlatpakEnvironment
 {
+	public const string DevProjexAppId = "io.github.Avazbek22.DevProjex";
 	private const string ApplicationPrefix = "/app/";
 	private static readonly AsyncLocal<FlatpakEnvironmentSnapshot?> Override = new();
 	// The markers and the executable location cannot change during a process lifetime.

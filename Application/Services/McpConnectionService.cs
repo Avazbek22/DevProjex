@@ -69,6 +69,16 @@ public sealed record McpConnectionRequest(
 	bool ReplaceExistingFields = false,
 	string? ExpectedExistingEntryFingerprint = null);
 
+/// <summary>
+/// A client entry named devprojex that DevProjex will not replace without an explicit choice. Commands are
+/// display text taken from the client configuration; surfaces escape them before showing them.
+/// </summary>
+public sealed record McpExistingEntryConflict(
+	string ExistingCommand,
+	string ProposedCommand,
+	IReadOnlyList<string> UnkeptArguments,
+	bool IsDevProjexLauncher);
+
 // NextCommand names a client command to run in the project folder; NextStep is a complete
 // localized instruction that is shown as is.
 public sealed record McpConnectionResult(
@@ -82,7 +92,9 @@ public sealed record McpConnectionResult(
 	bool Replaced = false,
 	IReadOnlyList<string>? FieldsToReplace = null,
 	string? ExistingEntryFingerprint = null,
-	string? NextStep = null)
+	string? NextStep = null,
+	McpExistingEntryConflict? ExistingEntryConflict = null,
+	bool KeptExistingEntry = false)
 {
 	public bool Succeeded => Status is McpConnectionStatus.Connected or McpConnectionStatus.Updated;
 
