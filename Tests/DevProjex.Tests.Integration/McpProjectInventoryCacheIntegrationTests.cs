@@ -203,20 +203,19 @@ public sealed class McpProjectInventoryCacheIntegrationTests
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
-		workspace.CreateFile("project/src/Original.cs", "original\n");
 		var buildCount = 0;
-		McpProjectService? service = null;
 		await using var harness = CreateHarness(
 			project,
 			(_, _) =>
 			{
 				Interlocked.Increment(ref buildCount);
-				DisableWatcher(service!);
 				return ValueTask.CompletedTask;
 			});
-		service = harness.Service;
+		var monitor = SilenceRootMonitor(harness.Service, project);
+		workspace.CreateFile("project/src/Original.cs", "original\n");
 
 		var initial = await BuildAsync(harness.Service);
+		Assert.Same(monitor, GetMonitor(harness.Service));
 		var buildsAfterInitial = buildCount;
 		var narrow = await BuildAsync(harness.Service, includePatterns: ["src/**"]);
 
@@ -237,24 +236,23 @@ public sealed class McpProjectInventoryCacheIntegrationTests
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
-		workspace.CreateFile("project/src/Inside.cs", "inside\n");
-		workspace.CreateFile("project/tests/Outside.cs", "outside\n");
 		var profileStore = new ProjectProfileStore(() => Path.Combine(workspace.Path, "app-data"));
 		profileStore.SaveProfile(project, new ProjectSelectionProfile([], [], [], SelectedPaths: ["src"]));
 		var buildCount = 0;
-		McpProjectService? service = null;
 		await using var harness = CreateHarness(
 			project,
 			(_, _) =>
 			{
 				Interlocked.Increment(ref buildCount);
-				DisableWatcher(service!);
 				return ValueTask.CompletedTask;
 			},
 			live: true);
-		service = harness.Service;
+		var monitor = SilenceRootMonitor(harness.Service, project);
+		workspace.CreateFile("project/src/Inside.cs", "inside\n");
+		workspace.CreateFile("project/tests/Outside.cs", "outside\n");
 
 		var initial = await BuildAsync(harness.Service);
+		Assert.Same(monitor, GetMonitor(harness.Service));
 		var buildsAfterInitial = buildCount;
 		var unchanged = await BuildAsync(harness.Service);
 
@@ -376,12 +374,13 @@ public sealed class McpProjectInventoryCacheIntegrationTests
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
-		var path = workspace.CreateFile("project/Payload.txt", "small\n");
 		await using var harness = CreateHarness(project);
+		var monitor = SilenceRootMonitor(harness.Service, project);
+		var path = workspace.CreateFile("project/Payload.txt", "small\n");
 
 		var initial = await BuildAsync(harness.Service, maximumFileBytes: 64);
+		Assert.Same(monitor, GetMonitor(harness.Service));
 		Assert.Equal(6, initial.IncludedBytes);
-		DisableWatcher(harness.Service);
 		File.WriteAllText(path, new string('x', 32));
 
 		var changed = await BuildAsync(harness.Service, maximumFileBytes: 64);
@@ -515,7 +514,6 @@ public sealed class McpProjectInventoryCacheIntegrationTests
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("root-09");
-		workspace.CreateFile("root-09/Anchor.cs", "anchor\n");
 		var buildCount = 0;
 		await using var harness = CreateHarness(
 			project,
@@ -526,6 +524,8 @@ public sealed class McpProjectInventoryCacheIntegrationTests
 			});
 		for (var index = 1; index <= 8; index++)
 			GetOrCreateMonitor(harness.Service, workspace.CreateDirectory($"root-{index:D2}"));
+		SilenceRootMonitor(harness.Service, project);
+		workspace.CreateFile("root-09/Anchor.cs", "anchor\n");
 
 		var initial = await BuildAsync(harness.Service);
 		for (var iteration = 0; iteration < 100; iteration++)
@@ -780,9 +780,24 @@ public sealed class McpProjectInventoryCacheIntegrationTests
 			.GetMethod("GetOrCreateRootMonitor", BindingFlags.Instance | BindingFlags.NonPublic)!
 			.Invoke(service, [root])!;
 
-	private static void DisableWatcher(McpProjectService service)
+	/// <summary>
+	/// Creates the monitor of an empty project root and stops its operating-system events before the
+	/// fixture files exist. A notification for those files can otherwise arrive after a build, even
+	/// after the watcher was disabled, and a test that asserts exact reuse would then see a rebuild it
+	/// did not cause. Only the changes a test raises itself move the revision afterwards.
+	/// </summary>
+	private static object SilenceRootMonitor(McpProjectService service, string root)
 	{
-		var monitor = GetMonitor(service);
+		Assert.Empty(Directory.EnumerateFileSystemEntries(root));
+		var monitor = GetOrCreateMonitor(service, McpRootRegistry.ResolvePhysicalExistingPath(root, requireDirectory: true));
+		DisableWatcher(monitor);
+		return monitor;
+	}
+
+	private static void DisableWatcher(McpProjectService service) => DisableWatcher(GetMonitor(service));
+
+	private static void DisableWatcher(object monitor)
+	{
 		var watcher = (FileSystemWatcher)monitor.GetType()
 			.GetField("watcher", BindingFlags.Instance | BindingFlags.NonPublic)!
 			.GetValue(monitor)!;
