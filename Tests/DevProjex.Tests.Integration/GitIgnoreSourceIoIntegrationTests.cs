@@ -657,11 +657,11 @@ public sealed class GitIgnoreSourceIoIntegrationTests
 		try
 		{
 			if (RunGit(workingDirectory, "--version") != 0)
-				Assert.Skip("Git is not available in this test environment.");
+				GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 		}
 		catch (System.ComponentModel.Win32Exception)
 		{
-			Assert.Skip("Git is not available in this test environment.");
+			GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 		}
 	}
 
@@ -672,6 +672,7 @@ public sealed class GitIgnoreSourceIoIntegrationTests
 			WorkingDirectory = workingDirectory,
 			UseShellExecute = false,
 			CreateNoWindow = true,
+			RedirectStandardInput = true,
 			RedirectStandardOutput = true,
 			RedirectStandardError = true
 		};
@@ -684,7 +685,7 @@ public sealed class GitIgnoreSourceIoIntegrationTests
 		if (!process.WaitForExit(10_000))
 		{
 			process.Kill(entireProcessTree: true);
-			throw new TimeoutException("Git command did not complete within 10 seconds.");
+			throw GitTestRequirement.Timeout("Git command did not complete within 10 seconds.");
 		}
 
 		return process.ExitCode;

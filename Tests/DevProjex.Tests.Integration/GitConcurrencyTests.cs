@@ -40,7 +40,7 @@ public class GitConcurrencyTests : IAsyncLifetime
     public async Task ParallelClones_ToDifferentDirectories_AllSucceed()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var dir1 = _tempDir.CreateDirectory("parallel-clone-1");
         var dir2 = _tempDir.CreateDirectory("parallel-clone-2");
@@ -59,7 +59,7 @@ public class GitConcurrencyTests : IAsyncLifetime
     public async Task ParallelGetBranches_SameRepository_AllSucceed()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var repoPath = _tempDir.CreateDirectory("parallel-branches");
         var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
@@ -82,7 +82,7 @@ public class GitConcurrencyTests : IAsyncLifetime
     public async Task ParallelPull_SameRepository_DoesNotCorruptState()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var repoPath = _tempDir.CreateDirectory("parallel-pull");
         var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
@@ -107,7 +107,7 @@ public class GitConcurrencyTests : IAsyncLifetime
     public async Task ConcurrentBranchSwitch_SameRepository_EventuallySucceeds()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var repoPath = _tempDir.CreateDirectory("concurrent-switch");
         var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
@@ -153,7 +153,7 @@ public class GitConcurrencyTests : IAsyncLifetime
     public async Task MixedOperations_SameRepository_MaintainConsistency()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var repoPath = _tempDir.CreateDirectory("mixed-ops");
         var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
@@ -205,7 +205,7 @@ public class GitConcurrencyTests : IAsyncLifetime
     public async Task RapidSequentialBranchSwitches_DoesNotCauseErrors()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var repoPath = _tempDir.CreateDirectory("rapid-switch");
         var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
@@ -253,7 +253,7 @@ public class GitConcurrencyTests : IAsyncLifetime
     public async Task ParallelGetCurrentBranch_ReturnsConsistentResults()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var repoPath = _tempDir.CreateDirectory("parallel-current");
         var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
@@ -274,7 +274,7 @@ public class GitConcurrencyTests : IAsyncLifetime
     public async Task StressTest_ManyOperations_MaintainsStability()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var repoPath = _tempDir.CreateDirectory("stress-test");
         var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);

@@ -48,7 +48,7 @@ public class GitAdvancedScenariosTests : IAsyncLifetime
     public async Task CloneRepository_ValidatesCurrentBranchAfterClone()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         // Arrange
         var cacheDir = _cacheService.CreateRepositoryDirectory(TestRepoUrl);
@@ -75,7 +75,7 @@ public class GitAdvancedScenariosTests : IAsyncLifetime
     public async Task GetBranches_AfterClone_ContainsDefaultBranch()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         // Arrange
         var cacheDir = _cacheService.CreateRepositoryDirectory(TestRepoUrl);
@@ -105,7 +105,7 @@ public class GitAdvancedScenariosTests : IAsyncLifetime
     public async Task SwitchBranch_UpdatesCurrentBranch()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         // Arrange
         var cacheDir = _cacheService.CreateRepositoryDirectory(TestRepoUrl);
@@ -138,7 +138,7 @@ public class GitAdvancedScenariosTests : IAsyncLifetime
     public async Task GetBranches_AfterBranchSwitch_ReflectsNewActiveBranch()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         // Arrange
         var cacheDir = _cacheService.CreateRepositoryDirectory(TestRepoUrl);
@@ -172,7 +172,7 @@ public class GitAdvancedScenariosTests : IAsyncLifetime
     public async Task CloneRepository_CreatesGitDirectory()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         // Arrange
         var cacheDir = _cacheService.CreateRepositoryDirectory(TestRepoUrl);
@@ -302,7 +302,7 @@ public class GitAdvancedScenariosTests : IAsyncLifetime
     public async Task Clone_WithInvalidPath_ReturnsFailure()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         // Use a destination that already exists as a file so clone must fail on every OS.
         var invalidPath = _tempDir.CreateFile("existing-target.txt", "occupied");

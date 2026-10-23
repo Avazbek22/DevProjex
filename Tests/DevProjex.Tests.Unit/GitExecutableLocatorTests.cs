@@ -133,7 +133,7 @@ public sealed class GitExecutableLocatorTests(ITestOutputHelper output)
 			allocatedBytes[index] = GC.GetAllocatedBytesForCurrentThread() - beforeAllocation;
 		}
 		if (resolved is null)
-			Assert.Skip("A trusted Git executable is unavailable on PATH.");
+			GitTestRequirement.ReportUnavailable("A trusted Git executable is unavailable on PATH.");
 		Assert.True(Path.IsPathFullyQualified(resolved));
 		output.WriteLine($"git_locator_first_ms={elapsedMilliseconds[0].ToString("F3", CultureInfo.InvariantCulture)}; warm_ms={string.Join(',', elapsedMilliseconds[1..].Select(static value => value.ToString("F3", CultureInfo.InvariantCulture)))}; first_alloc_bytes={allocatedBytes[0]}; warm_alloc_bytes={string.Join(',', allocatedBytes[1..])}");
 	}

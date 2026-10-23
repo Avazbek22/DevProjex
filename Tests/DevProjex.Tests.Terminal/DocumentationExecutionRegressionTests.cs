@@ -366,6 +366,7 @@ public sealed class DocumentationExecutionRegressionTests
 		{
 			WorkingDirectory = workingDirectory,
 			UseShellExecute = false,
+			RedirectStandardInput = true,
 			RedirectStandardOutput = true,
 			RedirectStandardError = true,
 			CreateNoWindow = true

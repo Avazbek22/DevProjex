@@ -796,17 +796,17 @@ public sealed partial class DeepGitWorkspaceEvidenceIntegrationTests
 		}
 		catch (System.ComponentModel.Win32Exception)
 		{
-			Assert.Skip("Git is not available in this test environment.");
+			GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 			return;
 		}
 
 		using var process = startedProcess;
 		if (process is null)
-			Assert.Skip("Git is not available in this test environment.");
+			GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 		process.StandardOutput.ReadToEnd();
 		process.StandardError.ReadToEnd();
 		if (!process.WaitForExit(10_000) || process.ExitCode != 0)
-			Assert.Skip("Git is not available in this test environment.");
+			GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 	}
 
 	private static void RunGit(string workingDirectory, params string[] arguments)
@@ -822,7 +822,7 @@ public sealed partial class DeepGitWorkspaceEvidenceIntegrationTests
 		if (!process.WaitForExit(20_000))
 		{
 			process.Kill(entireProcessTree: true);
-			throw new TimeoutException("Git command did not complete within 20 seconds.");
+			throw GitTestRequirement.Timeout("Git command did not complete within 20 seconds.");
 		}
 
 		Assert.True(process.ExitCode == 0, $"git failed ({process.ExitCode}): {error}{output}");

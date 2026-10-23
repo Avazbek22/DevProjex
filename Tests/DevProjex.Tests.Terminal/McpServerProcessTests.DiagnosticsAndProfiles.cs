@@ -165,7 +165,7 @@ public sealed partial class McpServerProcessTests
 	public async Task RealProcessRemoteCheckoutUsesStartupAndDelegatedExclusionsWithHonestEcho()
 	{
 		if (!await IsGitAvailableAsync())
-			Assert.Skip("Git is not available in this test environment.");
+			GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
 		using var workspace = new TemporaryDirectory();
 		var root = workspace.CreateDirectory("configured-root");

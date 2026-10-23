@@ -41,7 +41,7 @@ public class GitErrorRecoveryTests : IAsyncLifetime
     public async Task CloneAsync_InvalidRepository_ReturnsFailureResult()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var targetDir = _tempDir.CreateDirectory("invalid-clone");
 
@@ -56,7 +56,7 @@ public class GitErrorRecoveryTests : IAsyncLifetime
     public async Task CloneAsync_Cancelled_CleansUpPartialClone()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var targetDir = _tempDir.CreateDirectory("cancelled-clone");
         using var cts = new CancellationTokenSource();
@@ -73,7 +73,7 @@ public class GitErrorRecoveryTests : IAsyncLifetime
     public async Task GetBranchesAsync_NonGitDirectory_ReturnsEmptyList()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var nonGitDir = _tempDir.CreateDirectory("not-git");
         File.WriteAllText(Path.Combine(nonGitDir, "test.txt"), "test");
@@ -87,7 +87,7 @@ public class GitErrorRecoveryTests : IAsyncLifetime
     public async Task GetBranchesAsync_MissingGitDirectory_ReturnsEmptyList()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var missingDir = Path.Combine(_tempDir.Path, "nonexistent");
 
@@ -100,7 +100,7 @@ public class GitErrorRecoveryTests : IAsyncLifetime
     public async Task SwitchBranchAsync_NonGitDirectory_ReturnsFalse()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var nonGitDir = _tempDir.CreateDirectory("not-git-switch");
 
@@ -113,7 +113,7 @@ public class GitErrorRecoveryTests : IAsyncLifetime
     public async Task PullUpdatesAsync_NonGitDirectory_ReturnsFalse()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var nonGitDir = _tempDir.CreateDirectory("not-git-pull");
 
@@ -126,7 +126,7 @@ public class GitErrorRecoveryTests : IAsyncLifetime
     public async Task GetCurrentBranchAsync_NonGitDirectory_ReturnsNull()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var nonGitDir = _tempDir.CreateDirectory("not-git-current");
 
@@ -139,7 +139,7 @@ public class GitErrorRecoveryTests : IAsyncLifetime
     public async Task CloneAsync_ToExistingDirectory_HandlesGracefully()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var targetDir = _tempDir.CreateDirectory("existing-dir");
         File.WriteAllText(Path.Combine(targetDir, "existing.txt"), "data");
@@ -157,7 +157,7 @@ public class GitErrorRecoveryTests : IAsyncLifetime
     public async Task SwitchBranchAsync_WithCancellation_StopsGracefully()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var repoPath = _tempDir.CreateDirectory("cancel-switch");
         var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
@@ -193,7 +193,7 @@ public class GitErrorRecoveryTests : IAsyncLifetime
     public async Task PullUpdatesAsync_WithPreCancelledToken_DoesNotCorruptRepo()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var repoPath = _tempDir.CreateDirectory("cancel-pull");
         var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
@@ -220,7 +220,7 @@ public class GitErrorRecoveryTests : IAsyncLifetime
     public async Task CloneAsync_AfterFailedClone_CanRetry()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var targetDir = _tempDir.CreateDirectory("retry-clone");
 
@@ -248,7 +248,7 @@ public class GitErrorRecoveryTests : IAsyncLifetime
     public async Task GetBranchesAsync_AfterFailedOperation_StillWorks()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var repoPath = _tempDir.CreateDirectory("after-fail");
         var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
@@ -266,7 +266,7 @@ public class GitErrorRecoveryTests : IAsyncLifetime
     public async Task SwitchBranchAsync_AfterNetworkError_Recovers()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var repoPath = _tempDir.CreateDirectory("network-recovery");
         var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
@@ -290,7 +290,7 @@ public class GitErrorRecoveryTests : IAsyncLifetime
     public async Task CloneAsync_WithInvalidPath_HandlesGracefully()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         // Try to clone to path with special characters
         var specialPath = Path.Combine(_tempDir.Path, "repo:invalid");
@@ -328,7 +328,7 @@ public class GitErrorRecoveryTests : IAsyncLifetime
     public async Task GetCurrentBranchAsync_EmptyRepository_ReturnsNull()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var repoPath = _tempDir.CreateDirectory("empty-current");
 
@@ -339,6 +339,7 @@ public class GitErrorRecoveryTests : IAsyncLifetime
             Arguments = $"init \"{repoPath}\"",
             UseShellExecute = false,
             CreateNoWindow = true,
+            RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true
         };
@@ -356,7 +357,7 @@ public class GitErrorRecoveryTests : IAsyncLifetime
     public async Task SwitchBranchAsync_MultipleFailures_DoesNotCorruptState()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var repoPath = _tempDir.CreateDirectory("multi-fail");
         var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
@@ -378,7 +379,7 @@ public class GitErrorRecoveryTests : IAsyncLifetime
     public async Task CloneAsync_WithProgressCallback_ReportsProgress()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var targetDir = _tempDir.CreateDirectory("progress-test");
         var progress = new ProgressRecorder();

@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Xml.Linq;
 using DevProjex.Application.Preview;
 using DevProjex.Infrastructure.Git;
-using DevProjex.Infrastructure.Processes;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -1522,7 +1521,7 @@ public sealed class TerminalWorkspaceContractTests
 	public async Task EmptyMomentaryGitScopeRetainsBroadSelectionAcrossRefresh()
 	{
 		if (!TryRunGit(Directory.GetCurrentDirectory(), "--version"))
-			Assert.Skip("Git is required for this regression test.");
+			GitTestRequirement.ReportUnavailable("Git is required for this regression test.");
 		using var workspace = new TemporaryDirectory();
 		using var appData = new TemporaryDirectory();
 		workspace.WriteFile("Baseline.cs", "class Baseline {}\n");
@@ -1566,7 +1565,7 @@ public sealed class TerminalWorkspaceContractTests
 	public async Task ExplicitEmptySelectionRemainsEmptyWhenMomentaryGitScopeChanges()
 	{
 		if (!TryRunGit(Directory.GetCurrentDirectory(), "--version"))
-			Assert.Skip("Git is required for this regression test.");
+			GitTestRequirement.ReportUnavailable("Git is required for this regression test.");
 		using var workspace = new TemporaryDirectory();
 		using var appData = new TemporaryDirectory();
 		workspace.WriteFile("First.cs", "class First {}\n");
@@ -1696,7 +1695,7 @@ public sealed class TerminalWorkspaceContractTests
 	public async Task StructuralRefreshFallsBackWhenTheActiveRepositoryBoundaryDisappears()
 	{
 		if (!TryRunGit(Directory.GetCurrentDirectory(), "--version"))
-			Assert.Skip("Git is required for this regression test.");
+			GitTestRequirement.ReportUnavailable("Git is required for this regression test.");
 		using var workspace = new TemporaryDirectory();
 		using var appData = new TemporaryDirectory();
 		workspace.WriteFile("App.cs", "class App {}\n");
@@ -1751,7 +1750,7 @@ public sealed class TerminalWorkspaceContractTests
 		GitFilteringMode expectedMode)
 	{
 		if (!TryRunGit(Directory.GetCurrentDirectory(), "--version"))
-			Assert.Skip("Git is required for this regression test.");
+			GitTestRequirement.ReportUnavailable("Git is required for this regression test.");
 		using var workspace = new TemporaryDirectory();
 		using var appData = new TemporaryDirectory();
 		workspace.WriteFile("App.cs", "class App {}\n");
@@ -1895,7 +1894,7 @@ public sealed class TerminalWorkspaceContractTests
 	public async Task StructuralGitRefreshQueriesOnlyTheRepositoryOwningTheManualSelection()
 	{
 		if (!TryRunGit(Directory.GetCurrentDirectory(), "--version"))
-			Assert.Skip("Git is required for this regression test.");
+			GitTestRequirement.ReportUnavailable("Git is required for this regression test.");
 		using var workspace = new TemporaryDirectory();
 		using var appData = new TemporaryDirectory();
 		workspace.WriteFile("Outer.txt", "outer\n");
@@ -1989,7 +1988,7 @@ public sealed class TerminalWorkspaceContractTests
 	public async Task CachedRemoteWorkspaceHydratesShallowDiffWithoutChangingItsCheckout()
 	{
 		if (!TryRunGit(Directory.GetCurrentDirectory(), "--version"))
-			Assert.Skip("Git is required for this regression test.");
+			GitTestRequirement.ReportUnavailable("Git is required for this regression test.");
 		using var workspace = new TemporaryDirectory();
 		using var appData = new TemporaryDirectory();
 		var source = workspace.CreateDirectory("source");
@@ -2449,19 +2448,10 @@ public sealed class TerminalWorkspaceContractTests
 	private static async Task<bool> TryRunGitAsync(string workingDirectory, string[] arguments)
 	{
 		var command = $"git {string.Join(" ", arguments)}";
+		var trace = GitTestRequirement.CreateTraceFile();
 		try
 		{
-			var startInfo = new ProcessStartInfo("git")
-			{
-				WorkingDirectory = workingDirectory,
-				UseShellExecute = false,
-				CreateNoWindow = true,
-				RedirectStandardOutput = true,
-				RedirectStandardError = true
-			};
-			foreach (var argument in arguments)
-				startInfo.ArgumentList.Add(argument);
-			using var process = Process.Start(startInfo);
+			using var process = Process.Start(CreateGitStartInfo(workingDirectory, arguments, trace));
 			if (process is null)
 			{
 				TestContext.Current.TestOutputHelper?.WriteLine($"{command} did not start.");
@@ -2471,7 +2461,13 @@ public sealed class TerminalWorkspaceContractTests
 			timeout.CancelAfter(ProcessSafetyTimeout);
 			var outputTask = process.StandardOutput.ReadToEndAsync(timeout.Token);
 			var errorTask = process.StandardError.ReadToEndAsync(timeout.Token);
-			await ExternalProcessLifetime.WaitForExitOrTerminateAsync(process, timeout.Token).ConfigureAwait(false);
+			await GitTestRequirement.WaitForExitAsync(
+					process,
+					command,
+					trace,
+					ProcessSafetyTimeout,
+					TestContext.Current.CancellationToken)
+				.ConfigureAwait(false);
 			var output = await outputTask.WaitAsync(timeout.Token).ConfigureAwait(false);
 			var error = await errorTask.WaitAsync(timeout.Token).ConfigureAwait(false);
 			if (process.ExitCode != 0)
@@ -2481,6 +2477,11 @@ public sealed class TerminalWorkspaceContractTests
 				return false;
 			}
 			return true;
+		}
+		catch (TimeoutException exception)
+		{
+			TestContext.Current.TestOutputHelper?.WriteLine(exception.Message);
+			return false;
 		}
 		catch (Exception exception) when (
 			exception is System.ComponentModel.Win32Exception or
@@ -2493,31 +2494,57 @@ public sealed class TerminalWorkspaceContractTests
 				$"{command} failed or timed out after {ProcessSafetyTimeout}: {exception.Message}");
 			return false;
 		}
+		finally
+		{
+			GitTestRequirement.DeleteTraceFile(trace);
+		}
 	}
 
 	private static async Task<string> ReadGit(string workingDirectory, params string[] arguments)
+	{
+		var trace = GitTestRequirement.CreateTraceFile();
+		try
+		{
+			using var process = Process.Start(CreateGitStartInfo(workingDirectory, arguments, trace)) ??
+								throw new InvalidOperationException("Could not start git.");
+			using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+			timeout.CancelAfter(ProcessSafetyTimeout);
+			// Drain both pipes without blocking the process-exit continuation that invoked the test.
+			var outputTask = process.StandardOutput.ReadToEndAsync(timeout.Token);
+			var errorTask = process.StandardError.ReadToEndAsync(timeout.Token);
+			await GitTestRequirement.WaitForExitAsync(
+				process,
+				$"git {string.Join(' ', arguments)}",
+				trace,
+				ProcessSafetyTimeout,
+				TestContext.Current.CancellationToken);
+			var output = await outputTask.WaitAsync(timeout.Token);
+			var error = await errorTask.WaitAsync(timeout.Token);
+			Assert.True(process.ExitCode == 0, error);
+			return output.Trim();
+		}
+		finally
+		{
+			GitTestRequirement.DeleteTraceFile(trace);
+		}
+	}
+
+	private static ProcessStartInfo CreateGitStartInfo(string workingDirectory, string[] arguments, string traceFile)
 	{
 		var startInfo = new ProcessStartInfo("git")
 		{
 			WorkingDirectory = workingDirectory,
 			UseShellExecute = false,
 			CreateNoWindow = true,
+			RedirectStandardInput = true,
 			RedirectStandardOutput = true,
 			RedirectStandardError = true
 		};
 		foreach (var argument in arguments)
 			startInfo.ArgumentList.Add(argument);
-		using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Could not start git.");
-		using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
-		timeout.CancelAfter(ProcessSafetyTimeout);
-		// Drain both pipes without blocking the process-exit continuation that invoked the test.
-		var outputTask = process.StandardOutput.ReadToEndAsync(timeout.Token);
-		var errorTask = process.StandardError.ReadToEndAsync(timeout.Token);
-		await ExternalProcessLifetime.WaitForExitOrTerminateAsync(process, timeout.Token);
-		var output = await outputTask.WaitAsync(timeout.Token);
-		var error = await errorTask.WaitAsync(timeout.Token);
-		Assert.True(process.ExitCode == 0, error);
-		return output.Trim();
+		// Git records how far it got, so a Git that never exits shows where it stopped.
+		startInfo.Environment[GitTestRequirement.TraceVariable] = traceFile;
+		return startInfo;
 	}
 
 	private static TimeSpan ProcessSafetyTimeout =>

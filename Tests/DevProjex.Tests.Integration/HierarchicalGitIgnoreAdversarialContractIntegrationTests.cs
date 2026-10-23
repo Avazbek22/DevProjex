@@ -586,7 +586,7 @@ public sealed class HierarchicalGitIgnoreAdversarialContractIntegrationTests
 		if (!process.WaitForExit(10_000))
 		{
 			process.Kill(entireProcessTree: true);
-			throw new TimeoutException("git check-ignore did not complete within 10 seconds.");
+			throw GitTestRequirement.Timeout("git check-ignore did not complete within 10 seconds.");
 		}
 		Assert.True(process.ExitCode is 0 or 1, $"git check-ignore failed ({process.ExitCode}): {error}");
 		return output.Split('\0', StringSplitOptions.RemoveEmptyEntries)
@@ -605,7 +605,7 @@ public sealed class HierarchicalGitIgnoreAdversarialContractIntegrationTests
 		if (!process.WaitForExit(10_000))
 		{
 			process.Kill(entireProcessTree: true);
-			throw new TimeoutException("git did not complete within 10 seconds.");
+			throw GitTestRequirement.Timeout("git did not complete within 10 seconds.");
 		}
 		Assert.True(process.ExitCode == 0, $"git failed ({process.ExitCode}): {error}{output}");
 	}

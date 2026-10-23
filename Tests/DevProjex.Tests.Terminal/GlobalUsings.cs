@@ -11,3 +11,4 @@ global using DevProjex.Terminal.Tui;
 global using DevProjex.Tests.Terminal.Host;
 global using DevProjex.Tests.Terminal.Progress;
 global using Xunit;
+global using DevProjex.Tests.Shared.Git;

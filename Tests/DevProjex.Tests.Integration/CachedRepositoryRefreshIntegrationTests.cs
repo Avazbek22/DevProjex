@@ -27,7 +27,7 @@ public sealed class CachedRepositoryRefreshIntegrationTests : IDisposable
 	{
 		var git = new GitRepositoryService(allowFileTransportForTests: true);
 		if (!await git.IsGitAvailableAsync(TestContext.Current.CancellationToken))
-			return;
+			GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 		await using var remote = await GitTestRepository.CreateAsync(
 			"cached-refresh",
 			cancellationToken: TestContext.Current.CancellationToken);
@@ -90,7 +90,7 @@ public sealed class CachedRepositoryRefreshIntegrationTests : IDisposable
 	{
 		var git = new GitRepositoryService(allowFileTransportForTests: true);
 		if (!await git.IsGitAvailableAsync(TestContext.Current.CancellationToken))
-			return;
+			GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 		await using var remote = await GitTestRepository.CreateAsync(
 			"cached-offline",
 			cancellationToken: TestContext.Current.CancellationToken);
@@ -123,7 +123,7 @@ public sealed class CachedRepositoryRefreshIntegrationTests : IDisposable
 	{
 		var git = new GitRepositoryService(allowFileTransportForTests: true);
 		if (!await git.IsGitAvailableAsync(TestContext.Current.CancellationToken))
-			return;
+			GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 		await using var remote = await GitTestRepository.CreateAsync(
 			"local-cache-offline",
 			cancellationToken: TestContext.Current.CancellationToken);

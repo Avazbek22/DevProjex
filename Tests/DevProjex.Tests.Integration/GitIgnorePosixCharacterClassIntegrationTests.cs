@@ -190,7 +190,7 @@ public sealed class GitIgnorePosixCharacterClassIntegrationTests
 		if (!process.WaitForExit(10_000))
 		{
 			process.Kill(entireProcessTree: true);
-			throw new TimeoutException("git check-ignore did not complete within 10 seconds.");
+			throw GitTestRequirement.Timeout("git check-ignore did not complete within 10 seconds.");
 		}
 
 		Assert.True(process.ExitCode is 0 or 1, $"git check-ignore failed ({process.ExitCode}): {error}");
@@ -205,11 +205,11 @@ public sealed class GitIgnorePosixCharacterClassIntegrationTests
 		{
 			var result = RunGitCore(Environment.CurrentDirectory, ["--version"]);
 			if (result.ExitCode != 0)
-				Assert.Skip("Git is not available in this test environment.");
+				GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 		}
 		catch (System.ComponentModel.Win32Exception)
 		{
-			Assert.Skip("Git is not available in this test environment.");
+			GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 		}
 	}
 
@@ -236,7 +236,7 @@ public sealed class GitIgnorePosixCharacterClassIntegrationTests
 		if (!process.WaitForExit(10_000))
 		{
 			process.Kill(entireProcessTree: true);
-			throw new TimeoutException("git did not complete within 10 seconds.");
+			throw GitTestRequirement.Timeout("git did not complete within 10 seconds.");
 		}
 
 		return new GitProcessResult(process.ExitCode, output, error);

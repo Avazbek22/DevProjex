@@ -736,7 +736,7 @@ public sealed class GitModeCommandContractTests
 	{
 		using var workspace = new TemporaryDirectory();
 		if (!TryRunGit(workspace.Path, "init", "--quiet"))
-			Assert.Skip("Git is not available in this test environment.");
+			GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 		Assert.True(
 			TryRunGit(workspace.Path, "read-tree", "--empty"),
 			"Git initialized the repository but could not create a readable empty index.");
@@ -925,7 +925,7 @@ public sealed class GitModeCommandContractTests
 	private static void EnsureRepository(string path)
 	{
 		if (!TryRunGit(path, "init", "--quiet"))
-			Assert.Skip("Git is not available in this test environment.");
+			GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 		var hooksPath = Directory.CreateDirectory(Path.Combine(path, ".git", "devprojex-test-hooks")).FullName;
 		var excludesPath = Path.Combine(path, ".git", "devprojex-test-excludes");
 		File.WriteAllText(excludesPath, string.Empty);

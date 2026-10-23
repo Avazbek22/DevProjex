@@ -39,6 +39,7 @@
     <None Include="Snapshots\**\*" CopyToOutputDirectory="PreserveNewest" />
     <Compile Include="..\Shared\TerminalProgress\**\*.cs" LinkBase="TerminalProgress" />
     <Compile Include="..\Shared\TerminalHost\**\*.cs" LinkBase="TerminalHost" />
+    <Compile Include="..\Shared\Git\**\*.cs" LinkBase="Git" />
     <Compile Include="..\Shared\Mcp\**\*.cs" LinkBase="Mcp" />
   </ItemGroup>
 </Project>

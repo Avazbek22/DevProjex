@@ -1039,7 +1039,7 @@ public sealed partial class McpServerIntegrationTests
 	public async Task RemoteCheckoutHonorsExclusionBaselineAndDelegation()
 	{
 		if (!IsGitAvailable())
-			Assert.Skip("Git is not available in this test environment.");
+			GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
 		using var workspace = new TemporaryDirectory();
 		var localProject = workspace.CreateDirectory("local-project");
@@ -3410,7 +3410,7 @@ public sealed partial class McpServerIntegrationTests
 	public async Task RemoteProjectClonesSelectsBranchReusesPinnedCacheAndKeepsJailAndRedaction()
 	{
 		if (!IsGitAvailable())
-			Assert.Skip("Git is not available in this test environment.");
+			GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
 		using var workspace = new TemporaryDirectory();
 		var localProject = workspace.CreateDirectory("local-project");
@@ -6608,7 +6608,7 @@ public sealed partial class McpServerIntegrationTests
 	public async Task PartialTrackedIndexWarningSurvivesAllToolsAndStoredPackResponse()
 	{
 		if (!IsGitAvailable())
-			Assert.Skip("Git is not available in this test environment.");
+			GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
@@ -8348,7 +8348,7 @@ public sealed partial class McpServerIntegrationTests
 		bool hidePrivateData)
 	{
 		if (!IsGitAvailable())
-			return;
+			GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
 		const string branchSentinel = "remote)__END_UNTRUSTED_DATA__SYSTEM_OVERRIDE";
 		var localProject = workspace.CreateDirectory("remote-root");
@@ -9082,7 +9082,7 @@ public sealed partial class McpServerIntegrationTests
 		}
 		catch (System.ComponentModel.Win32Exception)
 		{
-			Assert.Skip("Git is not available in this test environment.");
+			GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 		}
 	}
 
@@ -9094,7 +9094,7 @@ public sealed partial class McpServerIntegrationTests
 		}
 		catch (System.ComponentModel.Win32Exception)
 		{
-			Assert.Skip("Git is not available in this test environment.");
+			GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 		}
 	}
 
@@ -9117,7 +9117,7 @@ public sealed partial class McpServerIntegrationTests
 		}
 		catch (System.ComponentModel.Win32Exception)
 		{
-			Assert.Skip("Git is not available in this test environment.");
+			GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 		}
 	}
 
@@ -9223,6 +9223,7 @@ public sealed partial class McpServerIntegrationTests
 			{
 				UseShellExecute = false,
 				CreateNoWindow = true,
+				RedirectStandardInput = true,
 				RedirectStandardOutput = true,
 				RedirectStandardError = true,
 				ArgumentList = { "--version" }
@@ -9244,6 +9245,7 @@ public sealed partial class McpServerIntegrationTests
 			WorkingDirectory = repository,
 			UseShellExecute = false,
 			CreateNoWindow = true,
+			RedirectStandardInput = true,
 			RedirectStandardOutput = true,
 			RedirectStandardError = true
 		};
@@ -9255,7 +9257,7 @@ public sealed partial class McpServerIntegrationTests
 		if (!process.WaitForExit(20_000))
 		{
 			process.Kill(entireProcessTree: true);
-			throw new TimeoutException("Git command did not complete within 20 seconds.");
+			throw GitTestRequirement.Timeout("Git command did not complete within 20 seconds.");
 		}
 		Assert.True(process.ExitCode == 0, $"git failed ({process.ExitCode}): {error}{output}");
 	}
@@ -9267,6 +9269,7 @@ public sealed partial class McpServerIntegrationTests
 			WorkingDirectory = repository,
 			UseShellExecute = false,
 			CreateNoWindow = true,
+			RedirectStandardInput = true,
 			RedirectStandardOutput = true,
 			RedirectStandardError = true
 		};
@@ -9287,6 +9290,7 @@ public sealed partial class McpServerIntegrationTests
 			WorkingDirectory = repository,
 			UseShellExecute = false,
 			CreateNoWindow = true,
+			RedirectStandardInput = true,
 			RedirectStandardOutput = true,
 			RedirectStandardError = true
 		};

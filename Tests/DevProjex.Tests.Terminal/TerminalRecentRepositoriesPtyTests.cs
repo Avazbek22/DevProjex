@@ -246,6 +246,7 @@ public sealed partial class TerminalRecentRepositoriesPtyTests
 		{
 			WorkingDirectory = workingDirectory,
 			UseShellExecute = false,
+			RedirectStandardInput = true,
 			RedirectStandardOutput = true,
 			RedirectStandardError = true,
 			CreateNoWindow = true

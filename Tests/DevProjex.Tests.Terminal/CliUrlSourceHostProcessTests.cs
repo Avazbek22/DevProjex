@@ -17,7 +17,7 @@ public sealed class CliUrlSourceHostProcessTests
 	public async Task UrlSourcesExportThroughARealProcess()
 	{
 		if (!IsGitAvailable())
-			Assert.Skip("Git is unavailable on this test host.");
+			GitTestRequirement.ReportUnavailable("Git is unavailable on this test host.");
 
 		using var workspace = new TemporaryDirectory();
 		var source = workspace.CreateDirectory("url/source");
@@ -182,6 +182,7 @@ public sealed class CliUrlSourceHostProcessTests
 			FileName = "git",
 			UseShellExecute = false,
 			CreateNoWindow = true,
+			RedirectStandardInput = true,
 			RedirectStandardOutput = true,
 			RedirectStandardError = true
 		};

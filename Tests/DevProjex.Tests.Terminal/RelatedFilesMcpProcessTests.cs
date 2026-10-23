@@ -324,7 +324,7 @@ public sealed partial class McpServerProcessTests
 	public async Task RealProcessRelatedFilesReportsBothDirectionsAmbiguityCoverageAndProgress()
 	{
 		if (!await IsGitAvailableAsync())
-			Assert.Skip("Git is not available in this test environment.");
+			GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
 		workspace.WriteFile("project/src/Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />\n");

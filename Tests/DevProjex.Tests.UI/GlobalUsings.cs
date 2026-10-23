@@ -13,6 +13,7 @@ global using DevProjex.Avalonia.ViewModels;
 global using DevProjex.Avalonia.Views;
 global using DevProjex.Application.Selection;
 global using DevProjex.Application.DesktopControl;
+global using DevProjex.Tests.Shared.Git;
 global using DevProjex.Tests.Shared.ProjectLoadWorkflow;
 global using DevProjex.Kernel;
 global using DevProjex.Kernel.Models;
