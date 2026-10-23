@@ -152,7 +152,7 @@ public sealed class StatusMetricWaveTextTests
     }
 
     [AvaloniaFact]
-    public async Task DetachDuringInitialReveal_CompletesAnimation()
+    public void DetachDuringInitialReveal_CompletesAnimation()
     {
         var control = new StatusMetricWaveText
         {
@@ -161,8 +161,8 @@ public sealed class StatusMetricWaveTextTests
         };
         var window = new Window { Content = control };
 
+        // Show starts the reveal synchronously; a dispatcher wait here lets fast UI timings finish it unseen.
         window.Show();
-        await FlushUiAsync();
         Assert.True(control.IsAnimationActive);
 
         window.Close();
