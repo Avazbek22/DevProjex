@@ -9223,6 +9223,7 @@ public sealed partial class McpServerIntegrationTests
 			{
 				UseShellExecute = false,
 				CreateNoWindow = true,
+				RedirectStandardInput = true,
 				RedirectStandardOutput = true,
 				RedirectStandardError = true,
 				ArgumentList = { "--version" }
@@ -9244,6 +9245,7 @@ public sealed partial class McpServerIntegrationTests
 			WorkingDirectory = repository,
 			UseShellExecute = false,
 			CreateNoWindow = true,
+			RedirectStandardInput = true,
 			RedirectStandardOutput = true,
 			RedirectStandardError = true
 		};
@@ -9267,6 +9269,7 @@ public sealed partial class McpServerIntegrationTests
 			WorkingDirectory = repository,
 			UseShellExecute = false,
 			CreateNoWindow = true,
+			RedirectStandardInput = true,
 			RedirectStandardOutput = true,
 			RedirectStandardError = true
 		};
@@ -9287,6 +9290,7 @@ public sealed partial class McpServerIntegrationTests
 			WorkingDirectory = repository,
 			UseShellExecute = false,
 			CreateNoWindow = true,
+			RedirectStandardInput = true,
 			RedirectStandardOutput = true,
 			RedirectStandardError = true
 		};

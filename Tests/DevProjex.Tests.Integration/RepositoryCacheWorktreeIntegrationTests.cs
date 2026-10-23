@@ -566,6 +566,7 @@ public sealed class RepositoryCacheWorktreeIntegrationTests
 				WorkingDirectory = repositoryPath,
 				UseShellExecute = false,
 				CreateNoWindow = true,
+				RedirectStandardInput = true,
 				RedirectStandardOutput = true,
 				RedirectStandardError = true
 			}

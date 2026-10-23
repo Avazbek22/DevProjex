@@ -278,6 +278,7 @@ public class GitBranchOperationsTests : IAsyncLifetime
             Arguments = $"init \"{repoPath}\"",
             UseShellExecute = false,
             CreateNoWindow = true,
+            RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true
         };

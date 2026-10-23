@@ -327,6 +327,7 @@ public sealed class ProjectAnalysisLoadFusionIntegrationTests
 			WorkingDirectory = workingDirectory,
 			UseShellExecute = false,
 			CreateNoWindow = true,
+			RedirectStandardInput = true,
 			RedirectStandardOutput = true,
 			RedirectStandardError = true
 		};

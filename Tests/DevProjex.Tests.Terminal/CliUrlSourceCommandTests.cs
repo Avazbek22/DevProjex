@@ -507,6 +507,7 @@ public sealed class CliUrlSourceCommandTests
 			using var process = Process.Start(new ProcessStartInfo("git", "--version")
 			{
 				UseShellExecute = false,
+				RedirectStandardInput = true,
 				RedirectStandardOutput = true,
 				RedirectStandardError = true,
 				CreateNoWindow = true
@@ -526,6 +527,7 @@ public sealed class CliUrlSourceCommandTests
 		{
 			WorkingDirectory = workingDirectory,
 			UseShellExecute = false,
+			RedirectStandardInput = true,
 			RedirectStandardOutput = true,
 			RedirectStandardError = true,
 			CreateNoWindow = true

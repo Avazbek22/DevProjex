@@ -182,6 +182,7 @@ public sealed class CliUrlSourceHostProcessTests
 			FileName = "git",
 			UseShellExecute = false,
 			CreateNoWindow = true,
+			RedirectStandardInput = true,
 			RedirectStandardOutput = true,
 			RedirectStandardError = true
 		};

@@ -430,6 +430,7 @@ public sealed class GitPathComparisonSemanticsIntegrationTests
 			WorkingDirectory = workingDirectory,
 			UseShellExecute = false,
 			CreateNoWindow = true,
+			RedirectStandardInput = true,
 			RedirectStandardOutput = true,
 			RedirectStandardError = true,
 			StandardOutputEncoding = Encoding.UTF8,

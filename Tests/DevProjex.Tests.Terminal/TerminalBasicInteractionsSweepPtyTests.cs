@@ -412,6 +412,7 @@ public sealed partial class TerminalBasicInteractionsSweepPtyTests
 		{
 			FileName = "git",
 			WorkingDirectory = workingDirectory,
+			RedirectStandardInput = true,
 			RedirectStandardOutput = true,
 			RedirectStandardError = true,
 			UseShellExecute = false,

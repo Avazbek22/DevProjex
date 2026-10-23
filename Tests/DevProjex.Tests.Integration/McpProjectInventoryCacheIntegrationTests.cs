@@ -873,6 +873,7 @@ public sealed class McpProjectInventoryCacheIntegrationTests
 			WorkingDirectory = workingDirectory,
 			UseShellExecute = false,
 			CreateNoWindow = true,
+			RedirectStandardInput = true,
 			RedirectStandardOutput = true,
 			RedirectStandardError = true
 		};

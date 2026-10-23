@@ -1820,6 +1820,7 @@ public sealed class TerminalSettingsPanelPtyTests
 			FileName = OperatingSystem.IsWindows() ? "git.exe" : "git",
 			WorkingDirectory = workingDirectory,
 			UseShellExecute = false,
+			RedirectStandardInput = true,
 			RedirectStandardOutput = true,
 			RedirectStandardError = true,
 			CreateNoWindow = true

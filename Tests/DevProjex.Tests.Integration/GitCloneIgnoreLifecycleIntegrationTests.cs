@@ -704,6 +704,7 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 			WorkingDirectory = workspace.Path,
 			UseShellExecute = false,
 			CreateNoWindow = true,
+			RedirectStandardInput = true,
 			RedirectStandardOutput = true,
 			RedirectStandardError = true
 		};
