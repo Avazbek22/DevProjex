@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Xml.Linq;
 using DevProjex.Application.Preview;
 using DevProjex.Infrastructure.Git;
-using DevProjex.Infrastructure.Processes;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -2449,19 +2448,10 @@ public sealed class TerminalWorkspaceContractTests
 	private static async Task<bool> TryRunGitAsync(string workingDirectory, string[] arguments)
 	{
 		var command = $"git {string.Join(" ", arguments)}";
+		var trace = GitTestRequirement.CreateTraceFile();
 		try
 		{
-			var startInfo = new ProcessStartInfo("git")
-			{
-				WorkingDirectory = workingDirectory,
-				UseShellExecute = false,
-				CreateNoWindow = true,
-				RedirectStandardOutput = true,
-				RedirectStandardError = true
-			};
-			foreach (var argument in arguments)
-				startInfo.ArgumentList.Add(argument);
-			using var process = Process.Start(startInfo);
+			using var process = Process.Start(CreateGitStartInfo(workingDirectory, arguments, trace));
 			if (process is null)
 			{
 				TestContext.Current.TestOutputHelper?.WriteLine($"{command} did not start.");
@@ -2471,7 +2461,13 @@ public sealed class TerminalWorkspaceContractTests
 			timeout.CancelAfter(ProcessSafetyTimeout);
 			var outputTask = process.StandardOutput.ReadToEndAsync(timeout.Token);
 			var errorTask = process.StandardError.ReadToEndAsync(timeout.Token);
-			await ExternalProcessLifetime.WaitForExitOrTerminateAsync(process, timeout.Token).ConfigureAwait(false);
+			await GitTestRequirement.WaitForExitAsync(
+					process,
+					command,
+					trace,
+					ProcessSafetyTimeout,
+					TestContext.Current.CancellationToken)
+				.ConfigureAwait(false);
 			var output = await outputTask.WaitAsync(timeout.Token).ConfigureAwait(false);
 			var error = await errorTask.WaitAsync(timeout.Token).ConfigureAwait(false);
 			if (process.ExitCode != 0)
@@ -2482,6 +2478,11 @@ public sealed class TerminalWorkspaceContractTests
 			}
 			return true;
 		}
+		catch (TimeoutException exception)
+		{
+			TestContext.Current.TestOutputHelper?.WriteLine(exception.Message);
+			return false;
+		}
 		catch (Exception exception) when (
 			exception is System.ComponentModel.Win32Exception or
 				InvalidOperationException or
@@ -2491,13 +2492,44 @@ public sealed class TerminalWorkspaceContractTests
 		{
 			TestContext.Current.TestOutputHelper?.WriteLine(
 				$"{command} failed or timed out after {ProcessSafetyTimeout}: {exception.Message}");
-			if (exception is OperationCanceledException)
-				TestContext.Current.TestOutputHelper?.WriteLine(GitTestRequirement.DescribeProcesses());
 			return false;
+		}
+		finally
+		{
+			GitTestRequirement.DeleteTraceFile(trace);
 		}
 	}
 
 	private static async Task<string> ReadGit(string workingDirectory, params string[] arguments)
+	{
+		var trace = GitTestRequirement.CreateTraceFile();
+		try
+		{
+			using var process = Process.Start(CreateGitStartInfo(workingDirectory, arguments, trace)) ??
+								throw new InvalidOperationException("Could not start git.");
+			using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+			timeout.CancelAfter(ProcessSafetyTimeout);
+			// Drain both pipes without blocking the process-exit continuation that invoked the test.
+			var outputTask = process.StandardOutput.ReadToEndAsync(timeout.Token);
+			var errorTask = process.StandardError.ReadToEndAsync(timeout.Token);
+			await GitTestRequirement.WaitForExitAsync(
+				process,
+				$"git {string.Join(' ', arguments)}",
+				trace,
+				ProcessSafetyTimeout,
+				TestContext.Current.CancellationToken);
+			var output = await outputTask.WaitAsync(timeout.Token);
+			var error = await errorTask.WaitAsync(timeout.Token);
+			Assert.True(process.ExitCode == 0, error);
+			return output.Trim();
+		}
+		finally
+		{
+			GitTestRequirement.DeleteTraceFile(trace);
+		}
+	}
+
+	private static ProcessStartInfo CreateGitStartInfo(string workingDirectory, string[] arguments, string traceFile)
 	{
 		var startInfo = new ProcessStartInfo("git")
 		{
@@ -2509,27 +2541,9 @@ public sealed class TerminalWorkspaceContractTests
 		};
 		foreach (var argument in arguments)
 			startInfo.ArgumentList.Add(argument);
-		using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Could not start git.");
-		using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
-		timeout.CancelAfter(ProcessSafetyTimeout);
-		// Drain both pipes without blocking the process-exit continuation that invoked the test.
-		var outputTask = process.StandardOutput.ReadToEndAsync(timeout.Token);
-		var errorTask = process.StandardError.ReadToEndAsync(timeout.Token);
-		try
-		{
-			await ExternalProcessLifetime.WaitForExitOrTerminateAsync(process, timeout.Token);
-			var output = await outputTask.WaitAsync(timeout.Token);
-			var error = await errorTask.WaitAsync(timeout.Token);
-			Assert.True(process.ExitCode == 0, error);
-			return output.Trim();
-		}
-		catch (OperationCanceledException exception) when (!TestContext.Current.CancellationToken.IsCancellationRequested)
-		{
-			throw GitTestRequirement.Timeout(
-				$"git {string.Join(' ', arguments)} (process {process.Id}) did not exit within " +
-				$"{ProcessSafetyTimeout.TotalSeconds:N0} seconds.",
-				exception);
-		}
+		// Git records how far it got, so a Git that never exits shows where it stopped.
+		startInfo.Environment[GitTestRequirement.TraceVariable] = traceFile;
+		return startInfo;
 	}
 
 	private static TimeSpan ProcessSafetyTimeout =>

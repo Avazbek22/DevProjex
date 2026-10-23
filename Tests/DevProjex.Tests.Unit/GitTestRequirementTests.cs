@@ -57,13 +57,7 @@ public sealed class GitTestRequirementTests
 	[Fact]
 	public void ProcessListShowsAProcessStartedJustBefore()
 	{
-		using var child = Process.Start(new ProcessStartInfo(
-			OperatingSystem.IsWindows() ? "cmd.exe" : "sleep",
-			OperatingSystem.IsWindows() ? "/c ping -n 6 127.0.0.1 >nul" : "5")
-		{
-			UseShellExecute = false,
-			CreateNoWindow = true
-		})!;
+		using var child = StartSleeper();
 		try
 		{
 			var description = GitTestRequirement.DescribeProcesses();
@@ -74,10 +68,97 @@ public sealed class GitTestRequirementTests
 		}
 		finally
 		{
-			if (!child.HasExited)
-				child.Kill(entireProcessTree: true);
-			child.WaitForExit(10_000);
+			Stop(child);
 		}
+	}
+
+	[Fact]
+	public async Task AStalledProcessIsDescribedWhileItRunsAndThenStopped()
+	{
+		using var child = StartSleeper();
+		var trace = GitTestRequirement.CreateTraceFile();
+		try
+		{
+			var exception = await Assert.ThrowsAsync<TimeoutException>(() => GitTestRequirement.WaitForExitAsync(
+				child,
+				"sleeper",
+				trace,
+				TimeSpan.FromMilliseconds(300),
+				TestContext.Current.CancellationToken));
+
+			Assert.StartsWith($"sleeper (process {child.Id}) did not exit within", exception.Message, StringComparison.Ordinal);
+			// Listed means it was described before it was stopped.
+			Assert.Contains($"[{child.Id}]", exception.Message, StringComparison.Ordinal);
+			Assert.Contains("Git wrote no trace", exception.Message, StringComparison.Ordinal);
+			Assert.IsAssignableFrom<OperationCanceledException>(exception.InnerException);
+			Assert.True(child.HasExited);
+		}
+		finally
+		{
+			Stop(child);
+			GitTestRequirement.DeleteTraceFile(trace);
+		}
+	}
+
+	[Fact]
+	public async Task TheTestsOwnCancellationIsNotReportedAsATimeout()
+	{
+		using var child = StartSleeper();
+		using var cancellation = new CancellationTokenSource();
+		cancellation.Cancel();
+		try
+		{
+			var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => GitTestRequirement.WaitForExitAsync(
+				child,
+				"sleeper",
+				null,
+				TimeSpan.FromSeconds(30),
+				cancellation.Token));
+
+			Assert.IsNotType<TimeoutException>(exception);
+		}
+		finally
+		{
+			Stop(child);
+		}
+	}
+
+	[Fact]
+	public void TraceShowsItsLastLinesOrThatGitStoppedBeforeTracing()
+	{
+		var path = GitTestRequirement.CreateTraceFile();
+		try
+		{
+			Assert.Contains("wrote no trace", GitTestRequirement.ReadTrace(path), StringComparison.Ordinal);
+
+			File.WriteAllText(path, string.Empty);
+			Assert.Contains("trace is empty", GitTestRequirement.ReadTrace(path), StringComparison.Ordinal);
+
+			File.WriteAllLines(path, Enumerable.Range(1, 30).Select(static line => $"line {line}"));
+			var lines = GitTestRequirement.ReadTrace(path).Split(Environment.NewLine);
+			Assert.Equal("Last Git trace lines:", lines[0]);
+			Assert.Equal(Enumerable.Range(11, 20).Select(static line => $"line {line}"), lines.Skip(1));
+		}
+		finally
+		{
+			GitTestRequirement.DeleteTraceFile(path);
+		}
+	}
+
+	private static Process StartSleeper() =>
+		Process.Start(new ProcessStartInfo(
+			OperatingSystem.IsWindows() ? "cmd.exe" : "sleep",
+			OperatingSystem.IsWindows() ? "/c ping -n 6 127.0.0.1 >nul" : "5")
+		{
+			UseShellExecute = false,
+			CreateNoWindow = true
+		})!;
+
+	private static void Stop(Process process)
+	{
+		if (!process.HasExited)
+			process.Kill(entireProcessTree: true);
+		process.WaitForExit(10_000);
 	}
 
 	[Fact]
