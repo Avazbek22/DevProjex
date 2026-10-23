@@ -255,6 +255,39 @@ cannot be read still backs off after the retry instead of being probed by every 
 entries come out of this list once the change has run clean for a week.
 
 
+## 6. Git stalled on a Windows runner
+
+- **Run**: [39915936626](https://github.com/Avazbek22/DevProjex/actions/runs/39915936626), first attempt, job `120289697805`
+- **Commit**: `ef3df328` on `master`, the merge of #483
+- **Job**: `CI (Windows / Terminal)`
+- **Test**: `DevProjex.Tests.Terminal.TerminalWorkspaceContractTests.CachedRemoteWorkspaceHydratesShallowDiffWithoutChangingItsCheckout`
+  (`Tests/DevProjex.Tests.Terminal/TerminalWorkspaceContractTests.cs:2023`)
+- **Message**:
+
+```
+System.Threading.Tasks.TaskCanceledException : A task was canceled.
+   at System.Diagnostics.Process.WaitForExitAsync(CancellationToken cancellationToken)
+   at DevProjex.Infrastructure.Processes.ExternalProcessLifetime.WaitForExitOrTerminateAsync(Process process, CancellationToken cancellationToken)
+   at DevProjex.Tests.Terminal.TerminalWorkspaceContractTests.ReadGit(String workingDirectory, String[] arguments)
+```
+
+The call that failed is `git rev-parse HEAD` in a fresh clone, and it ran for the whole two-minute
+CI limit: the test took 2 m 7 s. Six later tests in the same job then skipped with
+`Git is required for this regression test.`, at the xUnit clock readings `00:04:13`, `00:06:14`,
+`00:08:14`, `00:10:15`, `00:12:15` and `00:14:16`, each after waiting the same two minutes for
+`git --version`. Git did not start or did not exit on that runner for about fourteen minutes. #483
+added the Smithery bundle and fixed two tests and a TUI title; it did not change how any test or
+product code runs Git. The second attempt of the job passed. The cause on the runner is not known:
+the log names no process.
+
+**What changed.** Git that cannot be used on a CI runner no longer turns into a skip or a silent
+pass. `Tests/Shared/Git/GitTestRequirement.cs` skips a Git test on a developer machine and fails it
+when `CI` is set, because every CI runner has Git; 51 skips and 86 early returns that let a test
+pass without Git now go through it. That failure, and the Git timeouts in test helpers, list the
+processes running at that moment, read from the process table rather than by starting a tool, so
+the next stall names what was running.
+
+
 ## Blocking detector entry before generation invalidation
 
 [Run 34963511614, first attempt](https://github.com/Avazbek22/DevProjex/actions/runs/34963511614/attempts/1),
