@@ -1298,11 +1298,11 @@ public sealed class MainWindowGitScopeLifecycleUiTests
 		{
 			using var process = Process.Start(startInfo);
 			if (process is null || !process.WaitForExit(10_000) || process.ExitCode != 0)
-				Assert.Skip("Git is not available in this test environment.");
+				GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 		}
 		catch (System.ComponentModel.Win32Exception)
 		{
-			Assert.Skip("Git is not available in this test environment.");
+			GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 		}
 	}
 
@@ -1319,7 +1319,7 @@ public sealed class MainWindowGitScopeLifecycleUiTests
 		if (!process.WaitForExit(20_000))
 		{
 			process.Kill(entireProcessTree: true);
-			throw new TimeoutException("Git command did not complete within 20 seconds.");
+			throw GitTestRequirement.Timeout("Git command did not complete within 20 seconds.");
 		}
 		Assert.True(process.ExitCode == 0, $"git failed ({process.ExitCode}): {error}{output}");
 	}

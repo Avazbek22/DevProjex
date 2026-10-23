@@ -340,7 +340,7 @@ public sealed class ProjectAnalysisLoadFusionIntegrationTests
 		if (!process.WaitForExit(20_000))
 		{
 			process.Kill(entireProcessTree: true);
-			throw new TimeoutException("Git command did not complete within 20 seconds.");
+			throw GitTestRequirement.Timeout("Git command did not complete within 20 seconds.");
 		}
 
 		Assert.True(process.ExitCode == 0, $"git failed ({process.ExitCode}): {error}{output}");

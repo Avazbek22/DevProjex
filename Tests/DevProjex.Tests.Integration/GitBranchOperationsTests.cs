@@ -40,7 +40,7 @@ public class GitBranchOperationsTests : IAsyncLifetime
     public async Task GetBranchesAsync_ReturnsAllRemoteBranches()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var repoPath = _tempDir.CreateDirectory("branches-list");
         var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
@@ -57,7 +57,7 @@ public class GitBranchOperationsTests : IAsyncLifetime
     public async Task GetBranchesAsync_MarkesCurrentBranchAsActive()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var repoPath = _tempDir.CreateDirectory("active-branch");
         var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
@@ -74,7 +74,7 @@ public class GitBranchOperationsTests : IAsyncLifetime
     public async Task GetCurrentBranchAsync_ReturnsActiveBranch()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var repoPath = _tempDir.CreateDirectory("current-branch");
         var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
@@ -93,7 +93,7 @@ public class GitBranchOperationsTests : IAsyncLifetime
     public async Task SwitchBranchAsync_UpdatesCurrentBranch()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var repoPath = _tempDir.CreateDirectory("switch-updates");
         var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
@@ -124,7 +124,7 @@ public class GitBranchOperationsTests : IAsyncLifetime
     public async Task SwitchBranchAsync_UpdatesIsActiveFlag()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var repoPath = _tempDir.CreateDirectory("switch-flag");
         var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
@@ -148,7 +148,7 @@ public class GitBranchOperationsTests : IAsyncLifetime
     public async Task SwitchBranchAsync_ToNonexistentBranch_ReturnsFalse()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var repoPath = _tempDir.CreateDirectory("switch-invalid");
         var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
@@ -163,7 +163,7 @@ public class GitBranchOperationsTests : IAsyncLifetime
     public async Task SwitchBranchAsync_AtSignDoesNotReportHeadAsSuccessfulBranchSwitch()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var repoPath = _tempDir.CreateDirectory("switch-at-sign");
         var cloneResult = await _service.CloneAsync(
@@ -190,7 +190,7 @@ public class GitBranchOperationsTests : IAsyncLifetime
     public async Task SwitchBranchAsync_ToSameBranch_Succeeds()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var repoPath = _tempDir.CreateDirectory("switch-same");
         var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
@@ -206,7 +206,7 @@ public class GitBranchOperationsTests : IAsyncLifetime
     public async Task GetBranchesAsync_AfterMultipleSwitches_StaysConsistent()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var repoPath = _tempDir.CreateDirectory("multi-switch");
         var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
@@ -237,7 +237,7 @@ public class GitBranchOperationsTests : IAsyncLifetime
     public async Task SwitchBranchAsync_PreservesWorkingDirectory()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var repoPath = _tempDir.CreateDirectory("preserve-wd");
         var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
@@ -267,7 +267,7 @@ public class GitBranchOperationsTests : IAsyncLifetime
     public async Task GetBranchesAsync_EmptyRepository_ReturnsEmptyList()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var repoPath = _tempDir.CreateDirectory("empty-repo");
 
@@ -295,7 +295,7 @@ public class GitBranchOperationsTests : IAsyncLifetime
     public async Task SwitchBranchAsync_WithProgress_ReportsProgress()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var repoPath = _tempDir.CreateDirectory("switch-progress");
         var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
@@ -318,7 +318,7 @@ public class GitBranchOperationsTests : IAsyncLifetime
     public async Task GetBranchesAsync_CaseInsensitive_FindsBranches()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var repoPath = _tempDir.CreateDirectory("case-test");
         var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
@@ -334,7 +334,7 @@ public class GitBranchOperationsTests : IAsyncLifetime
     public async Task SwitchBranchAsync_AfterPull_WorksCorrectly()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var repoPath = _tempDir.CreateDirectory("switch-after-pull");
         var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
@@ -357,7 +357,7 @@ public class GitBranchOperationsTests : IAsyncLifetime
     public async Task GetBranchesAsync_DoesNotModifyRepository()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var repoPath = _tempDir.CreateDirectory("readonly-branches");
         var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);

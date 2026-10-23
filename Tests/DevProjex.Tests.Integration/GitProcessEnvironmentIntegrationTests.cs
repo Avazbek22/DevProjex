@@ -13,7 +13,7 @@ public sealed class GitProcessEnvironmentIntegrationTests
 	public async Task RepositoryCommandsIgnoreInheritedRepositoryOverrides()
 	{
 		if (!await SharedGitRepositories.IsGitAvailableAsync())
-			return;
+			GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
 		await using var source = await GitTestRepository.CreateAsync(
 			cancellationToken: TestContext.Current.CancellationToken);

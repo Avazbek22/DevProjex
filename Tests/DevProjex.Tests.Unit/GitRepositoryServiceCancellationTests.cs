@@ -13,7 +13,7 @@ public sealed class GitRepositoryServiceCancellationTests
         var service = new GitRepositoryService();
 
         if (!await service.IsGitAvailableAsync(cancellationToken: TestContext.Current.CancellationToken))
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         using var cts = new CancellationTokenSource();
         cts.Cancel();

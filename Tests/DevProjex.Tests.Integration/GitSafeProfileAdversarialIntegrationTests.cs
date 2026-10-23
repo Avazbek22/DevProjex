@@ -428,7 +428,8 @@ public sealed class GitSafeProfileAdversarialIntegrationTests
 			process.StandardInput.Close();
 			var output = process.StandardOutput.ReadToEnd();
 			var error = process.StandardError.ReadToEnd();
-			Assert.True(process.WaitForExit(30_000), "Fixture Git command timed out.");
+			if (!process.WaitForExit(30_000))
+				throw GitTestRequirement.Timeout("Fixture Git command timed out.");
 			Assert.True(process.ExitCode == 0, $"git {string.Join(' ', arguments)} failed: {error}{output}");
 		}
 

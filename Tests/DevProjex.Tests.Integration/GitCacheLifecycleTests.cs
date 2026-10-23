@@ -41,7 +41,7 @@ public sealed class GitCacheLifecycleTests : IAsyncLifetime, IDisposable
     public async Task CloneToCache_RepositoryFilesExist_AfterSuccessfulClone()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         // Arrange
         var cacheDir = _cacheService.CreateRepositoryDirectory(TestRepoUrl);
@@ -70,7 +70,7 @@ public sealed class GitCacheLifecycleTests : IAsyncLifetime, IDisposable
     public async Task FailedClone_CacheShouldBeCleanedUp_AfterError()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var invalidUrl = new Uri(Path.Combine(_tempDir.Path, "missing-repository.git")).AbsoluteUri;
         var cacheDir = _cacheService.CreateRepositoryDirectory(invalidUrl);
@@ -132,7 +132,7 @@ public sealed class GitCacheLifecycleTests : IAsyncLifetime, IDisposable
     public async Task SequentialClones_OldCacheCanBeDeleted_BeforeNewClone()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         // Arrange
         var cache1 = _cacheService.CreateRepositoryDirectory(TestRepoUrl);
@@ -199,7 +199,7 @@ public sealed class GitCacheLifecycleTests : IAsyncLifetime, IDisposable
     public async Task ClonedRepository_CanListBranches()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         // Arrange
         var cacheDir = _cacheService.CreateRepositoryDirectory(TestRepoUrl);
@@ -226,7 +226,7 @@ public sealed class GitCacheLifecycleTests : IAsyncLifetime, IDisposable
     public async Task ClonedRepository_CanSwitchBranches()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         // Arrange
         var cacheDir = _cacheService.CreateRepositoryDirectory(TestRepoUrl);

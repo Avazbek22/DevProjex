@@ -113,7 +113,7 @@ public sealed class PublishedSingleFileExtractionProcessTests
 	{
 		var application = GetPublishedSingleFileOrSkip();
 		if (!IsGitAvailable())
-			Assert.Skip("Git is unavailable on this test host.");
+			GitTestRequirement.ReportUnavailable("Git is unavailable on this test host.");
 
 		using var workspace = new TemporaryDirectory();
 		var source = workspace.CreateDirectory("url/source");

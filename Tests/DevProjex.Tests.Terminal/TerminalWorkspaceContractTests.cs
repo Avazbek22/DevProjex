@@ -1522,7 +1522,7 @@ public sealed class TerminalWorkspaceContractTests
 	public async Task EmptyMomentaryGitScopeRetainsBroadSelectionAcrossRefresh()
 	{
 		if (!TryRunGit(Directory.GetCurrentDirectory(), "--version"))
-			Assert.Skip("Git is required for this regression test.");
+			GitTestRequirement.ReportUnavailable("Git is required for this regression test.");
 		using var workspace = new TemporaryDirectory();
 		using var appData = new TemporaryDirectory();
 		workspace.WriteFile("Baseline.cs", "class Baseline {}\n");
@@ -1566,7 +1566,7 @@ public sealed class TerminalWorkspaceContractTests
 	public async Task ExplicitEmptySelectionRemainsEmptyWhenMomentaryGitScopeChanges()
 	{
 		if (!TryRunGit(Directory.GetCurrentDirectory(), "--version"))
-			Assert.Skip("Git is required for this regression test.");
+			GitTestRequirement.ReportUnavailable("Git is required for this regression test.");
 		using var workspace = new TemporaryDirectory();
 		using var appData = new TemporaryDirectory();
 		workspace.WriteFile("First.cs", "class First {}\n");
@@ -1696,7 +1696,7 @@ public sealed class TerminalWorkspaceContractTests
 	public async Task StructuralRefreshFallsBackWhenTheActiveRepositoryBoundaryDisappears()
 	{
 		if (!TryRunGit(Directory.GetCurrentDirectory(), "--version"))
-			Assert.Skip("Git is required for this regression test.");
+			GitTestRequirement.ReportUnavailable("Git is required for this regression test.");
 		using var workspace = new TemporaryDirectory();
 		using var appData = new TemporaryDirectory();
 		workspace.WriteFile("App.cs", "class App {}\n");
@@ -1751,7 +1751,7 @@ public sealed class TerminalWorkspaceContractTests
 		GitFilteringMode expectedMode)
 	{
 		if (!TryRunGit(Directory.GetCurrentDirectory(), "--version"))
-			Assert.Skip("Git is required for this regression test.");
+			GitTestRequirement.ReportUnavailable("Git is required for this regression test.");
 		using var workspace = new TemporaryDirectory();
 		using var appData = new TemporaryDirectory();
 		workspace.WriteFile("App.cs", "class App {}\n");
@@ -1895,7 +1895,7 @@ public sealed class TerminalWorkspaceContractTests
 	public async Task StructuralGitRefreshQueriesOnlyTheRepositoryOwningTheManualSelection()
 	{
 		if (!TryRunGit(Directory.GetCurrentDirectory(), "--version"))
-			Assert.Skip("Git is required for this regression test.");
+			GitTestRequirement.ReportUnavailable("Git is required for this regression test.");
 		using var workspace = new TemporaryDirectory();
 		using var appData = new TemporaryDirectory();
 		workspace.WriteFile("Outer.txt", "outer\n");
@@ -1989,7 +1989,7 @@ public sealed class TerminalWorkspaceContractTests
 	public async Task CachedRemoteWorkspaceHydratesShallowDiffWithoutChangingItsCheckout()
 	{
 		if (!TryRunGit(Directory.GetCurrentDirectory(), "--version"))
-			Assert.Skip("Git is required for this regression test.");
+			GitTestRequirement.ReportUnavailable("Git is required for this regression test.");
 		using var workspace = new TemporaryDirectory();
 		using var appData = new TemporaryDirectory();
 		var source = workspace.CreateDirectory("source");
@@ -2491,6 +2491,8 @@ public sealed class TerminalWorkspaceContractTests
 		{
 			TestContext.Current.TestOutputHelper?.WriteLine(
 				$"{command} failed or timed out after {ProcessSafetyTimeout}: {exception.Message}");
+			if (exception is OperationCanceledException)
+				TestContext.Current.TestOutputHelper?.WriteLine(GitTestRequirement.DescribeProcesses());
 			return false;
 		}
 	}
@@ -2513,11 +2515,21 @@ public sealed class TerminalWorkspaceContractTests
 		// Drain both pipes without blocking the process-exit continuation that invoked the test.
 		var outputTask = process.StandardOutput.ReadToEndAsync(timeout.Token);
 		var errorTask = process.StandardError.ReadToEndAsync(timeout.Token);
-		await ExternalProcessLifetime.WaitForExitOrTerminateAsync(process, timeout.Token);
-		var output = await outputTask.WaitAsync(timeout.Token);
-		var error = await errorTask.WaitAsync(timeout.Token);
-		Assert.True(process.ExitCode == 0, error);
-		return output.Trim();
+		try
+		{
+			await ExternalProcessLifetime.WaitForExitOrTerminateAsync(process, timeout.Token);
+			var output = await outputTask.WaitAsync(timeout.Token);
+			var error = await errorTask.WaitAsync(timeout.Token);
+			Assert.True(process.ExitCode == 0, error);
+			return output.Trim();
+		}
+		catch (OperationCanceledException exception) when (!TestContext.Current.CancellationToken.IsCancellationRequested)
+		{
+			throw GitTestRequirement.Timeout(
+				$"git {string.Join(' ', arguments)} (process {process.Id}) did not exit within " +
+				$"{ProcessSafetyTimeout.TotalSeconds:N0} seconds.",
+				exception);
+		}
 	}
 
 	private static TimeSpan ProcessSafetyTimeout =>

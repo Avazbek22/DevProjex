@@ -94,7 +94,7 @@ public class GitRepositoryServiceTests : IAsyncLifetime
     private void SkipIfNoGit()
     {
         if (!_gitAvailable)
-            Assert.Skip("Git is not available on this system.");
+            GitTestRequirement.ReportUnavailable("Git is not available on this system.");
     }
 
     /// <summary>

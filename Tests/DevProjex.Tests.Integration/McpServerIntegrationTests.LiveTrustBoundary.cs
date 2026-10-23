@@ -129,7 +129,7 @@ public sealed partial class McpServerIntegrationTests
 	public async Task DynamicFilterBudgetAndPatternValuesStayInsideUntrustedData()
 	{
 		if (!IsGitAvailable())
-			return;
+			GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 		const string marker = "MCP_DYNAMIC_TRUST_SENTINEL_8e2b";
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");

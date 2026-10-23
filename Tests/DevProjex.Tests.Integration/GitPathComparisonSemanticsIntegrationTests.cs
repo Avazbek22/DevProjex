@@ -403,11 +403,11 @@ public sealed class GitPathComparisonSemanticsIntegrationTests
 		try
 		{
 			if (RunGitExitCode(Environment.CurrentDirectory, "--version") != 0)
-				Assert.Skip("Git is not available in this test environment.");
+				GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 		}
 		catch (System.ComponentModel.Win32Exception)
 		{
-			Assert.Skip("Git is not available in this test environment.");
+			GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 		}
 	}
 
@@ -445,7 +445,7 @@ public sealed class GitPathComparisonSemanticsIntegrationTests
 		if (!process.WaitForExit(20_000))
 		{
 			process.Kill(entireProcessTree: true);
-			throw new TimeoutException("Git command did not complete within 20 seconds.");
+			throw GitTestRequirement.Timeout("Git command did not complete within 20 seconds.");
 		}
 
 		return new GitProcessResult(

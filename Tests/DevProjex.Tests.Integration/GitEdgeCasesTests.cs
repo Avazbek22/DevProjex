@@ -94,7 +94,7 @@ public class GitEdgeCasesTests : IAsyncLifetime
     {
         // Test switching to nonexistent branch in single-branch repo
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var repoPath = _tempDir.CreateDirectory("single-branch");
         var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
@@ -110,7 +110,7 @@ public class GitEdgeCasesTests : IAsyncLifetime
     {
         // Verify that GetCurrentBranch accurately reflects branch switches
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var repoPath = _tempDir.CreateDirectory("current-branch-accuracy");
         var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
@@ -139,7 +139,7 @@ public class GitEdgeCasesTests : IAsyncLifetime
     {
         // Verify that pulling immediately after clone doesn't break
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var repoPath = _tempDir.CreateDirectory("fresh-pull");
         var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
@@ -155,7 +155,7 @@ public class GitEdgeCasesTests : IAsyncLifetime
     {
         // Test multiple consecutive pulls don't break repository state
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var repoPath = _tempDir.CreateDirectory("multi-pull");
         var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
@@ -178,7 +178,7 @@ public class GitEdgeCasesTests : IAsyncLifetime
     {
         // Verify concurrent pulls don't cause race conditions
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var repoPath = _tempDir.CreateDirectory("concurrent-pull");
         var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
@@ -199,7 +199,7 @@ public class GitEdgeCasesTests : IAsyncLifetime
     {
         // Test that overlapping operations don't corrupt repository
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var repoPath = _tempDir.CreateDirectory("overlapping-ops");
         var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
@@ -283,7 +283,7 @@ public class GitEdgeCasesTests : IAsyncLifetime
     {
         // Verify that cloned repos go into cache
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var targetDir = _cacheService.CreateRepositoryDirectory(TestRepoUrl);
 
@@ -316,7 +316,7 @@ public class GitEdgeCasesTests : IAsyncLifetime
         // across CI environments. Raw filesystem paths are handled differently by git
         // when shallow clone is requested, especially on Unix runners.
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var sources = new List<string>
         {
@@ -341,7 +341,7 @@ public class GitEdgeCasesTests : IAsyncLifetime
     {
         // Verify that only one branch is marked as active
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var repoPath = _tempDir.CreateDirectory("active-branch");
         var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
@@ -367,7 +367,7 @@ public class GitEdgeCasesTests : IAsyncLifetime
     {
         // Test that failed switch doesn't corrupt repository state
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var repoPath = _tempDir.CreateDirectory("failed-switch-recovery");
         var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
@@ -401,7 +401,7 @@ public class GitEdgeCasesTests : IAsyncLifetime
     {
         // Verify that cancelled clone doesn't leave partial data
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var targetDir = _tempDir.CreateDirectory("cancelled-clone");
         using var cts = new CancellationTokenSource();
@@ -435,7 +435,7 @@ public class GitEdgeCasesTests : IAsyncLifetime
     {
         // Test branch names like "feature/my-feature" (common in git-flow)
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var repoPath = _tempDir.CreateDirectory("branch-slashes");
         var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
@@ -459,7 +459,7 @@ public class GitEdgeCasesTests : IAsyncLifetime
     {
         // Verify that "HEAD -> origin/main" entries are filtered out
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var repoPath = _tempDir.CreateDirectory("head-filter");
         var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
@@ -484,7 +484,7 @@ public class GitEdgeCasesTests : IAsyncLifetime
     {
         // Verify progress callback doesn't cause errors (Git may not report progress in non-interactive mode)
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var targetDir = _tempDir.CreateDirectory("progress-test");
         var progress = new ProgressRecorder();
@@ -501,7 +501,7 @@ public class GitEdgeCasesTests : IAsyncLifetime
     {
         // Verify progress reporting for branch switch
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var repoPath = _tempDir.CreateDirectory("switch-progress");
         var cloneResult = await _service.CloneAsync(TestRepoUrl, repoPath, cancellationToken: TestContext.Current.CancellationToken);
@@ -532,7 +532,7 @@ public class GitEdgeCasesTests : IAsyncLifetime
     {
         // Test repository name extraction from various URLs
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var targetDir = _tempDir.CreateDirectory("repo-name");
         var result = await _service.CloneAsync(TestRepoUrl, targetDir, cancellationToken: TestContext.Current.CancellationToken);
@@ -546,7 +546,7 @@ public class GitEdgeCasesTests : IAsyncLifetime
     {
         // Verify that original URL is preserved in result
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var url = TestRepoUrl;
         var targetDir = _tempDir.CreateDirectory("url-storage");
@@ -561,7 +561,7 @@ public class GitEdgeCasesTests : IAsyncLifetime
     {
         // Verify that source type is set to GitClone for git operations
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var targetDir = _tempDir.CreateDirectory("source-type");
         var result = await _service.CloneAsync(TestRepoUrl, targetDir, cancellationToken: TestContext.Current.CancellationToken);

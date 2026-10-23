@@ -9,7 +9,7 @@ public sealed class GitBranchScaleIntegrationTests
 	public async Task LargeRemoteBranchCatalogIsStreamedWithoutFallingBackToTheCurrentBranch(int branchCount)
 	{
 		if (!GitRuntime.VersionDisplay.StartsWith("git version ", StringComparison.OrdinalIgnoreCase))
-			Assert.Skip("Git is not available on this system.");
+			GitTestRequirement.ReportUnavailable("Git is not available on this system.");
 
 		await using var source = await GitTestRepository.CreateAsync(
 			$"branch-scale-{branchCount}",

@@ -55,7 +55,7 @@ public sealed class GitCloneWorkflowTests : IAsyncLifetime, IDisposable
     public async Task WorkflowSimulation_CloneRepository_OpenProject_Success()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         // Arrange - Simulate user clicking "Clone from Git"
         string? currentCachedRepoPath = null;
@@ -101,7 +101,7 @@ public sealed class GitCloneWorkflowTests : IAsyncLifetime, IDisposable
     public async Task WorkflowSimulation_CloneFails_CacheIsCleanedUp()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var invalidUrl = new Uri(Path.Combine(_tempDir.Path, "missing-repository.git")).AbsoluteUri;
         string? currentCachedRepoPath = null;
@@ -137,7 +137,7 @@ public sealed class GitCloneWorkflowTests : IAsyncLifetime, IDisposable
     public async Task WorkflowSimulation_CloneCancelledBeforeStart_CacheIsCleanedUp()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         string? currentCachedRepoPath = null;
         using var cts = new CancellationTokenSource();
@@ -164,7 +164,7 @@ public sealed class GitCloneWorkflowTests : IAsyncLifetime, IDisposable
     public async Task WorkflowSimulation_CloneFirstRepo_ThenCloneSecond_FirstCacheDeleted()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         // Arrange
         string? firstCachedRepoPath = null;
@@ -249,7 +249,7 @@ public sealed class GitCloneWorkflowTests : IAsyncLifetime, IDisposable
     public async Task WorkflowSimulation_CloneRepo_OpenLocalFolder_ReleasesLeaseAndRetainsCache()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         // Arrange
         string? currentCachedRepoPath = null;
@@ -310,7 +310,7 @@ public sealed class GitCloneWorkflowTests : IAsyncLifetime, IDisposable
     public async Task WorkflowSimulation_CloneRepo_SwitchBranch_FilesUpdate()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         // Arrange
         string? currentCachedRepoPath = null;
@@ -356,7 +356,7 @@ public sealed class GitCloneWorkflowTests : IAsyncLifetime, IDisposable
     public async Task WorkflowSimulation_MultipleSequentialClones_EachGetsOwnCache()
     {
         if (!_gitAvailable)
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         // Simulate user cloning, closing, cloning again multiple times
         string? cache1 = null;

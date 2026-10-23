@@ -121,7 +121,7 @@ public sealed class SelectionPathGitProcessTests
 		}
 		catch (Exception exception) when (exception is System.ComponentModel.Win32Exception)
 		{
-			Assert.Skip("Git is unavailable for the process contract.");
+			GitTestRequirement.ReportUnavailable("Git is unavailable for the process contract.");
 			return string.Empty;
 		}
 		using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);

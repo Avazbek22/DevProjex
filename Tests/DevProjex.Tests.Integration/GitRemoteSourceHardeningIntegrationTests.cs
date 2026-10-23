@@ -263,7 +263,8 @@ public sealed class GitRemoteSourceHardeningIntegrationTests
 		process.StandardInput.Close();
 		var output = process.StandardOutput.ReadToEnd();
 		var error = process.StandardError.ReadToEnd();
-		Assert.True(process.WaitForExit(30_000), "Git fixture command timed out.");
+		if (!process.WaitForExit(30_000))
+			throw GitTestRequirement.Timeout("Git fixture command timed out.");
 		Assert.True(process.ExitCode == 0, $"git {string.Join(' ', arguments)} failed: {error}{output}");
 	}
 

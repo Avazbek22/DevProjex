@@ -488,7 +488,7 @@ public sealed partial class McpServerProcessTests
 	public async Task RealProcessUnrestrictedOpensBothFilterAxesThroughTheCli(bool unrestricted)
 	{
 		if (!await IsGitAvailableAsync())
-			Assert.Skip("Git is not available in this test environment.");
+			GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
 		workspace.WriteFile("project/Anchor.cs", "anchor-unrestricted-marker\n");
@@ -570,7 +570,7 @@ public sealed partial class McpServerProcessTests
 	public async Task RealProcessUnrestrictedComposesWithAgentExclusionDelegation()
 	{
 		if (!await IsGitAvailableAsync())
-			Assert.Skip("Git is not available in this test environment.");
+			GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
 		workspace.WriteFile("project/Anchor.cs", "anchor-compose-marker\n");
@@ -806,7 +806,7 @@ public sealed partial class McpServerProcessTests
 	public async Task RealProcessClonesOptInRemoteAndAppliesTokenBudgetWithoutExposingCachePath()
 	{
 		if (!await IsGitAvailableAsync())
-			Assert.Skip("Git is not available in this test environment.");
+			GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
 		using var workspace = new TemporaryDirectory();
 		var root = workspace.CreateDirectory("configured-root");

@@ -10,7 +10,7 @@ public sealed partial class McpServerProcessTests
 	public async Task RealProcessDevProjexRepositoryFileCountsMatchGitAcrossCliAndMcp()
 	{
 		if (!await IsGitAvailableAsync())
-			Assert.Skip("Git is not available.");
+			GitTestRequirement.ReportUnavailable("Git is not available.");
 		var repository = PublishedApplicationLocator.FindRepositoryRoot();
 		using var state = new TemporaryDirectory();
 		var git = CreateBoundaryProcess(repository, state.CreateDirectory("git-state"));
@@ -78,7 +78,7 @@ public sealed partial class McpServerProcessTests
 	public async Task RealProcessRepositoryBoundariesAgreeAcrossCliAndMcp(string mode, bool embeddedVisible, bool changes)
 	{
 		if (!await IsGitAvailableAsync())
-			Assert.Skip("Git is not available.");
+			GitTestRequirement.ReportUnavailable("Git is not available.");
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
 		workspace.WriteFile("project/Anchor.cs", "anchor");

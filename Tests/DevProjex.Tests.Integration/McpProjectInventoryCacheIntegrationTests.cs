@@ -429,7 +429,7 @@ public sealed class McpProjectInventoryCacheIntegrationTests
 	public async Task BuildPlan_GitIndexStampInvalidatesWithoutAWatcherEvent()
 	{
 		if (!IsGitAvailable())
-			Assert.Skip("Git is unavailable.");
+			GitTestRequirement.ReportUnavailable("Git is unavailable.");
 
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
@@ -458,7 +458,7 @@ public sealed class McpProjectInventoryCacheIntegrationTests
 	public async Task BuildPlan_NestedWorktreeIndexOutsideTheWatchedRootInvalidatesThePlan()
 	{
 		if (!IsGitAvailable())
-			Assert.Skip("Git is unavailable.");
+			GitTestRequirement.ReportUnavailable("Git is unavailable.");
 
 		using var workspace = new TemporaryDirectory();
 		var repository = workspace.CreateDirectory("repository");

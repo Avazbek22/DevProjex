@@ -25,6 +25,7 @@
 
   <ItemGroup>
     <Compile Include="..\Shared\ProjectLoadWorkflow\**\*.cs" LinkBase="ProjectLoadWorkflow" />
+    <Compile Include="..\Shared\Git\**\*.cs" LinkBase="Git" />
   </ItemGroup>
 
   <ItemGroup>

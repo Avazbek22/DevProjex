@@ -8,7 +8,7 @@ public sealed class GitCloneContentConsumerParityIntegrationTests
 	{
 		var gitService = new GitRepositoryService(allowFileTransportForTests: true);
 		if (!await gitService.IsGitAvailableAsync(TestContext.Current.CancellationToken))
-			return;
+			GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
 		await using var repository = await GitTestRepository.CreateAsync(
 			repositoryName: "Content-Consumer-Repo",

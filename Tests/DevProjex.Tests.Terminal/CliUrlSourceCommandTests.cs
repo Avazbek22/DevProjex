@@ -150,7 +150,7 @@ public sealed class CliUrlSourceCommandTests
 	{
 		using var fileTransport = RepositoryTransportPolicy.AllowLocalFileTransport();
 		if (!IsGitAvailable())
-			Assert.Skip("Git is unavailable on this test host.");
+			GitTestRequirement.ReportUnavailable("Git is unavailable on this test host.");
 
 		using var workspace = new TemporaryDirectory();
 		using var data = new TemporaryDirectory();
@@ -225,7 +225,7 @@ public sealed class CliUrlSourceCommandTests
 	{
 		using var fileTransport = RepositoryTransportPolicy.AllowLocalFileTransport();
 		if (!IsGitAvailable())
-			Assert.Skip("Git is unavailable on this test host.");
+			GitTestRequirement.ReportUnavailable("Git is unavailable on this test host.");
 
 		using var workspace = new TemporaryDirectory();
 		using var data = new TemporaryDirectory();
@@ -290,7 +290,7 @@ public sealed class CliUrlSourceCommandTests
 	{
 		using var fileTransport = RepositoryTransportPolicy.AllowLocalFileTransport();
 		if (!IsGitAvailable())
-			Assert.Skip("Git is unavailable on this test host.");
+			GitTestRequirement.ReportUnavailable("Git is unavailable on this test host.");
 
 		using var workspace = new TemporaryDirectory();
 		using var data = new TemporaryDirectory();
@@ -365,7 +365,7 @@ public sealed class CliUrlSourceCommandTests
 	{
 		using var fileTransport = RepositoryTransportPolicy.AllowLocalFileTransport();
 		if (!IsGitAvailable())
-			Assert.Skip("Git is unavailable on this test host.");
+			GitTestRequirement.ReportUnavailable("Git is unavailable on this test host.");
 
 		using var workspace = new TemporaryDirectory();
 		using var data = new TemporaryDirectory();

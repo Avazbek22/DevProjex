@@ -195,7 +195,7 @@ public class ZipDownloadAdvancedTests : IAsyncLifetime
     {
         // Compare ZIP download with Git clone results
         if (!await _gitService.IsGitAvailableAsync(cancellationToken: TestContext.Current.CancellationToken))
-            return;
+            GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 
         var zipDir = _tempDir.CreateDirectory("zip-compare");
         var gitDir = _tempDir.CreateDirectory("git-compare");
