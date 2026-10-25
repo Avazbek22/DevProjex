@@ -6,7 +6,7 @@ using DevProjex.Terminal.Execution;
 
 namespace DevProjex.Tests.Terminal;
 
-public sealed partial class DocumentationAndPackagingContractTests
+public sealed class DocumentationAndPackagingContractTests
 {
 	private static readonly string[] RequiredDocumentation =
 	[
