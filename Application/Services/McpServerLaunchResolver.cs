@@ -12,13 +12,15 @@ public static partial class McpServerLaunchResolver
 		executablePath,
 		Environment.GetEnvironmentVariable(NpmExecutableVariable),
 		Environment.GetEnvironmentVariable("NUGET_PACKAGES"),
-		File.Exists);
+		File.Exists,
+		ReferToSameEntry);
 
 	internal static McpServerLaunch Resolve(
 		string executablePath,
 		string? npmExecutable,
 		string? nugetPackages,
-		Func<string, bool> fileExists)
+		Func<string, bool> fileExists,
+		Func<string, string, bool>? sameEntry = null)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(executablePath);
 		if (FlatpakEnvironment.Current.IsActive)
@@ -36,8 +38,8 @@ public static partial class McpServerLaunchResolver
 			parts[^4].Equals("@devprojex", comparison) &&
 			parts[^2].Equals("bin", comparison) &&
 			IsNpmBinary(parts[^3], parts[^1], comparison) &&
-			(IsMatchingExecutable(path, npmExecutable, comparison) ||
-			 parts.Length >= 7 && parts[^7].Equals("_npx", comparison) && parts[^6].Length > 0))
+			(parts.Length >= 7 && parts[^7].Equals("_npx", comparison) && parts[^6].Length > 0 ||
+			 PathsMatch(path, npmExecutable, comparison, sameEntry)))
 		{
 			return new("npx", ["-y", "devprojex"]);
 		}
@@ -51,7 +53,7 @@ public static partial class McpServerLaunchResolver
 			// Global tools have stable shims and their own .store; only the NuGet cache needs dnx.
 			if (!parts.Any(part => part.Equals(".store", comparison)) &&
 				(packageRoot.EndsWith("/.nuget/packages", comparison) ||
-				 !string.IsNullOrWhiteSpace(nugetPackages) && packageRoot.Equals(Normalize(nugetPackages).TrimEnd('/'), comparison) ||
+				 PathsMatch(packageRoot, nugetPackages is null ? null : Normalize(nugetPackages).TrimEnd('/'), comparison, sameEntry) ||
 				 fileExists(string.Join('/', parts[..^4]) + "/.nupkg.metadata")))
 			{
 				return new("dnx", ["devprojex"]);
@@ -75,8 +77,14 @@ public static partial class McpServerLaunchResolver
 		package.Equals("devprojex." + rid, comparison) &&
 		binary.Equals(rid.StartsWith("win-", comparison) ? "devprojex.exe" : "devprojex", comparison);
 
-	private static bool IsMatchingExecutable(string path, string? candidate, StringComparison comparison) =>
-		!string.IsNullOrWhiteSpace(candidate) && path.Equals(Normalize(candidate), comparison);
+	private static bool PathsMatch(string path, string? candidate, StringComparison comparison,
+		Func<string, string, bool>? sameEntry) =>
+		!string.IsNullOrWhiteSpace(candidate) &&
+		(path.Equals(Normalize(candidate), comparison) || sameEntry?.Invoke(path, candidate) == true);
+
+	private static bool ReferToSameEntry(string left, string right) =>
+		FileSystemPathIdentity.TryRead(left, out var leftIdentity) &&
+		FileSystemPathIdentity.TryRead(right, out var rightIdentity) && leftIdentity == rightIdentity;
 
 	private static string Normalize(string path) => IsWindowsPath(path) ? path.Replace('\\', '/') : path;
 

@@ -94,4 +94,40 @@ public sealed class McpServerLaunchResolverTests
 		Assert.Equal(executable, launch.Command);
 		Assert.Empty(launch.PrefixArguments);
 	}
+
+	[Theory]
+	[InlineData(false, true)]
+	[InlineData(true, true)]
+	[InlineData(false, false)]
+	[InlineData(true, false)]
+	public void PhysicalAliasesRequireMatchingFileSystemIdentity(bool nuget, bool identityMatches)
+	{
+		using var sandbox = FlatpakEnvironment.UseForTesting(new(false, null));
+		const string physicalCache = "/private/var/cache";
+		const string aliasCache = "/var/cache";
+		const string npmTail = "/node_modules/@devprojex/cli-darwin-arm64/bin/devprojex";
+		const string nugetTail = "/devprojex.osx-arm64/5.2.2/tools/any/osx-arm64/devprojex";
+		var executable = physicalCache + (nuget ? nugetTail : npmTail);
+		var expectedLeft = nuget ? physicalCache : executable;
+		var expectedRight = nuget ? aliasCache : aliasCache + npmTail;
+		var comparisons = new List<(string, string)>();
+		var launch = McpServerLaunchResolver.Resolve(executable, nuget ? null : expectedRight,
+			nuget ? aliasCache : null, _ => false, (left, right) =>
+			{
+				comparisons.Add((left, right));
+				return identityMatches;
+			});
+		Assert.Equal(identityMatches ? nuget ? "dnx" : "npx" : executable, launch.Command);
+		Assert.Equal([(expectedLeft, expectedRight)], comparisons);
+	}
+
+	[Fact]
+	public void LexicallyMatchingProvenanceDoesNotNeedFileSystemIdentity()
+	{
+		using var sandbox = FlatpakEnvironment.UseForTesting(new(false, null));
+		const string executable = "/var/cache/node_modules/@devprojex/cli-darwin-arm64/bin/devprojex";
+		var launch = McpServerLaunchResolver.Resolve(executable, executable, null,
+			_ => throw new InvalidOperationException(), (_, _) => throw new InvalidOperationException());
+		Assert.Equal("npx", launch.Command);
+	}
 }
