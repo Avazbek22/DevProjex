@@ -73,12 +73,15 @@ public sealed class McpPackageLauncherTests
 			UseShellExecute = false,
 			CreateNoWindow = true,
 			RedirectStandardOutput = true,
-			RedirectStandardError = true
+			RedirectStandardError = true,
+			StandardOutputEncoding = new UTF8Encoding(false),
+			StandardErrorEncoding = new UTF8Encoding(false)
 		};
 		string script;
 		if (windows)
 		{
-			script = "Remove-Item Alias:cd -ErrorAction SilentlyContinue; function cd { param($Path) }; " +
+			script = "[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); " +
+				"Remove-Item Alias:cd -ErrorAction SilentlyContinue; function cd { param($Path) }; " +
 				"function claude { [Console]::Out.Write((ConvertTo-Json -Compress -InputObject @($args))) }; " +
 				"Invoke-Expression $env:DPX_PACKAGE_FRAGMENT";
 			foreach (var argument in new[] { "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script })
