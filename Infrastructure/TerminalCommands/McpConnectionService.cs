@@ -1033,7 +1033,7 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 				entry.DisplayCommand,
 				McpExistingEntryParser.FormatCommandLine(
 					McpConnectionFragmentGenerator.ResolveServerExecutable(request.ExecutablePath),
-					CreateServerArguments(request.ProjectRoot, request.Mode)),
+					CreateServerArguments(request.ProjectRoot, request.Mode, request.ExecutablePath)),
 				entry.UnsupportedArguments,
 				entry.IsDevProjexLauncher));
 	}
@@ -1056,7 +1056,7 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 		IMcpCodexUserConfigurationStore store,
 		CancellationToken cancellationToken)
 	{
-		var arguments = CreateServerArguments(request.ProjectRoot, request.Mode);
+		var arguments = CreateServerArguments(request.ProjectRoot, request.Mode, request.ExecutablePath);
 		var requiredEnvironment = McpConnectionFragmentGenerator.GetRequiredServerEnvironment();
 		var write = await store.UpdateConnectionAsync(
 			configuration,
@@ -1082,7 +1082,7 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 			request.ProjectRoot,
 			cancellationToken).ConfigureAwait(false);
 		AppendOutput(output, "get", verify);
-		if (!verify.Succeeded || !TryParseCodexConnection(verify.StandardOutput, out var effective))
+		if (!verify.Succeeded || !TryParseCodexConnection(verify.StandardOutput, out var effective, allowPackageLauncher: true))
 		{
 			using var recoveryCts = new CancellationTokenSource(ClientCommandTimeout);
 			var restored = await store.RestoreAsync(configuration, recoveryCts.Token).ConfigureAwait(false);
@@ -1130,7 +1130,7 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 			request.ProjectRoot,
 			cancellationToken).ConfigureAwait(false);
 		AppendOutput(output, "get", verify);
-		if (!verify.Succeeded || !TryParseCodexConnection(verify.StandardOutput, out var effective))
+		if (!verify.Succeeded || !TryParseCodexConnection(verify.StandardOutput, out var effective, allowPackageLauncher: true))
 		{
 			var restored = await TryRestoreConnectionAsync(
 				request,
@@ -1147,7 +1147,7 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 				previousConnectionRestored: restored && previousSnapshot is not null);
 		}
 
-		var expectedArguments = CreateServerArguments(request.ProjectRoot, request.Mode);
+		var expectedArguments = CreateServerArguments(request.ProjectRoot, request.Mode, request.ExecutablePath);
 		var requiredEnvironment = McpConnectionFragmentGenerator.GetRequiredServerEnvironment();
 		if (ConnectionMatches(
 				effective,
@@ -1313,7 +1313,8 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 	private async Task<ExistingConnectionRead> ReadExistingConnectionAsync(
 		McpConnectionRequest request,
 		string executable,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		bool allowPackageLauncher = false)
 	{
 		if (request.Client == McpConnectionClient.ClaudeCode)
 		{
@@ -1336,7 +1337,8 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 					read.Connection.Arguments,
 					read.Connection.Environment,
 					out var claudeSnapshot,
-					read.Connection.RawJson))
+					read.Connection.RawJson,
+					allowPackageLauncher: allowPackageLauncher))
 			{
 				return new ExistingConnectionRead(
 					localRead,
@@ -1371,7 +1373,8 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 					read.Connection.Command,
 					read.Connection.Arguments,
 					read.Connection.Environment,
-					out var codexSnapshot))
+					out var codexSnapshot,
+					allowPackageLauncher: allowPackageLauncher))
 			{
 				return new ExistingConnectionRead(
 					localRead,
@@ -1432,7 +1435,8 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 		var actual = await ReadExistingConnectionAsync(
 			request,
 			executable,
-			recoveryCts.Token).ConfigureAwait(false);
+			recoveryCts.Token,
+			allowPackageLauncher: true).ConfigureAwait(false);
 		if (actual.Error is not null)
 			return false;
 		// An entry in a form DevProjex did not write is never removed during recovery; it either is the original
@@ -1457,7 +1461,7 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 			return true;
 		}
 
-		var expectedArguments = CreateServerArguments(request.ProjectRoot, request.Mode);
+		var expectedArguments = CreateServerArguments(request.ProjectRoot, request.Mode, request.ExecutablePath);
 		var requiredEnvironment = McpConnectionFragmentGenerator.GetRequiredServerEnvironment();
 		if (actual.Snapshot is not null &&
 			!ConnectionMatches(
@@ -1528,12 +1532,12 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 			arguments.Add("--");
 		}
 		arguments.Add(McpConnectionFragmentGenerator.ResolveServerExecutable(executablePath));
-		arguments.AddRange(CreateServerArguments(projectRoot, mode));
+		arguments.AddRange(CreateServerArguments(projectRoot, mode, executablePath));
 		return arguments;
 	}
 
-	private static string[] CreateServerArguments(string projectRoot, McpConnectionMode mode) =>
-		McpConnectionFragmentGenerator.BuildServerArguments(mode, projectRoot);
+	private static string[] CreateServerArguments(string projectRoot, McpConnectionMode mode, string executablePath) =>
+		McpConnectionFragmentGenerator.BuildServerArguments(mode, projectRoot, executablePath);
 
 	private static bool ConnectionMatches(
 		CommandLineConnectionSnapshot actual,
@@ -1591,7 +1595,8 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 
 	private static bool TryParseCodexConnection(
 		string output,
-		out CommandLineConnectionSnapshot snapshot)
+		out CommandLineConnectionSnapshot snapshot,
+		bool allowPackageLauncher = false)
 	{
 		snapshot = default!;
 		try
@@ -1632,7 +1637,8 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 				command,
 				arguments,
 				environment,
-				out snapshot);
+				out snapshot,
+				allowPackageLauncher: allowPackageLauncher);
 		}
 		catch (Exception exception) when (exception is JsonException or InvalidOperationException)
 		{
@@ -1715,7 +1721,8 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 		IReadOnlyList<string> arguments,
 		IReadOnlyDictionary<string, string> environment,
 		out CommandLineConnectionSnapshot snapshot,
-		string? rawConfiguration = null)
+		string? rawConfiguration = null,
+		bool allowPackageLauncher = false)
 	{
 		snapshot = default!;
 		var rootIndex = arguments
@@ -1724,7 +1731,7 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 			.index;
 		if (string.IsNullOrWhiteSpace(command) ||
 			arguments.Count < 3 ||
-			!(arguments[0] == "mcp" || FlatpakEnvironment.Current.IsActive && command == "flatpak" &&
+			!(arguments[0] == "mcp" || allowPackageLauncher && IsPackageServer(command, arguments) || FlatpakEnvironment.Current.IsActive && command == "flatpak" &&
 				arguments.Count >= 5 && arguments[0] == "run" &&
 				arguments[1] == FlatpakEnvironment.Current.AppId && arguments[2] == "mcp") ||
 			rootIndex <= 0 ||
@@ -1742,6 +1749,10 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 			rawConfiguration);
 		return true;
 	}
+
+	private static bool IsPackageServer(string command, IReadOnlyList<string> arguments) =>
+		command == "npx" && arguments.Count >= 5 && arguments[0] == "-y" && arguments[1] == "devprojex" && arguments[2] == "mcp" ||
+		command == "dnx" && arguments.Count >= 4 && arguments[0] == "devprojex" && arguments[1] == "mcp";
 
 	private static bool PathsEqual(string left, string right) =>
 		string.Equals(
@@ -1821,14 +1832,15 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 				read.Connection.Arguments,
 				read.Connection.Environment,
 				out snapshot,
-				read.Connection.RawJson))
+				read.Connection.RawJson,
+				allowPackageLauncher: true))
 		{
 			return false;
 		}
 		return ConnectionMatches(
 			snapshot,
 			request.ExecutablePath,
-			CreateServerArguments(request.ProjectRoot, request.Mode),
+			CreateServerArguments(request.ProjectRoot, request.Mode, request.ExecutablePath),
 			McpConnectionFragmentGenerator.GetRequiredServerEnvironment());
 	}
 

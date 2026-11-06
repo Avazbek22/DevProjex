@@ -51,6 +51,7 @@ function main() {
   }
 
   const result = spawnSync(binary, process.argv.slice(2), {
+    env: { ...process.env, DEVPROJEX_NPM_EXECUTABLE: require('node:path').resolve(binary) },
     stdio: 'inherit',
     shell: false,
     windowsHide: false,

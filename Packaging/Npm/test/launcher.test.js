@@ -55,6 +55,36 @@ test('DEVPROJEX_BINARY overrides package resolution', () => {
   }
 });
 
+test('launcher supplies exact npm provenance without changing arguments or inherited environment', () => {
+  const args = ['project with spaces Юникод', '$HOME', 'quote\'"`;&|', 'line\nbreak'];
+  const result = spawnSync(process.execPath, [
+    path.resolve(__dirname, '../devprojex/bin/devprojex.js'),
+    '-e', 'process.stdout.write(JSON.stringify({ marker: process.env.DEVPROJEX_NPM_EXECUTABLE, inherited: process.env.DPX_LAUNCHER_TEST, args: process.argv.slice(1) }))',
+    '--', ...args,
+  ], {
+    env: {
+      ...process.env,
+      DEVPROJEX_BINARY: process.execPath,
+      DEVPROJEX_NPM_EXECUTABLE: 'stale-parent-marker',
+      DPX_LAUNCHER_TEST: 'preserved',
+    },
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), {
+    marker: process.execPath,
+    inherited: 'preserved',
+    args,
+  });
+});
+
+test('launcher preserves the child exit code', () => {
+  const result = spawnSync(process.execPath, [
+    path.resolve(__dirname, '../devprojex/bin/devprojex.js'), '-e', 'process.exit(23)',
+  ], { env: { ...process.env, DEVPROJEX_BINARY: process.execPath } });
+  assert.equal(result.status, 23);
+});
+
 test('launcher preserves a native child termination signal', { skip: process.platform === 'win32' }, () => {
   const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'devprojex-launcher-signal-'));
   const child = path.join(temporaryRoot, 'terminate.sh');
