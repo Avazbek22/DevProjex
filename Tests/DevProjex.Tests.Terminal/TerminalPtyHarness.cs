@@ -45,6 +45,7 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 	private readonly StringBuilder _rawOutput = new();
 	private readonly StringBuilder _terminalQueryScanBuffer = new();
 	private readonly StringBuilder _terminalResponseLog = new();
+	private TerminalSizeResponseAcknowledgement? _resizeAcknowledgement;
 	private readonly TaskCompletionSource<int> _exit =
 		new(TaskCreationOptions.RunContinuationsAsynchronously);
 	private readonly Channel<string> _terminalResponses =
@@ -435,8 +436,11 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			$"Screen:\n{CaptureScreen()}\nRaw output tail:\n{CaptureRawOutputTail()}");
 	}
 
-	public async Task SendQuitAndConfirmAsync(CancellationToken cancellationToken = default)
+	public async Task SendQuitAndConfirmAsync(
+		CancellationToken cancellationToken = default,
+		string confirmationButtonText = "OK")
 	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(confirmationButtonText);
 		var quitDialogVisible = false;
 		for (var quitAttempt = 0; quitAttempt < 5; quitAttempt++)
 		{
@@ -445,15 +449,15 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			await SendAsync("q", cancellationToken).ConfigureAwait(false);
 			var after = await WaitForStableScreenAsync(
 				readiness: screen =>
-					screen.Contains("OK", StringComparison.Ordinal) ||
+					screen.Contains(confirmationButtonText, StringComparison.Ordinal) ||
 					!string.Equals(screen, before, StringComparison.Ordinal),
 				readinessDescription: "showing the quit dialog or completing the preceding operation",
 				timelineState: screen =>
-					$"dialog={screen.Contains("OK", StringComparison.Ordinal)} " +
+					$"dialog={screen.Contains(confirmationButtonText, StringComparison.Ordinal)} " +
 					$"changed={!string.Equals(screen, before, StringComparison.Ordinal)}",
 				timeout: PtyCoordinationTimeout,
 				cancellationToken: cancellationToken).ConfigureAwait(false);
-			quitDialogVisible = after.Contains("OK", StringComparison.Ordinal);
+			quitDialogVisible = after.Contains(confirmationButtonText, StringComparison.Ordinal);
 			if (quitDialogVisible)
 				break;
 		}
@@ -470,7 +474,7 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 			await SendEnterAsync(cancellationToken).ConfigureAwait(false);
 			if (await WaitForQuitCompletionAsync(cancellationToken).ConfigureAwait(false))
 				return;
-			if (!CaptureScreen().Contains("OK", StringComparison.Ordinal))
+			if (!CaptureScreen().Contains(confirmationButtonText, StringComparison.Ordinal))
 			{
 				throw new TimeoutException(
 					"The quit dialog closed without terminating the terminal process.\n" +
@@ -727,19 +731,41 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		CancellationToken cancellationToken = default)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
-		var outputLengthBeforeResize = RawOutput.Length;
-		lock (_terminalGate)
-			_terminal.Resize(columns, rows);
-		await _process.ResizeAsync(columns, rows, cancellationToken).ConfigureAwait(false);
-		var minimumRedrawLength = Math.Max(64, columns * 2);
 		var timeout = Stopwatch.StartNew();
-		while (!HasExited &&
-			   RawOutput.Length - outputLengthBeforeResize < minimumRedrawLength &&
-			   timeout.Elapsed < TimeSpan.FromSeconds(3))
+		var budget = TimeSpan.FromSeconds(3);
+		TimeSpan RemainingBudget()
 		{
-			await Task.Delay(25, cancellationToken).ConfigureAwait(false);
+			var remaining = budget - timeout.Elapsed;
+			if (remaining <= TimeSpan.Zero)
+				throw new TimeoutException("Timed out completing the terminal resize.\n" + CaptureScreen());
+			return remaining;
 		}
-		await Task.Delay(50, cancellationToken).ConfigureAwait(false);
+		await WaitForStableScreenAsync(
+			static _ => true,
+			"settling the frame before terminal resize",
+			timeout: RemainingBudget(),
+			cancellationToken: cancellationToken).ConfigureAwait(false);
+		var outputLengthBeforeResize = RawOutput.Length;
+		var acknowledgement = OperatingSystem.IsWindows()
+			? null
+			: new TerminalSizeResponseAcknowledgement(columns, rows);
+		lock (_terminalGate)
+		{
+			_resizeAcknowledgement = acknowledgement;
+			_terminal.Resize(columns, rows);
+		}
+		await _process.ResizeAsync(columns, rows, cancellationToken).ConfigureAwait(false);
+		// Reflow can hide old pane titles before the ANSI driver observes the new size.
+		// Wait until its requested size response has actually been written to the PTY.
+		if (acknowledgement is not null)
+			await acknowledgement.Completion.WaitAsync(RemainingBudget(), cancellationToken)
+				.ConfigureAwait(false);
+		var minimumRedrawLength = Math.Max(64, columns * 2);
+		await WaitForStableScreenAsync(
+			_ => RawOutput.Length - outputLengthBeforeResize >= minimumRedrawLength,
+			"completing terminal resize redraw",
+			timeout: RemainingBudget(),
+			cancellationToken: cancellationToken).ConfigureAwait(false);
 	}
 
 	public string CaptureScreen()
@@ -1120,6 +1146,8 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 				lock (_terminalGate)
 					_terminalResponseLog.Append(Convert.ToHexString(Encoding.UTF8.GetBytes(response))).Append(' ');
 				await SendAsync(response, _readerCts.Token).ConfigureAwait(false);
+				lock (_terminalGate)
+					_resizeAcknowledgement?.ObserveWrittenResponse(response);
 			}
 		}
 		catch (OperationCanceledException) when (_readerCts.IsCancellationRequested)

@@ -356,7 +356,13 @@ public sealed class TerminalPtyLifecycleTests
 		Assert.DoesNotContain("[[", screen, StringComparison.Ordinal);
 		Assert.Contains(exitAction, screen, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
-		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
+		Assert.True(CliChoiceSets.Language.TryParse(language, out var appLanguage));
+		var confirmationButtonText = new LocalizationService(
+			new DevProjex.Infrastructure.ResourceStore.JsonLocalizationCatalog(),
+			appLanguage)["Terminal.Tui.Accept"];
+		await terminal.SendQuitAndConfirmAsync(
+			TestContext.Current.CancellationToken,
+			confirmationButtonText);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(
