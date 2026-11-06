@@ -1217,12 +1217,12 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 				message,
 				Environment.NewLine,
 				_localization.Format("Mcp.Connect.ProjectEntryFieldsReplaced", fields));
-		// The root is written as the client's workspace variable, but the executable path is not
-		// portable; a committed file would point other machines at this one's installation.
-		message = string.Concat(
-			message,
-			Environment.NewLine,
-			_localization["Mcp.Connect.ProjectConfigurationMachinePath"]);
+		// Native registrations name this installation; package launchers contain no machine-specific executable path.
+		if (McpConnectionFragmentGenerator.ResolveServerExecutable(request.ExecutablePath) is not ("npx" or "dnx"))
+			message = string.Concat(
+				message,
+				Environment.NewLine,
+				_localization["Mcp.Connect.ProjectConfigurationMachinePath"]);
 		return new McpConnectionResult(
 			result.Replaced ? McpConnectionStatus.Updated : McpConnectionStatus.Connected,
 			message,

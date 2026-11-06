@@ -102,6 +102,8 @@ public sealed class McpPackageConnectionTests
 		await File.WriteAllTextAsync(path, "{\"" + container + "\":{\"other\":{\"command\":\"leave-alone\"}}}", Token);
 		var result = await setup.Service.ConnectAsync(setup.Request, Token);
 		Assert.True(result.Succeeded, result.UserMessage);
+		var machinePathWarning = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En)["Mcp.Connect.ProjectConfigurationMachinePath"];
+		Assert.DoesNotContain(machinePathWarning, result.UserMessage, StringComparison.Ordinal);
 		var first = await File.ReadAllTextAsync(path, Token);
 		using var json = JsonDocument.Parse(first);
 		var servers = json.RootElement.GetProperty(container);
