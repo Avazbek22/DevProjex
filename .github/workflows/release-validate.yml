@@ -52,7 +52,9 @@ jobs:
 
       - name: Validate CI planner contracts
         shell: pwsh
-        run: ./Scripts/ci/Test-CiChangePlanner.ps1
+        run: |
+          ./Scripts/ci/Test-CiChangePlanner.ps1
+          ./Scripts/ci/Test-WorkflowResultGateContract.ps1
 
       - name: Select release validation plan
         id: plan
@@ -1802,5 +1804,6 @@ jobs:
           $accepted = if ($env:FORCE_FULL -eq 'true') { @('success') } else { @('success', 'skipped') }
           $failed = @($results.GetEnumerator() | Where-Object { $_.Value -notin $accepted })
           if ($failed.Count -gt 0) {
-            throw "Selected release jobs failed: $($failed.ForEach({ \"$($_.Key)=$($_.Value)\" }) -join ', ')"
+            $details = $failed.ForEach({ "$($_.Key)=$($_.Value)" }) -join ', '
+            throw "Selected release jobs failed: $details"
           }
