@@ -9,6 +9,9 @@ internal sealed partial class DevProjexMcpTools
 	private const int MaximumDiffResponseCharacters = 50_000;
 	private const int DefaultDiffContextLines = 3;
 	private const string DiffNoChangesNotice = "[Diff] no changes in the effective selection for this scope.";
+	internal const string DiffNotInWorkingTreeNotice =
+		"[Diff] files changed in this range but absent from the working tree are counted, not shown; " +
+		"check out the range's newer commit to review them.";
 	// A constant: neither the scope value nor a path reaches it, so it stays trusted.
 	internal const string GitScopeDiffNotice = "[Diff] get_diff with the same git_scope returns only the changed lines.";
 
@@ -184,7 +187,8 @@ internal sealed partial class DevProjexMcpTools
 	}
 
 	private const string ChangedFilesHeading = "Changed files (largest first):";
-	private const string NotShownHeading = "Not shown:";
+	// Files with hunks left out only for the response limit; trusted reasons are counted in "[Diff] not shown:".
+	private const string NotShownHeading = "Not shown (size limit):";
 
 	private static string FormatDiffScope(ProjectDiffResult diff) =>
 		McpTextEscaping.EscapeSingleLine(GitScopeSelection.ToToken(
@@ -201,9 +205,16 @@ internal sealed partial class DevProjexMcpTools
 		var parts = new List<string>(4);
 		Add("binary", diff.Count(ProjectDiffOmission.Binary));
 		Add("too-large", diff.Count(ProjectDiffOmission.TooLarge));
+		Add("change-too-large", diff.Count(ProjectDiffOmission.ChangeTooLarge));
 		Add("line-endings-only", diff.Count(ProjectDiffOmission.LineEndingsOnly));
 		Add("deleted", diff.DeletedOutsideSelection);
-		return parts.Count == 0 ? null : "[Diff] not shown: " + string.Join(" · ", parts);
+		Add("not-in-working-tree", diff.NotInWorkingTree);
+		if (parts.Count == 0)
+			return null;
+		var notice = "[Diff] not shown: " + string.Join(" · ", parts);
+		return diff.NotInWorkingTree > 0 && diff.Mode == GitFilteringMode.Diff
+			? notice + "\n" + DiffNotInWorkingTreeNotice
+			: notice;
 
 		void Add(string name, int count)
 		{

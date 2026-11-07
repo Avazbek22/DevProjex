@@ -629,6 +629,8 @@
   "Terminal.Diff.NotShown": "Không hiển thị:",
   "Terminal.Diff.Summary": "Tệp đã thay đổi: {0}, đã hiển thị: {1}; dòng thêm: {2}, xóa: {3}.",
   "Terminal.Diff.Deleted": "Tệp đã xóa bên ngoài cây làm việc: {0}.",
+  "Terminal.Diff.NotInWorkingTree": "Tệp đã thay đổi không có trong cây làm việc, đã đếm nhưng không hiển thị: {0}.",
+  "Terminal.Diff.NotInWorkingTreeHint": "Hãy checkout commit mới hơn của phạm vi để xem chúng.",
   "Terminal.Diff.None": "Không có thay đổi trong lựa chọn hiệu lực cho phạm vi Git này.",
   "Terminal.Diff.Unavailable": "Không thể đọc từ Git các phiên bản tệp đã commit hoặc đã stage.",
   "Terminal.Command.Export": "Xuất ngữ cảnh dự án hoặc bản sao vật lý của dự án.",

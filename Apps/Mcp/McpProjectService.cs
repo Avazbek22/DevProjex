@@ -375,7 +375,11 @@ internal sealed class McpProjectService(
 					scope.DiffRange,
 					selectionFrontier?.ProjectionPaths,
 					cancellationToken,
-					resolvedDiffRange)
+					resolvedDiffRange,
+					hasSelectionFilters
+						? path => MatchesRequested(path, requested.Paths, requested.Directories) &&
+							globs.Includes(ToRelative(projectRoot, path))
+						: null)
 				.ConfigureAwait(false);
 			if (plan.HasErrors)
 			{

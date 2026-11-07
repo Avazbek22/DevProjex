@@ -10,8 +10,11 @@ public enum LineDiffOutcome
 
 	Changed,
 
-	/// <summary>A version exceeds the line limit, or the edit script exceeds the edit-distance limit.</summary>
-	TooLarge
+	/// <summary>A version exceeds the line limit.</summary>
+	TooLarge,
+
+	/// <summary>Both versions fit, but the edit script exceeds the edit-distance limit.</summary>
+	ChangeTooLarge
 }
 
 public enum UnifiedDiffLineKind
@@ -44,4 +47,5 @@ public sealed record LineDiffResult(
 	public static LineDiffResult Unchanged { get; } = new(LineDiffOutcome.Unchanged, 0, 0, []);
 	public static LineDiffResult LineEndingsOnly { get; } = new(LineDiffOutcome.LineEndingsOnly, 0, 0, []);
 	public static LineDiffResult TooLarge { get; } = new(LineDiffOutcome.TooLarge, 0, 0, []);
+	public static LineDiffResult ChangeTooLarge { get; } = new(LineDiffOutcome.ChangeTooLarge, 0, 0, []);
 }

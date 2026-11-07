@@ -3,9 +3,10 @@ namespace DevProjex.Application.Diff;
 /// <summary>
 /// A line diff for two versions of one file: Myers' O(ND) greedy algorithm over line identities,
 /// after the common prefix and suffix are removed. Pure and bounded: a version above
-/// <see cref="MaximumLines"/> lines, or a change whose search would need more than
-/// <see cref="MaximumEditDistance"/> added plus removed lines, is reported as too large instead
-/// of being approximated, so every hunk returned belongs to a minimal edit. A change that shares
+/// <see cref="MaximumLines"/> lines is reported as too large, and a change whose search would need
+/// more than <see cref="MaximumEditDistance"/> added plus removed lines as a change too large to
+/// compare line by line, instead of being approximated, so every hunk returned belongs to a
+/// minimal edit. A change that shares
 /// no line between the versions needs no search and is not limited by the edit distance.
 /// </summary>
 public static class LineDiff
@@ -38,7 +39,7 @@ public static class LineDiff
 
 		var script = BuildEditScript(oldIds, newIds, cancellationToken);
 		return script is null
-			? LineDiffResult.TooLarge
+			? LineDiffResult.ChangeTooLarge
 			: BuildResult(script, oldLines, newLines, contextLines, cancellationToken);
 	}
 

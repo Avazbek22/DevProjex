@@ -635,6 +635,8 @@
   "Terminal.Diff.NotShown": "Not shown:",
   "Terminal.Diff.Summary": "Changed files: {0}, shown: {1}; lines added: {2}, removed: {3}.",
   "Terminal.Diff.Deleted": "Deleted files outside the working tree: {0}.",
+  "Terminal.Diff.NotInWorkingTree": "Changed files absent from the working tree, counted but not shown: {0}.",
+  "Terminal.Diff.NotInWorkingTreeHint": "Check out the range's newer commit to review them.",
   "Terminal.Diff.None": "No changes in the effective selection for this Git scope.",
   "Terminal.Diff.Unavailable": "Committed or staged file versions could not be read from Git.",
   "Terminal.Command.Export": "Export project context or a physical project copy.",

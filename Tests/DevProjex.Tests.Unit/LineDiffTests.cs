@@ -170,7 +170,7 @@ public sealed class LineDiffTests
 	}
 
 	[Fact]
-	public void AnInterleavedChangeAboveTheEditDistanceLimitIsTooLarge()
+	public void AnInterleavedChangeAboveTheEditDistanceLimitIsAChangeTooLarge()
 	{
 		var count = LineDiff.MaximumEditDistance * 2;
 		var old = string.Concat(Enumerable.Range(0, count).Select(index => $"x{index}\n"));
@@ -179,8 +179,20 @@ public sealed class LineDiffTests
 
 		var result = LineDiff.Compare(old, updated, 3, TestContext.Current.CancellationToken);
 
-		Assert.Equal(LineDiffOutcome.TooLarge, result.Outcome);
+		// Both versions are far below the line limit; only the edit script is too long.
+		Assert.Equal(LineDiffOutcome.ChangeTooLarge, result.Outcome);
 		Assert.Empty(result.Hunks);
+		Assert.Equal(
+			"big.txt [modified, change-too-large]",
+			ProjectDiffText.FormatListEntry(new ProjectDiffFile(
+				"/p/big.txt",
+				"big.txt",
+				null,
+				ProjectDiffFileStatus.Modified,
+				ProjectDiffOmission.ChangeTooLarge,
+				0,
+				0,
+				[])));
 	}
 
 	[Fact]

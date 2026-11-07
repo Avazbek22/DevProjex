@@ -629,6 +629,8 @@
   "Terminal.Diff.NotShown": "Niepokazane:",
   "Terminal.Diff.Summary": "Zmienione pliki: {0}, pokazane: {1}; wiersze dodane: {2}, usunięte: {3}.",
   "Terminal.Diff.Deleted": "Usunięte pliki poza drzewem roboczym: {0}.",
+  "Terminal.Diff.NotInWorkingTree": "Zmienione pliki nieobecne w drzewie roboczym, policzone, ale niepokazane: {0}.",
+  "Terminal.Diff.NotInWorkingTreeHint": "Przełącz się na nowszy commit zakresu, aby je przejrzeć.",
   "Terminal.Diff.None": "Brak zmian w efektywnym wyborze dla tego zakresu Git.",
   "Terminal.Diff.Unavailable": "Nie można odczytać z Git zatwierdzonych ani przygotowanych wersji plików.",
   "Terminal.Command.Export": "Eksportuj kontekst projektu lub fizyczną kopię projektu.",

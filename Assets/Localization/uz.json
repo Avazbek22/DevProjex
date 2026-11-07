@@ -617,6 +617,8 @@
   "Terminal.Diff.NotShown": "Ko‘rsatilmagan:",
   "Terminal.Diff.Summary": "O‘zgargan fayllar: {0}, ko‘rsatilgan: {1}; qo‘shilgan qatorlar: {2}, o‘chirilgan: {3}.",
   "Terminal.Diff.Deleted": "Ishchi daraxtdan tashqarida o‘chirilgan fayllar: {0}.",
+  "Terminal.Diff.NotInWorkingTree": "Ishchi daraxtda yo‘q o‘zgargan fayllar, sanaldi, lekin ko‘rsatilmadi: {0}.",
+  "Terminal.Diff.NotInWorkingTreeHint": "Ularni ko‘rish uchun diapazonning yangiroq commit’iga o‘ting.",
   "Terminal.Diff.None": "Ushbu Git doirasi uchun samarali tanlovda o‘zgarishlar yo‘q.",
   "Terminal.Diff.Unavailable": "Fayllarning commit qilingan yoki indekslangan versiyalarini Git’dan o‘qib bo‘lmadi.",
   "Terminal.Command.Export": "Loyiha kontekstini yoki jismoniy nusxasini eksport qiladi.",
