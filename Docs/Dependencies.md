@@ -50,6 +50,16 @@ There are three separate scopes. The **allowed manifest** is the effective DevPr
 Seeds do not reduce the manifest that must be indexed. No declaration, candidate, path, or cached
 reason can cross the current manifest gate, and self-file relationships are suppressed.
 
+One documented projection looks past a narrowed selection without changing it. A selection
+cannot tell a reference into a file it left out from one that leads nowhere, so `related` and
+`related_files` relate their seeds to the files the caller may read but the call's own narrowing
+left out. That second index honors every access filter and lifts only the narrowing; the
+[MCP server](McpServer.md#related_files) and [command line](CommandLine.md#related) documents
+define it per surface. The selection's own results are computed exactly as before, and its
+answers stand: a relation found there only becomes an outside entry when the selection reported it
+unresolved. Outside entries name a path, the same evidence reasons, and an estimated token
+count, never content, and they are the only results that name a file outside the manifest.
+
 Configuration describes the project, not the selection. For each language present in the manifest,
 the engine also reads that language's control files (`.csproj`, `tsconfig.json`, `jsconfig.json`,
 `package.json`, `pyproject.toml`, `setup.cfg`, Maven and Gradle builds, `Cargo.toml`, `Gemfile`,

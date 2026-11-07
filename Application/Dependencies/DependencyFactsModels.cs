@@ -318,6 +318,31 @@ public sealed record DependencyRelatedResult(
 	DependencyIndexSnapshot Index,
 	IReadOnlyList<SeedRelatedFiles> Seeds);
 
+/// <summary>
+/// Resolved relations between a seed and project files a narrowed selection left out. Each list
+/// holds at most <see cref="DependencyOutsideSelectionResult.MaximumFilesPerSection"/> files in
+/// path order; the counts report how many exist.
+/// </summary>
+public sealed record SeedOutsideSelection(
+	string Seed,
+	IReadOnlyList<RelatedFile> Dependencies,
+	int DependencyCount,
+	IReadOnlyList<RelatedFile> Dependents,
+	int DependentCount);
+
+/// <param name="Edges">Resolved evidence groups behind the listed relations.</param>
+/// <param name="ExplainedUnresolvedEdges">
+/// Evidence groups the selection reported as unresolved that resolve to a file outside it.
+/// </param>
+public sealed record DependencyOutsideSelectionResult(
+	DependencyIndexSnapshot Index,
+	IReadOnlyList<SeedOutsideSelection> Seeds,
+	int Edges,
+	int ExplainedUnresolvedEdges)
+{
+	public const int MaximumFilesPerSection = 20;
+}
+
 public sealed class DependencyTraversalLimitException(int maximumSeeds) : Exception(
 	$"The related traversal reached more than {maximumSeeds} files. Reduce the depth or narrow the effective selection.")
 {
