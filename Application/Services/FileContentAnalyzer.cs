@@ -839,8 +839,39 @@ public sealed class FileContentAnalyzer :
 		}
 	}
 
+	/// <summary>
+	/// Classifies and decodes stored bytes, such as a committed version of a file, with the rules a
+	/// read of the working file applies: known binary extensions, the byte-order mark and null-byte
+	/// probe, the full-read size limit and strict decoding. A version therefore reads as text exactly
+	/// when the same bytes on disk would.
+	/// </summary>
+	public static ContentReadFact ReadStoredFact(
+		string path,
+		byte[] content,
+		long maxSizeForFullRead,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(path);
+		ArgumentNullException.ThrowIfNull(content);
+		if (HasKnownBinaryExtension(path))
+			return new ContentReadFact(null, FileContentClassification.Binary, null, null);
+		try
+		{
+			using var stream = new MemoryStream(content, writable: false);
+			return ReadFactFromOpenStream(stream, maxSizeForFullRead, cancellationToken);
+		}
+		catch (BinaryContentException)
+		{
+			return new ContentReadFact(null, FileContentClassification.Binary, null, null);
+		}
+		catch (DecoderFallbackException)
+		{
+			return new ContentReadFact(null, FileContentClassification.UnsupportedEncoding, null, null);
+		}
+	}
+
 	private static ContentReadFact ReadFactFromOpenStream(
-		FileStream stream,
+		Stream stream,
 		long maxSizeForFullRead,
 		CancellationToken cancellationToken)
 	{
@@ -909,7 +940,7 @@ public sealed class FileContentAnalyzer :
 	/// Checks first 512 bytes for null bytes to detect binary content.
 	/// Returns true if no null bytes found (text file), false otherwise (binary).
 	/// </summary>
-	private static PrefixProbe ReadPrefix(FileStream stream, CancellationToken cancellationToken)
+	private static PrefixProbe ReadPrefix(Stream stream, CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 		stream.Position = 0;
@@ -1445,7 +1476,7 @@ public sealed class FileContentAnalyzer :
 	}
 
 	private static ContentReadFact ReadFullContentStrict(
-		FileStream stream,
+		Stream stream,
 		long sizeBytes,
 		Encoding encoding,
 		TextFileEncoding textEncoding,

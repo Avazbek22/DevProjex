@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using DevProjex.Application.Diagnostics;
+using DevProjex.Application.Diff;
 using DevProjex.Application.Ranking;
 
 namespace DevProjex.Mcp;
@@ -31,6 +32,9 @@ internal sealed class McpProjectService(
 	private readonly ConcurrentDictionary<string, byte> provenIgnoredMonitorSubtrees = new(PathComparer.Default);
 	private readonly object rootMonitorSync = new();
 	private readonly ConditionalWeakTable<ProjectContextPlan, PlanMembership> planMembership = new();
+	// A remote ref-to-ref scope is read through the commit range its fetch resolved, which the plan
+	// itself does not carry.
+	private readonly ConditionalWeakTable<ProjectContextPlan, string> resolvedDiffRanges = new();
 	private readonly CancellationTokenSource disposalCancellation = new();
 	private long cacheGeneration;
 	private long planMembershipBuildCount;
@@ -350,9 +354,9 @@ internal sealed class McpProjectService(
 			globs,
 			hasSelectionFilters,
 			cancellationToken);
+		string? resolvedDiffRange = null;
 		if (parsedScope is { } scope)
 		{
-			string? resolvedDiffRange = null;
 			if (scope.Mode == GitFilteringMode.Diff && source.Identity?.SourceType == ProjectSourceType.GitClone)
 			{
 				resolvedDiffRange = await projectSources.ResolveRemoteDiffRangeAsync(
@@ -376,6 +380,15 @@ internal sealed class McpProjectService(
 			{
 				var diagnostic = plan.Diagnostics.First(static item =>
 					item.Severity == ContextDiagnosticSeverity.Error);
+				if (scope.Mode == GitFilteringMode.Diff &&
+					diagnostic.Code == GitScopeFilter.UnavailableDiagnosticCode &&
+					source.Identity?.SourceType != ProjectSourceType.GitClone &&
+					await services.DiffService
+						.ProbeRangeAsync(projectRoot, scope.DiffRange!, cancellationToken)
+						.ConfigureAwait(false) is not GitRevisionAvailability.Unknown and var availability)
+				{
+					throw MissingRevision(availability);
+				}
 				throw new McpToolException(
 					McpErrorCodes.ProjectUnavailable,
 					$"{McpErrorCodes.ProjectUnavailable}: Git state preparation failed " +
@@ -441,6 +454,8 @@ internal sealed class McpProjectService(
 		if (tolerateMissingPaths)
 			final = AddMissingRequestedPathDiagnostics(final, requested);
 		ValidatePlanContainment(roots, projectRoot, final.IncludedFiles, cancellationToken);
+		if (resolvedDiffRange is not null)
+			resolvedDiffRanges.AddOrUpdate(final, resolvedDiffRange);
 		if (allowProjectionReuse)
 		{
 			var projection = new CachedProjectionPlan(
@@ -1392,6 +1407,63 @@ internal sealed class McpProjectService(
 	/// </summary>
 	public bool IsDecodedAsSearchText(string path, long sizeBytes, bool probeContent) =>
 		services.OutputPreparer.ClassifyBeforeDecoding(path, sizeBytes, probeContent) is null;
+
+	/// <summary>
+	/// Compares the old and new version of every file in a plan built with a momentary Git scope.
+	/// The working side is read through the same root-jailed content analyzer every file read uses,
+	/// and both sides pass the protection that analyzer's reads pass.
+	/// </summary>
+	public async Task<ProjectDiffResult> CompareVersionsAsync(
+		ProjectContextPlan plan,
+		int contextLines,
+		CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(plan);
+		var mode = plan.Selection.GitMode ?? GitFilteringMode.None;
+		if (!GitScopeSelection.IsMomentary(mode))
+			throw new InvalidOperationException("A diff needs a plan built with a momentary Git scope.");
+		var range = mode == GitFilteringMode.Diff
+			? resolvedDiffRanges.TryGetValue(plan, out var resolved) ? resolved : plan.Selection.GitDiffRange
+			: null;
+		var redaction = CreateTransformationContext(plan).Redaction ??
+						throw new InvalidOperationException("MCP text redaction is unavailable.");
+		try
+		{
+			return await services.DiffService.CompareAsync(
+					new ProjectDiffRequest(
+						plan,
+						mode,
+						range,
+						contextLines,
+						redaction,
+						(path, token) => services.ContentAnalyzer.ReadClassifiedAsync(
+							path,
+							SecretRedactionOutputPreparer.MaximumScannableFileBytes,
+							token)),
+					cancellationToken)
+				.ConfigureAwait(false);
+		}
+		catch (ProjectDiffException exception) when (exception.Failure == GitFileVersionFailure.UnknownRevision)
+		{
+			throw MissingRevision(GitRevisionAvailability.Missing);
+		}
+		catch (ProjectDiffException)
+		{
+			throw new McpToolException(
+				McpErrorCodes.ProjectUnavailable,
+				$"{McpErrorCodes.ProjectUnavailable}: committed or staged file versions could not be read from Git. " +
+				"Verify the repository and retry.");
+		}
+	}
+
+	internal static McpToolException MissingRevision(GitRevisionAvailability availability) =>
+		new(
+			McpErrorCodes.InvalidArguments,
+			$"{McpErrorCodes.InvalidArguments}: git_scope names a revision this repository does not have." +
+			(availability == GitRevisionAvailability.MissingInShallowClone
+				? " This is a shallow clone, so older commits may be missing."
+				: string.Empty) +
+			" Check the refs, or use git_scope \"changes\" or \"staged\".");
 
 	public (string Text, SecretRedactionSnapshot Snapshot) RedactSyntheticText(
 		ProjectContextPlan plan,

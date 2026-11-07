@@ -118,9 +118,9 @@ defaulting to 1,800; `off` disables bodies but keeps declaration ranges and matc
 Invalid values fail before startup. The total search response budget remains
 16,000 characters; catalog descriptions and instructions reflect the chosen limit.
 `--tool-set full|reduced` selects a
-startup-fixed catalog: `full` (default) has all eight tools; `reduced` has
-`list_projects`, `get_tree`, `search_project`, `related_files`, `get_file`, and
-`read_pack`, but not `analyze` or `pack_context`. Instructions match the selected
+startup-fixed catalog: `full` (default) has all nine tools; `reduced` has
+`list_projects`, `get_tree`, `search_project`, `related_files`, `get_file`,
+`get_diff`, and `read_pack`, but not `analyze` or `pack_context`. Instructions match the selected
 set; retained search and dependency pages remain readable. Omitted tools return
 the normal unknown-tool error. Secret redaction is mandatory; private-data
 redaction is enabled only by the server startup flag and cannot be controlled by

@@ -8,6 +8,23 @@ namespace DevProjex.Application.Diff;
 public interface IGitFileVersionReader
 {
 	Task<GitFileVersionSet> ReadAsync(GitFileVersionRequest request, CancellationToken cancellationToken = default);
+
+	/// <summary>
+	/// Explains a ref-to-ref scope Git could not read: whether either revision is absent from the
+	/// repository that owns <paramref name="projectRoot"/>, and whether that repository is shallow.
+	/// </summary>
+	Task<GitRevisionAvailability> ProbeRangeAsync(
+		string projectRoot,
+		string diffRange,
+		CancellationToken cancellationToken = default);
+}
+
+public enum GitRevisionAvailability
+{
+	/// <summary>Both revisions resolve, or the repository could not be asked.</summary>
+	Unknown,
+	Missing,
+	MissingInShallowClone
 }
 
 /// <param name="Mode">

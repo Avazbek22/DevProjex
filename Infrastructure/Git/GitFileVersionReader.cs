@@ -63,6 +63,45 @@ public sealed class GitFileVersionReader : IGitFileVersionReader
 		return new GitFileVersionSet(results);
 	}
 
+	public async Task<GitRevisionAvailability> ProbeRangeAsync(
+		string projectRoot,
+		string diffRange,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
+		if (!GitScopeSelection.IsValidDiffRange(diffRange) ||
+			!GitTrackedPathIndexCache.TryFindNearestRepositoryBoundary(projectRoot, cancellationToken, out var repositoryRoot))
+		{
+			return GitRevisionAvailability.Unknown;
+		}
+		try
+		{
+			var (left, right) = GitScopeSelection.SplitDiffRange(diffRange);
+			var missing = false;
+			foreach (var reference in new[] { left, right })
+			{
+				var resolved = await ResolveCommitAsync(repositoryRoot, reference, cancellationToken).ConfigureAwait(false);
+				if (resolved.Failure is { Failure: GitFileVersionFailure.Unavailable })
+					return GitRevisionAvailability.Unknown;
+				missing |= resolved.ObjectId is null;
+			}
+			if (!missing)
+				return GitRevisionAvailability.Unknown;
+			var shallow = await RunListingAsync(
+					repositoryRoot,
+					GitProcessOperation.ReadShallowRepositoryState(),
+					cancellationToken)
+				.ConfigureAwait(false);
+			return shallow.Succeeded && shallow.Text.Trim() == "true"
+				? GitRevisionAvailability.MissingInShallowClone
+				: GitRevisionAvailability.Missing;
+		}
+		catch (Exception exception) when (exception is Win32Exception or InvalidOperationException)
+		{
+			return GitRevisionAvailability.Unknown;
+		}
+	}
+
 	private static SortedDictionary<string, List<RepositoryFile>> GroupByRepository(
 		IReadOnlyList<string> files,
 		Dictionary<string, GitFileVersions> results,

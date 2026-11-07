@@ -62,7 +62,8 @@ internal sealed class McpProjectSourceResolver : IDisposable
 			{
 				throw new McpToolException(
 					McpErrorCodes.InvalidArguments,
-					$"{McpErrorCodes.InvalidArguments}: 'branch' is valid only when 'project' is a Git URL.");
+					$"{McpErrorCodes.InvalidArguments}: 'branch' is valid only when 'project' is a Git URL. " +
+					"To compare a local project with a commit, call get_diff with git_scope \"changes\", \"staged\" or \"diff:<A>..<B>\".");
 			}
 
 			var localRoot = _localRoots.ResolveProject(project);

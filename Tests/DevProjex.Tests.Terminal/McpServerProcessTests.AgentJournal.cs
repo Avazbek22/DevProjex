@@ -64,6 +64,14 @@ public sealed partial class McpServerProcessTests
 				server,
 				"get_file",
 				new Dictionary<string, object?> { ["path"] = "Outside.cs" });
+			// The project is not a Git repository, so the diff fails; a failed call is journaled too.
+			var diff = await server.Client.CallToolAsync(
+				"get_diff",
+				new Dictionary<string, object?>(),
+				progress: null,
+				options: null,
+				TestContext.Current.CancellationToken);
+			Assert.True(diff.IsError);
 		}
 
 		using var journal = new AgentJournalStore(() => dataRoot, activeSessionProvider: static () => []);
@@ -74,7 +82,7 @@ public sealed partial class McpServerProcessTests
 
 		Assert.Equal(live ? AgentJournalMode.Live : AgentJournalMode.Standard, session.Mode);
 		Assert.Equal(ExpectedTools, calls.Select(static call => call.Tool));
-		Assert.Equal(8, session.Totals.Calls);
+		Assert.Equal(9, session.Totals.Calls);
 		Assert.True(session.Totals.ResultCharacters > 0);
 		Assert.True(session.Totals.EstimatedTokens > 0);
 		Assert.DoesNotContain(calls, call => call.Tool == "pack_context" && call.DeliveredPaths.Contains("src/Large.txt"));

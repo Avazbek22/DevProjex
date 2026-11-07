@@ -1404,7 +1404,7 @@ a fitting depth. Third, uninspected entries in MCP `analyze.topFiles` gain the
 optional `uninspected: true` field, and their estimates use the same character
 base as aggregate `characters` and `tokens`. Fourth, `initialize.instructions`
 now carries workflow, trust-boundary, redaction, limit, and glob guidance, while
-all eight tool descriptions are self-contained for tool search. Cached MCP
+all nine tool descriptions are self-contained for tool search. Cached MCP
 schemas must be refreshed for the additive `topFiles` field and new field
 descriptions.
 

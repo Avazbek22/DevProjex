@@ -166,7 +166,11 @@ public sealed partial class McpServerProcessTests
 			["--git-mode", "none", "--exclude", "none"], environment: GitModeEnvironment(repository));
 		var response = await CallAsync(server, "get_tree", new Dictionary<string, object?> { ["git_scope"] = "diff:HEAD~1..HEAD" });
 		Assert.True(response.IsError);
-		Assert.Contains("DPX-GIT-STATE-UNAVAILABLE", string.Join('\n', response.Content.OfType<TextContentBlock>().Select(static item => item.Text)), StringComparison.Ordinal);
+		Assert.Contains(
+			"DPX-MCP-INVALID-ARGUMENTS: git_scope names a revision this repository does not have. " +
+			"This is a shallow clone, so older commits may be missing.",
+			string.Join('\n', response.Content.OfType<TextContentBlock>().Select(static item => item.Text)),
+			StringComparison.Ordinal);
 	}
 
 	[Fact]

@@ -30,7 +30,8 @@ public static class UnifiedDiffFormatter
 	};
 
 	/// <summary>Writes the header and every line, each ended by '\n'.</summary>
-	public static void WriteHunk(TextWriter writer, UnifiedDiffHunk hunk)
+	/// <param name="formatLine">Applied to the text of every line after its prefix; null writes the text as is.</param>
+	public static void WriteHunk(TextWriter writer, UnifiedDiffHunk hunk, Func<string, string>? formatLine = null)
 	{
 		ArgumentNullException.ThrowIfNull(writer);
 		ArgumentNullException.ThrowIfNull(hunk);
@@ -39,7 +40,7 @@ public static class UnifiedDiffFormatter
 		foreach (var line in hunk.Lines)
 		{
 			writer.Write(Prefix(line.Kind));
-			writer.Write(line.Text);
+			writer.Write(formatLine is null ? line.Text : formatLine(line.Text));
 			writer.Write('\n');
 			if (line.IsUnterminated)
 			{

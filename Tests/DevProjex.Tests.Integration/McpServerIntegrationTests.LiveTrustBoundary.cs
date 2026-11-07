@@ -33,6 +33,15 @@ public sealed partial class McpServerIntegrationTests
 		File.WriteAllText(Path.Combine(outside, outsideFileName), "class Outside {}\n");
 		File.WriteAllText(Path.Combine(outside, secondOutsideFileName), "class SecondOutside {}\n");
 		File.WriteAllText(Path.Combine(second, "Second.cs"), "class Second {}\n");
+		if (!IsGitAvailable())
+			GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
+		// get_diff needs a repository: a committed and then edited file whose path and lines carry the marker.
+		RunGit(first, "init", "--quiet");
+		RunGit(first, "config", "user.name", "DevProjex Tests");
+		RunGit(first, "config", "user.email", "devprojex@example.invalid");
+		RunGit(first, "add", ".");
+		RunGit(first, "commit", "--quiet", "-m", "baseline");
+		File.AppendAllText(Path.Combine(selected, sourceName), "// edited " + marker + "\n");
 		var profileStore = new ProjectProfileStore(() => Path.Combine(workspace.Path, "app-data"));
 		profileStore.SaveProfile(first, new ProjectSelectionProfile([], [], [], SelectedPaths: [selectedName]));
 		profileStore.SaveProfile(second, new ProjectSelectionProfile([], [], [], SelectedPaths: null));
@@ -80,7 +89,10 @@ public sealed partial class McpServerIntegrationTests
 				{
 					["project"] = first,
 					["path"] = outsideName + "/" + outsideFileName
-				}))
+				})),
+			("get_diff", await server.CallAsync(
+				"get_diff",
+				new Dictionary<string, object?> { ["project"] = first }))
 		};
 
 		Assert.Equal(

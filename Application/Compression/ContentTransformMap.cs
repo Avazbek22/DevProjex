@@ -47,6 +47,12 @@ public sealed class ContentTransformMap
 
 	public bool IsIdentity => _sourceStarts.Length == 0;
 
+	internal int RangeCount => _sourceStarts.Length;
+
+	/// <summary>The edit at <paramref name="index"/>, in source order, in both coordinate spaces.</summary>
+	internal (int SourceStart, int SourceLength, int TransformedStart, int TransformedLength) GetRange(int index) =>
+		(_sourceStarts[index], _sourceLengths[index], _transformedStarts[index], _transformedLengths[index]);
+
 	/// <summary>
 	/// Builds a map from edits that are already sorted by start offset and non-overlapping —
 	/// the shape <see cref="CodeCompressionPlan"/> guarantees.

@@ -669,6 +669,7 @@ internal sealed class McpLiveContextState(
 			McpLiveFocusUse.Related => single
 				? "was checked only for links to the seeds"
 				: "were checked only for links to the seeds",
+			McpLiveFocusUse.Diff => single ? "was not compared" : "were not compared",
 			_ => throw new ArgumentOutOfRangeException(nameof(use), use, null)
 		};
 		return $"[Live context] focus: {focus.ToString(CultureInfo.InvariantCulture)} of " +
@@ -813,7 +814,8 @@ internal enum McpLiveFocusUse
 	Search,
 	Analysis,
 	Pack,
-	Related
+	Related,
+	Diff
 }
 
 internal sealed record McpLiveProfileSnapshot(
