@@ -106,7 +106,13 @@ public sealed class ProjectDiffService(IGitFileVersionReader versions)
 		if (omission != ProjectDiffOmission.None)
 			return Omitted(status, omission);
 
-		var (oldMasked, newMasked) = Mask(file, oldText?.Text ?? string.Empty, newText?.Text ?? string.Empty, scope, cancellationToken);
+		var (oldMasked, newMasked) = Mask(
+			file,
+			version.RenamedFrom,
+			oldText?.Text ?? string.Empty,
+			newText?.Text ?? string.Empty,
+			scope,
+			cancellationToken);
 		var diff = LineDiff.Compare(oldMasked, newMasked, request.ContextLines, cancellationToken);
 		switch (diff.Outcome)
 		{
@@ -138,6 +144,7 @@ public sealed class ProjectDiffService(IGitFileVersionReader versions)
 
 	private static (string Old, string New) Mask(
 		string file,
+		string? renamedFrom,
 		string oldText,
 		string newText,
 		SecretRedactionScope? scope,
@@ -145,9 +152,11 @@ public sealed class ProjectDiffService(IGitFileVersionReader versions)
 	{
 		if (scope is null)
 			return (oldText, newText);
-		// Both versions use the selected path as their identity, so path-based detector policy and
-		// hand marks apply to the old side exactly as they apply to the file a read returns.
-		var oldResult = scope.Redact(file, oldText, cancellationToken);
+		// Each version is redacted under the path that holds it, so path-based detector policy and
+		// hand marks of a rename source apply to its old content. A value either pass masks is then
+		// masked in both versions. The rename source is not compared on its own, so its old content
+		// is redacted, and counted, exactly once.
+		var oldResult = scope.Redact(renamedFrom ?? file, oldText, cancellationToken);
 		var newResult = scope.Redact(file, newText, cancellationToken);
 		return CrossVersionRedaction.Apply(oldText, oldResult, newText, newResult);
 	}

@@ -118,7 +118,11 @@ public sealed class GitFileVersionReader : IGitFileVersionReader
 				results[file] = new GitFileVersions(null, null, Unsupported: true);
 				continue;
 			}
-			var gitPath = Path.GetRelativePath(repositoryRoot, file).Replace('\\', '/');
+			// Only Windows separates directories with '\'; elsewhere it is part of a file name, which
+			// the safe-path check refuses, so such a file is reported unsupported instead of being
+			// read as the '/'-separated path of another file.
+			var relativePath = Path.GetRelativePath(repositoryRoot, file);
+			var gitPath = OperatingSystem.IsWindows() ? relativePath.Replace('\\', '/') : relativePath;
 			if (!GitProcessOperation.IsSafeRepositoryPath(gitPath) || Path.IsPathRooted(gitPath))
 			{
 				results[file] = new GitFileVersions(null, null, Unsupported: true);
@@ -199,7 +203,9 @@ public sealed class GitFileVersionReader : IGitFileVersionReader
 				.ConfigureAwait(false) ?? renames;
 		}
 
-		var requestedByGitPath = files.ToDictionary(static file => file.GitPath, StringComparer.Ordinal);
+		var requestedByGitPath = new Dictionary<string, RepositoryFile>(files.Count, StringComparer.Ordinal);
+		foreach (var file in files)
+			requestedByGitPath.TryAdd(file.GitPath, file);
 		var plans = new List<FilePlan>(files.Count);
 		foreach (var file in files)
 		{

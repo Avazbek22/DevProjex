@@ -41,12 +41,21 @@ internal static class GitRepositorySafetyInspector
 				repositoryPath,
 				GitProcessOperation.ReadConfigValue(GitConfigReadKind.PromisorRemotes),
 				cancellationToken).ConfigureAwait(false);
-			if (!TryInterpretQueryResult(promisorResult, out oldGitPromisor))
+			if (InterpretPromisorResult(promisorResult) is not { } isPromisor)
 				return GitRepositorySafetyInspection.Unavailable;
+			oldGitPromisor = isPromisor;
 		}
 
 		return inspection with { OldGitPromisorRepository = oldGitPromisor };
 	}
+
+	/// <summary>
+	/// Whether the fixed promisor query found a partial clone: a <c>remote.&lt;name&gt;.promisor</c>
+	/// key or <c>extensions.partialClone</c>, which Git honors on its own. Null when the query
+	/// could not be read.
+	/// </summary>
+	internal static bool? InterpretPromisorResult(GitInspectionProcessResult? result) =>
+		TryInterpretQueryResult(result, out var hasMatches) ? hasMatches : null;
 
 	internal static GitRepositorySafetyInspection InterpretUnsafeDriverResult(
 		GitInspectionProcessResult? result)

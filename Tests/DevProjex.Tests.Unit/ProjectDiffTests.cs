@@ -1,4 +1,5 @@
 using DevProjex.Application.Compression;
+using DevProjex.Application.Context;
 using DevProjex.Application.Diff;
 using DevProjex.Application.Secrets;
 using DevProjex.Kernel.Abstractions;
@@ -74,6 +75,116 @@ public sealed class CrossVersionRedactionTests
 
 	private static SecretTextRedactionResult Unmasked(string source) =>
 		new(source, [], 0, 0, ContentTransformMap.Identity);
+}
+
+public sealed class ProjectDiffRenameRedactionTests
+{
+	private const string Secret = "S3cretValue-7f2a";
+
+	[Fact]
+	public async Task TheOldSideOfARenameIsRedactedUnderItsOwnPath()
+	{
+		using var workspace = new TemporaryDirectory();
+		var source = workspace.CreateFile("terraform.tfvars", "region = \"eu\"\n");
+		var destination = workspace.CreateFile("terraform.tfvars.example", "placeholder\n");
+		var oldText = $"db_password = \"{Secret}\"\nregion = \"eu\"\nzone = \"a\"\n";
+		var newText = $"db_password = \"{Secret}\"\nregion = \"us\"\nzone = \"a\"\n";
+		var reader = new FixedVersionReader(new Dictionary<string, GitFileVersions>
+		{
+			[source] = new(Stored(oldText), null),
+			[destination] = new(Stored(oldText), Stored(newText), RenamedFrom: source)
+		});
+		using var session = new SecretRedactionSession(new NameOnlyDetector(".tfvars", Secret));
+		var request = new ProjectDiffRequest(
+			Plan(workspace.Path, [source, destination]),
+			GitFilteringMode.Staged,
+			null,
+			3,
+			new SecretRedactionContext(workspace.Path, session),
+			static (_, _) => throw new InvalidOperationException("The staged scope never reads the working file."));
+
+		var result = await new ProjectDiffService(reader).CompareAsync(request, TestContext.Current.CancellationToken);
+
+		var file = Assert.Single(result.Files);
+		Assert.Equal(ProjectDiffFileStatus.Renamed, file.Status);
+		Assert.Equal("terraform.tfvars", file.OldRelativePath);
+		var text = ProjectDiffText.FormatFile(file);
+		Assert.DoesNotContain(Secret, text, StringComparison.Ordinal);
+		Assert.Contains(" db_password = \"DEVPROJEX_REDACTED[", text, StringComparison.Ordinal);
+		Assert.Contains("-region = \"eu\"\n+region = \"us\"\n", text, StringComparison.Ordinal);
+		Assert.Equal(1, Assert.IsType<SecretRedactionSnapshot>(result.Protection).DetectedCount);
+	}
+
+	private static GitStoredFile Stored(string text)
+	{
+		var bytes = Encoding.UTF8.GetBytes(text);
+		return new GitStoredFile(GitStoredFileKind.Regular, bytes.Length, bytes);
+	}
+
+	private static ProjectContextPlan Plan(string root, IReadOnlyList<string> files)
+	{
+		var tree = new TreeNodeDescriptor("project", root, true, false, "folder", []);
+		var analysis = new ProjectAnalysisReport(
+			ProjectAnalysisReport.CurrentSchemaVersion,
+			DateTimeOffset.UnixEpoch,
+			root,
+			new ProjectAnalysisSelectionReport([], [], []),
+			new ProjectAnalysisInventoryReport([], [], new ProjectTreeSummaryReport(1, files.Count, 0)),
+			new ProjectAnalysisOutputMetricsReport(
+				ProjectOutputMetricsReport.Empty,
+				ProjectOutputMetricsReport.Empty),
+			new ProjectAnalysisTimingReport(0, 0, 0),
+			new ProjectAnalysisDiagnosticsReport(false, false, []));
+		return new ProjectContextPlan(
+			root,
+			ProjectSelectionSpec.Standard,
+			[],
+			[],
+			[],
+			[],
+			tree,
+			tree,
+			new HashSet<string>(PathComparer.Default),
+			files,
+			[root],
+			analysis,
+			[],
+			new ProjectContextGitReadiness(GitFilteringMode.Staged, 0, true),
+			"rename-redaction");
+	}
+
+	private sealed class FixedVersionReader(IReadOnlyDictionary<string, GitFileVersions> files) : IGitFileVersionReader
+	{
+		public Task<GitFileVersionSet> ReadAsync(GitFileVersionRequest request, CancellationToken cancellationToken = default) =>
+			Task.FromResult(new GitFileVersionSet(files));
+
+		public Task<GitRevisionAvailability> ProbeRangeAsync(
+			string projectRoot,
+			string diffRange,
+			CancellationToken cancellationToken = default) =>
+			Task.FromResult(GitRevisionAvailability.Unknown);
+	}
+
+	// Finds the value only in files whose name selects the structured rule, as real path-based rules do.
+	private sealed class NameOnlyDetector(string extension, string secret) : ISecretDetector
+	{
+		public IReadOnlyList<DetectedSecret> Detect(
+			string repositoryRelativePath,
+			string content,
+			CancellationToken cancellationToken = default)
+		{
+			if (!repositoryRelativePath.EndsWith(extension, StringComparison.OrdinalIgnoreCase))
+				return [];
+			var findings = new List<DetectedSecret>();
+			for (var start = content.IndexOf(secret, StringComparison.Ordinal);
+				 start >= 0;
+				 start = content.IndexOf(secret, start + secret.Length, StringComparison.Ordinal))
+			{
+				findings.Add(new DetectedSecret("config-secret", start, secret.Length, secret, 0));
+			}
+			return findings;
+		}
+	}
 }
 
 public sealed class ProjectDiffTextTests
