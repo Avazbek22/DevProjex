@@ -27,7 +27,7 @@ public sealed partial class McpServerProcessTests
 				RegexOptions.CultureInvariant, TimeSpan.FromSeconds(2));
 			Assert.DoesNotContain("Zq9MarkerName", outside, StringComparison.Ordinal);
 			Assert.Contains("[Symbols] the regular expression was read as 1 declaration name(s); they are listed at the top of the results.", outside, StringComparison.Ordinal);
-			Assert.Matches(@"<untrusted-data-[0-9a-f]+>\r?\nPattern read as declaration names: Zq9MarkerName", block.Text);
+			Assert.Matches(@"<untrusted-data-[0-9a-f]+>\nPattern read as declaration names: Zq9MarkerName\n", block.Text);
 		}
 		Assert.Equal(exists, AllProcessText(result).Contains("Service.cs", StringComparison.Ordinal));
 	}

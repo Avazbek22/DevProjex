@@ -1413,7 +1413,7 @@ internal sealed partial class DevProjexMcpTools(
 			{
 				var namesPrelude = namesReadFromPattern is null
 					? string.Empty
-					: "Pattern read as declaration names: " + string.Join(", ", namesReadFromPattern) + Environment.NewLine;
+					: "Pattern read as declaration names: " + string.Join(", ", namesReadFromPattern) + "\n";
 				var projectContent = McpSpotlight.Wrap(namesPrelude + output.ToString().TrimEnd());
 				var boundaryPrelude = FormatSearchBoundaryPrelude(boundary, storedSearch is not null);
 				if (boundaryPrelude is not null)
