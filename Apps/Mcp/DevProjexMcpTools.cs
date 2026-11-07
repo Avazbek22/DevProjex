@@ -2048,11 +2048,13 @@ internal sealed partial class DevProjexMcpTools(
 				// Standard batches keep the single fixed phrase. Live batches separate a filtered file
 				// from a missing one, because the window filters are the one thing the user can change.
 				// A directory with readable entries keeps its whole message: it names the file to read.
+				// That message repeats the requested path and entry names, so it is escaped onto one
+				// line like a single-file error; a raw line break would split the status table.
 				resolvedRequests.Add(new McpResolvedFileReadRequest(
 					item,
 					PhysicalPath: null,
 					UnavailableReason: exception.NamesReadableEntries
-						? exception.Message
+						? McpTextEscaping.EscapeSingleLine(McpToolResults.ProtectMetadataString(exception.Message))
 						: liveContext is null ? null : exception.BatchReason ?? exception.Code));
 			}
 		}
