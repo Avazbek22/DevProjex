@@ -207,6 +207,36 @@ public sealed class DependencyOutsideSelectionIntegrationTests
 		Assert.False(DependencyFactsEngine.CanRelateOutsideSelection(unsupported, DependencyDirection.Both));
 	}
 
+	[Fact]
+	public async Task NarrowedSelection_ListsAPythonModuleConstantSourceOutsideIt()
+	{
+		using var fixture = new TemporaryDirectory();
+		var package = fixture.CreateFile("pkg/__init__.py", string.Empty);
+		var config = fixture.CreateFile("pkg/_config.py", "DEFAULT_TIMEOUT_CONFIG = 5.0");
+		var api = fixture.CreateFile("pkg/_api.py", "from ._config import DEFAULT_TIMEOUT_CONFIG");
+		using var engine = CreateEngine();
+
+		var selection = await engine.FindRelatedAsync(
+			fixture.Path,
+			[package, api],
+			["pkg/_api.py"],
+			DependencyDirection.Dependencies,
+			cancellationToken: TestContext.Current.CancellationToken);
+		var outside = await engine.FindOutsideSelectionAsync(
+			fixture.Path,
+			selection,
+			[package, config, api],
+			DependencyDirection.Dependencies,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.True(DependencyFactsEngine.CanRelateOutsideSelection(selection, DependencyDirection.Dependencies));
+		var dependency = Assert.Single(Assert.Single(outside.Seeds).Dependencies);
+		Assert.Equal("pkg/_config.py", dependency.Path);
+		Assert.Contains("imported name not indexed", dependency.Reasons);
+		Assert.Equal(1, outside.Edges);
+		Assert.Equal(1, outside.ExplainedUnresolvedEdges);
+	}
+
 	private static DependencyFactsEngine CreateEngine() =>
 		new(new TreeSitterDependencyFactExtractor(), new FileDependencyConfigurationProvider());
 }

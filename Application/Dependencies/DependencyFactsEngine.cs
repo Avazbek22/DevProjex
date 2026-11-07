@@ -1288,6 +1288,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 	private const string PythonScriptDirectoryReason = "script-directory import";
 	private const string PythonScriptDirectoryConflictReason =
 		"script directory and project root both provide this module";
+	private const string PythonUnindexedNameReason = "imported name not indexed";
 
 	private static StringComparer PathComparer => OperatingSystem.IsWindows()
 		? StringComparer.OrdinalIgnoreCase
@@ -1595,7 +1596,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			foreach (var edge in raw)
 			{
 				var key = new EdgeAggregationKey(
-					edge.Source, edge.Target, edge.Layer, edge.Status, edge.Reference, edge.CrossScope);
+					edge.Source, edge.Target, edge.Layer, edge.Status, edge.Reference, edge.CrossScope, edge.ModuleOnly);
 				if (!groups.TryGetValue(key, out var accumulator))
 					groups.Add(key, accumulator = new EdgeAccumulator());
 				accumulator.Add(edge);
@@ -1607,13 +1608,16 @@ public sealed partial class DependencyFactsEngine : IDisposable
 				.ToArray();
 		}
 
+		// Module-only imports stay a group of their own, so an import that also names a declaration
+		// in the same module keeps its graph weight.
 		private readonly record struct EdgeAggregationKey(
 			string Source,
 			string? Target,
 			EvidenceLayer Layer,
 			ResolutionStatus Status,
 			string Reference,
-			bool CrossScope);
+			bool CrossScope,
+			bool ModuleOnly);
 
 		private sealed class EdgeAccumulator
 		{
@@ -1656,7 +1660,8 @@ public sealed partial class DependencyFactsEngine : IDisposable
 					_candidates!.Order(StringComparer.Ordinal).ToArray(),
 					key.CrossScope)
 				{
-					DeclarationFiles = _declarationFiles!.Order(StringComparer.Ordinal).ToArray()
+					DeclarationFiles = _declarationFiles!.Order(StringComparer.Ordinal).ToArray(),
+					ModuleOnly = key.ModuleOnly
 				};
 			}
 
@@ -2807,8 +2812,14 @@ public sealed partial class DependencyFactsEngine : IDisposable
 				if (candidates.Count == 0 && moduleEntityExists)
 				{
 					if (moduleCandidates.Any(candidate => HasPythonModuleAssignment(candidate, import.ImportedName)))
+					{
+						// A bare relative "from . import name" keeps its child-module reading and its
+						// existing result.
+						if (import.Specifier.Length > 0)
+							return ModuleOnlyImport(source, import, moduleCandidates, resolvedReason);
 						return Edge(source, import, ResolutionStatus.Unresolved, null,
 							"Python module assignment bindings are not indexed", []);
+					}
 					if (moduleCandidates.Any(HasPythonWildcardReExport))
 						return Edge(source, import, ResolutionStatus.Unresolved, null,
 							"Python wildcard re-export bindings are not indexed", []);
@@ -3530,6 +3541,20 @@ public sealed partial class DependencyFactsEngine : IDisposable
 					resolvedReason ?? "one module target", candidates),
 				_ => Edge(source, import, ResolutionStatus.Ambiguous, null, "multiple module targets", candidates)
 			};
+		}
+
+		// Importing a name loads its module even when the index does not hold that name as a
+		// declaration, so the edge relates the file to the module without claiming a declaration.
+		private DependencyEdge ModuleOnlyImport(
+			FileFacts source,
+			ImportFact import,
+			IReadOnlyList<string> moduleTargets,
+			string? resolvedReason)
+		{
+			var edge = FinishImport(source, import, moduleTargets, resolvedReason);
+			return edge.Status == ResolutionStatus.Resolved
+				? edge with { Reasons = [.. edge.Reasons, PythonUnindexedNameReason], ModuleOnly = true }
+				: edge;
 		}
 
 		private DependencyEdge Edge(FileFacts source, ImportFact import, ResolutionStatus status, string? target, string reason, IReadOnlyList<string> candidates) =>

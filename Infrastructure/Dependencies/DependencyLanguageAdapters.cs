@@ -1740,7 +1740,9 @@ internal sealed partial class PythonDependencyLanguageAdapter : DependencyLangua
 			if (!assignment.Success) continue;
 			var name = assignment.Groups["name"].Value;
 			metadata["$python-assignment:" + name] = "true";
-			if (name == "__all__" && DynamicAllValueRegex().IsMatch(assignment.Groups["value"].Value))
+			// An annotated __all__ has never set wildcard policy; only the plain form does.
+			if (name == "__all__" && !assignment.Groups["annotation"].Success &&
+			    DynamicAllValueRegex().IsMatch(assignment.Groups["value"].Value))
 				metadata["$dynamic-all"] = "true";
 		}
 		return Complete(context, declarations, imports, references, aliases: metadata);
@@ -1766,6 +1768,7 @@ internal sealed partial class PythonDependencyLanguageAdapter : DependencyLangua
 	private static readonly HashSet<string> Keywords = new(
 		["def", "class", "None", "True", "False", "str", "int", "float", "bool", "bytes", "list", "dict", "tuple", "set", "object", "typing", "self", "cls"], StringComparer.Ordinal);
 	[GeneratedRegex(@"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*", RegexOptions.CultureInvariant)] private static partial Regex TypeRegex();
-	[GeneratedRegex(@"^\s*(?<name>[^\W\d]\w*)\s*=\s*(?<value>[\s\S]*)$", RegexOptions.CultureInvariant)] private static partial Regex ModuleAssignmentRegex();
+	// "name = value" and "name: annotation = value"; a bare "name: annotation" binds nothing.
+	[GeneratedRegex(@"^\s*(?<name>[^\W\d]\w*)\s*(?<annotation>:[^=]*)?=\s*(?<value>[\s\S]*)$", RegexOptions.CultureInvariant)] private static partial Regex ModuleAssignmentRegex();
 	[GeneratedRegex(@"^\s*[^\W\d]", RegexOptions.CultureInvariant)] private static partial Regex DynamicAllValueRegex();
 }
