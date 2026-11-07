@@ -681,6 +681,41 @@ public sealed class RelatedCommandProcessTests
 		Assert.Contains("impl.py", localModel.StandardOutput, StringComparison.Ordinal);
 	}
 
+	[Fact]
+	public void NarrowedSelectionResolvesPythonImportsLikeTheWholeProject()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/pyproject.toml", "[project]\nname = \"demo\"\ndependencies = [\"colorama\"]\n");
+		workspace.WriteFile("project/src/demo/__init__.py", "");
+		workspace.WriteFile("project/src/demo/core.py", "class Command: pass\n");
+		workspace.WriteFile("project/src/demo/decorators.py",
+			"import colorama\nfrom .core import Command\nfrom demo.core import Command as Alias\n");
+		string[] arguments =
+		[
+			"related", "src/demo/decorators.py", "--project", project, "--direction", "dependencies",
+			"--format", "json", "--git-mode", "none", "--exclude", "none"
+		];
+
+		var whole = Run(workspace, arguments);
+		var narrowed = Run(workspace, [.. arguments, "--select", "src"]);
+		var filtered = Run(workspace, [.. arguments, "--extension", ".py"]);
+
+		Assert.Equal(0, whole.ExitCode);
+		Assert.Equal(0, narrowed.ExitCode);
+		Assert.Equal(0, filtered.ExitCode);
+		foreach (var result in new[] { whole, narrowed, filtered })
+		{
+			using var document = JsonDocument.Parse(result.StandardOutput);
+			var dependencies = Assert.Single(document.RootElement.GetProperty("seeds").EnumerateArray())
+				.GetProperty("dependencies").EnumerateArray()
+				.Select(static item => item.GetProperty("path").GetString())
+				.ToArray();
+			Assert.Equal(["src/demo/core.py"], dependencies);
+			Assert.DoesNotContain("pyproject.toml", result.StandardOutput, StringComparison.Ordinal);
+		}
+	}
+
 	private static TerminalTestProcessResult Run(TemporaryDirectory workspace, params string[] arguments)
 	{
 		var startInfo = new ProcessStartInfo("dotnet")

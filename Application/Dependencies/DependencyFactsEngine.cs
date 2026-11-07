@@ -193,6 +193,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			cachedSnapshot.ManifestPaths.SequenceEqual(manifestRelativePaths, StringComparer.Ordinal) &&
 			cachedSnapshot.Stamps.SequenceEqual(initialStamps) &&
 			AreControlFilesStillAbsent(cachedSnapshot.AbsentControlFiles, cancellationToken) &&
+			AreObservedControlPathsCurrent(cachedSnapshot.ObservedControlPaths, cancellationToken) &&
 			ArePhysicalFileProbesCurrent(cachedSnapshot.PhysicalFileProbes, cancellationToken) &&
 			ContentIdentitiesMatch(cachedSnapshot.ContentIdentities, alignedContentIdentities) &&
 			_indexCache.ContainsKey(cachedSnapshot.IndexCacheKey))
@@ -455,7 +456,8 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		var finalStamps = TryCaptureFileStamps(manifest, cancellationToken);
 		if (canCacheIndex && resolvedIndexEntry is not null &&
 			initialStamps is not null && finalStamps is not null && initialStamps.SequenceEqual(finalStamps) &&
-			AreControlFilesStillAbsent(configuration.AbsentControlFiles, cancellationToken))
+			AreControlFilesStillAbsent(configuration.AbsentControlFiles, cancellationToken) &&
+			AreObservedControlPathsCurrent(configuration.ObservedControlPaths, cancellationToken))
 		{
 			StoreManifestSnapshot(
 				manifestRequestKey,
@@ -463,6 +465,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 				initialStamps,
 				alignedContentIdentities,
 				configuration.AbsentControlFiles,
+				configuration.ObservedControlPaths,
 				resolved.PhysicalFileProbes,
 				cacheKey,
 				resolvedIndexEntry,
@@ -915,6 +918,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		IReadOnlyList<FileStamp> stamps,
 		IReadOnlyList<string>? contentIdentities,
 		IReadOnlyList<string> absentControlFiles,
+		IReadOnlyList<DependencyControlPathStamp> observedControlPaths,
 		IReadOnlyList<PhysicalFileProbe> physicalFileProbes,
 		IndexCacheKey indexCacheKey,
 		IndexCacheEntry expectedIndexEntry,
@@ -930,7 +934,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 				RemoveManifestSnapshotUnderLock(key, previous);
 			var entry = new ManifestSnapshotCacheEntry(
 				key, manifestPaths, stamps, contentIdentities, absentControlFiles,
-				physicalFileProbes, indexCacheKey, snapshot);
+				observedControlPaths, physicalFileProbes, indexCacheKey, snapshot);
 			_manifestSnapshots[key] = entry;
 			entry.OrderNode = _manifestSnapshotOrder.AddLast(entry);
 			while (_manifestSnapshots.Count > _limits.MaximumCachedIndexes &&
@@ -1068,6 +1072,19 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			if (File.Exists(path))
+				return false;
+		}
+		return true;
+	}
+
+	private static bool AreObservedControlPathsCurrent(
+		IReadOnlyList<DependencyControlPathStamp> stamps,
+		CancellationToken cancellationToken)
+	{
+		for (var index = 0; index < stamps.Count; index++)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (!stamps[index].IsCurrent())
 				return false;
 		}
 		return true;
@@ -1268,6 +1285,9 @@ public sealed partial class DependencyFactsEngine : IDisposable
 	private static string Normalize(string path) => path.Replace('\\', '/').TrimStart('/');
 	private const string MissingTypeScriptConfigurationReason =
 		"no owning tsconfig.json or jsconfig.json in the manifest";
+	private const string PythonScriptDirectoryReason = "script-directory import";
+	private const string PythonScriptDirectoryConflictReason =
+		"script directory and project root both provide this module";
 
 	private static StringComparer PathComparer => OperatingSystem.IsWindows()
 		? StringComparer.OrdinalIgnoreCase
@@ -1347,6 +1367,12 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		string DeclarationRevision,
 		string ConfigurationFingerprint);
 
+	private readonly record struct PythonImportRoots(
+		IReadOnlyList<string> Roots,
+		bool FromScriptDirectory,
+		bool Conflicting,
+		IReadOnlyList<string> Conflict);
+
 	private readonly record struct ManifestRequestKey(
 		string SourceRoot,
 		string ManifestPathsFingerprint);
@@ -1386,6 +1412,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		IReadOnlyList<FileStamp> Stamps,
 		IReadOnlyList<string>? ContentIdentities,
 		IReadOnlyList<string> AbsentControlFiles,
+		IReadOnlyList<DependencyControlPathStamp> ObservedControlPaths,
 		IReadOnlyList<PhysicalFileProbe> PhysicalFileProbes,
 		IndexCacheKey IndexCacheKey,
 		DependencyIndexSnapshot Snapshot)
@@ -2711,7 +2738,10 @@ public sealed partial class DependencyFactsEngine : IDisposable
 
 		private DependencyEdge ResolvePythonImport(FileFacts source, ImportFact import)
 		{
-			if (FindScope(source.ScopeId) is { } scope && ConfigurationFailure(scope) is { } configurationFailure)
+			// Python needs no configuration file to import: only a configuration that exists and
+			// cannot be read blocks resolution.
+			if (FindScope(source.ScopeId) is { HasConfiguration: true } scope &&
+				ConfigurationFailure(scope) is { } configurationFailure)
 				return Edge(source, import, ResolutionStatus.Unresolved, null, configurationFailure, []);
 			var sourceModule = PythonModule(source);
 			var sourcePackage = Path.GetFileNameWithoutExtension(source.Path) == "__init__"
@@ -2728,7 +2758,20 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			var module = import.RelativeLevel == 0
 				? import.Specifier
 				: string.Join('.', parts.Concat(import.Specifier.Split('.', StringSplitOptions.RemoveEmptyEntries)));
-			var candidates = ProbePythonModule(source, module).ToList();
+			var searchRoots = PythonRootPrefixes(source);
+			string? resolvedReason = null;
+			if (import.RelativeLevel == 0)
+			{
+				var lookup = FindPythonImportRoots(source, module);
+				if (lookup.Conflicting)
+					return Edge(source, import,
+						lookup.Conflict.Count > 1 ? ResolutionStatus.Ambiguous : ResolutionStatus.Unresolved,
+						null, PythonScriptDirectoryConflictReason, lookup.Conflict);
+				searchRoots = lookup.Roots;
+				if (lookup.FromScriptDirectory)
+					resolvedReason = PythonScriptDirectoryReason;
+			}
+			var candidates = ProbePythonModule(searchRoots, module).ToList();
 			var moduleCandidates = candidates.ToArray();
 			var moduleEntityExists = moduleCandidates.Length > 0;
 			if (import.ImportedName is { Length: > 0 } and not "*")
@@ -2750,16 +2793,16 @@ public sealed partial class DependencyFactsEngine : IDisposable
 				else if (candidates.Any(IsPythonPackageInitializer))
 				{
 					var child = module.Length == 0 ? import.ImportedName : module + "." + import.ImportedName;
-					candidates = ProbePythonModule(source, child).ToList();
+					candidates = ProbePythonModule(searchRoots, child).ToList();
 				}
 				else
 					candidates.Clear();
 				if (candidates.Count == 0 && !moduleEntityExists)
 				{
 					var child = module.Length == 0 ? import.ImportedName : module + "." + import.ImportedName;
-					candidates = ProbePythonModule(source, child).ToList();
+					candidates = ProbePythonModule(searchRoots, child).ToList();
 					if (candidates.Count > 0)
-						return FinishImport(source, import, candidates);
+						return FinishImport(source, import, candidates, resolvedReason);
 				}
 				if (candidates.Count == 0 && moduleEntityExists)
 				{
@@ -2775,7 +2818,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			}
 			if (candidates.Count == 0 && !moduleEntityExists)
 			{
-				var portionCount = CountPythonNamespacePortions(source, module);
+				var portionCount = CountPythonNamespacePortions(searchRoots, module);
 				if (portionCount > 0)
 					return Edge(source, import, ResolutionStatus.Resolved, "namespace:" + module,
 						"one namespace-package entity", []);
@@ -2789,7 +2832,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 				_files.TryGetValue(candidate, out var facts) && facts.Aliases.ContainsKey("$dynamic-all")))
 				return Edge(source, import, ResolutionStatus.Unresolved, null,
 					"dynamic __all__ is an unsupported mechanism", candidates);
-			return FinishImport(source, import, candidates);
+			return FinishImport(source, import, candidates, resolvedReason);
 		}
 
 		private IReadOnlyList<string> ResolvePythonStaticBinding(
@@ -2818,15 +2861,22 @@ public sealed partial class DependencyFactsEngine : IDisposable
 				}
 				var module = import.RelativeLevel == 0 ? import.Specifier :
 					string.Join('.', parts.Concat(import.Specifier.Split('.', StringSplitOptions.RemoveEmptyEntries)));
+				var searchRoots = PythonRootPrefixes(facts);
+				if (import.RelativeLevel == 0)
+				{
+					var lookup = FindPythonImportRoots(facts, module);
+					if (lookup.Conflicting) continue;
+					searchRoots = lookup.Roots;
+				}
 				if (import.ImportedName is { Length: > 0 } imported)
 				{
 					var child = module.Length == 0 ? imported : module + "." + imported;
 					if (import.Specifier.Length == 0)
 					{
-						var directChildTargets = ProbePythonModule(facts, child).ToArray();
+						var directChildTargets = ProbePythonModule(searchRoots, child).ToArray();
 						if (directChildTargets.Length > 0) return directChildTargets;
 					}
-					var moduleTargets = ProbePythonModule(facts, module).ToArray();
+					var moduleTargets = ProbePythonModule(searchRoots, module).ToArray();
 					var nested = moduleTargets
 						.SelectMany(next => ResolvePythonStaticBinding(next, imported, depth + 1, visited))
 						.Distinct(StringComparer.Ordinal)
@@ -2835,24 +2885,24 @@ public sealed partial class DependencyFactsEngine : IDisposable
 					if (nested.Length > 0) return nested;
 					if (moduleTargets.Any(IsPythonPackageInitializer))
 					{
-						var childTargets = ProbePythonModule(facts, child).ToArray();
+						var childTargets = ProbePythonModule(searchRoots, child).ToArray();
 						if (childTargets.Length > 0) return childTargets;
 					}
 				}
 				else
 				{
-					var moduleTargets = ProbePythonModule(facts, module).ToArray();
+					var moduleTargets = ProbePythonModule(searchRoots, module).ToArray();
 					if (moduleTargets.Length > 0) return moduleTargets;
 				}
 			}
 			return [];
 		}
 
-		private int CountPythonNamespacePortions(FileFacts source, string module)
+		private int CountPythonNamespacePortions(IReadOnlyList<string> roots, string module)
 		{
 			var segments = module.Split('.', StringSplitOptions.RemoveEmptyEntries);
 			if (segments.Length == 0) return 0;
-			var searchDirectories = PythonRootPrefixes(source).ToList();
+			var searchDirectories = roots.ToList();
 			for (var segmentIndex = 0; segmentIndex < segments.Length; segmentIndex++)
 			{
 				var namespaceDirectories = new List<string>();
@@ -2886,11 +2936,11 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			return 0;
 		}
 
-		private IEnumerable<string> ProbePythonModule(FileFacts source, string module)
+		private IEnumerable<string> ProbePythonModule(IReadOnlyList<string> roots, string module)
 		{
 			var segments = module.Split('.', StringSplitOptions.RemoveEmptyEntries);
 			if (segments.Length == 0) yield break;
-			var searchDirectories = PythonRootPrefixes(source).ToList();
+			var searchDirectories = roots.ToList();
 			for (var segmentIndex = 0; segmentIndex < segments.Length; segmentIndex++)
 			{
 				var isLast = segmentIndex == segments.Length - 1;
@@ -2949,6 +2999,40 @@ public sealed partial class DependencyFactsEngine : IDisposable
 
 		private static string PythonBoundName(ImportFact import) =>
 			import.Alias ?? import.ImportedName ?? import.Specifier.Split('.')[0];
+
+		// A script run directly puts its own directory first on sys.path, so a plain directory can
+		// import a sibling by its bare name. The project roots compete with that directory because
+		// the same file may also be imported as a module, and a standard-library or declared
+		// package name keeps its external meaning.
+		private PythonImportRoots FindPythonImportRoots(FileFacts source, string module)
+		{
+			var roots = PythonRootPrefixes(source);
+			var separator = source.Path.LastIndexOf('/');
+			if (separator <= 0) return new PythonImportRoots(roots, false, false, []);
+			var directory = source.Path[..separator];
+			if (IsPythonRegularPackageDirectory(directory) || roots.Contains(directory, StringComparer.Ordinal))
+				return new PythonImportRoots(roots, false, false, []);
+			var topLevel = module.Split('.')[0];
+			if (topLevel.Length == 0 || !HasPythonTopLevelEntity(directory, topLevel) ||
+				DependencyPlatformCatalog.IsPythonExternal(_configuration, source.ScopeId, topLevel) ||
+				FindScope(source.ScopeId)?.PythonExternalPackages.Contains(topLevel) == true)
+				return new PythonImportRoots(roots, false, false, []);
+			if (!roots.Any(root => HasPythonTopLevelEntity(root, topLevel)))
+				return new PythonImportRoots([directory], true, false, []);
+			var conflict = ProbePythonModule([directory], module)
+				.Concat(ProbePythonModule(roots, module))
+				.Distinct(StringComparer.Ordinal)
+				.Order(StringComparer.Ordinal)
+				.ToArray();
+			return new PythonImportRoots(roots, false, true, conflict);
+		}
+
+		private bool HasPythonTopLevelEntity(string directory, string name)
+		{
+			var prefix = directory.Length == 0 ? name : directory + "/" + name;
+			return _files.ContainsKey(prefix + ".py") || _files.ContainsKey(prefix + ".pyi") ||
+				_manifestDirectoryPrefixes.Contains(prefix + '/');
+		}
 
 		private IReadOnlyList<string> PythonRootPrefixes(FileFacts source)
 		{

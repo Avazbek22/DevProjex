@@ -799,7 +799,9 @@ defaults to the current directory and accepts the same local-directory or Git-UR
 as `analyze`; `--branch` remains URL-only. The seed chooses where the answer starts, while
 the dependency engine indexes the complete effective manifest produced by the selected
 profile, roots, extensions, paths, Git mode, exclusions, and file-size limit. It never
-returns a candidate outside that manifest.
+returns a candidate outside that manifest. The project configuration that owns the selected files,
+such as `pyproject.toml`, `tsconfig.json`, or a `.csproj`, is still read when `--select` or
+`--extension` leaves it out, so a narrowed view resolves its files as the whole project does.
 
 Bash seed files record literal script-relative `source` / `.` connections; computed shell paths
 remain explicitly unresolved and commands found through `PATH` are not dependencies. Scala seeds

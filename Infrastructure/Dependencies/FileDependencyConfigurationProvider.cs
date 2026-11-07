@@ -86,6 +86,13 @@ public sealed partial class FileDependencyConfigurationProvider : IDependencyCon
 		var absentControlFiles = new HashSet<string>(PathComparer);
 		var fingerprintedControlFiles = new HashSet<string>(PathComparer);
 		var transientReadFailure = 0;
+		// Configuration describes the project, not the selection: a narrowed or filtered view keeps
+		// the control files that own its files even when they are not part of the view.
+		var controlFiles = new HashSet<string>(manifest, PathComparer);
+		var observedControlPaths = new List<DependencyControlPathStamp>();
+		var unstampedControlFiles = new HashSet<string>(PathComparer);
+		if (!TryDiscoverControlFiles(root, manifest, controlFiles, observedControlPaths, cancellationToken))
+			transientReadFailure = 1;
 		var projectFiles = new List<string>();
 		var typeScriptConfigFiles = new List<string>();
 		var pythonConfigFiles = new List<string>();
@@ -96,7 +103,7 @@ public sealed partial class FileDependencyConfigurationProvider : IDependencyCon
 		var composerConfigFiles = new List<string>();
 		var cConfigFiles = new List<string>();
 		var scalaConfigFiles = new List<string>();
-		foreach (var path in manifest.Order(StringComparer.Ordinal))
+		foreach (var path in controlFiles.Order(StringComparer.Ordinal))
 		{
 			if (path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)) projectFiles.Add(path);
 			if (IsTypeScriptConfig(path)) typeScriptConfigFiles.Add(path);
@@ -124,9 +131,35 @@ public sealed partial class FileDependencyConfigurationProvider : IDependencyCon
 			var snapshot = await _reader.ReadAsync(path, MaximumConfigurationBytes, cancellationToken).ConfigureAwait(false);
 			if (snapshot.State == DependencyConfigurationState.Missing)
 				absentControlFiles.Add(Path.GetFullPath(path));
+			else if (IsUnstamped(path))
+				Interlocked.Exchange(ref transientReadFailure, 1);
 			if (!snapshot.CanCache)
 				Interlocked.Exchange(ref transientReadFailure, 1);
 			return snapshot;
+		}
+
+		bool IsUnstamped(string path)
+		{
+			lock (unstampedControlFiles)
+				return unstampedControlFiles.Contains(Path.GetFullPath(path));
+		}
+
+		// Stamped before it is read, so a later edit of a control file outside the manifest is
+		// visible to the engine's manifest snapshot. A file that cannot be stamped either stays
+		// missing, which the absent-file check observes, or makes the configuration uncacheable.
+		void ObserveControlFile(string path)
+		{
+			path = Path.GetFullPath(path);
+			if (controlFiles.Contains(path))
+				return;
+			var stamp = DependencyControlPathStamp.TryCapture(path, isDirectory: false);
+			lock (unstampedControlFiles)
+			{
+				if (stamp is { } captured)
+					observedControlPaths.Add(captured);
+				else
+					unstampedControlFiles.Add(path);
+			}
 		}
 
 		Task<ConfigurationParseResult<PackageMapDescriptor>> ReadPackageAsync(string path)
@@ -228,18 +261,13 @@ public sealed partial class FileDependencyConfigurationProvider : IDependencyCon
 					return TypeScriptLayerFailure(extendedPath.State, extendedPath.Reason);
 				if (!IsWithin(root, extendedPath.Value))
 					return TypeScriptLayerFailure(DependencyConfigurationState.UnsupportedSemantics, TypeScriptExtendsOutsideRootReason);
-				// The engine's fast manifest snapshot can validate only files in its manifest.
-				// If an extended control file is outside that set, bypass that snapshot so this
-				// provider observes every later edit instead of reusing configuration by metadata
-				// that never included the base file.
-				if (!manifest.Contains(extendedPath.Value))
-					Interlocked.Exchange(ref transientReadFailure, 1);
 				if (!_pathMetadata.TryResolveContainedPath(root, extendedPath.Value, out _))
 				{
 					Interlocked.Exchange(ref transientReadFailure, 1);
 					return TypeScriptLayerFailure(DependencyConfigurationState.UnsupportedSemantics,
 						TypeScriptExtendsOutsideRootReason);
 				}
+				ObserveControlFile(extendedPath.Value);
 
 				var inherited = await ReadTypeScriptLayerAsync(extendedPath.Value, depth + 1, chain)
 					.ConfigureAwait(false);
@@ -257,7 +285,7 @@ public sealed partial class FileDependencyConfigurationProvider : IDependencyCon
 		void AddDiagnostic(string path, DependencyConfigurationState state, string? reason, params string[] scopeIds)
 		{
 			if (state == DependencyConfigurationState.Valid ||
-			    state == DependencyConfigurationState.Missing && !manifest.Contains(path))
+			    state == DependencyConfigurationState.Missing && !controlFiles.Contains(path))
 				return;
 			diagnostics.Add(new DependencyConfigurationDiagnostic(
 				PortableRelative(root, path),
@@ -276,7 +304,7 @@ public sealed partial class FileDependencyConfigurationProvider : IDependencyCon
 				: ConfigurationParseResult<CSharpProjectConfiguration>.Failure(
 					CSharpProjectConfiguration.Default, snapshot.State, snapshot.Reason);
 			var references = parsed.Value.ProjectReferences;
-			foreach (var reference in references.Where(reference => !manifest.Contains(reference)))
+			foreach (var reference in references.Where(reference => !controlFiles.Contains(reference)))
 			{
 				if (IsNetworkPath(reference) || !IsWithin(root, reference) ||
 				    !_pathMetadata.TryResolveContainedPath(root, reference, out var physicalReference))
@@ -335,7 +363,7 @@ public sealed partial class FileDependencyConfigurationProvider : IDependencyCon
 		{
 			var directory = Path.GetDirectoryName(configPath)!;
 			var parsed = await ReadTypeScriptConfigAsync(configPath, directory).ConfigureAwait(false);
-			var package = FindNearestManifestFile(directory, root, "package.json", manifest);
+			var package = FindNearestManifestFile(directory, root, "package.json", controlFiles);
 			var packageName = package is null ? null : (await ReadPackageAsync(package).ConfigureAwait(false)).Value.PackageName;
 			var scopeId = "typescript:" + PortableRelative(root, configPath);
 			AddDiagnostic(configPath, parsed.State, parsed.Reason, scopeId);
@@ -711,8 +739,120 @@ public sealed partial class FileDependencyConfigurationProvider : IDependencyCon
 				.OrderBy(static item => item.Path, StringComparer.Ordinal)
 				.ToArray(),
 			CanCache = Volatile.Read(ref transientReadFailure) == 0,
-			AbsentControlFiles = absentControlFiles.Order(StringComparer.Ordinal).ToArray()
+			AbsentControlFiles = absentControlFiles.Order(StringComparer.Ordinal).ToArray(),
+			ObservedControlPaths = observedControlPaths
+				.OrderBy(static stamp => stamp.Path, StringComparer.Ordinal)
+				.ToArray()
 		};
+	}
+
+	// Searches the directories that hold manifest files, and their parents up to the root, for the
+	// control files of the languages present. Each directory is stamped before it is listed, so a
+	// control file created later invalidates a cached snapshot even when the view filters it out.
+	private bool TryDiscoverControlFiles(
+		string root,
+		IReadOnlySet<string> manifest,
+		ISet<string> controlFiles,
+		ICollection<DependencyControlPathStamp> observedControlPaths,
+		CancellationToken cancellationToken)
+	{
+		var families = ControlFileFamilies.None;
+		var directories = new HashSet<string>(PathComparer);
+		foreach (var path in manifest)
+		{
+			var family = SourceFamily(path);
+			if (family == ControlFileFamilies.None)
+				continue;
+			families |= family;
+			var directory = Path.GetDirectoryName(path);
+			while (directory is not null && IsWithin(root, directory) && directories.Add(directory))
+				directory = Path.GetDirectoryName(directory);
+		}
+
+		var complete = true;
+		foreach (var directory in directories.Order(StringComparer.Ordinal))
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (DependencyControlPathStamp.TryCapture(directory, isDirectory: true) is not { } directoryStamp)
+			{
+				complete = false;
+				continue;
+			}
+			observedControlPaths.Add(directoryStamp);
+			string[] entries;
+			try
+			{
+				entries = Directory.GetFiles(directory);
+			}
+			catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+				System.Security.SecurityException)
+			{
+				complete = false;
+				continue;
+			}
+			foreach (var candidate in entries.Order(StringComparer.Ordinal))
+			{
+				if ((ControlFamily(candidate) & families) == ControlFileFamilies.None ||
+					manifest.Contains(candidate) ||
+					!_pathMetadata.TryResolveContainedPath(root, candidate, out _))
+					continue;
+				if (DependencyControlPathStamp.TryCapture(candidate, isDirectory: false) is not { } fileStamp)
+				{
+					complete = false;
+					continue;
+				}
+				observedControlPaths.Add(fileStamp);
+				controlFiles.Add(candidate);
+			}
+		}
+		return complete;
+	}
+
+	private static ControlFileFamilies SourceFamily(string path) => Path.GetExtension(path).ToLowerInvariant() switch
+	{
+		".cs" => ControlFileFamilies.CSharp,
+		".ts" or ".mts" or ".cts" or ".tsx" or ".jsx" or ".js" or ".mjs" or ".cjs" => ControlFileFamilies.TypeScript,
+		".py" or ".pyi" => ControlFileFamilies.Python,
+		".java" or ".kt" or ".kts" => ControlFileFamilies.Jvm,
+		".rs" => ControlFileFamilies.Rust,
+		".rb" or ".rake" or ".gemspec" or ".ru" => ControlFileFamilies.Ruby,
+		".php" or ".phtml" => ControlFileFamilies.Php,
+		".c" or ".h" or ".cc" or ".cpp" or ".cxx" or ".hh" or ".hpp" or ".hxx" => ControlFileFamilies.C,
+		".scala" or ".sc" => ControlFileFamilies.Scala,
+		_ => ControlFileFamilies.None
+	};
+
+	// Mirrors the control-file classification in ReadAsync.
+	private static ControlFileFamilies ControlFamily(string path)
+	{
+		var name = Path.GetFileName(path);
+		if (path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)) return ControlFileFamilies.CSharp;
+		if (IsTypeScriptConfig(path) || name.Equals("package.json", StringComparison.OrdinalIgnoreCase))
+			return ControlFileFamilies.TypeScript;
+		if (IsPythonConfig(path)) return ControlFileFamilies.Python;
+		if (IsJavaConfig(path)) return ControlFileFamilies.Jvm;
+		if (name.Equals("Cargo.toml", StringComparison.OrdinalIgnoreCase)) return ControlFileFamilies.Rust;
+		if (name.Equals("Gemfile", StringComparison.OrdinalIgnoreCase) ||
+			path.EndsWith(".gemspec", StringComparison.OrdinalIgnoreCase)) return ControlFileFamilies.Ruby;
+		if (name.Equals("composer.json", StringComparison.OrdinalIgnoreCase)) return ControlFileFamilies.Php;
+		if (name.Equals("CMakeLists.txt", StringComparison.OrdinalIgnoreCase)) return ControlFileFamilies.C;
+		if (name is "build.sbt" or "build.sc") return ControlFileFamilies.Scala;
+		return ControlFileFamilies.None;
+	}
+
+	[Flags]
+	private enum ControlFileFamilies
+	{
+		None = 0,
+		CSharp = 1,
+		TypeScript = 2,
+		Python = 4,
+		Jvm = 8,
+		Rust = 16,
+		Ruby = 32,
+		Php = 64,
+		C = 128,
+		Scala = 256
 	}
 
 	private static IReadOnlySet<string> ParseNodeDependencies(JsonElement root)
