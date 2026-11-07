@@ -482,8 +482,10 @@ public sealed class DependencyPythonAndConfigurationSemanticsIntegrationTests
 
 		var edge = Assert.Single(result.Edges, item => item.Source == "consumer.py");
 		Assert.Equal(2, edge.Evidence.Count);
-		Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
-		Assert.Equal("Python module assignment bindings are not indexed", Assert.Single(edge.Reasons));
+		Assert.Equal(ResolutionStatus.Resolved, edge.Status);
+		Assert.Equal("settings.py", edge.Target);
+		Assert.True(edge.ModuleOnly);
+		Assert.Equal(["imported name not indexed", "one module target"], edge.Reasons);
 	}
 
 	[Fact]

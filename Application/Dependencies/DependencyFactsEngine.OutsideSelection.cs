@@ -4,8 +4,9 @@ public sealed partial class DependencyFactsEngine
 {
 	/// <summary>
 	/// A narrowed selection cannot see part of the project: a reference into a file it left out
-	/// reads as unresolved, external, a namespace, or a single candidate where the project has
-	/// several. Any seed with facts is therefore worth relating against the readable project.
+	/// reads as unresolved, external, a namespace, a single candidate where the project has
+	/// several, or a module that only stands in for a child module the selection left out. Any
+	/// seed with facts is therefore worth relating against the readable project.
 	/// </summary>
 	public static bool CanRelateOutsideSelection(DependencyRelatedResult selection)
 	{

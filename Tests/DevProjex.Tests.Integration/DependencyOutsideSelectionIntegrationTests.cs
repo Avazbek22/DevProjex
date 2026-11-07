@@ -482,6 +482,147 @@ public sealed class DependencyOutsideSelectionIntegrationTests
 			narrowed.Resolution);
 	}
 
+	[Fact]
+	public async Task NarrowedSelection_ListsAPythonModuleConstantSourceOutsideIt()
+	{
+		using var fixture = new TemporaryDirectory();
+		var package = fixture.CreateFile("pkg/__init__.py", string.Empty);
+		var config = fixture.CreateFile("pkg/_config.py", "DEFAULT_TIMEOUT_CONFIG = 5.0");
+		var api = fixture.CreateFile("pkg/_api.py", "from ._config import DEFAULT_TIMEOUT_CONFIG");
+		string[] projectManifest = [package, config, api];
+		using var engine = CreateEngine();
+
+		var selection = await engine.FindRelatedAsync(
+			fixture.Path,
+			[package, api],
+			["pkg/_api.py"],
+			DependencyDirection.Dependencies,
+			cancellationToken: TestContext.Current.CancellationToken);
+		var outside = await engine.FindOutsideSelectionAsync(
+			fixture.Path,
+			selection,
+			projectManifest,
+			DependencyDirection.Dependencies,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.True(DependencyFactsEngine.CanRelateOutsideSelection(selection));
+		var dependency = Assert.Single(Assert.Single(outside.Seeds).Dependencies);
+		Assert.Equal("pkg/_config.py", dependency.Path);
+		Assert.Contains("imported name not indexed", dependency.Reasons);
+		// The module-only relation is a resolved one, counted where its module is listed.
+		Assert.Equal(new DependencyResolutionCounts(0, 0, 0, 0, 1), outside.Resolution);
+		await AssertSameAnswerAsUnnarrowedAsync(
+			engine, fixture.Path, projectManifest, ["pkg/_api.py"], DependencyDirection.Dependencies, outside);
+	}
+
+	[Fact]
+	public async Task NarrowedSelection_ListsTheChildModuleAPackageAssignmentStoodInFor()
+	{
+		using var fixture = new TemporaryDirectory();
+		var package = fixture.CreateFile("pkg/__init__.py", "helper = None");
+		var child = fixture.CreateFile("pkg/helper.py", "class Helper: pass");
+		var bare = fixture.CreateFile("pkg/bare.py", "from . import helper");
+		var absolute = fixture.CreateFile("absolute.py", "from pkg import helper");
+		string[] projectManifest = [package, child, bare, absolute];
+		using var engine = CreateEngine();
+
+		foreach (var seedPath in new[] { "pkg/bare.py", "absolute.py" })
+		{
+			var selection = await engine.FindRelatedAsync(
+				fixture.Path,
+				[package, bare, absolute],
+				[seedPath],
+				DependencyDirection.Dependencies,
+				cancellationToken: TestContext.Current.CancellationToken);
+			var outside = await engine.FindOutsideSelectionAsync(
+				fixture.Path,
+				selection,
+				projectManifest,
+				DependencyDirection.Dependencies,
+				cancellationToken: TestContext.Current.CancellationToken);
+
+			var selectionEdge = Assert.Single(selection.Index.EdgesBySource[seedPath]);
+			Assert.True(selectionEdge.ModuleOnly);
+			Assert.Equal("pkg/__init__.py", selectionEdge.Target);
+			Assert.True(DependencyFactsEngine.CanRelateOutsideSelection(selection));
+			// The project knows the child module, so the package the selection settled on is gone.
+			Assert.Empty(Assert.Single(outside.Selection.Seeds).Dependencies);
+			var dependency = Assert.Single(Assert.Single(outside.Seeds).Dependencies);
+			Assert.Equal("pkg/helper.py", dependency.Path);
+			Assert.Equal(ResolutionStatus.Resolved, dependency.Status);
+			Assert.DoesNotContain("imported name not indexed", dependency.Reasons);
+			Assert.Equal(new DependencyResolutionCounts(0, 0, 0, 0, 1), outside.Resolution);
+			await AssertSameAnswerAsUnnarrowedAsync(
+				engine, fixture.Path, projectManifest, [seedPath], DependencyDirection.Dependencies, outside);
+		}
+	}
+
+	[Fact]
+	public async Task NarrowedSelection_ListsTheAssigningModuleOfAReExportOutsideIt()
+	{
+		using var fixture = new TemporaryDirectory();
+		var settings = fixture.CreateFile("settings.py", "API_VERSION = \"1\"");
+		var facade = fixture.CreateFile("facade.py", "from settings import API_VERSION");
+		var consumer = fixture.CreateFile("consumer.py", "from facade import API_VERSION");
+		string[] projectManifest = [settings, facade, consumer];
+		using var engine = CreateEngine();
+
+		var selection = await engine.FindRelatedAsync(
+			fixture.Path,
+			[facade, consumer],
+			["consumer.py"],
+			DependencyDirection.Dependencies,
+			cancellationToken: TestContext.Current.CancellationToken);
+		var outside = await engine.FindOutsideSelectionAsync(
+			fixture.Path,
+			selection,
+			projectManifest,
+			DependencyDirection.Dependencies,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var selectionEdge = Assert.Single(selection.Index.EdgesBySource["consumer.py"]);
+		Assert.Equal(ResolutionStatus.Unresolved, selectionEdge.Status);
+		Assert.Equal("re-exported name not indexed", Assert.Single(selectionEdge.Reasons));
+		var dependency = Assert.Single(Assert.Single(outside.Seeds).Dependencies);
+		Assert.Equal("settings.py", dependency.Path);
+		Assert.Contains("imported name not indexed", dependency.Reasons);
+		Assert.Equal(new DependencyResolutionCounts(0, 0, 0, 0, 1), outside.Resolution);
+		await AssertSameAnswerAsUnnarrowedAsync(
+			engine, fixture.Path, projectManifest, ["consumer.py"], DependencyDirection.Dependencies, outside);
+	}
+
+	[Fact]
+	public async Task NarrowedSelection_KeepsAModuleOnlyRelationInsideItWhenItsModuleIsSelected()
+	{
+		using var fixture = new TemporaryDirectory();
+		var package = fixture.CreateFile("pkg/__init__.py", string.Empty);
+		var config = fixture.CreateFile("pkg/_config.py", "DEFAULT_TIMEOUT_CONFIG = 5.0");
+		var api = fixture.CreateFile("pkg/_api.py", "from ._config import DEFAULT_TIMEOUT_CONFIG");
+		string[] projectManifest = [package, config, api];
+		using var engine = CreateEngine();
+
+		var selection = await engine.FindRelatedAsync(
+			fixture.Path,
+			[config, api],
+			["pkg/_api.py"],
+			DependencyDirection.Both,
+			cancellationToken: TestContext.Current.CancellationToken);
+		var narrowed = await engine.FindOutsideSelectionAsync(
+			fixture.Path,
+			selection,
+			projectManifest,
+			DependencyDirection.Both,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var inside = Assert.Single(Assert.Single(narrowed.Selection.Seeds).Dependencies);
+		Assert.Equal("pkg/_config.py", inside.Path);
+		Assert.Equal(ResolutionStatus.Resolved, inside.Status);
+		Assert.Contains("imported name not indexed", inside.Reasons);
+		Assert.Equal(1, narrowed.Resolution.Resolved);
+		await AssertSameAnswerAsUnnarrowedAsync(
+			engine, fixture.Path, projectManifest, ["pkg/_api.py"], DependencyDirection.Both, narrowed);
+	}
+
 	// Narrowing decides only where a related file is listed: together the selection's sections
 	// and the outside sections hold what the unnarrowed call resolves, with the same counts.
 	private static async Task AssertSameAnswerAsUnnarrowedAsync(

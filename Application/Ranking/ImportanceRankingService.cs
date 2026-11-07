@@ -133,7 +133,7 @@ public sealed class ImportanceRankingService(
 		var internalReferenceCandidates = dependency.Edges.Count(static edge =>
 			edge.Status != ResolutionStatus.External);
 		var resolvedInternalReferences = dependency.Edges.Count(edge =>
-			edge.Status == ResolutionStatus.Resolved &&
+			IsGraphEvidence(edge) &&
 			ResolvedTargets(edge).Any(candidateRelativePaths.Contains));
 		var resolvedInternalReferenceCoverage = internalReferenceCandidates == 0
 			? 0
@@ -241,6 +241,11 @@ public sealed class ImportanceRankingService(
 		edge.DeclarationFiles.Count > 0
 			? edge.DeclarationFiles
 			: edge.Target is null ? [] : [edge.Target];
+
+	// A module-only import names no declaration, so ranking sees it exactly as it saw the
+	// unresolved import it replaced: outside the graph and outside the resolved fraction.
+	private static bool IsGraphEvidence(DependencyEdge edge) =>
+		edge.Status == ResolutionStatus.Resolved && !edge.ModuleOnly;
 
 	internal static double CalculateExtractedFactsCoverage(
 		DependencyFactsCoverage coverage,
@@ -571,7 +576,7 @@ public sealed class ImportanceRankingService(
 		foreach (var edge in snapshot.Edges)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			if (edge.Status != ResolutionStatus.Resolved ||
+			if (!IsGraphEvidence(edge) ||
 				!nodeByPath.TryGetValue(edge.Source, out var sourceNode))
 			{
 				continue;

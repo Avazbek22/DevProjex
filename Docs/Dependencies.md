@@ -50,22 +50,23 @@ There are three separate scopes. The **allowed manifest** is the effective DevPr
 Seeds do not reduce the manifest that must be indexed. No declaration, candidate, path, or cached
 reason can cross the current manifest gate, and self-file relationships are suppressed.
 
-One documented projection looks past a narrowed selection without changing it. A selection
-cannot see the files it left out, and some of them decide what a reference inside it means: a C#
-`global using`, a Python package's `__init__.py`, or a second declaration that makes a name
-ambiguous. So `related`, the Terminal Workspace `related` command, and `related_files` resolve
-their seeds' relations against a second index of the files the caller may read. That index
-honors every access filter and lifts only the call's own narrowing; the
-[MCP server](McpServer.md#related_files), [command line](CommandLine.md#related), and
-[Terminal Workspace](TerminalWorkspace.md) documents define it per surface. The selection only
-decides where each related file is listed: in the seed's own sections when the selection holds
-it, and as an outside entry otherwise, so together they hold what the call relates without
-narrowing, and the resolution counts add up to that call's counts. An ambiguous relation stays
-in the seed's sections when the candidate it names is in the selection and is otherwise only
-counted. A seed the second index has no facts for keeps the selection's own answer, and the
+One documented projection looks past a narrowed selection without changing it. A selection cannot
+see the files it left out, and some of them decide what a reference inside it means: a C#
+`global using`, a Python package's `__init__.py`, a child module that a package assignment only
+stands in for, or a second declaration that makes a name ambiguous. So `related`, the Terminal
+Workspace `related` command, and `related_files` resolve their seeds' relations against a second
+index of the files the caller may read. That index honors every access filter and lifts only the
+call's own narrowing; the [MCP server](McpServer.md#related_files),
+[command line](CommandLine.md#related), and [Terminal Workspace](TerminalWorkspace.md) documents
+define it per surface. The selection only decides where each related file is listed: in the seed's own
+sections when the selection holds it, and as an outside entry otherwise, so together they hold what
+the call relates without narrowing, and the resolution counts add up to that call's counts. An
+ambiguous relation stays in the seed's sections when the candidate it names is in the selection and
+is otherwise only counted; a module-only Python relation is placed and counted like any other
+resolved one. A seed the second index has no facts for keeps the selection's own answer, and the
 selection's coverage and scope are reported unchanged. Outside entries name a path, the same
-evidence reasons, and an estimated token count, never content; they and the candidate lists of
-a narrowed call's ambiguous rows are the only results that name a file outside the manifest.
+evidence reasons, and an estimated token count, never content; they and the candidate lists of a
+narrowed call's ambiguous rows are the only results that name a file outside the manifest.
 
 Configuration describes the project, not the selection. For each language present in the manifest,
 the engine also reads that language's control files (`.csproj`, `tsconfig.json`, `jsconfig.json`,
@@ -400,8 +401,14 @@ ordinary module cannot acquire children from a same-named directory. `__all__` a
 wildcard imports only. A missing imported name remains `Unresolved` with a constant reason instead of
 turning the existence of the module into evidence for that name. Relative imports that would escape the top-level package remain unresolved.
 Only a module-level assignment can establish `__all__` policy; docstrings and assignments inside a
-function or class do not. Module-level value assignments and wildcard re-export expansion are not
-indexed, and report explicit unresolved limitations rather than guessed bindings. Dynamic `__all__`,
+function or class do not. Module-level value assignments, plain or annotated, are not indexed as
+declarations; importing such a name still relates the file to the module that assigns it as
+`Resolved` with the reason `imported name not indexed`, and importance ranking leaves this
+module-only relation out of its graph. This covers a package initializer, including
+`from . import name`, unless a child module of that name exists, and static re-export chains
+within the same depth bound as re-exported declarations; a chain that reaches no assignment
+remains `Unresolved` as `re-exported name not indexed`. Wildcard re-export expansion reports an
+explicit unresolved limitation rather than a guessed binding. Dynamic `__all__`,
 `setup.py`, and import hooks are not executed and remain unresolved. Separate
 complete `sys.stdlib_module_names` snapshots cover Python
 3.12 and 3.13. A decisive `requires-python`/`python_requires` constraint selects its snapshot;

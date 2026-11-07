@@ -1309,6 +1309,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 	private const string PythonScriptDirectoryReason = "script-directory import";
 	private const string PythonScriptDirectoryConflictReason =
 		"script directory and project root both provide this module";
+	private const string PythonUnindexedNameReason = "imported name not indexed";
 
 	private static StringComparer PathComparer => OperatingSystem.IsWindows()
 		? StringComparer.OrdinalIgnoreCase
@@ -1616,7 +1617,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			foreach (var edge in raw)
 			{
 				var key = new EdgeAggregationKey(
-					edge.Source, edge.Target, edge.Layer, edge.Status, edge.Reference, edge.CrossScope);
+					edge.Source, edge.Target, edge.Layer, edge.Status, edge.Reference, edge.CrossScope, edge.ModuleOnly);
 				if (!groups.TryGetValue(key, out var accumulator))
 					groups.Add(key, accumulator = new EdgeAccumulator());
 				accumulator.Add(edge);
@@ -1628,13 +1629,16 @@ public sealed partial class DependencyFactsEngine : IDisposable
 				.ToArray();
 		}
 
+		// Module-only imports stay a group of their own, so an import that also names a declaration
+		// in the same module keeps its graph weight.
 		private readonly record struct EdgeAggregationKey(
 			string Source,
 			string? Target,
 			EvidenceLayer Layer,
 			ResolutionStatus Status,
 			string Reference,
-			bool CrossScope);
+			bool CrossScope,
+			bool ModuleOnly);
 
 		private sealed class EdgeAccumulator
 		{
@@ -1677,7 +1681,8 @@ public sealed partial class DependencyFactsEngine : IDisposable
 					_candidates!.Order(StringComparer.Ordinal).ToArray(),
 					key.CrossScope)
 				{
-					DeclarationFiles = _declarationFiles!.Order(StringComparer.Ordinal).ToArray()
+					DeclarationFiles = _declarationFiles!.Order(StringComparer.Ordinal).ToArray(),
+					ModuleOnly = key.ModuleOnly
 				};
 			}
 
@@ -1695,6 +1700,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 	private sealed partial class ResolverContext
 	{
 		private const int MaximumBashSuffixCandidates = 32;
+		private const int MaximumPythonReExportDepth = 8;
 		private const string BashWorkingDirectoryReason = "the Bash execution working directory is unknown";
 		private const string BashSearchPathReason =
 			"the Bash execution working directory is unknown; PATH and sourcepath settings are also unknown";
@@ -2827,12 +2833,23 @@ public sealed partial class DependencyFactsEngine : IDisposable
 				}
 				if (candidates.Count == 0 && moduleEntityExists)
 				{
-					if (moduleCandidates.Any(candidate => HasPythonModuleAssignment(candidate, import.ImportedName)))
-						return Edge(source, import, ResolutionStatus.Unresolved, null,
-							"Python module assignment bindings are not indexed", []);
+					var assigned = moduleCandidates
+						.SelectMany(candidate => ResolvePythonAssignedBinding(
+							candidate,
+							import.ImportedName,
+							0,
+							new HashSet<string>(StringComparer.Ordinal)))
+						.Distinct(StringComparer.Ordinal)
+						.Order(StringComparer.Ordinal)
+						.ToArray();
+					if (assigned.Length > 0)
+						return ModuleOnlyImport(source, import, assigned, resolvedReason);
 					if (moduleCandidates.Any(HasPythonWildcardReExport))
 						return Edge(source, import, ResolutionStatus.Unresolved, null,
 							"Python wildcard re-export bindings are not indexed", []);
+					if (moduleCandidates.Any(candidate => HasPythonModuleLevelBinding(candidate, import.ImportedName)))
+						return Edge(source, import, ResolutionStatus.Unresolved, null,
+							"re-exported name not indexed", []);
 					return Edge(source, import, ResolutionStatus.Unresolved, null,
 						"name not found in module", []);
 				}
@@ -2862,33 +2879,15 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			int depth,
 			ISet<string> visited)
 		{
-			if (depth >= 8 || !visited.Add(candidate) || !_files.TryGetValue(candidate, out var facts)) return [];
+			if (depth >= MaximumPythonReExportDepth || !visited.Add(candidate) ||
+				!_files.TryGetValue(candidate, out var facts)) return [];
 			if (facts.Declarations.Any(declaration => declaration.ContainingType is null &&
 				SimpleName(declaration.Identity.QualifiedName) == name))
 				return [candidate];
-			foreach (var import in facts.Imports.Where(import => import.ContainingDeclaration is null &&
-				string.Equals(PythonBoundName(import), name, StringComparison.Ordinal)).Reverse())
+			foreach (var import in PythonModuleLevelBindings(facts, name))
 			{
-				var sourceModule = PythonModule(facts);
-				var sourcePackage = Path.GetFileNameWithoutExtension(candidate) == "__init__"
-					? sourceModule
-					: sourceModule.Contains('.') ? sourceModule[..sourceModule.LastIndexOf('.')] : string.Empty;
-				var parts = sourcePackage.Split('.', StringSplitOptions.RemoveEmptyEntries).ToList();
-				if (import.RelativeLevel > 0)
-				{
-					var remove = import.RelativeLevel - 1;
-					if (remove >= parts.Count) continue;
-					parts.RemoveRange(parts.Count - remove, remove);
-				}
-				var module = import.RelativeLevel == 0 ? import.Specifier :
-					string.Join('.', parts.Concat(import.Specifier.Split('.', StringSplitOptions.RemoveEmptyEntries)));
-				var searchRoots = PythonRootPrefixes(facts);
-				if (import.RelativeLevel == 0)
-				{
-					var lookup = FindPythonImportRoots(facts, module);
-					if (lookup.Conflicting) continue;
-					searchRoots = lookup.Roots;
-				}
+				if (FindPythonReExportModule(facts, import) is not { } lookup) continue;
+				var (searchRoots, module) = lookup;
 				if (import.ImportedName is { Length: > 0 } imported)
 				{
 					var child = module.Length == 0 ? imported : module + "." + imported;
@@ -2918,6 +2917,66 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			}
 			return [];
 		}
+
+		// Follows the same static re-exports to the file whose module-level assignment binds the
+		// name. The index holds no declaration for that assignment, so the result only locates the
+		// module. It is consulted after declarations and child modules have found nothing.
+		private IReadOnlyList<string> ResolvePythonAssignedBinding(
+			string candidate,
+			string name,
+			int depth,
+			ISet<string> visited)
+		{
+			if (depth >= MaximumPythonReExportDepth || !visited.Add(candidate) ||
+				!_files.TryGetValue(candidate, out var facts)) return [];
+			if (HasPythonModuleAssignment(candidate, name))
+				return [candidate];
+			foreach (var import in PythonModuleLevelBindings(facts, name))
+			{
+				if (import.ImportedName is not { Length: > 0 } imported ||
+					FindPythonReExportModule(facts, import) is not { } lookup) continue;
+				var assigned = ProbePythonModule(lookup.Roots, lookup.Module)
+					.SelectMany(next => ResolvePythonAssignedBinding(next, imported, depth + 1, visited))
+					.Distinct(StringComparer.Ordinal)
+					.Order(StringComparer.Ordinal)
+					.ToArray();
+				if (assigned.Length > 0) return assigned;
+			}
+			return [];
+		}
+
+		// Unconditional module-level imports that bind the name, the last one first.
+		private static IEnumerable<ImportFact> PythonModuleLevelBindings(FileFacts facts, string name) =>
+			facts.Imports.Where(import => import.ContainingDeclaration is null &&
+				string.Equals(PythonBoundName(import), name, StringComparison.Ordinal)).Reverse();
+
+		// The module a re-exporting file's import names and the roots it is looked up from, or null
+		// when the import cannot resolve from that file.
+		private (IReadOnlyList<string> Roots, string Module)? FindPythonReExportModule(
+			FileFacts facts,
+			ImportFact import)
+		{
+			var sourceModule = PythonModule(facts);
+			var sourcePackage = Path.GetFileNameWithoutExtension(facts.Path) == "__init__"
+				? sourceModule
+				: sourceModule.Contains('.') ? sourceModule[..sourceModule.LastIndexOf('.')] : string.Empty;
+			var parts = sourcePackage.Split('.', StringSplitOptions.RemoveEmptyEntries).ToList();
+			if (import.RelativeLevel > 0)
+			{
+				var remove = import.RelativeLevel - 1;
+				if (remove >= parts.Count) return null;
+				parts.RemoveRange(parts.Count - remove, remove);
+			}
+			var module = import.RelativeLevel == 0 ? import.Specifier :
+				string.Join('.', parts.Concat(import.Specifier.Split('.', StringSplitOptions.RemoveEmptyEntries)));
+			if (import.RelativeLevel != 0)
+				return (PythonRootPrefixes(facts), module);
+			var lookup = FindPythonImportRoots(facts, module);
+			return lookup.Conflicting ? null : (lookup.Roots, module);
+		}
+
+		private bool HasPythonModuleLevelBinding(string candidate, string name) =>
+			_files.TryGetValue(candidate, out var facts) && PythonModuleLevelBindings(facts, name).Any();
 
 		private int CountPythonNamespacePortions(IReadOnlyList<string> roots, string module)
 		{
@@ -3551,6 +3610,20 @@ public sealed partial class DependencyFactsEngine : IDisposable
 					resolvedReason ?? "one module target", candidates),
 				_ => Edge(source, import, ResolutionStatus.Ambiguous, null, "multiple module targets", candidates)
 			};
+		}
+
+		// The imported name is bound by a module-level assignment the index does not hold as a
+		// declaration, so the edge relates the file to the assigning module without claiming one.
+		private DependencyEdge ModuleOnlyImport(
+			FileFacts source,
+			ImportFact import,
+			IReadOnlyList<string> moduleTargets,
+			string? resolvedReason)
+		{
+			var edge = FinishImport(source, import, moduleTargets, resolvedReason);
+			return edge.Status == ResolutionStatus.Resolved
+				? edge with { Reasons = [.. edge.Reasons, PythonUnindexedNameReason], ModuleOnly = true }
+				: edge;
 		}
 
 		private DependencyEdge Edge(FileFacts source, ImportFact import, ResolutionStatus status, string? target, string reason, IReadOnlyList<string> candidates) =>
