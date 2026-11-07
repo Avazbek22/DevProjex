@@ -65,7 +65,7 @@ public sealed class McpPackageLauncherTests
 		using var sandbox = FlatpakEnvironment.UseForTesting(new(false, null));
 		var windows = OperatingSystem.IsWindows();
 		var launcher = nuget ? "dnx" : "npx";
-		var executable = PackageCases.First(row => row.Data.Item3.Contains(launcher) &&
+		var executable = PackageCases.First(row => (row.Data.Item2 == launcher || row.Data.Item3.Contains(launcher)) &&
 			row.Data.Item1.StartsWith(windows ? "C:" : "/", StringComparison.Ordinal)).Data.Item1;
 		var root = windows ? "C:\\Project with spaces\\Юникод ! $HOME `text` 'quote'" : "/project with spaces/Юникод ! $HOME `text` 'quote' \"double\" \\slash";
 		var fragment = McpConnectionFragmentGenerator.Generate(McpConnectionClient.ClaudeCode, McpConnectionMode.Live, executable, root);
