@@ -1977,6 +1977,12 @@ Package launches are another exception: connections created from an npm package 
 `npx -y devprojex mcp --root <project>`, and connections created from a NuGet package
 cache use `dnx devprojex mcp --root <project>`, with `--live` when requested. This
 also applies to `--print`, Terminal Workspace, and generated JSON/TOML fragments.
+On Windows `npx` and `dnx` are batch files, which MCP clients cannot start without a
+shell, so the command is `cmd` with arguments `/c`, `npx`, `-y`, `devprojex`, `mcp`,
+`--root`, the project path (or `/c`, `dnx`, `devprojex`, ...). A project path that
+contains `%`, `&`, or `^` would be rewritten by `cmd`, so such a connection names the
+installed executable instead. Running `mcp connect` again replaces a bare `npx` or `dnx`
+entry for the same project that an earlier version wrote on Windows.
 The client keeps a package launcher instead of a version-specific cached executable,
 so clearing the package cache does not leave a dead binary path in its configuration.
 Node.js/npm or the .NET 10 SDK respectively must remain available on the client's
