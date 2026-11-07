@@ -13,11 +13,20 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 	private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(30);
 	private static int _gitAvailability;
 	private readonly IGitPathComparisonSemanticsResolver _pathComparisonSemanticsResolver;
+	private readonly Func<string, CancellationToken, Task<IReadOnlyList<string>>> _readLineEndingSettings;
 
 	public GitScopePathProvider(IGitPathComparisonSemanticsResolver? pathComparisonSemanticsResolver = null)
+		: this(pathComparisonSemanticsResolver, GitLineEndingSettings.ReadAsync)
+	{
+	}
+
+	internal GitScopePathProvider(
+		IGitPathComparisonSemanticsResolver? pathComparisonSemanticsResolver,
+		Func<string, CancellationToken, Task<IReadOnlyList<string>>> readLineEndingSettings)
 	{
 		_pathComparisonSemanticsResolver = pathComparisonSemanticsResolver ??
 		                                   GitConfigPathComparisonSemanticsResolver.Instance;
+		_readLineEndingSettings = readLineEndingSettings ?? throw new ArgumentNullException(nameof(readLineEndingSettings));
 	}
 
 	public Task<GitScopePathResult> ResolveAsync(
@@ -168,6 +177,8 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 				];
 				break;
 			case GitFilteringMode.Changes:
+				var lineEndingSettings = await _readLineEndingSettings(repositoryRoot, cancellationToken)
+					.ConfigureAwait(false);
 				var outputBudget = new GitScopeOutputBudget(MaximumOutputBytes);
 				var stagedTask = RunAsync(
 					repositoryRoot,
@@ -176,7 +187,7 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 					outputBudget);
 				var unstagedTask = RunAsync(
 					repositoryRoot,
-					GitProcessOperation.ReadWorkingChanges(),
+					GitProcessOperation.ReadWorkingChanges(lineEndingSettings),
 					cancellationToken,
 					outputBudget);
 				var untrackedTask = RunAsync(

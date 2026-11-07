@@ -332,3 +332,39 @@ passes. The signal is not inert on that corpus. `Apps/TerminalHost/Program.cs`,
 `tools/SegmentedRedactionBenchmark/Program.cs` and `tools/StoreMediaCapture/Program.cs` are
 top-level-statement files, so both branches of the evidence fire. The role weight of `0.05` does
 not move any registered task's admitted set at any registered budget.
+
+### Project-wide dependency configuration
+
+Dependency configuration is now read from the project rather than from the selection: control
+files are found in the directories that hold manifest files and their parents up to the root,
+and Python imports no longer require a `pyproject.toml` or `setup.cfg`. The change is aimed at
+narrowed views, where a filtered-out configuration used to leave every reference unresolved. It
+had to be measured here as well, because the same dependency index feeds ranking.
+
+The frozen protocol was rerun on 2026-11-07 with the registry, tasks, budgets, comparators,
+sufficient sets and gates unchanged, once on the base `03edce29e962c05839b66be5f3bca326339415e8`
+and once on the change `41a721f8610972004f924c5a05bb6cadc1a94e6d`, on the same machine back to
+back. All 270 cells are identical: no RecallNew, AllRequired, oracle, oracle-after-seeds or
+irrelevant-token-share value moved. The release criterion passes with the same values, an
+overall `focus-v1 - seed-first` RecallNew delta of `+0.3667` (DevProjex `+0.2000`, Repomix
+`+0.3889`, Flask `+1.0000`) and zero AllRequired regressions. That is the expected outcome: the
+registered manifests are full standard-profile selections that already contain every control
+file, and the registered tasks contain no Python file without configuration. The protocol does
+not register narrowed views, so it can show that ranking did not regress, not how much narrowed
+views gained. The complete result is
+`tools/RankingEval/results/2026-11-07-project-configuration.json`, which replaces the
+2026-09-10 result as the current baseline.
+
+Searching the ancestor directories has a cost on full selections, even though it finds nothing
+new there. Cold `measure-index-one` medians of seven fresh processes per cell, base and change
+interleaved:
+
+| Repository | Cold base | Cold with the change | Change |
+|---|---:|---:|---:|
+| DevProjex | `3922.3` | `4100.2` | `+4.5%` |
+| Repomix | `491.2` | `508.8` | `+3.6%` |
+
+The minimum of every cell moved as well, so this is a real cost of about 10 to 20 ms for the
+roughly one hundred directories listed, not drift. Warm indexing is unaffected beyond the stamp
+checks for those directories. Reducing the listing cost is tracked as separate work, and that
+work must keep these results byte-identical.

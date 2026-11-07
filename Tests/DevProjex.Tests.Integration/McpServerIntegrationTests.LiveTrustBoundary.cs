@@ -215,7 +215,7 @@ public sealed partial class McpServerIntegrationTests
 			("search_project", new Dictionary<string, object?> { ["pattern"] = "focus-marker" }, "were not searched"),
 			("analyze", new Dictionary<string, object?>(), "were not measured"),
 			("pack_context", new Dictionary<string, object?>(), "were not packed"),
-			("related_files", new Dictionary<string, object?> { ["path"] = "src/App.cs" }, "were not traced")
+			("related_files", new Dictionary<string, object?> { ["path"] = "src/App.cs" }, "were checked only for links to the seeds")
 		};
 		foreach (var (tool, arguments, verb) in focusCalls)
 		{

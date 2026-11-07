@@ -709,10 +709,63 @@ public sealed class RelatedCommandProcessTests
 			using var document = JsonDocument.Parse(result.StandardOutput);
 			var dependencies = Assert.Single(document.RootElement.GetProperty("seeds").EnumerateArray())
 				.GetProperty("dependencies").EnumerateArray()
-				.Select(static item => item.GetProperty("path").GetString())
+				.Select(static item => item.GetProperty("path").GetString() ?? string.Empty)
 				.ToArray();
 			Assert.Equal(["src/demo/core.py"], dependencies);
 			Assert.DoesNotContain("pyproject.toml", result.StandardOutput, StringComparison.Ordinal);
+		}
+	}
+
+	[Fact]
+	public void NarrowedSelectionListsRelatedFilesOutsideItInTextAndJson()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/App.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />\n");
+		workspace.WriteFile("project/Models/User.cs", "namespace App.Models; public sealed class User { }\n");
+		workspace.WriteFile("project/Services/Store.cs",
+			"using App.Models; namespace App.Services; public sealed class Store { User Value; }\n");
+		workspace.WriteFile("project/Tests/StoreTests.cs",
+			"using App.Services; namespace App.Tests; public sealed class StoreTests { Store Subject; }\n");
+		string[] arguments =
+		[
+			"related", "Services/Store.cs", "--project", project, "--git-mode", "none", "--exclude", "none"
+		];
+
+		var text = Run(workspace, [.. arguments, "--select", "Services", "--format", "text"]);
+		var json = Run(workspace, [.. arguments, "--select", "Services", "--format", "json"]);
+		var whole = Run(workspace, [.. arguments, "--format", "json"]);
+
+		Assert.Equal(0, text.ExitCode);
+		Assert.Contains("Dependencies outside the selection:", text.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("Models/User.cs — ", text.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("Dependents outside the selection:", text.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("Tests/StoreTests.cs — ", text.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("[Resolution] resolved=0 · ambiguous=0 · unresolved=0 · external=0 · outside-selection=2",
+			text.StandardOutput, StringComparison.Ordinal);
+
+		Assert.Equal(0, json.ExitCode);
+		using (var document = JsonDocument.Parse(json.StandardOutput))
+		{
+			var outside = Assert.Single(document.RootElement.GetProperty("outsideSelection").EnumerateArray());
+			Assert.Equal("Services/Store.cs", outside.GetProperty("seed").GetString());
+			Assert.Equal("Models/User.cs",
+				Assert.Single(outside.GetProperty("dependencies").EnumerateArray()).GetProperty("path").GetString());
+			Assert.Equal(1, outside.GetProperty("dependencyCount").GetInt32());
+			Assert.Equal("Tests/StoreTests.cs",
+				Assert.Single(outside.GetProperty("dependents").EnumerateArray()).GetProperty("path").GetString());
+			Assert.Equal(1, outside.GetProperty("dependentCount").GetInt32());
+			var resolution = document.RootElement.GetProperty("resolution");
+			Assert.Equal(2, resolution.GetProperty("outsideSelection").GetInt32());
+			Assert.Equal(0, resolution.GetProperty("unresolved").GetInt32());
+		}
+
+		// Without narrowing nothing lies outside the selection and the document keeps its shape.
+		Assert.Equal(0, whole.ExitCode);
+		using (var document = JsonDocument.Parse(whole.StandardOutput))
+		{
+			Assert.False(document.RootElement.TryGetProperty("outsideSelection", out _));
+			Assert.False(document.RootElement.GetProperty("resolution").TryGetProperty("outsideSelection", out _));
 		}
 	}
 

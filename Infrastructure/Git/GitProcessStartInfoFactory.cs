@@ -123,6 +123,8 @@ internal static class GitProcessStartInfoFactory
 		{
 			case GitProcessProfile.LocalRead:
 				AddConfig(startInfo, "protocol.allow=never");
+				foreach (var setting in operation.LineEndingSettings)
+					AddConfig(startInfo, setting);
 				break;
 			case GitProcessProfile.ManagedCheckout:
 				AddConfig(startInfo, "protocol.allow=never");

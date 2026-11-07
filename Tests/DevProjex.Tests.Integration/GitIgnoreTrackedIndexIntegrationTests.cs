@@ -2,7 +2,7 @@ using DevProjex.Application.Context;
 
 namespace DevProjex.Tests.Integration;
 
-public sealed class GitIgnoreTrackedIndexIntegrationTests
+public sealed partial class GitIgnoreTrackedIndexIntegrationTests
 {
 	[Fact]
 	public void InvalidRepositoryMetadataDoesNotProduceAuthoritativeComparisonSemantics()

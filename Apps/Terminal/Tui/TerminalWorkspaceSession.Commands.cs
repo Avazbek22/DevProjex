@@ -436,6 +436,7 @@ internal sealed partial class TerminalWorkspaceSession
 				await RelatedOutputRenderer.WriteAsync(
 						writer,
 						related,
+						outside: null,
 						direction,
 						AnalysisOutputFormat.Text,
 						_services.Localization,

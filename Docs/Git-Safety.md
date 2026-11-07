@@ -100,12 +100,26 @@ rev-parse --verify --quiet --end-of-options <validated-ref>^{commit}
 config --get remote.origin.url
 config --show-scope --type=bool --get-regexp <fixed-path-semantics-pattern>
 config --name-only --get-regexp <fixed-safety-pattern>
+config -z --get-regexp ^core\.(autocrlf|eol)$
+config --system -z --get-regexp ^core\.(autocrlf|eol)$
+config --file <user-configuration-file> -z --get-regexp ^core\.(autocrlf|eol)$
 branch
 branch -r
 rev-parse --abbrev-ref HEAD
 symbolic-ref refs/remotes/origin/HEAD
 worktree list --porcelain
 ```
+
+The working-tree comparison of the `changes` scope is the one read that also honors user
+configuration, and only for line endings. Git for Windows keeps `core.autocrlf` in its system
+configuration, which isolation skips; without it a CRLF checkout compares as modified whenever Git
+rechecks file content, as it does after a fresh clone or a copy, and the scope would select nearly
+every file. Before that comparison DevProjex reads `core.autocrlf` and `core.eol` from the system
+file (unless `GIT_CONFIG_NOSYSTEM` is set for DevProjex), the user's files (`GIT_CONFIG_GLOBAL`, or
+the XDG file and then `~/.gitconfig`), and the repository, in Git's own precedence. It passes only
+validated values to that one `diff` as `-c core.autocrlf=true|false|input` and
+`-c core.eol=lf|crlf|native`. Any other value is ignored, no other setting from those files reaches
+Git, and an unreadable repository scope leaves the comparison without these settings.
 
 The fixed safety query detects filter, external-diff, transport-override, and promisor keys. DevProjex does not use a fictional `GIT_CONFIG_LOCAL` switch and does not write `safe.directory`, the user's global config, or `.git/config` to obtain isolation.
 
@@ -196,7 +210,8 @@ No MCP argument, repository value, profile file, or command-line token selects a
 - Full no-demand-fetch guarantees require Git 2.45 or newer. Older versions ignore `GIT_NO_LAZY_FETCH`; ordinary repositories continue to work, but DevProjex refuses LocalRead for a partial clone with a promisor remote.
 - Disabling fsmonitor can make reads slower in very large working trees. It avoids executing an untrusted monitor and does not change the selected file set.
 - Isolating system/global config intentionally removes user `insteadOf`, exclude,
-  and credential-helper behavior. Explicit network operations retain only the
+  and credential-helper behavior. Line-ending settings are the single exception, read only for
+  the `changes` working-tree comparison as described under LocalRead. Explicit network operations retain only the
   operator environment proxy and certificate variables listed above; repository
   proxy, TLS, header, cookie, and transport overrides remain rejected.
 - Disabling smudge/clean/process during managed materialization leaves LFS and similar pointer files unchanged. No background download is attempted.

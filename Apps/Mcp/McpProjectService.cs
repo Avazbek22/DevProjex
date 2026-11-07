@@ -455,6 +455,89 @@ internal sealed class McpProjectService(
 		return final;
 	}
 
+	/// <summary>
+	/// The files a call may relate its seeds to: exactly what <c>get_file</c> could read under the
+	/// same profile and exclusions, further limited by the call's own <c>exclude_patterns</c>,
+	/// <c>tracked_only</c> and <c>max_file_bytes</c>. Only the narrowing of <c>include_patterns</c>,
+	/// <c>git_scope</c> and the live focus is lifted. Returns null when nothing was lifted.
+	/// </summary>
+	public async Task<ProjectContextPlan?> BuildRelationProjectPlanAsync(
+		ProjectContextPlan selection,
+		string? project,
+		string? branch,
+		IReadOnlyList<string>? includePatterns,
+		IReadOnlyList<string>? excludePatterns,
+		string? profile,
+		bool trackedOnly,
+		string? gitScope,
+		long? maximumFileBytes,
+		IReadOnlyList<ProjectExclusion>? exclusions,
+		CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(selection);
+		if (liveContext is null && includePatterns is not { Count: > 0 } && string.IsNullOrEmpty(gitScope))
+			return null;
+
+		var plan = await BuildPlanAsync(
+			project,
+			branch,
+			paths: null,
+			includePatterns: null,
+			excludePatterns,
+			profile,
+			trackedOnly,
+			gitScope: null,
+			maximumFileBytes,
+			cancellationToken,
+			includeOutputMetrics: false,
+			exclusions).ConfigureAwait(false);
+		if (liveContext is not null)
+			plan = await WidenLiveFocusAsync(plan, excludePatterns, maximumFileBytes, cancellationToken)
+				.ConfigureAwait(false);
+		var selected = selection.IncludedFiles.ToHashSet(PathComparer.Default);
+		return plan.IncludedFiles.Any(path => !selected.Contains(path)) ? plan : null;
+	}
+
+	// Live checked nodes are a focus, not an access boundary: a named get_file may read any file the
+	// effective filters keep, so the same set bounds what related files may name.
+	private async Task<ProjectContextPlan> WidenLiveFocusAsync(
+		ProjectContextPlan plan,
+		IReadOnlyList<string>? excludePatterns,
+		long? maximumFileBytes,
+		CancellationToken cancellationToken)
+	{
+		var globs = McpGlobSet.Create(includePatterns: null, excludePatterns);
+		var effectiveFiles = new List<string>();
+		var pending = new Stack<TreeNodeDescriptor>();
+		pending.Push(plan.EffectiveTree);
+		while (pending.TryPop(out var node))
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (!node.IsDirectory)
+			{
+				var relative = ToRelative(plan.SourceRoot, node.FullPath);
+				if (globs.Includes(relative))
+					effectiveFiles.Add(relative);
+				continue;
+			}
+			for (var index = node.Children.Count - 1; index >= 0; index--)
+				pending.Push(node.Children[index]);
+		}
+		if (effectiveFiles.Count <= plan.IncludedFiles.Count)
+			return plan;
+
+		var widened = await services.Planner
+			.ReprojectSelectionAsync(plan, effectiveFiles, cancellationToken)
+			.ConfigureAwait(false);
+		if (maximumFileBytes is not null)
+			widened = RefreshEffectiveFileSizes(widened, cancellationToken);
+		widened = await ProjectFileSizeFilter
+			.ApplyAsync(services.Planner, widened, maximumFileBytes, cancellationToken)
+			.ConfigureAwait(false);
+		ValidatePlanContainment(roots, plan.SourceRoot, widened.IncludedFiles, cancellationToken);
+		return widened;
+	}
+
 	private async Task<ProjectContextPlan> ExpandNamedPathsOutsideSelectionAsync(
 		ProjectContextPlan plan,
 		RequestedPathSelection requested,
