@@ -163,8 +163,10 @@ internal static class RelatedOutputRenderer
 					"Terminal.Related.Candidates",
 					string.Join(", ", file.Candidates.Select(TerminalTextEscaping.EscapeSingleLine)))
 				: string.Empty;
+			var reasons = RelatedReasonCompaction.Compact(file.Reasons)
+				.Select(TerminalTextEscaping.EscapeSingleLine);
 			var line = $"{TerminalTextEscaping.EscapeSingleLine(file.Path)} — " +
-			           $"{string.Join(" · ", file.Reasons.Select(TerminalTextEscaping.EscapeSingleLine))} — " +
+			           $"{string.Join(" · ", reasons)} — " +
 			           $"{file.Status.ToString().ToLowerInvariant()} — " +
 			           localization.Format("Terminal.Related.Tokens", file.EstimatedTokens) +
 			           crossScope + candidates;
