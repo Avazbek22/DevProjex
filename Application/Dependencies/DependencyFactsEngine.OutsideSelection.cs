@@ -162,19 +162,25 @@ public sealed partial class DependencyFactsEngine
 	{
 		// One edge counts once even when both of its ends are seeds; it stays inside the
 		// selection when either end it is counted from reaches a file the selection shows.
+		// The counts cover exactly the edges the rows are projected from: a resolved reference
+		// to the seed's own file is never listed, and a dependent reaches the seed as any of its
+		// declaration parts or as an ambiguous candidate, not only as the first target.
 		var edges = new Dictionary<DependencyEdge, bool>();
 		foreach (var (index, seed) in answers)
 		{
 			if (direction is DependencyDirection.Dependencies or DependencyDirection.Both)
 			{
 				foreach (var edge in index.EdgesBySource.GetValueOrDefault(seed) ?? [])
-					Add(edge, visible is null || DependencyReachesSelection(edge, seed, visible));
+				{
+					if (!ReachesOnlyItsSource(edge))
+						Add(edge, visible is null || DependencyReachesSelection(edge, seed, visible));
+				}
 			}
 			if (direction is DependencyDirection.Dependents or DependencyDirection.Both)
 			{
 				foreach (var edge in index.EdgesByTarget.GetValueOrDefault(seed) ?? [])
 				{
-					if (string.Equals(edge.Target, seed, StringComparison.Ordinal))
+					if (!string.Equals(edge.Source, seed, StringComparison.Ordinal))
 						Add(edge, visible is null || visible.ContainsKey(edge.Source));
 				}
 			}
@@ -198,6 +204,20 @@ public sealed partial class DependencyFactsEngine
 
 		void Add(DependencyEdge edge, bool insideSelection) =>
 			edges[edge] = edges.TryGetValue(edge, out var known) ? known || insideSelection : insideSelection;
+	}
+
+	private static bool ReachesOnlyItsSource(DependencyEdge edge)
+	{
+		if (edge.Status != ResolutionStatus.Resolved)
+			return false;
+		var reachesAnyFile = false;
+		foreach (var target in ResolvedTargetFiles(edge))
+		{
+			if (!StringComparer.Ordinal.Equals(target, edge.Source))
+				return false;
+			reachesAnyFile = true;
+		}
+		return reachesAnyFile;
 	}
 
 	// The seed itself is never listed as its own dependency, so it does not keep an edge inside.

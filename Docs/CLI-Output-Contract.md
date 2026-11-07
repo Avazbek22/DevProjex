@@ -426,7 +426,9 @@ scopes that depend on that file. Text output reports at most eight of each as
 `[Dependency configuration] affected-scopes=N · problem=... · path=...`.
 `resolution` reports `resolved`, `ambiguous`, `unresolved`, and `external` evidence groups for every
 seed section emitted at the requested depth and direction. Text output carries the same values in `[Resolution]`; consequently an
-empty related-file list does not imply that every observed reference was resolved.
+empty related-file list does not imply that every observed reference was resolved. The counts cover the edges the items are
+drawn from, so a dependent counts for every seed it is listed under, and a reference from a seed to its own file is neither
+listed nor counted.
 When the selection is narrowed, the seeds' relations are resolved against the readable project
 without that narrowing, and the selection only decides where each related file is listed: `seeds`
 holds the related files the selection contains, and an ambiguous item appears there only when the
