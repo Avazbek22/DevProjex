@@ -709,7 +709,7 @@ public sealed class RelatedCommandProcessTests
 			using var document = JsonDocument.Parse(result.StandardOutput);
 			var dependencies = Assert.Single(document.RootElement.GetProperty("seeds").EnumerateArray())
 				.GetProperty("dependencies").EnumerateArray()
-				.Select(static item => item.GetProperty("path").GetString())
+				.Select(static item => item.GetProperty("path").GetString() ?? string.Empty)
 				.ToArray();
 			Assert.Equal(["src/demo/core.py"], dependencies);
 			Assert.DoesNotContain("pyproject.toml", result.StandardOutput, StringComparison.Ordinal);
