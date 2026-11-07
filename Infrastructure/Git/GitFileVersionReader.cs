@@ -259,8 +259,8 @@ public sealed class GitFileVersionReader : IGitFileVersionReader
 		if (!entry.IsRegularFile)
 			return new GitStoredFile(GitStoredFileKind.NotRegularFile, 0, null);
 		if (!contents.TryGetValue(entry.ObjectId, out var content) || content.Bytes is null)
-			return new GitStoredFile(GitStoredFileKind.TooLarge, content?.Size ?? 0, null);
-		return new GitStoredFile(GitStoredFileKind.Regular, content.Size, content.Bytes);
+			return new GitStoredFile(GitStoredFileKind.TooLarge, content?.Size ?? 0, null, entry.Mode);
+		return new GitStoredFile(GitStoredFileKind.Regular, content.Size, content.Bytes, entry.Mode);
 	}
 
 	private static async Task<CommitResolution> ResolveCommitAsync(
@@ -321,7 +321,8 @@ public sealed class GitFileVersionReader : IGitFileVersionReader
 				{
 					entries[path] = new StoredEntry(
 						fields[2],
-						fields[1] == "blob" && fields[0] is RegularFileMode or ExecutableFileMode);
+						fields[1] == "blob" && fields[0] is RegularFileMode or ExecutableFileMode,
+						fields[0]);
 				}
 			}
 		}
@@ -362,7 +363,7 @@ public sealed class GitFileVersionReader : IGitFileVersionReader
 					conflicted.Add(path);
 					continue;
 				}
-				entries[path] = new StoredEntry(fields[1], fields[0] is RegularFileMode or ExecutableFileMode);
+				entries[path] = new StoredEntry(fields[1], fields[0] is RegularFileMode or ExecutableFileMode, fields[0]);
 			}
 		}
 		return entries;
@@ -687,7 +688,7 @@ public sealed class GitFileVersionReader : IGitFileVersionReader
 
 	private readonly record struct RepositoryFile(string FullPath, string GitPath);
 
-	private sealed record StoredEntry(string ObjectId, bool IsRegularFile);
+	private sealed record StoredEntry(string ObjectId, bool IsRegularFile, string Mode);
 
 	private sealed record FilePlan(
 		RepositoryFile File,

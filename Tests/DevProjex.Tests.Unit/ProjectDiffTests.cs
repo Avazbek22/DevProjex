@@ -249,6 +249,109 @@ public sealed class ProjectDiffRenameRedactionTests
 	}
 }
 
+public sealed class ProjectDiffContentUnchangedTests
+{
+	[Fact]
+	public async Task AStagedModeOnlyChangeIsReportedAsContentUnchanged()
+	{
+		using var workspace = new TemporaryDirectory();
+		var file = workspace.CreateFile("script.sh", "echo hi\n");
+		var bytes = Encoding.UTF8.GetBytes("echo hi\n");
+		var reader = new FixedVersionReader(new Dictionary<string, GitFileVersions>
+		{
+			[file] = new(
+				new GitStoredFile(GitStoredFileKind.Regular, bytes.Length, bytes, "100644"),
+				new GitStoredFile(GitStoredFileKind.Regular, bytes.Length, bytes, "100755"))
+		});
+		var request = new ProjectDiffRequest(
+			Plan(workspace.Path, [file]),
+			GitFilteringMode.Staged,
+			null,
+			3,
+			null,
+			static (_, _) => throw new InvalidOperationException("The staged scope never reads the working file."));
+
+		var result = await new ProjectDiffService(reader).CompareAsync(request, TestContext.Current.CancellationToken);
+
+		var entry = Assert.Single(result.Files);
+		Assert.Equal(ProjectDiffFileStatus.Modified, entry.Status);
+		Assert.Equal(ProjectDiffOmission.ContentUnchanged, entry.Omission);
+		Assert.Equal("content-unchanged", ProjectDiffText.Omission(entry.Omission));
+	}
+
+	[Fact]
+	public async Task AChangesModeOnlyChangeIsReportedAsContentUnchanged()
+	{
+		using var workspace = new TemporaryDirectory();
+		var file = workspace.CreateFile("script.sh", "echo hi\n");
+		var bytes = Encoding.UTF8.GetBytes("echo hi\n");
+		var reader = new FixedVersionReader(new Dictionary<string, GitFileVersions>
+		{
+			[file] = new(new GitStoredFile(GitStoredFileKind.Regular, bytes.Length, bytes, "100644"), null)
+		});
+		var request = new ProjectDiffRequest(
+			Plan(workspace.Path, [file]) with { GitReadiness = new ProjectContextGitReadiness(GitFilteringMode.Changes, 0, true) },
+			GitFilteringMode.Changes,
+			null,
+			3,
+			null,
+			(_, _) => ValueTask.FromResult(new FileContentReadResult(
+				FileContentClassification.Text,
+				new TextFileContent("echo hi\n", bytes.Length, 1, bytes.Length, false, false),
+				TextFileEncoding.Utf8)));
+
+		var result = await new ProjectDiffService(reader).CompareAsync(request, TestContext.Current.CancellationToken);
+
+		var entry = Assert.Single(result.Files);
+		Assert.Equal(ProjectDiffFileStatus.Modified, entry.Status);
+		Assert.Equal(ProjectDiffOmission.ContentUnchanged, entry.Omission);
+	}
+
+	private static ProjectContextPlan Plan(string root, IReadOnlyList<string> files)
+	{
+		var tree = new TreeNodeDescriptor("project", root, true, false, "folder", []);
+		var analysis = new ProjectAnalysisReport(
+			ProjectAnalysisReport.CurrentSchemaVersion,
+			DateTimeOffset.UnixEpoch,
+			root,
+			new ProjectAnalysisSelectionReport([], [], []),
+			new ProjectAnalysisInventoryReport([], [], new ProjectTreeSummaryReport(1, files.Count, 0)),
+			new ProjectAnalysisOutputMetricsReport(
+				ProjectOutputMetricsReport.Empty,
+				ProjectOutputMetricsReport.Empty),
+			new ProjectAnalysisTimingReport(0, 0, 0),
+			new ProjectAnalysisDiagnosticsReport(false, false, []));
+		return new ProjectContextPlan(
+			root,
+			ProjectSelectionSpec.Standard,
+			[],
+			[],
+			[],
+			[],
+			tree,
+			tree,
+			new HashSet<string>(PathComparer.Default),
+			files,
+			[root],
+			analysis,
+			[],
+			new ProjectContextGitReadiness(GitFilteringMode.Staged, 0, true),
+			"content-unchanged");
+	}
+
+	private sealed class FixedVersionReader(IReadOnlyDictionary<string, GitFileVersions> files) : IGitFileVersionReader
+	{
+		public Task<GitFileVersionSet> ReadAsync(GitFileVersionRequest request, CancellationToken cancellationToken = default) =>
+			Task.FromResult(new GitFileVersionSet(files));
+
+		public Task<GitRevisionAvailability> ProbeRangeAsync(
+			string projectRoot,
+			string diffRange,
+			CancellationToken cancellationToken = default) =>
+			Task.FromResult(GitRevisionAvailability.Unknown);
+	}
+}
+
 public sealed class ProjectDiffTextTests
 {
 	[Fact]

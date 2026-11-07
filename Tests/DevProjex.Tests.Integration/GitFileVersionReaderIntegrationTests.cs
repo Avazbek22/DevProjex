@@ -170,6 +170,23 @@ public sealed class GitFileVersionReaderIntegrationTests
 	}
 
 	[Fact]
+	public async Task AStagedModeOnlyChangeReportsTheExecutableModeOnTheNewSideWithIdenticalBytes()
+	{
+		using var repository = new GitModeRepository();
+		var file = repository.Write("script.sh", "echo hi\n");
+		repository.Commit();
+		// core.fileMode is off in this fixture, so only an explicit index write records the bit;
+		// the same command works identically whether or not the filesystem tracks permissions.
+		repository.Git("update-index", "--chmod=+x", "script.sh");
+
+		var versions = await ReadAsync(repository, GitFilteringMode.Staged, null, file);
+
+		Assert.Equal("100644", versions.Files[file].Old!.Mode);
+		Assert.Equal("100755", versions.Files[file].New!.Mode);
+		Assert.Equal(Text(versions.Files[file].Old), Text(versions.Files[file].New));
+	}
+
+	[Fact]
 	public async Task AMissingBlobObjectIsUnsupportedButOtherFilesStillRead()
 	{
 		using var repository = new GitModeRepository();

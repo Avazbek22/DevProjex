@@ -33,6 +33,7 @@ public static class ProjectDiffText
 		ProjectDiffOmission.TooLarge => "too-large",
 		ProjectDiffOmission.ChangeTooLarge => "change-too-large",
 		ProjectDiffOmission.LineEndingsOnly => "line-endings-only",
+		ProjectDiffOmission.ContentUnchanged => "content-unchanged",
 		_ => throw new ArgumentOutOfRangeException(nameof(omission), omission, null)
 	};
 
