@@ -330,15 +330,33 @@ public sealed record SeedOutsideSelection(
 	IReadOnlyList<RelatedFile> Dependents,
 	int DependentCount);
 
-/// <param name="Edges">Resolved evidence groups behind the listed relations.</param>
-/// <param name="ExplainedUnresolvedEdges">
-/// Evidence groups the selection reported as unresolved that resolve to a file outside it.
-/// </param>
+/// <summary>
+/// The selected-direction edges of a related call's seeds by status. In a narrowed call,
+/// <see cref="OutsideSelection"/> holds the resolved edges that reach only files outside the
+/// selection, and <see cref="Resolved"/> the rest, so together they are what the call would
+/// resolve without narrowing.
+/// </summary>
+public sealed record DependencyResolutionCounts(
+	int Resolved,
+	int Ambiguous,
+	int Unresolved,
+	int External,
+	int OutsideSelection = 0);
+
+/// <summary>
+/// A narrowed call's seeds related against the readable project. The selection only decides
+/// where each related file is listed: <see cref="Selection"/> keeps the selection's index, so
+/// coverage and scope still describe the selection, while its seed sections hold the project's
+/// relations to files the selection shows; <see cref="Seeds"/> holds the relations to files it
+/// left out.
+/// </summary>
+/// <param name="Index">The readable project's index.</param>
+/// <param name="Resolution">The project's edges counted as an unnarrowed call counts them.</param>
 public sealed record DependencyOutsideSelectionResult(
 	DependencyIndexSnapshot Index,
+	DependencyRelatedResult Selection,
 	IReadOnlyList<SeedOutsideSelection> Seeds,
-	int Edges,
-	int ExplainedUnresolvedEdges)
+	DependencyResolutionCounts Resolution)
 {
 	public const int MaximumFilesPerSection = 20;
 }

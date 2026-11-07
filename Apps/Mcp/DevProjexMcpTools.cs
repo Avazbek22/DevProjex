@@ -1508,7 +1508,7 @@ internal sealed class DevProjexMcpTools(
 				cancellationToken).ConfigureAwait(false);
 			DependencyOutsideSelectionResult? outside = null;
 			ProjectContextPlan? projectPlan = null;
-			if (DependencyFactsEngine.CanRelateOutsideSelection(related, direction))
+			if (DependencyFactsEngine.CanRelateOutsideSelection(related))
 			{
 				projectPlan = await Projects.BuildRelationProjectPlanAsync(
 					plan,
@@ -1531,8 +1531,7 @@ internal sealed class DevProjexMcpTools(
 						direction,
 						progress.MeasureFacts("Relating files outside the selection", 70, 90),
 						cancellationToken).ConfigureAwait(false);
-					if (outside.Seeds.Count == 0)
-						outside = null;
+					related = outside.Selection;
 				}
 			}
 			var evidenceBudget = new RelatedEvidenceBudget();
@@ -1555,7 +1554,9 @@ internal sealed class DevProjexMcpTools(
 				: "Dependency index complete").ConfigureAwait(false);
 
 			var coverage = related.Index.Coverage;
-			var resolution = CountRelatedResolution(related.Index, relativeSeeds, direction, outside);
+			var resolution = outside is null
+				? CountRelatedResolution(related.Index, relativeSeeds, direction)
+				: ToRelatedResolutionCounts(outside.Resolution);
 			var configurationData = FormatDependencyConfigurationData(coverage.ConfigurationDiagnostics);
 			var selectionContext = new McpSelectionNoticeContext(
 				HasPaths: false,
@@ -3234,7 +3235,7 @@ internal sealed class DevProjexMcpTools(
 
 	internal static string? FormatOutsideSelectionNotice(DependencyOutsideSelectionResult? outside)
 	{
-		if (outside is null)
+		if (outside is not { Seeds.Count: > 0 })
 			return null;
 		var relations = outside.Seeds.Sum(static seed => seed.DependencyCount + seed.DependentCount);
 		var listed = outside.Seeds.Sum(static seed => seed.Dependencies.Count + seed.Dependents.Count);
@@ -3247,33 +3248,15 @@ internal sealed class DevProjexMcpTools(
 	internal static RelatedResolutionCounts CountRelatedResolution(
 		DependencyIndexSnapshot index,
 		IReadOnlyList<string> seeds,
-		DependencyDirection direction,
-		DependencyOutsideSelectionResult? outside = null)
-	{
-		var edges = new HashSet<DependencyEdge>();
-		if (direction is DependencyDirection.Dependencies or DependencyDirection.Both)
-		{
-			foreach (var seed in seeds)
-				foreach (var edge in index.EdgesBySource.GetValueOrDefault(seed) ?? [])
-					edges.Add(edge);
-		}
-		if (direction is DependencyDirection.Dependents or DependencyDirection.Both)
-		{
-			foreach (var seed in seeds)
-				foreach (var edge in index.EdgesByTarget.GetValueOrDefault(seed) ?? [])
-					if (edge.Target is not null && StringComparer.Ordinal.Equals(edge.Target, seed))
-						edges.Add(edge);
-		}
-		var counts = new int[4];
-		foreach (var edge in edges)
-			counts[(int)edge.Status]++;
-		return new RelatedResolutionCounts(
-			counts[(int)ResolutionStatus.Resolved],
-			counts[(int)ResolutionStatus.Ambiguous],
-			counts[(int)ResolutionStatus.Unresolved] - (outside?.ExplainedUnresolvedEdges ?? 0),
-			counts[(int)ResolutionStatus.External],
-			outside?.Edges ?? 0);
-	}
+		DependencyDirection direction) =>
+		ToRelatedResolutionCounts(DependencyFactsEngine.CountResolution(index, seeds, direction));
+
+	internal static RelatedResolutionCounts ToRelatedResolutionCounts(DependencyResolutionCounts counts) => new(
+		counts.Resolved,
+		counts.Ambiguous,
+		counts.Unresolved,
+		counts.External,
+		counts.OutsideSelection);
 
 	internal readonly record struct RelatedResolutionCounts(
 		int Resolved,

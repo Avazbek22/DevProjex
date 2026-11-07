@@ -502,6 +502,28 @@ public sealed partial class DependencyFactsEngine : IDisposable
 
 		var index = await IndexAsync(sourceRoot, manifestFiles, progress, cancellationToken)
 			.ConfigureAwait(false);
+		var seeds = TraverseRelated(
+			seedRelativePaths,
+			direction,
+			depth,
+			index.FileByPath,
+			frontier => FindRelated(index, frontier, direction).Seeds,
+			cancellationToken);
+		return new DependencyRelatedResult(index, seeds);
+	}
+
+	/// <summary>
+	/// Walks resolved relations level by level, expanding only into files of
+	/// <paramref name="traversable"/>, and returns every visited seed's answer in visiting order.
+	/// </summary>
+	private static IReadOnlyList<SeedRelatedFiles> TraverseRelated(
+		IReadOnlyList<string> seedRelativePaths,
+		DependencyDirection direction,
+		int depth,
+		IReadOnlyDictionary<string, FileFacts> traversable,
+		Func<IReadOnlyList<string>, IReadOnlyList<SeedRelatedFiles>> relate,
+		CancellationToken cancellationToken)
+	{
 		var normalizedSeeds = seedRelativePaths.Select(Normalize).ToArray();
 		var visited = new HashSet<string>(normalizedSeeds, StringComparer.Ordinal);
 		if (visited.Count > MaximumRelatedTraversalSeeds)
@@ -511,16 +533,16 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		for (var level = 0; level < depth && frontier.Count > 0; level++)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			var result = FindRelated(index, frontier, direction);
-			seeds.AddRange(result.Seeds);
+			var levelSeeds = relate(frontier);
+			seeds.AddRange(levelSeeds);
 			if (level + 1 >= depth)
 				break;
 
 			var next = new HashSet<string>(StringComparer.Ordinal);
-			foreach (var path in result.Seeds
+			foreach (var path in levelSeeds
 						 .SelectMany(seed => RelatedFiles(seed, direction))
 						 .Where(file => file.Status == ResolutionStatus.Resolved &&
-							 index.FileByPath.ContainsKey(file.Path))
+							 traversable.ContainsKey(file.Path))
 						 .Select(static file => file.Path))
 			{
 				if (visited.Contains(path) || !next.Add(path))
@@ -532,8 +554,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			frontier = next.Order(StringComparer.Ordinal).ToArray();
 			visited.UnionWith(frontier);
 		}
-
-		return new DependencyRelatedResult(index, seeds);
+		return seeds;
 	}
 
 	private static DependencyRelatedResult FindRelated(

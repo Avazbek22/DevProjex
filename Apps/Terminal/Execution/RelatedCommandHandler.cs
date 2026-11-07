@@ -105,7 +105,7 @@ public sealed class RelatedCommandHandler(
 		CancellationToken cancellationToken)
 	{
 		if (request.ProjectSelection is null ||
-			!DependencyFactsEngine.CanRelateOutsideSelection(related, request.Direction))
+			!DependencyFactsEngine.CanRelateOutsideSelection(related))
 			return null;
 
 		var projectPlan = await services.ContextFactory.BuildAsync(
@@ -123,12 +123,11 @@ public sealed class RelatedCommandHandler(
 		if (projectPlan.HasErrors || projectPlan.IncludedFiles.All(selected.Contains))
 			return null;
 
-		var outside = await services.DependencyFactsEngine.FindOutsideSelectionAsync(
+		return await services.DependencyFactsEngine.FindOutsideSelectionAsync(
 			plan.SourceRoot,
 			related,
 			projectPlan.IncludedFiles,
 			request.Direction,
 			cancellationToken: cancellationToken).ConfigureAwait(false);
-		return outside.Seeds.Count == 0 ? null : outside;
 	}
 }

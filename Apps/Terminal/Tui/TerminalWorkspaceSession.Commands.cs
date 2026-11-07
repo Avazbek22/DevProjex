@@ -423,7 +423,7 @@ internal sealed partial class TerminalWorkspaceSession
 							exception.MaximumSeeds));
 				}
 				DependencyOutsideSelectionResult? outside = null;
-				if (DependencyFactsEngine.CanRelateOutsideSelection(related, direction) &&
+				if (DependencyFactsEngine.CanRelateOutsideSelection(related) &&
 					await _controller
 						.BuildRelationProjectPlanAsync(state, plan, persistentGitMode, token)
 						.ConfigureAwait(false) is { } project)
@@ -436,8 +436,6 @@ internal sealed partial class TerminalWorkspaceSession
 							direction,
 							cancellationToken: token)
 						.ConfigureAwait(false);
-					if (outside.Seeds.Count == 0)
-						outside = null;
 				}
 				using var writer = new StringWriter(CultureInfo.CurrentCulture);
 				if (planDiagnostics.Length > 0)
