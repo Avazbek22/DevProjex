@@ -161,7 +161,7 @@ public sealed partial class McpServerIntegrationTests
 		Assert.Contains("export const mainEntry = 1;", body, StringComparison.Ordinal);
 		var text = Text(batch);
 		var outside = text[..text.IndexOf("<untrusted-data-", StringComparison.Ordinal)] +
-		              text[(text.LastIndexOf("</untrusted-data-", StringComparison.Ordinal) + 1)..];
+					  text[(text.LastIndexOf("</untrusted-data-", StringComparison.Ordinal) + 1)..];
 		Assert.DoesNotContain("index.ts", outside, StringComparison.Ordinal);
 	}
 
