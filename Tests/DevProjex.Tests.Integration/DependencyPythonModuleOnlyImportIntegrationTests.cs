@@ -203,31 +203,168 @@ public sealed class DependencyPythonModuleOnlyImportIntegrationTests
 	}
 
 	[Fact]
-	public async Task ModulesOutsideTheManifestReExportsAndBareRelativeImportsStayUnresolved()
+	public async Task ModulesOutsideTheManifestAndMissingNamesStayUnresolved()
 	{
 		using var fixture = new TemporaryDirectory();
 		var config = fixture.CreateFile("pyproject.toml", "[project]\nname = \"fixture\"");
-		var initializer = fixture.CreateFile("pkg/__init__.py", "VERSION = \"1\"");
+		var initializer = fixture.CreateFile("pkg/__init__.py", string.Empty);
 		fixture.CreateFile("pkg/_config.py", "DEFAULT = 1");
 		var outside = fixture.CreateFile("pkg/outside.py", "from ._config import DEFAULT");
-		var bareRelative = fixture.CreateFile("pkg/bare.py", "from . import VERSION");
-		var settings = fixture.CreateFile("settings.py", "API_VERSION = \"1\"");
-		var facade = fixture.CreateFile("facade.py", "from settings import API_VERSION");
-		var reExport = fixture.CreateFile("re_export.py", "from facade import API_VERSION");
 		var model = fixture.CreateFile("model.py", "class Item: pass");
 		var missing = fixture.CreateFile("missing.py", "from model import Missing");
 		using var engine = CreateEngine();
 
 		var result = await engine.IndexAsync(
 			fixture.Path,
-			[config, initializer, outside, bareRelative, settings, facade, reExport, model, missing],
+			[config, initializer, outside, model, missing],
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		AssertUnresolved(result, "pkg/outside.py", "no target in the manifest for this module");
-		AssertUnresolved(result, "pkg/bare.py", "Python module assignment bindings are not indexed");
-		AssertUnresolved(result, "re_export.py", "name not found in module");
 		AssertUnresolved(result, "missing.py", "name not found in module");
+	}
+
+	[Fact]
+	public async Task PackageAssignmentRelatesBareParentRelativeAndAbsoluteImportsToTheInitializer()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("pyproject.toml", "[project]\nname = \"fixture\"");
+		var initializer = fixture.CreateFile("pkg/__init__.py", "VERSION = \"1\"");
+		var bare = fixture.CreateFile("pkg/bare.py", "from . import VERSION");
+		var subpackage = fixture.CreateFile("pkg/sub/__init__.py", string.Empty);
+		var parent = fixture.CreateFile("pkg/sub/parent.py", "from .. import VERSION");
+		var absolute = fixture.CreateFile("absolute.py", "from pkg import VERSION");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, initializer, bare, subpackage, parent, absolute],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		AssertModuleOnly(result, "pkg/bare.py", ".", "pkg/__init__.py");
+		AssertModuleOnly(result, "pkg/sub/parent.py", "..", "pkg/__init__.py");
+		AssertModuleOnly(result, "absolute.py", "pkg", "pkg/__init__.py");
+	}
+
+	[Fact]
+	public async Task ChildModuleWinsOverAPackageAssignmentOfTheSameName()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("pyproject.toml", "[project]\nname = \"fixture\"");
+		var initializer = fixture.CreateFile("pkg/__init__.py", "helper = None");
+		var child = fixture.CreateFile("pkg/helper.py", "class Helper: pass");
+		var bare = fixture.CreateFile("pkg/bare.py", "from . import helper");
+		var absolute = fixture.CreateFile("absolute.py", "from pkg import helper");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, initializer, child, bare, absolute],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		foreach (var source in new[] { "pkg/bare.py", "absolute.py" })
+		{
+			var edge = Assert.Single(result.Edges, item => item.Source == source);
+			Assert.Equal(ResolutionStatus.Resolved, edge.Status);
+			Assert.Equal("pkg/helper.py", edge.Target);
+			Assert.False(edge.ModuleOnly);
+			Assert.Equal(ModuleTargetReason, Assert.Single(edge.Reasons));
+		}
+	}
+
+	[Fact]
+	public async Task ReExportChainsEndingInAnAssignmentRelateToTheAssigningModule()
+	{
+		using var fixture = new TemporaryDirectory();
+		var manifest = new[]
+		{
+			fixture.CreateFile("pyproject.toml", "[project]\nname = \"fixture\""),
+			fixture.CreateFile("settings.py", "API_VERSION = \"1\""),
+			fixture.CreateFile("facade.py", "from settings import API_VERSION\nfrom settings import API_VERSION as VERSION"),
+			fixture.CreateFile("consumer.py", "from facade import API_VERSION"),
+			fixture.CreateFile("aliased.py", "from facade import VERSION"),
+			fixture.CreateFile("pkg/__init__.py", "from .constants import LIMIT"),
+			fixture.CreateFile("pkg/constants.py", "LIMIT: int = 10"),
+			fixture.CreateFile("package_consumer.py", "from pkg import LIMIT")
+		};
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			manifest,
+			cancellationToken: TestContext.Current.CancellationToken);
+		var dependents = await engine.FindRelatedAsync(
+			fixture.Path,
+			manifest,
+			["settings.py"],
+			DependencyDirection.Dependents,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		AssertModuleOnly(result, "consumer.py", "facade", "settings.py");
+		AssertModuleOnly(result, "aliased.py", "facade", "settings.py");
 		AssertModuleOnly(result, "facade.py", "settings", "settings.py");
+		AssertModuleOnly(result, "package_consumer.py", "pkg", "pkg/constants.py");
+		Assert.Equal(["aliased.py", "consumer.py", "facade.py"],
+			Assert.Single(dependents.Seeds).Dependents.Select(static file => file.Path));
+	}
+
+	[Fact]
+	public async Task ReExportChainsThatReachNoAssignmentStayUnresolvedWithAnHonestReason()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("pyproject.toml", "[project]\nname = \"fixture\"");
+		var settings = fixture.CreateFile("settings.py", "OTHER = 1");
+		var facade = fixture.CreateFile("facade.py", "from settings import MISSING");
+		var consumer = fixture.CreateFile("consumer.py", "from facade import MISSING");
+		var first = fixture.CreateFile("first.py", "from second import CYCLE");
+		var second = fixture.CreateFile("second.py", "from first import CYCLE");
+		var cycleConsumer = fixture.CreateFile("cycle_consumer.py", "from first import CYCLE");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, settings, facade, consumer, first, second, cycleConsumer],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		AssertUnresolved(result, "facade.py", "name not found in module");
+		AssertUnresolved(result, "consumer.py", "re-exported name not indexed");
+		AssertUnresolved(result, "first.py", "re-exported name not indexed");
+		AssertUnresolved(result, "second.py", "re-exported name not indexed");
+		AssertUnresolved(result, "cycle_consumer.py", "re-exported name not indexed");
+	}
+
+	[Fact]
+	public async Task ReExportChainsStopAtTheDepthLimitDeclarationsAlreadyUse()
+	{
+		using var fixture = new TemporaryDirectory();
+		var manifest = new List<string> { fixture.CreateFile("pyproject.toml", "[project]\nname = \"fixture\"") };
+		// The consumer's module is hop 0; hop 7 is the deepest file the engine reads.
+		foreach (var (prefix, hops, terminal) in new[]
+		{
+			("near_value", 7, "VALUE = 1"),
+			("far_value", 8, "VALUE = 1"),
+			("near_class", 7, "class VALUE: pass"),
+			("far_class", 8, "class VALUE: pass")
+		})
+		{
+			for (var hop = 0; hop < hops; hop++)
+				manifest.Add(fixture.CreateFile($"{prefix}{hop}.py", $"from {prefix}{hop + 1} import VALUE"));
+			manifest.Add(fixture.CreateFile($"{prefix}{hops}.py", terminal));
+			manifest.Add(fixture.CreateFile($"{prefix}_consumer.py", $"from {prefix}0 import VALUE"));
+		}
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			manifest,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		AssertModuleOnly(result, "near_value_consumer.py", "near_value0", "near_value7.py");
+		AssertUnresolved(result, "far_value_consumer.py", "re-exported name not indexed");
+		var nearClass = Assert.Single(result.Edges, item => item.Source == "near_class_consumer.py");
+		Assert.Equal(ResolutionStatus.Resolved, nearClass.Status);
+		Assert.Equal("near_class7.py", nearClass.Target);
+		Assert.False(nearClass.ModuleOnly);
+		AssertUnresolved(result, "far_class_consumer.py", "re-exported name not indexed");
 	}
 
 	[Fact]
@@ -258,7 +395,8 @@ public sealed class DependencyPythonModuleOnlyImportIntegrationTests
 		Assert.Equal(ResolutionStatus.Resolved, edge.Status);
 		Assert.Equal(target, edge.Target);
 		Assert.True(edge.ModuleOnly);
-		Assert.Equal([ModuleTargetReason, ModuleOnlyReason], edge.Reasons);
+		// One import keeps its reasons in order; a merged group sorts them.
+		Assert.Equal([ModuleOnlyReason, ModuleTargetReason], edge.Reasons.Order(StringComparer.Ordinal));
 	}
 
 	private static void AssertUnresolved(DependencyIndexSnapshot result, string source, string reason)

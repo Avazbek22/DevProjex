@@ -395,10 +395,13 @@ wildcard imports only. A missing imported name remains `Unresolved` with a const
 turning the existence of the module into evidence for that name. Relative imports that would escape the top-level package remain unresolved.
 Only a module-level assignment can establish `__all__` policy; docstrings and assignments inside a
 function or class do not. Module-level value assignments, plain or annotated, are not indexed as
-declarations; importing such a name from a named module still relates the file to that module as
+declarations; importing such a name still relates the file to the module that assigns it as
 `Resolved` with the reason `imported name not indexed`, and importance ranking leaves this
-module-only relation out of its graph. A bare `from . import name` of such a value and wildcard
-re-export expansion report explicit unresolved limitations rather than guessed bindings. Dynamic `__all__`,
+module-only relation out of its graph. This covers a package initializer, including
+`from . import name`, unless a child module of that name exists, and static re-export chains
+within the same depth bound as re-exported declarations; a chain that reaches no assignment
+remains `Unresolved` as `re-exported name not indexed`. Wildcard re-export expansion reports an
+explicit unresolved limitation rather than a guessed binding. Dynamic `__all__`,
 `setup.py`, and import hooks are not executed and remain unresolved. Separate
 complete `sys.stdlib_module_names` snapshots cover Python
 3.12 and 3.13. A decisive `requires-python`/`python_requires` constraint selects its snapshot;

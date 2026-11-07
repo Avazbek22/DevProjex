@@ -220,9 +220,10 @@ public sealed record DependencyEdge(
 	public IReadOnlyList<string> DeclarationFiles { get; init; } = [];
 
 	/// <summary>
-	/// True when the edge only shows that its source loads the target module: the imported name
-	/// is bound there in a way the index does not record as a declaration. The relation is real,
-	/// but it carries no declaration evidence, so importance ranking leaves it out of its graph.
+	/// True when the edge only shows that its source loads the target module, directly or through
+	/// re-exports: the imported name is bound there in a way the index does not record as a
+	/// declaration. The relation is real, but it carries no declaration evidence, so importance
+	/// ranking leaves it out of its graph.
 	/// </summary>
 	public bool ModuleOnly { get; init; }
 }

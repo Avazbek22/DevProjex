@@ -5,7 +5,7 @@ public sealed partial class DependencyFactsEngine
 	/// <summary>
 	/// A narrowed selection cannot tell a reference into a file it left out from one that leads
 	/// nowhere. Only then is the project index worth building: when dependents are requested, or
-	/// when a seed has a reference the selection could not resolve.
+	/// when a seed has a reference the selection could not resolve or answered only with a module.
 	/// </summary>
 	public static bool CanRelateOutsideSelection(DependencyRelatedResult selection, DependencyDirection direction)
 	{
@@ -17,7 +17,7 @@ public sealed partial class DependencyFactsEngine
 			return true;
 		return supportedSeeds.Any(seed =>
 			(selection.Index.EdgesBySource.GetValueOrDefault(seed.Seed) ?? [])
-			.Any(static edge => edge.Status == ResolutionStatus.Unresolved));
+			.Any(static edge => edge.Status == ResolutionStatus.Unresolved || edge.ModuleOnly));
 	}
 
 	/// <summary>
@@ -59,8 +59,10 @@ public sealed partial class DependencyFactsEngine
 			if (direction is DependencyDirection.Dependencies or DependencyDirection.Both)
 			{
 				var selectionEdges = selection.Index.EdgesBySource.GetValueOrDefault(seed.Seed) ?? [];
+				// A module-only answer may stand in for a child module the selection left out, so it
+				// does not hide what the project index finds for the same import.
 				var answered = selectionEdges
-					.Where(static edge => edge.Status != ResolutionStatus.Unresolved)
+					.Where(static edge => edge.Status != ResolutionStatus.Unresolved && !edge.ModuleOnly)
 					.Select(static edge => (edge.Layer, edge.Reference))
 					.ToHashSet();
 				var outsideEdges = (project.EdgesBySource.GetValueOrDefault(seed.Seed) ?? [])

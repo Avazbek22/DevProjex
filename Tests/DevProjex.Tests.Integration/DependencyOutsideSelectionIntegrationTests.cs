@@ -237,6 +237,76 @@ public sealed class DependencyOutsideSelectionIntegrationTests
 		Assert.Equal(1, outside.ExplainedUnresolvedEdges);
 	}
 
+	[Fact]
+	public async Task NarrowedSelection_ListsTheChildModuleAPackageAssignmentStoodInFor()
+	{
+		using var fixture = new TemporaryDirectory();
+		var package = fixture.CreateFile("pkg/__init__.py", "helper = None");
+		var child = fixture.CreateFile("pkg/helper.py", "class Helper: pass");
+		var bare = fixture.CreateFile("pkg/bare.py", "from . import helper");
+		var absolute = fixture.CreateFile("absolute.py", "from pkg import helper");
+		using var engine = CreateEngine();
+
+		foreach (var seedPath in new[] { "pkg/bare.py", "absolute.py" })
+		{
+			var selection = await engine.FindRelatedAsync(
+				fixture.Path,
+				[package, bare, absolute],
+				[seedPath],
+				DependencyDirection.Dependencies,
+				cancellationToken: TestContext.Current.CancellationToken);
+			var outside = await engine.FindOutsideSelectionAsync(
+				fixture.Path,
+				selection,
+				[package, child, bare, absolute],
+				DependencyDirection.Dependencies,
+				cancellationToken: TestContext.Current.CancellationToken);
+
+			var selectionEdge = Assert.Single(selection.Index.EdgesBySource[seedPath]);
+			Assert.True(selectionEdge.ModuleOnly);
+			Assert.Equal("pkg/__init__.py", selectionEdge.Target);
+			Assert.True(DependencyFactsEngine.CanRelateOutsideSelection(selection, DependencyDirection.Dependencies));
+			var dependency = Assert.Single(Assert.Single(outside.Seeds).Dependencies);
+			Assert.Equal("pkg/helper.py", dependency.Path);
+			Assert.Equal(ResolutionStatus.Resolved, dependency.Status);
+			Assert.DoesNotContain("imported name not indexed", dependency.Reasons);
+			Assert.Equal(1, outside.Edges);
+			Assert.Equal(0, outside.ExplainedUnresolvedEdges);
+		}
+	}
+
+	[Fact]
+	public async Task NarrowedSelection_ListsTheAssigningModuleOfAReExportOutsideIt()
+	{
+		using var fixture = new TemporaryDirectory();
+		var settings = fixture.CreateFile("settings.py", "API_VERSION = \"1\"");
+		var facade = fixture.CreateFile("facade.py", "from settings import API_VERSION");
+		var consumer = fixture.CreateFile("consumer.py", "from facade import API_VERSION");
+		using var engine = CreateEngine();
+
+		var selection = await engine.FindRelatedAsync(
+			fixture.Path,
+			[facade, consumer],
+			["consumer.py"],
+			DependencyDirection.Dependencies,
+			cancellationToken: TestContext.Current.CancellationToken);
+		var outside = await engine.FindOutsideSelectionAsync(
+			fixture.Path,
+			selection,
+			[settings, facade, consumer],
+			DependencyDirection.Dependencies,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var selectionEdge = Assert.Single(selection.Index.EdgesBySource["consumer.py"]);
+		Assert.Equal(ResolutionStatus.Unresolved, selectionEdge.Status);
+		Assert.Equal("re-exported name not indexed", Assert.Single(selectionEdge.Reasons));
+		var dependency = Assert.Single(Assert.Single(outside.Seeds).Dependencies);
+		Assert.Equal("settings.py", dependency.Path);
+		Assert.Contains("imported name not indexed", dependency.Reasons);
+		Assert.Equal(1, outside.Edges);
+		Assert.Equal(1, outside.ExplainedUnresolvedEdges);
+	}
+
 	private static DependencyFactsEngine CreateEngine() =>
 		new(new TreeSitterDependencyFactExtractor(), new FileDependencyConfigurationProvider());
 }
