@@ -20,6 +20,7 @@ internal static class McpErrorCodes
 
 internal sealed class McpToolException(string code, string message) : Exception(message)
 {
+	public bool HasReadableDirectoryEntries { get; init; }
 	public string Code { get; } = code;
 
 	/// <summary>

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using DevProjex.Application.Diagnostics;
 using DevProjex.Application.Ranking;
@@ -1473,6 +1474,9 @@ internal sealed class McpProjectService(
 	{
 		if (isDirectory)
 		{
+			var directoryHint = FormatReadableDirectoryHint(plan, requestedPath, physicalPath);
+			if (directoryHint is not null)
+				throw new McpToolException(McpErrorCodes.PathNotFound, directoryHint) { HasReadableDirectoryEntries = true };
 			throw new McpToolException(
 				McpErrorCodes.PathNotFound,
 				$"{McpErrorCodes.PathNotFound}: '{requestedPath}' is a directory; provide a file path returned by " +
@@ -1505,6 +1509,38 @@ internal sealed class McpProjectService(
 				BatchReason = OutsideEffectiveSelectionReason
 			};
 		}
+	}
+
+	private string? FormatReadableDirectoryHint(ProjectContextPlan plan, string requestedPath, string physicalPath)
+	{
+		var entries = new SortedSet<string>(StringComparer.Ordinal);
+		var files = new SortedSet<string>(StringComparer.Ordinal);
+		foreach (var file in Membership(plan).Files)
+		{
+			if (!PathUtility.IsPathInside(file, physicalPath))
+				continue;
+			var relative = ToRelative(physicalPath, file);
+			var slash = relative.IndexOf('/');
+			if (slash >= 0)
+				entries.Add(relative[..(slash + 1)]);
+			else
+			{
+				entries.Add(relative);
+				files.Add(relative);
+			}
+		}
+		if (entries.Count == 0)
+			return null;
+		var more = entries.Count > 12 ? $" (+{(entries.Count - 12).ToString(CultureInfo.InvariantCulture)} more)" : string.Empty;
+		var message = $"{McpErrorCodes.PathNotFound}: '{requestedPath}' is a directory; readable entries: " +
+			string.Join(", ", entries.Take(12)) + more + ". ";
+		var treeCall = $"get_tree {{\"paths\":[{JsonSerializer.Serialize(requestedPath, McpToolResults.CompactJsonOptions)}]}}.";
+		var suggested = files.FirstOrDefault(static name => name.StartsWith("index.", StringComparison.Ordinal)) ?? files.FirstOrDefault();
+		if (suggested is null)
+			return message + "List it with " + treeCall;
+		var relativeSuggestion = ToRelative(plan.SourceRoot, Path.Combine(physicalPath, suggested));
+		return message + $"Read one with get_file {{\"path\":{JsonSerializer.Serialize(relativeSuggestion, McpToolResults.CompactJsonOptions)}}}, " +
+			"or list it with " + treeCall;
 	}
 
 	/// <summary>

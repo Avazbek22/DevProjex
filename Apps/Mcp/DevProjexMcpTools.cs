@@ -2003,7 +2003,9 @@ internal sealed class DevProjexMcpTools(
 				resolvedRequests.Add(new McpResolvedFileReadRequest(
 					item,
 					PhysicalPath: null,
-					UnavailableReason: liveContext is null ? null : exception.BatchReason ?? exception.Code));
+					UnavailableReason: exception.HasReadableDirectoryEntries
+						? exception.Message
+						: liveContext is null ? null : exception.BatchReason ?? exception.Code));
 			}
 		}
 
