@@ -359,7 +359,7 @@ internal sealed class DevProjexMcpTools(
 			return McpToolResults.TextSuccess(AppendTrustedNotices(
 				McpSpotlight.Wrap(treeWriter.IsTruncated ? treeWriter.CompleteLinesText : treeWriter.Text),
 				treeTruncationNotice,
-				FormatTreeDepthNotice(plan, depth, paths, cancellationToken),
+				FormatTreeDepthNotice(plan, depth, paths),
 				McpTrustedDiagnosticFormatter.FormatWarnings(plan),
 				FormatNameSearchNotice(plan, paths),
 				SelectionNotices(
@@ -4774,8 +4774,7 @@ internal sealed class DevProjexMcpTools(
 	private string? FormatTreeDepthNotice(
 		ProjectContextPlan plan,
 		int? explicitMaxDepth,
-		IReadOnlyList<string>? paths,
-		CancellationToken cancellationToken)
+		IReadOnlyList<string>? paths)
 	{
 		if (explicitMaxDepth is not { } maxDepth || !HasItems(paths))
 			return null;
@@ -4784,7 +4783,6 @@ internal sealed class DevProjexMcpTools(
 		var hiddenDirectoryCount = 0;
 		var smallestHiddenDepth = int.MaxValue;
 		var largestSuggestedDepth = 0;
-		var visibleDirectories = new List<string>();
 		foreach (var path in paths!)
 		{
 			string fullPath;
@@ -4803,11 +4801,7 @@ internal sealed class DevProjexMcpTools(
 			var isDirectory = Directory.Exists(fullPath);
 			var isHidden = isDirectory ? depth >= maxDepth : depth > maxDepth;
 			if (!isHidden)
-			{
-				if (isDirectory)
-					visibleDirectories.Add(fullPath);
 				continue;
-			}
 
 			hiddenCount++;
 			if (isDirectory)
@@ -4817,13 +4811,7 @@ internal sealed class DevProjexMcpTools(
 		}
 
 		if (hiddenCount == 0)
-		{
-			var collapsed = CountCollapsedRequestedFolders(plan.ProjectedTree, maxDepth, visibleDirectories, cancellationToken);
-			return collapsed == 0 ? null : "[Tree depth] max_depth counts from the project root; " +
-				$"{collapsed.ToString(CultureInfo.InvariantCulture)} folder(s) under the requested paths reach depth " +
-				$"{maxDepth.ToString(CultureInfo.InvariantCulture)} and are shown without their contents. " +
-				$"Omit max_depth, or pass {(maxDepth + 1).ToString(CultureInfo.InvariantCulture)} to open them.";
-		}
+			return null;
 
 		// A file has nothing under it, so the directory wording would contradict itself: the
 		// useful depth is the one that shows the file.
@@ -4841,35 +4829,6 @@ internal sealed class DevProjexMcpTools(
 			$"{smallestHiddenDepth.ToString(CultureInfo.InvariantCulture)} or deeper, so nothing under them is shown. " +
 			$"Omit max_depth, or pass {largestSuggestedDepth.ToString(CultureInfo.InvariantCulture)} " +
 			"to show two levels below them.";
-	}
-
-	internal static int CountCollapsedRequestedFolders(
-		TreeNodeDescriptor root,
-		int maxDepth,
-		IReadOnlyList<string> requestedFolders,
-		CancellationToken cancellationToken)
-	{
-		if (requestedFolders.Count == 0)
-			return 0;
-		var count = 0;
-		var pending = new Stack<(TreeNodeDescriptor Node, int Depth)>();
-		pending.Push((root, 0));
-		while (pending.TryPop(out var current))
-		{
-			cancellationToken.ThrowIfCancellationRequested();
-			if (current.Depth == maxDepth)
-			{
-				if (current.Node.IsDirectory && current.Node.Children.Count > 0 &&
-					requestedFolders.Any(path => PathUtility.IsPathInside(current.Node.FullPath, path)))
-				{
-					count++;
-				}
-				continue;
-			}
-			for (var index = current.Node.Children.Count - 1; index >= 0; index--)
-				pending.Push((current.Node.Children[index], current.Depth + 1));
-		}
-		return count;
 	}
 
 	/// <summary>

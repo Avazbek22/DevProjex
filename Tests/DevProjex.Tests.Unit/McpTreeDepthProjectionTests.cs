@@ -6,31 +6,6 @@ namespace DevProjex.Tests.Unit;
 public sealed class McpTreeDepthProjectionTests
 {
 	[Fact]
-	public void CollapsedFolderCountUsesOnlySelectedChildrenAndCountsOverlappingRequestsOnce()
-	{
-		var rootPath = Path.GetFullPath("depth-root");
-		TreeNodeDescriptor Node(string relative, bool directory, params TreeNodeDescriptor[] children) =>
-			new(relative, Path.Combine(rootPath, relative.Replace('/', Path.DirectorySeparatorChar)), directory, false, "", children);
-		var selected = Node("src/middleware/selected", true, Node("src/middleware/selected/file.cs", false));
-		var empty = Node("src/middleware/empty", true);
-		var subtree = Node("src/middleware", true, selected, empty);
-		var root = new TreeNodeDescriptor("root", rootPath, true, false, "", [Node("src", true, subtree)]);
-		Assert.Equal(1, DevProjexMcpTools.CountCollapsedRequestedFolders(root, 3,
-			[Path.Combine(rootPath, "src"), subtree.FullPath, subtree.FullPath], TestContext.Current.CancellationToken));
-		Assert.Equal(0, DevProjexMcpTools.CountCollapsedRequestedFolders(root, 3,
-			[Path.Combine(rootPath, "other")], TestContext.Current.CancellationToken));
-	}
-
-	[Fact]
-	public void CollapsedFolderCountingHonorsCancellation()
-	{
-		using var cancellation = new CancellationTokenSource();
-		cancellation.Cancel();
-		Assert.Throws<OperationCanceledException>(() => DevProjexMcpTools.CountCollapsedRequestedFolders(
-			CreateNode(0, []), 3, [Path.GetFullPath("depth-root")], cancellation.Token));
-	}
-
-	[Fact]
 	public void PruneToDepthPreservesRequestedDepthWithoutUsingTheCallStack()
 	{
 		const int sourceDepth = 10_000;

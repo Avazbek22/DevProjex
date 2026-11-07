@@ -1107,11 +1107,6 @@ path itself. When every hidden entry is a file, which has nothing below it, the
 trailer instead says those files are not shown and gives the `max_depth` that shows
 them, as in `[Tree depth] max_depth counts from the project root; 1 requested file(s)
 sit at depth 6 or deeper, so they are not shown. Omit max_depth, or pass 6 to show them.`
-
-When the requested paths stay visible but folders under them reach `max_depth`, the
-trailer counts those folders, which are shown without their contents, and gives the
-`max_depth` that opens them, as in `[Tree depth] max_depth counts from the project root; 26 folder(s) under the requested paths reach depth 3 and are shown without their contents. Omit max_depth, or pass 4 to open them.`
-
 The three narrowing parameters compose in a fixed order and never widen each other:
 `paths` and the pattern arrays intersect to form the selection, and `max_depth`
 then prunes the rendering of that selection. Listing one directory therefore needs
