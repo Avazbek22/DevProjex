@@ -650,7 +650,7 @@ public sealed class McpLiveContextStateTests
 	[InlineData((int)McpLiveFocusUse.Search, "were not searched")]
 	[InlineData((int)McpLiveFocusUse.Analysis, "were not measured")]
 	[InlineData((int)McpLiveFocusUse.Pack, "were not packed")]
-	[InlineData((int)McpLiveFocusUse.Related, "were not traced")]
+	[InlineData((int)McpLiveFocusUse.Related, "were checked only for links to the seeds")]
 	public void FocusNoticeReportsOnlyCountsWithTheVerbOfTheTool(int useValue, string verb)
 	{
 		using var temporary = new TemporaryDirectory();

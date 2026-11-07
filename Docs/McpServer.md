@@ -58,7 +58,9 @@ file:
 
 The verb follows the tool: `are not listed` for `get_tree`, `were not searched`
 for `search_project`, `were not measured` for `analyze`, `were not packed` for
-`pack_context`, and `were not traced` for `related_files`. With one file outside
+`pack_context`, and `were checked only for links to the seeds` for `related_files`,
+which names the related ones by path as described under
+[`related_files`](#related_files). With one file outside
 the focus the line ends `1 outside the focus was not searched; read it by name
 with get_file.` The line is omitted when the focus covers every selectable file
 and when no selection is saved.
@@ -673,6 +675,22 @@ returned as a result. Each seed is then
 resolved with the same path checks and case-correction guidance as `get_file`. A seed
 outside the effective selection returns the existing `DPX-MCP-PATH-NOT-FOUND` error.
 
+**Files outside a narrowed selection.** `include_patterns`, `git_scope`, and a live focus
+narrow what a call works on, not what the agent may read. When a call narrows, a reference
+into a file it left out would otherwise be indistinguishable from one that leads nowhere.
+The server therefore also indexes the files a named `get_file` could read under the same
+profile and exclusions, still limited by the call's own `exclude_patterns`, `tracked_only`,
+and `max_file_bytes`. Startup exclusions, smart-ignore, the Git mode, private-data policy,
+saved window filters, and the root jail keep every other file out of that index, so a file
+they hide is never opened and never named, and a reference to it stays unresolved. After a
+seed's own sections, `Dependencies outside the selection` and `Dependents outside the
+selection` list the related files from that index in the same row format, at most 20 per
+section in path order; a longer section's title states `(20 of N)`. Their contents are not
+returned, and every relation the selection resolved by itself keeps its own answer. The
+work runs only when the call narrows and either dependents are requested or a seed has an
+unresolved reference. The first such call for a project indexes the readable project once;
+later calls reuse that index like any other.
+
 The human-readable payload has `Dependencies` and `Dependents` sections according to
 `direction`. Each line contains a project-relative path, one or more evidence reasons
 separated by ` · `, a `resolved` or `ambiguous` status, an estimated token count, and
@@ -712,6 +730,14 @@ dependency-engine status constants is stated instead, once and without a path, i
 line `[No facts] <constant>.`; file extensions and arbitrary project text never enter that line. A
 call with no resolved edges receives trusted `[No related files] in the effective
 selection.`; when unresolved references exist, that same line reports their count.
+When files outside the selection are listed, `[Resolution]` adds `· outside-selection=N`,
+the resolved evidence groups behind them, and the references they explain no longer count as
+unresolved. The trusted line `[Outside selection] relations=N · listed=K; these files are
+readable but outside this call's selection, so only their paths are listed; read any of them
+with get_file.` follows it, and a call whose own selection resolved nothing reports `[No related
+files] in the effective selection; related files outside it are listed by path.` Both lines
+carry counts only; the paths stay inside the untrusted block. A call that narrows nothing, or
+finds nothing outside, keeps the earlier response byte for byte.
 Calls and static member uses are not edges, so an empty section is not evidence that
 nothing uses a file. Whenever a requested `Dependencies` or `Dependents` section of a
 seed with facts is empty, and on every call without resolved edges, the constant

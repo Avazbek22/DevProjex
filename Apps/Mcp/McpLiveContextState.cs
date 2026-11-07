@@ -666,7 +666,9 @@ internal sealed class McpLiveContextState(
 			McpLiveFocusUse.Search => single ? "was not searched" : "were not searched",
 			McpLiveFocusUse.Analysis => single ? "was not measured" : "were not measured",
 			McpLiveFocusUse.Pack => single ? "was not packed" : "were not packed",
-			McpLiveFocusUse.Related => single ? "was not traced" : "were not traced",
+			McpLiveFocusUse.Related => single
+				? "was checked only for links to the seeds"
+				: "were checked only for links to the seeds",
 			_ => throw new ArgumentOutOfRangeException(nameof(use), use, null)
 		};
 		return $"[Live context] focus: {focus.ToString(CultureInfo.InvariantCulture)} of " +

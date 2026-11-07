@@ -1457,7 +1457,7 @@ internal sealed class DevProjexMcpTools(
 		}, cancellationToken);
 
 	[Description(
-		"Finds evidenced dependencies and dependents for one to 16 seed files without widening selection. Use it after search_project or get_tree; use search_project for text references or get_file for content. Returns paths, evidence, resolution status, token estimates, language coverage, partial-parse and configuration diagnostics, and scope; results above 50,000 characters use read_pack. Key parameters: path, direction=dependencies|dependents|both, profile, git_scope, include_patterns, exclude_patterns, and max_file_bytes.")]
+		"Finds evidenced dependencies and dependents for one to 16 seed files; a narrowed call also names readable related files outside its selection, by path only. Use it after search_project or get_tree; use search_project for text references or get_file for content. Returns paths, evidence, resolution status, token estimates, language coverage, partial-parse and configuration diagnostics, and scope; results above 50,000 characters use read_pack. Key parameters: path, direction=dependencies|dependents|both, profile, git_scope, include_patterns, exclude_patterns, and max_file_bytes.")]
 	public Task<CallToolResult> RelatedFiles(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -1471,19 +1471,26 @@ internal sealed class DevProjexMcpTools(
 			var direction = ParseDependencyDirection(arguments.OptionalString("direction") ?? "both");
 			var includePatterns = arguments.OptionalStringArray("include_patterns");
 			var excludePatterns = arguments.OptionalStringArray("exclude_patterns");
+			var project = arguments.OptionalString("project");
+			var branch = arguments.OptionalString("branch");
+			var profile = arguments.OptionalString("profile");
+			var trackedOnly = arguments.OptionalBoolean("tracked_only", false);
+			var gitScope = arguments.OptionalString("git_scope");
+			var maximumFileBytes = arguments.OptionalInt64("max_file_bytes", 1, long.MaxValue);
+			var exclusions = ParseExclusionsArgument(arguments);
 			var plan = await Projects.BuildPlanAsync(
-				arguments.OptionalString("project"),
-				arguments.OptionalString("branch"),
+				project,
+				branch,
 				paths: null,
 				includePatterns,
 				excludePatterns,
-				arguments.OptionalString("profile"),
-				arguments.OptionalBoolean("tracked_only", false),
-				arguments.OptionalString("git_scope"),
-				arguments.OptionalInt64("max_file_bytes", 1, long.MaxValue),
+				profile,
+				trackedOnly,
+				gitScope,
+				maximumFileBytes,
 				cancellationToken,
 				includeOutputMetrics: false,
-				exclusions: ParseExclusionsArgument(arguments)).ConfigureAwait(false);
+				exclusions: exclusions).ConfigureAwait(false);
 			RecordPlan(plan);
 			liveContext?.RecordFocusUse(plan.SourceRoot, McpLiveFocusUse.Related);
 			var resolvedSeeds = Projects.ResolveRequestedFiles(plan, seeds, cancellationToken);
@@ -1497,37 +1504,81 @@ internal sealed class DevProjexMcpTools(
 				plan.IncludedFiles,
 				relativeSeeds,
 				direction,
-				progress.MeasureFacts("Indexing dependency facts", 5, 90),
+				progress.MeasureFacts("Indexing dependency facts", 5, 70),
 				cancellationToken).ConfigureAwait(false);
-			var protectedEvidence = await ProtectRelatedEvidenceAsync(plan, related, cancellationToken)
+			DependencyOutsideSelectionResult? outside = null;
+			ProjectContextPlan? projectPlan = null;
+			if (DependencyFactsEngine.CanRelateOutsideSelection(related, direction))
+			{
+				projectPlan = await Projects.BuildRelationProjectPlanAsync(
+					plan,
+					project,
+					branch,
+					includePatterns,
+					excludePatterns,
+					profile,
+					trackedOnly,
+					gitScope,
+					maximumFileBytes,
+					exclusions,
+					cancellationToken).ConfigureAwait(false);
+				if (projectPlan is not null)
+				{
+					outside = await Projects.DependencyFactsEngine.FindOutsideSelectionAsync(
+						plan.SourceRoot,
+						related,
+						projectPlan.IncludedFiles,
+						direction,
+						progress.MeasureFacts("Relating files outside the selection", 70, 90),
+						cancellationToken).ConfigureAwait(false);
+					if (outside.Seeds.Count == 0)
+						outside = null;
+				}
+			}
+			var evidenceBudget = new RelatedEvidenceBudget();
+			var protectedEvidence = await ProtectRelatedEvidenceAsync(plan, related, evidenceBudget, cancellationToken)
 				.ConfigureAwait(false);
 			related = protectedEvidence.Result;
+			var uninspectedEvidenceSources = protectedEvidence.UninspectedSources;
+			if (outside is not null)
+			{
+				var protectedOutside = await ProtectOutsideSelectionEvidenceAsync(
+					projectPlan!,
+					outside,
+					evidenceBudget,
+					cancellationToken).ConfigureAwait(false);
+				outside = protectedOutside.Result;
+				uninspectedEvidenceSources += protectedOutside.UninspectedSources;
+			}
 			await progress.CompleteAsync(100, related.Index.Metrics.ResolutionCacheHit
 				? "Dependency index reused"
 				: "Dependency index complete").ConfigureAwait(false);
 
 			var coverage = related.Index.Coverage;
-			var resolution = CountRelatedResolution(related.Index, relativeSeeds, direction);
+			var resolution = CountRelatedResolution(related.Index, relativeSeeds, direction, outside);
 			var configurationData = FormatDependencyConfigurationData(coverage.ConfigurationDiagnostics);
 			var selectionContext = new McpSelectionNoticeContext(
 				HasPaths: false,
 				HasPatterns: HasItems(includePatterns) || HasItems(excludePatterns),
 				HasRootOnlyPattern: HasRootOnlyPattern(includePatterns));
 			var noRelatedNotice = resolution.Resolved == 0
-				? resolution.Unresolved == 0
-					? "[No related files] in the effective selection."
-					: $"[No related files] in the effective selection; unresolved references={resolution.Unresolved.ToString(CultureInfo.InvariantCulture)}."
+				? resolution.OutsideSelection > 0
+					? "[No related files] in the effective selection; related files outside it are listed by path."
+					: resolution.Unresolved == 0
+						? "[No related files] in the effective selection."
+						: $"[No related files] in the effective selection; unresolved references={resolution.Unresolved.ToString(CultureInfo.InvariantCulture)}."
 				: null;
 			// An empty relation section reads as "nothing uses this" unless it says what an edge is.
 			var relatedScopeNotice = noRelatedNotice is not null || HasEmptyRelationSection(related.Seeds, direction)
 				? RelatedScopeNotice
 				: null;
-			var partialEvidenceNotice = protectedEvidence.UninspectedSources == 0
+			var partialEvidenceNotice = uninspectedEvidenceSources == 0
 				? null
-				: $"[Related evidence] partial · uninspected-sources={protectedEvidence.UninspectedSources.ToString(CultureInfo.InvariantCulture)}; " +
+				: $"[Related evidence] partial · uninspected-sources={uninspectedEvidenceSources.ToString(CultureInfo.InvariantCulture)}; " +
 				  "unverified reference text was withheld.";
 			var trustedNotices = CombineTrustedNotices(
-				$"[Resolution] resolved={resolution.Resolved.ToString(CultureInfo.InvariantCulture)} · ambiguous={resolution.Ambiguous.ToString(CultureInfo.InvariantCulture)} · unresolved={resolution.Unresolved.ToString(CultureInfo.InvariantCulture)} · external={resolution.External.ToString(CultureInfo.InvariantCulture)}",
+				FormatRelatedResolution(resolution),
+				FormatOutsideSelectionNotice(outside),
 				$"[Facts coverage] files={coverage.Files}, supported={coverage.Supported}, unsupported={coverage.Unsupported}, extraction-failed={coverage.ExtractionFailed}; supported means facts were extracted for a recognized language, unsupported means no supported extractor was available",
 				FormatDependencyConfigurationDiagnostics(coverage.ConfigurationDiagnostics),
 				$"[Search scope] files={plan.IncludedFiles.Count}",
@@ -1541,6 +1592,7 @@ internal sealed class DevProjexMcpTools(
 			WriteRelatedFiles(
 				relatedBody,
 				related,
+				outside,
 				direction,
 				configurationData,
 				coverage.ExtractionFailedFiles
@@ -1610,9 +1662,42 @@ internal sealed class DevProjexMcpTools(
 				advertiseLargeResult: true);
 		}, cancellationToken);
 
+	private async Task<(DependencyOutsideSelectionResult Result, int UninspectedSources)> ProtectOutsideSelectionEvidenceAsync(
+		ProjectContextPlan projectPlan,
+		DependencyOutsideSelectionResult outside,
+		RelatedEvidenceBudget budget,
+		CancellationToken cancellationToken)
+	{
+		var asRelated = new DependencyRelatedResult(
+			outside.Index,
+			outside.Seeds.Select(static seed => new SeedRelatedFiles(
+				seed.Seed,
+				LanguageId.Unsupported,
+				seed.Dependencies,
+				seed.Dependents,
+				null)).ToArray());
+		var protectedEvidence = await ProtectRelatedEvidenceAsync(projectPlan, asRelated, budget, cancellationToken)
+			.ConfigureAwait(false);
+		var protectedSeeds = protectedEvidence.Result.Seeds;
+		return (outside with
+		{
+			Seeds = outside.Seeds.Select((seed, index) => seed with
+			{
+				Dependencies = protectedSeeds[index].Dependencies,
+				Dependents = protectedSeeds[index].Dependents
+			}).ToArray()
+		}, protectedEvidence.UninspectedSources);
+	}
+
+	private sealed class RelatedEvidenceBudget
+	{
+		public long AdmittedSourceBytes;
+	}
+
 	private async Task<(DependencyRelatedResult Result, int UninspectedSources)> ProtectRelatedEvidenceAsync(
 		ProjectContextPlan plan,
 		DependencyRelatedResult related,
+		RelatedEvidenceBudget budget,
 		CancellationToken cancellationToken)
 	{
 		var displayedReasons = related.Seeds
@@ -1636,7 +1721,6 @@ internal sealed class DevProjexMcpTools(
 			.ToArray();
 		McpRelatedEvidenceRetentionDiagnostics.BeforeConsume(candidateSourcePaths);
 		var sourcePaths = new List<string>(candidateSourcePaths.Length);
-		long admittedSourceBytes = 0;
 		foreach (var sourcePath in candidateSourcePaths)
 		{
 			long sourceBytes;
@@ -1648,7 +1732,7 @@ internal sealed class DevProjexMcpTools(
 			{
 				continue;
 			}
-			if (!TryAdmitRelatedEvidenceSource(sourceBytes, ref admittedSourceBytes))
+			if (!TryAdmitRelatedEvidenceSource(sourceBytes, ref budget.AdmittedSourceBytes))
 				continue;
 			sourcePaths.Add(sourcePath);
 		}
@@ -2905,6 +2989,7 @@ internal sealed class DevProjexMcpTools(
 	private static void WriteRelatedFiles(
 		TextWriter output,
 		DependencyRelatedResult result,
+		DependencyOutsideSelectionResult? outside,
 		DependencyDirection direction,
 		string? configurationData,
 		IReadOnlyList<string> extractionFailedFiles,
@@ -2926,6 +3011,7 @@ internal sealed class DevProjexMcpTools(
 		// recordPath receives the file whose text a line quotes: a relation line quotes the
 		// reference text of the edge's source, which is the seed for a dependency and the listed
 		// file for a dependent. Seed headers and dependency targets are only named.
+		var outsideBySeed = outside?.Seeds.ToDictionary(static seed => seed.Seed, StringComparer.Ordinal);
 		foreach (var seed in result.Seeds)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
@@ -2962,6 +3048,24 @@ internal sealed class DevProjexMcpTools(
 					StartLine,
 					"Dependents",
 					seed.Dependents,
+					cancellationToken,
+					file => recordPath?.Invoke(file.Path, currentLine));
+			if (outsideBySeed?.GetValueOrDefault(seed.Seed) is not { } outsideSeed)
+				continue;
+			if (outsideSeed.DependencyCount > 0)
+				WriteRelatedSection(
+					output,
+					StartLine,
+					OutsideSelectionTitle("Dependencies", outsideSeed.Dependencies.Count, outsideSeed.DependencyCount),
+					outsideSeed.Dependencies,
+					cancellationToken,
+					_ => recordPath?.Invoke(seed.Seed, currentLine));
+			if (outsideSeed.DependentCount > 0)
+				WriteRelatedSection(
+					output,
+					StartLine,
+					OutsideSelectionTitle("Dependents", outsideSeed.Dependents.Count, outsideSeed.DependentCount),
+					outsideSeed.Dependents,
 					cancellationToken,
 					file => recordPath?.Invoke(file.Path, currentLine));
 		}
@@ -3114,10 +3218,37 @@ internal sealed class DevProjexMcpTools(
 		throw new InvalidOperationException("Stored pack response exceeded its character budget.");
 	}
 
+	private static string OutsideSelectionTitle(string relation, int listed, int total) =>
+		listed == total
+			? $"{relation} outside the selection"
+			: $"{relation} outside the selection ({listed.ToString(CultureInfo.InvariantCulture)} of {total.ToString(CultureInfo.InvariantCulture)})";
+
+	internal static string FormatRelatedResolution(RelatedResolutionCounts resolution) =>
+		$"[Resolution] resolved={resolution.Resolved.ToString(CultureInfo.InvariantCulture)} · " +
+		$"ambiguous={resolution.Ambiguous.ToString(CultureInfo.InvariantCulture)} · " +
+		$"unresolved={resolution.Unresolved.ToString(CultureInfo.InvariantCulture)} · " +
+		$"external={resolution.External.ToString(CultureInfo.InvariantCulture)}" +
+		(resolution.OutsideSelection > 0
+			? $" · outside-selection={resolution.OutsideSelection.ToString(CultureInfo.InvariantCulture)}"
+			: string.Empty);
+
+	internal static string? FormatOutsideSelectionNotice(DependencyOutsideSelectionResult? outside)
+	{
+		if (outside is null)
+			return null;
+		var relations = outside.Seeds.Sum(static seed => seed.DependencyCount + seed.DependentCount);
+		var listed = outside.Seeds.Sum(static seed => seed.Dependencies.Count + seed.Dependents.Count);
+		return $"[Outside selection] relations={relations.ToString(CultureInfo.InvariantCulture)} · " +
+			   $"listed={listed.ToString(CultureInfo.InvariantCulture)}; " +
+			   "these files are readable but outside this call's selection, so only their paths are listed; " +
+			   "read any of them with get_file.";
+	}
+
 	internal static RelatedResolutionCounts CountRelatedResolution(
 		DependencyIndexSnapshot index,
 		IReadOnlyList<string> seeds,
-		DependencyDirection direction)
+		DependencyDirection direction,
+		DependencyOutsideSelectionResult? outside = null)
 	{
 		var edges = new HashSet<DependencyEdge>();
 		if (direction is DependencyDirection.Dependencies or DependencyDirection.Both)
@@ -3139,15 +3270,17 @@ internal sealed class DevProjexMcpTools(
 		return new RelatedResolutionCounts(
 			counts[(int)ResolutionStatus.Resolved],
 			counts[(int)ResolutionStatus.Ambiguous],
-			counts[(int)ResolutionStatus.Unresolved],
-			counts[(int)ResolutionStatus.External]);
+			counts[(int)ResolutionStatus.Unresolved] - (outside?.ExplainedUnresolvedEdges ?? 0),
+			counts[(int)ResolutionStatus.External],
+			outside?.Edges ?? 0);
 	}
 
 	internal readonly record struct RelatedResolutionCounts(
 		int Resolved,
 		int Ambiguous,
 		int Unresolved,
-		int External);
+		int External,
+		int OutsideSelection = 0);
 
 	private sealed record McpResolvedFileReadRequest(
 		McpGetFileRequest Request,
