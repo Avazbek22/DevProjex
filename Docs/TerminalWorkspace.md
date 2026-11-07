@@ -374,6 +374,13 @@ restored before the operation completes.
 Depth `1` shows direct relations; larger values walk only resolved edges and emit
 one section per visited file. Ambiguous and unresolved evidence is never followed.
 The same 256-seed limit fails honestly before the panel shows a partial graph.
+Checked items are a focus, not a boundary, so when they or a momentary Git scope (`staged`,
+`changes`, `diff:...`) narrow the workspace, `related` also lists the related files the
+workspace could show without that narrowing: the same roots, file types, ignores, exclusions,
+and persistent Git mode. They appear as `Dependencies outside the selection` and `Dependents
+outside the selection` after each seed's own sections, at most 20 per section, and
+`[Resolution]` adds `· outside-selection=N`. A fully checked workspace without a momentary scope
+prints what it printed before.
 
 Left/Right, Home/End, Backspace, and Delete edit the line. Esc cancels it,
 Enter executes it, and Up/Down traverses command history. The newest 50 commands

@@ -127,6 +127,54 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 
 		Assert.Contains("Target.cs", result, StringComparison.Ordinal);
 		Assert.Contains("[Resolution]", result, StringComparison.Ordinal);
+		Assert.DoesNotContain("outside the selection", result, StringComparison.Ordinal);
+		Assert.False(terminal.HasExited);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await QuitAsync(terminal);
+	}
+
+	[Fact(Timeout = 120_000)]
+	public async Task RelatedCommandListsReadableFilesOutsideTheCheckedFocus()
+	{
+		using var workspace = new TemporaryDirectory();
+		var projectPath = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/App.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />\n");
+		workspace.WriteFile("project/Models/User.cs", "namespace App.Models; public sealed class User { }\n");
+		workspace.WriteFile("project/Services/Store.cs",
+			"using App.Models; namespace App.Services; public sealed class Store { User Value; }\n");
+		workspace.WriteFile("project/Tests/StoreTests.cs",
+			"using App.Services; namespace App.Tests; public sealed class StoreTests { Store Subject; }\n");
+		var profile = workspace.WriteFile(
+			"focus-profile.json",
+			"""
+			{
+			  "schemaVersion": 1,
+			  "selection": {
+			    "roots": null,
+			    "extensions": null,
+			    "selectedPaths": ["Services/Store.cs"],
+			    "gitMode": "none",
+			    "exclusions": []
+			  }
+			}
+			""");
+		await using var terminal = await StartAsync(projectPath, columns: 200, rows: 50, profile: profile);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.SendAsync(
+			":related Services/Store.cs --direction both\r",
+			TestContext.Current.CancellationToken);
+		var result = await terminal.WaitForScreenAsync(
+			"outside-selection=2",
+			timeout: TimeSpan.FromSeconds(60),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains("Dependencies outside the selection", result, StringComparison.Ordinal);
+		Assert.Contains("Models/User.cs", result, StringComparison.Ordinal);
+		Assert.Contains("Dependents outside the selection", result, StringComparison.Ordinal);
+		Assert.Contains("Tests/StoreTests.cs", result, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
 		await QuitAsync(terminal);
@@ -1297,14 +1345,15 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 		IReadOnlyDictionary<string, string>? environment = null,
 		bool plain = false,
 		string? language = "en",
-		Action<string>? initializeDataRoot = null)
+		Action<string>? initializeDataRoot = null,
+		string profile = "standard")
 	{
 		var arguments = new List<string>
 		{
 			"tui",
 			projectPath,
 			"--profile",
-			"standard",
+			profile,
 			"--screen",
 			"inline",
 			"--no-mouse"
