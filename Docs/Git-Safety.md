@@ -100,9 +100,9 @@ rev-parse --verify --quiet --end-of-options <validated-ref>^{commit}
 config --get remote.origin.url
 config --show-scope --type=bool --get-regexp <fixed-path-semantics-pattern>
 config --name-only --get-regexp <fixed-safety-pattern>
-config --get-regexp ^core\.(autocrlf|eol)$
-config --system --get-regexp ^core\.(autocrlf|eol)$
-config --file <user-configuration-file> --get-regexp ^core\.(autocrlf|eol)$
+config -z --get-regexp ^core\.(autocrlf|eol)$
+config --system -z --get-regexp ^core\.(autocrlf|eol)$
+config --file <user-configuration-file> -z --get-regexp ^core\.(autocrlf|eol)$
 branch
 branch -r
 rev-parse --abbrev-ref HEAD

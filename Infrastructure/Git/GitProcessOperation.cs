@@ -378,9 +378,9 @@ internal sealed record GitProcessOperation
 			["config", "--name-only", "--get-regexp", "^remote\\..*\\.promisor$"],
 		GitConfigReadKind.NetworkOverrides =>
 			["config", "--name-only", "--get-regexp", "^(url\\..*\\.insteadof|http(\\..*)?\\.(extraheader|cookiefile|proxy)|core\\.(gitproxy|sshcommand)|remote\\..*\\.uploadpack)$"],
-		GitConfigReadKind.RepositoryLineEndings => ["config", "--get-regexp", LineEndingPattern],
-		GitConfigReadKind.SystemLineEndings => ["config", "--system", "--get-regexp", LineEndingPattern],
-		GitConfigReadKind.FileLineEndings => ["config", "--file", Value!, "--get-regexp", LineEndingPattern],
+		GitConfigReadKind.RepositoryLineEndings => ["config", "-z", "--get-regexp", LineEndingPattern],
+		GitConfigReadKind.SystemLineEndings => ["config", "--system", "-z", "--get-regexp", LineEndingPattern],
+		GitConfigReadKind.FileLineEndings => ["config", "--file", Value!, "-z", "--get-regexp", LineEndingPattern],
 		_ => throw new ArgumentOutOfRangeException()
 	};
 

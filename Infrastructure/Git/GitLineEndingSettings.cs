@@ -52,12 +52,14 @@ internal static class GitLineEndingSettings
 		{
 			if (!IsQueryResult(result))
 				continue;
-			foreach (var line in result!.Output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+			// With -z each entry is "key\nvalue" followed by NUL, so a line break inside a value stays
+			// part of that value. A key written without "= value" is a boolean true and has no
+			// separator at all.
+			foreach (var entry in result!.Output.Split('\0', StringSplitOptions.RemoveEmptyEntries))
 			{
-				// A key written without "= value" is a boolean true, and Git prints it without a value.
-				var separator = line.IndexOf(' ');
-				var key = (separator < 0 ? line : line[..separator]).Trim().ToLowerInvariant();
-				values[key] = separator < 0 ? "true" : line[(separator + 1)..].Trim();
+				var separator = entry.IndexOf('\n');
+				var key = (separator < 0 ? entry : entry[..separator]).ToLowerInvariant();
+				values[key] = separator < 0 ? "true" : entry[(separator + 1)..];
 			}
 		}
 		return Normalize(values);
@@ -81,8 +83,57 @@ internal static class GitLineEndingSettings
 		"input" => "input",
 		"true" or "yes" or "on" or "1" => "true",
 		"false" or "no" or "off" or "0" or "" => "false",
-		_ => null
+		_ => NormalizeNumericBoolean(value)
 	};
+
+	// Git booleans also accept base-0 integers with an optional binary k/m/g multiplier.
+	private static string? NormalizeNumericBoolean(string value)
+	{
+		var digits = value.AsSpan();
+		if (digits.IsEmpty)
+			return null;
+		if (digits[0] is '+' or '-')
+			digits = digits[1..];
+		if (digits.IsEmpty)
+			return null;
+		var multiplier = char.ToLowerInvariant(digits[^1]) switch
+		{
+			'k' => 1024,
+			'm' => 1024 * 1024,
+			'g' => 1024 * 1024 * 1024,
+			_ => 1
+		};
+		if (multiplier != 1)
+			digits = digits[..^1];
+		var radix = 10;
+		if (digits.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+		{
+			radix = 16;
+			digits = digits[2..];
+		}
+		else if (digits.Length > 1 && digits[0] == '0')
+		{
+			radix = 8;
+		}
+		if (digits.IsEmpty)
+			return null;
+		var limit = int.MaxValue / multiplier;
+		var magnitude = 0;
+		foreach (var character in digits)
+		{
+			var digit = character switch
+			{
+				>= '0' and <= '9' => character - '0',
+				>= 'a' and <= 'f' => character - 'a' + 10,
+				>= 'A' and <= 'F' => character - 'A' + 10,
+				_ => -1
+			};
+			if (digit < 0 || digit >= radix || digit > limit || magnitude > (limit - digit) / radix)
+				return null;
+			magnitude = magnitude * radix + digit;
+		}
+		return magnitude == 0 ? "false" : "true";
+	}
 
 	// Exit code 1 with no output means the scope sets neither key.
 	private static bool IsQueryResult(GitInspectionProcessResult? result) =>
@@ -90,8 +141,10 @@ internal static class GitLineEndingSettings
 		(result.ExitCode == 0 || result.ExitCode == 1 && string.IsNullOrEmpty(result.Output));
 
 	private static bool ReadsSystemConfiguration() =>
-		Environment.GetEnvironmentVariable("GIT_CONFIG_NOSYSTEM")?.Trim().ToLowerInvariant()
-			is not ("1" or "true" or "yes" or "on");
+		ReadsSystemConfiguration(Environment.GetEnvironmentVariable("GIT_CONFIG_NOSYSTEM"));
+
+	internal static bool ReadsSystemConfiguration(string? noSystem) =>
+		NormalizeAutoCrlf(noSystem?.Trim() ?? string.Empty) is not "true";
 
 	// Git reads the XDG file and then ~/.gitconfig, unless GIT_CONFIG_GLOBAL names the only one.
 	private static IReadOnlyList<string> DefaultUserConfigurationFiles()
