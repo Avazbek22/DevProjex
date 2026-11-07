@@ -47,10 +47,10 @@ the revision that created them until the originating tool rebuilds them. Explici
 to omitting `profile`; portable and standard profile selections fail with
 `DPX-MCP-INVALID-ARGUMENTS` because live mode has one selection source.
 
-Tree, search, pack, analysis, and dependency results stay inside the checked
-selection. When that focus covers fewer files than the effective filters allow,
-each of those responses adds one trusted line with counts only; it never names a
-file:
+Tree, search, pack, analysis, and diff results stay inside the checked
+selection; `related_files` also names readable files outside it by path. When
+that focus covers fewer files than the effective filters allow, each of those
+responses adds one trusted line with counts only; it never names a file:
 
 ```text
 [Live context] focus: 1 of 9 selectable files; 8 outside the focus were not searched; read any of them by name with get_file.
@@ -58,9 +58,9 @@ file:
 
 The verb follows the tool: `are not listed` for `get_tree`, `were not searched`
 for `search_project`, `were not measured` for `analyze`, `were not packed` for
-`pack_context`, and `were checked only for links to the seeds` for `related_files`,
-which names the related ones by path as described under
-[`related_files`](#related_files). With one file outside
+`pack_context`, `were not compared` for `get_diff`, and `were checked only for
+links to the seeds` for `related_files`, which names the related ones by path as
+described under [`related_files`](#related_files). With one file outside
 the focus the line ends `1 outside the focus was not searched; read it by name
 with get_file.` The line is omitted when the focus covers every selectable file
 and when no selection is saved.

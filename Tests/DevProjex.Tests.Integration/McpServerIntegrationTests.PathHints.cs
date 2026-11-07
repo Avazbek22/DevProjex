@@ -166,6 +166,42 @@ public sealed partial class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task BatchedGetFileOnADirectoryKeepsEachStatusOnOneLine()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		WriteProjectFile(project, "pkg/a\u2028b.ts", "export const a = 1;\n");
+		// Windows does not permit line-feed characters in file names.
+		var lineFeedName = !OperatingSystem.IsWindows();
+		if (lineFeedName)
+			WriteProjectFile(project, "pkg/c\nd.ts", "export const c = 1;\n");
+		WriteProjectFile(project, "main.ts", "export const mainEntry = 1;\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var batch = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?>
+			{
+				["requests"] = new object[]
+				{
+					new Dictionary<string, object?> { ["path"] = "pkg" },
+					new Dictionary<string, object?> { ["path"] = "main.ts" }
+				}
+			});
+
+		Assert.NotEqual(true, batch.IsError);
+		var body = ExtractSpotlightBody(Text(batch));
+		Assert.DoesNotContain('\u2028', body);
+		var lines = body.Split('\n');
+		var status = Assert.Single(lines, static line => line.StartsWith("1.1 — ", StringComparison.Ordinal));
+		Assert.Contains("a\\u2028b.ts", status, StringComparison.Ordinal);
+		if (lineFeedName)
+			Assert.Contains("c\\nd.ts", status, StringComparison.Ordinal);
+		Assert.Equal(1, Array.IndexOf(lines, status));
+		Assert.Equal("2.1 — ok", lines[2]);
+	}
+
+	[Fact]
 	public async Task GetFileOnADirectoryWithNothingReadableKeepsThePlainRefusal()
 	{
 		using var workspace = new TemporaryDirectory();
