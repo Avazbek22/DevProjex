@@ -3132,10 +3132,13 @@ internal sealed partial class DevProjexMcpTools(
 			output.Write(McpTextEscaping.EscapeSingleLine(file.Path));
 			recordPath?.Invoke(file);
 			output.Write(" — ");
-			for (var index = 0; index < file.Reasons.Count; index++)
+			// Compaction happens only here, after evidence protection, which checks each site's own
+			// reason against its source line and therefore needs the reasons uncompacted.
+			var reasons = RelatedReasonCompaction.Compact(file.Reasons);
+			for (var index = 0; index < reasons.Count; index++)
 			{
 				if (index > 0) output.Write(" · ");
-				output.Write(McpTextEscaping.EscapeSingleLine(file.Reasons[index]));
+				output.Write(McpTextEscaping.EscapeSingleLine(reasons[index]));
 			}
 			output.Write(" — ");
 			output.Write(file.Status.ToString().ToLowerInvariant());

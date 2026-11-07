@@ -206,6 +206,38 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 	}
 
 	[Fact(Timeout = 120_000)]
+	public async Task RelatedCommandCompactsRepeatedEvidenceSites()
+	{
+		using var project = new TemporaryDirectory();
+		project.WriteFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />\n");
+		project.WriteFile("Box.cs", "public sealed class Box {}\n");
+		project.WriteFile("Consumer.cs",
+			"public sealed class Consumer\n{\n" +
+			string.Concat(Enumerable.Range(1, 7).Select(static index => $"\tBox Value{index};\n")) +
+			"}\n");
+		await using var terminal = await StartAsync(project.Path, columns: 200, rows: 40);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.SendAsync(
+			":related Consumer.cs --direction dependencies\r",
+			TestContext.Current.CancellationToken);
+		var result = await terminal.WaitForScreenAsync(
+			"[Resolution]",
+			timeout: TimeSpan.FromSeconds(45),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		// The result dialog wraps a long row, so only its start is matched; the whole row is pinned
+		// by the command-line test, which shares this renderer.
+		Assert.Contains("type reference Box at lines 3, 4", result, StringComparison.Ordinal);
+		Assert.DoesNotContain("type reference Box at line ", result, StringComparison.Ordinal);
+		Assert.False(terminal.HasExited);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await QuitAsync(terminal);
+	}
+
+	[Fact(Timeout = 120_000)]
 	public async Task RelatedCommandReportsTheSelectionFailureInTheCommandPanel()
 	{
 		using var project = new TemporaryDirectory();

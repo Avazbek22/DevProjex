@@ -834,8 +834,11 @@ Specific options are:
 Text output contains localized `Dependencies` and `Dependents` sections. Each row has a
 portable relative path, aggregated evidence reasons, resolution status, estimated tokens,
 and a cross-scope marker where applicable; ambiguous references stay grouped with their
-candidate paths. JSON is the deterministic `devprojex-related-files` document described in
-[CLI-Output-Contract.md](CLI-Output-Contract.md). The command has no content-transformation
+candidate paths. Reference sites that share the same reason text are one text entry, such
+as `type reference Response at lines 56, 141, 186, 222, 258 (+4 more)`, while JSON keeps
+every site as its own reason. JSON is the deterministic `devprojex-related-files` document
+described in [CLI-Output-Contract.md](CLI-Output-Contract.md). The command has no
+content-transformation
 flags and does not return source content. `-o` follows the `search` rules: the file is
 written atomically outside the source project, an existing file is never replaced
 (`DPX-EXPORT-DESTINATION-EXISTS`, exit code `4`; there is no `--force`), and success

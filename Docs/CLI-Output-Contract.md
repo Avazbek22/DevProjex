@@ -403,9 +403,11 @@ contains each file reached through resolved edges, once, in deterministic
 breadth-first order. Seeds and related paths use portable project-relative `/`
 separators. Each related item retains its aggregate
 evidence reasons, resolution status, sorted candidate list, cross-compilation-scope
-flag, and estimated source tokens. Ambiguous references have `status: "ambiguous"`
-and list every allowed candidate; self-file edges are absent. A seed whose language
-has no adapter has empty relationship arrays and a non-null `noFactsReason`.
+flag, and estimated source tokens. Every reference site stays its own `at line N` reason
+here, although text output writes sites that share the same reason text as one entry.
+Ambiguous references have `status: "ambiguous"` and list every allowed candidate;
+self-file edges are absent. A seed whose language has no adapter has empty
+relationship arrays and a non-null `noFactsReason`.
 
 `coverage` describes the complete effective manifest, not only the seeds. Its
 unsupported-language and C# error-node dictionaries use stable ordinal keys.
