@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using DevProjex.Infrastructure.ProjectProfiles;
+using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
 
 namespace DevProjex.Tests.Terminal;
@@ -165,5 +167,50 @@ public sealed partial class McpServerProcessTests
 		var response = await CallAsync(server, "get_tree", new Dictionary<string, object?> { ["git_scope"] = "diff:HEAD~1..HEAD" });
 		Assert.True(response.IsError);
 		Assert.Contains("DPX-GIT-STATE-UNAVAILABLE", string.Join('\n', response.Content.OfType<TextContentBlock>().Select(static item => item.Text)), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RealServerReportsUnsafeGitAsUnavailableWithoutStartingIt()
+	{
+		using var repository = new GitModeRepository();
+		using var state = new TemporaryDirectory();
+		repository.Git("config", "core.ignorecase", "false");
+		repository.Git("config", "core.precomposeunicode", "false");
+		repository.Write("file.txt", "tracked\n");
+		repository.Commit();
+		var marker = Path.Combine(state.Path, "git-started");
+		var executable = repository.WriteUntrustedGitMarker(marker);
+		var start = CreateBoundaryProcess(repository.Root, state.Path);
+		repository.SetProcessEnvironment(start);
+		start.WorkingDirectory = state.Path;
+		start.Environment["PATH"] = Path.GetDirectoryName(executable) + Path.PathSeparator + start.Environment["PATH"];
+		foreach (var argument in new[] { "mcp", "--root", repository.Root, "--git-mode", "none", "--exclude", "none" })
+			start.ArgumentList.Add(argument);
+		using var process = Process.Start(start) ?? throw new InvalidOperationException("MCP did not start.");
+		var errors = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+		using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+		timeout.CancelAfter(TimeSpan.FromSeconds(45));
+		try
+		{
+			await using (var client = await McpClient.CreateAsync(new StreamClientTransport(
+				process.StandardInput.BaseStream, process.StandardOutput.BaseStream),
+				clientOptions: null, loggerFactory: null, timeout.Token))
+			{
+				var response = await client.CallToolAsync("get_tree", new Dictionary<string, object?> { ["git_scope"] = "changes" },
+					progress: null, options: null, timeout.Token);
+				Assert.True(response.IsError);
+				var text = string.Join('\n', response.Content.OfType<TextContentBlock>().Select(static item => item.Text));
+				Assert.Contains("DPX-GIT-STATE-UNAVAILABLE", text, StringComparison.Ordinal);
+				Assert.False(File.Exists(marker));
+			}
+			process.StandardInput.Close();
+			await process.WaitForExitAsync(timeout.Token);
+			Assert.True(process.ExitCode == 0, await errors);
+		}
+		finally
+		{
+			if (!process.HasExited)
+				process.Kill(entireProcessTree: true);
+		}
 	}
 }

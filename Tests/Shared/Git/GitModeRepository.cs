@@ -79,7 +79,11 @@ internal sealed class GitModeRepository : IDisposable
 
 	public string Git(params string[] arguments) => GitAt(Root, arguments);
 
-	public string GitAt(string directory, params string[] arguments)
+	public string GitWithExpectedExitCode(int exitCode, params string[] arguments) => GitAtCore(Root, exitCode, arguments);
+
+	public string GitAt(string directory, params string[] arguments) => GitAtCore(directory, 0, arguments);
+
+	private string GitAtCore(string directory, int expectedExitCode, params string[] arguments)
 	{
 		var start = new ProcessStartInfo("git")
 		{
@@ -105,8 +109,37 @@ internal sealed class GitModeRepository : IDisposable
 			process.Kill(entireProcessTree: true);
 			throw new TimeoutException("Git fixture command exceeded 20 seconds.");
 		}
-		Assert.True(process.ExitCode == 0, $"git {string.Join(' ', arguments)}: {error.GetAwaiter().GetResult()}");
+		Assert.True(process.ExitCode == expectedExitCode,
+			$"git {string.Join(' ', arguments)}: expected exit {expectedExitCode}, actual {process.ExitCode}: {error.GetAwaiter().GetResult()}");
 		return output.GetAwaiter().GetResult();
+	}
+
+	public string WriteMergeConflict()
+	{
+		Write("conflict.txt", "baseline\n");
+		Write("stable.txt", "stable\n");
+		Commit("baseline");
+		Git("branch", "other-side");
+		Write("conflict.txt", "first side\n");
+		Commit("first side");
+		var first = Git("rev-parse", "HEAD").Trim();
+		Git("checkout", "--quiet", "other-side");
+		Write("conflict.txt", "second side\n");
+		Commit("second side");
+		GitWithExpectedExitCode(1, "merge", "--no-edit", first);
+		var contents = File.ReadAllText(Path.Combine(Root, "conflict.txt"));
+		Assert.Contains("<<<<<<<", contents, StringComparison.Ordinal);
+		Assert.Equal(3, Git("ls-files", "--unmerged", "-z").Split('\0', StringSplitOptions.RemoveEmptyEntries).Length);
+		return contents;
+	}
+
+	public string WriteUntrustedGitMarker(string marker)
+	{
+		var executable = Write(OperatingSystem.IsWindows() ? "tools/git.exe" : "tools/git",
+			"#!/bin/sh\nprintf started > '" + marker.Replace("'", "'\"'\"'", StringComparison.Ordinal) + "'\nexit 87\n");
+		if (!OperatingSystem.IsWindows())
+			File.SetUnixFileMode(executable, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+		return executable;
 	}
 
 	public void Dispose()

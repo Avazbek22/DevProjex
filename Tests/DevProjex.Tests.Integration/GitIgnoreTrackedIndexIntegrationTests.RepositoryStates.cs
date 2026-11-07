@@ -248,4 +248,85 @@ public sealed partial class GitIgnoreTrackedIndexIntegrationTests
 		Assert.True(result.IsAvailable, result.FailureReason);
 		Assert.Equal("linked.txt", Path.GetFileName(Assert.Single(result.IncludedPaths)));
 	}
+
+	[Theory]
+	[InlineData(GitFilteringMode.Staged)]
+	[InlineData(GitFilteringMode.Changes)]
+	[InlineData(GitFilteringMode.Diff)]
+	public async Task UnmergedIndexSelectsTheCurrentConflictFileOnlyOnce(GitFilteringMode mode)
+	{
+		using var repository = new GitModeRepository();
+		repository.WriteMergeConflict();
+		Assert.True(GitTrackedPathIndexCache.TryLoad(repository.Root, Path.Combine(repository.Root, ".git"),
+			TestContext.Current.CancellationToken, out var tracked));
+		Assert.Equal(2, tracked.Count);
+		var provider = new GitScopePathProvider(null, static (_, _) => Task.FromResult<IReadOnlyList<string>>([]));
+		var result = await provider.ResolveAsync(repository.Root, mode, mode == GitFilteringMode.Diff ? "HEAD~1..HEAD" : null,
+			TestContext.Current.CancellationToken);
+		Assert.True(result.IsAvailable, result.FailureReason);
+		Assert.Equal("conflict.txt", Path.GetFileName(Assert.Single(result.IncludedPaths)));
+		Assert.Equal(0, result.DeletedPathCount);
+	}
+
+	[Theory]
+	[InlineData(GitFilteringMode.Staged)]
+	[InlineData(GitFilteringMode.Changes)]
+	[InlineData(GitFilteringMode.Diff)]
+	public async Task CorruptIndexCannotPublishPartialStateAndRepairRecoversWithoutRestart(GitFilteringMode mode)
+	{
+		using var repository = new GitModeRepository();
+		repository.Write("selected.txt", "baseline\n");
+		repository.Commit();
+		repository.Write("selected.txt", "second revision\n");
+		repository.Commit();
+		repository.Write("selected.txt", "staged content\n");
+		repository.Git("add", "selected.txt");
+		var indexPath = Path.Combine(repository.Root, ".git", "index");
+		var original = File.ReadAllBytes(indexPath);
+		var timestamp = File.GetLastWriteTimeUtc(indexPath);
+		var provider = new GitScopePathProvider(null, static (_, _) => Task.FromResult<IReadOnlyList<string>>([]));
+		File.WriteAllBytes(indexPath, Encoding.ASCII.GetBytes("not an index"));
+		var corrupted = await provider.ResolveAsync(repository.Root, mode, mode == GitFilteringMode.Diff ? "HEAD~1..HEAD" : null,
+			TestContext.Current.CancellationToken);
+		if (mode == GitFilteringMode.Diff)
+		{
+			Assert.True(corrupted.IsAvailable, corrupted.FailureReason);
+			Assert.Equal("selected.txt", Path.GetFileName(Assert.Single(corrupted.IncludedPaths)));
+		}
+		else
+		{
+			Assert.False(corrupted.IsAvailable);
+			Assert.Empty(corrupted.IncludedPaths);
+		}
+		File.WriteAllBytes(indexPath, original);
+		File.SetLastWriteTimeUtc(indexPath, timestamp);
+		var repaired = await provider.ResolveAsync(repository.Root, mode, mode == GitFilteringMode.Diff ? "HEAD~1..HEAD" : null,
+			TestContext.Current.CancellationToken);
+		Assert.True(repaired.IsAvailable, repaired.FailureReason);
+		Assert.Equal("selected.txt", Path.GetFileName(Assert.Single(repaired.IncludedPaths)));
+	}
+
+	[Fact]
+	public async Task CancellationDuringLineEndingDiscoveryDoesNotPublishAnEmptySuccessfulScope()
+	{
+		using var repository = new GitModeRepository();
+		repository.Write("file.txt", "baseline\n");
+		repository.Commit();
+		var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var release = new TaskCompletionSource<IReadOnlyList<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+		using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+		var provider = new GitScopePathProvider(null, async (_, token) =>
+		{
+			entered.TrySetResult();
+			return await release.Task.WaitAsync(token);
+		});
+		var pending = provider.ResolveAsync(repository.Root, GitFilteringMode.Changes, null, cancellation.Token);
+		await entered.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+		await cancellation.CancelAsync();
+		await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending);
+		release.TrySetResult([]);
+		var resumed = await provider.ResolveAsync(repository.Root, GitFilteringMode.Changes, null, TestContext.Current.CancellationToken);
+		Assert.True(resumed.IsAvailable, resumed.FailureReason);
+		Assert.Empty(resumed.IncludedPaths);
+	}
 }

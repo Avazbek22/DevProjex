@@ -300,4 +300,46 @@ public sealed partial class GitWorkingChangesLineEndingIntegrationTests
 		Assert.Equal(["after.txt", "untracked.txt"], RelativePaths(repository.Root, result.IncludedPaths));
 		Assert.Equal(1, result.DeletedPathCount);
 	}
+
+	[Fact]
+	public void NumericBooleanNormalizationMatchesThousandsOfNativeGitValues()
+	{
+		const int seed = 1_864_257;
+		const int count = 4096;
+		using var repository = new GitModeRepository();
+		var random = new Random(seed);
+		var values = new string[count];
+		var configuration = new StringBuilder("[probe]\n");
+		for (var index = 0; index < count; index++)
+		{
+			var exponent = random.Next(4);
+			var multiplier = 1L << (10 * exponent);
+			var magnitude = (int)random.NextInt64(int.MaxValue / multiplier + 1);
+			var digits = random.Next(3) switch
+			{
+				0 => magnitude.ToString(System.Globalization.CultureInfo.InvariantCulture),
+				1 => "0" + Convert.ToString(magnitude, 8),
+				_ => "0X" + magnitude.ToString("X", System.Globalization.CultureInfo.InvariantCulture)
+			};
+			var sign = random.Next(3) switch { 0 => "", 1 => "+", _ => "-" };
+			var suffix = exponent switch { 0 => "", 1 => "K", 2 => "m", _ => "G" };
+			values[index] = sign + digits + suffix;
+			configuration.Append("value").Append(index.ToString("D4", System.Globalization.CultureInfo.InvariantCulture))
+				.Append(" = ").Append(values[index]).Append('\n');
+		}
+		var path = repository.Write("booleans.config", configuration.ToString());
+		var native = repository.Git("config", "--file", path, "--type=bool", "--get-regexp", "^probe\\.value[0-9]+$")
+			.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
+		Assert.Equal(count, native.Length);
+		for (var index = 0; index < count; index++)
+		{
+			var separator = native[index].IndexOf(' ');
+			var expectedKey = "probe.value" + index.ToString("D4", System.Globalization.CultureInfo.InvariantCulture);
+			Assert.Equal(expectedKey, native[index][..separator]);
+			var expected = "core.autocrlf=" + native[index][(separator + 1)..];
+			var actual = GitLineEndingSettings.Normalize(new Dictionary<string, string> { ["core.autocrlf"] = values[index] });
+			Assert.True(actual.Count == 1 && actual[0] == expected,
+				$"Seed={seed}; index={index}; input={values[index]}; expected={expected}; actual={string.Join(',', actual)}");
+		}
+	}
 }

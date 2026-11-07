@@ -95,11 +95,11 @@ public sealed partial class GitModeCommandContractTests
 			RedirectStandardError = true
 		};
 		repository.SetProcessEnvironment(start);
-		configureEnvironment?.Invoke(start);
 		start.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = state;
 		start.ArgumentList.Add(PublishedApplicationLocator.FindApplicationAssembly());
 		foreach (var argument in arguments)
 			start.ArgumentList.Add(argument);
+		configureEnvironment?.Invoke(start);
 		return TerminalTestProcess.Run(start);
 	}
 
@@ -109,6 +109,8 @@ public sealed partial class GitModeCommandContractTests
 	[InlineData("xdg")]
 	[InlineData("relative-global")]
 	[InlineData("integer-global")]
+	[InlineData("empty-global")]
+	[InlineData("whitespace-global")]
 	public void RealChangesCommandResolvesUserConfigurationWithoutInheritingTheMachinesFiles(string source)
 	{
 		using var repository = new GitModeRepository();
@@ -125,6 +127,12 @@ public sealed partial class GitModeCommandContractTests
 		File.WriteAllText(repository.UserConfiguration, $"[core]\n autocrlf = {(source == "integer-global" ? "2" : "true")}\n");
 		var xdg = state.CreateDirectory("xdg/git");
 		File.WriteAllText(Path.Combine(xdg, "config"), "[core]\n autocrlf = true\n");
+		if (source == "relative-global")
+		{
+			repository.Write("relative.config", "[core]\n autocrlf = true\n");
+			File.AppendAllText(Path.Combine(repository.Root, ".git", "info", "exclude"), "\nrelative.config\n");
+			Assert.Equal("true", repository.Git("config", "--file", "relative.config", "--get", "core.autocrlf").Trim());
+		}
 		var result = RunScopeCommand(repository, state.CreateDirectory("data"),
 			["tree", repository.Root, "--git-mode", "changes", "--exclude", "none", "--format", "text"], start =>
 			{
@@ -132,7 +140,12 @@ public sealed partial class GitModeCommandContractTests
 					start.Environment["HOME"] = string.Empty;
 				if (source == "xdg")
 				{
-					start.Environment["GIT_CONFIG_GLOBAL"] = string.Empty;
+					start.Environment.Remove("GIT_CONFIG_GLOBAL");
+					start.Environment["XDG_CONFIG_HOME"] = Path.GetDirectoryName(xdg)!;
+				}
+				if (source is "empty-global" or "whitespace-global")
+				{
+					start.Environment["GIT_CONFIG_GLOBAL"] = source == "empty-global" ? string.Empty : " ";
 					start.Environment["XDG_CONFIG_HOME"] = Path.GetDirectoryName(xdg)!;
 				}
 				if (source == "relative-global")
@@ -140,7 +153,8 @@ public sealed partial class GitModeCommandContractTests
 			});
 		Assert.True(result.ExitCode == 0, result.StandardError);
 		Assert.Contains("Edited.cs", result.StandardOutput, StringComparison.Ordinal);
-		Assert.Equal(source == "relative-global", result.StandardOutput.Contains("Untouched.cs", StringComparison.Ordinal));
+		Assert.Equal(source is "relative-global" or "empty-global" or "whitespace-global",
+			result.StandardOutput.Contains("Untouched.cs", StringComparison.Ordinal));
 	}
 
 	[Theory]
@@ -169,5 +183,86 @@ public sealed partial class GitModeCommandContractTests
 		Assert.Equal(untrackedVisible, paths.Contains("Untracked.cs"));
 		Assert.Equal(ignoredVisible, paths.Contains("Ignored.cs"));
 		Assert.Equal(1 + (untrackedVisible ? 1 : 0) + (ignoredVisible ? 1 : 0), paths.Length);
+	}
+
+	[Theory]
+	[InlineData("staged")]
+	[InlineData("changes")]
+	[InlineData("diff:HEAD~1..HEAD")]
+	public void RealContextExportUsesTheCurrentConflictContentOnce(string mode)
+	{
+		using var repository = new GitModeRepository();
+		using var state = new TemporaryDirectory();
+		var contents = repository.WriteMergeConflict();
+		var result = RunScopeCommand(repository, state.Path,
+			["export", "context", repository.Root, "--git-mode", mode, "--exclude", "none", "--view", "content",
+			 "--format", "json", "--language", "en", "--plain", "-o", "-"]);
+		Assert.True(result.ExitCode == 0, result.StandardError);
+		Assert.Empty(result.StandardError);
+		using var document = JsonDocument.Parse(result.StandardOutput);
+		var file = Assert.Single(document.RootElement.GetProperty("files").EnumerateArray());
+		Assert.Equal("conflict.txt", file.GetProperty("path").GetString());
+		Assert.Equal(contents, file.GetProperty("content").GetString());
+	}
+
+	[Theory]
+	[InlineData("staged")]
+	[InlineData("changes")]
+	[InlineData("diff:HEAD..HEAD")]
+	public void UnsafeGitExecutableInsideTheSelectedRepositoryFailsAsUnavailableState(string mode)
+	{
+		using var repository = new GitModeRepository();
+		using var state = new TemporaryDirectory();
+		repository.Git("config", "core.ignorecase", "false");
+		repository.Git("config", "core.precomposeunicode", "false");
+		repository.Write("file.txt", "tracked\n");
+		repository.Commit();
+		var marker = Path.Combine(state.Path, "git-started");
+		var executable = repository.WriteUntrustedGitMarker(marker);
+		var result = RunScopeCommand(repository, state.Path,
+			["tree", repository.Root, "--git-mode", mode, "--exclude", "none", "--format", "text", "--language", "en"], start =>
+			{
+				start.WorkingDirectory = state.Path;
+				start.Environment["PATH"] = Path.GetDirectoryName(executable) + Path.PathSeparator + start.Environment["PATH"];
+			});
+		Assert.False(File.Exists(marker));
+		Assert.Empty(result.StandardOutput);
+		Assert.Contains("DPX-GIT-STATE-UNAVAILABLE", result.StandardError, StringComparison.Ordinal);
+		Assert.Equal(CommandLineExitCodes.PolicyFailure, result.ExitCode);
+		Assert.DoesNotContain("DPX-CLI-UNEXPECTED", result.StandardError, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("none", true)]
+	[InlineData("staged", false)]
+	[InlineData("changes", false)]
+	[InlineData("diff:HEAD..HEAD", false)]
+	public void RealCommandWithoutGitDistinguishesTheUnfilteredControlFromUnavailableScopes(string mode, bool succeeds)
+	{
+		using var repository = new GitModeRepository();
+		using var state = new TemporaryDirectory();
+		repository.Git("config", "core.ignorecase", "false");
+		repository.Git("config", "core.precomposeunicode", "false");
+		repository.Write("file.txt", "tracked\n");
+		repository.Commit();
+		var result = RunScopeCommand(repository, state.Path,
+			["tree", repository.Root, "--git-mode", mode, "--exclude", "none", "--format", "text", "--language", "en"], start =>
+			{
+				start.FileName = PublishedApplicationLocator.FindExecutable();
+				start.ArgumentList.RemoveAt(0);
+				start.Environment["PATH"] = state.CreateDirectory("empty-path");
+			});
+		Assert.Equal(succeeds ? CommandLineExitCodes.Success : CommandLineExitCodes.PolicyFailure, result.ExitCode);
+		if (succeeds)
+		{
+			Assert.Contains("file.txt", result.StandardOutput, StringComparison.Ordinal);
+			Assert.Empty(result.StandardError);
+		}
+		else
+		{
+			Assert.Empty(result.StandardOutput);
+			Assert.Contains("DPX-GIT-STATE-UNAVAILABLE", result.StandardError, StringComparison.Ordinal);
+			Assert.DoesNotContain("DPX-CLI-UNEXPECTED", result.StandardError, StringComparison.Ordinal);
+		}
 	}
 }

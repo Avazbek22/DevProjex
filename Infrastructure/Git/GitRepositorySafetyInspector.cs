@@ -148,12 +148,10 @@ internal static class GitRepositorySafetyInspector
 	{
 		using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 		deadline.CancelAfter(operation.Deadline);
-		using var process = new Process
-		{
-			StartInfo = GitProcessStartInfoFactory.Create(repositoryPath, operation)
-		};
+		using var process = new Process();
 		try
 		{
+			process.StartInfo = GitProcessStartInfoFactory.Create(repositoryPath, operation);
 			if (!process.Start())
 				return null;
 			process.StandardInput.Close();

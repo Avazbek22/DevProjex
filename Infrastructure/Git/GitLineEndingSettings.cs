@@ -150,7 +150,7 @@ internal static class GitLineEndingSettings
 	private static IReadOnlyList<string> DefaultUserConfigurationFiles()
 	{
 		var global = Environment.GetEnvironmentVariable("GIT_CONFIG_GLOBAL");
-		if (!string.IsNullOrWhiteSpace(global))
+		if (global is not null)
 			return Path.IsPathFullyQualified(global) ? [global] : [];
 		var home = Environment.GetEnvironmentVariable("HOME") is { Length: > 0 } homeVariable &&
 				   Path.IsPathFullyQualified(homeVariable)
