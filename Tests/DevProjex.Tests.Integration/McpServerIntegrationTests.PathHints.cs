@@ -133,6 +133,39 @@ public sealed partial class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task BatchedGetFileOnADirectoryPrintsTheEntriesInsideTheUntrustedBlock()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		WriteProjectFile(project, "src/helper/index.ts", "export const helperEntry = 1;\n");
+		WriteProjectFile(project, "src/main.ts", "export const mainEntry = 1;\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var batch = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?>
+			{
+				["requests"] = new object[]
+				{
+					new Dictionary<string, object?> { ["path"] = "src/helper" },
+					new Dictionary<string, object?> { ["path"] = "src/main.ts" }
+				}
+			});
+
+		Assert.NotEqual(true, batch.IsError);
+		var body = ExtractSpotlightBody(Text(batch));
+		Assert.Contains(
+			"'src/helper' is a directory; readable entries: index.ts. Read one with get_file {\"path\":\"src/helper/index.ts\"}",
+			body,
+			StringComparison.Ordinal);
+		Assert.Contains("export const mainEntry = 1;", body, StringComparison.Ordinal);
+		var text = Text(batch);
+		var outside = text[..text.IndexOf("<untrusted-data-", StringComparison.Ordinal)] +
+		              text[(text.LastIndexOf("</untrusted-data-", StringComparison.Ordinal) + 1)..];
+		Assert.DoesNotContain("index.ts", outside, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task GetFileOnADirectoryWithNothingReadableKeepsThePlainRefusal()
 	{
 		using var workspace = new TemporaryDirectory();

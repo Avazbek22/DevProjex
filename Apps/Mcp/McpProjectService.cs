@@ -1890,14 +1890,22 @@ internal sealed class McpProjectService(
 			: string.Empty;
 		var message = $"{McpErrorCodes.PathNotFound}: '{requestedPath}' is a directory; readable entries: {shown}{more}.";
 		if (files.Count == 0)
-			return new McpToolException(McpErrorCodes.PathNotFound, $"{message} List it with {listCall}.");
+		{
+			return new McpToolException(McpErrorCodes.PathNotFound, $"{message} List it with {listCall}.")
+			{
+				NamesReadableEntries = true
+			};
+		}
 
 		var suggested = files.FirstOrDefault(static entry => IsDirectoryEntryFile(entry.Key), files.First()).Value;
 		var suggestedPath = ToRelative(plan.SourceRoot, suggested);
 		return new McpToolException(
 			McpErrorCodes.PathNotFound,
 			$"{message} Read one with get_file {{\"path\":{JsonSerializer.Serialize(suggestedPath, McpToolResults.CompactJsonOptions)}}}, " +
-			$"or list it with {listCall}.");
+			$"or list it with {listCall}.")
+		{
+			NamesReadableEntries = true
+		};
 	}
 
 	// The file a language loads when an import names the directory itself.
