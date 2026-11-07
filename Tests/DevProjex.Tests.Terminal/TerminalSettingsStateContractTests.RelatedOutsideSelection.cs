@@ -71,14 +71,16 @@ public sealed partial class TerminalSettingsStateContractTests
 			var token = TestContext.Current.CancellationToken;
 			var whole = await controller.BuildCurrentPlanAsync(state, token);
 			var (wholeRelated, wholeOutside) = await controller.FindRelatedAsync(
-				state, whole, NarrowedRelationFixtures.LibrarySeed, DependencyDirection.Both, 1,
+				TerminalWorkspaceController.CaptureRelationSnapshot(state), whole,
+				NarrowedRelationFixtures.LibrarySeed, DependencyDirection.Both, 1,
 				GitFilteringMode.RespectGitIgnore, token);
 			var wholeText = await RenderRelatedAsync(appData.Path, wholeRelated, wholeOutside, token);
 
 			SelectOnlyTopLevelDirectory(state, NarrowedRelationFixtures.LibraryFolder);
 			var focus = await controller.BuildCurrentPlanAsync(state, token);
 			var (related, outside) = await controller.FindRelatedAsync(
-				state, focus, NarrowedRelationFixtures.LibrarySeed, DependencyDirection.Both, 1,
+				TerminalWorkspaceController.CaptureRelationSnapshot(state), focus,
+				NarrowedRelationFixtures.LibrarySeed, DependencyDirection.Both, 1,
 				GitFilteringMode.RespectGitIgnore, token);
 			var text = await RenderRelatedAsync(appData.Path, related, outside, token);
 
@@ -98,12 +100,74 @@ public sealed partial class TerminalSettingsStateContractTests
 
 			// A deeper walk visits the selected files the project relates, never the outside ones.
 			var (_, deeper) = await controller.FindRelatedAsync(
-				state, focus, NarrowedRelationFixtures.LibrarySeed, DependencyDirection.Dependencies, 2,
+				TerminalWorkspaceController.CaptureRelationSnapshot(state), focus,
+				NarrowedRelationFixtures.LibrarySeed, DependencyDirection.Dependencies, 2,
 				GitFilteringMode.RespectGitIgnore, token);
 			Assert.NotNull(deeper);
 			Assert.Equal(
 				[NarrowedRelationFixtures.LibrarySeed, .. NarrowedRelationFixtures.LibraryDependenciesInside],
 				deeper.Selection.Seeds.Select(static seed => seed.Seed));
+		}
+	}
+
+	/// <summary>
+	/// A relation query must answer from the snapshot it was handed, never from whatever the live
+	/// workspace holds while it runs. This mutates the workspace's extension filter, in place and on
+	/// the dictionary instance <see cref="TerminalWorkspaceState.ExtensionOptionStates"/> exposes,
+	/// concurrently with a query already holding a snapshot taken before the mutation started; a
+	/// query that read the live state instead could answer from a half-applied extension change, or
+	/// throw when the dictionary it was enumerating was cleared from under it.
+	/// </summary>
+	[Fact]
+	public async Task FindRelatedAnswersFromItsSnapshotDespiteConcurrentLiveMutation()
+	{
+		using var repository = new GitModeRepository();
+		using var appData = new TemporaryDirectory();
+		repository.WriteScopeMatrix();
+		var (controller, state) = await OpenAsync(repository.Root, appData.Path);
+		using (state)
+		{
+			var token = TestContext.Current.CancellationToken;
+			await controller.SetExtensionsAsync(state, [".cs"], token);
+			await controller.SetGitModeAsync(state, GitFilteringMode.Changes, token);
+			var current = await controller.BuildCurrentPlanAsync(state, token);
+
+			// Frozen before any concurrent mutation starts.
+			var snapshot = TerminalWorkspaceController.CaptureRelationSnapshot(state);
+			var quiet = await controller.FindRelatedAsync(
+				snapshot, current, "Staged.cs", DependencyDirection.Both, 1,
+				GitFilteringMode.RespectGitIgnore, token);
+
+			using var stopMutating = new CancellationTokenSource();
+			var extensionSets = new[] { Array.Empty<string>(), new[] { ".cs" } };
+			var mutator = Task.Run(async () =>
+			{
+				var index = 0;
+				while (!stopMutating.IsCancellationRequested)
+				{
+					await controller.SetExtensionsAsync(
+						state, extensionSets[index++ % extensionSets.Length], CancellationToken.None)
+						.ConfigureAwait(false);
+				}
+			});
+			try
+			{
+				for (var attempt = 0; attempt < 25; attempt++)
+				{
+					var raced = await controller.FindRelatedAsync(
+						snapshot, current, "Staged.cs", DependencyDirection.Both, 1,
+						GitFilteringMode.RespectGitIgnore, token);
+					Assert.Equal(
+						quiet.Related.Seeds.Select(static seed => seed.Seed),
+						raced.Related.Seeds.Select(static seed => seed.Seed));
+					Assert.Equal(quiet.Outside is null, raced.Outside is null);
+				}
+			}
+			finally
+			{
+				await stopMutating.CancelAsync();
+				await mutator;
+			}
 		}
 	}
 
