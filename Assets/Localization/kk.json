@@ -595,6 +595,7 @@
   "Terminal.Option.RelatedProject": "Жоба каталогы немесе Git репозиторийінің URL мекенжайы. Әдепкісі — ағымдағы каталог.",
   "Terminal.Option.RelatedDirection": "Байланыс бағыты: тәуелділіктер, тәуелді файлдар немесе екеуі де.",
   "Terminal.Status.IndexingDependencies": "Тәуелділік фактілерін индекстеу",
+  "Terminal.Search.SymbolsReadAsNames": "--symbols: үлгі жариялау атаулары ретінде оқылды: {0}",
   "Terminal.Related.Seed": "Бастапқы файл",
   "Terminal.Related.Dependencies": "Тәуелділіктер",
   "Terminal.Related.Dependents": "Тәуелді файлдар",

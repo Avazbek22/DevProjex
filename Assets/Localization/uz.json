@@ -595,6 +595,7 @@
   "Terminal.Option.RelatedProject": "Loyiha katalogi yoki Git repozitoriy URL manzili. Standart qiymat — joriy katalog.",
   "Terminal.Option.RelatedDirection": "Bog‘lanish yo‘nalishi: bog‘liqliklar, bog‘liq fayllar yoki ikkalasi.",
   "Terminal.Status.IndexingDependencies": "Bog‘liqlik faktlari indekslanmoqda",
+  "Terminal.Search.SymbolsReadAsNames": "--symbols: andoza e'lon nomlari sifatida o'qildi: {0}",
   "Terminal.Related.Seed": "Boshlang‘ich fayl",
   "Terminal.Related.Dependencies": "Bog‘liqliklar",
   "Terminal.Related.Dependents": "Bog‘liq fayllar",

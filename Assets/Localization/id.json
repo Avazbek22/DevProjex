@@ -607,6 +607,7 @@
   "Terminal.Option.RelatedProject": "Direktori proyek atau URL repositori Git. Bawaannya direktori saat ini.",
   "Terminal.Option.RelatedDirection": "Arah hubungan: dependensi, dependen, atau keduanya.",
   "Terminal.Status.IndexingDependencies": "Mengindeks fakta dependensi",
+  "Terminal.Search.SymbolsReadAsNames": "--symbols: pola dibaca sebagai nama deklarasi: {0}",
   "Terminal.Related.Seed": "File awal",
   "Terminal.Related.Dependencies": "Dependensi",
   "Terminal.Related.Dependents": "Dependen",

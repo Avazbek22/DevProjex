@@ -9,6 +9,20 @@ public sealed partial class TerminalWorkspaceGrepRevealAndBudgetTests
 	private const long SmallBudget = 1_500;
 
 	[Fact]
+	public async Task GrepReadsSimpleSymbolPatternsAndPlacesTheReadingOnTheFirstLine()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = CreateSearchProject(workspace);
+		var (controller, services) = CreateController(workspace);
+		using var state = await OpenAsync(controller, project);
+		var plan = await controller.BuildCurrentPlanAsync(state, TestContext.Current.CancellationToken);
+		var result = await controller.SearchProjectAsync(plan, @"func\s+Run", SearchMode.Symbols, 50, TestContext.Current.CancellationToken);
+		Assert.Single(result.Matches);
+		var output = TerminalProjectSearchOutput.Format(result, services.Localization);
+		Assert.StartsWith(services.Localization.Format("Terminal.Search.SymbolsReadAsNames", "Run") + "\n", output, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task GrepReturnsTheCliMatchesWithDeclarationsForTheCurrentSelection()
 	{
 		using var workspace = new TemporaryDirectory();

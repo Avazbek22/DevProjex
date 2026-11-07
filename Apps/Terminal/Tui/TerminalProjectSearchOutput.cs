@@ -17,6 +17,8 @@ internal static class TerminalProjectSearchOutput
 		var pattern = TerminalTextEscaping.EscapeSingleLine(result.Pattern);
 		var boundary = result.Boundary;
 		var lines = new List<string>(result.Matches.Count * 2 + 4);
+		if (result.NamesReadFromPattern is { } names)
+			lines.Add(localization.Format("Terminal.Search.SymbolsReadAsNames", string.Join(", ", names)));
 		if (boundary.EncounteredMatches == 0)
 		{
 			lines.Add(localization.Format(

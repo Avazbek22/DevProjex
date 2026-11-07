@@ -607,6 +607,7 @@
   "Terminal.Option.RelatedProject": "프로젝트 디렉터리 또는 Git 저장소 URL입니다. 기본값은 현재 디렉터리입니다.",
   "Terminal.Option.RelatedDirection": "관계 방향: dependencies(사용 대상), dependents(사용처) 또는 both.",
   "Terminal.Status.IndexingDependencies": "종속성 정보 인덱싱 중",
+  "Terminal.Search.SymbolsReadAsNames": "--symbols: 패턴을 선언 이름으로 해석했습니다: {0}",
   "Terminal.Related.Seed": "시작 파일",
   "Terminal.Related.Dependencies": "이 파일이 사용하는 파일",
   "Terminal.Related.Dependents": "이 파일을 사용하는 파일",

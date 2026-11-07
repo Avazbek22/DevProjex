@@ -607,6 +607,7 @@
   "Terminal.Option.RelatedProject": "Diretório do projeto ou URL do repositório Git. O padrão é o diretório atual.",
   "Terminal.Option.RelatedDirection": "Direção da relação: dependências, dependentes ou ambas.",
   "Terminal.Status.IndexingDependencies": "Indexando fatos de dependências",
+  "Terminal.Search.SymbolsReadAsNames": "--symbols: o padrão foi lido como nomes de declarações: {0}",
   "Terminal.Related.Seed": "Arquivo inicial",
   "Terminal.Related.Dependencies": "Dependências",
   "Terminal.Related.Dependents": "Dependentes",

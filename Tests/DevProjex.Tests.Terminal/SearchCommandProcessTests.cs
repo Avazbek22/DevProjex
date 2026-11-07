@@ -9,6 +9,26 @@ public sealed class SearchCommandProcessTests
 	private const int MaximumOutputCharacters = 16_000;
 
 	[Fact]
+	public void SymbolRegularExpressionReadsNamesWithAStderrHintAndPreservesJsonShape()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = CreateProject(workspace);
+		var plain = Run(workspace, project, "Run", "--symbols", "--format", "json");
+		var read = Run(workspace, project, @"func\s+Run", "--symbols", "--format", "json");
+		Assert.True(read.ExitCode == 0, read.StandardError);
+		Assert.Contains("hint: --symbols read the pattern as declaration names: Run", read.StandardError, StringComparison.Ordinal);
+		using var plainJson = JsonDocument.Parse(plain.StandardOutput);
+		using var readJson = JsonDocument.Parse(read.StandardOutput);
+		Assert.Equal(plainJson.RootElement.EnumerateObject().Select(property => property.Name),
+			readJson.RootElement.EnumerateObject().Select(property => property.Name));
+		Assert.Equal(plainJson.RootElement.GetProperty("matches").GetRawText(), readJson.RootElement.GetProperty("matches").GetRawText());
+		Assert.DoesNotContain("read the pattern", read.StandardOutput, StringComparison.Ordinal);
+		var text = Run(workspace, project, "func.*Run", "--symbols", "--format", "text");
+		Assert.True(text.ExitCode == 0, text.StandardError);
+		Assert.Contains("src/App.cs", text.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void TextJsonAndMarkdownDescribeTheSameMatches()
 	{
 		using var workspace = new TemporaryDirectory();

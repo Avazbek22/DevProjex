@@ -718,10 +718,15 @@ enables a timed .NET regular expression; `--symbols` treats the pattern as one o
 more declaration names separated by `|` (each alternative keeps its last word, so
 `class Foo` asks for `Foo`) while retaining the same source evidence and containing-
 declaration lookup, and is the same mode as MCP `search_project` with `symbols: true`.
-A `--symbols` pattern that looks like a regular expression, such as `command\(` or
-`\bcommand\b`, is refused before the project is read with `DPX-CLI-SEARCH-PATTERN`
+A `--symbols` pattern that looks like a regular expression, such as `command\(`,
+is refused before the project is read with `DPX-CLI-SEARCH-PATTERN`
 (exit code 2) and a hint to pass the name or use `--regex`; the rule is the one MCP
 applies to `symbols: true`.
+
+`--symbols` reads a regular expression the same way: when every alternative reduces
+to one plain name, the search runs for those names and prints a note naming them;
+any other regular expression is still refused. The Terminal Workspace `:grep --symbols`
+does the same.
 Selected binary files are counted as skipped rather than searched and do not make
 a search partial unless nothing else was selected. They are not charged to the inspection
 budget, and a file that does not fit what remains of it is skipped while later files that

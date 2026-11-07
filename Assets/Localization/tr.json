@@ -607,6 +607,7 @@
   "Terminal.Option.RelatedProject": "Proje dizini veya Git deposu URL’si. Varsayılan geçerli dizindir.",
   "Terminal.Option.RelatedDirection": "İlişki yönü: bağımlılıklar, bağımlılar veya her ikisi.",
   "Terminal.Status.IndexingDependencies": "Bağımlılık olguları dizine ekleniyor",
+  "Terminal.Search.SymbolsReadAsNames": "--symbols: desen bildirim adları olarak okundu: {0}",
   "Terminal.Related.Seed": "Başlangıç dosyası",
   "Terminal.Related.Dependencies": "Bağımlılıklar",
   "Terminal.Related.Dependents": "Bağımlılar",

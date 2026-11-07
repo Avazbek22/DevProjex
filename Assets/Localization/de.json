@@ -613,6 +613,7 @@
   "Terminal.Option.RelatedProject": "Projektverzeichnis oder Git-Repository-URL. Standardmäßig das aktuelle Verzeichnis.",
   "Terminal.Option.RelatedDirection": "Beziehungsrichtung: Abhängigkeiten, abhängige Dateien oder beides.",
   "Terminal.Status.IndexingDependencies": "Abhängigkeitsfakten werden indiziert",
+  "Terminal.Search.SymbolsReadAsNames": "--symbols: Muster als Deklarationsnamen gelesen: {0}",
   "Terminal.Related.Seed": "Ausgangsdatei",
   "Terminal.Related.Dependencies": "Abhängigkeiten",
   "Terminal.Related.Dependents": "Abhängige Dateien",

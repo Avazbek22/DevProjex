@@ -355,6 +355,41 @@ public sealed class McpInfrastructureTests
 		Assert.False(McpSearchSymbols.LooksLikeRegularExpression(pattern));
 	}
 
+	[Theory]
+	[InlineData(@"interface\s+ToNumberStrategy", "ToNumberStrategy")]
+	[InlineData("func.*RemoteIP|func.*isTrustedProxy", "RemoteIP,isTrustedProxy")]
+	[InlineData(@"^class\s+Foo\b$", "Foo")]
+	[InlineData(@"export\s+function\s+serveStatic", "serveStatic")]
+	[InlineData("Foo|class Foo", "Foo")]
+	[InlineData(@"interface\s+函數²_𐐀", "函數²_𐐀")]
+	[InlineData(@"class\s*Foo", "Foo")]
+	[InlineData(@"func.+Bar|\bFoo\b", "Bar,Foo")]
+	public void SimpleRegularExpressionsReadExactlyOneNamePerAlternative(string pattern, string expected)
+	{
+		Assert.True(McpSearchSymbols.TryReadDeclarationNames(pattern, out var names));
+		Assert.Equal(expected.Split(','), names);
+	}
+
+	[Theory]
+	[InlineData("func Test.*ClientIP")]
+	[InlineData(@"class\s+\w+Service")]
+	[InlineData("Foo.Bar")]
+	[InlineData("(?i)foo")]
+	[InlineData("a+b")]
+	[InlineData(@"def\s+(foo|bar)")]
+	[InlineData("Foo|")]
+	[InlineData("|Foo")]
+	[InlineData("Foo||Bar")]
+	[InlineData("class")]
+	[InlineData("CLASS Foo")]
+	[InlineData("")]
+	[InlineData(" ")]
+	public void ComplexRegularExpressionsNeverBecomePartialDeclarationNameQueries(string pattern)
+	{
+		Assert.False(McpSearchSymbols.TryReadDeclarationNames(pattern, out var names));
+		Assert.Empty(names);
+	}
+
 	[Fact]
 	public void BodyTruncationNoticeNamesTheExactUnshownLines()
 	{
