@@ -1703,8 +1703,12 @@ internal sealed partial class DevProjexMcpTools(
 				}
 				: seed).ToArray());
 		var projectFiles = outside.Index.FileByPath;
-		var evidenceEdges = SeedEdges(outside.Index, selection.Seeds)
-			.Concat(SeedEdges(selection.Index, selection.Seeds).Where(edge => projectFiles.ContainsKey(edge.Source)))
+		// Each seed's Dependencies/Dependents in "combined" are already capped to the rows a
+		// section actually lists (outside sections cap at MaximumFilesPerSection); filtering by
+		// those same lists, rather than by every seed in the broader "selection", keeps an edge
+		// to a file past that cap from being treated as evidence for a row that is shown.
+		var evidenceEdges = SeedEdges(outside.Index, combined.Seeds)
+			.Concat(SeedEdges(selection.Index, combined.Seeds).Where(edge => projectFiles.ContainsKey(edge.Source)))
 			.Distinct()
 			.ToArray();
 		var protectedEvidence = await ProtectRelatedEvidenceAsync(
@@ -1742,14 +1746,27 @@ internal sealed partial class DevProjexMcpTools(
 	}
 
 	// Every listed row comes from an edge one of its seeds starts or receives. A reason names no
-	// source file, so evidence is looked up only there: the same text in an unrelated file must
-	// neither be read nor decide whether a listed row may quote it.
+	// source file, so two different files importing the same name the same way can format the
+	// identical reason text; matching only by that text would let an edge whose other file was
+	// never listed - such as one past an outside-selection section's display cap - still open that
+	// file for evidence. Restricting each seed's edges to the files its own Dependencies and
+	// Dependents already list keeps evidence to files a row actually shows.
 	private static IEnumerable<DependencyEdge> SeedEdges(
 		DependencyIndexSnapshot index,
 		IEnumerable<SeedRelatedFiles> seeds) =>
-		seeds.SelectMany(seed => (index.EdgesBySource.GetValueOrDefault(seed.Seed) ?? [])
-				.Concat(index.EdgesByTarget.GetValueOrDefault(seed.Seed) ?? []))
-			.Distinct();
+		seeds.SelectMany(seed => SeedEdges(index, seed)).Distinct();
+
+	private static IEnumerable<DependencyEdge> SeedEdges(DependencyIndexSnapshot index, SeedRelatedFiles seed)
+	{
+		var dependencyPaths = seed.Dependencies.Select(static file => file.Path).ToHashSet(PathComparer.Default);
+		var dependentPaths = seed.Dependents.Select(static file => file.Path).ToHashSet(PathComparer.Default);
+		foreach (var edge in index.EdgesBySource.GetValueOrDefault(seed.Seed) ?? [])
+			if (edge.Target is not null && dependencyPaths.Contains(edge.Target))
+				yield return edge;
+		foreach (var edge in index.EdgesByTarget.GetValueOrDefault(seed.Seed) ?? [])
+			if (dependentPaths.Contains(edge.Source))
+				yield return edge;
+	}
 
 	/// <param name="evidenceEdges">The edges whose evidence the displayed reasons may quote.</param>
 	private async Task<(DependencyRelatedResult Result, int UninspectedSources)> ProtectRelatedEvidenceAsync(
