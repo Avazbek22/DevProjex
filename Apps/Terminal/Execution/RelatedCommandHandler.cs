@@ -33,6 +33,7 @@ public sealed class RelatedCommandHandler(
 			_ = ExactOutputDestinationValidator.ValidateAnalysis(plan.SourceRoot, destination, overwrite: false);
 		var relative = RelatedQueryRunner.ResolveSeed(plan, request.SeedPath);
 		DependencyRelatedResult related;
+		DependencyOutsideSelectionResult? outside;
 		try
 		{
 			related = await status.RunAsync(
@@ -44,6 +45,10 @@ public sealed class RelatedCommandHandler(
 				request.Direction,
 					request.Depth,
 					cancellationToken)).ConfigureAwait(false);
+			// The project's relations can lead a deeper walk to more selected files, under the same limit.
+			outside = await status.RunAsync(
+				services.Localization["Terminal.Status.IndexingDependencies"],
+				() => FindOutsideSelectionAsync(request, plan, related, relative, cancellationToken)).ConfigureAwait(false);
 		}
 		catch (DependencyTraversalLimitException exception)
 		{
@@ -54,9 +59,6 @@ public sealed class RelatedCommandHandler(
 				Exception: exception));
 			return CommandLineExitCodes.PolicyFailure;
 		}
-		var outside = await status.RunAsync(
-			services.Localization["Terminal.Status.IndexingDependencies"],
-			() => FindOutsideSelectionAsync(request, plan, related, cancellationToken)).ConfigureAwait(false);
 		if (related.Seeds.Any(static seed => seed.NoFactsReason is { Length: > 0 }))
 		{
 			environment.Error.WriteLine(
@@ -96,12 +98,13 @@ public sealed class RelatedCommandHandler(
 		return CommandLineExitCodes.Success;
 	}
 
-	// A narrowed selection cannot tell a reference into a file it left out from one that leads
-	// nowhere, so the same project without that narrowing answers for the seeds' relations.
+	// A narrowed selection cannot see part of the project, so the same project without that
+	// narrowing answers for the seed's relations; the selection only places each related file.
 	private async Task<DependencyOutsideSelectionResult?> FindOutsideSelectionAsync(
 		RelatedCommandRequest request,
 		ProjectContextPlan plan,
 		DependencyRelatedResult related,
+		string seed,
 		CancellationToken cancellationToken)
 	{
 		if (request.ProjectSelection is null ||
@@ -127,7 +130,9 @@ public sealed class RelatedCommandHandler(
 			plan.SourceRoot,
 			related,
 			projectPlan.IncludedFiles,
+			[seed],
 			request.Direction,
+			request.Depth,
 			cancellationToken: cancellationToken).ConfigureAwait(false);
 	}
 }

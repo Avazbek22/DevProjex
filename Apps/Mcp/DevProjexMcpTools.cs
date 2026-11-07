@@ -1531,23 +1531,28 @@ internal sealed class DevProjexMcpTools(
 						direction,
 						progress.MeasureFacts("Relating files outside the selection", 70, 90),
 						cancellationToken).ConfigureAwait(false);
-					related = outside.Selection;
 				}
 			}
-			var evidenceBudget = new RelatedEvidenceBudget();
-			var protectedEvidence = await ProtectRelatedEvidenceAsync(plan, related, evidenceBudget, cancellationToken)
-				.ConfigureAwait(false);
-			related = protectedEvidence.Result;
-			var uninspectedEvidenceSources = protectedEvidence.UninspectedSources;
-			if (outside is not null)
+			int uninspectedEvidenceSources;
+			if (outside is null)
 			{
-				var protectedOutside = await ProtectOutsideSelectionEvidenceAsync(
+				var protectedEvidence = await ProtectRelatedEvidenceAsync(
+					plan,
+					related,
+					related.Index.Edges,
+					cancellationToken).ConfigureAwait(false);
+				related = protectedEvidence.Result;
+				uninspectedEvidenceSources = protectedEvidence.UninspectedSources;
+			}
+			else
+			{
+				var protectedEvidence = await ProtectOutsideSelectionEvidenceAsync(
 					projectPlan!,
 					outside,
-					evidenceBudget,
 					cancellationToken).ConfigureAwait(false);
-				outside = protectedOutside.Result;
-				uninspectedEvidenceSources += protectedOutside.UninspectedSources;
+				outside = protectedEvidence.Result;
+				related = outside.Selection;
+				uninspectedEvidenceSources = protectedEvidence.UninspectedSources;
 			}
 			await progress.CompleteAsync(100, related.Index.Metrics.ResolutionCacheHit
 				? "Dependency index reused"
@@ -1663,49 +1668,81 @@ internal sealed class DevProjexMcpTools(
 				advertiseLargeResult: true);
 		}, cancellationToken);
 
+	// A narrowed answer quotes the project's evidence inside and outside the selection alike, so
+	// both are checked in one pass against what the project plan may read. Every row comes from an
+	// edge a seed starts or receives; a seed the project had no facts for quotes the selection's
+	// edges, which are kept to sources of that plan too.
 	private async Task<(DependencyOutsideSelectionResult Result, int UninspectedSources)> ProtectOutsideSelectionEvidenceAsync(
 		ProjectContextPlan projectPlan,
 		DependencyOutsideSelectionResult outside,
-		RelatedEvidenceBudget budget,
 		CancellationToken cancellationToken)
 	{
-		var asRelated = new DependencyRelatedResult(
+		var selection = outside.Selection;
+		var outsideBySeed = outside.Seeds.ToDictionary(static seed => seed.Seed, StringComparer.Ordinal);
+		var combined = new DependencyRelatedResult(
 			outside.Index,
-			outside.Seeds.Select(static seed => new SeedRelatedFiles(
-				seed.Seed,
-				LanguageId.Unsupported,
-				seed.Dependencies,
-				seed.Dependents,
-				null)).ToArray());
-		var protectedEvidence = await ProtectRelatedEvidenceAsync(projectPlan, asRelated, budget, cancellationToken)
-			.ConfigureAwait(false);
+			selection.Seeds.Select(seed => outsideBySeed.TryGetValue(seed.Seed, out var outsideSeed)
+				? seed with
+				{
+					Dependencies = [.. seed.Dependencies, .. outsideSeed.Dependencies],
+					Dependents = [.. seed.Dependents, .. outsideSeed.Dependents]
+				}
+				: seed).ToArray());
+		var projectFiles = outside.Index.FileByPath;
+		var evidenceEdges = selection.Seeds
+			.SelectMany(seed => SeedEdges(outside.Index, seed.Seed).Concat(
+				SeedEdges(selection.Index, seed.Seed).Where(edge => projectFiles.ContainsKey(edge.Source))))
+			.Distinct()
+			.ToArray();
+		var protectedEvidence = await ProtectRelatedEvidenceAsync(
+			projectPlan,
+			combined,
+			evidenceEdges,
+			cancellationToken).ConfigureAwait(false);
+
 		var protectedSeeds = protectedEvidence.Result.Seeds;
+		var selectionSeeds = new SeedRelatedFiles[selection.Seeds.Count];
+		var outsideSeeds = new List<SeedOutsideSelection>(outside.Seeds.Count);
+		for (var index = 0; index < selectionSeeds.Length; index++)
+		{
+			var seed = selection.Seeds[index];
+			var protectedSeed = protectedSeeds[index];
+			selectionSeeds[index] = seed with
+			{
+				Dependencies = protectedSeed.Dependencies.Take(seed.Dependencies.Count).ToArray(),
+				Dependents = protectedSeed.Dependents.Take(seed.Dependents.Count).ToArray()
+			};
+			if (outsideBySeed.TryGetValue(seed.Seed, out var outsideSeed))
+			{
+				outsideSeeds.Add(outsideSeed with
+				{
+					Dependencies = protectedSeed.Dependencies.Skip(seed.Dependencies.Count).ToArray(),
+					Dependents = protectedSeed.Dependents.Skip(seed.Dependents.Count).ToArray()
+				});
+			}
+		}
 		return (outside with
 		{
-			Seeds = outside.Seeds.Select((seed, index) => seed with
-			{
-				Dependencies = protectedSeeds[index].Dependencies,
-				Dependents = protectedSeeds[index].Dependents
-			}).ToArray()
+			Selection = selection with { Seeds = selectionSeeds },
+			Seeds = outsideSeeds
 		}, protectedEvidence.UninspectedSources);
+
+		static IEnumerable<DependencyEdge> SeedEdges(DependencyIndexSnapshot index, string seed) =>
+			(index.EdgesBySource.GetValueOrDefault(seed) ?? []).Concat(index.EdgesByTarget.GetValueOrDefault(seed) ?? []);
 	}
 
-	private sealed class RelatedEvidenceBudget
-	{
-		public long AdmittedSourceBytes;
-	}
-
+	/// <param name="evidenceEdges">The edges whose evidence the displayed reasons may quote.</param>
 	private async Task<(DependencyRelatedResult Result, int UninspectedSources)> ProtectRelatedEvidenceAsync(
 		ProjectContextPlan plan,
 		DependencyRelatedResult related,
-		RelatedEvidenceBudget budget,
+		IEnumerable<DependencyEdge> evidenceEdges,
 		CancellationToken cancellationToken)
 	{
 		var displayedReasons = related.Seeds
 			.SelectMany(static seed => seed.Dependencies.Concat(seed.Dependents))
 			.SelectMany(static file => file.Reasons)
 			.ToHashSet(StringComparer.Ordinal);
-		var evidence = related.Index.Edges
+		var evidence = evidenceEdges
 			.SelectMany(edge => edge.Evidence.Select(site => new RelatedEvidence(
 				edge,
 				site,
@@ -1722,6 +1759,7 @@ internal sealed class DevProjexMcpTools(
 			.ToArray();
 		McpRelatedEvidenceRetentionDiagnostics.BeforeConsume(candidateSourcePaths);
 		var sourcePaths = new List<string>(candidateSourcePaths.Length);
+		var admittedSourceBytes = 0L;
 		foreach (var sourcePath in candidateSourcePaths)
 		{
 			long sourceBytes;
@@ -1733,7 +1771,7 @@ internal sealed class DevProjexMcpTools(
 			{
 				continue;
 			}
-			if (!TryAdmitRelatedEvidenceSource(sourceBytes, ref budget.AdmittedSourceBytes))
+			if (!TryAdmitRelatedEvidenceSource(sourceBytes, ref admittedSourceBytes))
 				continue;
 			sourcePaths.Add(sourcePath);
 		}
