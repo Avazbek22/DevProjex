@@ -187,7 +187,8 @@ internal sealed partial class DevProjexMcpTools
 	}
 
 	private const string ChangedFilesHeading = "Changed files (largest first):";
-	private const string NotShownHeading = "Not shown:";
+	// Files with hunks left out only for the response limit; trusted reasons are counted in "[Diff] not shown:".
+	private const string NotShownHeading = "Not shown (size limit):";
 
 	private static string FormatDiffScope(ProjectDiffResult diff) =>
 		McpTextEscaping.EscapeSingleLine(GitScopeSelection.ToToken(

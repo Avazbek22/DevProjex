@@ -171,7 +171,7 @@ public sealed class McpDiffLayoutTests
 		Assert.Contains("+++ b/large.txt\n", rendered.Text, StringComparison.Ordinal);
 		Assert.DoesNotContain("+++ b/medium.txt", rendered.Text, StringComparison.Ordinal);
 		Assert.Contains("+++ b/small.txt\n", rendered.Text, StringComparison.Ordinal);
-		Assert.Contains("Not shown:\nmedium.txt +800 -0 [added]", rendered.Text, StringComparison.Ordinal);
+		Assert.Contains("Not shown (size limit):\nmedium.txt +800 -0 [added]", rendered.Text, StringComparison.Ordinal);
 		Assert.Contains("[Diff] scope=changes · files=3 · shown=2 · added=1703 · removed=0 · partial", rendered.Text, StringComparison.Ordinal);
 		Assert.Contains("[Diff] partial · 1 file(s) not shown", rendered.Text, StringComparison.Ordinal);
 		Assert.Equal(["large.txt", "small.txt"], rendered.DeliveredPaths);

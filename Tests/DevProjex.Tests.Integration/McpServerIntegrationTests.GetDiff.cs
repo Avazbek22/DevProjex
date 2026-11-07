@@ -194,7 +194,7 @@ public sealed partial class McpServerIntegrationTests
 		Assert.InRange(text.Length, 1, 50_000);
 		Assert.Contains("+++ b/large-a.txt\n", text, StringComparison.Ordinal);
 		Assert.DoesNotContain("+++ b/large-b.txt", text, StringComparison.Ordinal);
-		Assert.Contains("Not shown:\nlarge-b.txt +740 -0 [added]\nlarge-c.txt +720 -0 [added]\n</untrusted-data-", text, StringComparison.Ordinal);
+		Assert.Contains("Not shown (size limit):\nlarge-b.txt +740 -0 [added]\nlarge-c.txt +720 -0 [added]\n</untrusted-data-", text, StringComparison.Ordinal);
 		Assert.Contains("[Diff] scope=changes · files=3 · shown=1 · added=2220 · removed=0 · partial", text, StringComparison.Ordinal);
 		Assert.Contains(
 			"[Diff] partial · 2 file(s) not shown to stay within 50,000 characters; narrow paths or include_patterns, or lower context_lines.",
