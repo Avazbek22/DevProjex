@@ -425,6 +425,15 @@ scopes that depend on that file. Text output reports at most eight of each as
 `resolution` reports `resolved`, `ambiguous`, `unresolved`, and `external` evidence groups for every
 seed section emitted at the requested depth and direction. Text output carries the same values in `[Resolution]`; consequently an
 empty related-file list does not imply that every observed reference was resolved.
+When the selection is narrowed and related files lie outside it, the document adds two
+additive members. `outsideSelection` follows `seeds` and holds one object per seed with such
+files: `seed`, `dependencies`, `dependencyCount`, `dependents`, and `dependentCount`. Each list
+uses the related-item shape above, holds at most 20 items in path order, and its count reports
+how many exist. `resolution.outsideSelection` counts the resolved evidence groups behind them;
+the references they explain are no longer counted as `unresolved`. Text output prints those
+lists under `Dependencies outside the selection` and `Dependents outside the selection` and
+appends `· outside-selection=N` to `[Resolution]`. A document with nothing outside its
+selection omits both members, exactly as before.
 Traversal follows only resolved edges and is limited to 256 distinct seed files.
 Crossing that limit emits `DPX-DEPENDENCY-TRAVERSAL-LIMIT`, returns policy exit
 code `3`, and writes no partial related-files document.

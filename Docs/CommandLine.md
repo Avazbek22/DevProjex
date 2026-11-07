@@ -802,6 +802,12 @@ profile, roots, extensions, paths, Git mode, exclusions, and file-size limit. It
 returns a candidate outside that manifest. The project configuration that owns the selected files,
 such as `pyproject.toml`, `tsconfig.json`, or a `.csproj`, is still read when `--select` or
 `--extension` leaves it out, so a narrowed view resolves its files as the whole project does.
+When `--select`, `--extension`, `--root`, or a momentary `--git-mode` (`staged`, `changes`,
+`diff:...`) narrows the selection, `related` also lists the files the same profile, exclusions,
+persistent Git mode, and `--max-file-bytes` allow but the narrowing left out:
+`Dependencies outside the selection` and `Dependents outside the selection` follow each seed's own
+sections with the same row format, at most 20 per section in path order, and `[Resolution]` adds
+`· outside-selection=N`. A command that narrows nothing prints what it printed before.
 
 Bash seed files record literal script-relative `source` / `.` connections; computed shell paths
 remain explicitly unresolved and commands found through `PATH` are not dependencies. Scala seeds

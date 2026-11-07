@@ -1173,6 +1173,12 @@ public sealed class DevProjexCommandTree
 						services,
 						selectedPaths,
 						cancellationToken).ConfigureAwait(false);
+					var projectSpec = await selection.ResolveWithoutNarrowingAsync(
+						parseResult,
+						resolvedSource.ProjectPath,
+						services,
+						selectedPaths,
+						cancellationToken).ConfigureAwait(false);
 					return await new RelatedCommandHandler(services, environment).ExecuteAsync(
 						new RelatedCommandRequest(
 							resolvedSource.ProjectPath,
@@ -1193,7 +1199,8 @@ public sealed class DevProjexCommandTree
 							selection.GetMaxFileBytes(parseResult),
 							resolvedSource.RepositorySourceUrl,
 							parseResult.GetValue(depth),
-							parseResult.GetValue(outputPath)),
+							parseResult.GetValue(outputPath),
+							projectSpec),
 						cancellationToken).ConfigureAwait(false);
 				},
 				_localization,

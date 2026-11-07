@@ -60,7 +60,8 @@ public sealed record RelatedCommandRequest(
 	long? MaxFileBytes = null,
 	string? RepositorySourceUrl = null,
 	int Depth = 1,
-	string? OutputPath = null);
+	string? OutputPath = null,
+	ProjectSelectionSpec? ProjectSelection = null);
 
 public sealed record TreeCommandRequest(
 	string ProjectPath,
