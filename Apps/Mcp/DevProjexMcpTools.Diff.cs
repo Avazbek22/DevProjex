@@ -80,24 +80,27 @@ internal sealed partial class DevProjexMcpTools
 				[]);
 		}
 
-		// Every trusted line but the partial notice is known before the body is laid out; the
-		// partial notice is reserved at its longest so the response cannot cross the limit.
+		// Every trusted line but the two partial notices is known before the body is laid out; both
+		// are reserved at their longest so the response cannot cross the limit.
 		var fixedNotices = CombineTrustedNotices(FormatDiffNotShownNotice(diff), trailingNotices);
 		var budget = MaximumDiffResponseCharacters -
 			McpSpotlight.Wrap(string.Empty).Length -
 			FormatDiffSummary(diff, shown: int.MaxValue, partial: true).Length -
 			FormatDiffPartialNotice(int.MaxValue).Length -
+			FormatDiffHunkPartialNotice(int.MaxValue).Length -
 			(fixedNotices?.Length ?? 0) -
 			8;
 		var layout = LayoutDiff(rootLine, diff, budget);
 		var shown = layout.Shown.Count(static file => file.Omission == ProjectDiffOmission.None);
-		var partial = layout.NotShown.Count > 0;
+		var filesPartial = layout.NotShown.Count > 0;
+		var hunksPartial = layout.PartialHunksNotShown > 0;
 		return new McpDiffRendering(
 			AppendTrustedNotices(
 				McpSpotlight.Wrap(layout.Body),
-				FormatDiffSummary(diff, shown, partial),
+				FormatDiffSummary(diff, shown, filesPartial || hunksPartial),
 				FormatDiffNotShownNotice(diff),
-				partial ? FormatDiffPartialNotice(layout.NotShown.Count) : null,
+				filesPartial ? FormatDiffPartialNotice(layout.NotShown.Count) : null,
+				hunksPartial ? FormatDiffHunkPartialNotice(layout.PartialHunksNotShown) : null,
 				trailingNotices),
 			layout.Shown
 				.Where(static file => file.Omission == ProjectDiffOmission.None)
@@ -107,9 +110,12 @@ internal sealed partial class DevProjexMcpTools
 
 	/// <summary>
 	/// Lays files out largest change first. A file that does not fit whole is moved to the
-	/// not-shown list and later, smaller files still get the room; no file is ever cut.
+	/// not-shown list and later, smaller files still get the room; no file is ever cut. The first
+	/// file considered (or the only file in the diff) gets one exception: when it still does not
+	/// fit whole, as many of its hunks as fit are shown instead, in file order, and no hunk is cut
+	/// either; the rest of its hunks are listed by their range under "Not shown".
 	/// </summary>
-	private static (string Body, IReadOnlyList<ProjectDiffFile> Shown, IReadOnlyList<ProjectDiffFile> NotShown) LayoutDiff(
+	private static (string Body, IReadOnlyList<ProjectDiffFile> Shown, IReadOnlyList<ProjectDiffFile> NotShown, int PartialHunksNotShown) LayoutDiff(
 		string rootLine,
 		ProjectDiffResult diff,
 		int budget)
@@ -121,6 +127,8 @@ internal sealed partial class DevProjexMcpTools
 		var shown = new List<ProjectDiffFile>();
 		var notShown = new List<ProjectDiffFile>();
 		var sections = new List<string>();
+		ProjectDiffFile? partialFile = null;
+		IReadOnlyList<UnifiedDiffHunk> partialNotShownHunks = [];
 		foreach (var file in diff.Files)
 		{
 			if (file.Omission != ProjectDiffOmission.None)
@@ -128,17 +136,37 @@ internal sealed partial class DevProjexMcpTools
 				shown.Add(file);
 				continue;
 			}
-			var section = ProjectDiffText.FormatFile(file);
-			if (section.Length + 1 <= remaining)
+			// A lower bound from the unescaped text avoids formatting (and escaping) a file that
+			// cannot possibly fit; escaping only ever makes the formatted text longer.
+			if (EstimateDiffFileLowerBound(file) <= remaining)
 			{
-				remaining -= section.Length + 1;
-				shown.Add(file);
-				sections.Add(section);
+				var section = ProjectDiffText.FormatFile(file);
+				if (section.Length + 1 <= remaining)
+				{
+					remaining -= section.Length + 1;
+					shown.Add(file);
+					sections.Add(section);
+					continue;
+				}
 			}
-			else
+			if ((sections.Count == 0 || diff.Files.Count == 1) &&
+				TryFormatPartialDiffFile(file, remaining) is { } partial)
 			{
-				notShown.Add(file);
+				var cost = partial.Section.Length + 1 +
+					(FormatPartialListEntry(file).Length - ProjectDiffText.FormatListEntry(file).Length) +
+					partial.NotShownHunks.Sum(hunk => FormatDiffHunkRangeEntry(file, hunk).Length + 1);
+				// TryFormatPartialDiffFile reserves this exact cost up front, so it never overshoots.
+				if (cost <= remaining)
+				{
+					remaining -= cost;
+					shown.Add(file);
+					sections.Add(partial.Section);
+					partialFile = file;
+					partialNotShownHunks = partial.NotShownHunks;
+					continue;
+				}
 			}
+			notShown.Add(file);
 		}
 
 		var body = new StringBuilder(header);
@@ -146,24 +174,27 @@ internal sealed partial class DevProjexMcpTools
 		{
 			body.Append('\n').Append(ChangedFilesHeading).Append('\n');
 			foreach (var file in shown)
-				body.Append(ProjectDiffText.FormatListEntry(file)).Append('\n');
+				body.Append(ReferenceEquals(file, partialFile) ? FormatPartialListEntry(file) : ProjectDiffText.FormatListEntry(file)).Append('\n');
 		}
 		foreach (var section in sections)
 			body.Append('\n').Append(section);
-		if (notShown.Count > 0)
+		if (notShown.Count > 0 || partialNotShownHunks.Count > 0)
 		{
 			body.Append('\n').Append(NotShownHeading).Append('\n');
 			foreach (var file in notShown)
 				body.Append(ProjectDiffText.FormatListEntry(file)).Append('\n');
+			if (partialFile is not null)
+				foreach (var hunk in partialNotShownHunks)
+					body.Append(FormatDiffHunkRangeEntry(partialFile, hunk)).Append('\n');
 		}
 		if (remaining < 0)
 			return TrimToBudget(header, diff, budget);
-		return (body.ToString().TrimEnd('\n'), shown, notShown);
+		return (body.ToString().TrimEnd('\n'), shown, notShown, partialNotShownHunks.Count);
 	}
 
 	// Only reached when the file list alone exceeds the response limit: the list is cut at a whole
 	// entry and every file counts as not shown.
-	private static (string Body, IReadOnlyList<ProjectDiffFile> Shown, IReadOnlyList<ProjectDiffFile> NotShown) TrimToBudget(
+	private static (string Body, IReadOnlyList<ProjectDiffFile> Shown, IReadOnlyList<ProjectDiffFile> NotShown, int PartialHunksNotShown) TrimToBudget(
 		string header,
 		ProjectDiffResult diff,
 		int budget)
@@ -183,8 +214,91 @@ internal sealed partial class DevProjexMcpTools
 			body.Append("… ").Append((diff.Files.Count - listed).ToString(CultureInfo.InvariantCulture))
 				.Append(" more changed file(s)\n");
 		}
-		return (body.ToString().TrimEnd('\n'), [], diff.Files);
+		return (body.ToString().TrimEnd('\n'), [], diff.Files, 0);
 	}
+
+	/// <summary>The characters <see cref="ProjectDiffText.FormatFile"/> writes, without escaping or writing them.</summary>
+	private static long EstimateDiffFileLowerBound(ProjectDiffFile file)
+	{
+		long characters = (file.Status == ProjectDiffFileStatus.Added
+			? "--- /dev/null"
+			: "--- a/" + (file.OldRelativePath ?? file.RelativePath)).Length + 1;
+		characters += (file.Status == ProjectDiffFileStatus.Deleted
+			? "+++ /dev/null"
+			: "+++ b/" + file.RelativePath).Length + 1;
+		foreach (var hunk in file.Hunks)
+			characters += UnifiedDiffFormatter.MeasureHunk(hunk);
+		return characters;
+	}
+
+	/// <summary>
+	/// Formats as many of a file's hunks, in file order, as fit within <paramref name="remaining"/>;
+	/// no hunk is ever cut. Returns null when not even its first hunk fits.
+	/// </summary>
+	/// <remarks>
+	/// The caller charges <paramref name="remaining"/> for the section plus the file's "partial"
+	/// list entry and a "not shown" range line per hunk left out. Showing one more hunk removes
+	/// one range line but can cost far more than it saves, so the budget for hunk text is reserved
+	/// up front for the worst case (every hunk left out) rather than reduced one hunk at a time
+	/// until it happens to fit.
+	/// </remarks>
+	private static (string Section, IReadOnlyList<UnifiedDiffHunk> NotShownHunks)? TryFormatPartialDiffFile(
+		ProjectDiffFile file,
+		int remaining)
+	{
+		var headerLines =
+			(file.Status == ProjectDiffFileStatus.Added
+				? "--- /dev/null"
+				: "--- a/" + ProjectDiffText.EscapePath(file.OldRelativePath ?? file.RelativePath)) + "\n" +
+			(file.Status == ProjectDiffFileStatus.Deleted
+				? "+++ /dev/null"
+				: "+++ b/" + ProjectDiffText.EscapePath(file.RelativePath)) + "\n";
+		var entryDelta = FormatPartialListEntry(file).Length - ProjectDiffText.FormatListEntry(file).Length;
+		var allHunksRangeLines = file.Hunks.Sum(hunk => FormatDiffHunkRangeEntry(file, hunk).Length + 1);
+		var textBudget = remaining - entryDelta - allHunksRangeLines - 1;
+		if (headerLines.Length > textBudget)
+			return null;
+		var builder = new StringBuilder(headerLines);
+		var budgetLeft = textBudget - headerLines.Length;
+		var notShown = new List<UnifiedDiffHunk>();
+		var shownCount = 0;
+		var cut = false;
+		foreach (var hunk in file.Hunks)
+		{
+			if (!cut)
+			{
+				if (UnifiedDiffFormatter.MeasureHunk(hunk) <= budgetLeft)
+				{
+					using var writer = new StringWriter(CultureInfo.InvariantCulture);
+					UnifiedDiffFormatter.WriteHunk(writer, hunk, ProjectDiffText.EscapeLine);
+					var text = writer.ToString();
+					if (text.Length <= budgetLeft)
+					{
+						budgetLeft -= text.Length;
+						builder.Append(text);
+						shownCount++;
+						continue;
+					}
+				}
+				cut = true;
+			}
+			notShown.Add(hunk);
+		}
+		return shownCount > 0 ? (builder.ToString(), notShown) : null;
+	}
+
+	private static string FormatPartialListEntry(ProjectDiffFile file)
+	{
+		var status = file.Status == ProjectDiffFileStatus.Renamed && file.OldRelativePath is not null
+			? "renamed from " + ProjectDiffText.EscapePath(file.OldRelativePath)
+			: ProjectDiffText.Status(file.Status);
+		return string.Create(
+			CultureInfo.InvariantCulture,
+			$"{ProjectDiffText.EscapePath(file.RelativePath)} +{file.Added} -{file.Removed} [{status}, partial]");
+	}
+
+	private static string FormatDiffHunkRangeEntry(ProjectDiffFile file, UnifiedDiffHunk hunk) =>
+		ProjectDiffText.EscapePath(file.RelativePath) + " " + UnifiedDiffFormatter.FormatHeader(hunk);
 
 	private const string ChangedFilesHeading = "Changed files (largest first):";
 	// Files with hunks left out only for the response limit; trusted reasons are counted in "[Diff] not shown:".
@@ -227,6 +341,10 @@ internal sealed partial class DevProjexMcpTools
 	internal static string FormatDiffPartialNotice(int notShown) =>
 		$"[Diff] partial · {(notShown == int.MaxValue ? "0000000" : notShown.ToString(CultureInfo.InvariantCulture))} " +
 		"file(s) not shown to stay within 50,000 characters; narrow paths or include_patterns, or lower context_lines.";
+
+	internal static string FormatDiffHunkPartialNotice(int notShownHunks) =>
+		$"[Diff] partial · {(notShownHunks == int.MaxValue ? "0000000" : notShownHunks.ToString(CultureInfo.InvariantCulture))} " +
+		"hunk(s) of a file that does not fit were not shown; their line ranges are listed, read them with get_file.";
 
 	private static string? FormatGitScopeDiffNotice(McpJsonArguments arguments) =>
 		arguments.OptionalString("git_scope") is null ? null : GitScopeDiffNotice;

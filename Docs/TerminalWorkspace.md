@@ -266,7 +266,7 @@ inline ghost suffix as soon as a token can be completed:
 | `copy [tree\|content\|tree-content] [text\|markdown\|json\|xml] [--max-tokens <N>] [--rank importance]` | copy an exact context document without changing the current view or format; a format can be given without a view |
 | `analyze` | analyze the current context |
 | `related <path> [--direction <dependencies\|dependents\|both>] [--depth <1..10>]` | show dependency relations in the output panel using the current workspace selection |
-| `diff [changes\|staged\|diff:<ref>..<ref>]` | show the changed lines of the current workspace selection in the output panel, as the direct CLI `diff` prints them; the default is `changes` |
+| `diff [changes\|staged\|diff:<ref>..<ref>] [--context <0..20>]` | show the changed lines of the current workspace selection in the output panel, as the direct CLI `diff` prints them; the default is `changes` and three context lines |
 | `reveal <path>` | reveal a project path in Project Tree like `R`: expand its folders, move the cursor to it, and focus the tree |
 | `branch [name]` | switch the cloned repository branch, or open branch selection |
 | `update` | get updates for the cloned repository |
@@ -393,14 +393,20 @@ unnarrowed workspace resolves at that depth, and a larger depth walks only into 
 narrowing keeps. A fully checked workspace without a momentary scope prints what it printed
 before.
 
-`diff` compares the current workspace selection in the requested Git scope: `changes`
-(default) compares `HEAD` with the working tree, `staged` compares `HEAD` with the index, and
-`diff:<ref>..<ref>` compares two commits. The scope applies on top of the checked items, file
-types, ignores, exclusions, and the workspace Git mode, so it never shows a file the workspace
-hides. Old versions come from Git's object store without running a repository filter or
-converter. When Hide Secrets or Hide Private Data is on, both versions are redacted before they
-are compared. The output panel shows the same unified diff, `Not shown:` list, and summary line
-as the direct CLI, with three context lines.
+`diff [scope] [--context N]` compares the current workspace selection in the requested Git
+scope: `changes` (default) compares `HEAD` with the working tree, `staged` compares `HEAD` with
+the index, and `diff:<ref>..<ref>` compares two commits. `--context` sets the number of unchanged
+lines around each change, from 0 to 20, as it does for the direct CLI; without it, three lines are
+shown. The requested scope replaces any momentary Git scope (`staged`, `changes`, `diff:...`)
+already active for the workspace rather than narrowing it further: if one is active, it is lifted
+back to the persistent Git mode first, exactly as a `related` lookup lifts it, so the two scopes
+are never intersected. Checked items, file types, path filters, exclusions, and protection carry
+over unchanged, so the comparison never shows a file those would hide. Old versions come from
+Git's object store without running a repository filter or converter. When Hide Secrets or Hide
+Private Data is on, both versions are redacted before they are compared. The output panel shows
+the same unified diff, `Not shown:` list, and summary line as the direct CLI. The panel keeps at
+most 50,000 characters of that output, cut at a line break; past that limit a trailing line
+reports how many characters were left out, and the direct CLI `diff` command shows the rest.
 
 Left/Right, Home/End, Backspace, and Delete edit the line. Esc cancels it,
 Enter executes it, and Up/Down traverses command history. The newest 50 commands

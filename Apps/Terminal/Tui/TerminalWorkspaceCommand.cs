@@ -97,7 +97,8 @@ internal sealed record TerminalWorkspaceCommand(
 	SearchMode SearchMode = SearchMode.Text,
 	int? MaximumResults = null,
 	long? MaximumEstimatedTokens = null,
-	ProjectContextRank? Rank = null);
+	ProjectContextRank? Rank = null,
+	int? ContextLines = null);
 
 internal enum TerminalWorkspaceMcpAction
 {
@@ -357,7 +358,7 @@ internal static class TerminalWorkspaceCommandCatalog
 			TerminalWorkspaceCommandVerb.Diff,
 			TerminalWorkspaceCommandGrammar.Diff,
 			"diff",
-			"diff [changes|staged|diff:<ref>..<ref>]",
+			"diff [changes|staged|diff:<ref>..<ref>] [--context N]",
 			"diff staged",
 			static (session, command) => session.ExecuteDiffCommand(command)),
 		Define(

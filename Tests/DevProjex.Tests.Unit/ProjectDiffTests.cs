@@ -527,6 +527,48 @@ public sealed class McpDiffLayoutTests
 		Assert.DoesNotContain("main", trusted, StringComparison.Ordinal);
 	}
 
+	[Fact]
+	public void ASingleOversizedFileShowsAsManyWholeHunksAsFitAndListsTheRest()
+	{
+		// 60 hunks of 40 added lines each (~2,520 characters apiece) do not fit whole within the
+		// 50,000-character budget, but the file is the only one requested, so hunks are shown one
+		// at a time, in order, until the next one would not fit whole.
+		var hunks = Enumerable.Range(0, 60).Select(index => Hunk(index * 100 + 1, 40, 40)).ToArray();
+		var file = new ProjectDiffFile(
+			"/p/huge.txt", "huge.txt", null, ProjectDiffFileStatus.Modified, ProjectDiffOmission.None, 60 * 40, 0, hunks);
+
+		var rendered = DevProjexMcpTools.RenderDiff("Root: /project", Result([file]), trailingNotices: null);
+
+		Assert.InRange(rendered.Text.Length, 1, 50_000);
+		Assert.Contains("Changed files (largest first):\nhuge.txt +2400 -0 [modified, partial]\n", rendered.Text, StringComparison.Ordinal);
+		Assert.Contains("--- a/huge.txt\n+++ b/huge.txt\n@@ -0,0 +1,40 @@\n", rendered.Text, StringComparison.Ordinal);
+		Assert.Contains("Not shown (size limit):\n", rendered.Text, StringComparison.Ordinal);
+		Assert.Matches(@"huge\.txt @@ -0,0 \+\d+,40 @@", rendered.Text);
+		Assert.Contains("[Diff] scope=changes · files=1 · shown=1 · added=2400 · removed=0 · partial", rendered.Text, StringComparison.Ordinal);
+		Assert.Matches(@"\[Diff\] partial · [1-9]\d* hunk\(s\) of a file that does not fit were not shown; their line ranges are listed, read them with get_file\.", rendered.Text);
+		Assert.Equal(["huge.txt"], rendered.DeliveredPaths);
+		// No whole-file omission happened: every hunk header appears exactly once, shown or listed.
+		Assert.DoesNotContain("[Diff] partial · 1 file(s) not shown", rendered.Text, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void AnOversizedFileAmongSeveralIsNotSplitIntoHunks()
+	{
+		// The same oversized file, but a smaller one sorts first, so the oversized file is no
+		// longer the first one considered (and is not the only requested file): it is listed
+		// whole, exactly as before this feature existed.
+		var hunks = Enumerable.Range(0, 60).Select(index => Hunk(index * 100 + 1, 40, 40)).ToArray();
+		var huge = new ProjectDiffFile(
+			"/p/huge.txt", "huge.txt", null, ProjectDiffFileStatus.Modified, ProjectDiffOmission.None, 60 * 40, 0, hunks);
+		var small = Changed("small.txt", 3, 10);
+
+		var rendered = DevProjexMcpTools.RenderDiff("Root: /project", Result([small, huge]), trailingNotices: null);
+
+		Assert.DoesNotContain("partial]", rendered.Text, StringComparison.Ordinal);
+		Assert.Contains("Not shown (size limit):\nhuge.txt +2400 -0 [modified]\n", rendered.Text, StringComparison.Ordinal);
+		Assert.DoesNotContain("@@ -0,0 +1,40 @@", rendered.Text, StringComparison.Ordinal);
+	}
+
 	private static ProjectDiffResult Result(IReadOnlyList<ProjectDiffFile> files, int deleted = 0) =>
 		new(GitFilteringMode.Changes, null, files, deleted, null);
 
@@ -540,4 +582,12 @@ public sealed class McpDiffLayoutTests
 			Enumerable.Range(0, lines).Select(_ => new UnifiedDiffLine(UnifiedDiffLineKind.Added, new string('x', width))).ToArray());
 		return new ProjectDiffFile("/p/" + path, path, null, ProjectDiffFileStatus.Added, ProjectDiffOmission.None, lines, 0, [hunk]);
 	}
+
+	private static UnifiedDiffHunk Hunk(int newStart, int lines, int width) =>
+		new(
+			0,
+			0,
+			newStart,
+			lines,
+			Enumerable.Range(0, lines).Select(_ => new UnifiedDiffLine(UnifiedDiffLineKind.Added, new string('x', width))).ToArray());
 }

@@ -877,6 +877,13 @@ end of the block, and later, smaller files still use the remaining room. Files l
 for a reason are not in that list; their reasons are counted in the trusted `[Diff] not shown:`
 line.
 
+The first file considered, largest change first, or the only one requested, gets one exception: if
+it still does not fit whole, as many of its hunks as fit are shown instead, in order, and no hunk is
+ever cut. Its list entry gains `, partial`, for example `huge.py +2400 -0 [modified, partial]`, and
+the hunks left out are listed by range under `Not shown (size limit):` as
+`<path> @@ -a,b +c,d @@`, one per line, to read with `get_file`. Every other file that does not fit
+whole is still listed only once, not split.
+
 The trusted lines after the block hold only counts and fixed words:
 
 ```text
@@ -884,14 +891,17 @@ The trusted lines after the block hold only counts and fixed words:
 [Diff] not shown: binary=1 · deleted=2 · not-in-working-tree=1
 [Diff] files changed in this range but absent from the working tree are counted, not shown; check out the range's newer commit to review them.
 [Diff] partial · 1 file(s) not shown to stay within 50,000 characters; narrow paths or include_patterns, or lower context_lines.
+[Diff] partial · 3 hunk(s) of a file that does not fit were not shown; their line ranges are listed, read them with get_file.
 [Diff] no changes in the effective selection for this scope.
 ```
 
 `scope` is `changes`, `staged`, or `diff`; the references of a range appear only on the `Scope:`
-line inside the block. `shown` counts files whose hunks are in the response. The `not shown` line
-lists only its nonzero fields, in this order; the line about files absent from the working tree
-follows it only for a `diff:<A>..<B>` scope with `not-in-working-tree` above zero, and the
-`partial` line appears only when a file was left out for the character limit. The usual `[Effective filters]` and `[Protection]` (or
+line inside the block. `shown` counts files whose hunks are in the response, including one shown
+only in part. The `not shown` line lists only its nonzero fields, in this order; the line about
+files absent from the working tree follows it only for a `diff:<A>..<B>` scope with
+`not-in-working-tree` above zero. The file-count `partial` line appears only when a whole file was
+left out for the character limit; the hunk-count `partial` line appears only when a file was shown
+in part, and either or both can appear. The usual `[Effective filters]` and `[Protection]` (or
 `[Unchanged]`) lines follow.
 
 `get_tree`, `analyze`, and `pack_context` called with `git_scope` add the trusted line
