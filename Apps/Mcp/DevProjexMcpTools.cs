@@ -1539,7 +1539,7 @@ internal sealed class DevProjexMcpTools(
 				var protectedEvidence = await ProtectRelatedEvidenceAsync(
 					plan,
 					related,
-					related.Index.Edges,
+					SeedEdges(related.Index, related.Seeds),
 					cancellationToken).ConfigureAwait(false);
 				related = protectedEvidence.Result;
 				uninspectedEvidenceSources = protectedEvidence.UninspectedSources;
@@ -1669,9 +1669,8 @@ internal sealed class DevProjexMcpTools(
 		}, cancellationToken);
 
 	// A narrowed answer quotes the project's evidence inside and outside the selection alike, so
-	// both are checked in one pass against what the project plan may read. Every row comes from an
-	// edge a seed starts or receives; a seed the project had no facts for quotes the selection's
-	// edges, which are kept to sources of that plan too.
+	// both are checked in one pass against what the project plan may read. A seed the project had
+	// no facts for quotes the selection's edges, which are kept to sources of that plan too.
 	private async Task<(DependencyOutsideSelectionResult Result, int UninspectedSources)> ProtectOutsideSelectionEvidenceAsync(
 		ProjectContextPlan projectPlan,
 		DependencyOutsideSelectionResult outside,
@@ -1689,9 +1688,8 @@ internal sealed class DevProjexMcpTools(
 				}
 				: seed).ToArray());
 		var projectFiles = outside.Index.FileByPath;
-		var evidenceEdges = selection.Seeds
-			.SelectMany(seed => SeedEdges(outside.Index, seed.Seed).Concat(
-				SeedEdges(selection.Index, seed.Seed).Where(edge => projectFiles.ContainsKey(edge.Source))))
+		var evidenceEdges = SeedEdges(outside.Index, selection.Seeds)
+			.Concat(SeedEdges(selection.Index, selection.Seeds).Where(edge => projectFiles.ContainsKey(edge.Source)))
 			.Distinct()
 			.ToArray();
 		var protectedEvidence = await ProtectRelatedEvidenceAsync(
@@ -1726,10 +1724,17 @@ internal sealed class DevProjexMcpTools(
 			Selection = selection with { Seeds = selectionSeeds },
 			Seeds = outsideSeeds
 		}, protectedEvidence.UninspectedSources);
-
-		static IEnumerable<DependencyEdge> SeedEdges(DependencyIndexSnapshot index, string seed) =>
-			(index.EdgesBySource.GetValueOrDefault(seed) ?? []).Concat(index.EdgesByTarget.GetValueOrDefault(seed) ?? []);
 	}
+
+	// Every listed row comes from an edge one of its seeds starts or receives. A reason names no
+	// source file, so evidence is looked up only there: the same text in an unrelated file must
+	// neither be read nor decide whether a listed row may quote it.
+	private static IEnumerable<DependencyEdge> SeedEdges(
+		DependencyIndexSnapshot index,
+		IEnumerable<SeedRelatedFiles> seeds) =>
+		seeds.SelectMany(seed => (index.EdgesBySource.GetValueOrDefault(seed.Seed) ?? [])
+				.Concat(index.EdgesByTarget.GetValueOrDefault(seed.Seed) ?? []))
+			.Distinct();
 
 	/// <param name="evidenceEdges">The edges whose evidence the displayed reasons may quote.</param>
 	private async Task<(DependencyRelatedResult Result, int UninspectedSources)> ProtectRelatedEvidenceAsync(
