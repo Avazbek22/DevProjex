@@ -16,7 +16,9 @@ public sealed partial class McpServerProcessTests
 		await using var server = await ActualMcpProcess.StartAsync(project, workspace.CreateDirectory("data"));
 		var result = await CallAsync(server, "search_project", new Dictionary<string, object?>
 		{
-			["pattern"] = @"interface\s+Zq9MarkerName", ["symbols"] = true, ["context_lines"] = 0
+			["pattern"] = @"interface\s+Zq9MarkerName",
+			["symbols"] = true,
+			["context_lines"] = 0
 		});
 		Assert.False(result.IsError is true, AllProcessText(result));
 		foreach (var block in result.Content.OfType<TextContentBlock>())
