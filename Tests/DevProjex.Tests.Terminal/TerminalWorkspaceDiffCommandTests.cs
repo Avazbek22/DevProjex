@@ -42,6 +42,15 @@ public sealed class TerminalWorkspaceDiffCommandTests
 	}
 
 	[Fact]
+	public void TheDiPrefixCompletesDiagnosticsBeforeDiff()
+	{
+		var completion = _parser.GetCompletion("di", 2, Context);
+
+		Assert.Equal(["diagnostics", "diff"], completion.Candidates.Select(static candidate => candidate.Token));
+		Assert.Equal("diagnostics", completion.Candidates[0].CompletedText);
+	}
+
+	[Fact]
 	public void DiffCompletesTheThreeScopes()
 	{
 		var completion = _parser.GetCompletion("diff ", 5, Context);

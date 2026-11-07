@@ -28,6 +28,11 @@ internal sealed record McpExistingEntry(
 {
 	public bool IsDevProjexLauncher => Kind == McpExistingEntryKind.Launcher;
 
+	/// <summary>
+	/// npx or dnx named directly; both are batch files on Windows, where clients start servers without a shell.
+	/// </summary>
+	public bool StartsBatchLauncherDirectly { get; init; }
+
 	public string DisplayCommand => McpExistingEntryParser.FormatCommandLine(Command, Arguments);
 
 	/// <summary>Identifies the entry the user saw when confirming, so a changed entry is never replaced.</summary>
@@ -83,6 +88,7 @@ internal static class McpExistingEntryParser
 			arguments[serverStart] == ServerCommand)
 		{
 			var (projectRoot, mode, unsupported) = ParseServerArguments(arguments, serverStart + 1);
+			var directCommand = NormalizeCommandName(command);
 			return new McpExistingEntry(
 				McpExistingEntryKind.Launcher,
 				command,
@@ -92,7 +98,10 @@ internal static class McpExistingEntryParser
 				launcher,
 				projectRoot,
 				mode,
-				unsupported);
+				unsupported)
+			{
+				StartsBatchLauncherDirectly = directCommand is "npx" or "dnx"
+			};
 		}
 
 		return new McpExistingEntry(
@@ -115,17 +124,46 @@ internal static class McpExistingEntryParser
 	public static bool IsEquivalent(
 		McpExistingEntry entry,
 		McpConnectionRequest request,
-		bool launcherSharesApplicationData)
+		bool launcherSharesApplicationData) =>
+		IsEquivalent(entry, request, launcherSharesApplicationData, OperatingSystem.IsWindows());
+
+	internal static bool IsEquivalent(
+		McpExistingEntry entry,
+		McpConnectionRequest request,
+		bool launcherSharesApplicationData,
+		bool windows)
 	{
 		ArgumentNullException.ThrowIfNull(entry);
 		ArgumentNullException.ThrowIfNull(request);
 		return entry.IsDevProjexLauncher &&
+			   !(windows && entry.StartsBatchLauncherDirectly) &&
 			   entry.ProjectRoot is not null &&
 			   PathsEqual(entry.ProjectRoot, request.ProjectRoot) &&
 			   entry.Mode == request.Mode &&
 			   entry.UnsupportedArguments.Count == 0 &&
 			   entry.Environment.Count == 0 &&
 			   (request.Mode == McpConnectionMode.Standard || launcherSharesApplicationData);
+	}
+
+	/// <summary>
+	/// An entry that serves the requested project and mode but names npx or dnx without cmd /c on Windows,
+	/// as earlier versions wrote it, never starts there; replacing it loses nothing, so no confirmation is asked.
+	/// </summary>
+	public static bool IsUnstartableOnWindows(McpExistingEntry entry, McpConnectionRequest request) =>
+		IsUnstartableOnWindows(entry, request, OperatingSystem.IsWindows());
+
+	internal static bool IsUnstartableOnWindows(McpExistingEntry entry, McpConnectionRequest request, bool windows)
+	{
+		ArgumentNullException.ThrowIfNull(entry);
+		ArgumentNullException.ThrowIfNull(request);
+		return windows &&
+			   entry.IsDevProjexLauncher &&
+			   entry.StartsBatchLauncherDirectly &&
+			   entry.ProjectRoot is not null &&
+			   PathsEqual(entry.ProjectRoot, request.ProjectRoot) &&
+			   entry.Mode == request.Mode &&
+			   entry.UnsupportedArguments.Count == 0 &&
+			   entry.Environment.Count == 0;
 	}
 
 	public static string FormatCommandLine(string command, IEnumerable<string> arguments) =>

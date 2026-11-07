@@ -1013,6 +1013,9 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 				KeptExistingEntry: true);
 		}
 
+		if (McpExistingEntryParser.IsUnstartableOnWindows(entry, request))
+			return null;
+
 		var confirmedByProject = expectedExistingProjectRoot is not null &&
 			entry.ProjectRoot is not null &&
 			PathsEqual(entry.ProjectRoot, expectedExistingProjectRoot);
@@ -1032,7 +1035,7 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 			ExistingEntryConflict: new McpExistingEntryConflict(
 				entry.DisplayCommand,
 				McpExistingEntryParser.FormatCommandLine(
-					McpConnectionFragmentGenerator.ResolveServerExecutable(request.ExecutablePath),
+					McpConnectionFragmentGenerator.ResolveServerExecutable(request.ExecutablePath, request.ProjectRoot),
 					CreateServerArguments(request.ProjectRoot, request.Mode, request.ExecutablePath)),
 				entry.UnsupportedArguments,
 				entry.IsDevProjexLauncher));
@@ -1060,7 +1063,7 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 		var requiredEnvironment = McpConnectionFragmentGenerator.GetRequiredServerEnvironment();
 		var write = await store.UpdateConnectionAsync(
 			configuration,
-			McpConnectionFragmentGenerator.ResolveServerExecutable(request.ExecutablePath),
+			McpConnectionFragmentGenerator.ResolveServerExecutable(request.ExecutablePath, request.ProjectRoot),
 			arguments,
 			requiredEnvironment,
 			cancellationToken).ConfigureAwait(false);
@@ -1094,7 +1097,7 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 				previousConnectionRemoved: true,
 				previousConnectionRestored: restored);
 		}
-		if (!ConnectionMatches(effective, request.ExecutablePath, arguments, requiredEnvironment))
+		if (!ConnectionMatches(effective, request.ExecutablePath, request.ProjectRoot, arguments, requiredEnvironment))
 		{
 			return new McpConnectionResult(
 				McpConnectionStatus.InvalidConfiguration,
@@ -1152,6 +1155,7 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 		if (ConnectionMatches(
 				effective,
 				request.ExecutablePath,
+				request.ProjectRoot,
 				expectedArguments,
 				requiredEnvironment))
 		{
@@ -1218,7 +1222,7 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 				Environment.NewLine,
 				_localization.Format("Mcp.Connect.ProjectEntryFieldsReplaced", fields));
 		// Native registrations name this installation; package launchers contain no machine-specific executable path.
-		if (McpConnectionFragmentGenerator.ResolveServerExecutable(request.ExecutablePath) is not ("npx" or "dnx"))
+		if (!McpServerLaunchResolver.Resolve(request.ExecutablePath).IsPackageLauncher)
 			message = string.Concat(
 				message,
 				Environment.NewLine,
@@ -1467,6 +1471,7 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 			!ConnectionMatches(
 				actual.Snapshot,
 				request.ExecutablePath,
+				request.ProjectRoot,
 				expectedArguments,
 				requiredEnvironment))
 		{
@@ -1531,7 +1536,7 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 			}
 			arguments.Add("--");
 		}
-		arguments.Add(McpConnectionFragmentGenerator.ResolveServerExecutable(executablePath));
+		arguments.Add(McpConnectionFragmentGenerator.ResolveServerExecutable(executablePath, projectRoot));
 		arguments.AddRange(CreateServerArguments(projectRoot, mode, executablePath));
 		return arguments;
 	}
@@ -1542,12 +1547,13 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 	private static bool ConnectionMatches(
 		CommandLineConnectionSnapshot actual,
 		string expectedCommand,
+		string projectRoot,
 		IReadOnlyList<string> expectedArguments,
 		IReadOnlyDictionary<string, string> requiredEnvironment)
 	{
 		if (!string.Equals(
 				actual.Command,
-				McpConnectionFragmentGenerator.ResolveServerExecutable(expectedCommand),
+				McpConnectionFragmentGenerator.ResolveServerExecutable(expectedCommand, projectRoot),
 				OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal) ||
 			!actual.Arguments.SequenceEqual(expectedArguments, StringComparer.Ordinal))
 		{
@@ -1750,9 +1756,17 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 		return true;
 	}
 
+	// The cmd /c form is what Windows connections use; the bare form is what earlier versions wrote there.
 	private static bool IsPackageServer(string command, IReadOnlyList<string> arguments) =>
-		command == "npx" && arguments.Count >= 5 && arguments[0] == "-y" && arguments[1] == "devprojex" && arguments[2] == "mcp" ||
-		command == "dnx" && arguments.Count >= 4 && arguments[0] == "devprojex" && arguments[1] == "mcp";
+		IsPackageServer(command, arguments, 0) ||
+		string.Equals(command, "cmd", StringComparison.OrdinalIgnoreCase) &&
+		arguments.Count >= 2 && arguments[0] is "/c" or "/C" &&
+		IsPackageServer(arguments[1], arguments, 2);
+
+	private static bool IsPackageServer(string command, IReadOnlyList<string> arguments, int start) =>
+		command == "npx" && arguments.Count >= start + 5 && arguments[start] == "-y" &&
+		arguments[start + 1] == "devprojex" && arguments[start + 2] == "mcp" ||
+		command == "dnx" && arguments.Count >= start + 4 && arguments[start] == "devprojex" && arguments[start + 1] == "mcp";
 
 	private static bool PathsEqual(string left, string right) =>
 		string.Equals(
@@ -1840,6 +1854,7 @@ public sealed class McpConnectionService : IMcpConnectionService, IMcpConnection
 		return ConnectionMatches(
 			snapshot,
 			request.ExecutablePath,
+			request.ProjectRoot,
 			CreateServerArguments(request.ProjectRoot, request.Mode, request.ExecutablePath),
 			McpConnectionFragmentGenerator.GetRequiredServerEnvironment());
 	}

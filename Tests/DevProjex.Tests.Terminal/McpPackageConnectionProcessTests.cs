@@ -40,7 +40,9 @@ public sealed class McpPackageConnectionProcessTests
 		var project = workspace.CreateDirectory("project with spaces Юникод");
 		workspace.WriteFile("project with spaces Юникод/Keep.cs", "class Keep {}\n");
 		var data = workspace.CreateDirectory("data");
-		string[] prefix = command == "npx" ? ["-y", "devprojex"] : ["devprojex"];
+		// Windows clients start servers without a shell, so the batch launchers go through cmd /c.
+		string[] prefix = [.. windows ? new[] { "/c", command } : [], .. command == "npx" ? new[] { "-y", "devprojex" } : ["devprojex"]];
+		var expectedCommand = windows ? "cmd" : command;
 		foreach (var mode in new[] { "standard", "live" })
 		{
 			var result = Run("json", mode, print: true);
@@ -48,7 +50,7 @@ public sealed class McpPackageConnectionProcessTests
 			Assert.True(string.IsNullOrWhiteSpace(result.StandardError), result.StandardError);
 			using var json = JsonDocument.Parse(result.StandardOutput);
 			var entry = json.RootElement.GetProperty("mcpServers").GetProperty("devprojex");
-			Assert.Equal(command, entry.GetProperty("command").GetString());
+			Assert.Equal(expectedCommand, entry.GetProperty("command").GetString());
 			string[] arguments = [.. prefix, "mcp", "--root", project, .. mode == "live" ? new[] { "--live" } : []];
 			Assert.Equal(arguments, entry.GetProperty("args").EnumerateArray().Select(x => x.GetString()));
 			Assert.False(Directory.Exists(Path.Combine(project, ".cursor")));
@@ -59,7 +61,7 @@ public sealed class McpPackageConnectionProcessTests
 		Assert.True(string.IsNullOrWhiteSpace(written.StandardError), written.StandardError);
 		using var configuration = JsonDocument.Parse(File.ReadAllText(Path.Combine(project, ".vscode/mcp.json")));
 		var server = configuration.RootElement.GetProperty("servers").GetProperty("devprojex");
-		Assert.Equal(command, server.GetProperty("command").GetString());
+		Assert.Equal(expectedCommand, server.GetProperty("command").GetString());
 		Assert.Equal([.. prefix, "mcp", "--root", "${workspaceFolder}", "--live"], server.GetProperty("args").EnumerateArray().Select(x => x.GetString()));
 		Assert.Equal("class Keep {}\n", File.ReadAllText(Path.Combine(project, "Keep.cs")));
 
