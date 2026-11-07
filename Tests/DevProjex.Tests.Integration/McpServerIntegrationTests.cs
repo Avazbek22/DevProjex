@@ -2140,7 +2140,7 @@ public sealed partial class McpServerIntegrationTests
 			options: null,
 			TestContext.Current.CancellationToken);
 
-		string[] delegated = ["get_tree", "analyze", "pack_context", "search_project", "related_files", "get_file"];
+		string[] delegated = ["get_tree", "analyze", "pack_context", "search_project", "related_files", "get_file", "get_diff"];
 		foreach (var tool in tools)
 		{
 			var schema = tool.ProtocolTool.InputSchema;
