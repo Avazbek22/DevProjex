@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using DevProjex.Application.Compression;
 using DevProjex.Application.Context;
 using DevProjex.Application.Diff;
@@ -60,6 +61,67 @@ public sealed class CrossVersionRedactionTests
 		var (oldText, newText) = CrossVersionRedaction.Apply("a\n", Unmasked("a\n"), "b\n", Unmasked("b\n"));
 
 		Assert.Equal(("a\n", "b\n"), (oldText, newText));
+	}
+
+	[Fact]
+	public void AMaskPartiallyOverlappingTheFullValueCoversTheirUnionInBothVersions()
+	{
+		// The old side's own detector only masked the inner part of the value (a narrower match),
+		// while the new side masked the full value. The full value found by the global scan in the
+		// old source only partially overlaps the old side's own, narrower mask, so the fix must
+		// widen that mask to cover the whole value instead of skipping the overlap.
+		const string value = "s3cr3t-value-12";
+		var oldSource = $"key = \"{value}\"\n";
+		var newSource = $"key = \"{value}\"\nkey = \"{value}\"\n";
+		var innerStart = oldSource.IndexOf(value, StringComparison.Ordinal) + 2;
+		const int innerLength = 10;
+		var newStart = newSource.IndexOf(value, StringComparison.Ordinal);
+
+		var (oldText, newText) = CrossVersionRedaction.Apply(
+			oldSource,
+			Masked(oldSource, innerStart, innerLength),
+			newSource,
+			Masked(newSource, newStart, value.Length));
+
+		Assert.DoesNotContain(value, oldText, StringComparison.Ordinal);
+		Assert.DoesNotContain(value, newText, StringComparison.Ordinal);
+		Assert.Equal($"key = \"{Placeholder}\"\n", oldText);
+		Assert.Equal($"key = \"{Placeholder}\"\nkey = \"{Placeholder}\"\n", newText);
+	}
+
+	[Fact]
+	public void ManyDistinctValuesOnALargeTextCompleteQuickly()
+	{
+		var values = Enumerable.Range(0, 4096).Select(static index => $"value-{index:D8}-secret").ToArray();
+		var builder = new StringBuilder();
+		foreach (var value in values)
+			builder.Append("line irrelevant filler text around ").Append(value).Append(" more filler\n");
+		while (builder.Length < 1024 * 1024)
+			builder.Append("padding padding padding padding padding padding padding padding\n");
+		var source = builder.ToString();
+		var mapped = Masked(source, source.IndexOf(values[0], StringComparison.Ordinal), values[0].Length);
+
+		var stopwatch = Stopwatch.StartNew();
+		CrossVersionRedaction.Apply(source, mapped, source, Unmasked(source));
+		stopwatch.Stop();
+
+		Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(10), $"Masking took {stopwatch.Elapsed}.");
+	}
+
+	[Fact]
+	public void CancellationStopsProcessingBeforeCompletion()
+	{
+		var values = Enumerable.Range(0, 2048).Select(static index => $"value-{index:D8}-secret").ToArray();
+		var builder = new StringBuilder();
+		foreach (var value in values)
+			builder.Append("filler text around ").Append(value).Append(" more filler\n");
+		var source = builder.ToString();
+		var mapped = Masked(source, source.IndexOf(values[0], StringComparison.Ordinal), values[0].Length);
+		using var cancelled = new CancellationTokenSource();
+		cancelled.Cancel();
+
+		Assert.Throws<OperationCanceledException>(() =>
+			CrossVersionRedaction.Apply(source, mapped, source, Unmasked(source), cancelled.Token));
 	}
 
 	private static SecretTextRedactionResult Masked(string source, int start, int length)

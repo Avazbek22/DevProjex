@@ -167,7 +167,7 @@ public sealed class ProjectDiffService(IGitFileVersionReader versions)
 		// is redacted, and counted, exactly once.
 		var oldResult = scope.Redact(renamedFrom ?? file, oldText, cancellationToken);
 		var newResult = scope.Redact(file, newText, cancellationToken);
-		return CrossVersionRedaction.Apply(oldText, oldResult, newText, newResult);
+		return CrossVersionRedaction.Apply(oldText, oldResult, newText, newResult, cancellationToken);
 	}
 
 	private static VersionText Decode(string file, GitStoredFile stored, CancellationToken cancellationToken)
