@@ -629,6 +629,8 @@
   "Terminal.Diff.NotShown": "Gösterilmeyenler:",
   "Terminal.Diff.Summary": "Değişen dosyalar: {0}, gösterilen: {1}; eklenen satırlar: {2}, kaldırılan: {3}.",
   "Terminal.Diff.Deleted": "Çalışma ağacı dışında silinen dosyalar: {0}.",
+  "Terminal.Diff.NotInWorkingTree": "Çalışma ağacında bulunmayan değişen dosyalar, sayıldı ancak gösterilmedi: {0}.",
+  "Terminal.Diff.NotInWorkingTreeHint": "İncelemek için aralığın daha yeni commit’ine geçin.",
   "Terminal.Diff.None": "Bu Git kapsamı için etkin seçimde değişiklik yok.",
   "Terminal.Diff.Unavailable": "Commit edilmiş veya hazırlanmış dosya sürümleri Git’ten okunamadı.",
   "Terminal.Command.Export": "Bağlamı veya fiziksel bir proje kopyasını dışa aktarın.",

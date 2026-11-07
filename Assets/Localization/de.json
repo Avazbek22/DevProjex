@@ -635,6 +635,8 @@
   "Terminal.Diff.NotShown": "Nicht angezeigt:",
   "Terminal.Diff.Summary": "Geänderte Dateien: {0}, angezeigt: {1}; Zeilen hinzugefügt: {2}, entfernt: {3}.",
   "Terminal.Diff.Deleted": "Gelöschte Dateien außerhalb des Arbeitsverzeichnisses: {0}.",
+  "Terminal.Diff.NotInWorkingTree": "Geänderte Dateien, die im Arbeitsverzeichnis fehlen, gezählt, nicht angezeigt: {0}.",
+  "Terminal.Diff.NotInWorkingTreeHint": "Checken Sie den neueren Commit des Bereichs aus, um sie zu prüfen.",
   "Terminal.Diff.None": "Keine Änderungen in der effektiven Auswahl für diesen Git-Bereich.",
   "Terminal.Diff.Unavailable": "Committete oder gestagte Dateiversionen konnten nicht aus Git gelesen werden.",
   "Terminal.Command.Export": "Projektkontext oder physische Projektkopie exportieren.",

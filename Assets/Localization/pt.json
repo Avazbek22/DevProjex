@@ -629,6 +629,8 @@
   "Terminal.Diff.NotShown": "Não mostrados:",
   "Terminal.Diff.Summary": "Arquivos alterados: {0}, mostrados: {1}; linhas adicionadas: {2}, removidas: {3}.",
   "Terminal.Diff.Deleted": "Arquivos excluídos fora da árvore de trabalho: {0}.",
+  "Terminal.Diff.NotInWorkingTree": "Arquivos alterados ausentes da árvore de trabalho, contados mas não mostrados: {0}.",
+  "Terminal.Diff.NotInWorkingTreeHint": "Faça checkout do commit mais recente do intervalo para revisá-los.",
   "Terminal.Diff.None": "Nenhuma mudança na seleção efetiva para este escopo do Git.",
   "Terminal.Diff.Unavailable": "Não foi possível ler do Git as versões confirmadas ou preparadas dos arquivos.",
     "Terminal.Command.Export": "Exporta o contexto ou uma cópia física do projeto.",

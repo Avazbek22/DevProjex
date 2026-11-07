@@ -53,6 +53,12 @@ internal static class DiffOutputRenderer
 			.Append('\n');
 		if (diff.DeletedOutsideSelection > 0)
 			output.Append(localization.Format("Terminal.Diff.Deleted", diff.DeletedOutsideSelection)).Append('\n');
+		if (diff.NotInWorkingTree > 0)
+		{
+			output.Append(localization.Format("Terminal.Diff.NotInWorkingTree", diff.NotInWorkingTree)).Append('\n');
+			if (diff.Mode == GitFilteringMode.Diff)
+				output.Append(localization["Terminal.Diff.NotInWorkingTreeHint"]).Append('\n');
+		}
 		return output.ToString();
 	}
 
@@ -93,8 +99,9 @@ internal static class DiffOutputRenderer
 				diff.Count(ProjectDiffOmission.Binary),
 				diff.Count(ProjectDiffOmission.TooLarge),
 				diff.Count(ProjectDiffOmission.LineEndingsOnly),
-				diff.DeletedOutsideSelection),
-			Complete: notShown.Length == 0 && diff.DeletedOutsideSelection == 0);
+				diff.DeletedOutsideSelection,
+				diff.NotInWorkingTree),
+			Complete: notShown.Length == 0 && diff.DeletedOutsideSelection == 0 && diff.NotInWorkingTree == 0);
 		return JsonSerializer.Serialize(document, JsonOptions) + "\n";
 	}
 
@@ -144,5 +151,6 @@ internal static class DiffOutputRenderer
 		int Binary,
 		int TooLarge,
 		int LineEndingsOnly,
-		int Deleted);
+		int Deleted,
+		int NotInWorkingTree);
 }

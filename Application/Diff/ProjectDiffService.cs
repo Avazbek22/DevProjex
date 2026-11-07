@@ -33,8 +33,9 @@ public sealed class ProjectDiffService(IGitFileVersionReader versions)
 		var deletedOutsideSelection = plan.Diagnostics
 			.Where(static diagnostic => diagnostic.Code == GitScopeFilter.DeletedDiagnosticCode)
 			.Sum(static diagnostic => diagnostic.Count ?? 0);
+		var notInWorkingTree = plan.GitScopeFilesNotInWorkingTree;
 		if (files.Length == 0)
-			return new ProjectDiffResult(request.Mode, request.DiffRange, [], deletedOutsideSelection, null);
+			return new ProjectDiffResult(request.Mode, request.DiffRange, [], deletedOutsideSelection, null, notInWorkingTree);
 
 		var stored = await versions
 			.ReadAsync(new GitFileVersionRequest(plan.SourceRoot, request.Mode, request.DiffRange, files), cancellationToken)
@@ -70,7 +71,13 @@ public sealed class ProjectDiffService(IGitFileVersionReader versions)
 			.OrderByDescending(static file => file.ChangedLines)
 			.ThenBy(static file => file.RelativePath, StringComparer.Ordinal)
 			.ToArray();
-		return new ProjectDiffResult(request.Mode, request.DiffRange, ordered, deletedOutsideSelection, scope?.Complete());
+		return new ProjectDiffResult(
+			request.Mode,
+			request.DiffRange,
+			ordered,
+			deletedOutsideSelection,
+			scope?.Complete(),
+			notInWorkingTree);
 	}
 
 	private static async Task<ProjectDiffFile?> CompareFileAsync(

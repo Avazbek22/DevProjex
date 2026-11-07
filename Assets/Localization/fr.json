@@ -635,6 +635,8 @@
   "Terminal.Diff.NotShown": "Non affichés :",
   "Terminal.Diff.Summary": "Fichiers modifiés : {0}, affichés : {1} ; lignes ajoutées : {2}, supprimées : {3}.",
   "Terminal.Diff.Deleted": "Fichiers supprimés hors de l’arbre de travail : {0}.",
+  "Terminal.Diff.NotInWorkingTree": "Fichiers modifiés absents de l’arbre de travail, comptés mais non affichés : {0}.",
+  "Terminal.Diff.NotInWorkingTreeHint": "Extrayez le commit le plus récent de la plage pour les examiner.",
   "Terminal.Diff.None": "Aucune modification dans la sélection effective pour cette portée Git.",
   "Terminal.Diff.Unavailable": "Impossible de lire depuis Git les versions validées ou indexées des fichiers.",
   "Terminal.Command.Export": "Exporter le contexte ou une copie physique du projet.",

@@ -934,7 +934,10 @@ control characters in a line or path are escaped so each output line is one phys
 listed without hunks follow under a localized `Not shown:` heading as `path [status, reason]`, with
 `binary`, `too-large`, or `line-endings-only` as the reason. A localized summary line ends the
 output with the changed, shown, added, and removed counts, followed by the count of deleted files
-that are no longer in the working tree, whose paths are not printed. Every line ends with `\n` on
+that are no longer in the working tree and the count of changed files the working tree does not
+have, such as files added on a branch that is not checked out; their paths are not printed, and a
+`diff:<ref>..<ref>` scope adds a line suggesting to check out the range's newer commit. Because the
+selection lists the working tree, `diff:<ref>..<ref>` shows the files present in it. Every line ends with `\n` on
 every platform. JSON is the deterministic `devprojex-diff` document described in
 [CLI-Output-Contract.md](CLI-Output-Contract.md). `-o` follows the `related` rules: the file is
 written atomically outside the source project, an existing file is never replaced, and success

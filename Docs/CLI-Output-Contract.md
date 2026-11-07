@@ -489,7 +489,8 @@ selection diagnostics stay on stderr. The shape is:
     "binary": 1,
     "tooLarge": 0,
     "lineEndingsOnly": 0,
-    "deleted": 0
+    "deleted": 0,
+    "notInWorkingTree": 0
   },
   "complete": false
 }
@@ -503,8 +504,10 @@ lines starts at the line before the hunk, `0` at the top of the file. `lines` ho
 with their unified prefix (` `, `-`, or `+`), unescaped, and the separate entry
 `\ No newline at end of file` after a line that has no newline. `notShown` lists the changed files
 without hunks, with `reason` `binary`, `too-large`, or `line-endings-only`. `counts.deleted` counts
-deleted files that are no longer in the working tree; their paths are never listed. `complete` is
-`true` when every changed file is in `files` and no deleted file was left uncounted by path. When
+deleted files that are no longer in the working tree, and `counts.notInWorkingTree` counts files a
+`staged` or ref-to-ref scope adds, changes, or renames to that the working tree does not have; both
+apply only the selection rules a path alone decides, and their paths are never listed. `complete`
+is `true` when every changed file is in `files` and neither count is above zero. When
 the selection hides secrets or private data, both versions are redacted before they are compared,
 so placeholders appear in `lines` exactly as in text output.
 

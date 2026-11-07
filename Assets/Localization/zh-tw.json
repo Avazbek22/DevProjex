@@ -629,6 +629,8 @@
   "Terminal.Diff.NotShown": "未顯示：",
   "Terminal.Diff.Summary": "已變更檔案：{0}，已顯示：{1}；新增行：{2}，刪除行：{3}。",
   "Terminal.Diff.Deleted": "工作樹之外已刪除的檔案：{0}。",
+  "Terminal.Diff.NotInWorkingTree": "工作樹中不存在的已變更檔案（僅計數，未顯示）：{0}。",
+  "Terminal.Diff.NotInWorkingTreeHint": "請簽出該範圍中較新的提交以檢視這些檔案。",
   "Terminal.Diff.None": "此 Git 範圍的有效選擇中沒有變更。",
   "Terminal.Diff.Unavailable": "無法從 Git 讀取已提交或已暫存的檔案版本。",
   "Terminal.Command.Export": "匯出專案上下文或實體專案副本。",
