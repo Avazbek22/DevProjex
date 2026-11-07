@@ -29,11 +29,13 @@ public static class McpServerHost
 	private const string FullLiveContextInstructions =
 		" Live context uses the selection saved by the DevProjex window as the baseline. " +
 		"Every response reports its revision. Named files remain readable outside that selection; " +
-		"tree, search, pack, analysis, and related-file results remain inside it.";
+		"tree, search, pack, analysis, and diff results remain inside it; " +
+		"related_files also names readable files outside it by path.";
 	private const string ReducedLiveContextInstructions =
 		" Live context uses the selection saved by the DevProjex window as the baseline. " +
 		"Every response reports its revision. Named files remain readable outside that selection; " +
-		"tree, search, and related-file results remain inside it.";
+		"tree, search, and diff results remain inside it; " +
+		"related_files also names readable files outside it by path.";
 
 	internal const int MaximumSearchBodyCharacters = 16_000;
 
