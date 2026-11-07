@@ -4,6 +4,7 @@ using System.Globalization;
 using DevProjex.Application.Context;
 using DevProjex.Application.Diff;
 using DevProjex.Infrastructure.FileSystem;
+using DevProjex.Kernel.Models;
 
 namespace DevProjex.Infrastructure.Git;
 
@@ -326,7 +327,75 @@ public sealed class GitFileVersionReader : IGitFileVersionReader
 				}
 			}
 		}
+
+		var unresolved = gitPaths.Where(path => !entries.ContainsKey(path)).ToArray();
+		if (unresolved.Length == 0)
+			return entries;
+		if (!await TryResolveCaseInsensitiveTreeMatchesAsync(repositoryRoot, commit, unresolved, entries, cancellationToken)
+				.ConfigureAwait(false))
+		{
+			return null;
+		}
 		return entries;
+	}
+
+	/// <summary>
+	/// Resolves tree paths that a literal pathspec lookup missed only because the requested
+	/// spelling differs from the tree's recorded one by case or Unicode normalization form.
+	/// <c>ls-tree --literal-pathspecs</c> matches by exact bytes regardless of
+	/// <c>core.ignorecase</c>, so this full listing is read only once, and only when the
+	/// repository's comparison semantics call for it. A match is accepted only when the
+	/// requested path's identity, computed the same way the tracked-path index reconciles a
+	/// disk path, is unambiguous among the tree's own entries; a requested spelling that does
+	/// not currently exist on disk resolves to nothing here rather than guessing.
+	/// </summary>
+	private static async Task<bool> TryResolveCaseInsensitiveTreeMatchesAsync(
+		string repositoryRoot,
+		string commit,
+		IReadOnlyList<string> unresolvedPaths,
+		Dictionary<string, StoredEntry> entries,
+		CancellationToken cancellationToken)
+	{
+		var semantics = GitConfigPathComparisonSemanticsResolver.Instance.Resolve(repositoryRoot);
+		if (!semantics.IsAuthoritative || !(semantics.IgnoreCase || semantics.NormalizeUnicode))
+			return true;
+
+		var listing = await RunListingAsync(
+				repositoryRoot,
+				GitProcessOperation.ReadFullTreeEntries(commit),
+				cancellationToken)
+			.ConfigureAwait(false);
+		if (!listing.Succeeded)
+			return false;
+
+		var treePaths = new List<string>();
+		var storedByTreePath = new Dictionary<string, StoredEntry>(StringComparer.Ordinal);
+		foreach (var record in SplitRecords(listing.Text))
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var tab = record.IndexOf('\t');
+			if (tab < 0)
+				return false;
+			var fields = record[..tab].Split(' ');
+			var path = record[(tab + 1)..];
+			if (fields.Length != 3 || !GitProcessOperation.IsObjectId(fields[2]))
+				return false;
+			treePaths.Add(path);
+			storedByTreePath[path] = new StoredEntry(
+				fields[2],
+				fields[1] == "blob" && fields[0] is RegularFileMode or ExecutableFileMode,
+				fields[0]);
+		}
+
+		ResolveByIdentity(
+			repositoryRoot,
+			semantics,
+			treePaths,
+			unresolvedPaths,
+			cancellationToken,
+			entries.ContainsKey,
+			(requestedPath, matchedTreePath) => entries[requestedPath] = storedByTreePath[matchedTreePath]);
+		return true;
 	}
 
 	private static async Task<Dictionary<string, StoredEntry>?> ReadIndexEntriesAsync(
@@ -366,8 +435,123 @@ public sealed class GitFileVersionReader : IGitFileVersionReader
 				entries[path] = new StoredEntry(fields[1], fields[0] is RegularFileMode or ExecutableFileMode, fields[0]);
 			}
 		}
+
+		var unresolved = gitPaths.Where(path => !entries.ContainsKey(path) && !conflicted.Contains(path)).ToArray();
+		if (unresolved.Length == 0)
+			return entries;
+		if (!await TryResolveCaseInsensitiveIndexMatchesAsync(repositoryRoot, unresolved, entries, cancellationToken)
+				.ConfigureAwait(false))
+		{
+			return null;
+		}
 		return entries;
 	}
+
+	/// <summary>
+	/// The staged-index counterpart of <see cref="TryResolveCaseInsensitiveTreeMatchesAsync"/>: a
+	/// stage-0 entry whose recorded spelling differs from the request only by case or Unicode
+	/// normalization form is matched the same way, against the full index listing. A path staged
+	/// only as a conflict is left for the caller's existing conflict handling and never matched
+	/// here.
+	/// </summary>
+	private static async Task<bool> TryResolveCaseInsensitiveIndexMatchesAsync(
+		string repositoryRoot,
+		IReadOnlyList<string> unresolvedPaths,
+		Dictionary<string, StoredEntry> entries,
+		CancellationToken cancellationToken)
+	{
+		var semantics = GitConfigPathComparisonSemanticsResolver.Instance.Resolve(repositoryRoot);
+		if (!semantics.IsAuthoritative || !(semantics.IgnoreCase || semantics.NormalizeUnicode))
+			return true;
+
+		var listing = await RunListingAsync(
+				repositoryRoot,
+				GitProcessOperation.ReadFullIndexEntries(),
+				cancellationToken)
+			.ConfigureAwait(false);
+		if (!listing.Succeeded)
+			return false;
+
+		var indexPaths = new List<string>();
+		var storedByIndexPath = new Dictionary<string, StoredEntry>(StringComparer.Ordinal);
+		foreach (var record in SplitRecords(listing.Text))
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var tab = record.IndexOf('\t');
+			if (tab < 0)
+				return false;
+			var fields = record[..tab].Split(' ');
+			var path = record[(tab + 1)..];
+			if (fields.Length != 3 || !GitProcessOperation.IsObjectId(fields[1]))
+				return false;
+			if (fields[2] != "0")
+				continue;
+			indexPaths.Add(path);
+			storedByIndexPath[path] = new StoredEntry(fields[1], fields[0] is RegularFileMode or ExecutableFileMode, fields[0]);
+		}
+
+		ResolveByIdentity(
+			repositoryRoot,
+			semantics,
+			indexPaths,
+			unresolvedPaths,
+			cancellationToken,
+			entries.ContainsKey,
+			(requestedPath, matchedIndexPath) => entries[requestedPath] = storedByIndexPath[matchedIndexPath]);
+		return true;
+	}
+
+	/// <summary>
+	/// Matches each of <paramref name="requestedPaths"/> against <paramref name="candidatePaths"/>
+	/// by the identity <see cref="GitTrackedPathIndex"/> already uses to reconcile a disk path with
+	/// the tracked index: a candidate keeps its own identity when it does not collide with another
+	/// candidate under the repository's comparison semantics; a requested path absent from the
+	/// candidates resolves only when exactly one candidate shares its folded identity and the
+	/// requested spelling currently exists on disk under that identity.
+	/// </summary>
+	private static void ResolveByIdentity(
+		string repositoryRoot,
+		GitPathComparisonSemantics semantics,
+		IReadOnlyList<string> candidatePaths,
+		IReadOnlyList<string> requestedPaths,
+		CancellationToken cancellationToken,
+		Func<string, bool> isAlreadyResolved,
+		Action<string, string> accept)
+	{
+		var index = new GitTrackedPathIndex(repositoryRoot, candidatePaths, semantics);
+		var pathByIdentity = new Dictionary<string, string>(StringComparer.Ordinal);
+		var ambiguousIdentities = new HashSet<string>(StringComparer.Ordinal);
+		foreach (var candidatePath in candidatePaths)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (!index.TryGetPathIdentity(ToFullPath(repositoryRoot, candidatePath), out var identity))
+				continue;
+			if (pathByIdentity.TryGetValue(identity, out var existingPath))
+			{
+				if (!StringComparer.Ordinal.Equals(existingPath, candidatePath))
+					ambiguousIdentities.Add(identity);
+				continue;
+			}
+			pathByIdentity[identity] = candidatePath;
+		}
+
+		foreach (var requestedPath in requestedPaths)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (isAlreadyResolved(requestedPath))
+				continue;
+			if (!index.TryGetPathIdentity(ToFullPath(repositoryRoot, requestedPath), out var identity) ||
+				ambiguousIdentities.Contains(identity) ||
+				!pathByIdentity.TryGetValue(identity, out var matchedPath))
+			{
+				continue;
+			}
+			accept(requestedPath, matchedPath);
+		}
+	}
+
+	private static string ToFullPath(string repositoryRoot, string gitPath) =>
+		Path.Combine(repositoryRoot, gitPath.Replace('/', Path.DirectorySeparatorChar));
 
 	/// <summary>Maps each rename destination to its source; a listing that cannot be read yields none.</summary>
 	private static async Task<IReadOnlyDictionary<string, string>?> ReadRenamesAsync(
