@@ -634,7 +634,9 @@ and when measurement is inactive hot resolver loops do not call the counter path
 `devprojex related PATH` and MCP `related_files` show dependencies, dependents, or both. Every row
 contains a portable relative path, aggregated evidence reasons, resolution status, estimated tokens,
 and a cross-scope marker when applicable. Ambiguous references remain one group with their candidate
-list. Coverage reports manifest files, supported and unsupported languages, and extraction failures.
+list. Text rows write reference sites that share the same reason text as one `at lines ...` entry;
+CLI JSON keeps one reason per site. Coverage reports manifest files, supported and unsupported
+languages, and extraction failures.
 File-status reasons and configuration diagnostics use a fixed vocabulary; project-controlled mapping
 keys and paths remain in their dedicated structured fields rather than being interpolated into trusted
 diagnostic text. Edge evidence is project data: it deliberately includes the referenced symbol or

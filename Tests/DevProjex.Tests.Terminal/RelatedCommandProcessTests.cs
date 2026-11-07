@@ -868,6 +868,53 @@ public sealed class RelatedCommandProcessTests
 			.Select(static item => item.GetProperty("path").GetString()!)
 			.ToArray();
 
+	[Fact]
+	public void RepeatedEvidenceSitesAreCompactedInTextAndListedOneByOneInJson()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/App.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />\n");
+		workspace.WriteFile("project/Models/User.cs", "namespace App.Models; public sealed class User { }\n");
+		workspace.WriteFile("project/Services/Store.cs",
+			"using App.Models;\nnamespace App.Services;\npublic sealed class Store\n{\n" +
+			string.Concat(Enumerable.Range(1, 7).Select(static index => $"\tUser Value{index};\n")) +
+			"}\n");
+		string[] arguments =
+		[
+			"related", "Services/Store.cs", "--project", project, "--direction", "dependencies",
+			"--git-mode", "none", "--exclude", "none"
+		];
+
+		var text = Run(workspace, [.. arguments, "--format", "text"]);
+		var json = Run(workspace, [.. arguments, "--format", "json"]);
+
+		Assert.True(text.ExitCode == 0, text.StandardError + text.StandardOutput);
+		Assert.Contains(
+			"Models/User.cs — one visible declaration identity · " +
+			"type reference User at lines 5, 6, 7, 8, 9 (+2 more) — resolved — ",
+			text.StandardOutput,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain("type reference User at line ", text.StandardOutput, StringComparison.Ordinal);
+
+		Assert.Equal(0, json.ExitCode);
+		using var document = JsonDocument.Parse(json.StandardOutput);
+		var dependency = Assert.Single(Assert.Single(document.RootElement.GetProperty("seeds").EnumerateArray())
+			.GetProperty("dependencies").EnumerateArray());
+		Assert.Equal("Models/User.cs", dependency.GetProperty("path").GetString());
+		Assert.Equal(
+			[
+				"one visible declaration identity",
+				"type reference User at line 10",
+				"type reference User at line 11",
+				"type reference User at line 5",
+				"type reference User at line 6",
+				"type reference User at line 7",
+				"type reference User at line 8",
+				"type reference User at line 9"
+			],
+			dependency.GetProperty("reasons").EnumerateArray().Select(static reason => reason.GetString()));
+	}
+
 	private static TerminalTestProcessResult Run(TemporaryDirectory workspace, params string[] arguments)
 	{
 		var startInfo = new ProcessStartInfo("dotnet")
