@@ -4,7 +4,7 @@ using DevProjex.Application.Ranking;
 
 namespace DevProjex.Mcp;
 
-internal sealed class DevProjexMcpTools(
+internal sealed partial class DevProjexMcpTools(
 	McpRootRegistry roots,
 	Lazy<McpProjectService> projectService,
 	McpPackRegistry packs,
@@ -362,6 +362,7 @@ internal sealed class DevProjexMcpTools(
 				FormatTreeDepthNotice(plan, depth, paths),
 				McpTrustedDiagnosticFormatter.FormatWarnings(plan),
 				FormatNameSearchNotice(plan, paths),
+				FormatGitScopeDiffNotice(arguments),
 				SelectionNotices(
 					plan,
 					includeFilters: true,
@@ -604,7 +605,8 @@ internal sealed class DevProjexMcpTools(
 				formattedAdmissionReport,
 				FormatCompressionUnavailable(prepared.CompressionSnapshot),
 				McpTrustedDiagnosticFormatter.FormatWarnings(plan),
-				SelectionNotices(plan, includeFilters: false, selection.NoticeContext, includeProtection: false));
+				SelectionNotices(plan, includeFilters: false, selection.NoticeContext, includeProtection: false),
+				FormatGitScopeDiffNotice(arguments));
 			return McpToolResults.ProtectedJsonSuccess(
 				envelope,
 				notices,
@@ -706,7 +708,8 @@ internal sealed class DevProjexMcpTools(
 			var trustedPlanWarnings = CombineTrustedNotices(
 				FormatExpansionNotice(expansionResult),
 				McpTrustedDiagnosticFormatter.FormatWarnings(plan),
-				SelectionNotices(plan, includeFilters: true, selection.NoticeContext));
+				SelectionNotices(plan, includeFilters: true, selection.NoticeContext),
+				FormatGitScopeDiffNotice(arguments));
 			operationProgress.Milestone(
 				10,
 				$"scanning files {plan.IncludedFiles.Count}/{plan.IncludedFiles.Count}");

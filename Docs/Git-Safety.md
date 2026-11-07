@@ -108,7 +108,25 @@ branch -r
 rev-parse --abbrev-ref HEAD
 symbolic-ref refs/remotes/origin/HEAD
 worktree list --porcelain
+log --topo-order --no-renames --no-decorate --format=%x1e%H%x00 --name-only -z -n 200 --
+rev-parse --is-shallow-repository
+--literal-pathspecs ls-tree -r -z --full-tree <validated-commit-id> -- <selected-paths>
+--literal-pathspecs ls-files --stage -z -- <selected-paths>
+cat-file --batch-check
+cat-file --batch
 ```
+
+The last four read committed and staged file versions for a Git-scoped diff. A revision is first
+resolved to a commit id with the `rev-parse` form above, and only that full hexadecimal id reaches
+`ls-tree`. The paths come from the call's effective selection, after `--` and with
+`--literal-pathspecs`, so a leading `-` or pathspec magic such as `:(glob)` is an ordinary file name;
+a path with a control character, an empty, `.` or `..` segment, or a backslash is refused before Git
+starts, and one path list is limited to 24,000 characters. Both `cat-file` forms receive only full
+lowercase hexadecimal object ids on standard input, one per line, so Git's revision-name resolution
+never sees caller text. Without `--textconv` or `--filters`, `cat-file` returns stored bytes and runs
+no repository program; none of these forms compares against the working tree, so no clean, smudge,
+process or external-diff driver can run. One object is read only when it is at most 16 MiB, and one
+call reads at most 64 MiB of object content.
 
 The working-tree comparison of the `changes` scope is the one read that also honors user
 configuration, and only for line endings. Git for Windows keeps `core.autocrlf` in its system
@@ -202,6 +220,12 @@ that was actually downloaded. Unix symbolic-link entries are skipped with a coun
 | `ManagedWorktreeAdd`, `ManagedWorktreeRemove`, `ManagedWorktreePrune` | ManagedCheckout | Manage leased cache worktrees. |
 | `ManagedWorktreeList` | LocalRead | Probe/list cache worktrees without writing. |
 | `ManagedConfigWrite` | ManagedCheckout | Write only fixed DevProjex cache metadata keys or the fixed tracked-branch setting. |
+| `ReadHistoryWindow` | LocalRead | Read changed paths of the last 200 commits for importance ranking. |
+| `ReadShallowRepositoryState` | LocalRead | Report whether the repository is a shallow clone. |
+| `ReadTreeEntries` | LocalRead | List blob entries of one resolved commit for literal selected paths. |
+| `ReadIndexEntries` | LocalRead | List index entries for literal selected paths. |
+| `ReadObjectHeaders` | LocalRead | Report type and size for validated object ids read from standard input. |
+| `ReadObjectContents` | LocalRead | Stream stored bytes for validated object ids read from standard input. |
 
 No MCP argument, repository value, profile file, or command-line token selects a Git subcommand. Callers supply only the validated operands accepted by a registered operation.
 

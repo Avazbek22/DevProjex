@@ -593,7 +593,7 @@ Mica使用平台的系統材質，沒有單獨的背景透明度設定。如果�
 * 對於不支援取消的操作，它只會停止狀態列中的指示，操作本身仍可能在背景完成。
 
 ## 19) MCP與AI代理程式
-DevProjex內建本機唯讀MCP伺服器。Claude Code、Codex、Cursor和VS Code等AI代理程式會透過它讀取專案：機密資訊遮罩永遠開啟，代理程式無法變更專案檔案。伺服器提供八個工具：`list_projects`、`get_tree`、`analyze`、`search_project`、`related_files`、`get_file`、`pack_context`和`read_pack`。
+DevProjex內建本機唯讀MCP伺服器。Claude Code、Codex、Cursor和VS Code等AI代理程式會透過它讀取專案：機密資訊遮罩永遠開啟，代理程式無法變更專案檔案。伺服器提供九個工具：`list_projects`、`get_tree`、`analyze`、`search_project`、`related_files`、`get_file`、`get_diff`、`pack_context`和`read_pack`。
 
 ### 19.1 連線用戶端
 MCP選單包含：

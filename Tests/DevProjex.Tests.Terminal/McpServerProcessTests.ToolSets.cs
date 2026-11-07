@@ -6,11 +6,11 @@ namespace DevProjex.Tests.Terminal;
 public sealed partial class McpServerProcessTests
 {
 	private static readonly string[] ReducedTools =
-		["list_projects", "get_tree", "read_pack", "search_project", "related_files", "get_file"];
+		["list_projects", "get_tree", "read_pack", "search_project", "related_files", "get_file", "get_diff"];
 
 	[Theory]
-	[InlineData("full", 28_300)]
-	[InlineData("reduced", 17_500)]
+	[InlineData("full", 31_200)]
+	[InlineData("reduced", 20_300)]
 	public async Task RealProcessPublishesTheSelectedToolSetWithinItsOwnBudget(string toolSet, int ceiling)
 	{
 		using var workspace = new TemporaryDirectory();

@@ -593,7 +593,7 @@ Status-bardagi X (bekor qilish) tugmasi:
 * bekor qilishni qo‘llamaydigan amallarda status-bar indikatsiyasini tugatadi, lekin amal fon rejimida yakunlanishi mumkin.
 
 ## 19) MCP va AI agentlar
-DevProjex tarkibida faqat o‘qish uchun mo‘ljallangan mahalliy MCP server bor. Claude Code, Codex, Cursor va VS Code kabi AI agentlar loyihani u orqali o‘qiydi: sirlarni maskalash doim yoqilgan, agent esa loyiha fayllarini o‘zgartira olmaydi. Serverda sakkizta vosita bor: `list_projects`, `get_tree`, `analyze`, `search_project`, `related_files`, `get_file`, `pack_context` va `read_pack`.
+DevProjex tarkibida faqat o‘qish uchun mo‘ljallangan mahalliy MCP server bor. Claude Code, Codex, Cursor va VS Code kabi AI agentlar loyihani u orqali o‘qiydi: sirlarni maskalash doim yoqilgan, agent esa loyiha fayllarini o‘zgartira olmaydi. Serverda to‘qqizta vosita bor: `list_projects`, `get_tree`, `analyze`, `search_project`, `related_files`, `get_file`, `get_diff`, `pack_context` va `read_pack`.
 
 ### 19.1 Mijozni ulash
 MCP menyusida quyidagilar bor:

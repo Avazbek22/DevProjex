@@ -26,7 +26,8 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 			Create(target, nameof(DevProjexMcpTools.ReadPack), "read_pack", "Read context pack", ReadPackInput, largeResult: true),
 			Create(target, nameof(DevProjexMcpTools.SearchProject), "search_project", "Search project", SearchInput(agentExclusions), openWorld: allowRemote),
 			Create(target, nameof(DevProjexMcpTools.RelatedFiles), "related_files", "Find related files", RelatedFilesInput(agentExclusions), largeResult: true, idempotent: false, openWorld: allowRemote),
-			Create(target, nameof(DevProjexMcpTools.GetFile), "get_file", "Get project file", GetFileInput(agentExclusions), openWorld: allowRemote)
+			Create(target, nameof(DevProjexMcpTools.GetFile), "get_file", "Get project file", GetFileInput(agentExclusions), openWorld: allowRemote),
+			Create(target, nameof(DevProjexMcpTools.GetDiff), "get_diff", "Get project diff", GetDiffInput, openWorld: allowRemote)
 		];
 		var search = _tools.Single(tool => tool.ProtocolTool.Name == "search_project").ProtocolTool;
 		search.Description = searchBodyCharacters == 0
@@ -98,7 +99,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 			BindingFlags.Instance | BindingFlags.Public) ??
 					 throw new MissingMethodException(typeof(DevProjexMcpTools).FullName, methodName);
 		var description = method.GetCustomAttribute<System.ComponentModel.DescriptionAttribute>()?.Description;
-		if (name is "get_tree" or "analyze" or "pack_context" or "search_project" or "related_files" or "get_file")
+		if (name is "get_tree" or "analyze" or "pack_context" or "search_project" or "related_files" or "get_file" or "get_diff")
 			description += ProjectAddressDescription;
 		var options = new McpServerToolCreateOptions
 		{
@@ -136,6 +137,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 		"search_project" => "search file contents with a regular expression",
 		"related_files" => "trace static dependencies around known files",
 		"get_file" => "read project files by path, range, or symbol",
+		"get_diff" => "review changed lines of staged, uncommitted, or ref-to-ref changes",
 		_ => throw new ArgumentOutOfRangeException(nameof(name), name, null)
 	};
 
@@ -531,6 +533,30 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{CompactMaxFileBytesProperty}}
 	  },
 	  "required": ["path"],
+	  "additionalProperties": false
+	}
+	""";
+
+	private static readonly string GetDiffInput = $$"""
+	{
+	  "type": "object",
+	  "properties": {
+	    {{CompactProjectProperty}},
+	    {{CompactBranchProperty}},
+	    "git_scope": {
+	      "description": "Chooses the comparison: changes is HEAD to the working tree including untracked files, staged is HEAD to the index, and diff:<ref>..<ref> compares two commits.",
+	      "default": "changes",
+	      "maxLength": 4096,
+	      "oneOf": [
+	        { "type": "string", "enum": ["changes", "staged"] },
+	        { "type": "string", "pattern": "^diff:(?!.*\\.\\.\\.)(?!.*\\.\\..*\\.\\.)[^\\s-]\\S*\\.\\.[^\\s-]\\S*$" }
+	      ]
+	    },
+	    {{CompactPathsProperty}},
+	    {{CompactIncludeProperty}},
+	    {{CompactExcludeProperty}},
+	    "context_lines": { "description": "Unchanged lines around each change; hunks whose context touches merge.", "default": 3, "oneOf": [ { "type": "integer", "minimum": 0, "maximum": 20 }, { "type": "string", "pattern": "^[0-9]+$" } ] }
+	  },
 	  "additionalProperties": false
 	}
 	""";

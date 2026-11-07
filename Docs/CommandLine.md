@@ -71,6 +71,7 @@ devprojex
 ├── analyze
 ├── search
 ├── related
+├── diff
 ├── tree
 ├── export
 │   ├── context, ctx
@@ -118,9 +119,9 @@ defaulting to 1,800; `off` disables bodies but keeps declaration ranges and matc
 Invalid values fail before startup. The total search response budget remains
 16,000 characters; catalog descriptions and instructions reflect the chosen limit.
 `--tool-set full|reduced` selects a
-startup-fixed catalog: `full` (default) has all eight tools; `reduced` has
-`list_projects`, `get_tree`, `search_project`, `related_files`, `get_file`, and
-`read_pack`, but not `analyze` or `pack_context`. Instructions match the selected
+startup-fixed catalog: `full` (default) has all nine tools; `reduced` has
+`list_projects`, `get_tree`, `search_project`, `related_files`, `get_file`,
+`get_diff`, and `read_pack`, but not `analyze` or `pack_context`. Instructions match the selected
 set; retained search and dependency pages remain readable. Omitted tools return
 the normal unknown-tool error. Secret redaction is mandatory; private-data
 redaction is enabled only by the server startup flag and cannot be controlled by
@@ -255,6 +256,7 @@ request-scoped choice rather than a standalone command.
 | Save profile | direct action | `profile save` | `profile save` | none by design |
 | Search | direct action | `grep` | `search` | `search_project` |
 | Related files | none by design | `related` | `related` | `related_files` |
+| Changed lines | none by design | `diff` | `diff` | `get_diff` |
 | Analyze | direct action | `analyze` | `analyze` | `analyze` |
 | Export context | direct action | `export` | `export context` | `pack_context` |
 | Connect MCP client | MCP menu | `mcp connect` | `mcp connect` | none by design |
@@ -881,6 +883,72 @@ Examples:
 devprojex related Application/Services/ProjectAnalysisService.cs
 devprojex related src/main.ts --direction dependencies --format json
 devprojex related tests/test_app.py --project . --select src --select tests
+```
+
+## Diff
+
+```shell
+devprojex diff [--project PROJECT|URL] [--git-mode changes|staged|diff:<ref>..<ref>] [options]
+```
+
+`diff` prints the changed lines of the effective selection as a unified diff. Without
+`--git-mode` it compares uncommitted changes: `HEAD` against the working tree, including untracked
+files. `--git-mode staged` compares `HEAD` with the index, and `--git-mode diff:<ref>..<ref>`
+compares two commits. The persistent modes `none`, `gitignore`, and `tracked` select files rather
+than changes, so `diff` refuses them with `DPX-CLI-INVALID-VALUE`. The files are exactly the ones
+the same profile, roots, extensions, `--select`, exclusions, and `--max-file-bytes` select in that
+Git scope; nothing outside them is read or named.
+
+The old version is always read from Git's object store and the new one from the working file, the
+index, or the second commit. These reads never run a repository filter, textconv, or external diff;
+[Git-Safety.md](Git-Safety.md) lists the exact command forms. In `changes` mode a repository with a
+clean or process filter is refused with `DPX-GIT-UNSAFE-FILTER`, because Git's working comparison
+would need that filter. When the selection hides secrets or private data (`--hide-secrets`,
+`--hide-private-data`, or the profile), both versions are redacted before they are compared, in one
+redaction scope, so an unchanged line holding a secret stays unchanged and no original value is
+printed for either side. Lines are compared without their line endings and a leading byte-order
+mark, so a CRLF working copy of an LF commit shows only its real changes.
+
+Specific options are:
+
+```text
+--project <PROJECT|URL>
+--git-mode <changes|staged|diff:<ref>..<ref>>   default: changes
+--context <0..20>                               default: 3
+-f, --format <text|json>                        default: text
+-o, --output <PATH|->                           default: -
+--branch <NAME>                                 URL source only
+--max-file-bytes <SIZE>
+--hide-secrets, --no-hide-secrets
+--hide-private-data, --no-hide-private-data
+<shared path-selection options>
+<shared output options>
+```
+
+Text output is one `--- a/<path>` / `+++ b/<path>` section per changed file, largest change first,
+with standard `@@ -a,b +c,d @@` hunks and `--context` unchanged lines around each change; hunks
+whose context touches merge. An added or deleted file uses `/dev/null` on its missing side, and a
+last line without a newline is followed by `\ No newline at end of file`. Tabs stay tabs; other
+control characters in a line or path are escaped so each output line is one physical line. Files
+listed without hunks follow under a localized `Not shown:` heading as `path [status, reason]`, with
+`binary`, `too-large`, or `line-endings-only` as the reason. A localized summary line ends the
+output with the changed, shown, added, and removed counts, followed by the count of deleted files
+that are no longer in the working tree, whose paths are not printed. Every line ends with `\n` on
+every platform. JSON is the deterministic `devprojex-diff` document described in
+[CLI-Output-Contract.md](CLI-Output-Contract.md). `-o` follows the `related` rules: the file is
+written atomically outside the source project, an existing file is never replaced, and success
+prints the absolute path of the written file.
+
+A successful comparison exits `0`, including one with no changes. Git state that cannot be read,
+an unknown revision, or a refused filter is reported through the ordinary selection diagnostics
+with exit code `3`.
+
+Examples:
+
+```shell
+devprojex diff
+devprojex diff --git-mode staged --context 1
+devprojex diff --git-mode diff:main..HEAD --format json -o -
 ```
 
 ## Tree

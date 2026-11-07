@@ -593,7 +593,7 @@ Tombol X (batal) di bilah status:
 * untuk operasi tanpa dukungan pembatalan, tombol ini menghentikan indikasi di bilah status, sementara operasinya sendiri mungkin tetap selesai di latar belakang.
 
 ## 19) MCP dan agen AI
-DevProjex menyertakan server MCP lokal hanya-baca. Agen AI seperti Claude Code, Codex, Cursor, dan VS Code membaca proyek melaluinya: penyamaran rahasia selalu aktif, dan agen tidak dapat mengubah file proyek. Server menyediakan delapan alat: `list_projects`, `get_tree`, `analyze`, `search_project`, `related_files`, `get_file`, `pack_context`, dan `read_pack`.
+DevProjex menyertakan server MCP lokal hanya-baca. Agen AI seperti Claude Code, Codex, Cursor, dan VS Code membaca proyek melaluinya: penyamaran rahasia selalu aktif, dan agen tidak dapat mengubah file proyek. Server menyediakan sembilan alat: `list_projects`, `get_tree`, `analyze`, `search_project`, `related_files`, `get_file`, `get_diff`, `pack_context`, dan `read_pack`.
 
 ### 19.1 Menghubungkan klien
 Menu MCP berisi:

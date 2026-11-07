@@ -134,6 +134,31 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 	}
 
 	[Fact(Timeout = 120_000)]
+	public async Task DiffCommandPublishesTheChangedLinesInTheCommandPanel()
+	{
+		using var repository = new GitModeRepository();
+		repository.Write("App.cs", "public sealed class App { int Before; }\n");
+		repository.Commit();
+		repository.Write("App.cs", "public sealed class App { int After; }\n");
+		await using var terminal = await StartAsync(repository.Root, columns: 160, rows: 40);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.SendAsync(":diff\r", TestContext.Current.CancellationToken);
+		var result = await terminal.WaitForScreenAsync(
+			"Changed files: 1",
+			timeout: TimeSpan.FromSeconds(45),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains("-public sealed class App { int Before; }", result, StringComparison.Ordinal);
+		Assert.Contains("+public sealed class App { int After; }", result, StringComparison.Ordinal);
+		Assert.False(terminal.HasExited);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await QuitAsync(terminal);
+	}
+
+	[Fact(Timeout = 120_000)]
 	public async Task RelatedCommandListsReadableFilesOutsideTheCheckedFocus()
 	{
 		using var workspace = new TemporaryDirectory();

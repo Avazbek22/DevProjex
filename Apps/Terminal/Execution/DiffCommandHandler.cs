@@ -1,0 +1,74 @@
+using DevProjex.Application.Diff;
+using DevProjex.Terminal.CommandLine;
+using DevProjex.Terminal.Rendering;
+
+namespace DevProjex.Terminal.Execution;
+
+public sealed class DiffCommandHandler(
+	TerminalServices services,
+	ITerminalEnvironment environment)
+{
+	public async Task<int> ExecuteAsync(DiffCommandRequest request, CancellationToken cancellationToken)
+	{
+		var status = new StatusRenderer(environment, request.Output);
+		var plan = await status.RunAsync(
+			services.Localization["Terminal.Status.AnalyzingProject"],
+			() => services.ContextFactory.BuildAsync(
+				request.ProjectPath,
+				request.Selection,
+				includeOutputMetrics: false,
+				cancellationToken: cancellationToken,
+				repositorySourceUrl: request.RepositorySourceUrl)).ConfigureAwait(false);
+		plan = await ProjectFileSizeFilter.ApplyAsync(
+			services.ContextPlanner,
+			plan,
+			request.MaxFileBytes,
+			cancellationToken).ConfigureAwait(false);
+		new ContextDiagnosticRenderer(environment, request.Output, services.Localization).Write(plan.Diagnostics);
+		if (plan.HasErrors)
+			return CommandLineExitCodes.PolicyFailure;
+
+		var destination = request.OutputPath is null or "-"
+			? null
+			: Path.GetFullPath(request.OutputPath);
+		if (destination is not null)
+			_ = ExactOutputDestinationValidator.ValidateAnalysis(plan.SourceRoot, destination, overwrite: false);
+		ProjectDiffResult diff;
+		try
+		{
+			diff = await status.RunAsync(
+				services.Localization["Terminal.Status.ComparingVersions"],
+				() => DiffQueryRunner.CompareAsync(services, plan, request.ContextLines, cancellationToken))
+				.ConfigureAwait(false);
+		}
+		catch (ProjectDiffException exception)
+		{
+			new ErrorRenderer(environment, request.Output, services.Localization).Write(new TerminalError(
+				GitScopeFilter.UnavailableDiagnosticCode,
+				services.Localization["Terminal.Diff.Unavailable"],
+				ExitCode: CommandLineExitCodes.PolicyFailure,
+				Exception: exception));
+			return CommandLineExitCodes.PolicyFailure;
+		}
+
+		var payload = request.Format == AnalysisOutputFormat.Json
+			? DiffOutputRenderer.FormatJson(diff)
+			: DiffOutputRenderer.FormatText(diff, services.Localization);
+		if (destination is null)
+		{
+			await environment.Output.WriteAsync(payload.AsMemory(), cancellationToken).ConfigureAwait(false);
+			await environment.Output.FlushAsync(cancellationToken).ConfigureAwait(false);
+			return CommandLineExitCodes.Success;
+		}
+
+		var writtenPath = await AtomicOutputWriter.WriteTextAsync(
+			destination,
+			payload,
+			overwrite: false,
+			cancellationToken,
+			path => ExactOutputDestinationValidator.ValidateAnalysis(plan.SourceRoot, path, overwrite: false))
+			.ConfigureAwait(false);
+		TerminalTextEscaping.WriteSingleLine(environment.Output, writtenPath);
+		return CommandLineExitCodes.Success;
+	}
+}

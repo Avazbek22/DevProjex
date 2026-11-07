@@ -449,6 +449,63 @@ Git mode, exclusions, and file-size limit. No field can contain a file or candid
 outside that manifest. See [Dependencies.md](Dependencies.md) for the evidence and
 resolution semantics.
 
+## Diff JSON
+
+`diff --format json` emits one deterministic document on stdout. Operational progress and
+selection diagnostics stay on stderr. The shape is:
+
+```json
+{
+  "schemaVersion": 1,
+  "kind": "devprojex-diff",
+  "scope": "changes",
+  "files": [
+    {
+      "path": "src/app.py",
+      "status": "modified",
+      "added": 1,
+      "removed": 1,
+      "hunks": [
+        {
+          "oldStart": 1,
+          "oldLines": 3,
+          "newStart": 1,
+          "newLines": 3,
+          "lines": [" import os", "-TIMEOUT = 5", "+TIMEOUT = 10", " RETRIES = 3"]
+        }
+      ]
+    }
+  ],
+  "notShown": [
+    { "path": "assets/logo.png", "status": "modified", "reason": "binary" }
+  ],
+  "counts": {
+    "files": 2,
+    "shown": 1,
+    "added": 1,
+    "removed": 1,
+    "binary": 1,
+    "tooLarge": 0,
+    "lineEndingsOnly": 0,
+    "deleted": 0
+  },
+  "complete": false
+}
+```
+
+`scope` is `changes`, `staged`, or the full `diff:<ref>..<ref>` token. `files` holds every file
+shown with hunks, largest change first and then by path in ordinal order; `path` is portable and
+project-relative, and `oldPath` appears only for a rename shown against its source. `status` is
+`added`, `modified`, `deleted`, or `renamed`. Each hunk carries the unified ranges: a side with no
+lines starts at the line before the hunk, `0` at the top of the file. `lines` holds the hunk lines
+with their unified prefix (` `, `-`, or `+`), unescaped, and the separate entry
+`\ No newline at end of file` after a line that has no newline. `notShown` lists the changed files
+without hunks, with `reason` `binary`, `too-large`, or `line-endings-only`. `counts.deleted` counts
+deleted files that are no longer in the working tree; their paths are never listed. `complete` is
+`true` when every changed file is in `files` and no deleted file was left uncounted by path. When
+the selection hides secrets or private data, both versions are redacted before they are compared,
+so placeholders appear in `lines` exactly as in text output.
+
 ## Tree JSON and XML
 
 `tree --format json` writes one object with two properties: `rootPath`, the absolute

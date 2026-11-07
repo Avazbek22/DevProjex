@@ -31,7 +31,8 @@ public sealed partial class McpServerIntegrationTests
 		"read_pack",
 		"search_project",
 		"related_files",
-		"get_file"
+		"get_file",
+		"get_diff"
 	];
 
 	[Theory]
@@ -74,6 +75,8 @@ public sealed partial class McpServerIntegrationTests
 			var file = await server.CallAsync("get_file", new Dictionary<string, object?> { ["path"] = "Outside.cs" });
 			Assert.NotEqual(true, file.IsError);
 			Assert.Equal(live, AllText(file).Contains("returned outside the current focus", StringComparison.Ordinal));
+			// Not a Git repository: the diff fails, and a failed call is journaled like any other.
+			Assert.True((await server.CallAsync("get_diff")).IsError);
 		}
 
 		using var journal = new AgentJournalStore(
@@ -84,7 +87,7 @@ public sealed partial class McpServerIntegrationTests
 
 		Assert.Equal(live ? AgentJournalMode.Live : AgentJournalMode.Standard, session.Mode);
 		Assert.Equal(ExpectedTools, calls.Select(static call => call.Tool));
-		Assert.Equal(8, session.Totals.Calls);
+		Assert.Equal(9, session.Totals.Calls);
 		Assert.True(session.Totals.ResultCharacters > 0);
 		Assert.True(session.Totals.EstimatedTokens > 0);
 		Assert.DoesNotContain(calls, call => call.Tool == "pack_context" && call.DeliveredPaths.Count > 0);
@@ -2506,7 +2509,8 @@ public sealed partial class McpServerIntegrationTests
 			"pack_context",
 			"search_project",
 			"related_files",
-			"get_file"
+			"get_file",
+			"get_diff"
 		};
 		var searchHints = new Dictionary<string, string>(StringComparer.Ordinal)
 		{
@@ -2517,7 +2521,8 @@ public sealed partial class McpServerIntegrationTests
 			["read_pack"] = "continue reading a stored project result",
 			["search_project"] = "search file contents with a regular expression",
 			["related_files"] = "trace static dependencies around known files",
-			["get_file"] = "read project files by path, range, or symbol"
+			["get_file"] = "read project files by path, range, or symbol",
+			["get_diff"] = "review changed lines of staged, uncommitted, or ref-to-ref changes"
 		};
 		Assert.All(tools, tool =>
 		{
@@ -2595,7 +2600,8 @@ public sealed partial class McpServerIntegrationTests
 			["read_pack"] = ["pack_id", "start_line", "end_line", "start_column"],
 			["search_project"] = ["project", "branch", "pattern", "paths", "include_patterns", "exclude_patterns", "tracked_only", "git_scope", "max_file_bytes", "context_lines", "ignore_case", "symbols", "max_results"],
 			["related_files"] = ["project", "branch", "path", "direction", "include_patterns", "exclude_patterns", "profile", "tracked_only", "git_scope", "max_file_bytes"],
-			["get_file"] = ["project", "branch", "profile", "path", "requests", "start_line", "end_line", "start_column", "symbol"]
+			["get_file"] = ["project", "branch", "profile", "path", "requests", "start_line", "end_line", "start_column", "symbol"],
+			["get_diff"] = ["project", "branch", "git_scope", "paths", "include_patterns", "exclude_patterns", "context_lines"]
 		};
 		foreach (var tool in tools)
 		{
@@ -6420,8 +6426,11 @@ public sealed partial class McpServerIntegrationTests
 		McpSearchOutputAssertions.ContainsMatch(Text(search), "Selected.cs", 1);
 		Assert.DoesNotContain("Untouched.cs:", Text(search), StringComparison.Ordinal);
 		Assert.True(missingRef.IsError);
-		Assert.Contains(McpErrorCodes.ProjectUnavailable, Text(missingRef), StringComparison.Ordinal);
-		Assert.Contains(GitScopeFilter.UnavailableDiagnosticCode, Text(missingRef), StringComparison.Ordinal);
+		Assert.Contains(
+			$"{McpErrorCodes.InvalidArguments}: git_scope names a revision this repository does not have. " +
+			"Check the refs, or use git_scope",
+			Text(missingRef),
+			StringComparison.Ordinal);
 		Assert.Null(missingRef.StructuredContent);
 	}
 
@@ -7944,7 +7953,7 @@ public sealed partial class McpServerIntegrationTests
 			tools.Single(static tool => tool.Name == "list_projects").ProtocolTool.Description,
 			StringComparison.Ordinal);
 		foreach (var tool in tools.Where(static tool => tool.Name is
-			"get_tree" or "analyze" or "pack_context" or "search_project" or "related_files" or "get_file"))
+			"get_tree" or "analyze" or "pack_context" or "search_project" or "related_files" or "get_file" or "get_diff"))
 		{
 			Assert.Contains("absolute path returned by list_projects", tool.ProtocolTool.Description,
 				StringComparison.Ordinal);
@@ -8416,7 +8425,8 @@ public sealed partial class McpServerIntegrationTests
 			("get_file", await server.CallAsync("get_file", new Dictionary<string, object?>(remote)
 			{
 				["path"] = "Main.cs"
-			}), true)
+			}), true),
+			("get_diff", await server.CallAsync("get_diff", remote), true)
 		};
 		var stored = results.Single(static item => item.Name == "pack_context").Result;
 		if (Text(stored).Contains("Pack stored as '", StringComparison.Ordinal))

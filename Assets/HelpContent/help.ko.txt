@@ -592,7 +592,7 @@ Mica는 플랫폼의 시스템 재질을 사용하며 별도의 배경 투명도
 * 취소를 지원하지 않는 작업은 상태 표시줄 표시만 멈추고, 작업 자체는 백그라운드에서 끝날 수 있습니다.
 
 ## 19) MCP 및 AI 에이전트
-DevProjex에는 로컬 읽기 전용 MCP 서버가 포함되어 있습니다. Claude Code, Codex, Cursor, VS Code 같은 AI 에이전트는 이 서버를 통해 프로젝트를 읽습니다. 비밀 정보 마스킹은 항상 켜져 있으며, 에이전트는 프로젝트 파일을 바꿀 수 없습니다. 서버는 8개의 도구를 제공합니다: `list_projects`, `get_tree`, `analyze`, `search_project`, `related_files`, `get_file`, `pack_context`, `read_pack`.
+DevProjex에는 로컬 읽기 전용 MCP 서버가 포함되어 있습니다. Claude Code, Codex, Cursor, VS Code 같은 AI 에이전트는 이 서버를 통해 프로젝트를 읽습니다. 비밀 정보 마스킹은 항상 켜져 있으며, 에이전트는 프로젝트 파일을 바꿀 수 없습니다. 서버는 9개의 도구를 제공합니다: `list_projects`, `get_tree`, `analyze`, `search_project`, `related_files`, `get_file`, `get_diff`, `pack_context`, `read_pack`.
 
 ### 19.1 클라이언트 연결
 “MCP” 메뉴에는 다음 항목이 있습니다.

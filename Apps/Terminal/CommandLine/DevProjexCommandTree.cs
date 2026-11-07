@@ -79,6 +79,7 @@ public sealed class DevProjexCommandTree
 		root.Subcommands.Add(BuildAnalyzeCommand());
 		root.Subcommands.Add(BuildSearchCommand());
 		root.Subcommands.Add(BuildRelatedCommand());
+		root.Subcommands.Add(BuildDiffCommand());
 		root.Subcommands.Add(BuildTreeCommand());
 		root.Subcommands.Add(BuildExportCommand());
 		root.Subcommands.Add(BuildProfileCommand());
@@ -1201,6 +1202,109 @@ public sealed class DevProjexCommandTree
 							parseResult.GetValue(depth),
 							parseResult.GetValue(outputPath),
 							projectSpec),
+						cancellationToken).ConfigureAwait(false);
+				},
+				_localization,
+				forceReplacementAvailable: false).ConfigureAwait(false);
+		});
+		return command;
+	}
+
+	private Command BuildDiffCommand()
+	{
+		var command = new Command("diff", L("Terminal.Command.Diff"));
+		CliExamplesRegistry.Set(
+			command,
+			"devprojex diff",
+			"devprojex diff --git-mode staged --context 1",
+			"devprojex diff --git-mode diff:main..HEAD --format json -o -");
+		var project = new Option<string?>("--project")
+		{
+			Description = L("Terminal.Option.DiffProject"),
+			HelpName = "PROJECT",
+			DefaultValueFactory = _ => Directory.GetCurrentDirectory()
+		};
+		project.CompletionSources.Add(context => FileSystemCompletionSource.Complete(
+			context,
+			FileSystemCompletionKind.Directories));
+		CliHelpMetadataRegistry.SuppressParserDefault(project);
+		var contextLines = new Option<int>("--context")
+		{
+			Description = L("Terminal.Option.DiffContext"),
+			HelpName = "N",
+			DefaultValueFactory = _ => DiffQueryRunner.DefaultContextLines
+		};
+		var format = CliChoiceSymbols.Option(
+			"--format",
+			L("Terminal.Option.Format"),
+			CliTextJsonFormat.Text,
+			CliChoiceSets.TextJson,
+			_localization);
+		format.Aliases.Add("-f");
+		var outputPath = OutputPathOption();
+		var branch = BranchOption();
+		var selection = new SelectionOptions(
+			_localization,
+			environment,
+			includeCodeTransformations: false,
+			includeMaxFileBytes: true,
+			gitModeCapability: GitModeOptionCapability.Momentary);
+		command.Options.Add(project);
+		command.Options.Add(contextLines);
+		command.Options.Add(format);
+		command.Options.Add(outputPath);
+		command.Options.Add(branch);
+		selection.AddTo(command);
+		_output.AddProgressTo(command);
+		command.Validators.Add(result =>
+		{
+			if (CliParseValue.TryGet(result, contextLines, out var value) &&
+				value is < 0 or > DiffQueryRunner.MaximumContextLines)
+			{
+				result.AddError(LocalizedParseError.Create(L("Terminal.Validation.DiffContext")));
+			}
+		});
+		command.SetAction(async (parseResult, cancellationToken) =>
+		{
+			var output = _output.Get(parseResult);
+			return await CommandExecution.RunAsync(
+				environment,
+				output,
+				async () =>
+				{
+					using var serviceScope = CreateServiceScope(parseResult);
+					var services = serviceScope.Services;
+					var projectSource = parseResult.GetValue(project) ?? Directory.GetCurrentDirectory();
+					await using var resolvedSource = await new TerminalProjectSourceResolver(
+							services,
+							environment,
+							output)
+						.ResolveAsync(projectSource, parseResult.GetValue(branch), cancellationToken)
+						.ConfigureAwait(false);
+					var selectedPaths = await selection.ReadSelectedPathsAsync(parseResult, cancellationToken)
+						.ConfigureAwait(false);
+					var spec = await selection.ResolveAsync(
+						parseResult,
+						resolvedSource.ProjectPath,
+						services,
+						selectedPaths,
+						cancellationToken).ConfigureAwait(false);
+					// Without --git-mode the command reviews uncommitted changes, whatever Git mode
+					// the profile keeps for other commands.
+					if (parseResult.GetResult(selection.GitMode) is null)
+						spec = spec with { GitMode = GitFilteringMode.Changes, GitDiffRange = null };
+					return await new DiffCommandHandler(services, environment).ExecuteAsync(
+						new DiffCommandRequest(
+							resolvedSource.ProjectPath,
+							spec,
+							parseResult.GetValue(contextLines),
+							parseResult.GetValue(format) == CliTextJsonFormat.Json
+								? AnalysisOutputFormat.Json
+								: AnalysisOutputFormat.Text,
+							output,
+							selection.GetMaxFileBytes(parseResult),
+							resolvedSource.RepositorySourceUrl,
+							parseResult.GetValue(outputPath)),
 						cancellationToken).ConfigureAwait(false);
 				},
 				_localization,

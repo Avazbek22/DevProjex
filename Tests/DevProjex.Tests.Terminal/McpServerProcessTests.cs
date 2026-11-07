@@ -20,7 +20,8 @@ public sealed partial class McpServerProcessTests
 		"read_pack",
 		"search_project",
 		"related_files",
-		"get_file"
+		"get_file",
+		"get_diff"
 	];
 	private const string Secret = "ghp_" + "a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL";
 	private const string PrivateEmail = "alice.smith" + "@company.io";
@@ -60,7 +61,7 @@ public sealed partial class McpServerProcessTests
 			clientPhase.Token))
 		{
 			var tools = await client.ListToolsAsync(options: null, clientPhase.Token);
-			Assert.Equal(8, tools.Count);
+			Assert.Equal(9, tools.Count);
 			Assert.Equal(ExpectedTools, tools.Select(static tool => tool.Name));
 
 			var missing = await client.CallToolAsync(
@@ -359,7 +360,8 @@ public sealed partial class McpServerProcessTests
 				["read_pack"] = ("Reads a stored result page", "pack_context instead", "1,000 lines"),
 				["search_project"] = ("Searches transformed text", "use related_files for", "max_results=1..200"),
 				["related_files"] = ("Finds evidenced dependencies", "use search_project for", "direction=dependencies|dependents|both"),
-				["get_file"] = ("Reads selected text", "pack_context for", "sixteen file/range/symbol")
+				["get_file"] = ("Reads selected text", "pack_context for", "sixteen file/range/symbol"),
+				["get_diff"] = ("Shows what changed", "use get_file for whole files", "context_lines=0..20")
 			};
 			foreach (var tool in tools)
 			{

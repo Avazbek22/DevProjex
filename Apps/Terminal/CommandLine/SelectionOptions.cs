@@ -6,7 +6,8 @@ internal enum GitModeOptionCapability
 {
 	All,
 	Desktop,
-	Persistent
+	Persistent,
+	Momentary
 }
 
 internal sealed class SelectionOptions
@@ -381,10 +382,16 @@ internal sealed class SelectionOptions
 		LocalizationService localization,
 		GitModeOptionCapability capability)
 	{
-		var fixedTokens = capability == GitModeOptionCapability.Persistent
-			? CliChoiceSets.PersistentGitMode.Tokens
-			: CliChoiceSets.GitMode.Tokens;
-		var advertisesDiff = capability == GitModeOptionCapability.All;
+		var fixedTokens = capability switch
+		{
+			GitModeOptionCapability.Persistent => CliChoiceSets.PersistentGitMode.Tokens,
+			GitModeOptionCapability.Momentary => CliChoiceSets.GitMode.Tokens
+				.Where(static token => GitScopeSelection.TryParse(token, out var mode, out _) &&
+									   GitScopeSelection.IsMomentary(mode))
+				.ToArray(),
+			_ => CliChoiceSets.GitMode.Tokens
+		};
+		var advertisesDiff = capability is GitModeOptionCapability.All or GitModeOptionCapability.Momentary;
 		var advertisedTokens = advertisesDiff
 			? fixedTokens.Concat(["diff:<ref>..<ref>"]).ToArray()
 			: fixedTokens.ToArray();
@@ -408,7 +415,8 @@ internal sealed class SelectionOptions
 				if (result.Tokens.Count == 1)
 				{
 					var token = result.Tokens[0].Value;
-					if (GitScopeSelection.TryParse(token, out var mode, out var diffRange))
+					if (GitScopeSelection.TryParse(token, out var mode, out var diffRange) &&
+						(capability != GitModeOptionCapability.Momentary || GitScopeSelection.IsMomentary(mode)))
 					{
 						return new CliGitModeValue(mode, diffRange);
 					}

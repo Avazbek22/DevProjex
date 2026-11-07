@@ -593,7 +593,7 @@ Mica使用平台的系统材质，没有单独的背景透明度设置。如果�
 * 对于不支持取消的操作，它只停止状态栏中的指示，操作本身仍可能在后台完成。
 
 ## 19) MCP与AI代理
-DevProjex内置本地只读MCP服务器。Claude Code、Codex、Cursor和VS Code等AI代理通过它读取项目：机密信息遮蔽始终开启，代理无法更改项目文件。服务器提供八个工具：`list_projects`、`get_tree`、`analyze`、`search_project`、`related_files`、`get_file`、`pack_context`和`read_pack`。
+DevProjex内置本地只读MCP服务器。Claude Code、Codex、Cursor和VS Code等AI代理通过它读取项目：机密信息遮蔽始终开启，代理无法更改项目文件。服务器提供九个工具：`list_projects`、`get_tree`、`analyze`、`search_project`、`related_files`、`get_file`、`get_diff`、`pack_context`和`read_pack`。
 
 ### 19.1 连接客户端
 MCP菜单包含：

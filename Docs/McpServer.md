@@ -9,9 +9,9 @@ server starts with `--allow-remote`.
 devprojex mcp --root /absolute/path/to/project
 ```
 
-The default `--tool-set full` publishes all eight tools, with unchanged instructions
+The default `--tool-set full` publishes all nine tools, with unchanged instructions
 and responses. `--tool-set reduced` publishes exactly `list_projects`, `get_tree`,
-`search_project`, `related_files`, `get_file`, and `read_pack`; it omits `analyze`
+`search_project`, `related_files`, `get_file`, `get_diff`, and `read_pack`; it omits `analyze`
 and `pack_context`. The set is fixed at startup, not changed during a session.
 Reduced instructions and catalog guidance do not mention omitted tools. Calling an omitted tool returns
 the normal unknown-tool protocol error (`-32602`) naming that tool. `read_pack`
@@ -572,7 +572,7 @@ Every `DPX-MCP-*` code a tool can return in its `isError: true` result.
 | `DPX-MCP-UNKNOWN-PROJECT` | The supplied `project` value does not match a listed project. |
 | `DPX-MCP-PROJECT-UNAVAILABLE` | The project root is temporarily unreadable; retry advised. |
 | `DPX-MCP-PATH-NOT-FOUND` | The requested path does not exist in the effective selection. |
-| `DPX-MCP-INVALID-ARGUMENTS` | Tool arguments are malformed, ambiguous, or mutually exclusive. |
+| `DPX-MCP-INVALID-ARGUMENTS` | Tool arguments are malformed, ambiguous, or mutually exclusive, or a `git_scope` range names a revision the repository does not have. |
 | `DPX-MCP-INVALID-RANGE` | The requested line or column range is invalid or past end of file. |
 | `DPX-MCP-INVALID-PATTERN` | The search pattern is unsupported (for example a character class) or malformed. |
 | `DPX-MCP-PAYLOAD-TRUNCATED` | The response would exceed the payload limit and was withheld or truncated. |
@@ -599,7 +599,7 @@ allowlisted to keep documentation and fixtures readable.
 The tool order is stable. Every tool is annotated read-only and non-destructive
 because none modifies the source project. `pack_context` and `related_files` are
 non-idempotent because either may create a stored result with a new session id. Without `--allow-remote`, every tool is
-closed-world; with it, the six tools that accept `project` Git URLs are annotated
+closed-world; with it, the seven tools that accept `project` Git URLs are annotated
 open-world.
 
 Discovery is conditional rather than a mandatory sequence. Use `list_projects` only
@@ -614,21 +614,22 @@ can ignore it without changing any route or result.
 ### MCP catalog size
 
 Before a client asks anything about a project, it receives the tool schemas and server
-instructions. The measurements below describe data sent to the client on 2026-09-30: the
+instructions. The measurements below describe data sent to the client on 2026-11-07: the
 official C# client, as the connection-payload process test records it. How much model context
 that data uses depends on the client and how it loads tools:
 
 | Payload | Characters |
 |---|---:|
-| `tools/list` C# client wire result, default server | 28,058 |
-| `tools/list` C# client wire result with per-call exclusions | 30,674 |
-| `instructions` | 1,175 |
+| `tools/list` C# client wire result, default server | 30,928 |
+| `tools/list` C# client wire result with per-call exclusions | 33,544 |
+| `instructions` | 1,197 |
 
 Removing the two output schemas reduced the default catalog from 42,370 characters at the
 base revision to 32,516 before the named batch-read selector and discovery hints were added.
 Concise descriptions brought it below 28,000 characters without changing schema types,
 accepted values, bounds, or tool behavior; later additions such as the `search_project`
-`symbols` parameter bring the default catalog to 28,058. `pack_context` is the largest single
+`symbols` parameter brought the default catalog to 28,058, and the `get_diff` tool adds 2,870
+characters to reach 30,928. `pack_context` is the largest single
 tool at 5,824 characters, including 4,877 characters of input schema. The `exclusions`
 parameter costs a flat 2,616 characters, 436 on each of the six tools that take it. A process
 test holds the default `tools/list` result and the instructions under ceilings with deliberate
@@ -644,6 +645,7 @@ description has to fit a budget rather than grow one silently.
 | `read_pack` | `pack_id`, `start_line?`, `end_line?`, `start_column?` | Pages a stored result from `pack_context`, `search_project`, or `related_files`. Inclusive, 1-based line range; `start_column` continues within `start_line` using 1-based Unicode characters. At most 1,000 lines or 50,000 characters per call. An `end_line` after EOF is clamped and reported. A manual protection-policy change after storage fails with `DPX-MCP-STORED-PROTECTION-CHANGED` and requires rerunning the producing tool. If the current saved policy cannot be verified, `DPX-MCP-STORED-PROTECTION-UNAVAILABLE` fails closed until the selection becomes readable. A selection-only revision change keeps the stored page readable with its existing revision warning. Call the originating tool again after server restart or quota eviction. |
 | `search_project` | `project?`, `branch?`, `pattern`, `paths?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `symbols?`, `max_results?` | `symbols: true` is the declaration-name mode of CLI `search --symbols`: `pattern` names one or more declarations separated by `|`, and each alternative keeps its last word before any parameter list or type arguments, so `class Foo`, `type Foo|interface Foo` and `def foo(` all ask for their names. A qualified name is matched on its last segment and then narrowed to that declaration. Only declarations with those names match, never their uses; a pattern that names nothing is refused with `DPX-MCP-INVALID-ARGUMENTS`, and so is a pattern that looks like a regular expression (a backslash, `^`, `+`, `.*` or `(?` anywhere, or `*`, `?`, brackets, braces or parentheses where a name stands), with a hint to pass the name or omit `symbols` to search text with a regex. Brackets, braces and parentheses after a name stay a declaration tail, as in `def foo(`, one trailing `?` stays part of a name such as Ruby `valid?`, and `$` stays a name character. Otherwise matches over safe transformed text, grouped by file: the relative path stands on its own line, then each line of the group is written as `line:text` for a match and `line-text` for context. Quoted text keeps its tabs as tabs, so it copies back as code; any other control character, U+2028, or U+2029 is escaped as `\uXXXX` so each result line stays one physical line. Line numbers refer to that returned text after replacements. `search_project` matches file content only and never matches paths; use `get_tree` with `include_patterns` to find files by name. A bounded collector keeps stronger evidence from everything inspected instead of preserving arrival order. The returned match text is capped at 16,000 characters. Overlapping or adjacent context windows are merged and distinct groups use `--`. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200. The trusted `[Search boundary]` line distinguishes a complete result from every partial limit and reports inspected sources, encountered and retained matches, written matches, named declaration files, and continuation guidance. Actual text inserted by redaction never matches. |
 | `related_files` | `project?`, `branch?`, `path`, `direction?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `tracked_only?`, `git_scope?`, `max_file_bytes?` | Statically evidenced dependencies and dependents for one seed or up to 16 seeds. `direction` is `dependencies`, `dependents`, or `both` (default). The trusted `[Resolution]` line counts resolved, ambiguous, unresolved, and external edges for the call. Coverage distinguishes recognized supported languages from unsupported files and reports configuration diagnostics. Evidence protection consumes transformed sources one at a time under a cumulative 64 MiB source budget; sources outside that budget are not opened by this pass and their dynamic fragments become bounded generic reasons. Results larger than 50,000 characters use `read_pack`. |
+| `get_diff` | `project?`, `branch?`, `git_scope?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `context_lines?` | Masked unified diff hunks for the effective selection of a Git scope: `changes` (default), `staged`, or `diff:<ref>..<ref>`. Each changed file is listed largest change first with its status and added/removed counts; hunks carry `context_lines` (0..20, default 3) unchanged lines and merge when their context touches. Both versions pass the same redaction as file content before they are compared. Binary, oversized, and line-ending-only files are counted, not shown; deleted files outside the working tree are counted by number only. At most 50,000 characters; a file that does not fit whole is listed under `Not shown` and the result is `partial`. See [`get_diff`](#get_diff). |
 | `get_file` | `project?`, `branch?`, `profile?`, either `path` with `start_line?`, `end_line?`, `start_column?`, `symbol?`, or `requests` | Redacted text from one effective file or a batch of up to eight file requests and sixteen file selections. Every returned section starts with its path and returned line interval. A batch item with only `path` reads the whole file; `ranges` or `symbol` narrows it. Ranges are inclusive, each physical file is read and redacted once, overlaps merge, and every original range reports `ok`, `partial`, `not-returned`, or `unavailable` from its own returned coverage. Both forms share the 1,000-line/50,000-character limit. Coordinates refer to returned text after replacements. A non-empty file that cannot pass the 16 MiB mandatory-redaction boundary is withheld; the single form returns `DPX-MCP-PAYLOAD-TRUNCATED` and never returns an empty success, while batch output reports the count-only unavailable status. `profile` applies the same effective selection and transformations as `analyze` and `pack_context`. Markdown-escaped names copied from default `get_tree` are accepted (`\_` and other ASCII punctuation); use `format: "text"` to copy unescaped names. A `start_line` or `end_line` that holds several numbers, or an unknown range-like argument such as `start_range`, is refused with a pointer to the `requests` form; a directory `path` is refused with `DPX-MCP-PATH-NOT-FOUND`, and the message names up to 12 of its readable entries in the effective selection, suggests a file to read when the directory holds one (its `index` file, `__init__.py`, or `mod.rs` first), and keeps the `get_tree` call that lists it. |
 
 `requests` may also arrive as a string holding a JSON array, which some clients send;
@@ -778,6 +780,99 @@ a source identity change, or a change to an observed control file invalidates th
 affected snapshot. Changing only `related_files` seeds or `direction` does not;
 those are projections over the same immutable index. This is an optimization,
 not a strict filesystem snapshot mode, and no strict cache switch is offered.
+
+### `get_diff`
+
+`get_diff` answers "what changed" with the changed lines only, where `git_scope` on the other tools
+selects the changed files and returns them whole. It reads exactly the files the same call's
+selection holds: `git_scope` (default `changes`), `paths`, `include_patterns`,
+`exclude_patterns`, the server exclusions, `.gitignore`, smart ignore, and a live focus all apply
+as they do for `get_tree`, and no file outside that selection is read or named.
+
+**Where each version comes from.** For `changes` the old version is the blob in `HEAD` and the new
+version is the working file, read through the same guarded read as `get_file`. For `staged` the old
+version is the blob in `HEAD` and the new one the index entry at stage 0. For `diff:<A>..<B>` both
+come from Git objects: each reference is resolved to a commit first and only that commit id reaches
+Git. A branch without commits has no old version, so every file is added. Versions are read with
+the four object reads listed under LocalRead in [Git process safety](Git-Safety.md): no `git show`,
+`textconv`, clean or smudge filter, external diff, or working-tree comparison is involved, so no
+program the repository configures can run. The `changes` scope itself still needs Git's working
+comparison, so it is refused with `DPX-GIT-UNSAFE-FILTER` in a repository with a clean or process
+filter; `staged` and ref-to-ref diffs remain available there.
+
+**Masking happens before the diff.** Both versions pass the secret and private-data redaction that
+`get_file` applies, under the selected file's path, inside one redaction scope for the whole call.
+One value therefore gets one placeholder in either version: an unchanged line that holds a secret
+compares as unchanged and is shown only as context, and a rotated secret shows two different
+placeholders. A value masked in one version is also masked wherever it still appears unmasked in the
+other, because detection runs per text and a hand-marked value or a context-dependent rule can be
+found in one version and missed in the other. No original value of a masked span reaches either side
+of the output. Content transformations of the active profile, such as compression, are not applied:
+the diff compares the redacted text of each version.
+
+**Line endings.** A committed blob is often LF while the working file is CRLF under
+`core.autocrlf`. Lines are split on `\n` and one trailing `\r` is removed from each, and a leading
+byte-order mark is ignored, so such a file shows only its real changes. A file whose versions differ
+only in line endings, a byte-order mark, or other bytes no line shows (such as a mode change) is
+listed as `line-endings-only` without hunks. A last line without a newline is followed by
+`\ No newline at end of file`, as in Git.
+
+**Limits.** Text classification follows `get_file`: binary content, an unsupported encoding, a
+symbolic link, a submodule, or an unmerged index entry is listed as `binary`; a version over the
+16 MiB redaction limit, over 50,000 lines, or past the 64 MiB of object content one call reads is
+`too-large`. The line diff is Myers' algorithm over whole lines after the common prefix and suffix
+are removed; a change that would need more than 2,000 added and removed lines of search is reported
+as `too-large` rather than approximated, while a change that shares no line between the versions,
+such as an added file, needs no search and is always shown.
+
+**Deleted and renamed files.** A file deleted from the working tree has no path the selection
+filters can be checked against without the file, so it is counted as `deleted=N` and never named.
+A file that still exists but is deleted on the new side, such as one removed with
+`git rm --cached`, is in the selection and is shown with `+++ /dev/null`. A rename from `staged` or
+`diff:<A>..<B>` is shown against its source only when the source path is itself in the selection;
+otherwise the destination is an added file and the source counts as deleted.
+
+**Response shape.** Every project path, hunk, and reference stays inside the untrusted-data block:
+
+```text
+Root: <project>
+Scope: changes
+
+Changed files (largest first):
+httpx/_config.py +2 -2 [modified]
+logo.png [modified, binary]
+
+--- a/httpx/_config.py
++++ b/httpx/_config.py
+@@ -243,6 +243,6 @@
+...
+```
+
+A rename is listed as `[renamed from <path>]` with `--- a/<source>`; an added or deleted file uses
+`/dev/null` on its missing side. Content lines keep their tabs; any other control character, U+2028,
+or U+2029 is escaped as `\uXXXX`, as in `search_project`. Files are ordered by added plus removed
+lines, then by path in ordinal order. The whole response stays within 50,000 characters: a file
+whose hunks do not fit whole is moved, with its counts, to a `Not shown:` list at the end of the
+block, and later, smaller files still use the remaining room.
+
+The trusted lines after the block hold only counts and fixed words:
+
+```text
+[Diff] scope=changes · files=2 · shown=1 · added=2 · removed=2 · complete
+[Diff] not shown: binary=1 · deleted=2
+[Diff] partial · 1 file(s) not shown to stay within 50,000 characters; narrow paths or include_patterns, or lower context_lines.
+[Diff] no changes in the effective selection for this scope.
+```
+
+`scope` is `changes`, `staged`, or `diff`; the references of a range appear only on the `Scope:`
+line inside the block. `shown` counts files whose hunks are in the response. The `not shown` line
+lists only its nonzero fields, in this order, and the `partial` line appears only when a file was
+left out for the character limit. The usual `[Effective filters]` and `[Protection]` (or
+`[Unchanged]`) lines follow.
+
+`get_tree`, `analyze`, and `pack_context` called with `git_scope` add the trusted line
+`[Diff] get_diff with the same git_scope returns only the changed lines.` to every such response.
+`branch` remains valid only for a Git URL; its error on a local project points to `get_diff`.
 
 ### `pack_context.expand_related`
 
@@ -1083,7 +1178,7 @@ contains counts only; structured analysis data remains inside its untrusted repr
 Unsupported languages and files rejected by parse or structural safety checks are
 separate unchanged-file outcomes and do not produce this trailer.
 
-All eight tools omit `outputSchema` and `structuredContent` and return the useful
+All nine tools omit `outputSchema` and `structuredContent` and return the useful
 payload in text blocks under `content`. `list_projects` and `analyze` place their
 JSON object inside the standard spotlighted untrusted-data block; the other tools
 return their existing text or document shape there. This
@@ -1771,16 +1866,20 @@ already enabled by that profile. A non-Git project rejects the option with an
 actionable error instead of returning an empty result.
 
 `git_scope` accepts only the narrowing values `staged`, `changes`, and
-`diff:<ref>..<ref>` on `get_tree`, `analyze`, `pack_context`, and
-`search_project`, and `related_files`. It intersects the server/profile baseline and therefore cannot
+`diff:<ref>..<ref>` on `get_tree`, `analyze`, `pack_context`,
+`search_project`, `related_files`, and `get_diff`. It intersects the server/profile baseline and therefore cannot
 re-enable paths excluded by `tracked_only` or a tracked profile. Staged selects
 paths changed in the index; changes selects staged, unstaged, and non-ignored
 untracked paths; diff selects paths changed between two Git references. These
 scopes use Git only to select paths: every existing file's content comes from the
-current working tree, never from index or reference blobs. The complete value is
+current working tree, never from index or reference blobs; `get_diff` is the one tool that
+reads those blobs, to show the changed lines. The complete value is
 limited to 4,096 characters.
 Deleted paths are omitted with a `DPX-GIT-STATE-DELETED` warning. A non-Git
-project or unavailable/invalid Git state returns an actionable tool error.
+project or unavailable/invalid Git state returns an actionable tool error. A local
+`diff:<ref>..<ref>` that names a revision the repository does not have returns
+`DPX-MCP-INVALID-ARGUMENTS` saying so, and adds that the repository is a shallow clone when it
+is one; other Git state failures keep `DPX-MCP-PROJECT-UNAVAILABLE`.
 
 Profiles use the existing project profile mechanism. `standard` is the desktop
 set of all eight exclusion toggles with `gitignore`, so it is stricter than the
