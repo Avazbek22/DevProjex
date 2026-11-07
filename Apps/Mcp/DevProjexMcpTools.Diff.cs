@@ -202,11 +202,12 @@ internal sealed partial class DevProjexMcpTools
 
 	internal static string? FormatDiffNotShownNotice(ProjectDiffResult diff)
 	{
-		var parts = new List<string>(4);
+		var parts = new List<string>(5);
 		Add("binary", diff.Count(ProjectDiffOmission.Binary));
 		Add("too-large", diff.Count(ProjectDiffOmission.TooLarge));
 		Add("change-too-large", diff.Count(ProjectDiffOmission.ChangeTooLarge));
 		Add("line-endings-only", diff.Count(ProjectDiffOmission.LineEndingsOnly));
+		Add("content-unchanged", diff.Count(ProjectDiffOmission.ContentUnchanged));
 		Add("deleted", diff.DeletedOutsideSelection);
 		Add("not-in-working-tree", diff.NotInWorkingTree);
 		if (parts.Count == 0)

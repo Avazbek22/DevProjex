@@ -817,9 +817,10 @@ the diff compares the redacted text of each version.
 **Line endings.** A committed blob is often LF while the working file is CRLF under
 `core.autocrlf`. Lines are split on `\n` and one trailing `\r` is removed from each, and a leading
 byte-order mark is ignored, so such a file shows only its real changes. A file whose versions differ
-only in line endings, a byte-order mark, or other bytes no line shows (such as a mode change) is
-listed as `line-endings-only` without hunks. A last line without a newline is followed by
-`\ No newline at end of file`, as in Git.
+only in line endings or a byte-order mark is listed as `line-endings-only` without hunks. A file Git
+reports as changed whose bytes are otherwise identical on both sides, such as a `chmod` that flips
+the executable bit with no content change, is listed as `content-unchanged` instead. A last line
+without a newline is followed by `\ No newline at end of file`, as in Git.
 
 **Limits.** Text classification follows `get_file`: binary content, an unsupported encoding, a
 symbolic link, a submodule, or an unmerged index entry is listed as `binary`; a version over the

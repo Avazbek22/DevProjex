@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using DevProjex.Application.Compression;
 using DevProjex.Application.Context;
 using DevProjex.Application.Diff;
@@ -60,6 +61,67 @@ public sealed class CrossVersionRedactionTests
 		var (oldText, newText) = CrossVersionRedaction.Apply("a\n", Unmasked("a\n"), "b\n", Unmasked("b\n"));
 
 		Assert.Equal(("a\n", "b\n"), (oldText, newText));
+	}
+
+	[Fact]
+	public void AMaskPartiallyOverlappingTheFullValueCoversTheirUnionInBothVersions()
+	{
+		// The old side's own detector only masked the inner part of the value (a narrower match),
+		// while the new side masked the full value. The full value found by the global scan in the
+		// old source only partially overlaps the old side's own, narrower mask, so the fix must
+		// widen that mask to cover the whole value instead of skipping the overlap.
+		const string value = "s3cr3t-value-12";
+		var oldSource = $"key = \"{value}\"\n";
+		var newSource = $"key = \"{value}\"\nkey = \"{value}\"\n";
+		var innerStart = oldSource.IndexOf(value, StringComparison.Ordinal) + 2;
+		const int innerLength = 10;
+		var newStart = newSource.IndexOf(value, StringComparison.Ordinal);
+
+		var (oldText, newText) = CrossVersionRedaction.Apply(
+			oldSource,
+			Masked(oldSource, innerStart, innerLength),
+			newSource,
+			Masked(newSource, newStart, value.Length));
+
+		Assert.DoesNotContain(value, oldText, StringComparison.Ordinal);
+		Assert.DoesNotContain(value, newText, StringComparison.Ordinal);
+		Assert.Equal($"key = \"{Placeholder}\"\n", oldText);
+		Assert.Equal($"key = \"{Placeholder}\"\nkey = \"{Placeholder}\"\n", newText);
+	}
+
+	[Fact]
+	public void ManyDistinctValuesOnALargeTextCompleteQuickly()
+	{
+		var values = Enumerable.Range(0, 4096).Select(static index => $"value-{index:D8}-secret").ToArray();
+		var builder = new StringBuilder();
+		foreach (var value in values)
+			builder.Append("line irrelevant filler text around ").Append(value).Append(" more filler\n");
+		while (builder.Length < 1024 * 1024)
+			builder.Append("padding padding padding padding padding padding padding padding\n");
+		var source = builder.ToString();
+		var mapped = Masked(source, source.IndexOf(values[0], StringComparison.Ordinal), values[0].Length);
+
+		var stopwatch = Stopwatch.StartNew();
+		CrossVersionRedaction.Apply(source, mapped, source, Unmasked(source));
+		stopwatch.Stop();
+
+		Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(10), $"Masking took {stopwatch.Elapsed}.");
+	}
+
+	[Fact]
+	public void CancellationStopsProcessingBeforeCompletion()
+	{
+		var values = Enumerable.Range(0, 2048).Select(static index => $"value-{index:D8}-secret").ToArray();
+		var builder = new StringBuilder();
+		foreach (var value in values)
+			builder.Append("filler text around ").Append(value).Append(" more filler\n");
+		var source = builder.ToString();
+		var mapped = Masked(source, source.IndexOf(values[0], StringComparison.Ordinal), values[0].Length);
+		using var cancelled = new CancellationTokenSource();
+		cancelled.Cancel();
+
+		Assert.Throws<OperationCanceledException>(() =>
+			CrossVersionRedaction.Apply(source, mapped, source, Unmasked(source), cancelled.Token));
 	}
 
 	private static SecretTextRedactionResult Masked(string source, int start, int length)
@@ -184,6 +246,109 @@ public sealed class ProjectDiffRenameRedactionTests
 			}
 			return findings;
 		}
+	}
+}
+
+public sealed class ProjectDiffContentUnchangedTests
+{
+	[Fact]
+	public async Task AStagedModeOnlyChangeIsReportedAsContentUnchanged()
+	{
+		using var workspace = new TemporaryDirectory();
+		var file = workspace.CreateFile("script.sh", "echo hi\n");
+		var bytes = Encoding.UTF8.GetBytes("echo hi\n");
+		var reader = new FixedVersionReader(new Dictionary<string, GitFileVersions>
+		{
+			[file] = new(
+				new GitStoredFile(GitStoredFileKind.Regular, bytes.Length, bytes, "100644"),
+				new GitStoredFile(GitStoredFileKind.Regular, bytes.Length, bytes, "100755"))
+		});
+		var request = new ProjectDiffRequest(
+			Plan(workspace.Path, [file]),
+			GitFilteringMode.Staged,
+			null,
+			3,
+			null,
+			static (_, _) => throw new InvalidOperationException("The staged scope never reads the working file."));
+
+		var result = await new ProjectDiffService(reader).CompareAsync(request, TestContext.Current.CancellationToken);
+
+		var entry = Assert.Single(result.Files);
+		Assert.Equal(ProjectDiffFileStatus.Modified, entry.Status);
+		Assert.Equal(ProjectDiffOmission.ContentUnchanged, entry.Omission);
+		Assert.Equal("content-unchanged", ProjectDiffText.Omission(entry.Omission));
+	}
+
+	[Fact]
+	public async Task AChangesModeOnlyChangeIsReportedAsContentUnchanged()
+	{
+		using var workspace = new TemporaryDirectory();
+		var file = workspace.CreateFile("script.sh", "echo hi\n");
+		var bytes = Encoding.UTF8.GetBytes("echo hi\n");
+		var reader = new FixedVersionReader(new Dictionary<string, GitFileVersions>
+		{
+			[file] = new(new GitStoredFile(GitStoredFileKind.Regular, bytes.Length, bytes, "100644"), null)
+		});
+		var request = new ProjectDiffRequest(
+			Plan(workspace.Path, [file]) with { GitReadiness = new ProjectContextGitReadiness(GitFilteringMode.Changes, 0, true) },
+			GitFilteringMode.Changes,
+			null,
+			3,
+			null,
+			(_, _) => ValueTask.FromResult(new FileContentReadResult(
+				FileContentClassification.Text,
+				new TextFileContent("echo hi\n", bytes.Length, 1, bytes.Length, false, false),
+				TextFileEncoding.Utf8)));
+
+		var result = await new ProjectDiffService(reader).CompareAsync(request, TestContext.Current.CancellationToken);
+
+		var entry = Assert.Single(result.Files);
+		Assert.Equal(ProjectDiffFileStatus.Modified, entry.Status);
+		Assert.Equal(ProjectDiffOmission.ContentUnchanged, entry.Omission);
+	}
+
+	private static ProjectContextPlan Plan(string root, IReadOnlyList<string> files)
+	{
+		var tree = new TreeNodeDescriptor("project", root, true, false, "folder", []);
+		var analysis = new ProjectAnalysisReport(
+			ProjectAnalysisReport.CurrentSchemaVersion,
+			DateTimeOffset.UnixEpoch,
+			root,
+			new ProjectAnalysisSelectionReport([], [], []),
+			new ProjectAnalysisInventoryReport([], [], new ProjectTreeSummaryReport(1, files.Count, 0)),
+			new ProjectAnalysisOutputMetricsReport(
+				ProjectOutputMetricsReport.Empty,
+				ProjectOutputMetricsReport.Empty),
+			new ProjectAnalysisTimingReport(0, 0, 0),
+			new ProjectAnalysisDiagnosticsReport(false, false, []));
+		return new ProjectContextPlan(
+			root,
+			ProjectSelectionSpec.Standard,
+			[],
+			[],
+			[],
+			[],
+			tree,
+			tree,
+			new HashSet<string>(PathComparer.Default),
+			files,
+			[root],
+			analysis,
+			[],
+			new ProjectContextGitReadiness(GitFilteringMode.Staged, 0, true),
+			"content-unchanged");
+	}
+
+	private sealed class FixedVersionReader(IReadOnlyDictionary<string, GitFileVersions> files) : IGitFileVersionReader
+	{
+		public Task<GitFileVersionSet> ReadAsync(GitFileVersionRequest request, CancellationToken cancellationToken = default) =>
+			Task.FromResult(new GitFileVersionSet(files));
+
+		public Task<GitRevisionAvailability> ProbeRangeAsync(
+			string projectRoot,
+			string diffRange,
+			CancellationToken cancellationToken = default) =>
+			Task.FromResult(GitRevisionAvailability.Unknown);
 	}
 }
 

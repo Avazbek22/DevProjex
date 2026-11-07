@@ -25,7 +25,10 @@ public enum ProjectDiffOmission
 	ChangeTooLarge,
 
 	/// <summary>No line differs once line endings and the byte-order mark are normalized.</summary>
-	LineEndingsOnly
+	LineEndingsOnly,
+
+	/// <summary>The bytes are identical on both sides; Git reported the file as changed only because its mode changed (for example an executable bit flipped by <c>chmod</c>).</summary>
+	ContentUnchanged
 }
 
 /// <param name="RelativePath">Project-relative, '/'-separated.</param>

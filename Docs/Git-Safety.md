@@ -112,6 +112,8 @@ log --topo-order --no-renames --no-decorate --format=%x1e%H%x00 --name-only -z -
 rev-parse --is-shallow-repository
 --literal-pathspecs ls-tree -r -z --full-tree <validated-commit-id> -- <selected-paths>
 --literal-pathspecs ls-files --stage -z -- <selected-paths>
+--literal-pathspecs ls-tree -r -z --full-tree <validated-commit-id>
+--literal-pathspecs ls-files --stage -z
 cat-file --batch-check
 cat-file --batch
 ```
@@ -130,6 +132,14 @@ never sees caller text. Without `--textconv` or `--filters`, `cat-file` returns 
 no repository program; none of these forms compares against the working tree, so no clean, smudge,
 process or external-diff driver can run. One object is read only when it is at most 16 MiB, and one
 call reads at most 64 MiB of object content.
+
+The two full-listing forms, without a path filter, are a fallback and run at most once per read,
+only when a path the literal-pathspec listing above missed differs from the tree's or index's
+recorded spelling only by case or Unicode normalization form, and only when the repository's own
+comparison semantics call for that (`core.ignorecase`, or `core.precomposeunicode` on macOS). A
+fallback match is accepted only when the requested spelling currently and unambiguously exists on
+disk under the same identity the tracked-path index uses to reconcile a disk path with Git's index;
+a path that cannot be confirmed that way is reported the same as before the fallback, never guessed.
 
 The working-tree comparison of the `changes` scope is the one read that also honors user
 configuration, and only for line endings. Git for Windows keeps `core.autocrlf` in its system
@@ -230,7 +240,7 @@ that was actually downloaded. Unix symbolic-link entries are skipped with a coun
 | `ReadShallowRepositoryState` | LocalRead | Report whether the repository is a shallow clone. |
 | `ReadTreeEntries` | LocalRead | List blob entries of one resolved commit for literal selected paths. |
 | `ReadIndexEntries` | LocalRead | List index entries for literal selected paths. |
-| `ReadObjectHeaders` | LocalRead | Report type and size for validated object ids read from standard input. |
+| `ReadObjectHeaders` | LocalRead | Report type and size for validated object ids read from standard input; an object whose loose file is physically gone is reported as missing, which only marks the file(s) that name it as unsupported and never fails the rest of the batch. |
 | `ReadObjectContents` | LocalRead | Stream stored bytes for validated object ids read from standard input. |
 
 No MCP argument, repository value, profile file, or command-line token selects a Git subcommand. Callers supply only the validated operands accepted by a registered operation.
