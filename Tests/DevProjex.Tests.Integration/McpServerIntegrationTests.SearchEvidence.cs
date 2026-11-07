@@ -275,7 +275,7 @@ public sealed partial class McpServerIntegrationTests
 		Assert.Contains(McpErrorCodes.InvalidArguments, AllText(nameless), StringComparison.Ordinal);
 
 		// A regular expression in declaration mode would otherwise answer a confident "no matches".
-		foreach (var regularExpression in new[] { "OrderService\\(", "\\bOrderService\\b", "class\\s+OrderService" })
+		foreach (var regularExpression in new[] { "OrderService\\(", "class\\s+\\w+Service", "(?i)OrderService" })
 		{
 			var refused = await server.CallAsync("search_project", new Dictionary<string, object?>
 			{
@@ -295,6 +295,31 @@ public sealed partial class McpServerIntegrationTests
 		}));
 		Assert.Contains("OrderService.cs", parameterList, StringComparison.Ordinal);
 		Assert.Contains("matches retained=1/1", parameterList, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData(@"\bOrderService\b")]
+	[InlineData(@"class\s+OrderService")]
+	public async Task SymbolsSearchReadsSimpleRegularExpressionsWithoutMatchingUses(string pattern)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "OrderService.cs"), "namespace Shop; public sealed class OrderService { }\n");
+		File.WriteAllText(Path.Combine(project, "Checkout.cs"), "namespace Shop; public class Checkout { OrderService orders; }\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+		var result = await server.CallAsync("search_project", new Dictionary<string, object?>
+		{
+			["pattern"] = pattern,
+			["symbols"] = true,
+			["context_lines"] = 0
+		});
+		Assert.NotEqual(true, result.IsError);
+		var text = Text(result);
+		Assert.Contains("OrderService.cs", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("Checkout.cs", text, StringComparison.Ordinal);
+		Assert.Contains("matches retained=1/1", text, StringComparison.Ordinal);
+		Assert.Contains("[Symbols] the regular expression was read as 1 declaration name(s); they are listed at the top of the results.", text, StringComparison.Ordinal);
+		Assert.Contains("Pattern read as declaration names: OrderService", text, StringComparison.Ordinal);
 	}
 
 	[Fact]
