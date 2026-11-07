@@ -169,6 +169,31 @@ public sealed class GitFileVersionReaderIntegrationTests
 		Assert.Null(alone.Files[literal].New);
 	}
 
+	[Fact]
+	public async Task ThePromisorQueryFindsAPartialCloneDeclaredOnlyByTheExtension()
+	{
+		using var repository = new GitModeRepository();
+		repository.Write("app.txt", "one\n");
+		repository.Commit();
+		var plain = await GitRepositorySafetyInspector.RunAsync(
+			repository.Root,
+			GitProcessOperation.ReadConfigValue(GitConfigReadKind.PromisorRemotes),
+			TestContext.Current.CancellationToken);
+		repository.Git("config", "core.repositoryformatversion", "1");
+		repository.Git("config", "extensions.partialClone", "origin");
+
+		var partial = await GitRepositorySafetyInspector.RunAsync(
+			repository.Root,
+			GitProcessOperation.ReadConfigValue(GitConfigReadKind.PromisorRemotes),
+			TestContext.Current.CancellationToken);
+
+		Assert.False(GitRepositorySafetyInspector.InterpretPromisorResult(plain));
+		Assert.NotNull(partial);
+		Assert.Equal(0, partial.ExitCode);
+		Assert.Equal("extensions.partialclone", partial.Output.Trim());
+		Assert.True(GitRepositorySafetyInspector.InterpretPromisorResult(partial));
+	}
+
 	private static async Task<GitFileVersionSet> ReadAsync(
 		GitModeRepository repository,
 		GitFilteringMode mode,

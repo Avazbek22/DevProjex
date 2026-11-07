@@ -484,7 +484,7 @@ internal sealed record GitProcessOperation
 			["config", "--name-only", "--get-regexp", "^(filter\\..*\\.(clean|smudge|process|required)|diff\\..*\\.(command|textconv)|diff\\.external)$"],
 		GitConfigReadKind.WorktreeBranch => ["config", "--worktree", "--get", "devprojex.branch"],
 		GitConfigReadKind.PromisorRemotes =>
-			["config", "--name-only", "--get-regexp", "^remote\\..*\\.promisor$"],
+			["config", "--name-only", "--get-regexp", "^(remote\\..*\\.promisor|extensions\\.partialclone)$"],
 		GitConfigReadKind.NetworkOverrides =>
 			["config", "--name-only", "--get-regexp", "^(url\\..*\\.insteadof|http(\\..*)?\\.(extraheader|cookiefile|proxy)|core\\.(gitproxy|sshcommand)|remote\\..*\\.uploadpack)$"],
 		GitConfigReadKind.RepositoryLineEndings => ["config", "-z", "--get-regexp", LineEndingPattern],
