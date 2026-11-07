@@ -762,15 +762,16 @@ selection.`; when unresolved references exist, that same line reports their coun
 In a narrowed call, `[Resolution]` counts the readable project's edges exactly as the same
 call without narrowing does, except that resolved edges reaching only files outside the
 selection are reported as `· outside-selection=N` instead of in `resolved`; `resolved` plus
-`outside-selection` is therefore what the unnarrowed call resolves, and `ambiguous`,
-`unresolved`, and `external` match it. `[Facts coverage]` and `[Search scope]` still
-describe the selection. When files outside the selection are listed, the trusted line
+`outside-selection` is therefore what the unnarrowed call resolves at depth 1, and
+`ambiguous`, `unresolved`, and `external` match it. `[Facts coverage]` and `[Search scope]`
+still describe the selection. When files outside the selection are listed, the trusted line
 `[Outside selection] relations=N · listed=K; these files are readable but outside this
-call's selection, so only their paths are listed; read any of them with get_file.` follows
-`[Resolution]`, and a call that resolves nothing inside its selection while such files are
-listed reports `[No related files] in the effective selection; related files outside it are
-listed by path.` Both lines carry counts only; the paths stay inside the untrusted block. A
-call that narrows nothing keeps the earlier response byte for byte.
+call's selection, so they are named with evidence; their contents are not returned; read
+any of them with get_file.` follows `[Resolution]`, and a call that resolves nothing inside
+its selection while such files are listed reports `[No related files] in the effective
+selection; related files outside it are named with evidence, but their contents are not
+returned.` Both lines carry counts only; the paths stay inside the untrusted block. A call
+that narrows nothing keeps the earlier response byte for byte.
 Calls and static member uses are not edges, so an empty section is not evidence that
 nothing uses a file. Whenever a requested `Dependencies` or `Dependents` section of a
 seed with facts is empty, and on every call without resolved edges, the constant

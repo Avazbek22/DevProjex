@@ -388,8 +388,10 @@ listed: files it keeps stay in the seed's own sections, and resolved relations t
 as `Dependencies outside the selection` and `Dependents outside the selection` after them, at most
 20 per section. `[Resolution]` counts edges as the workspace without that narrowing does and
 reports resolved edges that reach only files outside the selection as `· outside-selection=N`
-instead of in `resolved`; a larger depth walks only into files the narrowing keeps. A fully
-checked workspace without a momentary scope prints what it printed before.
+instead of in `resolved`, at depth 1; `resolved` plus `outside-selection` is therefore what the
+unnarrowed workspace resolves at that depth, and a larger depth walks only into files the
+narrowing keeps. A fully checked workspace without a momentary scope prints what it printed
+before.
 
 `diff` compares the current workspace selection in the requested Git scope: `changes`
 (default) compares `HEAD` with the working tree, `staged` compares `HEAD` with the index, and

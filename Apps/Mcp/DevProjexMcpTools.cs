@@ -1471,7 +1471,7 @@ internal sealed partial class DevProjexMcpTools(
 		}, cancellationToken);
 
 	[Description(
-		"Finds evidenced dependencies and dependents for one to 16 seed files; a narrowed call also names readable related files outside its selection, by path only. Use it after search_project or get_tree; use search_project for text references or get_file for content. Returns paths, evidence, resolution status, token estimates, language coverage, partial-parse and configuration diagnostics, and scope; results above 50,000 characters use read_pack. Key parameters: path, direction=dependencies|dependents|both, profile, git_scope, include_patterns, exclude_patterns, and max_file_bytes.")]
+		"Finds evidenced dependencies and dependents for one to 16 seed files; a narrowed call also names readable related files outside its selection with evidence, but their contents are never returned. Use it after search_project or get_tree; use search_project for text references or get_file for content. Returns paths, evidence, resolution status, token estimates, language coverage, partial-parse and configuration diagnostics, and scope; results above 50,000 characters use read_pack. Key parameters: path, direction=dependencies|dependents|both, profile, git_scope, include_patterns, exclude_patterns, and max_file_bytes.")]
 	public Task<CallToolResult> RelatedFiles(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -1583,7 +1583,7 @@ internal sealed partial class DevProjexMcpTools(
 				HasRootOnlyPattern: HasRootOnlyPattern(includePatterns));
 			var noRelatedNotice = resolution.Resolved == 0
 				? resolution.OutsideSelection > 0
-					? "[No related files] in the effective selection; related files outside it are listed by path."
+					? "[No related files] in the effective selection; related files outside it are named with evidence, but their contents are not returned."
 					: resolution.Unresolved == 0
 						? "[No related files] in the effective selection."
 						: $"[No related files] in the effective selection; unresolved references={resolution.Unresolved.ToString(CultureInfo.InvariantCulture)}."
@@ -3331,7 +3331,7 @@ internal sealed partial class DevProjexMcpTools(
 		var listed = outside.Seeds.Sum(static seed => seed.Dependencies.Count + seed.Dependents.Count);
 		return $"[Outside selection] relations={relations.ToString(CultureInfo.InvariantCulture)} · " +
 			   $"listed={listed.ToString(CultureInfo.InvariantCulture)}; " +
-			   "these files are readable but outside this call's selection, so only their paths are listed; " +
+			   "these files are readable but outside this call's selection, so they are named with evidence; their contents are not returned; " +
 			   "read any of them with get_file.";
 	}
 
