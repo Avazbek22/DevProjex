@@ -205,6 +205,7 @@ internal sealed partial class DevProjexMcpTools
 		var parts = new List<string>(4);
 		Add("binary", diff.Count(ProjectDiffOmission.Binary));
 		Add("too-large", diff.Count(ProjectDiffOmission.TooLarge));
+		Add("change-too-large", diff.Count(ProjectDiffOmission.ChangeTooLarge));
 		Add("line-endings-only", diff.Count(ProjectDiffOmission.LineEndingsOnly));
 		Add("deleted", diff.DeletedOutsideSelection);
 		Add("not-in-working-tree", diff.NotInWorkingTree);

@@ -119,6 +119,8 @@ public sealed class ProjectDiffService(IGitFileVersionReader versions)
 		{
 			case LineDiffOutcome.TooLarge:
 				return Omitted(status, ProjectDiffOmission.TooLarge);
+			case LineDiffOutcome.ChangeTooLarge:
+				return Omitted(status, ProjectDiffOmission.ChangeTooLarge);
 			case LineDiffOutcome.LineEndingsOnly or LineDiffOutcome.Unchanged
 				when status == ProjectDiffFileStatus.Modified:
 				return Omitted(status, ProjectDiffOmission.LineEndingsOnly);

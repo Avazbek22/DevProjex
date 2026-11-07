@@ -488,6 +488,7 @@ selection diagnostics stay on stderr. The shape is:
     "removed": 1,
     "binary": 1,
     "tooLarge": 0,
+    "changeTooLarge": 0,
     "lineEndingsOnly": 0,
     "deleted": 0,
     "notInWorkingTree": 0
@@ -503,7 +504,9 @@ project-relative, and `oldPath` appears only for a rename shown against its sour
 lines starts at the line before the hunk, `0` at the top of the file. `lines` holds the hunk lines
 with their unified prefix (` `, `-`, or `+`), unescaped, and the separate entry
 `\ No newline at end of file` after a line that has no newline. `notShown` lists the changed files
-without hunks, with `reason` `binary`, `too-large`, or `line-endings-only`. `counts.deleted` counts
+without hunks, with `reason` `binary`, `too-large`, `change-too-large`, or `line-endings-only`;
+`change-too-large` means both versions fit but the change needs more than 2,000 added and removed
+lines of search, and `counts.changeTooLarge` counts those files. `counts.deleted` counts
 deleted files that are no longer in the working tree, and `counts.notInWorkingTree` counts files a
 `staged` or ref-to-ref scope adds, changes, or renames to that the working tree does not have; both
 apply only the selection rules a path alone decides, and their paths are never listed. `complete`

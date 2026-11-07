@@ -932,7 +932,8 @@ whose context touches merge. An added or deleted file uses `/dev/null` on its mi
 last line without a newline is followed by `\ No newline at end of file`. Tabs stay tabs; other
 control characters in a line or path are escaped so each output line is one physical line. Files
 listed without hunks follow under a localized `Not shown:` heading as `path [status, reason]`, with
-`binary`, `too-large`, or `line-endings-only` as the reason. A localized summary line ends the
+`binary`, `too-large` (a version is too large), `change-too-large` (the change is too large to
+compare line by line), or `line-endings-only` as the reason. A localized summary line ends the
 output with the changed, shown, added, and removed counts, followed by the count of deleted files
 that are no longer in the working tree and the count of changed files the working tree does not
 have, such as files added on a branch that is not checked out; their paths are not printed, and a

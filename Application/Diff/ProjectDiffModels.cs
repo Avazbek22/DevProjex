@@ -18,8 +18,11 @@ public enum ProjectDiffOmission
 	/// <summary>A version is binary, not a regular file, not decodable text, or cannot be looked up safely.</summary>
 	Binary,
 
-	/// <summary>A version exceeds the read or line limit, or its change exceeds the edit-distance limit.</summary>
+	/// <summary>A version exceeds the read or line limit.</summary>
 	TooLarge,
+
+	/// <summary>Both versions fit, but the change exceeds the edit-distance limit of the line diff.</summary>
+	ChangeTooLarge,
 
 	/// <summary>No line differs once line endings and the byte-order mark are normalized.</summary>
 	LineEndingsOnly

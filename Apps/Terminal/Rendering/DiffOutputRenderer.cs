@@ -98,6 +98,7 @@ internal static class DiffOutputRenderer
 				diff.Removed,
 				diff.Count(ProjectDiffOmission.Binary),
 				diff.Count(ProjectDiffOmission.TooLarge),
+				diff.Count(ProjectDiffOmission.ChangeTooLarge),
 				diff.Count(ProjectDiffOmission.LineEndingsOnly),
 				diff.DeletedOutsideSelection,
 				diff.NotInWorkingTree),
@@ -150,6 +151,7 @@ internal static class DiffOutputRenderer
 		int Removed,
 		int Binary,
 		int TooLarge,
+		int ChangeTooLarge,
 		int LineEndingsOnly,
 		int Deleted,
 		int NotInWorkingTree);

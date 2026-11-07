@@ -184,12 +184,13 @@ public sealed class McpDiffLayoutTests
 			[
 				Changed("a.txt", 1, 5),
 				new ProjectDiffFile("/p/b.png", "b.png", null, ProjectDiffFileStatus.Modified, ProjectDiffOmission.Binary, 0, 0, []),
-				new ProjectDiffFile("/p/c.txt", "c.txt", null, ProjectDiffFileStatus.Modified, ProjectDiffOmission.LineEndingsOnly, 0, 0, [])
+				new ProjectDiffFile("/p/c.txt", "c.txt", null, ProjectDiffFileStatus.Modified, ProjectDiffOmission.LineEndingsOnly, 0, 0, []),
+				new ProjectDiffFile("/p/d.txt", "d.txt", null, ProjectDiffFileStatus.Modified, ProjectDiffOmission.ChangeTooLarge, 0, 0, [])
 			],
 			deleted: 2);
 
 		Assert.Equal(
-			"[Diff] not shown: binary=1 · line-endings-only=1 · deleted=2",
+			"[Diff] not shown: binary=1 · change-too-large=1 · line-endings-only=1 · deleted=2",
 			DevProjexMcpTools.FormatDiffNotShownNotice(result));
 	}
 
