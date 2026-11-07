@@ -230,7 +230,7 @@ that was actually downloaded. Unix symbolic-link entries are skipped with a coun
 | `ReadShallowRepositoryState` | LocalRead | Report whether the repository is a shallow clone. |
 | `ReadTreeEntries` | LocalRead | List blob entries of one resolved commit for literal selected paths. |
 | `ReadIndexEntries` | LocalRead | List index entries for literal selected paths. |
-| `ReadObjectHeaders` | LocalRead | Report type and size for validated object ids read from standard input. |
+| `ReadObjectHeaders` | LocalRead | Report type and size for validated object ids read from standard input; an object whose loose file is physically gone is reported as missing, which only marks the file(s) that name it as unsupported and never fails the rest of the batch. |
 | `ReadObjectContents` | LocalRead | Stream stored bytes for validated object ids read from standard input. |
 
 No MCP argument, repository value, profile file, or command-line token selects a Git subcommand. Callers supply only the validated operands accepted by a registered operation.

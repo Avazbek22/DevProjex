@@ -227,13 +227,17 @@ public sealed class GitFileVersionReader : IGitFileVersionReader
 				conflicted.Contains(file.GitPath)));
 		}
 
-		var contents = await ReadContentsAsync(repositoryRoot, plans, budget, cancellationToken).ConfigureAwait(false);
-		if (contents is null)
+		var read = await ReadContentsAsync(repositoryRoot, plans, budget, cancellationToken).ConfigureAwait(false);
+		if (read is null)
 			return GitFileVersionSet.Unavailable("Git object contents could not be read.");
+		var (contents, missingObjects) = read.Value;
 		foreach (var plan in plans)
 		{
-			if (plan.Conflicted)
+			if (plan.Conflicted || IsMissing(plan.Old, missingObjects) || IsMissing(plan.New, missingObjects))
 			{
+				// The repository no longer has the object this entry names: the loose object file is
+				// gone even though the tree or index still records it. Only this file is affected; the
+				// rest of the selection is still read and shown.
 				results[plan.File.FullPath] = new GitFileVersions(null, null, Unsupported: true);
 				continue;
 			}
@@ -244,6 +248,9 @@ public sealed class GitFileVersionReader : IGitFileVersionReader
 		}
 		return null;
 	}
+
+	private static bool IsMissing(StoredEntry? entry, IReadOnlySet<string> missingObjects) =>
+		entry is { IsRegularFile: true } && missingObjects.Contains(entry.ObjectId);
 
 	private static GitStoredFile? ToStoredFile(StoredEntry? entry, IReadOnlyDictionary<string, ObjectContent> contents)
 	{
@@ -391,7 +398,7 @@ public sealed class GitFileVersionReader : IGitFileVersionReader
 		return renames;
 	}
 
-	private static async Task<Dictionary<string, ObjectContent>?> ReadContentsAsync(
+	private static async Task<(Dictionary<string, ObjectContent> Contents, HashSet<string> Missing)?> ReadContentsAsync(
 		string repositoryRoot,
 		IReadOnlyList<FilePlan> plans,
 		BlobBudget budget,
@@ -411,14 +418,17 @@ public sealed class GitFileVersionReader : IGitFileVersionReader
 		}
 		var contents = new Dictionary<string, ObjectContent>(StringComparer.Ordinal);
 		if (wanted.Count == 0)
-			return contents;
+			return (contents, new HashSet<string>(StringComparer.Ordinal));
 
-		var sizes = await ReadObjectSizesAsync(repositoryRoot, wanted, cancellationToken).ConfigureAwait(false);
-		if (sizes is null)
+		var headers = await ReadObjectSizesAsync(repositoryRoot, wanted, cancellationToken).ConfigureAwait(false);
+		if (headers is null)
 			return null;
+		var (sizes, missing) = headers.Value;
 		var readable = new List<string>(wanted.Count);
 		foreach (var objectId in wanted)
 		{
+			if (missing.Contains(objectId))
+				continue;
 			var size = sizes[objectId];
 			if (size <= MaximumBlobBytes && budget.TryReserve(size))
 				readable.Add(objectId);
@@ -426,12 +436,18 @@ public sealed class GitFileVersionReader : IGitFileVersionReader
 				contents[objectId] = new ObjectContent(size, null);
 		}
 		if (readable.Count == 0)
-			return contents;
-		return await ReadObjectBytesAsync(repositoryRoot, readable, sizes, contents, cancellationToken)
+			return (contents, missing);
+		var result = await ReadObjectBytesAsync(repositoryRoot, readable, sizes, contents, cancellationToken)
 			.ConfigureAwait(false);
+		return result is null ? null : (result, missing);
 	}
 
-	private static async Task<Dictionary<string, long>?> ReadObjectSizesAsync(
+	/// <summary>
+	/// Reports each object's size, or that it is missing from the object store: the tree or index
+	/// still names it, but its loose object file is gone. A missing object fails only the file(s)
+	/// that name it, not the rest of the batch.
+	/// </summary>
+	private static async Task<(Dictionary<string, long> Sizes, HashSet<string> Missing)?> ReadObjectSizesAsync(
 		string repositoryRoot,
 		IReadOnlyList<string> objectIds,
 		CancellationToken cancellationToken)
@@ -446,10 +462,16 @@ public sealed class GitFileVersionReader : IGitFileVersionReader
 		if (!result.Succeeded || result.Value is null)
 			return null;
 		var sizes = new Dictionary<string, long>(StringComparer.Ordinal);
+		var missing = new HashSet<string>(StringComparer.Ordinal);
 		foreach (var line in result.Value.Split('\n', StringSplitOptions.RemoveEmptyEntries))
 		{
 			// <object> SP <type> SP <size>; a missing object is "<object> missing".
 			var fields = line.Split(' ');
+			if (fields.Length == 2 && fields[1] == "missing" && GitProcessOperation.IsObjectId(fields[0]))
+			{
+				missing.Add(fields[0]);
+				continue;
+			}
 			if (fields.Length != 3 || fields[1] != "blob" ||
 				!long.TryParse(fields[2], NumberStyles.None, CultureInfo.InvariantCulture, out var size))
 			{
@@ -457,7 +479,9 @@ public sealed class GitFileVersionReader : IGitFileVersionReader
 			}
 			sizes[fields[0]] = size;
 		}
-		return objectIds.All(sizes.ContainsKey) ? sizes : null;
+		return objectIds.All(objectId => sizes.ContainsKey(objectId) || missing.Contains(objectId))
+			? (sizes, missing)
+			: null;
 	}
 
 	private static async Task<Dictionary<string, ObjectContent>?> ReadObjectBytesAsync(

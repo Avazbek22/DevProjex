@@ -170,6 +170,27 @@ public sealed class GitFileVersionReaderIntegrationTests
 	}
 
 	[Fact]
+	public async Task AMissingBlobObjectIsUnsupportedButOtherFilesStillRead()
+	{
+		using var repository = new GitModeRepository();
+		var missing = repository.Write("missing.txt", "will be deleted\n");
+		var present = repository.Write("present.txt", "still here\n");
+		repository.Commit();
+		var objectId = repository.Git("rev-parse", "HEAD:missing.txt").Trim();
+		var objectPath = Path.Combine(repository.Root, ".git", "objects", objectId[..2], objectId[2..]);
+		Assert.True(File.Exists(objectPath), objectPath);
+		File.SetAttributes(objectPath, FileAttributes.Normal);
+		File.Delete(objectPath);
+
+		var versions = await ReadAsync(repository, GitFilteringMode.Changes, null, missing, present);
+
+		Assert.True(versions.Files[missing].Unsupported);
+		Assert.Null(versions.Files[missing].Old);
+		Assert.False(versions.Files[present].Unsupported);
+		Assert.Equal("still here\n", Text(versions.Files[present].Old));
+	}
+
+	[Fact]
 	public async Task ThePromisorQueryFindsAPartialCloneDeclaredOnlyByTheExtension()
 	{
 		using var repository = new GitModeRepository();
