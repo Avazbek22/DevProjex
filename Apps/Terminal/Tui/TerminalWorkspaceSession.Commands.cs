@@ -388,6 +388,7 @@ internal sealed partial class TerminalWorkspaceSession
 		};
 		var depth = command.Depth ?? RelatedQueryRunner.MinimumDepth;
 		var state = _state;
+		var persistentGitMode = _preferredGitMode;
 		TrackActiveOperation(RunOperationAsync(
 			L("Terminal.Tui.Command.Related.Title"),
 			async token =>
@@ -421,6 +422,23 @@ internal sealed partial class TerminalWorkspaceSession
 							"Terminal.Related.TraversalLimit",
 							exception.MaximumSeeds));
 				}
+				DependencyOutsideSelectionResult? outside = null;
+				if (DependencyFactsEngine.CanRelateOutsideSelection(related, direction) &&
+					await _controller
+						.BuildRelationProjectPlanAsync(state, plan, persistentGitMode, token)
+						.ConfigureAwait(false) is { } project)
+				{
+					outside = await _services.DependencyFactsEngine
+						.FindOutsideSelectionAsync(
+							plan.SourceRoot,
+							related,
+							project.IncludedFiles,
+							direction,
+							cancellationToken: token)
+						.ConfigureAwait(false);
+					if (outside.Seeds.Count == 0)
+						outside = null;
+				}
 				using var writer = new StringWriter(CultureInfo.CurrentCulture);
 				if (planDiagnostics.Length > 0)
 				{
@@ -436,7 +454,7 @@ internal sealed partial class TerminalWorkspaceSession
 				await RelatedOutputRenderer.WriteAsync(
 						writer,
 						related,
-						outside: null,
+						outside,
 						direction,
 						AnalysisOutputFormat.Text,
 						_services.Localization,

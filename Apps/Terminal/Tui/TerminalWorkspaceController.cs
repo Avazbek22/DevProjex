@@ -672,6 +672,52 @@ public sealed class TerminalWorkspaceController(
 				state.BuildSelectedRelativePaths(),
 				cancellationToken);
 
+	/// <summary>
+	/// The workspace without its attention: the checked items and a momentary Git scope are lifted,
+	/// while roots, extensions, ignores, exclusions, and the persistent Git mode stay, as the saved
+	/// window filters do for a live MCP session. Returns null when that adds no file to
+	/// <paramref name="current"/>.
+	/// </summary>
+	public async Task<ProjectContextPlan?> BuildRelationProjectPlanAsync(
+		TerminalWorkspaceState state,
+		ProjectContextPlan current,
+		GitFilteringMode persistentGitMode,
+		CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(state);
+		ArgumentNullException.ThrowIfNull(current);
+		if (!GitScopeSelection.IsPersistent(persistentGitMode))
+			throw new ArgumentOutOfRangeException(nameof(persistentGitMode), persistentGitMode, null);
+		var baseline = state.Plan;
+		if (GitScopeSelection.IsMomentary(baseline.Selection.GitMode ?? GitFilteringMode.None))
+		{
+			// The panel's file types and path options carry over exactly as a settings change would.
+			var lifted = await BuildSettingsPlanAsync(
+					baseline,
+					state.BuildSelection() with
+					{
+						SelectedPaths = null,
+						GitMode = persistentGitMode,
+						GitDiffRange = null
+					},
+					state.ExtensionOptionStates,
+					new HashSet<string>(StringComparer.Ordinal),
+					state.PathOptionStates,
+					selectedPathFrontier: null,
+					persistentGitMode,
+					cancellationToken)
+				.ConfigureAwait(false);
+			baseline = lifted.Plan;
+		}
+		if (baseline.HasErrors)
+			return null;
+		var project = await services.ContextPlanner
+			.ReprojectSelectionAsync(baseline, selectedPaths: null, cancellationToken)
+			.ConfigureAwait(false);
+		var selected = current.IncludedFiles.ToHashSet(PathComparer.Default);
+		return project.IncludedFiles.Any(path => !selected.Contains(path)) ? project : null;
+	}
+
 	private Task<ProjectContextPlan> BuildContextExportPlanAsync(
 		TerminalWorkspaceState state,
 		ProjectContextDocumentFormat format,
