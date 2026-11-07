@@ -27,6 +27,65 @@ public sealed class DependencyPythonAndConfigurationSemanticsIntegrationTests
 	}
 
 	[Fact]
+	public async Task PythonWithoutConfiguration_ResolvesRelativeImportsAndKeepsStandardLibraryExternal()
+	{
+		using var fixture = new TemporaryDirectory();
+		var package = fixture.CreateFile("pkg/__init__.py", string.Empty);
+		var first = fixture.CreateFile("pkg/a.py", "from .b import Value\nimport json\nimport b");
+		var second = fixture.CreateFile("pkg/b.py", "class Value: pass");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[package, first, second],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(result.Edges, edge => edge.Source == "pkg/a.py" && edge.Reference == ".b" &&
+			edge.Status == ResolutionStatus.Resolved && edge.Target == "pkg/b.py");
+		Assert.Contains(result.Edges, edge => edge.Source == "pkg/a.py" && edge.Reference == "json" &&
+			edge.Status == ResolutionStatus.External);
+		// A regular package has no implicit relative imports in Python 3.
+		Assert.Contains(result.Edges, edge => edge.Source == "pkg/a.py" && edge.Reference == "b" &&
+			edge.Status == ResolutionStatus.Unresolved && edge.Target is null);
+	}
+
+	[Fact]
+	public async Task PythonScriptDirectory_ResolvesAnUncontestedSiblingOnly()
+	{
+		using var fixture = new TemporaryDirectory();
+		var script = fixture.CreateFile("scripts/run.py", """
+			import helper
+			from helper import tool
+			import json
+			import shared
+			""");
+		var helper = fixture.CreateFile("scripts/helper.py", "def tool(): pass");
+		var shadow = fixture.CreateFile("scripts/json.py", "VALUE = 1");
+		var localShared = fixture.CreateFile("scripts/shared.py", "VALUE = 1");
+		var rootShared = fixture.CreateFile("shared.py", "VALUE = 2");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[script, helper, shadow, localShared, rootShared],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var sibling = Assert.Single(result.Edges, edge => edge.Source == "scripts/run.py" &&
+			edge.Reference == "helper");
+		Assert.Equal(ResolutionStatus.Resolved, sibling.Status);
+		Assert.Equal("scripts/helper.py", sibling.Target);
+		Assert.Equal(["script-directory import"], sibling.Reasons);
+		// Both the module import and the name import reach the sibling.
+		Assert.Equal(2, sibling.Evidence.Count);
+		Assert.Contains(result.Edges, edge => edge.Source == "scripts/run.py" &&
+			edge.Reference == "json" && edge.Status == ResolutionStatus.External);
+		var contested = Assert.Single(result.Edges, edge => edge.Source == "scripts/run.py" &&
+			edge.Reference == "shared");
+		Assert.Equal(ResolutionStatus.Ambiguous, contested.Status);
+		Assert.Equal(["scripts/shared.py", "shared.py"], contested.Candidates);
+	}
+
+	[Fact]
 	public async Task ReExportDoesNotTreatAnOrdinaryModuleAsAPackage()
 	{
 		using var fixture = new TemporaryDirectory();

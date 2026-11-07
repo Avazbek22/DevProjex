@@ -338,6 +338,16 @@ configuration files of one language have the same root, ownership is diagnosed a
 of choosing one by filename order. A nested Python configuration owns only its subtree; files outside
 that subtree retain the root fallback scope.
 
+Python imports need no configuration file. Without one, the project root and its `src/` directory are
+the import roots, relative imports start at the source package, and standard-library names are
+external; only a configuration that exists but cannot be read makes its imports unresolved. Running a
+script puts its own directory first on `sys.path`, so in a plain directory without `__init__.py` a
+bare import of a sibling module or package resolves to it with the reason `script-directory import`.
+When an import root also provides that top-level name, the file may be run as a script or imported as
+a module, so the import is `Ambiguous` with both candidates, or `Unresolved` when fewer than two files
+remain. A standard-library or declared package name keeps its external meaning, and a regular package
+never gains implicit relative imports.
+
 Python relative imports start at the source package, and evidence names the relative module as
 written, leading dots included: `from . import types` is `import . at line N` and
 `from ..pkg import Name` is `import ..pkg at line N`. `from module import Name` first checks classes,
