@@ -178,13 +178,92 @@ public sealed class McpServerLaunchResolverTests
 	}
 
 	[Fact]
-	public void GlobalToolStoreRemainsNativeEvenWithAnInheritedMarkerAndRestoreMetadata()
+	public void GlobalToolStoreKeepsTheVersionedPathWhenNoShimExists()
 	{
 		using var sandbox = FlatpakEnvironment.UseForTesting(new(false, null));
 		const string executable = "/home/me/.dotnet/tools/.store/devprojex/5.2.0/devprojex.linux-x64/5.2.0/tools/any/linux-x64/devprojex";
+		var launch = McpServerLaunchResolver.Resolve(executable, executable, null, _ => false);
+		Assert.Equal(executable, launch.Command);
+		Assert.Empty(launch.PrefixArguments);
+	}
+
+	[Theory]
+	[InlineData(
+		"/home/me/.dotnet/tools/.store/devprojex/5.2.0/devprojex.linux-x64/5.2.0/tools/any/linux-x64/devprojex",
+		"/home/me/.dotnet/tools/devprojex")]
+	[InlineData(
+		"/home/me/.dotnet/tools/.store/devprojex/5.2.0/devprojex.osx-arm64/5.2.0/tools/any/osx-arm64/devprojex",
+		"/home/me/.dotnet/tools/devprojex")]
+	public void GlobalToolStoreUsesThePosixShimWhenItExistsOnDisk(string executable, string shimPath)
+	{
+		using var sandbox = FlatpakEnvironment.UseForTesting(new(false, null));
+		var checkedPaths = new List<string>();
+		var launch = McpServerLaunchResolver.Resolve(executable, executable, null, path =>
+		{
+			checkedPaths.Add(path);
+			return path == shimPath;
+		});
+		Assert.Equal(shimPath, launch.Command);
+		Assert.Empty(launch.PrefixArguments);
+		Assert.True(launch.IsPackageLauncher);
+		Assert.Equal([shimPath], checkedPaths);
+	}
+
+	[Fact]
+	public void GlobalToolStoreUsesTheWindowsShimThroughCmdCallWhenItExistsOnDisk()
+	{
+		using var sandbox = FlatpakEnvironment.UseForTesting(new(false, null));
+		const string executable =
+			@"C:\Users\me\.dotnet\tools\.store\devprojex\5.2.0\devprojex.win-x64\5.2.0\tools\any\win-x64\devprojex.exe";
+		const string shimPath = @"C:\Users\me\.dotnet\tools\devprojex.cmd";
+		var launch = McpServerLaunchResolver.Resolve(executable, executable, null,
+			path => path == "C:/Users/me/.dotnet/tools/devprojex.cmd");
+		Assert.Equal("cmd", launch.Command);
+		Assert.Equal(["/c", "call", shimPath], launch.PrefixArguments);
+		Assert.True(launch.IsPackageLauncher);
+	}
+
+	[Fact]
+	public void GlobalToolStoreFallsBackWhenTheWindowsShimPathHasUnsafeCharacters()
+	{
+		using var sandbox = FlatpakEnvironment.UseForTesting(new(false, null));
+		const string executable =
+			@"C:\Projects\100%\.dotnet\tools\.store\devprojex\5.2.0\devprojex.win-x64\5.2.0\tools\any\win-x64\devprojex.exe";
 		var launch = McpServerLaunchResolver.Resolve(executable, executable, null, _ => true);
 		Assert.Equal(executable, launch.Command);
 		Assert.Empty(launch.PrefixArguments);
+		Assert.False(launch.IsPackageLauncher);
+	}
+
+	[Fact]
+	public void WindowsGlobalToolShimFragmentStartsThroughCmdCall()
+	{
+		Assert.SkipWhen(!OperatingSystem.IsWindows(),
+			"Needs a real Windows-style absolute temp path to exercise the cmd /c call wrapper.");
+		using var sandbox = FlatpakEnvironment.UseForTesting(new(false, null));
+		var toolPath = Path.Combine(Path.GetTempPath(), "devprojex-shim-" + Guid.NewGuid().ToString("N"));
+		Directory.CreateDirectory(toolPath);
+		var shimPath = Path.Combine(toolPath, "devprojex.cmd");
+		File.WriteAllText(shimPath, "@echo off");
+		try
+		{
+			var executable = Path.Combine(
+				toolPath, ".store", "devprojex", "5.2.0", "devprojex.win-x64", "5.2.0", "tools", "any", "win-x64", "devprojex.exe");
+			const string root = @"C:\Projects\Sample App";
+
+			using var fragment = System.Text.Json.JsonDocument.Parse(
+				McpConnectionFragmentGenerator.Generate(McpConnectionClient.Json, McpConnectionMode.Live, executable, root));
+			var server = fragment.RootElement.GetProperty("mcpServers").GetProperty("devprojex");
+
+			Assert.Equal("cmd", server.GetProperty("command").GetString());
+			Assert.Equal(
+				["/c", "call", shimPath, "mcp", "--root", root, "--live"],
+				server.GetProperty("args").EnumerateArray().Select(static item => item.GetString()!));
+		}
+		finally
+		{
+			Directory.Delete(toolPath, recursive: true);
+		}
 	}
 
 	[Theory]

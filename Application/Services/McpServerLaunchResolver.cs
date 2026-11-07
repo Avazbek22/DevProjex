@@ -65,18 +65,49 @@ public static partial class McpServerLaunchResolver
 			IsNuGetBinary(parts[^6], parts[^2], parts[^1], comparison) &&
 			PackageVersion().IsMatch(parts[^5]))
 		{
-			var packageRoot = string.Join('/', parts[..^6]);
+			var storeIndex = Array.FindIndex(parts, part => part.Equals(".store", comparison));
 			// Global tools have stable shims and their own .store; only the NuGet cache needs dnx.
-			if (!parts.Any(part => part.Equals(".store", comparison)) &&
-				(packageRoot.EndsWith("/.nuget/packages", comparison) ||
-				 PathsMatch(packageRoot, nugetPackages is null ? null : Normalize(nugetPackages).TrimEnd('/'), comparison, sameEntry) ||
-				 fileExists(string.Join('/', parts[..^4]) + "/.nupkg.metadata")))
+			if (storeIndex >= 0)
 			{
-				return PackageLaunch("dnx", ["devprojex"], shellWrapped);
+				var shim = ResolveShimLaunch(parts, storeIndex, windowsPath, fileExists);
+				if (shim is not null)
+					return shim;
+			}
+			else
+			{
+				var packageRoot = string.Join('/', parts[..^6]);
+				if (packageRoot.EndsWith("/.nuget/packages", comparison) ||
+					PathsMatch(packageRoot, nugetPackages is null ? null : Normalize(nugetPackages).TrimEnd('/'), comparison, sameEntry) ||
+					fileExists(string.Join('/', parts[..^4]) + "/.nupkg.metadata"))
+				{
+					return PackageLaunch("dnx", ["devprojex"], shellWrapped);
+				}
 			}
 		}
 		return new(executablePath, []);
 	}
+
+	/// <summary>
+	/// The dotnet-tool shim that sits next to .store and survives <c>dotnet tool update</c>, unlike the
+	/// versioned apphost path inside .store. Returns null when the shim is missing on disk, or when its
+	/// Windows batch wrapper could not pass through <c>cmd /c call</c> safely; the caller then keeps the
+	/// installed .store path as-is.
+	/// </summary>
+	private static McpServerLaunch? ResolveShimLaunch(
+		IReadOnlyList<string> parts, int storeIndex, bool windowsPath, Func<string, bool> fileExists)
+	{
+		var shimRoot = string.Join('/', parts.Take(storeIndex));
+		var shimPath = shimRoot + "/" + (windowsPath ? "devprojex.cmd" : "devprojex");
+		if (!fileExists(shimPath))
+			return null;
+		if (!windowsPath)
+			return new(shimPath, [], IsPackageLauncher: true);
+		if (shimPath.IndexOfAny(CommandShellUnsafeCharacters) >= 0)
+			return null;
+		return new("cmd", ["/c", "call", ToWindowsSeparators(shimPath)], IsPackageLauncher: true);
+	}
+
+	private static string ToWindowsSeparators(string normalizedPath) => normalizedPath.Replace('/', '\\');
 
 	/// <summary>
 	/// True when a project root reaches the server unchanged through <c>cmd /c</c>, whichever way the client

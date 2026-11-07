@@ -100,7 +100,11 @@ internal static class McpExistingEntryParser
 				mode,
 				unsupported)
 			{
-				StartsBatchLauncherDirectly = directCommand is "npx" or "dnx"
+				// npx, dnx, and a dotnet-tool shim are all batch files on Windows; naming one directly as the
+				// command, instead of through `cmd /c [call]`, never starts there.
+				StartsBatchLauncherDirectly = directCommand is "npx" or "dnx" ||
+					command.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase) ||
+					command.EndsWith(".bat", StringComparison.OrdinalIgnoreCase)
 			};
 		}
 
@@ -186,9 +190,14 @@ internal static class McpExistingEntryParser
 				var index = start;
 				while (index < arguments.Count && arguments[index] is "/d" or "/D" or "/s" or "/S" or "/q" or "/Q")
 					index++;
-				return index + 1 < arguments.Count &&
-					   arguments[index] is "/c" or "/C" &&
-					   TryFindServerArguments(arguments[index + 1], arguments, index + 2, false, out launcher, out serverStart);
+				if (index + 1 >= arguments.Count || arguments[index] is not ("/c" or "/C"))
+					return false;
+				index++;
+				// A dotnet-tool shim is a batch file too, so Windows writes it as `cmd /c call <shim> ...`.
+				if (index < arguments.Count && string.Equals(arguments[index], "call", StringComparison.OrdinalIgnoreCase))
+					index++;
+				return index < arguments.Count &&
+					   TryFindServerArguments(arguments[index], arguments, index + 1, false, out launcher, out serverStart);
 			case "npx":
 				launcher = "npx";
 				return TryFindNpxServer(arguments, start, out serverStart);
@@ -203,6 +212,11 @@ internal static class McpExistingEntryParser
 			case "flatpak":
 				launcher = "flatpak";
 				return TryFindFlatpakServer(arguments, start, out serverStart);
+			case PackageName:
+				// The dotnet-tool shim or apphost named directly: the server arguments follow with no package token.
+				launcher = PackageName;
+				serverStart = start;
+				return true;
 			default:
 				return false;
 		}
