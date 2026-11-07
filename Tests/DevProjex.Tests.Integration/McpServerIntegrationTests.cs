@@ -3258,8 +3258,21 @@ public sealed partial class McpServerIntegrationTests
 		var hiddenTrustedTail = hiddenText[(hiddenText.LastIndexOf("</untrusted-data-", StringComparison.Ordinal) + 1)..];
 		Assert.DoesNotContain("src/main/java", hiddenTrustedTail, StringComparison.Ordinal);
 
+		// The requested path is visible at depth 5, but its deepest folder renders without App.java.
 		Assert.NotEqual(true, notHidden.IsError);
-		Assert.DoesNotContain("[Tree depth]", AllText(notHidden), StringComparison.Ordinal);
+		AssertTrustedTrailerOutsideSpotlight(
+			notHidden,
+			"[Tree depth] max_depth counts from the project root; 1 folder(s) under the requested paths reach depth 5 " +
+			"and are shown without their contents. Omit max_depth, or pass 6 to open them.");
+		var complete = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["paths"] = new[] { "src/main/java" },
+				["max_depth"] = 6
+			});
+		Assert.NotEqual(true, complete.IsError);
+		Assert.DoesNotContain("[Tree depth]", AllText(complete), StringComparison.Ordinal);
 
 		Assert.NotEqual(true, noMaxDepth.IsError);
 		Assert.DoesNotContain("[Tree depth]", AllText(noMaxDepth), StringComparison.Ordinal);

@@ -27,4 +27,10 @@ internal sealed class McpToolException(string code, string message) : Exception(
 	/// carries a path: the request index already identifies the file.
 	/// </summary>
 	public string? BatchReason { get; init; }
+
+	/// <summary>
+	/// The message names a directory's readable entries, the next step for that batch item, so a
+	/// batched read prints the whole message inside its untrusted block instead of a bare status.
+	/// </summary>
+	public bool NamesReadableEntries { get; init; }
 }
