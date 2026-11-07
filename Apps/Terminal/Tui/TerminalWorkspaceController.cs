@@ -734,20 +734,20 @@ public sealed class TerminalWorkspaceController(
 	{
 		ArgumentNullException.ThrowIfNull(state);
 		ArgumentNullException.ThrowIfNull(current);
+		// The readable project bounds the configuration the selection may be resolved with.
+		var project = await BuildRelationProjectPlanAsync(state, current, persistentGitMode, cancellationToken)
+			.ConfigureAwait(false);
 		var related = await RelatedQueryRunner.FindAsync(
 				services.DependencyFactsEngine,
 				current,
 				seed,
 				direction,
 				depth,
+				(project ?? current).IncludedFiles,
 				cancellationToken)
 			.ConfigureAwait(false);
-		if (!DependencyFactsEngine.CanRelateOutsideSelection(related) ||
-			await BuildRelationProjectPlanAsync(state, current, persistentGitMode, cancellationToken)
-				.ConfigureAwait(false) is not { } project)
-		{
+		if (project is null || !DependencyFactsEngine.CanRelateOutsideSelection(related))
 			return (related, null);
-		}
 		var outside = await services.DependencyFactsEngine
 			.FindOutsideSelectionAsync(
 				current.SourceRoot,

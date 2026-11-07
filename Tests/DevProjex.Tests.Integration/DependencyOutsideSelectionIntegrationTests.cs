@@ -623,6 +623,171 @@ public sealed class DependencyOutsideSelectionIntegrationTests
 			engine, fixture.Path, projectManifest, ["pkg/_api.py"], DependencyDirection.Both, narrowed);
 	}
 
+	[Fact]
+	public async Task SeedTheProjectRanOutOfResolutionWorkFor_KeepsTheSelectionAnswer()
+	{
+		using var fixture = new TemporaryDirectory();
+		const string seedSource = "namespace App.Zzzz; public sealed class Seed { Dep Value; }";
+		var project = fixture.CreateFile("App.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var filler = fixture.CreateFile("A/Seed.cs", seedSource.Replace("Zzzz", "Aaaa", StringComparison.Ordinal));
+		var dependency = fixture.CreateFile("Z/Dep.cs", "namespace App.Zzzz; public sealed class Dep { }");
+		var seedPath = fixture.CreateFile("Z/Seed.cs", seedSource);
+		string[] seeds = ["Z/Seed.cs"];
+		// The selection fits one unit of resolution work; the project spends it on A/Seed.cs first.
+		using var engine = new DependencyFactsEngine(
+			new TreeSitterDependencyFactExtractor(),
+			new FileDependencyConfigurationProvider(),
+			new DependencyFactsLimits(MaximumWorkPerIndex: 1));
+
+		var selection = await engine.FindRelatedAsync(
+			fixture.Path, [dependency, seedPath], seeds, DependencyDirection.Dependencies,
+			cancellationToken: TestContext.Current.CancellationToken);
+		var narrowed = await engine.FindOutsideSelectionAsync(
+			fixture.Path, selection, [project, filler, dependency, seedPath], DependencyDirection.Dependencies,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(narrowed.Index.EdgesBySource["Z/Seed.cs"], static edge => edge.Reference == "<limit>");
+		Assert.Equal(["Z/Dep.cs"], Paths(Assert.Single(narrowed.Selection.Seeds).Dependencies));
+		Assert.Empty(narrowed.Seeds);
+		Assert.Equal(1, narrowed.SelectionAnsweredSeeds);
+		Assert.Equal(
+			DependencyFactsEngine.CountResolution(selection.Index, seeds, DependencyDirection.Dependencies),
+			narrowed.Resolution);
+	}
+
+	[Fact]
+	public async Task DependentTheProjectHasNoFactsFor_KeepsTheSelectionAnswer()
+	{
+		using var fixture = new TemporaryDirectory();
+		const string seedSource = "namespace App.Zzzz; public sealed class Seed { Dep Value; }";
+		var project = fixture.CreateFile("App.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var filler = fixture.CreateFile("A/Seed.cs", seedSource.Replace("Zzzz", "Aaaa", StringComparison.Ordinal));
+		var dependency = fixture.CreateFile("Z/Dep.cs", "namespace App.Zzzz; public sealed class Dep { }");
+		var dependent = fixture.CreateFile("Z/Seed.cs", seedSource);
+		string[] projectManifest = [project, filler, dependency, dependent];
+		string[] seeds = ["Z/Dep.cs"];
+		long budget;
+		using (var measuring = CreateEngine())
+		{
+			budget = (await measuring.IndexAsync(
+				fixture.Path, [project, filler, dependency], cancellationToken: TestContext.Current.CancellationToken))
+				.Metrics.AccumulatedFactBytes;
+		}
+		// The project spends the fact budget before it reaches the dependent; the selection does not.
+		using var engine = new DependencyFactsEngine(
+			new TreeSitterDependencyFactExtractor(),
+			new FileDependencyConfigurationProvider(),
+			new DependencyFactsLimits(MaximumAccumulatedFactBytes: budget));
+
+		var selection = await engine.FindRelatedAsync(
+			fixture.Path, [dependency, dependent], seeds, DependencyDirection.Dependents,
+			cancellationToken: TestContext.Current.CancellationToken);
+		var narrowed = await engine.FindOutsideSelectionAsync(
+			fixture.Path, selection, projectManifest, DependencyDirection.Dependents,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Equal(["Z/Seed.cs"], narrowed.Index.Coverage.FactBudgetLimitedFiles);
+		Assert.Equal(["Z/Seed.cs"], Paths(Assert.Single(selection.Seeds).Dependents));
+		Assert.Equal(["Z/Seed.cs"], Paths(Assert.Single(narrowed.Selection.Seeds).Dependents));
+		Assert.Equal(1, narrowed.SelectionAnsweredSeeds);
+	}
+
+	[Fact]
+	public async Task PythonNamespacePackage_StaysInTheSeedsOwnDependencies()
+	{
+		using var fixture = new TemporaryDirectory();
+		var pyproject = fixture.CreateFile("pyproject.toml", "[project]\nname = \"demo\"\n");
+		var consumer = fixture.CreateFile("consumer.py", "import ns\n");
+		var portion = fixture.CreateFile("ns/portion.py", "value = 1\n");
+		var other = fixture.CreateFile("other.py", "value = 2\n");
+		string[] projectManifest = [pyproject, consumer, portion, other];
+		string[] seeds = ["consumer.py"];
+		using var engine = CreateEngine();
+
+		var selection = await engine.FindRelatedAsync(
+			fixture.Path, [consumer], seeds, DependencyDirection.Dependencies,
+			cancellationToken: TestContext.Current.CancellationToken);
+		var narrowed = await engine.FindOutsideSelectionAsync(
+			fixture.Path, selection, projectManifest, DependencyDirection.Dependencies,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var inside = Assert.Single(narrowed.Selection.Seeds);
+		Assert.Equal(["namespace:ns"], Paths(inside.Dependencies));
+		Assert.Empty(narrowed.Seeds);
+		Assert.Equal(new DependencyResolutionCounts(1, 0, 0, 0, 0), narrowed.Resolution);
+		await AssertSameAnswerAsUnnarrowedAsync(
+			engine, fixture.Path, projectManifest, seeds, DependencyDirection.Dependencies, narrowed);
+	}
+
+	[Fact]
+	public async Task RepeatedSeed_IsAnsweredOnceInsideAndOutsideTheSelection()
+	{
+		using var fixture = new TemporaryDirectory();
+		var tsconfig = fixture.CreateFile("tsconfig.json", "{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}");
+		var target = fixture.CreateFile("core/Target.ts", "export default 1;\n");
+		var inside = fixture.CreateFile("core/Inside.ts", "import target from './Target.js';\n");
+		var outsideFile = fixture.CreateFile("app/Outside.ts", "import target from '../core/Target.js';\n");
+		string[] projectManifest = [tsconfig, target, inside, outsideFile];
+		string[] seeds = ["core/Target.ts", "core\\Target.ts", "core/Target.ts"];
+		using var engine = CreateEngine();
+
+		var selection = await engine.FindRelatedAsync(
+			fixture.Path, [target, inside], seeds, DependencyDirection.Dependents,
+			cancellationToken: TestContext.Current.CancellationToken);
+		var narrowed = await engine.FindOutsideSelectionAsync(
+			fixture.Path, selection, projectManifest, DependencyDirection.Dependents,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Equal(["core/Target.ts"], selection.Seeds.Select(static seed => seed.Seed));
+		Assert.Equal(["core/Target.ts"], narrowed.Selection.Seeds.Select(static seed => seed.Seed));
+		Assert.Equal(["app/Outside.ts"], Paths(Assert.Single(narrowed.Seeds).Dependents));
+	}
+
+	[Theory]
+	[InlineData("{ broken")]
+	[InlineData("{\"compilerOptions\":{\"paths\":{\"@lib/*\":[\"./lib/*\"]}}}")]
+	public async Task ConfigurationTheCallerMayNotRead_NeitherResolvesNorIsNamed(string hiddenConfiguration)
+	{
+		using var fixture = new TemporaryDirectory();
+		fixture.CreateFile("tsconfig.json", hiddenConfiguration);
+		var util = fixture.CreateFile("lib/util.ts", "export const util = 1;\n");
+		var main = fixture.CreateFile("app/main.ts", "import { util } from '@lib/util';\n");
+		string[] readable = [util, main];
+		using var engine = CreateEngine();
+
+		var related = await engine.FindRelatedAsync(
+			fixture.Path, [main], ["app/main.ts"], DependencyDirection.Dependencies,
+			cancellationToken: TestContext.Current.CancellationToken,
+			readableProjectFiles: readable);
+		var outside = await engine.FindOutsideSelectionAsync(
+			fixture.Path, related, readable, DependencyDirection.Dependencies,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		foreach (var index in new[] { related.Index, outside.Index })
+		{
+			Assert.Empty(index.Coverage.ConfigurationDiagnostics);
+			Assert.DoesNotContain(index.Edges, static edge => edge.Status == ResolutionStatus.Resolved);
+		}
+		Assert.Empty(outside.Seeds);
+	}
+
+	[Fact]
+	public async Task ConfigurationTheCallerMayRead_StillResolvesTheNarrowedSelection()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("tsconfig.json", "{\"compilerOptions\":{\"paths\":{\"@lib/*\":[\"./lib/*\"]}}}");
+		var util = fixture.CreateFile("lib/util.ts", "export const util = 1;\n");
+		var main = fixture.CreateFile("app/main.ts", "import { util } from '@lib/util';\n");
+		using var engine = CreateEngine();
+
+		var related = await engine.FindRelatedAsync(
+			fixture.Path, [util, main], ["app/main.ts"], DependencyDirection.Dependencies,
+			cancellationToken: TestContext.Current.CancellationToken,
+			readableProjectFiles: [config, util, main]);
+
+		Assert.Equal(["lib/util.ts"], Paths(Assert.Single(related.Seeds).Dependencies));
+	}
+
 	// Narrowing decides only where a related file is listed: together the selection's sections
 	// and the outside sections hold what the unnarrowed call resolves, with the same counts.
 	private static async Task AssertSameAnswerAsUnnarrowedAsync(
@@ -654,7 +819,19 @@ public sealed class DependencyOutsideSelectionIntegrationTests
 			Assert.Equal(
 				Rows(wholeSeed.Dependencies.Where(file => file.Status == ResolutionStatus.Ambiguous && visible.ContainsKey(file.Path))),
 				Rows(inside.Dependencies.Where(static file => file.Status == ResolutionStatus.Ambiguous)));
+			Assert.Equal(
+				Rows(wholeSeed.Dependents.Where(file => file.Status == ResolutionStatus.Ambiguous && visible.ContainsKey(file.Path))),
+				Rows(inside.Dependents.Where(static file => file.Status == ResolutionStatus.Ambiguous)));
+			// A file the selection shows, or a target that is no project file, is listed inside.
+			Assert.Equal(
+				ResolvedPaths(wholeSeed.Dependencies.Where(file => ShownInside(file.Path))),
+				ResolvedPaths(inside.Dependencies));
+			Assert.Equal(
+				ResolvedPaths(wholeSeed.Dependents.Where(file => ShownInside(file.Path))),
+				ResolvedPaths(inside.Dependents));
 		}
+
+		bool ShownInside(string path) => visible.ContainsKey(path) || !narrowed.Index.FileByPath.ContainsKey(path);
 	}
 
 	private static string[] Paths(IEnumerable<RelatedFile> files) =>

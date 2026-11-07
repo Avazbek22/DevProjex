@@ -13,6 +13,9 @@ public sealed partial class DependencyFactsEngine : IDisposable
 {
 	public const int MaximumRelatedTraversalSeeds = 256;
 	internal const string AccumulatedFactBudgetReason = "index fact memory limit exceeded";
+	// The reference of the one edge that stands in for a file whose facts were not resolved
+	// because the file exceeded the edge limit or the index ran out of resolution work.
+	private const string LimitReference = "<limit>";
 	private const int MaximumCachedNavigationFiles = 2_048;
 	private const long MaximumNavigationCacheBytes = 8L * 1024 * 1024;
 	private const int MaximumCachedPhysicalFileProbes = 4_096;
@@ -161,12 +164,18 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		}
 	}
 
+	/// <param name="readableProjectFiles">
+	/// The files of the readable project the manifest was narrowed from. Configuration that owns
+	/// manifest files is read from outside the manifest only when it is one of them, so a file the
+	/// caller may not read never decides how references resolve. Null applies no such bound.
+	/// </param>
 	public async Task<DependencyIndexSnapshot> IndexAsync(
 		string sourceRoot,
 		IReadOnlyList<string> manifestFiles,
 		IProgress<DependencyIndexProgress>? progress = null,
 		CancellationToken cancellationToken = default,
-		DependencyManifestContentIdentities? contentIdentities = null)
+		DependencyManifestContentIdentities? contentIdentities = null,
+		IReadOnlyCollection<string>? readableProjectFiles = null)
 	{
 		ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
 		ArgumentException.ThrowIfNullOrWhiteSpace(sourceRoot);
@@ -183,9 +192,15 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			manifest[index] = canonicalManifest[index].FullPath;
 			manifestRelativePaths[index] = canonicalManifest[index].RelativePath;
 		}
+		var readableFiles = readableProjectFiles is null
+			? null
+			: CreateCanonicalManifest(root, [.. readableProjectFiles], cancellationToken);
 		var manifestRequestKey = new ManifestRequestKey(
 			root,
-			HashWithCancellation(manifestRelativePaths, cancellationToken));
+			HashWithCancellation(manifestRelativePaths, cancellationToken),
+			readableFiles is null
+				? null
+				: HashWithCancellation(readableFiles.Select(static file => file.RelativePath), cancellationToken));
 		var initialStamps = TryCaptureFileStamps(manifest, cancellationToken);
 		var alignedContentIdentities = AlignContentIdentities(manifest, contentIdentities, cancellationToken);
 		if (initialStamps is not null &&
@@ -223,7 +238,11 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			};
 		}
 		var configuration = await _configurationProvider
-			.ReadAsync(root, manifest, cancellationToken)
+			.ReadAsync(
+				root,
+				manifest,
+				readableFiles?.Select(static file => file.FullPath).ToHashSet(PathComparer),
+				cancellationToken)
 			.ConfigureAwait(false);
 		var prepared = new PreparedDependencyIdentity[manifest.Length];
 		var observations = new DependencySourceObservation[manifest.Length];
@@ -481,9 +500,11 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		IReadOnlyList<string> seedRelativePaths,
 		DependencyDirection direction = DependencyDirection.Both,
 		IProgress<DependencyIndexProgress>? progress = null,
-		CancellationToken cancellationToken = default)
+		CancellationToken cancellationToken = default,
+		IReadOnlyCollection<string>? readableProjectFiles = null)
 	{
-		var index = await IndexAsync(sourceRoot, manifestFiles, progress, cancellationToken)
+		var index = await IndexAsync(
+				sourceRoot, manifestFiles, progress, cancellationToken, readableProjectFiles: readableProjectFiles)
 			.ConfigureAwait(false);
 		return FindRelated(index, seedRelativePaths, direction);
 	}
@@ -495,12 +516,14 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		DependencyDirection direction,
 		int depth,
 		IProgress<DependencyIndexProgress>? progress = null,
-		CancellationToken cancellationToken = default)
+		CancellationToken cancellationToken = default,
+		IReadOnlyCollection<string>? readableProjectFiles = null)
 	{
 		if (depth < 1)
 			throw new ArgumentOutOfRangeException(nameof(depth));
 
-		var index = await IndexAsync(sourceRoot, manifestFiles, progress, cancellationToken)
+		var index = await IndexAsync(
+				sourceRoot, manifestFiles, progress, cancellationToken, readableProjectFiles: readableProjectFiles)
 			.ConfigureAwait(false);
 		var seeds = TraverseRelated(
 			seedRelativePaths,
@@ -524,7 +547,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		Func<IReadOnlyList<string>, IReadOnlyList<SeedRelatedFiles>> relate,
 		CancellationToken cancellationToken)
 	{
-		var normalizedSeeds = seedRelativePaths.Select(Normalize).ToArray();
+		var normalizedSeeds = DistinctSeeds(seedRelativePaths);
 		var visited = new HashSet<string>(normalizedSeeds, StringComparer.Ordinal);
 		if (visited.Count > MaximumRelatedTraversalSeeds)
 			throw new DependencyTraversalLimitException(MaximumRelatedTraversalSeeds);
@@ -564,9 +587,8 @@ public sealed partial class DependencyFactsEngine : IDisposable
 	{
 		var fileByPath = index.FileByPath;
 		var seeds = new List<SeedRelatedFiles>(seedRelativePaths.Count);
-		foreach (var rawSeed in seedRelativePaths)
+		foreach (var seed in DistinctSeeds(seedRelativePaths))
 		{
-			var seed = Normalize(rawSeed);
 			if (!fileByPath.TryGetValue(seed, out var facts))
 				throw new ArgumentException($"Seed '{seed}' is outside the dependency manifest.", nameof(seedRelativePaths));
 			if (facts.Status != DependencyFileStatus.Supported)
@@ -584,6 +606,10 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		}
 		return new DependencyRelatedResult(index, seeds);
 	}
+
+	// One seed is answered once, in the order it was first named, however a caller spelled it.
+	private static string[] DistinctSeeds(IEnumerable<string> seedRelativePaths) =>
+		seedRelativePaths.Select(Normalize).Distinct(StringComparer.Ordinal).ToArray();
 
 	private static IEnumerable<RelatedFile> RelatedFiles(
 		SeedRelatedFiles seed,
@@ -1397,7 +1423,8 @@ public sealed partial class DependencyFactsEngine : IDisposable
 
 	private readonly record struct ManifestRequestKey(
 		string SourceRoot,
-		string ManifestPathsFingerprint);
+		string ManifestPathsFingerprint,
+		string? ReadableFilesFingerprint);
 
 	private readonly record struct RelatedGroupKey(
 		string Path,
@@ -1609,7 +1636,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 
 		private static DependencyEdge LimitEdge(FileFacts file, string reason) => new(
 			file.Path, null, EvidenceLayer.TypeReference, ResolutionStatus.Unresolved,
-			"<limit>", [reason], [new SourceSite(file.Path, 1, reason)], [], false);
+			LimitReference, [reason], [new SourceSite(file.Path, 1, reason)], [], false);
 
 		private static IReadOnlyList<DependencyEdge> Aggregate(IEnumerable<DependencyEdge> raw)
 		{
