@@ -1053,6 +1053,31 @@ public sealed class DocumentationAndPackagingContractTests
 	}
 
 	[Fact]
+	public void ContainerArtifactChangesTriggerBothPackagingEventsAndShareLoadedIdentityChecks()
+	{
+		var rootPath = FindRepositoryRoot();
+		var workflow = File.ReadAllText(Path.Combine(rootPath, ".github", "workflows", "publish-container.yml"));
+		foreach (var eventName in new[] { "push", "pull_request" })
+		{
+			var eventBlock = Regex.Match(workflow, $@"(?ms)^  {eventName}:\r?\n.*?(?=^  \w+:)");
+			Assert.True(eventBlock.Success, $"Missing {eventName} configuration.");
+			Assert.Contains("'Scripts/Test-ContainerImageArtifacts.ps1'", eventBlock.Value, StringComparison.Ordinal);
+			Assert.Contains("'Scripts/ContainerPublishing.ps1'", eventBlock.Value, StringComparison.Ordinal);
+			Assert.Contains("'Scripts/ci/Test-ContainerPromotionPolicy.ps1'", eventBlock.Value, StringComparison.Ordinal);
+		}
+
+		var validator = File.ReadAllText(Path.Combine(rootPath, "Scripts", "Test-ContainerImageArtifacts.ps1"));
+		var publisher = File.ReadAllText(Path.Combine(rootPath, "Scripts", "Publish-HeadlessContainer.ps1"));
+		var builder = File.ReadAllText(Path.Combine(rootPath, ".github", "workflows", "container-build.yml"));
+		Assert.Contains("Assert-ContainerLoadedImage", validator, StringComparison.Ordinal);
+		Assert.Contains("Assert-ContainerLoadedImage", publisher, StringComparison.Ordinal);
+		Assert.DoesNotContain("{{.Id}}", validator + publisher, StringComparison.Ordinal);
+		Assert.Contains("Get-FileHash -LiteralPath $archivePath -Algorithm SHA256", validator, StringComparison.Ordinal);
+		Assert.Contains("schemaVersion = 2", builder, StringComparison.Ordinal);
+		Assert.Equal(2, Regex.Matches(builder, "configDigest = Get-ContainerArchiveConfigDigest").Count);
+	}
+
+	[Fact]
 	public void PrivilegedReleaseWorkflowsPinThirdPartyActions()
 	{
 		var rootPath = FindRepositoryRoot();
