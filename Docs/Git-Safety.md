@@ -121,7 +121,10 @@ resolved to a commit id with the `rev-parse` form above, and only that full hexa
 `ls-tree`. The paths come from the call's effective selection, after `--` and with
 `--literal-pathspecs`, so a leading `-` or pathspec magic such as `:(glob)` is an ordinary file name;
 a path with a control character, an empty, `.` or `..` segment, or a backslash is refused before Git
-starts, and one path list is limited to 24,000 characters. Both `cat-file` forms receive only full
+starts, and one path list is limited to 24,000 characters. Only on Windows does a selected path's `\`
+become the `/` Git separates directories with; on Linux and macOS a backslash is part of a file name,
+so a file such as `config\.env` is listed as unsupported without being read, never as the old side of
+`config/.env`. Both `cat-file` forms receive only full
 lowercase hexadecimal object ids on standard input, one per line, so Git's revision-name resolution
 never sees caller text. Without `--textconv` or `--filters`, `cat-file` returns stored bytes and runs
 no repository program; none of these forms compares against the working tree, so no clean, smudge,

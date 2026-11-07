@@ -147,6 +147,28 @@ public sealed class GitFileVersionReaderIntegrationTests
 		Assert.Equal([requested], versions.Files.Keys);
 	}
 
+	[Fact]
+	public async Task ABackslashOutsideWindowsIsPartOfTheNameAndIsNeverReadAsAnotherPath()
+	{
+		if (OperatingSystem.IsWindows())
+			Assert.Skip("Windows separates directories with a backslash.");
+		using var repository = new GitModeRepository();
+		var nested = repository.Write("config/.env", "nested\n");
+		var literal = repository.Write("config\\.env", "literal\n");
+		repository.Commit();
+		Assert.Contains("config\\.env", repository.Git("ls-files", "-z").Split('\0'));
+
+		var both = await ReadAsync(repository, GitFilteringMode.Changes, null, nested, literal);
+		var alone = await ReadAsync(repository, GitFilteringMode.Staged, null, literal);
+
+		Assert.Equal("nested\n", Text(both.Files[nested].Old));
+		Assert.True(both.Files[literal].Unsupported);
+		Assert.Null(both.Files[literal].Old);
+		Assert.True(alone.Files[literal].Unsupported);
+		Assert.Null(alone.Files[literal].Old);
+		Assert.Null(alone.Files[literal].New);
+	}
+
 	private static async Task<GitFileVersionSet> ReadAsync(
 		GitModeRepository repository,
 		GitFilteringMode mode,
