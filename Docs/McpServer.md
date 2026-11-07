@@ -696,14 +696,17 @@ The human-readable payload has `Dependencies` and `Dependents` sections accordin
 separated by ` · `, a `resolved` or `ambiguous` status, an estimated token count, and
 an optional `cross-scope` marker. One ambiguous reference is one row with its bounded
 candidate list; when Bash suffix matching exceeds its 32-path cap, the reason states how many
-matches are shown and how many exist. Self-file edges are omitted. For example:
+matches are shown and how many exist. Self-file edges are omitted. Reference sites that share
+the same reason text form one entry, placed where the first of them stands, with its line
+numbers ascending and at most five listed: `type reference Response at lines 56, 141, 186, 222,
+258 (+4 more)`. A single site keeps the `at line N` form. For example:
 
 ```text
 Dependencies:
 Application/Context/ProjectContextPlan.cs — one visible declaration identity in csharp:Apps/Mcp/DevProjex.Mcp.csproj · type reference ProjectContextPlan at line 18 — resolved — 642 tokens — cross-scope
 Models/Alpha/User.cs — multiple visible declaration identities · type reference User at line 27 — ambiguous — 84 tokens — candidates: Models/Alpha/User.cs, Models/Beta/User.cs
 Dependents:
-Apps/Terminal/Execution/AnalyzeCommandHandler.cs — one visible declaration identity in csharp:Apps/Terminal/DevProjex.Terminal.csproj · type reference ProjectContextPlan at line 44 — resolved — 1830 tokens — cross-scope
+Apps/Terminal/Execution/AnalyzeCommandHandler.cs — one visible declaration identity in csharp:Apps/Terminal/DevProjex.Terminal.csproj · type reference ProjectContextPlan at lines 44, 61, 97 — resolved — 1830 tokens — cross-scope
 ```
 
 Project-derived paths and evidence remain inside the random `untrusted-data` block.
