@@ -593,7 +593,7 @@ Przycisk X (anuluj) na pasku stanu:
 * w operacjach bez obsługi anulowania kończy wskazanie na pasku stanu, a sama operacja może nadal zakończyć się w tle.
 
 ## 19) MCP i agenci AI
-DevProjex zawiera lokalny serwer MCP tylko do odczytu. Agenci AI, tacy jak Claude Code, Codex, Cursor i VS Code, czytają przez niego projekt: maskowanie sekretów jest zawsze włączone, a agent nie może zmieniać plików projektu. Serwer udostępnia osiem narzędzi: `list_projects`, `get_tree`, `analyze`, `search_project`, `related_files`, `get_file`, `pack_context` i `read_pack`.
+DevProjex zawiera lokalny serwer MCP tylko do odczytu. Agenci AI, tacy jak Claude Code, Codex, Cursor i VS Code, czytają przez niego projekt: maskowanie sekretów jest zawsze włączone, a agent nie może zmieniać plików projektu. Serwer udostępnia dziewięć narzędzi: `list_projects`, `get_tree`, `analyze`, `search_project`, `related_files`, `get_file`, `get_diff`, `pack_context` i `read_pack`.
 
 ### 19.1 Łączenie klienta
 Menu MCP zawiera:

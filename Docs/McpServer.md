@@ -1155,7 +1155,7 @@ contains counts only; structured analysis data remains inside its untrusted repr
 Unsupported languages and files rejected by parse or structural safety checks are
 separate unchanged-file outcomes and do not produce this trailer.
 
-All eight tools omit `outputSchema` and `structuredContent` and return the useful
+All nine tools omit `outputSchema` and `structuredContent` and return the useful
 payload in text blocks under `content`. `list_projects` and `analyze` place their
 JSON object inside the standard spotlighted untrusted-data block; the other tools
 return their existing text or document shape there. This

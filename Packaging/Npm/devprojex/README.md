@@ -73,8 +73,8 @@ command = "npx"
 args = ["-y", "devprojex", "mcp", "--root", "/absolute/path/to/project"]
 ```
 
-Eight read-only tools cover the workflow: `list_projects`, `get_tree`, `analyze`,
-`search_project`, `related_files`, `get_file`, `pack_context`, and `read_pack`.
+Nine read-only tools cover the workflow: `list_projects`, `get_tree`, `analyze`,
+`search_project`, `related_files`, `get_file`, `get_diff`, `pack_context`, and `read_pack`.
 
 - Secret redaction is always on in MCP mode and has no off switch.
 - Access is pinned to the startup root; symlink and junction escapes are rejected.

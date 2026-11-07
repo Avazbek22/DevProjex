@@ -593,7 +593,7 @@ Nút X (hủy) trên thanh trạng thái:
 * với các thao tác không hỗ trợ hủy, nút này dừng hiển thị trên thanh trạng thái, trong khi bản thân thao tác vẫn có thể kết thúc ở chế độ nền.
 
 ## 19) MCP và tác nhân AI
-DevProjex có sẵn một máy chủ MCP cục bộ chỉ đọc. Các tác nhân AI như Claude Code, Codex, Cursor và VS Code đọc dự án thông qua nó: việc che thông tin bí mật luôn được bật, và tác nhân không thể thay đổi tệp dự án. Máy chủ cung cấp tám công cụ: `list_projects`, `get_tree`, `analyze`, `search_project`, `related_files`, `get_file`, `pack_context` và `read_pack`.
+DevProjex có sẵn một máy chủ MCP cục bộ chỉ đọc. Các tác nhân AI như Claude Code, Codex, Cursor và VS Code đọc dự án thông qua nó: việc che thông tin bí mật luôn được bật, và tác nhân không thể thay đổi tệp dự án. Máy chủ cung cấp chín công cụ: `list_projects`, `get_tree`, `analyze`, `search_project`, `related_files`, `get_file`, `get_diff`, `pack_context` và `read_pack`.
 
 ### 19.1 Kết nối ứng dụng
 Menu MCP gồm:
