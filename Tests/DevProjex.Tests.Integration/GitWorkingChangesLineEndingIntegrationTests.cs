@@ -5,7 +5,7 @@ using DevProjex.Kernel.Models;
 
 namespace DevProjex.Tests.Integration;
 
-public sealed class GitWorkingChangesLineEndingIntegrationTests
+public sealed partial class GitWorkingChangesLineEndingIntegrationTests
 {
 	[Fact]
 	public async Task ChangesScope_InACrlfCheckout_ReportsOnlyTheEditedFile()

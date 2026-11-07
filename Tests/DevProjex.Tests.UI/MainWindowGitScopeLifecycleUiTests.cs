@@ -5,7 +5,7 @@ using DevProjex.Avalonia.Coordinators;
 namespace DevProjex.Tests.UI;
 
 [Collection(UiWorkspaceCollection.Name)]
-public sealed class MainWindowGitScopeLifecycleUiTests
+public sealed partial class MainWindowGitScopeLifecycleUiTests
 {
 	[AvaloniaFact]
 	public async Task CleanStagedScope_HidesIrrelevantSettingsAndClearsAggregates()
@@ -1297,7 +1297,10 @@ public sealed class MainWindowGitScopeLifecycleUiTests
 		try
 		{
 			using var process = Process.Start(startInfo);
-			if (process is null || !process.WaitForExit(10_000) || process.ExitCode != 0)
+			if (process is null)
+				throw new InvalidOperationException("Could not start git.");
+			process.StandardInput.Close();
+			if (!process.WaitForExit(10_000) || process.ExitCode != 0)
 				GitTestRequirement.ReportUnavailable("Git is not available in this test environment.");
 		}
 		catch (System.ComponentModel.Win32Exception)
@@ -1314,6 +1317,7 @@ public sealed class MainWindowGitScopeLifecycleUiTests
 
 		using var process = Process.Start(startInfo) ??
 			throw new InvalidOperationException("Could not start git.");
+		process.StandardInput.Close();
 		var output = process.StandardOutput.ReadToEnd();
 		var error = process.StandardError.ReadToEnd();
 		if (!process.WaitForExit(20_000))
@@ -1330,6 +1334,7 @@ public sealed class MainWindowGitScopeLifecycleUiTests
 			WorkingDirectory = workingDirectory,
 			UseShellExecute = false,
 			CreateNoWindow = true,
+			RedirectStandardInput = true,
 			RedirectStandardOutput = true,
 			RedirectStandardError = true,
 			StandardOutputEncoding = Encoding.UTF8,
