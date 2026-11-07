@@ -27,7 +27,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 			Create(target, nameof(DevProjexMcpTools.SearchProject), "search_project", "Search project", SearchInput(agentExclusions), openWorld: allowRemote),
 			Create(target, nameof(DevProjexMcpTools.RelatedFiles), "related_files", "Find related files", RelatedFilesInput(agentExclusions), largeResult: true, idempotent: false, openWorld: allowRemote),
 			Create(target, nameof(DevProjexMcpTools.GetFile), "get_file", "Get project file", GetFileInput(agentExclusions), openWorld: allowRemote),
-			Create(target, nameof(DevProjexMcpTools.GetDiff), "get_diff", "Get project diff", GetDiffInput, openWorld: allowRemote)
+			Create(target, nameof(DevProjexMcpTools.GetDiff), "get_diff", "Get project diff", GetDiffInput(agentExclusions), openWorld: allowRemote)
 		];
 		var search = _tools.Single(tool => tool.ProtocolTool.Name == "search_project").ProtocolTool;
 		search.Description = searchBodyCharacters == 0
@@ -537,12 +537,13 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	}
 	""";
 
-	private static readonly string GetDiffInput = $$"""
+	private static string GetDiffInput(bool agentExclusions) => $$"""
 	{
 	  "type": "object",
 	  "properties": {
 	    {{CompactProjectProperty}},
 	    {{CompactBranchProperty}},
+	    {{CompactProfileProperty}},
 	    "git_scope": {
 	      "description": "Chooses the comparison: changes is HEAD to the working tree including untracked files, staged is HEAD to the index, and diff:<ref>..<ref> compares two commits.",
 	      "default": "changes",
@@ -554,7 +555,9 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    },
 	    {{CompactPathsProperty}},
 	    {{CompactIncludeProperty}},
-	    {{CompactExcludeProperty}},
+	    {{CompactExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
+	    {{CompactTrackedOnlyProperty}},
+	    {{CompactMaxFileBytesProperty}},
 	    "context_lines": { "description": "Unchanged lines around each change; hunks whose context touches merge.", "default": 3, "oneOf": [ { "type": "integer", "minimum": 0, "maximum": 20 }, { "type": "string", "pattern": "^[0-9]+$" } ] }
 	  },
 	  "additionalProperties": false

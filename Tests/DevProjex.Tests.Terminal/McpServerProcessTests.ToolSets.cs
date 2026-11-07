@@ -9,8 +9,8 @@ public sealed partial class McpServerProcessTests
 		["list_projects", "get_tree", "read_pack", "search_project", "related_files", "get_file", "get_diff"];
 
 	[Theory]
-	[InlineData("full", 31_200)]
-	[InlineData("reduced", 20_300)]
+	[InlineData("full", 31_870)]
+	[InlineData("reduced", 20_970)]
 	public async Task RealProcessPublishesTheSelectedToolSetWithinItsOwnBudget(string toolSet, int ceiling)
 	{
 		using var workspace = new TemporaryDirectory();

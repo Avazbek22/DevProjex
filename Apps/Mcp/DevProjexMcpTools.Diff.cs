@@ -12,8 +12,9 @@ internal sealed partial class DevProjexMcpTools
 	// A constant: neither the scope value nor a path reaches it, so it stays trusted.
 	internal const string GitScopeDiffNotice = "[Diff] get_diff with the same git_scope returns only the changed lines.";
 
-	private readonly IReadOnlySet<string> getDiffArgumentNames = McpJsonArguments.FreezeAllowed(
-		"project", "branch", "git_scope", "paths", "include_patterns", "exclude_patterns", "context_lines");
+	private readonly IReadOnlySet<string> getDiffArgumentNames = Allowed(agentExclusions,
+		"project", "branch", "profile", "git_scope", "paths", "include_patterns", "exclude_patterns",
+		"tracked_only", "max_file_bytes", "context_lines");
 
 	[Description(
 		"Shows what changed: masked unified diff hunks for a Git scope. Use it to review staged, uncommitted or ref-to-ref changes; use get_file for whole files and search_project for text. Returns per-file status, added/removed counts and hunks with context, largest changes first, under the same secret and private-data redaction as file content, with complete|partial status within 50,000 characters. Key parameters: git_scope=changes|staged|diff:A..B (default changes), paths, include_patterns, exclude_patterns, context_lines=0..20.")]
@@ -33,12 +34,13 @@ internal sealed partial class DevProjexMcpTools
 				paths,
 				includePatterns,
 				excludePatterns,
-				profile: null,
-				trackedOnly: false,
+				arguments.OptionalString("profile"),
+				arguments.OptionalBoolean("tracked_only", false),
 				arguments.OptionalString("git_scope") ?? GitScopeSelection.ToToken(GitFilteringMode.Changes),
-				maximumFileBytes: null,
+				arguments.OptionalInt64("max_file_bytes", 1, long.MaxValue),
 				cancellationToken,
 				includeOutputMetrics: false,
+				exclusions: ParseExclusionsArgument(arguments),
 				tolerateMissingPaths: true).ConfigureAwait(false);
 			RecordPlan(plan);
 			liveContext?.RecordFocusUse(plan.SourceRoot, McpLiveFocusUse.Diff);
