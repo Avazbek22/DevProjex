@@ -40,7 +40,10 @@ internal enum GitConfigReadKind
 	UnsafeDrivers,
 	WorktreeBranch,
 	PromisorRemotes,
-	NetworkOverrides
+	NetworkOverrides,
+	RepositoryLineEndings,
+	SystemLineEndings,
+	FileLineEndings
 }
 
 internal enum GitBranchListKind
@@ -81,7 +84,8 @@ internal sealed record GitProcessOperation
 		GitManagedCheckoutKind checkoutKind = default,
 		GitManagedConfigWriteKind configWriteKind = default,
 		IReadOnlyList<string>? filterDrivers = null,
-		string? allowedProtocols = null)
+		string? allowedProtocols = null,
+		IReadOnlyList<string>? lineEndingSettings = null)
 	{
 		Kind = kind;
 		Profile = profile;
@@ -94,6 +98,7 @@ internal sealed record GitProcessOperation
 		ConfigWriteKind = configWriteKind;
 		FilterDrivers = filterDrivers ?? [];
 		AllowedProtocols = allowedProtocols;
+		LineEndingSettings = lineEndingSettings ?? [];
 	}
 
 	public GitOperationKind Kind { get; }
@@ -107,6 +112,7 @@ internal sealed record GitProcessOperation
 	public GitManagedConfigWriteKind ConfigWriteKind { get; }
 	public IReadOnlyList<string> FilterDrivers { get; }
 	public string? AllowedProtocols { get; }
+	public IReadOnlyList<string> LineEndingSettings { get; }
 
 	public TimeSpan Deadline => Profile switch
 	{
@@ -122,8 +128,11 @@ internal sealed record GitProcessOperation
 	public static GitProcessOperation ReadStagedChanges() =>
 		new(GitOperationKind.ReadStagedChanges, GitProcessProfile.LocalRead);
 
-	public static GitProcessOperation ReadWorkingChanges() =>
-		new(GitOperationKind.ReadWorkingChanges, GitProcessProfile.LocalRead);
+	public static GitProcessOperation ReadWorkingChanges(IReadOnlyList<string>? lineEndingSettings = null) =>
+		new(
+			GitOperationKind.ReadWorkingChanges,
+			GitProcessProfile.LocalRead,
+			lineEndingSettings: ValidateLineEndingSettings(lineEndingSettings));
 
 	public static GitProcessOperation ReadUntracked() =>
 		new(GitOperationKind.ReadUntracked, GitProcessProfile.LocalRead);
@@ -144,11 +153,26 @@ internal sealed record GitProcessOperation
 			range);
 	}
 
-	public static GitProcessOperation ReadConfigValue(GitConfigReadKind kind) =>
-		new(
+	public static GitProcessOperation ReadConfigValue(GitConfigReadKind kind)
+	{
+		if (kind == GitConfigReadKind.FileLineEndings)
+			throw new ArgumentException("A configuration file read needs its path.", nameof(kind));
+		return new GitProcessOperation(
 			GitOperationKind.ReadConfigValue,
 			GitProcessProfile.LocalRead,
 			configReadKind: kind);
+	}
+
+	public static GitProcessOperation ReadLineEndingsFromFile(string configurationFile)
+	{
+		if (string.IsNullOrWhiteSpace(configurationFile) || !Path.IsPathFullyQualified(configurationFile))
+			throw new ArgumentException("A configuration file path must be absolute.", nameof(configurationFile));
+		return new GitProcessOperation(
+			GitOperationKind.ReadConfigValue,
+			GitProcessProfile.LocalRead,
+			configurationFile,
+			configReadKind: GitConfigReadKind.FileLineEndings);
+	}
 
 	public static GitProcessOperation ReadRemoteUrl() =>
 		new(GitOperationKind.ReadRemoteUrl, GitProcessProfile.LocalRead);
@@ -354,8 +378,28 @@ internal sealed record GitProcessOperation
 			["config", "--name-only", "--get-regexp", "^remote\\..*\\.promisor$"],
 		GitConfigReadKind.NetworkOverrides =>
 			["config", "--name-only", "--get-regexp", "^(url\\..*\\.insteadof|http(\\..*)?\\.(extraheader|cookiefile|proxy)|core\\.(gitproxy|sshcommand)|remote\\..*\\.uploadpack)$"],
+		GitConfigReadKind.RepositoryLineEndings => ["config", "--get-regexp", LineEndingPattern],
+		GitConfigReadKind.SystemLineEndings => ["config", "--system", "--get-regexp", LineEndingPattern],
+		GitConfigReadKind.FileLineEndings => ["config", "--file", Value!, "--get-regexp", LineEndingPattern],
 		_ => throw new ArgumentOutOfRangeException()
 	};
+
+	private const string LineEndingPattern = "^core\\.(autocrlf|eol)$";
+
+	// Only the two line-ending settings, with a value Git itself accepts, may reach a working-tree
+	// comparison; nothing a configuration file holds can add any other option.
+	private static IReadOnlyList<string> ValidateLineEndingSettings(IReadOnlyList<string>? settings)
+	{
+		if (settings is null || settings.Count == 0)
+			return [];
+		foreach (var setting in settings)
+		{
+			if (setting is not ("core.autocrlf=true" or "core.autocrlf=false" or "core.autocrlf=input" or
+				"core.eol=lf" or "core.eol=crlf" or "core.eol=native"))
+				throw new ArgumentException("A Git line-ending setting is invalid.", nameof(settings));
+		}
+		return settings.ToArray();
+	}
 
 	private IReadOnlyList<string> BuildBranchListArguments() => BranchListKind switch
 	{
