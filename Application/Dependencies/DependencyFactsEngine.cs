@@ -193,6 +193,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			cachedSnapshot.ManifestPaths.SequenceEqual(manifestRelativePaths, StringComparer.Ordinal) &&
 			cachedSnapshot.Stamps.SequenceEqual(initialStamps) &&
 			AreControlFilesStillAbsent(cachedSnapshot.AbsentControlFiles, cancellationToken) &&
+			AreObservedControlPathsCurrent(cachedSnapshot.ObservedControlPaths, cancellationToken) &&
 			ArePhysicalFileProbesCurrent(cachedSnapshot.PhysicalFileProbes, cancellationToken) &&
 			ContentIdentitiesMatch(cachedSnapshot.ContentIdentities, alignedContentIdentities) &&
 			_indexCache.ContainsKey(cachedSnapshot.IndexCacheKey))
@@ -455,7 +456,8 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		var finalStamps = TryCaptureFileStamps(manifest, cancellationToken);
 		if (canCacheIndex && resolvedIndexEntry is not null &&
 			initialStamps is not null && finalStamps is not null && initialStamps.SequenceEqual(finalStamps) &&
-			AreControlFilesStillAbsent(configuration.AbsentControlFiles, cancellationToken))
+			AreControlFilesStillAbsent(configuration.AbsentControlFiles, cancellationToken) &&
+			AreObservedControlPathsCurrent(configuration.ObservedControlPaths, cancellationToken))
 		{
 			StoreManifestSnapshot(
 				manifestRequestKey,
@@ -463,6 +465,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 				initialStamps,
 				alignedContentIdentities,
 				configuration.AbsentControlFiles,
+				configuration.ObservedControlPaths,
 				resolved.PhysicalFileProbes,
 				cacheKey,
 				resolvedIndexEntry,
@@ -915,6 +918,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		IReadOnlyList<FileStamp> stamps,
 		IReadOnlyList<string>? contentIdentities,
 		IReadOnlyList<string> absentControlFiles,
+		IReadOnlyList<DependencyControlPathStamp> observedControlPaths,
 		IReadOnlyList<PhysicalFileProbe> physicalFileProbes,
 		IndexCacheKey indexCacheKey,
 		IndexCacheEntry expectedIndexEntry,
@@ -930,7 +934,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 				RemoveManifestSnapshotUnderLock(key, previous);
 			var entry = new ManifestSnapshotCacheEntry(
 				key, manifestPaths, stamps, contentIdentities, absentControlFiles,
-				physicalFileProbes, indexCacheKey, snapshot);
+				observedControlPaths, physicalFileProbes, indexCacheKey, snapshot);
 			_manifestSnapshots[key] = entry;
 			entry.OrderNode = _manifestSnapshotOrder.AddLast(entry);
 			while (_manifestSnapshots.Count > _limits.MaximumCachedIndexes &&
@@ -1068,6 +1072,19 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			if (File.Exists(path))
+				return false;
+		}
+		return true;
+	}
+
+	private static bool AreObservedControlPathsCurrent(
+		IReadOnlyList<DependencyControlPathStamp> stamps,
+		CancellationToken cancellationToken)
+	{
+		for (var index = 0; index < stamps.Count; index++)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (!stamps[index].IsCurrent())
 				return false;
 		}
 		return true;
@@ -1395,6 +1412,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		IReadOnlyList<FileStamp> Stamps,
 		IReadOnlyList<string>? ContentIdentities,
 		IReadOnlyList<string> AbsentControlFiles,
+		IReadOnlyList<DependencyControlPathStamp> ObservedControlPaths,
 		IReadOnlyList<PhysicalFileProbe> PhysicalFileProbes,
 		IndexCacheKey IndexCacheKey,
 		DependencyIndexSnapshot Snapshot)
@@ -2814,7 +2832,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 				_files.TryGetValue(candidate, out var facts) && facts.Aliases.ContainsKey("$dynamic-all")))
 				return Edge(source, import, ResolutionStatus.Unresolved, null,
 					"dynamic __all__ is an unsupported mechanism", candidates);
-			return FinishImport(source, import, candidates);
+			return FinishImport(source, import, candidates, resolvedReason);
 		}
 
 		private IReadOnlyList<string> ResolvePythonStaticBinding(

@@ -554,10 +554,29 @@ public sealed class DependencyPythonAndConfigurationSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task FilteredOwningConfigurationHasAnExplicitMissingReason()
+	public async Task FilteredOwningConfigurationStillOwnsTheSelectedFiles()
 	{
 		using var fixture = new TemporaryDirectory();
 		fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var target = fixture.CreateFile("Target.cs", "namespace Models; public sealed class Item { }");
+		var source = fixture.CreateFile("Consumer.cs", "using Models; public sealed class Consumer { Item Value; }");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[target, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(result.Edges, item => item.Source == "Consumer.cs");
+		Assert.Equal(ResolutionStatus.Resolved, edge.Status);
+		Assert.Equal("Target.cs", edge.Target);
+		Assert.DoesNotContain(result.Files, file => file.Path == "Fixture.csproj");
+	}
+
+	[Fact]
+	public async Task WithoutAnOwningProjectOnDisk_CSharpReferencesKeepAnExplicitMissingReason()
+	{
+		using var fixture = new TemporaryDirectory();
 		var target = fixture.CreateFile("Target.cs", "namespace Models; public sealed class Item { }");
 		var source = fixture.CreateFile("Consumer.cs", "using Models; public sealed class Consumer { Item Value; }");
 		using var engine = CreateEngine();

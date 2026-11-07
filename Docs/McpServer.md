@@ -666,7 +666,10 @@ same Unicode scalar-value semantics at runtime.
 selects the starting point for the answer; it does not promise that only the seed is
 read. The server first builds the complete effective manifest through the same
 baseline, profile, Git scope, exclusion, glob, and file-size pipeline as the other
-selection tools, without narrowing that manifest to the seed paths. Each seed is then
+selection tools, without narrowing that manifest to the seed paths. The project
+configuration that owns the selected files, such as `pyproject.toml`, `tsconfig.json`, or a
+`.csproj`, is read even when `include_patterns` or a profile leaves it out; it is never
+returned as a result. Each seed is then
 resolved with the same path checks and case-correction guidance as `get_file`. A seed
 outside the effective selection returns the existing `DPX-MCP-PATH-NOT-FOUND` error.
 

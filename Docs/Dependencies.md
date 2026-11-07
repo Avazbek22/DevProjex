@@ -50,6 +50,18 @@ There are three separate scopes. The **allowed manifest** is the effective DevPr
 Seeds do not reduce the manifest that must be indexed. No declaration, candidate, path, or cached
 reason can cross the current manifest gate, and self-file relationships are suppressed.
 
+Configuration describes the project, not the selection. For each language present in the manifest,
+the engine also reads that language's control files (`.csproj`, `tsconfig.json`, `jsconfig.json`,
+`package.json`, `pyproject.toml`, `setup.cfg`, Maven and Gradle builds, `Cargo.toml`, `Gemfile`,
+`*.gemspec`, `composer.json`, `CMakeLists.txt`, `build.sbt`, and `build.sc`) from the directories that
+hold manifest files and their parents up to the project root, even when a path selection or an
+extension filter leaves them out of the view. A sibling directory's configuration and anything above
+the root are never read, and a control-file link that leaves the root is ignored. These files only
+decide how references resolve: they are not delivered, never become targets, and do not widen the
+manifest, so narrowing a view changes what is shown, not how the shown files relate. Each such file
+and each searched directory is stamped before it is read, so editing it or creating a new control
+file there invalidates the retained snapshot.
+
 C# compilation scopes come from `.csproj` ownership and `ProjectReference` entries read as XML.
 Both `/` and `\` in an MSBuild `Include` are normalized as project-reference separators on every OS;
 this normalization never applies to ordinary Unix filenames. Project-reference visibility is
@@ -79,7 +91,8 @@ guessed as the target. Current and enclosing namespaces take precedence over imp
 multiple visible imported declarations remain ambiguous. Namespace lookup considers only immediate
 members of that namespace: a nested type is visible through an explicit qualification such as
 `Holder.Task` or through the source type's nearest-to-farthest containing-type chain. Without an
-owning `.csproj` inside the effective manifest, cross-file C# type references stay unresolved.
+owning `.csproj` in the file's directory or a parent directory inside the project root, cross-file C#
+type references stay unresolved.
 Declaration accessibility is not modeled across project boundaries; candidates that differ only by
 that unavailable evidence remain `Ambiguous`. Files containing conditional-compilation directives
 do not claim configuration-specific type edges: their type references stay `Unresolved` because no
@@ -166,9 +179,9 @@ bare specifiers, and paths outside the root are reported as unsupported semantic
 the configuration file that declared them, matching TypeScript's configuration-origin semantics;
 the existing legacy `baseUrl` resolution limitation described above still applies.
 Every extended file is included in the configuration fingerprint. A missing base is also recorded as
-an absent control file, so its later appearance invalidates a cached dependency snapshot. When an
-existing base is outside the effective manifest, the manifest-snapshot shortcut is bypassed; this
-keeps later edits observable without widening the selected dependency manifest.
+an absent control file, so its later appearance invalidates a cached dependency snapshot. An existing
+base outside the effective manifest is stamped before it is read, so a later edit invalidates the
+snapshot without widening the selected dependency manifest.
 
 Java source files contribute classes, interfaces, enums, records, and annotation types under their
 declared package and complete nesting chain. Exact imports resolve only to matching declarations in
