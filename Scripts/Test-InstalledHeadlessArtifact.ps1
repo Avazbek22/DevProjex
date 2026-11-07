@@ -7,7 +7,15 @@ param(
     [string]$WorkingRoot,
 
     [Parameter(Mandatory = $true)]
-    [string]$ExpectedVersion
+    [string]$ExpectedVersion,
+
+    # How this installation's connection command is expected to name itself:
+    # - Direct: the executable path itself (a standalone archive/AppImage/Store artifact).
+    # - Npm: npx -y devprojex (cmd /c npx -y devprojex on Windows, since npx is a batch file there).
+    # - NuGetToolPath: the dotnet-tool shim next to .store (cmd /c call <shim> on Windows).
+    # - Dnx: dnx devprojex (cmd /c dnx devprojex on Windows).
+    [ValidateSet('Direct', 'Npm', 'NuGetToolPath', 'Dnx')]
+    [string]$ExpectedLauncher = 'Direct'
 )
 
 Set-StrictMode -Version Latest
@@ -87,10 +95,57 @@ try {
 
 	$connection = Invoke-InstalledCommand @(
 		'mcp', 'connect', $project, '--client', 'json', '--print') | ConvertFrom-Json
-	if ([string]::IsNullOrWhiteSpace($connection.mcpServers.devprojex.command)) {
+	$connectionCommand = $connection.mcpServers.devprojex.command
+	$connectionArguments = @($connection.mcpServers.devprojex.args)
+	if ([string]::IsNullOrWhiteSpace($connectionCommand)) {
         throw 'mcp connect --print did not return an executable command.'
     }
-    Write-Output 'mcp connect --print: ok'
+
+	switch ($ExpectedLauncher) {
+		'Npm' {
+			if ($IsWindows) {
+				if ($connectionCommand -ne 'cmd' -or $connectionArguments.Count -lt 4 -or
+					$connectionArguments[0] -ne '/c' -or $connectionArguments[1] -ne 'npx' -or
+					$connectionArguments[2] -ne '-y' -or $connectionArguments[3] -ne 'devprojex') {
+					throw "Expected npx through cmd /c, found '$connectionCommand $($connectionArguments -join ' ')'."
+				}
+			}
+			elseif ($connectionCommand -ne 'npx' -or $connectionArguments.Count -lt 2 -or
+				$connectionArguments[0] -ne '-y' -or $connectionArguments[1] -ne 'devprojex') {
+				throw "Expected npx, found '$connectionCommand $($connectionArguments -join ' ')'."
+			}
+		}
+		'NuGetToolPath' {
+			if ($IsWindows) {
+				if ($connectionCommand -ne 'cmd' -or $connectionArguments.Count -lt 3 -or
+					$connectionArguments[0] -ne '/c' -or $connectionArguments[1] -ne 'call' -or
+					$connectionArguments[2] -ne $resolvedExecutable) {
+					throw "Expected the installed shim through cmd /c call, found '$connectionCommand $($connectionArguments -join ' ')'."
+				}
+			}
+			elseif ($connectionCommand -ne $resolvedExecutable) {
+				throw "Expected the installed shim path directly, found '$connectionCommand'."
+			}
+		}
+		'Dnx' {
+			if ($IsWindows) {
+				if ($connectionCommand -ne 'cmd' -or $connectionArguments.Count -lt 3 -or
+					$connectionArguments[0] -ne '/c' -or $connectionArguments[1] -ne 'dnx' -or
+					$connectionArguments[2] -ne 'devprojex') {
+					throw "Expected dnx through cmd /c, found '$connectionCommand $($connectionArguments -join ' ')'."
+				}
+			}
+			elseif ($connectionCommand -ne 'dnx' -or $connectionArguments.Count -lt 1 -or $connectionArguments[0] -ne 'devprojex') {
+				throw "Expected dnx, found '$connectionCommand $($connectionArguments -join ' ')'."
+			}
+		}
+		default {
+			if ($connectionCommand -ne $resolvedExecutable) {
+				throw "Expected the installed executable path directly, found '$connectionCommand'."
+			}
+		}
+	}
+    Write-Output "mcp connect --print: ok ($ExpectedLauncher)"
 }
 finally {
     [Environment]::SetEnvironmentVariable('DEVPROJEX_INTERNAL_DATA_ROOT', $previousDataRoot, 'Process')
