@@ -63,6 +63,21 @@ jobs:
           docker save devprojex-ci:amd64 | gzip -9 > artifacts/container-images/devprojex-amd64.tar.gz
           docker save devprojex-ci:arm64 | gzip -9 > artifacts/container-images/devprojex-arm64.tar.gz
 
+      - name: Inspect build runner image identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker version
+          docker info
+          for arch in amd64 arm64; do
+            docker image inspect "devprojex-ci:$arch"
+            archive="artifacts/container-images/devprojex-$arch.tar.gz"
+            config=$(tar -xOzf "$archive" manifest.json | jq -r '.[0].Config')
+            echo "Archive config for $arch: $config"
+            tar -xOzf "$archive" "$config" | sha256sum
+            tar -xOzf "$archive" "$config" | jq '.rootfs'
+          done
+
       - name: Record tested image identities
         shell: pwsh
         run: |
@@ -147,6 +162,20 @@ jobs:
         with:
           name: devprojex-container-images
           path: artifacts/container-images
+
+      - name: Inspect native runner image identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker version
+          docker info
+          docker load -i artifacts/container-images/devprojex-arm64.tar.gz
+          docker image inspect devprojex-ci:arm64
+          docker save -o "$RUNNER_TEMP/loaded-arm64.tar" devprojex-ci:arm64
+          config=$(tar -xOf "$RUNNER_TEMP/loaded-arm64.tar" manifest.json | jq -r '.[0].Config')
+          echo "Loaded config: $config"
+          tar -xOf "$RUNNER_TEMP/loaded-arm64.tar" "$config" | sha256sum
+          tar -xOf "$RUNNER_TEMP/loaded-arm64.tar" "$config" | jq '.rootfs'
 
       - name: Load and smoke arm64 with a read-only root
         shell: pwsh
