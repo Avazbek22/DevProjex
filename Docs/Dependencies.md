@@ -394,8 +394,11 @@ ordinary module cannot acquire children from a same-named directory. `__all__` a
 wildcard imports only. A missing imported name remains `Unresolved` with a constant reason instead of
 turning the existence of the module into evidence for that name. Relative imports that would escape the top-level package remain unresolved.
 Only a module-level assignment can establish `__all__` policy; docstrings and assignments inside a
-function or class do not. Module-level value assignments and wildcard re-export expansion are not
-indexed, and report explicit unresolved limitations rather than guessed bindings. Dynamic `__all__`,
+function or class do not. Module-level value assignments, plain or annotated, are not indexed as
+declarations; importing such a name from a named module still relates the file to that module as
+`Resolved` with the reason `imported name not indexed`, and importance ranking leaves this
+module-only relation out of its graph. A bare `from . import name` of such a value and wildcard
+re-export expansion report explicit unresolved limitations rather than guessed bindings. Dynamic `__all__`,
 `setup.py`, and import hooks are not executed and remain unresolved. Separate
 complete `sys.stdlib_module_names` snapshots cover Python
 3.12 and 3.13. A decisive `requires-python`/`python_requires` constraint selects its snapshot;
