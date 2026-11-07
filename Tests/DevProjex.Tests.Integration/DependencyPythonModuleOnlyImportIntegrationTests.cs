@@ -368,7 +368,7 @@ public sealed class DependencyPythonModuleOnlyImportIntegrationTests
 	}
 
 	[Fact]
-	public async Task AnnotatedAllKeepsWildcardImportsResolved()
+	public async Task AnnotatedDynamicAllIsReadLikeAPlainDynamicAll()
 	{
 		using var fixture = new TemporaryDirectory();
 		var config = fixture.CreateFile("pyproject.toml", "[project]\nname = \"fixture\"");
@@ -381,11 +381,11 @@ public sealed class DependencyPythonModuleOnlyImportIntegrationTests
 			[config, module, consumer],
 			cancellationToken: TestContext.Current.CancellationToken);
 
-		Assert.False(Assert.Single(result.Files, item => item.Path == "module.py").Aliases.ContainsKey("$dynamic-all"));
+		// Python honours an annotated __all__ for star imports, so a computed one is as unknowable as `__all__ = build_names()`.
+		Assert.True(Assert.Single(result.Files, item => item.Path == "module.py").Aliases.ContainsKey("$dynamic-all"));
 		var edge = Assert.Single(result.Edges, item => item.Source == "consumer.py");
-		Assert.Equal(ResolutionStatus.Resolved, edge.Status);
-		Assert.Equal("module.py", edge.Target);
-		Assert.False(edge.ModuleOnly);
+		Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
+		Assert.Equal("dynamic __all__ is an unsupported mechanism", Assert.Single(edge.Reasons));
 	}
 
 	private static void AssertModuleOnly(DependencyIndexSnapshot result, string source, string reference, string target)
