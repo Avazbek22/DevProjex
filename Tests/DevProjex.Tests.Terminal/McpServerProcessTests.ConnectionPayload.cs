@@ -9,14 +9,14 @@ public sealed partial class McpServerProcessTests
 	// recorded measurement, not the measurement itself: a ceiling with a few characters to spare is
 	// a tripwire for the next honest addition rather than a budget.
 	//
-	// Recorded on 2026-11-07 from the wire JSON the client received: tools/list result 30,928 on a
-	// default server and 33,544 when per-call exclusions are enabled, after the get_diff tool added
-	// 2,870 characters to the 28,058 recorded on 2026-09-29. The 31,200 ceiling leaves 272
+	// Recorded on 2026-11-07 from the wire JSON the client received: tools/list result 31,598 on a
+	// default server and 34,650 when per-call exclusions are enabled, after the shared get_diff
+	// selection parameters added 670 characters to the default catalog. The 31,870 ceiling leaves 272
 	// characters for the next intentional catalog change while the exact mode difference below
 	// isolates the optional exclusion parameter.
-	private const int ToolsListResultCeiling = 31_200;
+	private const int ToolsListResultCeiling = 31_870;
 	private const int ToolsListResultFloor = 30_600;
-	private const int ExclusionsParameterCost = 2_616;
+	private const int ExclusionsParameterCost = 3_052;
 	private const int InstructionsCeiling = 1_200;
 	private const int InstructionsFloor = 900;
 
@@ -27,7 +27,7 @@ public sealed partial class McpServerProcessTests
 		Assert.InRange(defaultPayload, ToolsListResultFloor, ToolsListResultCeiling);
 		Assert.InRange(instructions.Length, InstructionsFloor, InstructionsCeiling);
 
-		// A delegation server publishes the exclusion parameter on six tools and pays for nothing
+		// A delegation server publishes the exclusion parameter on seven tools and pays for nothing
 		// else, so the whole difference is that parameter. Pinning it exactly reports a growing
 		// parameter by name instead of waiting for a total to cross a line.
 		var (delegationPayload, delegationInstructions) =
