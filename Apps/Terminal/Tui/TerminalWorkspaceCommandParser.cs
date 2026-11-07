@@ -28,6 +28,7 @@ internal sealed class TerminalWorkspaceCommandParser
 	private static readonly string[] McpLogTargets = ["session", "last", "export", "clear"];
 	private static readonly string[] McpLogFormats = ["markdown", "json"];
 	private static readonly string[] RelatedOptions = ["--direction", "--depth"];
+	private static readonly string[] DiffScopes = ["changes", "staged", "diff:"];
 	private static readonly string[] RelatedDirections = ["dependencies", "dependents", "both"];
 	private static readonly string[] RelatedDepths = Enumerable.Range(1, 10)
 		.Select(static depth => depth.ToString(CultureInfo.InvariantCulture))
@@ -115,6 +116,9 @@ internal sealed class TerminalWorkspaceCommandParser
 			[TerminalWorkspaceCommandGrammar.Related] = new(
 				static (definition, tokens, _) => ParseRelated(definition, tokens),
 				CompleteRelated),
+			[TerminalWorkspaceCommandGrammar.Diff] = new(
+				static (definition, tokens, _) => ParseDiff(definition, tokens),
+				CompleteDiff),
 			[TerminalWorkspaceCommandGrammar.Grep] = new(
 				static (definition, tokens, _) => ParseGrep(definition, tokens),
 				CompleteGrep),
@@ -874,6 +878,30 @@ internal sealed class TerminalWorkspaceCommandParser
 			Depth: depth));
 	}
 
+	// The scope defaults to uncommitted changes and is normalized to its canonical token, so the
+	// session receives only a value the Git scope parser has already accepted.
+	private static TerminalWorkspaceCommandParseResult ParseDiff(
+		TerminalWorkspaceCommandDefinition definition,
+		IReadOnlyList<ParsedToken> tokens)
+	{
+		if (tokens.Count > 2)
+			return Unexpected(tokens[2]);
+		if (tokens.Count == 1)
+		{
+			return TerminalWorkspaceCommandParseResult.Success(new TerminalWorkspaceCommand(
+				definition,
+				Text: GitScopeSelection.ToToken(GitFilteringMode.Changes)));
+		}
+		if (!GitScopeSelection.TryParse(tokens[1].Value, out var mode, out var diffRange) ||
+			!GitScopeSelection.IsMomentary(mode))
+		{
+			return Unknown(tokens[1], DiffScopes);
+		}
+		return TerminalWorkspaceCommandParseResult.Success(new TerminalWorkspaceCommand(
+			definition,
+			Text: GitScopeSelection.ToToken(mode, diffRange)));
+	}
+
 	private static TerminalWorkspaceCommandParseResult ParseGrep(
 		TerminalWorkspaceCommandDefinition definition,
 		IReadOnlyList<ParsedToken> tokens)
@@ -1028,6 +1056,14 @@ internal sealed class TerminalWorkspaceCommandParser
 			? new CompletionCandidateSource(["all", .. paths], ToggleValues)
 			: new CompletionCandidateSource(paths, ToggleValues);
 	}
+
+	private static CompletionCandidateSource CompleteDiff(
+		int argumentIndex,
+		IReadOnlyList<ParsedToken> tokens,
+		string current,
+		TerminalWorkspaceCommandParseContext context,
+		CancellationToken cancellationToken) =>
+		argumentIndex == 0 ? new CompletionCandidateSource(DiffScopes) : default;
 
 	private static CompletionCandidateSource CompleteView(
 		int argumentIndex,

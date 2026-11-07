@@ -97,3 +97,13 @@ public sealed record ExportProjectCommandRequest(
 	bool DryRun,
 	TerminalOutputOptions Output,
 	string? RepositorySourceUrl = null);
+
+public sealed record DiffCommandRequest(
+	string ProjectPath,
+	ProjectSelectionSpec Selection,
+	int ContextLines,
+	AnalysisOutputFormat Format,
+	TerminalOutputOptions Output,
+	long? MaxFileBytes = null,
+	string? RepositorySourceUrl = null,
+	string? OutputPath = null);
