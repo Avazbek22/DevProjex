@@ -867,7 +867,8 @@ When a grammar rejects one construction but independent facts survive, text outp
 `[Dependency partial parse]` with the dropped-construction count and bounded line ranges; JSON uses
 `coverage.partialParseDiagnostics`. No fact from a damaged construction is published.
 `[Resolution] resolved=N · ambiguous=N · unresolved=N · external=N` counts evidence for the requested
-seed and direction. JSON exposes the same additive `resolution` object, so an empty related-file list
+seed and direction: the edges the rows are drawn from, plus the references no row can show. A
+reference from a seed to its own file is neither listed nor counted. JSON exposes the same additive `resolution` object, so an empty related-file list
 can still distinguish unresolved evidence from a complete absence of references.
 
 An unsupported seed language is a successful empty result plus

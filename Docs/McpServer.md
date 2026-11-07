@@ -744,7 +744,10 @@ up to eight `[Dependency partial parse] path=... · dropped=N · lines=...` rows
 syntax was discarded. No partial-parse row is added when the manifest has no discarded syntax,
 and the fixed response and stored-result limits still apply. `[Search scope] files=N` and the ordinary
 `[Effective filters]` trailer follow. `[Resolution] resolved=N · ambiguous=M ·
-unresolved=K · external=E` counts the selected-direction edges considered for the call.
+unresolved=K · external=E` counts the selected-direction edges considered for the call:
+the edges the rows are drawn from, plus the references no row can show. A dependent counts for
+every seed it is listed under, as a declaration part or an ambiguous candidate, and a reference
+from a seed to its own file is neither listed nor counted.
 A seed without facts is a successful empty result with
 its path and any nonstandard explanation inside the untrusted block. One of the six fixed
 dependency-engine status constants is stated instead, once and without a path, in the trusted
