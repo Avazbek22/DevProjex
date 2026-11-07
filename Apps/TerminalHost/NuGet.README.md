@@ -33,6 +33,14 @@ dotnet tool install --global devprojex
 
 ## MCP server for AI agents
 
+To generate or register a connection from the NuGet cache, use
+`dnx devprojex mcp connect /absolute/path/to/project --client claude-code`.
+Add `--print` to print the configuration without changing client settings, or
+`--mode live` to follow the saved window selection. Generated cache-based connections
+use `dnx devprojex`, not a version-specific cached binary. The client needs the
+.NET 10 SDK on `PATH`; `dnx` may restore the package after a cache cleanup.
+Global-tool installations retain their existing executable-path behavior.
+
 Claude Code:
 
 ```shell

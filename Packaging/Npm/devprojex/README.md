@@ -25,6 +25,13 @@ npx -y devprojex search Configure . --symbols
 
 ## MCP server for AI agents
 
+To generate or register a connection from this package, use
+`npx -y devprojex mcp connect /absolute/path/to/project --client claude-code`.
+Add `--print` to print the configuration without changing client settings, or
+`--mode live` to follow the saved window selection. Generated connections use
+`npx -y devprojex`, not the temporary binary path in npm's cache. The client needs
+Node.js/npm on `PATH`; npm may restore the package after a cache cleanup.
+
 Claude Code:
 
 ```shell

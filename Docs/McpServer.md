@@ -1814,6 +1814,18 @@ DevProjex runs through `APPIMAGE_EXTRACT_AND_RUN=1` or
 `--appimage-extract-and-run`, generated registrations carry
 `APPIMAGE_EXTRACT_AND_RUN=1` into the MCP server process.
 
+Package launches are another exception: connections created from an npm package use
+`npx -y devprojex mcp --root <project>`, and connections created from a NuGet package
+cache use `dnx devprojex mcp --root <project>`, with `--live` when requested. This
+also applies to `--print`, Terminal Workspace, and generated JSON/TOML fragments.
+The client keeps a package launcher instead of a version-specific cached executable,
+so clearing the package cache does not leave a dead binary path in its configuration.
+Node.js/npm or the .NET 10 SDK respectively must remain available on the client's
+`PATH`; the launcher may restore packages and follows that package manager's version
+resolution. Existing equivalent launcher entries are kept, including their explicit
+version pins. Installed global-tool shims and standalone artifacts keep their
+existing executable-path behavior.
+
 The Flatpak channel is an exception to the executable-path rule above: its host
 registrations use `flatpak` with arguments `run`, `io.github.Avazbek22.DevProjex`,
 `mcp`, `--root`, the host project path, and optionally `--live`. For example:
