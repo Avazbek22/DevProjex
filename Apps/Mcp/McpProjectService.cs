@@ -25,6 +25,7 @@ internal sealed class McpProjectService(
 	private const int MaximumCachedInventories = 8;
 	private const int MaximumCachedProjections = 16;
 	private const int MaximumRootMonitors = 8;
+	private const int MaximumDirectoryEntriesNamed = 12;
 	private readonly ConcurrentDictionary<McpInventoryCacheKey, CachedInventoryEntry> inventoryCache = [];
 	private readonly ConcurrentDictionary<McpProjectionCacheKey, CachedProjectionPlan> projectionCache = [];
 	private readonly Dictionary<string, RootChangeMonitor> rootMonitors = new(PathComparer.Default);
@@ -1472,12 +1473,7 @@ internal sealed class McpProjectService(
 		bool isDirectory)
 	{
 		if (isDirectory)
-		{
-			throw new McpToolException(
-				McpErrorCodes.PathNotFound,
-				$"{McpErrorCodes.PathNotFound}: '{requestedPath}' is a directory; provide a file path returned by " +
-				$"get_tree or search_project, or list it with get_tree {{\"paths\":[{JsonSerializer.Serialize(requestedPath, McpToolResults.CompactJsonOptions)}]}}.");
-		}
+			throw CreateDirectoryRequestedException(plan, requestedPath, physicalPath);
 		if (!Membership(plan).Files.Contains(physicalPath))
 		{
 			var caseMismatch = ResolveCaseMismatch(plan, requestedPath);
@@ -1849,6 +1845,65 @@ internal sealed class McpProjectService(
 			$"from the listed path '{McpTextEscaping.EscapeSingleLine(matches[0])}'; paths are case-sensitive on every platform — " +
 			"retry with the listed spelling.");
 	}
+
+	/// <summary>
+	/// A directory read is usually a guess at the file that holds a folder's code, such as an
+	/// import of "./helper" that resolves to its index file. Naming the readable entries lets the
+	/// next call read that file instead of listing the directory first. Only selection members are
+	/// named, so a file the effective filters hide never appears, not even through its folder.
+	/// </summary>
+	private McpToolException CreateDirectoryRequestedException(
+		ProjectContextPlan plan,
+		string requestedPath,
+		string physicalPath)
+	{
+		var listCall = $"get_tree {{\"paths\":[{JsonSerializer.Serialize(requestedPath, McpToolResults.CompactJsonOptions)}]}}";
+		var prefix = Path.TrimEndingDirectorySeparator(physicalPath) + Path.DirectorySeparatorChar;
+		// File name to the member path, so a suggestion keeps the on-disk spelling get_file accepts.
+		var files = new SortedDictionary<string, string>(StringComparer.Ordinal);
+		var folders = new SortedSet<string>(StringComparer.Ordinal);
+		foreach (var file in Membership(plan).Files)
+		{
+			if (!file.StartsWith(prefix, PathComparer.Comparison))
+				continue;
+
+			var remainder = file[prefix.Length..];
+			var separator = remainder.IndexOfAny([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]);
+			if (separator < 0)
+				files[remainder] = file;
+			else
+				folders.Add(remainder[..separator] + "/");
+		}
+
+		if (files.Count == 0 && folders.Count == 0)
+		{
+			return new McpToolException(
+				McpErrorCodes.PathNotFound,
+				$"{McpErrorCodes.PathNotFound}: '{requestedPath}' is a directory; provide a file path returned by " +
+				$"get_tree or search_project, or list it with {listCall}.");
+		}
+
+		var entries = files.Keys.Concat(folders).Order(StringComparer.Ordinal).ToArray();
+		var shown = string.Join(", ", entries.Take(MaximumDirectoryEntriesNamed));
+		var more = entries.Length > MaximumDirectoryEntriesNamed
+			? $" (+{(entries.Length - MaximumDirectoryEntriesNamed).ToString(System.Globalization.CultureInfo.InvariantCulture)} more)"
+			: string.Empty;
+		var message = $"{McpErrorCodes.PathNotFound}: '{requestedPath}' is a directory; readable entries: {shown}{more}.";
+		if (files.Count == 0)
+			return new McpToolException(McpErrorCodes.PathNotFound, $"{message} List it with {listCall}.");
+
+		var suggested = files.FirstOrDefault(static entry => IsDirectoryEntryFile(entry.Key), files.First()).Value;
+		var suggestedPath = ToRelative(plan.SourceRoot, suggested);
+		return new McpToolException(
+			McpErrorCodes.PathNotFound,
+			$"{message} Read one with get_file {{\"path\":{JsonSerializer.Serialize(suggestedPath, McpToolResults.CompactJsonOptions)}}}, " +
+			$"or list it with {listCall}.");
+	}
+
+	// The file a language loads when an import names the directory itself.
+	private static bool IsDirectoryEntryFile(string fileName) =>
+		Path.GetFileNameWithoutExtension(fileName) == "index" ||
+		fileName is "__init__.py" or "mod.rs";
 
 	private PlanMembership Membership(ProjectContextPlan plan) =>
 		planMembership.GetValue(plan, CreatePlanMembership);

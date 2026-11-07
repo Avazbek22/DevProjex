@@ -4770,6 +4770,7 @@ internal sealed class DevProjexMcpTools(
 		var hiddenDirectoryCount = 0;
 		var smallestHiddenDepth = int.MaxValue;
 		var largestSuggestedDepth = 0;
+		var visibleDirectories = new List<string>();
 		foreach (var path in paths!)
 		{
 			string fullPath;
@@ -4788,7 +4789,11 @@ internal sealed class DevProjexMcpTools(
 			var isDirectory = Directory.Exists(fullPath);
 			var isHidden = isDirectory ? depth >= maxDepth : depth > maxDepth;
 			if (!isHidden)
+			{
+				if (isDirectory)
+					visibleDirectories.Add(relative);
 				continue;
+			}
 
 			hiddenCount++;
 			if (isDirectory)
@@ -4798,7 +4803,7 @@ internal sealed class DevProjexMcpTools(
 		}
 
 		if (hiddenCount == 0)
-			return null;
+			return FormatCollapsedFoldersNotice(plan, visibleDirectories, maxDepth);
 
 		// A file has nothing under it, so the directory wording would contradict itself: the
 		// useful depth is the one that shows the file.
@@ -4816,6 +4821,41 @@ internal sealed class DevProjexMcpTools(
 			$"{smallestHiddenDepth.ToString(CultureInfo.InvariantCulture)} or deeper, so nothing under them is shown. " +
 			$"Omit max_depth, or pass {largestSuggestedDepth.ToString(CultureInfo.InvariantCulture)} " +
 			"to show two levels below them.";
+	}
+
+	/// <summary>
+	/// A requested directory that stays visible can still render its deepest folders as bare names:
+	/// a folder at exactly max_depth shows without the files under it, which reads as an empty
+	/// folder. Counts only folders that hold selected files.
+	/// </summary>
+	private static string? FormatCollapsedFoldersNotice(
+		ProjectContextPlan plan,
+		IReadOnlyList<string> visibleDirectories,
+		int maxDepth)
+	{
+		if (visibleDirectories.Count == 0)
+			return null;
+
+		var collapsedFolders = new HashSet<string>(PathComparer.Default);
+		foreach (var file in plan.IncludedFiles)
+		{
+			var segments = PathUtility.GetPortableRelativePath(plan.SourceRoot, file).Split('/');
+			if (segments.Length <= maxDepth)
+				continue;
+
+			var folder = string.Join('/', segments, 0, maxDepth);
+			if (visibleDirectories.Any(directory =>
+					directory.Length == 0 || folder.StartsWith(directory + "/", PathComparer.Comparison)))
+				collapsedFolders.Add(folder);
+		}
+
+		if (collapsedFolders.Count == 0)
+			return null;
+
+		return "[Tree depth] max_depth counts from the project root; " +
+			$"{collapsedFolders.Count.ToString(CultureInfo.InvariantCulture)} folder(s) under the requested paths reach depth " +
+			$"{maxDepth.ToString(CultureInfo.InvariantCulture)} and are shown without their contents. " +
+			$"Omit max_depth, or pass {(maxDepth + 1).ToString(CultureInfo.InvariantCulture)} to open them.";
 	}
 
 	/// <summary>
