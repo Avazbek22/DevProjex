@@ -64,9 +64,16 @@ public sealed partial class FileDependencyConfigurationProvider : IDependencyCon
 		_pathMetadata = pathMetadata ?? throw new ArgumentNullException(nameof(pathMetadata));
 	}
 
+	public Task<DependencyResolverConfiguration> ReadAsync(
+		string sourceRoot,
+		IReadOnlyList<string> manifestFiles,
+		CancellationToken cancellationToken) =>
+		ReadAsync(sourceRoot, manifestFiles, readableProjectFiles: null, cancellationToken);
+
 	public async Task<DependencyResolverConfiguration> ReadAsync(
 		string sourceRoot,
 		IReadOnlyList<string> manifestFiles,
+		IReadOnlySet<string>? readableProjectFiles,
 		CancellationToken cancellationToken)
 	{
 		var root = Path.GetFullPath(sourceRoot);
@@ -91,7 +98,7 @@ public sealed partial class FileDependencyConfigurationProvider : IDependencyCon
 		var controlFiles = new HashSet<string>(manifest, PathComparer);
 		var observedControlPaths = new List<DependencyControlPathStamp>();
 		var unstampedControlFiles = new HashSet<string>(PathComparer);
-		if (!TryDiscoverControlFiles(root, manifest, controlFiles, observedControlPaths, cancellationToken))
+		if (!TryDiscoverControlFiles(root, manifest, readableProjectFiles, controlFiles, observedControlPaths, cancellationToken))
 			transientReadFailure = 1;
 		var projectFiles = new List<string>();
 		var typeScriptConfigFiles = new List<string>();
@@ -267,6 +274,11 @@ public sealed partial class FileDependencyConfigurationProvider : IDependencyCon
 					return TypeScriptLayerFailure(DependencyConfigurationState.UnsupportedSemantics,
 						TypeScriptExtendsOutsideRootReason);
 				}
+				// A base the caller may not read is unavailable, exactly as a missing one is.
+				if (readableProjectFiles is not null &&
+					!controlFiles.Contains(Path.GetFullPath(extendedPath.Value)) &&
+					!readableProjectFiles.Contains(Path.GetFullPath(extendedPath.Value)))
+					return TypeScriptLayerFailure(DependencyConfigurationState.Missing, TypeScriptExtendsUnavailableReason);
 				ObserveControlFile(extendedPath.Value);
 
 				var inherited = await ReadTypeScriptLayerAsync(extendedPath.Value, depth + 1, chain)
@@ -749,9 +761,11 @@ public sealed partial class FileDependencyConfigurationProvider : IDependencyCon
 	// Searches the directories that hold manifest files, and their parents up to the root, for the
 	// control files of the languages present. Each directory is stamped before it is listed, so a
 	// control file created later invalidates a cached snapshot even when the view filters it out.
+	// With a readable bound, a file the caller may not read is neither stamped nor read.
 	private bool TryDiscoverControlFiles(
 		string root,
 		IReadOnlySet<string> manifest,
+		IReadOnlySet<string>? readableProjectFiles,
 		ISet<string> controlFiles,
 		ICollection<DependencyControlPathStamp> observedControlPaths,
 		CancellationToken cancellationToken)
@@ -794,6 +808,7 @@ public sealed partial class FileDependencyConfigurationProvider : IDependencyCon
 			{
 				if ((ControlFamily(candidate) & families) == ControlFileFamilies.None ||
 					manifest.Contains(candidate) ||
+					readableProjectFiles?.Contains(candidate) == false ||
 					!_pathMetadata.TryResolveContainedPath(root, candidate, out _))
 					continue;
 				if (DependencyControlPathStamp.TryCapture(candidate, isDirectory: false) is not { } fileStamp)

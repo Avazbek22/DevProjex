@@ -36,6 +36,8 @@ public sealed class RelatedCommandHandler(
 		DependencyOutsideSelectionResult? outside;
 		try
 		{
+			// The readable project bounds the configuration the selection may be resolved with.
+			var projectPlan = await BuildProjectPlanAsync(request, plan, cancellationToken).ConfigureAwait(false);
 			related = await status.RunAsync(
 			services.Localization["Terminal.Status.IndexingDependencies"],
 				() => RelatedQueryRunner.FindAsync(
@@ -44,11 +46,21 @@ public sealed class RelatedCommandHandler(
 					relative,
 				request.Direction,
 					request.Depth,
+					(projectPlan ?? plan).IncludedFiles,
 					cancellationToken)).ConfigureAwait(false);
 			// The project's relations can lead a deeper walk to more selected files, under the same limit.
-			outside = await status.RunAsync(
-				services.Localization["Terminal.Status.IndexingDependencies"],
-				() => FindOutsideSelectionAsync(request, plan, related, relative, cancellationToken)).ConfigureAwait(false);
+			outside = projectPlan is null || !DependencyFactsEngine.CanRelateOutsideSelection(related)
+				? null
+				: await status.RunAsync(
+					services.Localization["Terminal.Status.IndexingDependencies"],
+					() => services.DependencyFactsEngine.FindOutsideSelectionAsync(
+						plan.SourceRoot,
+						related,
+						projectPlan.IncludedFiles,
+						[relative],
+						request.Direction,
+						request.Depth,
+						cancellationToken: cancellationToken)).ConfigureAwait(false);
 		}
 		catch (DependencyTraversalLimitException exception)
 		{
@@ -100,15 +112,13 @@ public sealed class RelatedCommandHandler(
 
 	// A narrowed selection cannot see part of the project, so the same project without that
 	// narrowing answers for the seed's relations; the selection only places each related file.
-	private async Task<DependencyOutsideSelectionResult?> FindOutsideSelectionAsync(
+	// Returns null when nothing was narrowed away.
+	private async Task<ProjectContextPlan?> BuildProjectPlanAsync(
 		RelatedCommandRequest request,
 		ProjectContextPlan plan,
-		DependencyRelatedResult related,
-		string seed,
 		CancellationToken cancellationToken)
 	{
-		if (request.ProjectSelection is null ||
-			!DependencyFactsEngine.CanRelateOutsideSelection(related))
+		if (request.ProjectSelection is null)
 			return null;
 
 		var projectPlan = await services.ContextFactory.BuildAsync(
@@ -123,16 +133,6 @@ public sealed class RelatedCommandHandler(
 			request.MaxFileBytes,
 			cancellationToken).ConfigureAwait(false);
 		var selected = plan.IncludedFiles.ToHashSet(PathComparer.Default);
-		if (projectPlan.HasErrors || projectPlan.IncludedFiles.All(selected.Contains))
-			return null;
-
-		return await services.DependencyFactsEngine.FindOutsideSelectionAsync(
-			plan.SourceRoot,
-			related,
-			projectPlan.IncludedFiles,
-			[seed],
-			request.Direction,
-			request.Depth,
-			cancellationToken: cancellationToken).ConfigureAwait(false);
+		return projectPlan.HasErrors || projectPlan.IncludedFiles.All(selected.Contains) ? null : projectPlan;
 	}
 }

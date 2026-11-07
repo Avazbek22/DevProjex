@@ -191,6 +191,17 @@ public interface IDependencyConfigurationProvider
 		string sourceRoot,
 		IReadOnlyList<string> manifestFiles,
 		CancellationToken cancellationToken);
+
+	/// <param name="readableProjectFiles">
+	/// Absolute paths of the files the caller may read. A control file outside the manifest is
+	/// read only when it is one of them; null applies no such bound.
+	/// </param>
+	Task<DependencyResolverConfiguration> ReadAsync(
+		string sourceRoot,
+		IReadOnlyList<string> manifestFiles,
+		IReadOnlySet<string>? readableProjectFiles,
+		CancellationToken cancellationToken) =>
+		ReadAsync(sourceRoot, manifestFiles, cancellationToken);
 }
 
 public sealed record DependencyFactsLimits(

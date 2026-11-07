@@ -91,6 +91,13 @@ internal static class RelatedOutputRenderer
 			$"unresolved={resolutionCounts.Unresolved} · external={resolutionCounts.External}" +
 			(resolutionCounts.OutsideSelection > 0 ? $" · outside-selection={resolutionCounts.OutsideSelection}" : string.Empty))
 			.ConfigureAwait(false);
+		if (outside is { SelectionAnsweredSeeds: > 0 and var selectionAnsweredSeeds })
+		{
+			await writer.WriteLineAsync(
+				$"[Dependency facts limited] project index partial · selection-answer-seeds={selectionAnsweredSeeds}; " +
+				"a fact or work limit dropped facts these seeds rely on, so they keep the selection's own answer and list no files outside it.")
+				.ConfigureAwait(false);
+		}
 		var coverage = result.Index.Coverage;
 		await writer.WriteLineAsync(localization.Format(
 			"Terminal.Related.Coverage",

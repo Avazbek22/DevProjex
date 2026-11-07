@@ -367,6 +367,14 @@ public sealed record DependencyOutsideSelectionResult(
 	DependencyResolutionCounts Resolution)
 {
 	public const int MaximumFilesPerSection = 20;
+
+	/// <summary>
+	/// How many seeds with facts in the selection the readable project's index could not answer
+	/// completely: the project had no facts for the seed, or a fact or resolution-work limit dropped
+	/// facts that the selection's answer for the seed relies on. Those seeds keep the selection's own
+	/// answer, so no file outside the selection is listed for them.
+	/// </summary>
+	public int SelectionAnsweredSeeds { get; init; }
 }
 
 public sealed class DependencyTraversalLimitException(int maximumSeeds) : Exception(

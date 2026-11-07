@@ -1510,42 +1510,42 @@ internal sealed partial class DevProjexMcpTools(
 			var resolvedSeeds = Projects.ResolveRequestedFiles(plan, seeds, cancellationToken);
 			var relativeSeeds = resolvedSeeds
 				.Select(seed => McpProjectService.ToRelative(plan.SourceRoot, seed))
+				.Distinct(StringComparer.Ordinal)
 				.ToArray();
 			var progress = new McpProgressReporter(request, cancellationToken);
 			progress.Milestone(5, "Preparing dependency manifest");
+			// The readable project bounds the configuration the selection may be resolved with, so it
+			// is known before the selection is indexed.
+			var projectPlan = await Projects.BuildRelationProjectPlanAsync(
+				plan,
+				project,
+				branch,
+				includePatterns,
+				excludePatterns,
+				profile,
+				trackedOnly,
+				gitScope,
+				maximumFileBytes,
+				exclusions,
+				cancellationToken).ConfigureAwait(false);
 			var related = await Projects.DependencyFactsEngine.FindRelatedAsync(
 				plan.SourceRoot,
 				plan.IncludedFiles,
 				relativeSeeds,
 				direction,
 				progress.MeasureFacts("Indexing dependency facts", 5, 70),
-				cancellationToken).ConfigureAwait(false);
+				cancellationToken,
+				(projectPlan ?? plan).IncludedFiles).ConfigureAwait(false);
 			DependencyOutsideSelectionResult? outside = null;
-			ProjectContextPlan? projectPlan = null;
-			if (DependencyFactsEngine.CanRelateOutsideSelection(related))
+			if (projectPlan is not null && DependencyFactsEngine.CanRelateOutsideSelection(related))
 			{
-				projectPlan = await Projects.BuildRelationProjectPlanAsync(
-					plan,
-					project,
-					branch,
-					includePatterns,
-					excludePatterns,
-					profile,
-					trackedOnly,
-					gitScope,
-					maximumFileBytes,
-					exclusions,
+				outside = await Projects.DependencyFactsEngine.FindOutsideSelectionAsync(
+					plan.SourceRoot,
+					related,
+					projectPlan.IncludedFiles,
+					direction,
+					progress.MeasureFacts("Relating files outside the selection", 70, 90),
 					cancellationToken).ConfigureAwait(false);
-				if (projectPlan is not null)
-				{
-					outside = await Projects.DependencyFactsEngine.FindOutsideSelectionAsync(
-						plan.SourceRoot,
-						related,
-						projectPlan.IncludedFiles,
-						direction,
-						progress.MeasureFacts("Relating files outside the selection", 70, 90),
-						cancellationToken).ConfigureAwait(false);
-				}
 			}
 			int uninspectedEvidenceSources;
 			if (outside is null)
@@ -1599,6 +1599,7 @@ internal sealed partial class DevProjexMcpTools(
 			var trustedNotices = CombineTrustedNotices(
 				FormatRelatedResolution(resolution),
 				FormatOutsideSelectionNotice(outside),
+				FormatSelectionAnswerNotice(outside?.SelectionAnsweredSeeds ?? 0),
 				$"[Facts coverage] files={coverage.Files}, supported={coverage.Supported}, unsupported={coverage.Unsupported}, extraction-failed={coverage.ExtractionFailed}; supported means facts were extracted for a recognized language, unsupported means no supported extractor was available",
 				FormatDependencyConfigurationDiagnostics(coverage.ConfigurationDiagnostics),
 				$"[Search scope] files={plan.IncludedFiles.Count}",
@@ -3307,6 +3308,12 @@ internal sealed partial class DevProjexMcpTools(
 			   "these files are readable but outside this call's selection, so only their paths are listed; " +
 			   "read any of them with get_file.";
 	}
+
+	internal static string? FormatSelectionAnswerNotice(int selectionAnsweredSeeds) =>
+		selectionAnsweredSeeds == 0
+			? null
+			: $"[Dependency facts limited] project index partial · selection-answer-seeds={selectionAnsweredSeeds.ToString(CultureInfo.InvariantCulture)}; " +
+			  "a fact or work limit dropped facts these seeds rely on, so they keep the selection's own answer and list no files outside it.";
 
 	internal static RelatedResolutionCounts CountRelatedResolution(
 		DependencyIndexSnapshot index,
