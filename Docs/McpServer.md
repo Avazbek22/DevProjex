@@ -649,10 +649,6 @@ description has to fit a budget rather than grow one silently.
 `requests` may also arrive as a string holding a JSON array, which some clients send;
 it is parsed and validated exactly like an array.
 
-`get_file` on a directory still fails with `DPX-MCP-PATH-NOT-FOUND`, but the message
-lists up to 12 readable entries, suggests a file to read, and keeps the `get_tree`
-call that lists it. Only files in the effective selection are listed.
-
 When `symbols=true` receives a regular expression in which every alternative reduces
 to one plain name after declaration keywords and the separators `\s+`, `\s*`, `\s`,
 `.*`, `.+` and `\b` are removed, such as `interface\s+ToNumberStrategy` or
