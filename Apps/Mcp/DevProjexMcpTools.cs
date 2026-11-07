@@ -2035,6 +2035,7 @@ internal sealed partial class DevProjexMcpTools(
 		RecordPlan(plan);
 
 		var resolvedRequests = new List<McpResolvedFileReadRequest>(requestSet.Requests.Count);
+		var requestedMissingPath = false;
 		foreach (var item in requestSet.Requests)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
@@ -2057,6 +2058,12 @@ internal sealed partial class DevProjexMcpTools(
 					UnavailableReason: exception.NamesReadableEntries
 						? McpTextEscaping.EscapeSingleLine(McpToolResults.ProtectMetadataString(exception.Message))
 						: liveContext is null ? null : exception.BatchReason ?? exception.Code));
+				// Standard batches never flag this: the escaped per-item message already carries the
+				// detail, and the journal notice is a live-only signal, same as before this directory
+				// case also named its readable entries in NamesReadableEntries' own message text.
+				requestedMissingPath |= liveContext is not null &&
+					exception.Code == McpErrorCodes.PathNotFound &&
+					exception.BatchReason is null;
 			}
 		}
 
@@ -2151,7 +2158,7 @@ internal sealed partial class DevProjexMcpTools(
 		}
 		if (rendered.UnavailableNotice is not null)
 			journal?.RecordNotice(AgentJournalNoticeCodes.Unavailable);
-		if (resolvedRequests.Any(static item => item.UnavailableReason == McpErrorCodes.PathNotFound))
+		if (requestedMissingPath)
 			journal?.RecordNotice(AgentJournalNoticeCodes.MissingPath);
 		return McpToolResults.TextSuccess(AppendTrustedNotices(
 			spotlighted,
