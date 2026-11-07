@@ -2601,7 +2601,7 @@ public sealed partial class McpServerIntegrationTests
 			["search_project"] = ["project", "branch", "pattern", "paths", "include_patterns", "exclude_patterns", "tracked_only", "git_scope", "max_file_bytes", "context_lines", "ignore_case", "symbols", "max_results"],
 			["related_files"] = ["project", "branch", "path", "direction", "include_patterns", "exclude_patterns", "profile", "tracked_only", "git_scope", "max_file_bytes"],
 			["get_file"] = ["project", "branch", "profile", "path", "requests", "start_line", "end_line", "start_column", "symbol"],
-			["get_diff"] = ["project", "branch", "git_scope", "paths", "include_patterns", "exclude_patterns", "context_lines"]
+			["get_diff"] = ["project", "branch", "profile", "git_scope", "paths", "include_patterns", "exclude_patterns", "tracked_only", "max_file_bytes", "context_lines"]
 		};
 		foreach (var tool in tools)
 		{
