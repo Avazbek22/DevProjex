@@ -22,6 +22,9 @@ internal static class RelatedOutputRenderer
 		LocalizationService localization,
 		CancellationToken cancellationToken)
 	{
+		// A narrowed call answers from the readable project; the selection only places each file.
+		result = outside?.Selection ?? result;
+		var outsideSeeds = outside is { Seeds.Count: > 0 } ? outside.Seeds : null;
 		if (format == AnalysisOutputFormat.Json)
 		{
 			var jsonCoverage = result.Index.Coverage;
@@ -31,7 +34,7 @@ internal static class RelatedOutputRenderer
 				Kind: "devprojex-related-files",
 				Direction: direction,
 				Seeds: result.Seeds,
-				OutsideSelection: outside?.Seeds,
+				OutsideSelection: outsideSeeds,
 				Coverage: new
 				{
 					jsonCoverage.Files,
@@ -51,7 +54,7 @@ internal static class RelatedOutputRenderer
 			return;
 		}
 
-		var outsideBySeed = outside?.Seeds.ToDictionary(static seed => seed.Seed, StringComparer.Ordinal);
+		var outsideBySeed = outsideSeeds?.ToDictionary(static seed => seed.Seed, StringComparer.Ordinal);
 		foreach (var seed in result.Seeds)
 		{
 			await writer.WriteLineAsync($"{localization["Terminal.Related.Seed"]}: {TerminalTextEscaping.EscapeSingleLine(seed.Seed)}")
@@ -127,23 +130,16 @@ internal static class RelatedOutputRenderer
 		DependencyOutsideSelectionResult? outside,
 		DependencyDirection direction)
 	{
-		var edges = new HashSet<DependencyEdge>();
-		foreach (var seed in result.Seeds)
-		{
-			if (direction is DependencyDirection.Dependencies or DependencyDirection.Both)
-				foreach (var edge in result.Index.EdgesBySource.GetValueOrDefault(seed.Seed) ?? [])
-					edges.Add(edge);
-			if (direction is DependencyDirection.Dependents or DependencyDirection.Both)
-				foreach (var edge in result.Index.EdgesByTarget.GetValueOrDefault(seed.Seed) ?? [])
-					if (string.Equals(edge.Target, seed.Seed, StringComparison.Ordinal))
-						edges.Add(edge);
-		}
+		var counts = outside?.Resolution ?? DependencyFactsEngine.CountResolution(
+			result.Index,
+			result.Seeds.Select(static seed => seed.Seed),
+			direction);
 		return new ResolutionCounts(
-			edges.Count(static edge => edge.Status == ResolutionStatus.Resolved),
-			edges.Count(static edge => edge.Status == ResolutionStatus.Ambiguous),
-			edges.Count(static edge => edge.Status == ResolutionStatus.Unresolved) - (outside?.ExplainedUnresolvedEdges ?? 0),
-			edges.Count(static edge => edge.Status == ResolutionStatus.External),
-			outside?.Edges ?? 0);
+			counts.Resolved,
+			counts.Ambiguous,
+			counts.Unresolved,
+			counts.External,
+			counts.OutsideSelection);
 	}
 
 	private static async Task WriteSection(

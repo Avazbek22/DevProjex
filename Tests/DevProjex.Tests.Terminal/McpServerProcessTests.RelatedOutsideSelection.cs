@@ -109,6 +109,85 @@ public sealed partial class McpServerProcessTests
 			StringComparison.Ordinal);
 	}
 
+	[Fact]
+	public async Task RealProcessRelatedFilesAnswersANarrowedSeedFromTheReadableProject()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		NarrowedRelationFixtures.WriteGlobalUsingLibrary(workspace, "project");
+		await using var server = await ActualMcpProcess.StartAsync(project, workspace.CreateDirectory("data"));
+
+		var narrowed = await CallAsync(server, "related_files", new Dictionary<string, object?>
+		{
+			["path"] = NarrowedRelationFixtures.LibrarySeed,
+			["direction"] = "both",
+			["include_patterns"] = new[] { NarrowedRelationFixtures.LibraryFolder + "/**" }
+		});
+		var whole = await CallAsync(server, "related_files", new Dictionary<string, object?>
+		{
+			["path"] = NarrowedRelationFixtures.LibrarySeed,
+			["direction"] = "both"
+		});
+		var text = Assert.IsType<TextContentBlock>(Assert.Single(narrowed.Content)).Text;
+		var wholeText = Assert.IsType<TextContentBlock>(Assert.Single(whole.Content)).Text;
+
+		// The global using lies outside the selection, yet the files it reaches are in it and
+		// belong in the seed's own section.
+		Assert.NotEqual(true, narrowed.IsError);
+		Assert.Equal(
+			NarrowedRelationFixtures.LibraryDependenciesInside,
+			NarrowedRelationFixtures.SectionPaths(text, "Dependencies"));
+		Assert.Empty(NarrowedRelationFixtures.SectionPaths(text, "Dependents"));
+		Assert.Equal(["Events/LogEvent.cs"],
+			NarrowedRelationFixtures.SectionPaths(text, "Dependencies outside the selection"));
+		Assert.Equal(["Configuration.cs"],
+			NarrowedRelationFixtures.SectionPaths(text, "Dependents outside the selection"));
+		Assert.Contains("[Resolution] resolved=3 · ambiguous=0 · unresolved=0 · external=0 · outside-selection=2\n",
+			text, StringComparison.Ordinal);
+		Assert.Contains("[Outside selection] relations=2 · listed=2;", text, StringComparison.Ordinal);
+		Assert.Contains("[Search scope] files=4", text, StringComparison.Ordinal);
+		Assert.Contains("[Resolution] resolved=5 · ambiguous=0 · unresolved=0 · external=0\n",
+			wholeText, StringComparison.Ordinal);
+		Assert.Equal(
+			NarrowedRelationFixtures.SectionPaths(wholeText, "Dependencies"),
+			NarrowedRelationFixtures.SectionPaths(text, "Dependencies")
+				.Concat(NarrowedRelationFixtures.SectionPaths(text, "Dependencies outside the selection"))
+				.Order(StringComparer.Ordinal));
+	}
+
+	[Fact]
+	public async Task RealProcessRelatedFilesKeepsNarrowedPathsInsideTheUntrustedBlock()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		NarrowedRelationFixtures.WriteGlobalUsingLibrary(workspace, "project");
+		workspace.WriteFile("project/Core/Marked.cs",
+			"using Lib.Events;\nnamespace Lib.Core;\npublic sealed class Marked { MarkedEnricher First; MarkedEvent Second; }\n");
+		workspace.WriteFile("project/Core/Enrichers/Zq7InsideMarker.cs",
+			"namespace Lib.Core.Enrichers;\npublic sealed class MarkedEnricher { }\n");
+		workspace.WriteFile("project/Events/Zq7OutsideMarker.cs",
+			"namespace Lib.Events;\npublic sealed class MarkedEvent { }\n");
+		await using var server = await ActualMcpProcess.StartAsync(project, workspace.CreateDirectory("data"));
+
+		var result = await CallAsync(server, "related_files", new Dictionary<string, object?>
+		{
+			["path"] = "Core/Marked.cs",
+			["direction"] = "both",
+			["include_patterns"] = new[] { "Core/**" }
+		});
+		var text = Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
+		var trusted = OutsideSelectionTrustedText(text);
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.Equal(["Core/Enrichers/Zq7InsideMarker.cs"], NarrowedRelationFixtures.SectionPaths(text, "Dependencies"));
+		Assert.Equal(["Events/Zq7OutsideMarker.cs"],
+			NarrowedRelationFixtures.SectionPaths(text, "Dependencies outside the selection"));
+		Assert.Contains("[Resolution] resolved=1 · ambiguous=0 · unresolved=0 · external=0 · outside-selection=1",
+			trusted, StringComparison.Ordinal);
+		Assert.DoesNotContain("Zq7", trusted, StringComparison.Ordinal);
+		Assert.DoesNotContain("Marked", trusted, StringComparison.Ordinal);
+	}
+
 	private static string WriteOutsideSelectionProject(TemporaryDirectory workspace)
 	{
 		var project = workspace.CreateDirectory("project");

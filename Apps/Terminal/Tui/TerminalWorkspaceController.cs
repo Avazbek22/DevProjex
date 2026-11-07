@@ -718,6 +718,49 @@ public sealed class TerminalWorkspaceController(
 		return project.IncludedFiles.Any(path => !selected.Contains(path)) ? project : null;
 	}
 
+	/// <summary>
+	/// Relates <paramref name="seed"/> within <paramref name="current"/>. When the workspace narrows
+	/// that plan, the relation project of <see cref="BuildRelationProjectPlanAsync"/> answers for the
+	/// seed's relations and <c>Outside</c> carries that answer; the selection only places each file.
+	/// </summary>
+	public async Task<(DependencyRelatedResult Related, DependencyOutsideSelectionResult? Outside)> FindRelatedAsync(
+		TerminalWorkspaceState state,
+		ProjectContextPlan current,
+		string seed,
+		DependencyDirection direction,
+		int depth,
+		GitFilteringMode persistentGitMode,
+		CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(state);
+		ArgumentNullException.ThrowIfNull(current);
+		var related = await RelatedQueryRunner.FindAsync(
+				services.DependencyFactsEngine,
+				current,
+				seed,
+				direction,
+				depth,
+				cancellationToken)
+			.ConfigureAwait(false);
+		if (!DependencyFactsEngine.CanRelateOutsideSelection(related) ||
+			await BuildRelationProjectPlanAsync(state, current, persistentGitMode, cancellationToken)
+				.ConfigureAwait(false) is not { } project)
+		{
+			return (related, null);
+		}
+		var outside = await services.DependencyFactsEngine
+			.FindOutsideSelectionAsync(
+				current.SourceRoot,
+				related,
+				project.IncludedFiles,
+				[seed],
+				direction,
+				depth,
+				cancellationToken: cancellationToken)
+			.ConfigureAwait(false);
+		return (related, outside);
+	}
+
 	private Task<ProjectContextPlan> BuildContextExportPlanAsync(
 		TerminalWorkspaceState state,
 		ProjectContextDocumentFormat format,

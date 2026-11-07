@@ -206,6 +206,27 @@ public sealed class ImportanceRankingServiceTests
 	}
 
 	[Fact]
+	public void BuildGraph_LeavesModuleOnlyEdgesOutOfTheGraph()
+	{
+		var moduleOnly = Edge("a.cs", "b.cs") with { ModuleOnly = true };
+		var declaration = Edge("c.cs", "b.cs");
+		var candidates = new[] { "a.cs", "b.cs", "c.cs" }
+			.Select(path => new ImportanceRankingService.Candidate(path, path))
+			.ToArray();
+
+		var graph = ImportanceRankingService.BuildGraph(
+			candidates,
+			Snapshot([moduleOnly, declaration]),
+			TestContext.Current.CancellationToken);
+
+		Assert.Empty(graph.Outgoing[graph.NodeByPath["a.cs"]]);
+		Assert.Equal([graph.NodeByPath["b.cs"]], graph.Outgoing[graph.NodeByPath["c.cs"]]);
+		Assert.Equal(1, graph.Dependents[graph.NodeByPath["b.cs"]]);
+		Assert.Equal(1, graph.EdgeCount);
+		Assert.Equal(2, graph.FilesWithEdges);
+	}
+
+	[Fact]
 	public void CalculatePageRank_IsDeterministicAcrossInputOrderAndOmitsUnsupportedFiles()
 	{
 		var edges = new[] { Edge("a.cs", "b.cs"), Edge("c.cs", "b.cs"), Edge("b.cs", "a.cs") };
