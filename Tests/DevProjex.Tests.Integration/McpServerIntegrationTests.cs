@@ -3325,6 +3325,67 @@ public sealed partial class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task GetTreeRequestedAsTheProjectRootStillCountsCollapsedFoldersUnderIt()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.CreateDirectory("project/a");
+		File.WriteAllText(Path.Combine(project, "a", "b.txt"), string.Empty);
+		File.WriteAllText(Path.Combine(project, "c.txt"), string.Empty);
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		// The root named as "." sits at depth 0, the same as its absolute path would; a folder
+		// under it one level deeper than max_depth still collapses, instead of the root's own
+		// "." spelling escaping the empty-relative-path match that finds collapsed folders.
+		var depthOne = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["paths"] = new[] { "." }, ["max_depth"] = 1 });
+		var depthTwo = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["paths"] = new[] { "." }, ["max_depth"] = 2 });
+
+		Assert.NotEqual(true, depthOne.IsError);
+		AssertTrustedTrailerOutsideSpotlight(
+			depthOne,
+			"[Tree depth] max_depth counts from the project root; 1 folder(s) under the requested paths reach depth 1 " +
+			"and are shown without their contents. Omit max_depth, or pass 2 to open them.");
+
+		// Nothing in this two-level project reaches past depth 2, so there is nothing left to collapse.
+		Assert.NotEqual(true, depthTwo.IsError);
+		Assert.DoesNotContain("[Tree depth]", AllText(depthTwo), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task GetTreeOmitsTheCollapsedFoldersHintWhenTheTreeItselfWasTruncated()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var wide = workspace.CreateDirectory("project/wide");
+		for (var file = 0; file < 2_100; file++)
+			File.WriteAllText(Path.Combine(wide, $"{file:D4}.txt"), string.Empty);
+		var narrow = workspace.CreateDirectory("project/narrow");
+		var deep = workspace.CreateDirectory("project/narrow/deep");
+		File.WriteAllText(Path.Combine(deep, "leaf.txt"), string.Empty);
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		// At max_depth 2, "wide" renders every one of its 2,100 files (depth 2, not hidden) and
+		// overruns the line limit, while "narrow/deep" would otherwise be a collapsed folder. A
+		// truncated render cannot say which folders past the cut actually collapsed, so the hint
+		// must not claim one did.
+		var truncated = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["paths"] = new[] { "wide", "narrow" },
+				["max_depth"] = 2
+			});
+
+		Assert.NotEqual(true, truncated.IsError);
+		Assert.Contains("[Tree truncated", AllText(truncated), StringComparison.Ordinal);
+		Assert.DoesNotContain("[Tree depth]", AllText(truncated), StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task RemoteProjectIsRejectedWithoutOptInBeforeRemoteServicesAreCreated()
 	{
 		using var workspace = new TemporaryDirectory();

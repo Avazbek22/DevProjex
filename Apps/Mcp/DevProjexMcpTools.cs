@@ -359,7 +359,7 @@ internal sealed partial class DevProjexMcpTools(
 			return McpToolResults.TextSuccess(AppendTrustedNotices(
 				McpSpotlight.Wrap(treeWriter.IsTruncated ? treeWriter.CompleteLinesText : treeWriter.Text),
 				treeTruncationNotice,
-				FormatTreeDepthNotice(plan, depth, paths),
+				FormatTreeDepthNotice(plan, depth, paths, treeWriter.IsTruncated),
 				McpTrustedDiagnosticFormatter.FormatWarnings(plan),
 				FormatNameSearchNotice(plan, paths),
 				FormatGitScopeDiffNotice(arguments),
@@ -4816,7 +4816,8 @@ internal sealed partial class DevProjexMcpTools(
 	private string? FormatTreeDepthNotice(
 		ProjectContextPlan plan,
 		int? explicitMaxDepth,
-		IReadOnlyList<string>? paths)
+		IReadOnlyList<string>? paths,
+		bool treeTruncated)
 	{
 		if (explicitMaxDepth is not { } maxDepth || !HasItems(paths))
 			return null;
@@ -4840,6 +4841,9 @@ internal sealed partial class DevProjexMcpTools(
 			}
 
 			var relative = PathUtility.GetPortableRelativePath(plan.SourceRoot, fullPath);
+			// The root itself, named as "." or by its absolute path, sits at depth 0.
+			if (relative == ".")
+				relative = string.Empty;
 			var depth = relative.Length == 0 ? 0 : relative.Count(static character => character == '/') + 1;
 			var isDirectory = Directory.Exists(fullPath);
 			var isHidden = isDirectory ? depth >= maxDepth : depth > maxDepth;
@@ -4857,8 +4861,10 @@ internal sealed partial class DevProjexMcpTools(
 			largestSuggestedDepth = Math.Max(largestSuggestedDepth, isDirectory ? depth + 2 : depth);
 		}
 
+		// A cut tree never reached part of the collapsed folders, and the rendered text cannot tell
+		// which ones, so a count of them would name folders the response does not show.
 		if (hiddenCount == 0)
-			return FormatCollapsedFoldersNotice(plan, visibleDirectories, maxDepth);
+			return treeTruncated ? null : FormatCollapsedFoldersNotice(plan, visibleDirectories, maxDepth);
 
 		// A file has nothing under it, so the directory wording would contradict itself: the
 		// useful depth is the one that shows the file.
