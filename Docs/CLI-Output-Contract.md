@@ -425,15 +425,20 @@ scopes that depend on that file. Text output reports at most eight of each as
 `resolution` reports `resolved`, `ambiguous`, `unresolved`, and `external` evidence groups for every
 seed section emitted at the requested depth and direction. Text output carries the same values in `[Resolution]`; consequently an
 empty related-file list does not imply that every observed reference was resolved.
-When the selection is narrowed and related files lie outside it, the document adds two
-additive members. `outsideSelection` follows `seeds` and holds one object per seed with such
+When the selection is narrowed, the seeds' relations are resolved against the readable project
+without that narrowing, and the selection only decides where each related file is listed: `seeds`
+holds the related files the selection contains, and an ambiguous item appears there only when the
+candidate it names is selected. When related files lie outside the selection, the document adds
+two additive members. `outsideSelection` follows `seeds` and holds one object per seed with such
 files: `seed`, `dependencies`, `dependencyCount`, `dependents`, and `dependentCount`. Each list
-uses the related-item shape above, holds at most 20 items in path order, and its count reports
-how many exist. `resolution.outsideSelection` counts the resolved evidence groups behind them;
-the references they explain are no longer counted as `unresolved`. Text output prints those
-lists under `Dependencies outside the selection` and `Dependents outside the selection` and
-appends `· outside-selection=N` to `[Resolution]`. A document with nothing outside its
-selection omits both members, exactly as before.
+uses the related-item shape above, holds resolved items only, at most 20 in path order, and its
+count reports how many exist. `resolution` counts evidence groups exactly as the command without
+narrowing does, except that `resolution.outsideSelection` holds the resolved groups that reach
+only files outside the selection and `resolved` the rest; `coverage` and `searchScope` still
+describe the selection. Text output prints those lists under `Dependencies outside the selection`
+and `Dependents outside the selection` and appends `· outside-selection=N` to `[Resolution]`. A
+document with nothing outside its selection omits both members, and a command that narrows
+nothing writes exactly the document it wrote before.
 Traversal follows only resolved edges and is limited to 256 distinct seed files.
 Crossing that limit emits `DPX-DEPENDENCY-TRAVERSAL-LIMIT`, returns policy exit
 code `3`, and writes no partial related-files document.

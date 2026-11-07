@@ -51,15 +51,21 @@ Seeds do not reduce the manifest that must be indexed. No declaration, candidate
 reason can cross the current manifest gate, and self-file relationships are suppressed.
 
 One documented projection looks past a narrowed selection without changing it. A selection
-cannot tell a reference into a file it left out from one that leads nowhere, so `related`,
-the Terminal Workspace `related` command, and `related_files` relate their seeds to the files the
-caller may read but the call's own narrowing left out. That second index honors every access
-filter and lifts only the narrowing; the [MCP server](McpServer.md#related_files),
-[command line](CommandLine.md#related), and [Terminal Workspace](TerminalWorkspace.md) documents
-define it per surface. The selection's own results are computed exactly as before, and its
-answers stand: a relation found there only becomes an outside entry when the selection reported it
-unresolved. Outside entries name a path, the same evidence reasons, and an estimated token
-count, never content, and they are the only results that name a file outside the manifest.
+cannot see the files it left out, and some of them decide what a reference inside it means: a C#
+`global using`, a Python package's `__init__.py`, or a second declaration that makes a name
+ambiguous. So `related`, the Terminal Workspace `related` command, and `related_files` resolve
+their seeds' relations against a second index of the files the caller may read. That index
+honors every access filter and lifts only the call's own narrowing; the
+[MCP server](McpServer.md#related_files), [command line](CommandLine.md#related), and
+[Terminal Workspace](TerminalWorkspace.md) documents define it per surface. The selection only
+decides where each related file is listed: in the seed's own sections when the selection holds
+it, and as an outside entry otherwise, so together they hold what the call relates without
+narrowing, and the resolution counts add up to that call's counts. An ambiguous relation stays
+in the seed's sections when the candidate it names is in the selection and is otherwise only
+counted. A seed the second index has no facts for keeps the selection's own answer, and the
+selection's coverage and scope are reported unchanged. Outside entries name a path, the same
+evidence reasons, and an estimated token count, never content; they and the candidate lists of
+a narrowed call's ambiguous rows are the only results that name a file outside the manifest.
 
 Configuration describes the project, not the selection. For each language present in the manifest,
 the engine also reads that language's control files (`.csproj`, `tsconfig.json`, `jsconfig.json`,

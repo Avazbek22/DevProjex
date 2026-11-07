@@ -799,15 +799,23 @@ defaults to the current directory and accepts the same local-directory or Git-UR
 as `analyze`; `--branch` remains URL-only. The seed chooses where the answer starts, while
 the dependency engine indexes the complete effective manifest produced by the selected
 profile, roots, extensions, paths, Git mode, exclusions, and file-size limit. It never
-returns a candidate outside that manifest. The project configuration that owns the selected files,
+returns a candidate outside that manifest, except the readable files a narrowed selection names
+by path as described below. The project configuration that owns the selected files,
 such as `pyproject.toml`, `tsconfig.json`, or a `.csproj`, is still read when `--select` or
 `--extension` leaves it out, so a narrowed view resolves its files as the whole project does.
 When `--select`, `--extension`, `--root`, or a momentary `--git-mode` (`staged`, `changes`,
-`diff:...`) narrows the selection, `related` also lists the files the same profile, exclusions,
-persistent Git mode, and `--max-file-bytes` allow but the narrowing left out:
-`Dependencies outside the selection` and `Dependents outside the selection` follow each seed's own
-sections with the same row format, at most 20 per section in path order, and `[Resolution]` adds
-`· outside-selection=N`. A command that narrows nothing prints what it printed before.
+`diff:...`) narrows the selection, `related` resolves the seed's relations against the files the
+same profile, exclusions, persistent Git mode, and `--max-file-bytes` allow, because a file the
+narrowing left out can decide what a reference means, such as a C# `global using` or a Python
+package's `__init__.py`. The selection only decides where each related file is listed: a selected
+file stays in the seed's own sections, an ambiguous row stays there only when the candidate it
+names is selected, and resolved relations to the other files follow as
+`Dependencies outside the selection` and `Dependents outside the selection` with the same row
+format, at most 20 per section in path order. Candidate lists and outside rows name files outside
+the selection by path only. `[Resolution]` counts edges as the command without narrowing does and
+reports resolved edges that reach only files outside the selection as `· outside-selection=N`
+instead of in `resolved`. A larger `--depth` walks the same relations, but only into selected
+files. A command that narrows nothing prints what it printed before.
 
 Bash seed files record literal script-relative `source` / `.` connections; computed shell paths
 remain explicitly unresolved and commands found through `PATH` are not dependencies. Scala seeds
