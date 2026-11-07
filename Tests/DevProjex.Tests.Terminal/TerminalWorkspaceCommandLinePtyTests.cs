@@ -159,6 +159,67 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 	}
 
 	[Fact(Timeout = 120_000)]
+	public async Task DiffCommandReplacesAnActiveMomentaryScopeInsteadOfIntersectingWithIt()
+	{
+		// "set git diff:HEAD..HEAD" narrows the live workspace plan to an empty file set (a range
+		// with nothing in it). If "diff changes" then applied its own scope on top of that
+		// narrowed plan instead of lifting it first, New.txt's real uncommitted change would be
+		// intersected away and the command would wrongly report no changes.
+		using var repository = new GitModeRepository();
+		repository.Write("Old.txt", "old\n");
+		repository.Commit();
+		await using var terminal = await StartAsync(repository.Root, columns: 160, rows: 40);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await ExecuteAsync(terminal, "set git diff:HEAD..HEAD", "✓ diff:HEAD..HEAD");
+
+		repository.Write("New.txt", "new\n");
+		await terminal.OpenCommandLineAsync(TestContext.Current.CancellationToken);
+		await terminal.SendAsync("diff changes\r", TestContext.Current.CancellationToken);
+		var result = await terminal.WaitForScreenAsync(
+			"Changed files: 1",
+			timeout: TimeSpan.FromSeconds(45),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains("New.txt", result, StringComparison.Ordinal);
+		Assert.DoesNotContain("No changes", result, StringComparison.Ordinal);
+		Assert.False(terminal.HasExited);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await QuitAsync(terminal);
+	}
+
+	[Fact(Timeout = 120_000)]
+	public async Task DiffCommandAcceptsAContextOption()
+	{
+		using var repository = new GitModeRepository();
+		repository.Write(
+			"Numbers.txt",
+			string.Join('\n', Enumerable.Range(1, 11).Select(static line => $"{line}")) + "\n");
+		repository.Commit();
+		repository.Write(
+			"Numbers.txt",
+			string.Join('\n', Enumerable.Range(1, 11).Select(static line => line == 6 ? "SIX" : $"{line}")) + "\n");
+		await using var terminal = await StartAsync(repository.Root, columns: 160, rows: 40);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.OpenCommandLineAsync(TestContext.Current.CancellationToken);
+		await terminal.SendAsync("diff changes --context 0\r", TestContext.Current.CancellationToken);
+		var result = await terminal.WaitForScreenAsync(
+			"Changed files: 1",
+			timeout: TimeSpan.FromSeconds(45),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains("@@ -6 +6 @@", result, StringComparison.Ordinal);
+		Assert.DoesNotContain(" 5\n", result, StringComparison.Ordinal);
+		Assert.False(terminal.HasExited);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await QuitAsync(terminal);
+	}
+
+	[Fact(Timeout = 120_000)]
 	public async Task RelatedCommandListsReadableFilesOutsideTheCheckedFocus()
 	{
 		using var workspace = new TemporaryDirectory();
