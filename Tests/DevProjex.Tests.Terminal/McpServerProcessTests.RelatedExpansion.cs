@@ -157,6 +157,41 @@ public sealed partial class McpServerProcessTests
 			StringComparison.Ordinal);
 	}
 
+	[Fact]
+	public async Task RealProcessExpansionIgnoresAPathAliasConfigurationExcludedFromTheSelection()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("alias-expansion-project");
+		workspace.WriteFile(
+			"alias-expansion-project/tsconfig.json",
+			"{\"compilerOptions\":{\"paths\":{\"@lib/*\":[\"./lib/*\"]}}}\n");
+		workspace.WriteFile("alias-expansion-project/lib/util.ts", "export const util = 1;\n");
+		workspace.WriteFile(
+			"alias-expansion-project/app/main.ts",
+			"import { util } from '@lib/util';\nexport const main = util;\n");
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			workspace.CreateDirectory("data"));
+
+		// tsconfig.json still exists on disk, but is excluded from the effective selection, the
+		// way a gitignored or excluded configuration file would be.
+		var excluded = Expansion(["app/main.ts"], hops: 1, direction: "dependencies");
+		excluded["exclude_patterns"] = new[] { "tsconfig.json" };
+		var excludedResult = await PackAsync(server, excluded);
+
+		var included = Expansion(["app/main.ts"], hops: 1, direction: "dependencies");
+		var includedResult = await PackAsync(server, included);
+
+		// With the configuration excluded, the alias never resolves: same answer as if the file
+		// did not exist at all.
+		Assert.Contains("[Expanded] seeds=1 · hop1=+0", excludedResult, StringComparison.Ordinal);
+		Assert.DoesNotContain("export const util", excludedResult, StringComparison.Ordinal);
+
+		// With the configuration readable, the alias resolves and pulls the neighbour in.
+		Assert.Contains("[Expanded] seeds=1 · hop1=+1", includedResult, StringComparison.Ordinal);
+		Assert.Contains("export const util", includedResult, StringComparison.Ordinal);
+	}
+
 	private static Dictionary<string, object?> Expansion(string[] seeds, int hops, string direction) =>
 		new()
 		{
