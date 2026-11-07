@@ -35,14 +35,16 @@ public sealed class SearchCommandHandler(
 		SearchCommandRequest request,
 		CancellationToken cancellationToken)
 	{
-		// A regular expression in declaration mode would otherwise report a confident "no
-		// matches"; refusing it before the project is analyzed also keeps the refusal cheap.
+		IReadOnlyList<string>? namesReadFromPattern = null;
 		if (request.Mode == SearchMode.Symbols && McpSearchSymbols.LooksLikeRegularExpression(request.Pattern))
 		{
-			throw new SearchCommandException(
-				"DPX-CLI-SEARCH-PATTERN",
-				SymbolsRegularExpressionMessage,
-				hint: "Pass the name, or use --regex instead of --symbols to search text with a regular expression.");
+			if (!McpSearchSymbols.TryReadDeclarationNames(request.Pattern, out namesReadFromPattern))
+			{
+				throw new SearchCommandException(
+					"DPX-CLI-SEARCH-PATTERN",
+					SymbolsRegularExpressionMessage,
+					hint: "Pass the name, or use --regex instead of --symbols to search text with a regular expression.");
+			}
 		}
 
 		var status = new StatusRenderer(environment, request.Output);
@@ -76,6 +78,11 @@ public sealed class SearchCommandHandler(
 				exception);
 		}
 
+		if (namesReadFromPattern is not null)
+		{
+			var note = services.Localization.Format("Terminal.Search.SymbolsReadAsNames", string.Join(", ", namesReadFromPattern));
+			environment.Error.WriteLine($"{services.Localization["Terminal.Label.Hint"]}: {TerminalTextEscaping.EscapeSingleLine(note)}");
+		}
 		if (request.OutputPath is null or "-")
 		{
 			await environment.Output.WriteAsync(payload.AsMemory(), cancellationToken).ConfigureAwait(false);
@@ -134,11 +141,9 @@ public sealed class SearchCommandHandler(
 		long maximumInspectedBytes,
 		CancellationToken cancellationToken)
 	{
-		var declarationNames = request.Mode == SearchMode.Symbols
-			? McpSearchSymbols.ParseDeclarationNames(request.Pattern)
-			: [];
+		var regexPattern = ToRegexPattern(request.Pattern, request.Mode, out var declarationNames, out var namesReadFromPattern);
 		var regex = new McpSearchRegex(
-			ToRegexPattern(request.Pattern, request.Mode, declarationNames),
+			regexPattern,
 			ignoreCase: true);
 		var context = CreateTransformationContext(plan);
 		// Without a transformation the raw reader below decodes each admitted file itself and
@@ -392,7 +397,8 @@ public sealed class SearchCommandHandler(
 				resolution,
 				boundary,
 				rendered.Output.ToString().TrimEnd(),
-				matchingFiles);
+				matchingFiles,
+				namesReadFromPattern ? declarationNames : null);
 		}
 
 		var maximumBudget = MaximumContentCharacters;
@@ -438,15 +444,28 @@ public sealed class SearchCommandHandler(
 	private static string ToRegexPattern(
 		string pattern,
 		SearchMode mode,
-		IReadOnlyList<string> declarationNames)
+		out IReadOnlyList<string> declarationNames,
+		out bool namesReadFromPattern)
 	{
+		declarationNames = [];
+		namesReadFromPattern = false;
+		if (mode == SearchMode.Symbols)
+		{
+			if (McpSearchSymbols.LooksLikeRegularExpression(pattern))
+			{
+				if (!McpSearchSymbols.TryReadDeclarationNames(pattern, out declarationNames))
+					throw new McpToolException(McpErrorCodes.InvalidPattern, $"{McpErrorCodes.InvalidPattern}: {SymbolsRegularExpressionMessage}");
+				namesReadFromPattern = true;
+			}
+			else
+			{
+				declarationNames = McpSearchSymbols.ParseDeclarationNames(pattern);
+			}
+		}
 		return mode switch
 		{
 			SearchMode.Regex => pattern,
 			SearchMode.Text => Regex.Escape(pattern),
-			SearchMode.Symbols when McpSearchSymbols.LooksLikeRegularExpression(pattern) => throw new McpToolException(
-				McpErrorCodes.InvalidPattern,
-				$"{McpErrorCodes.InvalidPattern}: {SymbolsRegularExpressionMessage}"),
 			SearchMode.Symbols => declarationNames.Count > 0
 				? McpSearchSymbols.ToDeclarationNamePattern(declarationNames)
 				: throw new McpToolException(
@@ -814,7 +833,8 @@ public sealed class SearchCommandHandler(
 		SearchResolution Resolution,
 		McpSearchBoundary Boundary,
 		string Body,
-		int MatchingFiles);
+		int MatchingFiles,
+		IReadOnlyList<string>? NamesReadFromPattern = null);
 
 	internal sealed record SearchMatch(string Path, int Line, string Text, string? Declaration);
 

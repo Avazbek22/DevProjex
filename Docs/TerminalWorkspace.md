@@ -342,6 +342,10 @@ and can be cancelled; its results open in the output panel with project-relative
 line numbers, and the enclosing declaration when one is known. `search` keeps searching
 the current Preview.
 
+The Terminal Workspace `:grep --symbols` reads a regular expression the same way:
+when every alternative reduces to one plain name, the search runs for those names
+and prints a note naming them; any other regular expression is still refused.
+
 `--max-tokens` and `--rank` on `copy` and `export context` follow
 `devprojex export context`: the budget admits files by estimated content tokens and
 `--rank importance` orders files by importance before the budget is applied. Ranking needs a view that includes

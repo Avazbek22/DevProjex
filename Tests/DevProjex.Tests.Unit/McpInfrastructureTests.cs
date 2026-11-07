@@ -355,6 +355,62 @@ public sealed class McpInfrastructureTests
 		Assert.False(McpSearchSymbols.LooksLikeRegularExpression(pattern));
 	}
 
+	[Theory]
+	[InlineData(@"interface\s+ToNumberStrategy", "ToNumberStrategy")]
+	[InlineData("func.*RemoteIP|func.*isTrustedProxy", "RemoteIP,isTrustedProxy")]
+	[InlineData(@"^class\s+Foo\b$", "Foo")]
+	[InlineData(@"export\s+function\s+serveStatic", "serveStatic")]
+	[InlineData("Foo|class Foo", "Foo")]
+	[InlineData(@"interface\s+函數²_𐐀", "函數²_𐐀")]
+	[InlineData(@"class\s*Foo", "Foo")]
+	[InlineData(@"record\s+Foo", "Foo")]
+	[InlineData(@"public\s+class\s+Foo", "Foo")]
+	[InlineData(@"pub\s+fn\s+handle", "handle")]
+	[InlineData(@"protected\s+readonly\s+record\s+Item", "Item")]
+	[InlineData(@"public\s+static\s+async\s+Task", "Task")]
+	[InlineData(@"func.+Bar|\bFoo\b", "Bar,Foo")]
+	public void SimpleRegularExpressionsReadExactlyOneNamePerAlternative(string pattern, string expected)
+	{
+		Assert.True(McpSearchSymbols.TryReadDeclarationNames(pattern, out var names));
+		Assert.Equal(expected.Split(','), names);
+	}
+
+	[Theory]
+	[InlineData("func Test.*ClientIP")]
+	[InlineData(@"class\s+\w+Service")]
+	[InlineData("Foo.Bar")]
+	[InlineData("(?i)foo")]
+	[InlineData("a+b")]
+	[InlineData(@"def\s+(foo|bar)")]
+	[InlineData("Foo|")]
+	[InlineData("|Foo")]
+	[InlineData("Foo||Bar")]
+	[InlineData("class")]
+	[InlineData("CLASS Foo")]
+	[InlineData(@"proecord\s+Foo")]
+	[InlineData("")]
+	[InlineData(" ")]
+	public void ComplexRegularExpressionsNeverBecomePartialDeclarationNameQueries(string pattern)
+	{
+		Assert.False(McpSearchSymbols.TryReadDeclarationNames(pattern, out var names));
+		Assert.Empty(names);
+	}
+
+	[Fact]
+	public void EveryDeclarationKeywordIsDiscardedWhenReadingARegularExpression()
+	{
+		const string keywords = "abstract async class const data def default enum export extern final fn fun func function " +
+			"impl interface internal let module namespace object override partial private protected pub public readonly record " +
+			"sealed static struct trait type typedef union val var virtual";
+		var words = keywords.Split(' ');
+		Assert.Equal(40, words.Length);
+		foreach (var keyword in words)
+		{
+			Assert.True(McpSearchSymbols.TryReadDeclarationNames(keyword + @"\s+Name", out var names), keyword);
+			Assert.Equal(["Name"], names);
+		}
+	}
+
 	[Fact]
 	public void BodyTruncationNoticeNamesTheExactUnshownLines()
 	{

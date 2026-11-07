@@ -613,6 +613,7 @@
   "Terminal.Option.RelatedProject": "Project directory or Git repository URL. Defaults to the current directory.",
   "Terminal.Option.RelatedDirection": "Relationship direction: dependencies, dependents, or both.",
   "Terminal.Status.IndexingDependencies": "Indexing dependency facts",
+  "Terminal.Search.SymbolsReadAsNames": "--symbols read the pattern as declaration names: {0}",
   "Terminal.Related.Seed": "Seed",
   "Terminal.Related.Dependencies": "Dependencies",
   "Terminal.Related.Dependents": "Dependents",

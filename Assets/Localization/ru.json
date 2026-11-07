@@ -613,6 +613,7 @@
   "Terminal.Option.RelatedProject": "Каталог проекта или URL Git-репозитория. По умолчанию текущий каталог.",
   "Terminal.Option.RelatedDirection": "Направление связей: зависимости, зависимые файлы или оба направления.",
   "Terminal.Status.IndexingDependencies": "Индексирование фактов зависимостей",
+  "Terminal.Search.SymbolsReadAsNames": "--symbols: шаблон прочитан как имена объявлений: {0}",
   "Terminal.Related.Seed": "Исходный файл",
   "Terminal.Related.Dependencies": "Зависимости",
   "Terminal.Related.Dependents": "Зависимые файлы",

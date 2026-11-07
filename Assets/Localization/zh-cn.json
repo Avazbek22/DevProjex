@@ -607,6 +607,7 @@
   "Terminal.Option.RelatedProject": "项目目录或 Git 存储库 URL。默认为当前目录。",
   "Terminal.Option.RelatedDirection": "关系方向：依赖项、依赖方或两者。",
   "Terminal.Status.IndexingDependencies": "正在索引依赖关系事实",
+  "Terminal.Search.SymbolsReadAsNames": "--symbols：已将模式解析为声明名称：{0}",
   "Terminal.Related.Seed": "起始文件",
   "Terminal.Related.Dependencies": "依赖项",
   "Terminal.Related.Dependents": "依赖方",

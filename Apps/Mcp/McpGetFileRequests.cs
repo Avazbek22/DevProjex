@@ -91,8 +91,24 @@ internal sealed record McpGetFileRequestSet(bool IsBatch, IReadOnlyList<McpGetFi
 
 		if (arguments.Contains("start_line") || arguments.Contains("end_line") || arguments.Contains("start_column"))
 			throw Invalid("start_line, end_line, and start_column are valid only with 'path'");
-		if (!arguments.TryGetElement("requests", out var requestsElement) ||
-			requestsElement.ValueKind != JsonValueKind.Array ||
+		arguments.TryGetElement("requests", out var requestsElement);
+		if (requestsElement.ValueKind == JsonValueKind.String)
+		{
+			var encoded = requestsElement.GetString()!.Trim();
+			if (encoded.StartsWith('['))
+			{
+				try
+				{
+					using var document = JsonDocument.Parse(encoded);
+					if (document.RootElement.ValueKind == JsonValueKind.Array)
+						requestsElement = document.RootElement.Clone();
+				}
+				catch (JsonException)
+				{
+				}
+			}
+		}
+		if (requestsElement.ValueKind != JsonValueKind.Array ||
 			requestsElement.GetArrayLength() is < 1 or > MaximumFiles)
 		{
 			throw Invalid($"'requests' must be an array with 1 to {MaximumFiles} entries");

@@ -86,6 +86,51 @@ internal static class McpSearchSymbols
 		return string.Empty;
 	}
 
+	public static bool TryReadDeclarationNames(string pattern, out IReadOnlyList<string> names)
+	{
+		ArgumentNullException.ThrowIfNull(pattern);
+		var parsed = new List<string>();
+		names = [];
+		foreach (var alternative in pattern.Split('|', StringSplitOptions.TrimEntries))
+		{
+			var text = alternative.StartsWith('^') ? alternative[1..] : alternative;
+			if (text.EndsWith('$'))
+				text = text[..^1];
+			text = text.Replace(@"\s+", " ", StringComparison.Ordinal)
+				.Replace(@"\s*", " ", StringComparison.Ordinal)
+				.Replace(@"\s", " ", StringComparison.Ordinal)
+				.Replace(".*", " ", StringComparison.Ordinal)
+				.Replace(".+", " ", StringComparison.Ordinal)
+				.Replace(@"\b", " ", StringComparison.Ordinal);
+			string? name = null;
+			foreach (var word in text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
+			{
+				if (IsDeclarationKeyword(word))
+					continue;
+				if (name is not null || !word.EnumerateRunes().All(static rune =>
+					Rune.IsLetter(rune) || Rune.GetUnicodeCategory(rune) is UnicodeCategory.DecimalDigitNumber or
+						UnicodeCategory.LetterNumber or UnicodeCategory.OtherNumber || rune.Value == '_'))
+				{
+					return false;
+				}
+				name = word;
+			}
+			if (name is null)
+				return false;
+			if (!parsed.Contains(name, StringComparer.Ordinal))
+				parsed.Add(name);
+		}
+		names = parsed;
+		return true;
+	}
+
+	private static bool IsDeclarationKeyword(string word) => word is
+		"abstract" or "async" or "class" or "const" or "data" or "def" or "default" or "enum" or "export" or
+		"extern" or "final" or "fn" or "fun" or "func" or "function" or "impl" or "interface" or "internal" or
+		"let" or "module" or "namespace" or "object" or "override" or "partial" or "private" or "protected" or
+		"pub" or "public" or "readonly" or "record" or
+		"sealed" or "static" or "struct" or "trait" or "type" or "typedef" or "union" or "val" or "var" or "virtual";
+
 	private static bool IsPlainDeclaredName(string name)
 	{
 		var body = name.Length > 1 && name[^1] == '?' && IsIdentifierCharacter(name[^2])

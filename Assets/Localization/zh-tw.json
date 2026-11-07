@@ -607,6 +607,7 @@
   "Terminal.Option.RelatedProject": "專案目錄或 Git 儲存庫 URL。預設為目前目錄。",
   "Terminal.Option.RelatedDirection": "關聯方向：相依項目、相依來源或兩者。",
   "Terminal.Status.IndexingDependencies": "正在建立相依性事實索引",
+  "Terminal.Search.SymbolsReadAsNames": "--symbols：已將模式解析為宣告名稱：{0}",
   "Terminal.Related.Seed": "起始檔案",
   "Terminal.Related.Dependencies": "相依項目",
   "Terminal.Related.Dependents": "相依來源",

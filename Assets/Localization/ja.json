@@ -607,6 +607,7 @@
   "Terminal.Option.RelatedProject": "プロジェクトのディレクトリまたはGitリポジトリのURL。既定は現在のディレクトリです。",
   "Terminal.Option.RelatedDirection": "関係の向き：dependencies、dependents、both のいずれか。",
   "Terminal.Status.IndexingDependencies": "依存関係をインデックス化中",
+  "Terminal.Search.SymbolsReadAsNames": "--symbols: パターンを宣言名として解釈しました: {0}",
   "Terminal.Related.Seed": "起点",
   "Terminal.Related.Dependencies": "依存先",
   "Terminal.Related.Dependents": "依存元",

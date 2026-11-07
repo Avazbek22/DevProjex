@@ -607,6 +607,7 @@
   "Terminal.Option.RelatedProject": "Katalog projektu lub adres URL repozytorium Git. Domyślnie bieżący katalog.",
   "Terminal.Option.RelatedDirection": "Kierunek relacji: zależności, pliki zależne lub oba.",
   "Terminal.Status.IndexingDependencies": "Indeksowanie zależności",
+  "Terminal.Search.SymbolsReadAsNames": "--symbols: wzorzec odczytano jako nazwy deklaracji: {0}",
   "Terminal.Related.Seed": "Plik początkowy",
   "Terminal.Related.Dependencies": "Zależności",
   "Terminal.Related.Dependents": "Pliki zależne",

@@ -613,6 +613,7 @@
   "Terminal.Option.RelatedProject": "Dossier du projet ou URL du dépôt Git. Par défaut, le dossier actuel.",
   "Terminal.Option.RelatedDirection": "Direction de la relation : dépendances, dépendants ou les deux.",
   "Terminal.Status.IndexingDependencies": "Indexation des faits de dépendance",
+  "Terminal.Search.SymbolsReadAsNames": "--symbols : motif lu comme noms de déclarations : {0}",
   "Terminal.Related.Seed": "Fichier de départ",
   "Terminal.Related.Dependencies": "Dépendances",
   "Terminal.Related.Dependents": "Dépendants",

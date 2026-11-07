@@ -1051,15 +1051,19 @@ internal sealed class DevProjexMcpTools(
 			// symbols=true is the declaration-name mode of CLI search --symbols: the pattern is one
 			// identifier, and only declarations with that name match, not its uses.
 			var declarationsOnly = arguments.OptionalBoolean("symbols", false);
+			IReadOnlyList<string>? namesReadFromPattern = null;
 			if (declarationsOnly && McpSearchSymbols.LooksLikeRegularExpression(pattern))
 			{
-				throw new McpToolException(
-					McpErrorCodes.InvalidArguments,
-					$"{McpErrorCodes.InvalidArguments}: symbols=true takes declaration names such as command, " +
-					"class Command or Foo|Bar; this pattern looks like a regular expression. Pass the name, " +
-					"or omit symbols to search text with a regex.");
+				if (!McpSearchSymbols.TryReadDeclarationNames(pattern, out namesReadFromPattern))
+				{
+					throw new McpToolException(
+						McpErrorCodes.InvalidArguments,
+						$"{McpErrorCodes.InvalidArguments}: symbols=true takes declaration names such as command, " +
+						"class Command or Foo|Bar; this pattern looks like a regular expression. Pass the name, " +
+						"or omit symbols to search text with a regex.");
+				}
 			}
-			var declarationNames = declarationsOnly ? McpSearchSymbols.ParseDeclarationNames(pattern) : [];
+			var declarationNames = namesReadFromPattern ?? (declarationsOnly ? McpSearchSymbols.ParseDeclarationNames(pattern) : []);
 			if (declarationsOnly && declarationNames.Count == 0)
 			{
 				throw new McpToolException(
@@ -1404,7 +1408,10 @@ internal sealed class DevProjexMcpTools(
 			var retained = false;
 			try
 			{
-				var projectContent = McpSpotlight.Wrap(output.ToString().TrimEnd());
+				var namesPrelude = namesReadFromPattern is null
+					? string.Empty
+					: "Pattern read as declaration names: " + string.Join(", ", namesReadFromPattern) + Environment.NewLine;
+				var projectContent = McpSpotlight.Wrap(namesPrelude + output.ToString().TrimEnd());
 				var boundaryPrelude = FormatSearchBoundaryPrelude(boundary, storedSearch is not null);
 				if (boundaryPrelude is not null)
 					projectContent = boundaryPrelude + Environment.NewLine + Environment.NewLine + projectContent;
@@ -1428,6 +1435,10 @@ internal sealed class DevProjexMcpTools(
 						withheldStored,
 						withheldByFile.Count),
 					FormatSymbolCoverageNotice(symbols, namesRefused),
+					namesReadFromPattern is null
+						? null
+						: $"[Symbols] the regular expression was read as {namesReadFromPattern.Count.ToString(CultureInfo.InvariantCulture)} " +
+						  "declaration name(s); they are listed at the top of the results.",
 					FormatNameSearchNotice(plan, paths, pattern, totalMatches),
 					additionalMatchesNotice,
 					searchTotalsNotice,

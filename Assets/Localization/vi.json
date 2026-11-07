@@ -607,6 +607,7 @@
   "Terminal.Option.RelatedProject": "Thư mục dự án hoặc URL kho Git. Mặc định là thư mục hiện tại.",
   "Terminal.Option.RelatedDirection": "Hướng quan hệ: dependencies, dependents hoặc both.",
   "Terminal.Status.IndexingDependencies": "Đang lập chỉ mục dữ kiện phụ thuộc",
+  "Terminal.Search.SymbolsReadAsNames": "--symbols: mẫu được đọc là tên khai báo: {0}",
   "Terminal.Related.Seed": "Tệp bắt đầu",
   "Terminal.Related.Dependencies": "Phụ thuộc",
   "Terminal.Related.Dependents": "Được sử dụng bởi",
