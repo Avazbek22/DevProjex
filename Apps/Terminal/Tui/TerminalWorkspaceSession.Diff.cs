@@ -35,11 +35,16 @@ internal sealed partial class TerminalWorkspaceSession
 						"DPX-TUI-DIFF-SELECTION-FAILED",
 						planDiagnostics);
 				}
+				// A momentary diff scope is applied after the plan is built, so, unlike the CLI
+				// command, resolution against the remote (for a Git URL source) only happens here.
+				var resolvedDiffRange = mode == GitFilteringMode.Diff && diffRange is { } requestedDiffRange
+					? await _services.ContextFactory.ResolveDiffRangeAsync(plan, requestedDiffRange, token).ConfigureAwait(false)
+					: null;
 				ProjectDiffResult diff;
 				try
 				{
 					diff = await DiffQueryRunner
-						.CompareAsync(_services, plan, DiffQueryRunner.DefaultContextLines, token)
+						.CompareAsync(_services, plan, DiffQueryRunner.DefaultContextLines, token, resolvedDiffRange)
 						.ConfigureAwait(false);
 				}
 				catch (ProjectDiffException)

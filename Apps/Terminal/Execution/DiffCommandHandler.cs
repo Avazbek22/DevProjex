@@ -19,6 +19,9 @@ public sealed class DiffCommandHandler(
 				includeOutputMetrics: false,
 				cancellationToken: cancellationToken,
 				repositorySourceUrl: request.RepositorySourceUrl)).ConfigureAwait(false);
+		// Captured before ProjectFileSizeFilter replaces the plan instance, which would lose the
+		// association between the plan and its resolved remote commit range.
+		var resolvedDiffRange = services.ContextFactory.TryGetResolvedDiffRange(plan);
 		plan = await ProjectFileSizeFilter.ApplyAsync(
 			services.ContextPlanner,
 			plan,
@@ -38,7 +41,7 @@ public sealed class DiffCommandHandler(
 		{
 			diff = await status.RunAsync(
 				services.Localization["Terminal.Status.ComparingVersions"],
-				() => DiffQueryRunner.CompareAsync(services, plan, request.ContextLines, cancellationToken))
+				() => DiffQueryRunner.CompareAsync(services, plan, request.ContextLines, cancellationToken, resolvedDiffRange))
 				.ConfigureAwait(false);
 		}
 		catch (ProjectDiffException exception)

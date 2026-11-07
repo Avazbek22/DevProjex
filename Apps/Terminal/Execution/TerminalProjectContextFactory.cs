@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using DevProjex.Application.Secrets;
 using DevProjex.Infrastructure.Git;
 
@@ -10,6 +11,45 @@ public sealed class TerminalProjectContextFactory(
 	IGitScopePathProvider gitScopePathProvider,
 	GitRemoteDiffRangeResolver remoteDiffRangeResolver)
 {
+	// Keyed by the plan BuildAsync returns, before any later filter (such as
+	// ProjectFileSizeFilter) produces a new plan instance that would not be found here.
+	private readonly ConditionalWeakTable<ProjectContextPlan, string> resolvedDiffRanges = new();
+
+	/// <summary>
+	/// The commit range <paramref name="plan"/>'s <c>diff:&lt;A&gt;..&lt;B&gt;</c> scope was resolved
+	/// to against its remote, when it was a Git URL source and resolution ran; null for a local
+	/// project or when no resolution was needed. Call before any filter replaces the plan instance.
+	/// </summary>
+	public string? TryGetResolvedDiffRange(ProjectContextPlan plan) =>
+		resolvedDiffRanges.TryGetValue(plan, out var resolved) ? resolved : null;
+
+	/// <summary>
+	/// Resolves <paramref name="diffRange"/> against <paramref name="plan"/>'s own remote, for a
+	/// momentary Git scope applied to a plan built without one: the same resolution
+	/// <see cref="BuildAsync"/> performs up front, usable once the range is only known afterward.
+	/// Returns null for a local project, one without a remote URL, or when resolution fails.
+	/// </summary>
+	public Task<string?> ResolveDiffRangeAsync(
+		ProjectContextPlan plan,
+		string diffRange,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(plan);
+		ArgumentException.ThrowIfNullOrWhiteSpace(diffRange);
+		var identity = plan.SourceIdentity;
+		if (identity is null || identity.SourceType != ProjectSourceType.GitClone)
+			return Task.FromResult<string?>(null);
+		var sourceUrl = identity.RepositoryUrl;
+		return string.IsNullOrWhiteSpace(sourceUrl)
+			? Task.FromResult<string?>(null)
+			: remoteDiffRangeResolver.ResolveAsync(
+				plan.SourceRoot,
+				sourceUrl,
+				diffRange,
+				identity.Branch,
+				cancellationToken);
+	}
+
 	public Task<ProjectContextPlan> BuildAsync(
 		string projectPath,
 		ProjectSelectionSpec selection,
@@ -112,6 +152,8 @@ public sealed class TerminalProjectContextFactory(
 		cancellationToken.ThrowIfCancellationRequested();
 		if (applyMarkedSecrets)
 			ApplyMarkedSecretsCore(projectPath, selection, markedSecrets);
+		if (resolvedDiffRange is not null)
+			resolvedDiffRanges.AddOrUpdate(plan, resolvedDiffRange);
 		return plan;
 	}
 
