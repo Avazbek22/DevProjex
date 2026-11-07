@@ -2001,8 +2001,21 @@ so clearing the package cache does not leave a dead binary path in its configura
 Node.js/npm or the .NET 10 SDK respectively must remain available on the client's
 `PATH`; the launcher may restore packages and follows that package manager's version
 resolution. Existing equivalent launcher entries are kept, including their explicit
-version pins. Installed global-tool shims and standalone artifacts keep their
-existing executable-path behavior.
+version pins.
+
+A global dotnet tool and a `--tool-path` install are a further exception: the
+executable DevProjex resolves at startup sits inside `.store` at the apphost for
+the currently installed version, and `dotnet tool update` replaces that version
+and leaves the old path dangling. When the stable shim next to `.store`
+(`devprojex` on Linux/macOS, `devprojex.cmd` on Windows) exists on disk, the
+connection names that shim instead. On Windows the shim is a batch file, so it is
+started the same way as `npx`/`dnx`: `cmd` with arguments `/c`, `call`, the shim
+path, `mcp`, `--root`, the project path (quoting `call` is required because a
+batch file calling another batch file directly would exit the caller). If the
+shim's path contains `%`, `&`, or `^`, or if the shim is missing from disk (for
+example, an older install without one), the connection falls back to the
+`.store` executable path as before. Standalone artifacts (ZIP, AppImage, the
+Store package) keep their existing executable-path behavior.
 
 The Flatpak channel is an exception to the executable-path rule above: its host
 registrations use `flatpak` with arguments `run`, `io.github.Avazbek22.DevProjex`,
@@ -2052,10 +2065,11 @@ A Claude Code or Codex `devprojex` entry that DevProjex did not write is never
 replaced silently:
 
 - An entry that already starts DevProjex for this project and mode through `npx`,
-  `dnx`, or `flatpak run` is left unchanged and reported as connected. A live entry
-  counts only when its launcher shares this installation's selection: `npx` and
-  `dnx` do not share it with the Store or Flatpak app, and `flatpak run` shares it
-  only with the Flatpak app.
+  `dnx`, a dotnet-tool shim (named directly, or through `cmd /c call` on
+  Windows), or `flatpak run` is left unchanged and reported as connected. A live
+  entry counts only when its launcher shares this installation's selection:
+  `npx`, `dnx`, and the shim do not share it with the Store or Flatpak app, and
+  `flatpak run` shares it only with the Flatpak app.
 - Any other entry is shown next to the replacement command, together with the
   arguments the replacement would drop. That covers a launcher for another project,
   mode, or arguments, and a command DevProjex does not recognize. Desktop and

@@ -39,7 +39,11 @@ Add `--print` to print the configuration without changing client settings, or
 `--mode live` to follow the saved window selection. Generated cache-based connections
 use `dnx devprojex`, not a version-specific cached binary. The client needs the
 .NET 10 SDK on `PATH`; `dnx` may restore the package after a cache cleanup.
-Global-tool installations retain their existing executable-path behavior.
+A global tool or `--tool-path` installation connects through its stable `devprojex`
+shim instead of the version-specific path inside `.store`, so `dotnet tool update`
+does not leave the client pointing at a dangling path. On Windows the shim is a
+batch file, so the command is `cmd` with arguments `/c`, `call`, the shim path,
+`mcp`, `--root`, the project path.
 
 Claude Code:
 
