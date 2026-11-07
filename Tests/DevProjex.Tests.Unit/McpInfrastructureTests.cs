@@ -364,6 +364,10 @@ public sealed class McpInfrastructureTests
 	[InlineData(@"interface\s+函數²_𐐀", "函數²_𐐀")]
 	[InlineData(@"class\s*Foo", "Foo")]
 	[InlineData(@"record\s+Foo", "Foo")]
+	[InlineData(@"public\s+class\s+Foo", "Foo")]
+	[InlineData(@"pub\s+fn\s+handle", "handle")]
+	[InlineData(@"protected\s+readonly\s+record\s+Item", "Item")]
+	[InlineData(@"public\s+static\s+async\s+Task", "Task")]
 	[InlineData(@"func.+Bar|\bFoo\b", "Bar,Foo")]
 	public void SimpleRegularExpressionsReadExactlyOneNamePerAlternative(string pattern, string expected)
 	{
@@ -390,6 +394,21 @@ public sealed class McpInfrastructureTests
 	{
 		Assert.False(McpSearchSymbols.TryReadDeclarationNames(pattern, out var names));
 		Assert.Empty(names);
+	}
+
+	[Fact]
+	public void EveryDeclarationKeywordIsDiscardedWhenReadingARegularExpression()
+	{
+		const string keywords = "abstract async class const data def default enum export extern final fn fun func function " +
+			"impl interface internal let module namespace object override partial private protected pub public readonly record " +
+			"sealed static struct trait type typedef union val var virtual";
+		var words = keywords.Split(' ');
+		Assert.Equal(40, words.Length);
+		foreach (var keyword in words)
+		{
+			Assert.True(McpSearchSymbols.TryReadDeclarationNames(keyword + @"\s+Name", out var names), keyword);
+			Assert.Equal(["Name"], names);
+		}
 	}
 
 	[Fact]
