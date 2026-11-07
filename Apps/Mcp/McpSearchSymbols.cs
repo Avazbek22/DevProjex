@@ -127,7 +127,7 @@ internal static class McpSearchSymbols
 	private static bool IsDeclarationKeyword(string word) => word is
 		"abstract" or "async" or "class" or "const" or "data" or "def" or "default" or "enum" or "export" or
 		"extern" or "final" or "fn" or "fun" or "func" or "function" or "impl" or "interface" or "internal" or
-		"let" or "module" or "namespace" or "object" or "override" or "partial" or "private" or "proecord" or
+		"let" or "module" or "namespace" or "object" or "override" or "partial" or "private" or "record" or
 		"sealed" or "static" or "struct" or "trait" or "type" or "typedef" or "union" or "val" or "var" or "virtual";
 
 	private static bool IsPlainDeclaredName(string name)

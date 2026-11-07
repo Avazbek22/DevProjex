@@ -363,6 +363,7 @@ public sealed class McpInfrastructureTests
 	[InlineData("Foo|class Foo", "Foo")]
 	[InlineData(@"interface\s+函數²_𐐀", "函數²_𐐀")]
 	[InlineData(@"class\s*Foo", "Foo")]
+	[InlineData(@"record\s+Foo", "Foo")]
 	[InlineData(@"func.+Bar|\bFoo\b", "Bar,Foo")]
 	public void SimpleRegularExpressionsReadExactlyOneNamePerAlternative(string pattern, string expected)
 	{
@@ -382,6 +383,7 @@ public sealed class McpInfrastructureTests
 	[InlineData("Foo||Bar")]
 	[InlineData("class")]
 	[InlineData("CLASS Foo")]
+	[InlineData(@"proecord\s+Foo")]
 	[InlineData("")]
 	[InlineData(" ")]
 	public void ComplexRegularExpressionsNeverBecomePartialDeclarationNameQueries(string pattern)
