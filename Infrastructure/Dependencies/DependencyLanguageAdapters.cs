@@ -1736,13 +1736,11 @@ internal sealed partial class PythonDependencyLanguageAdapter : DependencyLangua
 		foreach (var capture in context.References.Where(static capture =>
 			capture.Name == "context.module_assignment" && capture.ContainingDeclaration is null))
 		{
-			var assignment = ModuleAssignmentRegex().Match(capture.Text);
-			if (!assignment.Success) continue;
-			var name = assignment.Groups["name"].Value;
+			if (!TryParseModuleAssignment(capture.Text, out var name, out var value)) continue;
 			metadata["$python-assignment:" + name] = "true";
-			// An annotated __all__ has never set wildcard policy; only the plain form does.
-			if (name == "__all__" && !assignment.Groups["annotation"].Success &&
-			    DynamicAllValueRegex().IsMatch(assignment.Groups["value"].Value))
+			// A call or other dynamic expression assigned to __all__, annotated or not, leaves its
+			// export list unknowable without running it.
+			if (name == "__all__" && DynamicAllValueRegex().IsMatch(value))
 				metadata["$dynamic-all"] = "true";
 		}
 		return Complete(context, declarations, imports, references, aliases: metadata);
@@ -1768,7 +1766,64 @@ internal sealed partial class PythonDependencyLanguageAdapter : DependencyLangua
 	private static readonly HashSet<string> Keywords = new(
 		["def", "class", "None", "True", "False", "str", "int", "float", "bool", "bytes", "list", "dict", "tuple", "set", "object", "typing", "self", "cls"], StringComparer.Ordinal);
 	[GeneratedRegex(@"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*", RegexOptions.CultureInvariant)] private static partial Regex TypeRegex();
-	// "name = value" and "name: annotation = value"; a bare "name: annotation" binds nothing.
-	[GeneratedRegex(@"^\s*(?<name>[^\W\d]\w*)\s*(?<annotation>:[^=]*)?=\s*(?<value>[\s\S]*)$", RegexOptions.CultureInvariant)] private static partial Regex ModuleAssignmentRegex();
 	[GeneratedRegex(@"^\s*[^\W\d]", RegexOptions.CultureInvariant)] private static partial Regex DynamicAllValueRegex();
+
+	/// <summary>
+	/// Reads a tree-sitter "assignment" node's text as "name = value" or "name: annotation = value".
+	/// An annotation's own "=" sign, such as a default inside <c>Annotated[int, Field(default=1)]</c>,
+	/// sits inside brackets or a quoted string and is never the statement's own assignment operator;
+	/// only an unbracketed, unquoted "=" at the top level is. A bare "name: annotation" with no such
+	/// "=" anywhere binds nothing, matching how the Python grammar also produces this same node for
+	/// an annotation without a value.
+	/// </summary>
+	private static bool TryParseModuleAssignment(string text, out string name, out string value)
+	{
+		name = string.Empty;
+		value = string.Empty;
+		var length = text.Length;
+		var index = 0;
+		while (index < length && char.IsWhiteSpace(text[index])) index++;
+		var nameStart = index;
+		if (index >= length || !(char.IsLetter(text[index]) || text[index] == '_')) return false;
+		index++;
+		while (index < length && (char.IsLetterOrDigit(text[index]) || text[index] == '_')) index++;
+		name = text[nameStart..index];
+		while (index < length && char.IsWhiteSpace(text[index])) index++;
+		if (index >= length) return false;
+		if (text[index] == ':') index++;
+		else if (text[index] != '=') return false;
+
+		var depth = 0;
+		char? quote = null;
+		for (; index < length; index++)
+		{
+			var current = text[index];
+			if (quote is { } openQuote)
+			{
+				if (current == '\\' && index + 1 < length) index++;
+				else if (current == openQuote) quote = null;
+				continue;
+			}
+			switch (current)
+			{
+				case '\'' or '"':
+					quote = current;
+					break;
+				case '(' or '[' or '{':
+					depth++;
+					break;
+				case ')' or ']' or '}':
+					if (depth > 0) depth--;
+					break;
+				case '=' when depth == 0:
+					// Comparison and augmented-assignment operators never appear in this statement
+					// shape, but a defensive skip keeps "==" from being read as the binding "=".
+					if (index + 1 < length && text[index + 1] == '=') { index++; break; }
+					value = text[(index + 1)..].TrimStart();
+					return true;
+			}
+		}
+		// Reached the end without a top-level "=": a bare annotation, which binds nothing.
+		return false;
+	}
 }

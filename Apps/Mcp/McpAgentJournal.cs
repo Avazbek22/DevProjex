@@ -489,7 +489,28 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 		}
 		if (source.TryGetValue("paths", out var paths))
 			result["paths"] = CountValues(paths).ToString(CultureInfo.InvariantCulture);
-		if (source.TryGetValue("requests", out var requests) && requests.ValueKind == JsonValueKind.Array)
+		if (source.TryGetValue("requests", out var requests))
+		{
+			// get_file accepts 'requests' as a JSON-encoded string as well as a literal array; count
+			// it the same way get_file itself parses it, instead of only the literal array form.
+			if (requests.ValueKind == JsonValueKind.String)
+			{
+				var encoded = requests.GetString()?.Trim();
+				if (encoded is { Length: > 0 } && encoded.StartsWith('['))
+				{
+					try
+					{
+						using var document = JsonDocument.Parse(encoded);
+						if (document.RootElement.ValueKind == JsonValueKind.Array)
+							requests = document.RootElement.Clone();
+					}
+					catch (JsonException)
+					{
+					}
+				}
+			}
+		}
+		if (requests.ValueKind == JsonValueKind.Array)
 		{
 			result["paths"] = requests.GetArrayLength().ToString(CultureInfo.InvariantCulture);
 			var symbols = requests.EnumerateArray().Count(static item =>

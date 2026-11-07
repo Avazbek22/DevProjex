@@ -314,6 +314,11 @@ prints the same ranges (at most six, then `and N more`). Declaration `body` is n
 when body output is disabled or no body fits, and `remainingBodyLines` reports a
 bounded prefix honestly.
 
+A `--symbols` pattern that looks like a regular expression still runs as a declaration-name
+search when every alternative reduces to one plain name after declaration keywords and
+separators are removed; stdout is unaffected, but stderr gets one additional line:
+`hint: --symbols read the pattern as declaration names: <names>`.
+
 `resolution` has the same four stable field names as the text `[Resolution]` line.
 For search it describes containing-declaration evidence for written matches:
 `resolved` means one containing declaration was named and `unresolved` means none
@@ -438,11 +443,12 @@ files: `seed`, `dependencies`, `dependencyCount`, `dependents`, and `dependentCo
 uses the related-item shape above, holds resolved items only, at most 20 in path order, and its
 count reports how many exist. `resolution` counts evidence groups exactly as the command without
 narrowing does, except that `resolution.outsideSelection` holds the resolved groups that reach
-only files outside the selection and `resolved` the rest; `coverage` and `searchScope` still
-describe the selection. Text output prints those lists under `Dependencies outside the selection`
-and `Dependents outside the selection` and appends `· outside-selection=N` to `[Resolution]`. A
-document with nothing outside its selection omits both members, and a command that narrows
-nothing writes exactly the document it wrote before.
+only files outside the selection and `resolved` the rest, at depth 1; `resolved` plus
+`outsideSelection` is therefore what the unnarrowed command resolves at that depth, and `coverage`
+and `searchScope` still describe the selection. Text output prints those lists under
+`Dependencies outside the selection` and `Dependents outside the selection` and appends
+`· outside-selection=N` to `[Resolution]`. A document with nothing outside its selection omits both
+members, and a command that narrows nothing writes exactly the document it wrote before.
 Traversal follows only resolved edges and is limited to 256 distinct seed files.
 Crossing that limit emits `DPX-DEPENDENCY-TRAVERSAL-LIMIT`, returns policy exit
 code `3`, and writes no partial related-files document.

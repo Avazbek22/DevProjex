@@ -294,6 +294,29 @@ public sealed class ImportanceRankingCoverageIntegrationTests
 		Assert.Equal(1, report.Entries.Single(entry => entry.Path == "pkg/_config.py").Dependents);
 	}
 
+	[Fact]
+	public async Task HiddenPathAliasConfigurationDoesNotResolveImportsItIsNotPartOfTheRankedCandidates()
+	{
+		using var fixture = new TemporaryDirectory();
+		// tsconfig.json exists on disk (as a gitignored or excluded file would) but is never passed
+		// as one of the files RankAsync is asked to rank.
+		fixture.CreateFile("tsconfig.json", "{\"compilerOptions\":{\"paths\":{\"@lib/*\":[\"./lib/*\"]}}}");
+		var util = fixture.CreateFile("lib/util.ts", "export const util = 1;\n");
+		var main = fixture.CreateFile("app/main.ts", "import { util } from '@lib/util';\n");
+		using var engine = CreateEngine();
+		var ranking = new ImportanceRankingService(engine, new UnavailableHistoryReader());
+
+		var report = await ranking.RankAsync(
+			fixture.Path,
+			[util, main],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(0, report.ResolvedInternalReferences);
+		Assert.Equal(
+			0,
+			report.Entries.Single(entry => entry.Path == "app/main.ts").Dependencies);
+	}
+
 	private static DependencyFactsEngine CreateEngine() => new(
 		new TreeSitterDependencyFactExtractor(),
 		new FileDependencyConfigurationProvider());

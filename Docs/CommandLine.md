@@ -726,9 +726,13 @@ is refused before the project is read with `DPX-CLI-SEARCH-PATTERN`
 applies to `symbols: true`.
 
 `--symbols` reads a regular expression the same way: when every alternative reduces
-to one plain name, the search runs for those names and prints a note naming them;
-any other regular expression is still refused. The Terminal Workspace `:grep --symbols`
-does the same.
+to one plain name after declaration keywords and the separators `\s+`, `\s*`, `\s`,
+`.*`, `.+`, and `\b` are removed, the search runs for those names and prints a note
+naming them. An alternative that starts or ends with `.*` or `.+` once a leading `^`,
+a trailing `$`, and outer `\b` are removed, such as `def\s+test_.*` or `.*Handler$`,
+asks for every name with that prefix or suffix rather than one name, so the whole
+pattern is refused; any other regular expression is still refused. The Terminal
+Workspace `:grep --symbols` does the same.
 Selected binary files are counted as skipped rather than searched and do not make
 a search partial unless nothing else was selected. They are not charged to the inspection
 budget, and a file that does not fit what remains of it is skipped while later files that
@@ -819,10 +823,12 @@ file stays in the seed's own sections, an ambiguous row stays there only when th
 names is selected, and resolved relations to the other files follow as
 `Dependencies outside the selection` and `Dependents outside the selection` with the same row
 format, at most 20 per section in path order. Candidate lists and outside rows name files outside
-the selection by path only. `[Resolution]` counts edges as the command without narrowing does and
-reports resolved edges that reach only files outside the selection as `· outside-selection=N`
-instead of in `resolved`. A larger `--depth` walks the same relations, but only into selected
-files. A command that narrows nothing prints what it printed before.
+the selection with evidence; their contents are not returned. `[Resolution]` counts edges as the
+command without narrowing does and reports resolved edges that reach only files outside the
+selection as `· outside-selection=N` instead of in `resolved`, at depth 1; `resolved` plus
+`outside-selection` is therefore what the unnarrowed command resolves at that depth. A larger
+`--depth` walks the same relations, but only into selected files. A command that narrows nothing
+prints what it printed before.
 
 Bash seed files record literal script-relative `source` / `.` connections; computed shell paths
 remain explicitly unresolved and commands found through `PATH` are not dependencies. Scala seeds

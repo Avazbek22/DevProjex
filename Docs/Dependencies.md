@@ -60,7 +60,8 @@ call's own narrowing; the [MCP server](McpServer.md#related_files),
 [command line](CommandLine.md#related), and [Terminal Workspace](TerminalWorkspace.md) documents
 define it per surface. The selection only decides where each related file is listed: in the seed's own
 sections when the selection holds it, and as an outside entry otherwise, so together they hold what
-the call relates without narrowing, and the resolution counts add up to that call's counts. An
+the call relates without narrowing at depth 1, and the resolution counts add up to that call's
+counts. An
 ambiguous relation stays in the seed's sections when the candidate it names is in the selection and
 is otherwise only counted; a module-only Python relation is placed and counted like any other
 resolved one. A seed the second index has no facts for keeps the selection's own answer, and the
