@@ -96,6 +96,8 @@ internal static class McpSearchSymbols
 			var text = alternative.StartsWith('^') ? alternative[1..] : alternative;
 			if (text.EndsWith('$'))
 				text = text[..^1];
+			if (IsOpenEnded(text))
+				return false;
 			text = text.Replace(@"\s+", " ", StringComparison.Ordinal)
 				.Replace(@"\s*", " ", StringComparison.Ordinal)
 				.Replace(@"\s", " ", StringComparison.Ordinal)
@@ -122,6 +124,23 @@ internal static class McpSearchSymbols
 		}
 		names = parsed;
 		return true;
+	}
+
+	/// <summary>
+	/// A wildcard at either end of an alternative, as in "def\s+test_.*" or ".*Handler", asks for
+	/// every name with that prefix or suffix. Reading it as the bare name would turn the query into
+	/// a different one and answer a confident "no matches", so such a pattern stays a refused regex.
+	/// A wildcard between a keyword and the name, as in "func.*RemoteIP", only skips the signature.
+	/// </summary>
+	private static bool IsOpenEnded(string alternative)
+	{
+		var text = alternative.AsSpan();
+		while (text.StartsWith(@"\b", StringComparison.Ordinal))
+			text = text[2..];
+		while (text.EndsWith(@"\b", StringComparison.Ordinal))
+			text = text[..^2];
+		return text.StartsWith(".*", StringComparison.Ordinal) || text.StartsWith(".+", StringComparison.Ordinal) ||
+			text.EndsWith(".*", StringComparison.Ordinal) || text.EndsWith(".+", StringComparison.Ordinal);
 	}
 
 	private static bool IsDeclarationKeyword(string word) => word is

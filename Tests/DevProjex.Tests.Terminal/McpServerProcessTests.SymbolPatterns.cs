@@ -38,6 +38,7 @@ public sealed partial class McpServerProcessTests
 	[InlineData("(?i)foo")]
 	[InlineData("a+b")]
 	[InlineData(@"def\s+(foo|bar)")]
+	[InlineData(@"def\s+test_.*")]
 	public async Task RealProcessKeepsTheExistingRefusalForComplexSymbolPatterns(string pattern)
 	{
 		using var workspace = new TemporaryDirectory();
