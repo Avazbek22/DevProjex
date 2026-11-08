@@ -2616,6 +2616,18 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Theory]
+	[InlineData(@"a\r\nb", true)]
+	[InlineData("a\r\nb", true)]
+	[InlineData(@"a\r?\nb", true)]
+	[InlineData(@"a\nb", false)]
+	[InlineData(@"a\\r", false)]
+	[InlineData(@"(?s)a.*b", false)]
+	public void MultilineSearchKeepsCarriageReturnsOnlyForAPatternThatNamesOne(string pattern, bool expected)
+	{
+		Assert.Equal(expected, McpSearchRegex.NamesCarriageReturn(pattern));
+	}
+
+	[Theory]
 	[InlineData("readme.md", true)]
 	[InlineData("readme.MDX", true)]
 	[InlineData("guide.rst", true)]

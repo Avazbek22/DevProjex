@@ -1074,6 +1074,7 @@ internal sealed partial class DevProjexMcpTools(
 			}
 			// A pattern that can only mean to cross a line break is matched against whole files.
 			var multiline = !declarationsOnly && McpSearchRegex.RequiresMultilineMatching(pattern);
+			var preserveCarriageReturns = multiline && McpSearchRegex.NamesCarriageReturn(pattern);
 			var regex = new McpSearchRegex(
 				declarationsOnly ? McpSearchSymbols.ToDeclarationNamePattern(declarationNames) : pattern,
 				ignoreCase,
@@ -1193,7 +1194,8 @@ internal sealed partial class DevProjexMcpTools(
 							contextLines,
 							file.ReplacementRanges,
 							AcceptMatch,
-							token).TotalMatches;
+							token,
+							preserveCarriageReturns).TotalMatches;
 					}
 					else
 					{

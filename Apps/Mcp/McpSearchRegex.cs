@@ -73,6 +73,26 @@ internal sealed class McpSearchRegex
 		return false;
 	}
 
+	/// <summary>
+	/// Whether the pattern names a carriage return itself, escaped or literal; such a pattern is
+	/// matched against the text with its original line breaks.
+	/// </summary>
+	public static bool NamesCarriageReturn(string pattern)
+	{
+		ArgumentNullException.ThrowIfNull(pattern);
+		if (pattern.Contains('\r'))
+			return true;
+		for (var index = 0; index < pattern.Length - 1; index++)
+		{
+			if (pattern[index] != '\\')
+				continue;
+			if (pattern[index + 1] == 'r')
+				return true;
+			index++;
+		}
+		return false;
+	}
+
 	private static bool EnablesSingleLineOption(string pattern, int groupStart)
 	{
 		if (groupStart + 1 >= pattern.Length || pattern[groupStart + 1] != '?')
@@ -240,7 +260,8 @@ internal sealed class McpSearchRegex
 		string input,
 		IReadOnlyList<TransformedTextRange> protectedRanges,
 		Action<int, int> consume,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		Func<int, int>? toSourceOffset = null)
 	{
 		ArgumentNullException.ThrowIfNull(input);
 		ArgumentNullException.ThrowIfNull(protectedRanges);
@@ -252,15 +273,18 @@ internal sealed class McpSearchRegex
 			foreach (var match in _regex.EnumerateMatches(input))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
+				// Offsets are checked and reported in the source text the protected ranges describe.
+				var start = toSourceOffset?.Invoke(match.Index) ?? match.Index;
+				var end = toSourceOffset?.Invoke(match.Index + match.Length) ?? match.Index + match.Length;
 				if (!OverlapsProtectedText(
-						match.Index,
-						match.Length,
+						start,
+						end - start,
 						protectedRanges,
 						ref protectedRangeIndex,
 						ref protectedRangeComparisons,
 						cancellationToken))
 				{
-					consume(match.Index, match.Length);
+					consume(start, end - start);
 				}
 			}
 			return protectedRangeComparisons;

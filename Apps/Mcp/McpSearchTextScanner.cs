@@ -168,7 +168,8 @@ internal static class McpSearchTextScanner
 		int contextLines,
 		IReadOnlyList<TransformedTextRange> protectedRanges,
 		Action<McpSearchMatchContext> consume,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		bool preserveCarriageReturns = false)
 	{
 		ArgumentNullException.ThrowIfNull(content);
 		ArgumentNullException.ThrowIfNull(regex);
@@ -195,8 +196,17 @@ internal static class McpSearchTextScanner
 			consume(new McpSearchMatchContext([pendingStart], covered, false, pendingEnd));
 		}
 
+		// CRLF is matched as "\n" so a pattern written with \n and $ works on either line ending;
+		// a pattern that names \r itself sees the text as it is.
+		var collapsedBreaks = preserveCarriageReturns ? null : CollapsedLineBreaks(content);
+		var searchText = collapsedBreaks is { Count: > 0 }
+			? content.Replace("\r\n", "\n", StringComparison.Ordinal)
+			: content;
+		Func<int, int>? toSourceOffset = collapsedBreaks is { Count: > 0 }
+			? offset => ToSourceOffset(collapsedBreaks, offset)
+			: null;
 		var protectedRangeComparisons = regex.ForEachUnprotectedMatch(
-			content,
+			searchText,
 			protectedRanges,
 			(offset, length) =>
 			{
@@ -212,7 +222,8 @@ internal static class McpSearchTextScanner
 				pendingStart = startLine;
 				pendingEnd = endLine;
 			},
-			cancellationToken);
+			cancellationToken,
+			toSourceOffset);
 		if (pendingStart > 0)
 			Flush();
 
@@ -237,6 +248,27 @@ internal static class McpSearchTextScanner
 		}
 		lines.Add(new McpTextLineRange(lines.Count + 1, lineStart, content.Length - lineStart));
 		return lines;
+	}
+
+	// Positions, in the collapsed text, of each "\n" that stands for a source "\r\n".
+	private static List<int> CollapsedLineBreaks(string content)
+	{
+		var positions = new List<int>();
+		var index = content.IndexOf("\r\n", StringComparison.Ordinal);
+		while (index >= 0)
+		{
+			positions.Add(index - positions.Count);
+			index = content.IndexOf("\r\n", index + 2, StringComparison.Ordinal);
+		}
+		return positions;
+	}
+
+	// Every collapsed break before the offset gave up one source character.
+	private static int ToSourceOffset(List<int> collapsedBreaks, int offset)
+	{
+		var found = collapsedBreaks.BinarySearch(offset);
+		var before = found >= 0 ? found : ~found;
+		return offset + before;
 	}
 
 	// A line owns its terminator, so a match that ends on a line break ends on that line.

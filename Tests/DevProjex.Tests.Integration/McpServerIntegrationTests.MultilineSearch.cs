@@ -210,6 +210,70 @@ public sealed partial class McpServerIntegrationTests
 		Assert.DoesNotContain(MultilineSearchNotice, AllText(result), StringComparison.Ordinal);
 	}
 
+	[Theory]
+	[InlineData("open\\nclose")]
+	[InlineData("open\\r\\nclose")]
+	[InlineData("(?s)open$")]
+	[InlineData("(?s)^open$\\n^close$")]
+	public async Task SearchMatchesLineBreaksInACrlfFileWithTheRightLineRange(string pattern)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "crlf.txt"), "alpha\r\nopen\r\nclose\r\nend\r\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync("search_project", new Dictionary<string, object?>
+		{
+			["pattern"] = pattern,
+			["context_lines"] = 0
+		});
+		var text = Normalize(Text(result));
+		var body = ExtractSpotlightBody(text);
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.Contains("crlf.txt\n2:open", body, StringComparison.Ordinal);
+		Assert.DoesNotContain("\r", body, StringComparison.Ordinal);
+		Assert.DoesNotContain("1:alpha", body, StringComparison.Ordinal);
+		Assert.DoesNotContain("4:end", body, StringComparison.Ordinal);
+		Assert.Contains("matches written=1", text, StringComparison.Ordinal);
+		if (pattern.Contains("close", StringComparison.Ordinal))
+			Assert.Contains("2:open\n3:close", body, StringComparison.Ordinal);
+		else
+			Assert.DoesNotContain("3:close", body, StringComparison.Ordinal);
+		AssertMultilineNotices(text, body);
+	}
+
+	[Fact]
+	public async Task SearchKeepsASecretProtectedInACrlfFile()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(
+			Path.Combine(project, "settings.txt"),
+			$"start\r\nopen\r\nclose\r\ntoken = \"{Secret}\"\r\nfinish\r\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var acrossSecret = await server.CallAsync("search_project", new Dictionary<string, object?>
+		{
+			["pattern"] = "close[\\s\\S]*?finish",
+			["context_lines"] = 0
+		});
+		var beforeSecret = await server.CallAsync("search_project", new Dictionary<string, object?>
+		{
+			["pattern"] = "close\\ntoken = ",
+			["context_lines"] = 0
+		});
+		var acrossText = Normalize(Text(acrossSecret));
+		var beforeText = Normalize(Text(beforeSecret));
+		var beforeBody = ExtractSpotlightBody(beforeText);
+
+		Assert.Contains("matches written=0", acrossText, StringComparison.Ordinal);
+		Assert.DoesNotContain(Secret, acrossText, StringComparison.Ordinal);
+		Assert.Contains("3:close\n4:token = \"DEVPROJEX_REDACTED[", beforeBody, StringComparison.Ordinal);
+		Assert.Contains("matches written=1", beforeText, StringComparison.Ordinal);
+		Assert.DoesNotContain(Secret, beforeText, StringComparison.Ordinal);
+	}
+
 	private static void AssertMultilineNotices(string text, string body)
 	{
 		var trusted = text.Replace(body, string.Empty, StringComparison.Ordinal);
@@ -217,7 +281,7 @@ public sealed partial class McpServerIntegrationTests
 		Assert.DoesNotContain(MultilineSearchNotice, body, StringComparison.Ordinal);
 		Assert.DoesNotContain(PerLineSearchNotice, text, StringComparison.Ordinal);
 		// Paths and project text stay inside the untrusted block.
-		foreach (var projectText in new[] { "package.json", "list.txt", "blocks.txt", "exports", "BEGIN", "open 1" })
+		foreach (var projectText in new[] { "package.json", "list.txt", "blocks.txt", "crlf.txt", "exports", "BEGIN", "open 1" })
 			Assert.DoesNotContain(projectText, trusted, StringComparison.Ordinal);
 	}
 

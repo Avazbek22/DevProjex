@@ -1485,7 +1485,9 @@ Matching is per line unless the pattern can only mean to cross a line break: an
 escaped or literal line break (`\n`, `\r`), a class that covers one (`[\s\S]`,
 `[\S\s]`, `[\w\W]`, `[\W\w]`, `[\d\D]`, `[\D\d]`), or the inline `(?s)` option.
 Such a pattern runs against each file's whole protected text, with `^` and `$`
-still anchoring lines, under the same per-file timeout. One match covering lines
+still anchoring lines, under the same per-file timeout. Line breaks are matched
+as `\n`, so CRLF files behave like LF files, unless the pattern contains `\r`,
+which keeps the original line breaks. One match covering lines
 A–B is one match: every line from A to B is written as a `line:text` match line,
 context lines surround the range as usual, and limits, counts, the
 `[Search boundary]` line and `read_pack` continuation all count it once. A match
