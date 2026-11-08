@@ -1679,7 +1679,11 @@ search response budget. Its declaration is selected once from the full displayed
 match slice and is not reconsidered during placement. Complete overlapping context
 lines from that same declaration are printed in the body rather than twice; matching
 lines, context outside the printed body, and other files remain in their original order.
-Only spare space is used beyond that reclaimed context. When space is insufficient,
+Only spare space is used beyond that reclaimed context. A body longer than the limit is
+not shown as a fragment: only its head is printed, meaning the signature lines up to the
+start of the body (plus the first docstring line in Python), at most 400 characters of
+whole lines; where the signature end cannot be found, the head is the first whole lines
+within the same 400 characters. When space is insufficient,
 the body is cut at a complete line or omitted, never at the expense of a shown match.
 A cut body reports exactly how many
 declaration lines remain, names them as a range, as in `[Declaration body truncated: 60 line(s) remain; read lines 30-89 with get_file.]`, and prints the complete `get_file` arguments needed to read it.
