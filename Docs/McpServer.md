@@ -732,6 +732,41 @@ Dependents:
 Apps/Terminal/Execution/AnalyzeCommandHandler.cs — one visible declaration identity in csharp:Apps/Terminal/DevProjex.Terminal.csproj · type reference ProjectContextPlan at lines 44, 61, 97 — resolved — 1830 tokens — cross-scope
 ```
 
+**Changed seeds.** When a call lists dependents and a seed has Git changes, its `Dependents`
+section is replaced by groups that say who uses what the change touched. The changes are the
+call's own `git_scope` when it is `changes`, `staged`, or `diff:A..B`, and otherwise the
+uncommitted changes of the seeds; a project without Git, a seed without textual hunks, and a
+change outside any declaration keep the plain section. Each changed line is mapped to the
+top-level declaration that holds it, or, in Python and TypeScript/JavaScript, to the module-level
+assignment it changes; a changed method is named with its type. The groups are:
+
+- `Changed declarations:` the names, each with its first changed line and the changed members.
+- `Dependents using changed declarations:` dependents whose own text uses a changed name through
+  their import of the seed, or references it, with the use lines and the top-level declarations
+  holding them. A dependent that accesses a changed member (`.getResponse at line 93`) comes first.
+- `Tests using changed declarations:` the same for test files, including tests that reach a
+  changed name through a file that only re-exports it, such as a package `__init__.py` or an
+  `index.ts` (`via pkg/__init__.py`). Python `import *` honours a literal `__all__`.
+- `Re-exported by:` dependents that only bind the changed names.
+- `Other dependents, using no changed declaration:` the rest, each with its first reason; a
+  dependent whose text could not be inspected stays here as `not inspected for changed declarations`.
+
+Uses are found in the protected text of the dependent, never in imports, comment lines, quoted
+names, or redacted ranges, and the trusted `[Change focus]` line marks a grouped answer. A
+change that a dependent observes only through a value it never names, such as a default an
+inherited method passes on, is not traced. With `git_scope=diff:A..B` the selection holds only
+the range's files, so dependents from other files follow under `Dependents outside the selection`.
+
+```text
+Changed declarations: DEFAULT_TIMEOUT_CONFIG at line 246, DEFAULT_MAX_REDIRECTS at line 248
+Dependents using changed declarations:
+httpx/_api.py — DEFAULT_TIMEOUT_CONFIG at lines 52, 137, 184, 220, 256 (+4 more) · in request, stream, get (+6 more) — resolved — 3045 tokens
+httpx/_client.py — DEFAULT_TIMEOUT_CONFIG at lines 196, 653, 1366 · DEFAULT_MAX_REDIRECTS at lines 198, 656, 1369 · in BaseClient, Client, AsyncClient — resolved — 16934 tokens
+Tests using changed declarations: none reference them directly
+Other dependents, using no changed declaration:
+httpx/_transports/default.py — import .._config at line 38 — resolved — 3598 tokens
+```
+
 Project-derived paths and evidence remain inside the random `untrusted-data` block.
 Evidence fragments are checked against the protected text of their original source
 file before formatting. If a source-bound manual mark covers that source line, or

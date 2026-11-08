@@ -247,14 +247,14 @@ public static partial class DependencyChangeFocus
 	private static DependencyNameBinding? PythonBinding(ImportFact import, string targetModule)
 	{
 		var line = import.Site.Line;
+		if (import.IsWildcard)
+			return new DependencyNameBinding(DependencyBindingKind.Wildcard, string.Empty, null, line);
 		if (import.ImportedName is null)
 		{
 			// "import a.b" binds "a" and is used as "a.b.Name"; "import a.b as c" binds "c".
 			var qualifier = import.Alias ?? import.Specifier;
 			return IsQualifier(qualifier) ? new DependencyNameBinding(DependencyBindingKind.Qualifier, qualifier, null, line) : null;
 		}
-		if (import.IsWildcard)
-			return new DependencyNameBinding(DependencyBindingKind.Wildcard, string.Empty, null, line);
 		var imported = import.ImportedName;
 		if (!IsIdentifier(imported))
 			return null;
