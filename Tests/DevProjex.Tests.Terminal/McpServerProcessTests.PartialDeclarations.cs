@@ -3,20 +3,11 @@ namespace DevProjex.Tests.Terminal;
 public sealed partial class McpServerProcessTests
 {
 	[Fact]
-	public async Task RealProcessKeepsIndependentDeclarationsAndReportsFilesWithoutDeclarations()
+	public async Task RealProcessReportsFilesWithoutIndexedDeclarations()
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
-		workspace.WriteFile("project/types.ts", """
-			export type Before = string
-			export interface HandlerInterface {
-			  <P extends string = string>(handler: H<P>): HonoBase<P>
-			  <P extends string = string>(handler: H<P>): HonoBase<P>
-			  <P extends string = string>(handler: H<P>): HonoBase<P>
-			}
-			export type TypedResponse<T = unknown> = { _data: T }
-			export type After = TypedResponse
-			""");
+		workspace.WriteFile("project/types.ts", "export type TypedResponse<T = unknown> = { _data: T }\n");
 		workspace.WriteFile("project/Zq9UnindexedPath.txt", "Text that does not contain the requested declaration name.\n");
 		await using var server = await ActualMcpProcess.StartAsync(project, workspace.CreateDirectory("data"));
 

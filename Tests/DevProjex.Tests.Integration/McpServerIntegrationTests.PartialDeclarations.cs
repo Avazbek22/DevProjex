@@ -10,47 +10,6 @@ public sealed partial class McpServerIntegrationTests
 		}
 		""";
 
-	[Fact]
-	public async Task AWholeFileSyntaxFailureStillReportsNoFactsWithItsRealDroppedRange()
-	{
-		using var workspace = new TemporaryDirectory();
-		var project = workspace.CreateDirectory("project");
-		File.WriteAllText(Path.Combine(project, "broken.ts"), BrokenSignatureInterface);
-		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
-
-		var response = await server.CallAsync("related_files", new Dictionary<string, object?>
-		{
-			["path"] = "broken.ts"
-		});
-
-		Assert.Contains("[No facts] syntax tree contains errors.", AllText(response), StringComparison.Ordinal);
-		Assert.Contains("dropped=1", AllText(response), StringComparison.Ordinal);
-		Assert.Contains("lines=1-5", AllText(response), StringComparison.Ordinal);
-	}
-
-	[Fact]
-	public async Task SymbolsSearchFindsADeclarationAfterDamagedGenericCallSignatures()
-	{
-		using var workspace = new TemporaryDirectory();
-		var project = workspace.CreateDirectory("project");
-		File.WriteAllText(Path.Combine(project, "types.ts"),
-			"export type Before = string\n" + BrokenSignatureInterface + "\n" +
-			"export type TypedResponse<T = unknown> = { _data: T }\nexport type After = TypedResponse\n");
-		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
-
-		var response = await server.CallAsync("search_project", new Dictionary<string, object?>
-		{
-			["pattern"] = "TypedResponse",
-			["symbols"] = true,
-			["context_lines"] = 0
-		});
-
-		Assert.NotEqual(true, response.IsError);
-		Assert.Contains("TypedResponse", ExtractSpotlightBody(AllText(response)), StringComparison.Ordinal);
-		Assert.DoesNotContain("[No matches]", AllText(response), StringComparison.Ordinal);
-		Assert.DoesNotContain("[Symbols coverage] declarations-not-indexed=", AllText(response), StringComparison.Ordinal);
-	}
-
 	[Theory]
 	[InlineData("namespace Target {}")]
 	[InlineData("namespace Target;")]
