@@ -2575,6 +2575,36 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Theory]
+	[InlineData("^tests/client/", true)]
+	[InlineData("src/.*/", true)]
+	[InlineData("tests/(client|server)/", false)]
+	[InlineData("prefix tests/client/", false)]
+	[InlineData("tests/.+", false)]
+	[InlineData(@"src/.*App.*\.cs$", true)]
+	[InlineData("thing.verylongextension", true)]
+	[InlineData("имя.данные", true)]
+	[InlineData("ordinaryAbsent", false)]
+	[InlineData("^$", false)]
+	public void SearchPathPatternHintsRecognizeOnlyTheSpecifiedShapes(string pattern, bool expected)
+	{
+		Assert.Equal(expected, DevProjexMcpTools.LooksLikeANameSearch(pattern));
+	}
+
+	[Theory]
+	[InlineData(@"def a\nfoo", 0, true)]
+	[InlineData("def a\nfoo", 0, true)]
+	[InlineData(@"def a\nfoo", 1, false)]
+	[InlineData("ordinaryAbsent", 0, false)]
+	[InlineData("", 0, false)]
+	public void SearchPerLinePatternHintIsFixedAndOnlyAppearsWithoutMatches(string pattern, int matches, bool expected)
+	{
+		var notice = DevProjexMcpTools.FormatPerLineSearchNotice(pattern, matches);
+		Assert.Equal(expected, notice is not null);
+		if (notice is not null)
+			Assert.Equal("[Search] matching is per line, so a pattern with \\n cannot match; search for each line separately.", notice);
+	}
+
+	[Theory]
 	[InlineData("readme.md", true)]
 	[InlineData("readme.MDX", true)]
 	[InlineData("guide.rst", true)]

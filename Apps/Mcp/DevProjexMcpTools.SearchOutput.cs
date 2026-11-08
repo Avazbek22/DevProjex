@@ -2,6 +2,14 @@ namespace DevProjex.Mcp;
 
 internal sealed partial class DevProjexMcpTools
 {
+	private const string SearchPathPatternNotice =
+		"[Search] the pattern looks like a path, but search_project matches file content; find files by name with get_tree include_patterns.";
+
+	internal static string? FormatPerLineSearchNotice(string pattern, int totalMatches) =>
+		totalMatches == 0 && (pattern.Contains("\\n", StringComparison.Ordinal) || pattern.Contains('\n'))
+			? "[Search] matching is per line, so a pattern with \\n cannot match; search for each line separately."
+			: null;
+
 	internal static McpSearchRenderSlice RenderSearchGroupsWithDocumentationLast(
 		IReadOnlyList<McpSearchRenderedGroup> ordered,
 		int maximumResults,
