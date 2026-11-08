@@ -662,6 +662,8 @@ leading `^`, a trailing `$` and outer `\b` are removed, such as `def\s+test_.*`,
 than one name, so the whole pattern is refused. Any other regular expression is
 still refused.
 
+With `symbols=true`, `[Declarations not indexed]` lists up to eight affected paths inside the untrusted block, and the trusted `[Symbols coverage]` line counts files without indexed declarations that text search can still read.
+
 On a server started with `--allow-agent-exclusions`, `get_tree`, `analyze`,
 `pack_context`, `search_project`, `related_files`, `get_file`, and `get_diff` additionally accept the
 `exclusions` array parameter described in the startup section, so a file

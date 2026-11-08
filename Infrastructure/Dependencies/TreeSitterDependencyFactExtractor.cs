@@ -411,7 +411,7 @@ public sealed partial class TreeSitterDependencyFactExtractor : IDependencyFactE
 				ReadQuery(definition.QueryDirectory, "references.scm") + "\0" +
 				ReadQuery(definition.QueryDirectory, "navigation.scm") + "\0" + DiagnosticErrorQuery));
 			var projectionIdentity = id == LanguageId.CSharp ? ":conditional-projection-v3" : string.Empty;
-			return $"{definition.Library}:TreeSitter.DotNet-1.3.0:{queryHash}{projectionIdentity}";
+			return $"{definition.Library}:TreeSitter.DotNet-1.3.0:{queryHash}{projectionIdentity}:root-recovery-v1";
 		});
 
 	public FileFacts Extract(PreparedDependencySource source, DependencyFactsLimits limits) =>
@@ -434,7 +434,7 @@ public sealed partial class TreeSitterDependencyFactExtractor : IDependencyFactE
 		cancellationToken.ThrowIfCancellationRequested();
 		var runtime = GetRuntime(language);
 		using var lease = runtime.Rent(_workerBudget);
-		using var tree = ParseWithConditionalProjection(lease.Parser, language, source, relativePath,
+		using var tree = ParseWithSyntaxRecovery(lease.Parser, language, source, relativePath,
 			cancellationToken, out var omittedRegions);
 		var syntaxDamage = AnalyzeSyntaxDamage(
 			tree.RootNode,
@@ -468,7 +468,7 @@ public sealed partial class TreeSitterDependencyFactExtractor : IDependencyFactE
 			cancellationToken.ThrowIfCancellationRequested();
 			var runtime = GetRuntime(source.LanguageId);
 			using var lease = runtime.Rent(_workerBudget);
-			using var tree = ParseWithConditionalProjection(lease.Parser, source.LanguageId, source.Source,
+			using var tree = ParseWithSyntaxRecovery(lease.Parser, source.LanguageId, source.Source,
 				source.RelativePath, cancellationToken, out var omittedRegions);
 			var syntaxDamage = AnalyzeSyntaxDamage(
 				tree.RootNode,
@@ -774,6 +774,7 @@ public sealed partial class TreeSitterDependencyFactExtractor : IDependencyFactE
 	{
 		if (!root.HasError && omittedRegions is not { Count: > 0 })
 			return null;
+		cancellationToken.ThrowIfCancellationRequested();
 		var damaged = new HashSet<(int StartIndex, int EndIndex, int StartLine, int EndLine)>(
 			omittedRegions?.Select(static region => (
 				region.StartIndex,
@@ -781,7 +782,8 @@ public sealed partial class TreeSitterDependencyFactExtractor : IDependencyFactE
 				region.StartLine,
 				region.EndLine)) ?? []);
 		var pending = new Stack<Node>();
-		pending.Push(root);
+		if (root.HasError)
+			pending.Push(root);
 		var visited = 0;
 		while (pending.TryPop(out var node))
 		{

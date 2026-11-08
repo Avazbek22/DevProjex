@@ -1117,6 +1117,8 @@ internal sealed partial class DevProjexMcpTools(
 				MaximumStoredSearchMatches,
 				MaximumStoredSearchCharacters);
 			var navigationByFile = new Dictionary<string, IReadOnlyList<NavigationDeclaration>>(StringComparer.Ordinal);
+			var declarationsNotIndexed = 0;
+			var declarationsNotIndexedPaths = new List<string>(8);
 			await using var searched = await Projects.ConsumeSearchTextAsync(
 				plan with { IncludedFiles = inspectedFiles },
 				(file, token) =>
@@ -1167,17 +1169,22 @@ internal sealed partial class DevProjexMcpTools(
 					int fileMatches;
 					if (declarationsOnly)
 					{
+						navigation = McpSearchSymbols.CaptureNavigation(
+							Projects.DependencyFactsEngine, relative, file.Content, token);
+						if (navigation.Count == 0)
+						{
+							declarationsNotIndexed++;
+							if (declarationsNotIndexedPaths.Count < 8)
+								declarationsNotIndexedPaths.Add(relative);
+						}
 						var declarationMatches = McpSearchSymbols.FindNamedDeclarationMatches(
-							Projects.DependencyFactsEngine,
-							relative,
 							file.Content,
 							regex,
 							contextLines,
 							file.ReplacementRanges,
+							navigation,
 							declarationNames,
-							token,
-							out var fileNavigation);
-						navigation = fileNavigation;
+							token);
 						foreach (var match in declarationMatches)
 							AcceptMatch(match);
 						fileMatches = declarationMatches.Count;
@@ -1224,7 +1231,10 @@ internal sealed partial class DevProjexMcpTools(
 				.Distinct(StringComparer.Ordinal)
 				.Count();
 
-			var rendered = RenderSearchGroupsWithDocumentationLast(ordered, maximumResults, MaximumSearchContentCharacters);
+			var coverageAppendix = FormatDeclarationsNotIndexed(declarationsNotIndexedPaths);
+			var rendered = RenderSearchGroupsWithDocumentationLast(ordered, maximumResults,
+				MaximumSearchContentCharacters - coverageAppendix.Length);
+			rendered.Output.Append(coverageAppendix);
 			var symbols = McpSearchSymbols.Resolve(
 				rendered.WrittenHits,
 				navigationByFile,
@@ -1439,6 +1449,10 @@ internal sealed partial class DevProjexMcpTools(
 						withheldStored,
 						withheldByFile.Count),
 					FormatSymbolCoverageNotice(symbols, namesRefused),
+					declarationsNotIndexed == 0
+						? null
+						: $"[Symbols coverage] declarations-not-indexed={declarationsNotIndexed.ToString(CultureInfo.InvariantCulture)}; " +
+						  "search without symbols=true still reads these files.",
 					namesReadFromPattern is null
 						? null
 						: $"[Symbols] the regular expression was read as {namesReadFromPattern.Count.ToString(CultureInfo.InvariantCulture)} " +
