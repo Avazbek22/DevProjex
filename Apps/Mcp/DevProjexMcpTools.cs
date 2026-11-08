@@ -3060,6 +3060,7 @@ internal sealed partial class DevProjexMcpTools(
 		CallToolResult Complete(CallToolResult value)
 		{
 			var completed = liveContext?.AppendNotices(value) ?? value;
+			McpToolResults.NormalizeLineEndings(completed);
 			McpToolResults.EnsureBalanced(completed);
 			journal?.Complete(completed);
 			return completed;
@@ -3858,6 +3859,10 @@ internal sealed partial class DevProjexMcpTools(
 		long? storedDocumentCharacters = null,
 		int additionalReplyCharacters = 0)
 	{
+		// The reply estimate below has to match what the response boundary actually delivers, so
+		// any CRLF still carried by upstream text (for example a pack body read back from a shared
+		// document writer) is normalized before it is measured, not after.
+		responseWithoutAccounting = McpToolResults.NormalizeLineEndings(responseWithoutAccounting);
 		var reportTokens = CodeCompressionSnapshot.EstimateTokens(formattedReportCharacters);
 		var replyTokens = CodeCompressionSnapshot.EstimateTokens(
 			responseWithoutAccounting.Length + additionalReplyCharacters);
