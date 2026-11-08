@@ -136,6 +136,22 @@ internal static class McpToolResults
 			McpSpotlight.EnsureBalanced(block.Text);
 	}
 
+	/// <summary>
+	/// Every text block the server composes uses LF, on every platform, so a response does not
+	/// depend on <see cref="Environment.NewLine"/> and two agents never pay a different token
+	/// cost for the same call. This runs once at the response boundary, after every tool's own
+	/// builder has produced its text, so no individual builder needs to track line endings itself.
+	/// </summary>
+	public static void NormalizeLineEndings(CallToolResult result)
+	{
+		ArgumentNullException.ThrowIfNull(result);
+		foreach (var block in result.Content.OfType<TextContentBlock>())
+			block.Text = NormalizeLineEndings(block.Text);
+	}
+
+	private static string NormalizeLineEndings(string text) =>
+		text.Contains('\r') ? text.Replace("\r\n", "\n").Replace('\r', '\n') : text;
+
 	// Secrets are always masked. Private data is masked only when the caller's effective policy
 	// hides it, so an address such as a project root is not rewritten without that opt-in.
 	internal static string ProtectMetadataString(string value, bool detectPrivateData = true)

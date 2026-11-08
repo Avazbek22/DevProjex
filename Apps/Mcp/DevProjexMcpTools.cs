@@ -3046,6 +3046,7 @@ internal sealed partial class DevProjexMcpTools(
 		CallToolResult Complete(CallToolResult value)
 		{
 			var completed = liveContext?.AppendNotices(value) ?? value;
+			McpToolResults.NormalizeLineEndings(completed);
 			McpToolResults.EnsureBalanced(completed);
 			journal?.Complete(completed);
 			return completed;
