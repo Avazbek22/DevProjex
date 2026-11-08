@@ -9,13 +9,14 @@ public sealed partial class McpServerIntegrationTests
 		  <P extends string = string>(handler: H<P>): HonoBase<P>
 		}
 		""";
+	private static string UnindexedInterface => BrokenSignatureInterface.Replace("interface HandlerInterface", "interface", StringComparison.Ordinal);
 
 	[Fact]
 	public async Task AWholeFileSyntaxFailureStillReportsNoFactsWithItsRealDroppedRange()
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
-		File.WriteAllText(Path.Combine(project, "broken.ts"), BrokenSignatureInterface);
+		File.WriteAllText(Path.Combine(project, "broken.ts"), UnindexedInterface);
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
 
 		var response = await server.CallAsync("related_files", new Dictionary<string, object?>
@@ -81,7 +82,7 @@ public sealed partial class McpServerIntegrationTests
 		const string marker = "Zq9UnindexedPath";
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
-		File.WriteAllText(Path.Combine(project, marker + ".ts"), BrokenSignatureInterface);
+		File.WriteAllText(Path.Combine(project, marker + ".ts"), UnindexedInterface);
 		File.WriteAllText(Path.Combine(project, "Target.cs"), "class Target {}\n");
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
 
@@ -116,7 +117,7 @@ public sealed partial class McpServerIntegrationTests
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
 		for (var index = 0; index < 10; index++)
-			File.WriteAllText(Path.Combine(project, $"broken-{index:D2}.ts"), BrokenSignatureInterface);
+			File.WriteAllText(Path.Combine(project, $"broken-{index:D2}.ts"), UnindexedInterface);
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
 
 		var response = await server.CallAsync("search_project", new Dictionary<string, object?>
@@ -138,7 +139,7 @@ public sealed partial class McpServerIntegrationTests
 		var project = workspace.CreateDirectory("project");
 		File.WriteAllText(Path.Combine(project, "Target.cs"), string.Join('\n', Enumerable.Repeat(
 			"class Target { string Padding = \"" + new string('x', 180) + "\"; }", 120)));
-		File.WriteAllText(Path.Combine(project, "broken.ts"), BrokenSignatureInterface);
+		File.WriteAllText(Path.Combine(project, "broken.ts"), UnindexedInterface);
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
 
 		var response = await server.CallAsync("search_project", new Dictionary<string, object?>
