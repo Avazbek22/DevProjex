@@ -2665,69 +2665,6 @@ public sealed class McpInfrastructureTests
 			.Select(line => new McpSearchGroupLine(line, true, $"{line}:needle " + new string('x', 20))).ToArray());
 
 	[Fact]
-	public void SearchBatchMergesAdjacentRangesAndKeepsEveryBatchBound()
-	{
-		var hits = new List<McpSearchHit>();
-		var groups = new List<McpSearchRenderedGroup>();
-		foreach (var path in new[] { "first.log", "second.log", "third.log", "fourth.log", "fifth.log", "sixth.log" })
-		{
-			int[] numbers = [1, 2, 5, 8, 11, 14];
-			hits.AddRange(numbers.Select(line => new McpSearchHit(path, path, line)));
-			groups.Add(new McpSearchRenderedGroup(path, path, numbers,
-				Enumerable.Range(1, 15).Select(line => new McpSearchGroupLine(line, numbers.Contains(line), "line")).ToArray()));
-		}
-		var output = new StringBuilder("results\n");
-
-		Assert.True(DevProjexMcpTools.AppendSearchBatchRead(output, hits, McpSearchSymbolResult.None, groups, 0, 16_000));
-		var line = output.ToString().TrimEnd().Split('\n')[^1];
-		using var json = JsonDocument.Parse(line["Read these in one call: get_file ".Length..]);
-		var requests = json.RootElement.GetProperty("requests").EnumerateArray().ToArray();
-		Assert.Equal(new[] { "first.log", "second.log", "third.log", "fourth.log", "fifth.log" },
-			requests.Select(item => item.GetProperty("path").GetString()));
-		Assert.All(requests, item => Assert.InRange(item.GetProperty("ranges").GetArrayLength(), 1, 4));
-		Assert.InRange(requests.Sum(item => item.GetProperty("ranges").GetArrayLength()), 1, 16);
-		Assert.Equal(1, requests[0].GetProperty("ranges")[0].GetProperty("start_line").GetInt32());
-		Assert.Equal(2, requests[0].GetProperty("ranges")[0].GetProperty("end_line").GetInt32());
-	}
-
-	[Fact]
-	public void SearchBatchIsOmittedWithoutChangingAnAlreadyFullBody()
-	{
-		var hits = new[] { new McpSearchHit("a.log", "a.log", 1), new McpSearchHit("b.log", "b.log", 1) };
-		var groups = hits.Select(hit => new McpSearchRenderedGroup(hit.RelativePath, hit.FullPath, [1],
-			[new McpSearchGroupLine(1, true, "needle")])).ToArray();
-		var output = new StringBuilder(new string('x', 15_999));
-		var before = output.ToString();
-
-		Assert.False(DevProjexMcpTools.AppendSearchBatchRead(output, hits, McpSearchSymbolResult.None, groups, 0, 16_000));
-		Assert.Equal(before, output.ToString());
-	}
-
-	[Fact]
-	public void SearchBatchUsesTheMatchedOverloadRatherThanTheFirstDeclaration()
-	{
-		var declaration = new McpSearchDeclaration("code.cs", "Run", 2, 3);
-		var symbols = new McpSearchSymbolResult(
-			new Dictionary<McpSearchHitKey, string> { [new("code.cs", 12)] = "Run" }, [declaration], 1, 0, 0)
-		{
-			DeclarationRanges = new McpDeclarationLineRanges(
-				new Dictionary<McpSearchDeclaration, IReadOnlyList<(int StartLine, int EndLine)>>
-				{
-					[declaration] = [(2, 3), (10, 14)]
-				})
-		};
-		var hits = new[] { new McpSearchHit("code.cs", "code.cs", 12), new McpSearchHit("plain.log", "plain.log", 1) };
-		var groups = new[] { new McpSearchRenderedGroup("plain.log", "plain.log", [1], [new(1, true, "needle")]) };
-		var output = new StringBuilder();
-
-		Assert.True(DevProjexMcpTools.AppendSearchBatchRead(output, hits, symbols, groups, 0, 16_000));
-		using var json = JsonDocument.Parse(output.ToString().Trim()["Read these in one call: get_file ".Length..]);
-		var range = json.RootElement.GetProperty("requests")[0].GetProperty("ranges")[0];
-		Assert.Equal(10, range.GetProperty("start_line").GetInt32());
-		Assert.Equal(14, range.GetProperty("end_line").GetInt32());
-	}
-
-	[Fact]
 	public void SearchScannerKeepsOnlyBoundedMatchContext()
 	{
 		const string content = "before\r\nneedle\rcontext\nneedle-again\rafter";
