@@ -412,7 +412,8 @@ public sealed partial class TreeSitterDependencyFactExtractor : IDependencyFactE
 				ReadQuery(definition.QueryDirectory, "navigation.scm") + "\0" + DiagnosticErrorQuery));
 			var projectionIdentity = id == LanguageId.CSharp ? ":conditional-projection-v3" : string.Empty;
 			var callableHeaderIdentity = id is LanguageId.TypeScript or LanguageId.Tsx ? ":callable-headers-v1" : string.Empty;
-			return $"{definition.Library}:TreeSitter.DotNet-1.3.0:{queryHash}{projectionIdentity}:root-recovery-v1{callableHeaderIdentity}";
+			var pythonNavigationIdentity = id == LanguageId.Python ? ":module-navigation-v1" : string.Empty;
+			return $"{definition.Library}:TreeSitter.DotNet-1.3.0:{queryHash}{projectionIdentity}:root-recovery-v1{callableHeaderIdentity}{pythonNavigationIdentity}";
 		});
 
 	public FileFacts Extract(PreparedDependencySource source, DependencyFactsLimits limits) =>
@@ -738,6 +739,8 @@ public sealed partial class TreeSitterDependencyFactExtractor : IDependencyFactE
 				});
 			}
 		}
+		if (language == LanguageId.Python)
+			AddPythonModuleAssignments(declarations, root, contentFingerprint, cancellationToken, syntaxDamage);
 		return declarations
 			.OrderBy(static declaration => declaration.StartLine)
 			.ThenBy(static declaration => declaration.EndLine)
