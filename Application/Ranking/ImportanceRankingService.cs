@@ -16,6 +16,8 @@ public sealed class ImportanceRankingService(
 		ImportanceMissingSignalPolicy.ConfidenceLimited;
 	private const int MaximumTopEntries = 10;
 	private const int PageRankIterations = 30;
+	private const int MinimumParallelSourceVersionFiles = 512;
+	private const int MaximumSourceVersionHashConcurrency = 4;
 	private static readonly HashSet<string> TestFrameworks = new(StringComparer.OrdinalIgnoreCase)
 	{
 		"xunit", "nunit", "microsoft.visualstudio.testtools.unittesting",
@@ -314,7 +316,14 @@ public sealed class ImportanceRankingService(
 		return false;
 	}
 
-	private static async Task<IReadOnlyDictionary<string, RankingSourceVersion>> CaptureVersionsAsync(
+	private static Task<IReadOnlyDictionary<string, RankingSourceVersion>> CaptureVersionsAsync(
+		IReadOnlyList<string> paths,
+		CancellationToken cancellationToken) =>
+		paths.Count < MinimumParallelSourceVersionFiles
+			? CaptureVersionsSerialAsync(paths, cancellationToken)
+			: CaptureVersionsInParallelAsync(paths, cancellationToken);
+
+	private static async Task<IReadOnlyDictionary<string, RankingSourceVersion>> CaptureVersionsSerialAsync(
 		IReadOnlyList<string> paths,
 		CancellationToken cancellationToken)
 	{
@@ -325,6 +334,31 @@ public sealed class ImportanceRankingService(
 			versions[Path.GetFullPath(path)] = await RankingSourceVersion
 				.CaptureAsync(path, cancellationToken)
 				.ConfigureAwait(false);
+		}
+		return versions;
+	}
+
+	private static async Task<IReadOnlyDictionary<string, RankingSourceVersion>> CaptureVersionsInParallelAsync(
+		IReadOnlyList<string> paths,
+		CancellationToken cancellationToken)
+	{
+		var captured = new RankingSourceVersion[paths.Count];
+		await Parallel.ForEachAsync(
+			Enumerable.Range(0, paths.Count),
+			new ParallelOptions
+			{
+				MaxDegreeOfParallelism = MaximumSourceVersionHashConcurrency,
+				CancellationToken = cancellationToken
+			},
+			async (index, token) =>
+				captured[index] = await RankingSourceVersion.CaptureAsync(paths[index], token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+		var versions = new Dictionary<string, RankingSourceVersion>(paths.Count, PathComparer.Default);
+		// Preserve insertion order and serial overwrite semantics for duplicate paths.
+		for (var index = 0; index < paths.Count; index++)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			versions[Path.GetFullPath(paths[index])] = captured[index];
 		}
 		return versions;
 	}
