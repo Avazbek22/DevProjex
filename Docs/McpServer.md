@@ -1477,7 +1477,23 @@ selection that was already empty are all unchanged.
 ### Search hits name the declaration that contains them
 
 Documentation matches (`.md`, `.mdx`, `.rst`, `.txt`, `.adoc`, or files below `docs`/`doc`) follow code under `Matches in documentation files:` and are withheld first when the body budget is exhausted.
-An empty search gets a fixed hint for a newline pattern, because matching is per line, or a path-like pattern, because matching covers content rather than file names.
+An empty search gets a fixed hint for a path-like pattern, because matching covers content rather than file names.
+
+### Multi-line patterns
+
+Matching is per line unless the pattern can only mean to cross a line break: an
+escaped or literal line break (`\n`, `\r`), a class that covers one (`[\s\S]`,
+`[\S\s]`, `[\w\W]`, `[\W\w]`, `[\d\D]`, `[\D\d]`), or the inline `(?s)` option.
+Such a pattern runs against each file's whole protected text, with `^` and `$`
+still anchoring lines, under the same per-file timeout. One match covering lines
+A–B is one match: every line from A to B is written as a `line:text` match line,
+context lines surround the range as usual, and limits, counts, the
+`[Search boundary]` line and `read_pack` continuation all count it once. A match
+longer than 20 lines shows its first 20 lines followed by one
+`(+N more matched lines)` line. A match that touches redacted text never counts,
+as in per-line matching. The trusted line
+`[Search] multi-line pattern: a match may span lines and counts once at its first line.`
+marks this mode. `symbols: true` is unaffected.
 
 `search_project` names the declaration each shown hit sits inside. There is no
 parameter for it: a hit without the thing that contains it is what made callers
