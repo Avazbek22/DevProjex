@@ -86,6 +86,7 @@ public sealed partial class TerminalPreviewNavigationPtyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("> PROJECT TREE", initial, StringComparison.Ordinal);
 		Assert.Contains("Ctrl+A/U Select all/none", initial, StringComparison.Ordinal);
+		await terminal.WaitForTerminalNegotiationAsync(cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendAsync("2", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"ContentMarker001",

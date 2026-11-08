@@ -58,6 +58,8 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 	private readonly Task _readerTask;
 	private readonly Task _exitMonitorTask;
 	private readonly Task _terminalResponseTask;
+	private long _lastTerminalResponseTicks = Environment.TickCount64;
+	private int _pendingTerminalResponses;
 	private readonly string _dataRoot;
 	private readonly bool _verifyExecutableRelaunch;
 
@@ -74,7 +76,10 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		_terminal.DataReceived += (_, args) =>
 		{
 			if (!string.IsNullOrEmpty(args.Data))
+			{
+				Interlocked.Increment(ref _pendingTerminalResponses);
 				_terminalResponses.Writer.TryWrite(args.Data);
+			}
 		};
 		_terminalResponseTask = Task.Run(WriteTerminalResponsesAsync);
 		_readerTask = Task.Run(ReadOutputAsync);
@@ -391,6 +396,29 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		var split = marker.Length / 2;
 		return QuoteForPosixShell(marker[..split]) + " " +
 			   QuoteForPosixShell(marker[split..]);
+	}
+
+	/// <summary>
+	/// Terminal.Gui keeps querying the terminal (device attributes, window size, colors) for a moment after the
+	/// first frame, and a key that arrives while it waits for an answer can be taken as part of that answer and
+	/// lost. Waits until no query has been answered for <paramref name="quietPeriod"/> before the first key, so
+	/// the key reaches the application. Returns after <paramref name="timeout"/> even if queries continue.
+	/// </summary>
+	public async Task WaitForTerminalNegotiationAsync(
+		TimeSpan? quietPeriod = null,
+		TimeSpan? timeout = null,
+		CancellationToken cancellationToken = default)
+	{
+		var quietMilliseconds = (long)(quietPeriod ?? TimeSpan.FromMilliseconds(500)).TotalMilliseconds;
+		var stopwatch = Stopwatch.StartNew();
+		var effectiveTimeout = timeout ?? TimeSpan.FromSeconds(5);
+		while (stopwatch.Elapsed < effectiveTimeout && !HasExited)
+		{
+			var idle = Environment.TickCount64 - Interlocked.Read(ref _lastTerminalResponseTicks);
+			if (idle >= quietMilliseconds && Volatile.Read(ref _pendingTerminalResponses) == 0)
+				return;
+			await Task.Delay(50, cancellationToken).ConfigureAwait(false);
+		}
 	}
 
 	public async Task SendAsync(string input, CancellationToken cancellationToken = default)
@@ -1146,6 +1174,8 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 				lock (_terminalGate)
 					_terminalResponseLog.Append(Convert.ToHexString(Encoding.UTF8.GetBytes(response))).Append(' ');
 				await SendAsync(response, _readerCts.Token).ConfigureAwait(false);
+				Interlocked.Exchange(ref _lastTerminalResponseTicks, Environment.TickCount64);
+				Interlocked.Decrement(ref _pendingTerminalResponses);
 				lock (_terminalGate)
 					_resizeAcknowledgement?.ObserveWrittenResponse(response);
 			}
