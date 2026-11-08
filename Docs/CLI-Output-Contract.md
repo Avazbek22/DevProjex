@@ -526,9 +526,9 @@ apply only the selection rules a path alone decides, and their paths are never l
 is `true` when every changed file is in `files` and neither count is above zero. When
 the selection hides secrets or private data, both versions are redacted before they are compared,
 so placeholders appear in `lines` exactly as in text output. `affected` is present whenever the
-diff has changes: `dependents` holds up to 10 portable paths of files that depend on the changed
-files, and `tests` up to 10 test files that cover them, both in ordinal order and possibly empty,
-with the same rules as `get_diff`.
+diff has changes: `dependents` holds up to 5 portable paths of non-test files that import a changed
+file directly, in ordinal order, and `tests` up to 5 test files named after a changed file, then
+those that import one directly; both possibly empty, with the same rules as `get_diff`.
 
 ## Tree JSON and XML
 

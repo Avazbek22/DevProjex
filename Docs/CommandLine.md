@@ -940,7 +940,8 @@ control characters in a line or path are escaped so each output line is one phys
 listed without hunks follow under a localized `Not shown:` heading as `path [status, reason]`, with
 `binary`, `too-large` (a version is too large), `change-too-large` (the change is too large to
 compare line by line), or `line-endings-only` as the reason. Two localized lists follow, each only when it is not empty:
-the files that depend on the changed files and the tests that cover them, up to 10 each, related
+the non-test files that import a changed file directly, and the tests named after a changed file or
+importing one directly, up to 5 each, related
 across the selection without its Git scope and path narrowing exactly as `get_diff` relates them.
 A localized summary line ends the
 output with the changed, shown, added, and removed counts, followed by the count of deleted files

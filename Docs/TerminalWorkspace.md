@@ -404,7 +404,7 @@ are never intersected. Checked items, file types, path filters, exclusions, and 
 over unchanged, so the comparison never shows a file those would hide. Old versions come from
 Git's object store without running a repository filter or converter. When Hide Secrets or Hide
 Private Data is on, both versions are redacted before they are compared. The output panel shows
-the same unified diff, `Not shown:` list, lists of dependent files and covering tests, and
+the same unified diff, `Not shown:` list, lists of files and tests that import the changed files, and
 summary line as the direct CLI. The panel keeps at
 most 50,000 characters of that output, cut at a line break; past that limit a trailing line
 reports how many characters were left out, and the direct CLI `diff` command shows the rest.
