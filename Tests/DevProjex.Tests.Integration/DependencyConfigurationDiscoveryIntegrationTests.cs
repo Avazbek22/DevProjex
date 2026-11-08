@@ -275,6 +275,28 @@ public sealed class DependencyConfigurationDiscoveryIntegrationTests
 		Assert.Equal(before.Edges, removed.Edges);
 	}
 
+	[Fact]
+	public async Task ControlFileNames_KeepTheirExistingCaseRules()
+	{
+		using var fixture = new TemporaryDirectory();
+		fixture.CreateFile("TSCONFIG.JSON",
+			"{\"compilerOptions\":{\"paths\":{\"alias\":[\"./target.ts\"]}}}");
+		fixture.CreateFile("PACKAGE.JSON", "{\"name\":\"demo\",\"dependencies\":{\"external-package\":\"1\"}}");
+		var source = fixture.CreateFile("main.ts", "import { value } from 'alias'; import 'external-package';");
+		var target = fixture.CreateFile("target.ts", "export const value = 1;");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(fixture.Path, [source, target],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(result.Edges, edge => edge.Reference == "alias" && edge.Status == ResolutionStatus.Unresolved);
+		var reader = new CountingControlFileReader();
+		var configuration = await new FileDependencyConfigurationProvider(reader).ReadAsync(
+			fixture.Path, [source, target], TestContext.Current.CancellationToken);
+		Assert.Equal([Path.Combine(fixture.Path, "PACKAGE.JSON")], reader.Paths);
+		Assert.Contains(configuration.PackageMaps.Values, map => map.ExternalPackages.Contains("external-package"));
+	}
+
 	// Every edge the full project resolves between two files of the narrowed view resolves to the
 	// same target there: narrowing changes what is shown, not what is understood.
 	private static void AssertNarrowingKeepsEdges(DependencyIndexSnapshot full, DependencyIndexSnapshot narrowed)
