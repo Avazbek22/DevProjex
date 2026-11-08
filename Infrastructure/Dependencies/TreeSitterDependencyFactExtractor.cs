@@ -97,6 +97,17 @@ public sealed partial class TreeSitterDependencyFactExtractor : IDependencyFactE
 		}
 	}
 
+	public (LanguageId LanguageId, string ScopeId) DescribePath(
+		string fullPath,
+		DependencyResolverConfiguration configuration)
+	{
+		ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+		var language = ForPath(fullPath);
+		var scope = ScopeOwners.GetValue(configuration, static value => new ScopeOwnerIndex(value.Scopes))
+			.Resolve(language, fullPath);
+		return (language, scope);
+	}
+
 	public async ValueTask<PreparedDependencySource> PrepareAsync(
 		string sourceRoot,
 		string fullPath,
