@@ -125,9 +125,9 @@ async function validateNativeSamples(repository, root, scan, server, workspaceRo
         '--plain',
       ], root, { DEVPROJEX_INTERNAL_DATA_ROOT: join(dataRoot, 'cli') });
       const cli = normalizeCliRelated(JSON.parse(cliProcess.stdout))[0];
-      const mcpCall = await mcp.callAndPage('related_files', { path: declared.path, direction: 'both' });
+      const mcpCall = await mcp.callAndPage('get_dependencies_and_usages', { path: declared.path, direction: 'both' });
       if (mcpCall.isError)
-        throw new Error(`${repository.id}:${declared.path}: MCP related_files returned an error.`);
+        throw new Error(`${repository.id}:${declared.path}: MCP get_dependencies_and_usages returned an error.`);
       const mcpResult = parseMcpRelated(mcpCall.allText);
       mcpResult.seed ??= declared.path;
       const parity = compareRelated(cli, mcpResult);

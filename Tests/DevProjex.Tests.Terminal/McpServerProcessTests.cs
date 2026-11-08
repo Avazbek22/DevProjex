@@ -19,7 +19,7 @@ public sealed partial class McpServerProcessTests
 		"pack_context",
 		"read_pack",
 		"search_project",
-		"related_files",
+		"get_dependencies_and_usages",
 		"get_file",
 		"get_diff"
 	];
@@ -358,8 +358,8 @@ public sealed partial class McpServerProcessTests
 				["analyze"] = ("Measures a selection", "pack_context", "detail=full|compact|signatures"),
 				["pack_context"] = ("Builds multi-file project context", "use get_file for", "view=tree|content|tree-content"),
 				["read_pack"] = ("Reads a stored result page", "pack_context instead", "1,000 lines"),
-				["search_project"] = ("Searches transformed text", "use related_files for", "max_results=1..200"),
-				["related_files"] = ("Get dependencies and usages of a file", "use search_project for text", "direction=dependencies|dependents|both"),
+				["search_project"] = ("Searches transformed text", "use get_dependencies_and_usages for", "max_results=1..200"),
+				["get_dependencies_and_usages"] = ("Get dependencies and usages of a file", "use search_project for text", "direction=dependencies|dependents|both"),
 				["get_file"] = ("Reads selected text", "pack_context for", "sixteen file/range/symbol"),
 				["get_diff"] = ("Shows what changed", "use get_file for whole files", "context_lines=0..20")
 			};

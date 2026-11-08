@@ -15,7 +15,7 @@ public sealed partial class McpServerProcessTests
 		workspace.WriteFile("project/lib.sh", "setup() { :; }\n");
 		workspace.WriteFile("project/dynamic.sh", ":\n");
 		await using var server = await ActualMcpProcess.StartAsync(project, workspace.CreateDirectory("data"));
-		var result = await CallAsync(server, "related_files", new Dictionary<string, object?> { ["path"] = "main.sh", ["direction"] = "dependencies" });
+		var result = await CallAsync(server, "get_dependencies_and_usages", new Dictionary<string, object?> { ["path"] = "main.sh", ["direction"] = "dependencies" });
 		var text = AllProcessText(result);
 		Assert.NotEqual(true, result.IsError);
 		Assert.Contains("lib.sh", text, StringComparison.Ordinal);

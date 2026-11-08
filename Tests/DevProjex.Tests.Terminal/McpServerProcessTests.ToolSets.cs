@@ -6,7 +6,7 @@ namespace DevProjex.Tests.Terminal;
 public sealed partial class McpServerProcessTests
 {
 	private static readonly string[] ReducedTools =
-		["list_projects", "get_tree", "read_pack", "search_project", "related_files", "get_file", "get_diff"];
+		["list_projects", "get_tree", "read_pack", "search_project", "get_dependencies_and_usages", "get_file", "get_diff"];
 
 	[Theory]
 	[InlineData("full", 32_329)]
@@ -122,7 +122,7 @@ public sealed partial class McpServerProcessTests
 		foreach (var request in new[]
 		{
 			("search_project", new Dictionary<string, object?> { ["pattern"] = "stored-marker", ["max_results"] = 200 }),
-			("related_files", new Dictionary<string, object?> { ["path"] = "Target.ts", ["direction"] = "dependents" })
+			("get_dependencies_and_usages", new Dictionary<string, object?> { ["path"] = "Target.ts", ["direction"] = "dependents" })
 		})
 		{
 			var result = AllProcessText(await CallAsync(server, request.Item1, request.Item2));

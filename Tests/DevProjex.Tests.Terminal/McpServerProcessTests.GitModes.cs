@@ -78,7 +78,7 @@ public sealed partial class McpServerProcessTests
 			environment: GitModeEnvironment(repository));
 		if (live)
 			await SaveGitModeProfileAsync(server, workspace.Path, "tracked", ["Seed.cs"]);
-		var response = await CallAsync(server, "related_files", new Dictionary<string, object?>
+		var response = await CallAsync(server, "get_dependencies_and_usages", new Dictionary<string, object?>
 		{
 			["path"] = "Seed.cs",
 			["direction"] = "dependencies",
@@ -142,7 +142,7 @@ public sealed partial class McpServerProcessTests
 		};
 		if (trackedOnly)
 			arguments["tracked_only"] = true;
-		var response = await CallAsync(server, "related_files", arguments);
+		var response = await CallAsync(server, "get_dependencies_and_usages", arguments);
 		var text = string.Join('\n', response.Content.OfType<TextContentBlock>().Select(static item => item.Text));
 		Assert.False(response.IsError == true, text);
 		Assert.Contains("Target.cs — ", text, StringComparison.Ordinal);

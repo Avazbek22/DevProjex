@@ -225,7 +225,7 @@ async function traverseRelated(client, seeds, maximumHops, requiredPaths) {
   for (let hop = 1; hop <= maximumHops && frontier.length > 0; hop++) {
     const next = new Set();
     for (const seed of frontier) {
-      const result = await client.callAndPage('related_files', { path: seed, direction: 'both' });
+      const result = await client.callAndPage('get_dependencies_and_usages', { path: seed, direction: 'both' });
       const parsed = parseRelatedPaths(result.allText);
       calls.push({
         seed,

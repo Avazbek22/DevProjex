@@ -37,7 +37,7 @@ public sealed partial class McpServerProcessTests
 			var tools = await client.ListToolsAsync(options: null, TestContext.Current.CancellationToken);
 			var getFile = Assert.Single(tools, static tool => tool.Name == "get_file");
 			Assert.True(getFile.ProtocolTool.InputSchema.GetProperty("properties").TryGetProperty("requests", out _));
-			Assert.False(Assert.Single(tools, static tool => tool.Name == "related_files")
+			Assert.False(Assert.Single(tools, static tool => tool.Name == "get_dependencies_and_usages")
 				.ProtocolTool.Annotations?.IdempotentHint);
 
 			var batch = await client.CallToolAsync("get_file", new Dictionary<string, object?>
@@ -53,7 +53,7 @@ public sealed partial class McpServerProcessTests
 			Assert.Contains("Requests: 1.1, 2.1", batchText, StringComparison.Ordinal);
 			Assert.DoesNotContain(Secret, batchText, StringComparison.Ordinal);
 
-			var related = await client.CallToolAsync("related_files", new Dictionary<string, object?>
+			var related = await client.CallToolAsync("get_dependencies_and_usages", new Dictionary<string, object?>
 			{
 				["path"] = "Main.ts",
 				["direction"] = "dependencies"
@@ -125,7 +125,7 @@ public sealed partial class McpServerProcessTests
 			});
 		try
 		{
-			var result = await client.CallToolAsync("related_files", new Dictionary<string, object?>
+			var result = await client.CallToolAsync("get_dependencies_and_usages", new Dictionary<string, object?>
 			{
 				["path"] = "File00000.txt"
 			}, progress: null, new RequestOptions { ProgressToken = token },

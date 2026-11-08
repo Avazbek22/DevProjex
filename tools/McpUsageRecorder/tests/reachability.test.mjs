@@ -79,7 +79,7 @@ test('analysis distinguishes direct chain knowledge-only and unreachable files',
     const client = fakeClient(calls, {
       search_project: result('src/Direct.cs\n1:Needle direct\n' + completeBoundary(1, 1)),
       get_tree: result(''),
-      related_files: result('Dependencies:\nsrc/Linked.cs — type reference — resolved — 1 tokens'),
+      get_dependencies_and_usages: result('Dependencies:\nsrc/Linked.cs — type reference — resolved — 1 tokens'),
       get_file: argumentsValue => argumentsValue.path === 'src/Blocked.cs'
         ? result('not found', true)
         : result('1:text'),
@@ -96,7 +96,7 @@ test('analysis distinguishes direct chain knowledge-only and unreachable files',
       ReachabilityClass.Unreachable,
     ]);
     assert.equal(analysis.tasks[0].requiredFiles[1].relatedHop, 1);
-    assert.equal(calls.filter(call => call.name === 'related_files').length, 2);
+    assert.equal(calls.filter(call => call.name === 'get_dependencies_and_usages').length, 2);
     assert.equal(client.closed, true);
   } finally {
     await rm(root, { recursive: true, force: true });

@@ -249,7 +249,7 @@ public sealed partial class McpServerProcessTests
 		// pack pointer and carries none of the service notices.
 		var stored = AllProcessText(await CallAsync(
 			server,
-			"related_files",
+			"get_dependencies_and_usages",
 			new Dictionary<string, object?> { ["path"] = "target.ts", ["direction"] = "dependents" }));
 		var next = AllProcessText(await CallAsync(
 			server,

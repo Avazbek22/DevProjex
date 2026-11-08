@@ -2,7 +2,7 @@
 
 This tool records dependency-fact coverage and checked related-file projections for repositories at
 fixed commits. It runs the in-process dependency engine for aggregate facts, then compares `related`
-CLI output with the real MCP `related_files` surface for every declared sample. Checked source
+CLI output with the real MCP `get_dependencies_and_usages` surface for every declared sample. Checked source
 relations combine explicit entries in `registry.json` with uniquely resolvable repository-local
 `#include` directives discovered by the runner. The scanner records whether each expected relation
 resolved, remained explicit but unresolved, fell inside a reported partial-parse range, or vanished

@@ -18,7 +18,7 @@ public sealed partial class McpServerProcessTests
 		workspace.WriteFile("c-project/include/model.h", "typedef struct Model { int value; } Model;\n");
 		workspace.WriteFile("c-project/src/app.c", "#include \"../include/model.h\"\nModel read_model(void);\n");
 		await using var server = await ActualMcpProcess.StartAsync(project, workspace.CreateDirectory("data"));
-		var result = await CallAsync(server, "related_files", new Dictionary<string, object?>
+		var result = await CallAsync(server, "get_dependencies_and_usages", new Dictionary<string, object?>
 		{
 			["path"] = "src/app.c", ["direction"] = "dependencies"
 		});
@@ -33,7 +33,7 @@ public sealed partial class McpServerProcessTests
 		workspace.WriteFile("cpp-project/include/model.hpp", "namespace Models { class Model {}; }\n");
 		workspace.WriteFile("cpp-project/src/app.cpp", "#include \"../include/model.hpp\"\nModels::Model read_model();\n");
 		await using var server = await ActualMcpProcess.StartAsync(project, workspace.CreateDirectory("data"));
-		var result = await CallAsync(server, "related_files", new Dictionary<string, object?>
+		var result = await CallAsync(server, "get_dependencies_and_usages", new Dictionary<string, object?>
 		{
 			["path"] = "src/app.cpp", ["direction"] = "dependencies"
 		});
@@ -55,7 +55,7 @@ public sealed partial class McpServerProcessTests
 
 		var result = await CallAsync(
 			server,
-			"related_files",
+			"get_dependencies_and_usages",
 			new Dictionary<string, object?>
 			{
 				["path"] = "app/Consumer.java",
@@ -81,7 +81,7 @@ public sealed partial class McpServerProcessTests
 
 		var result = await CallAsync(
 			server,
-			"related_files",
+			"get_dependencies_and_usages",
 			new Dictionary<string, object?>
 			{
 				["path"] = "app/main.ts",
@@ -109,7 +109,7 @@ public sealed partial class McpServerProcessTests
 
 		var result = await CallAsync(
 			server,
-			"related_files",
+			"get_dependencies_and_usages",
 			new Dictionary<string, object?>
 			{
 				["path"] = "src/service.rs",
@@ -136,7 +136,7 @@ public sealed partial class McpServerProcessTests
 
 		var result = await CallAsync(
 			server,
-			"related_files",
+			"get_dependencies_and_usages",
 			new Dictionary<string, object?>
 			{
 				["path"] = "app/Consumer.kt",
@@ -157,7 +157,7 @@ public sealed partial class McpServerProcessTests
 		workspace.WriteFile("ruby-project/lib/service.rb", "require_relative 'model'\nclass Service\n VALUE = Models::User\nend\n");
 		await using var server = await ActualMcpProcess.StartAsync(project, workspace.CreateDirectory("data"));
 
-		var result = await CallAsync(server, "related_files", new Dictionary<string, object?>
+		var result = await CallAsync(server, "get_dependencies_and_usages", new Dictionary<string, object?>
 		{
 			["path"] = "lib/service.rb",
 			["direction"] = "dependencies"
@@ -178,7 +178,7 @@ public sealed partial class McpServerProcessTests
 		workspace.WriteFile("ruby-project/test/consumer.rb", "class Consumer\n include Sinatra\n VALUE = Sinatra::Base\nend\n");
 		await using var server = await ActualMcpProcess.StartAsync(project, workspace.CreateDirectory("data"));
 
-		var result = await CallAsync(server, "related_files", new Dictionary<string, object?>
+		var result = await CallAsync(server, "get_dependencies_and_usages", new Dictionary<string, object?>
 		{
 			["path"] = "test/consumer.rb",
 			["direction"] = "dependencies"
@@ -197,7 +197,7 @@ public sealed partial class McpServerProcessTests
 		workspace.WriteFile("php-project/src/Remote.php", "<?php namespace Library; class Remote {}");
 		workspace.WriteFile("php-project/src/App.php", "<?php namespace App; use Library\\Remote; class App { private Remote $value; }");
 		await using var server = await ActualMcpProcess.StartAsync(project, workspace.CreateDirectory("data"));
-		var result = await CallAsync(server, "related_files", new Dictionary<string, object?>
+		var result = await CallAsync(server, "get_dependencies_and_usages", new Dictionary<string, object?>
 		{
 			["path"] = "src/App.php", ["direction"] = "dependencies"
 		});
@@ -221,11 +221,11 @@ public sealed partial class McpServerProcessTests
 
 		var relative = Assert.IsType<TextContentBlock>(Assert.Single((await CallAsync(
 			server,
-			"related_files",
+			"get_dependencies_and_usages",
 			new Dictionary<string, object?> { ["path"] = "pkg/core.py", ["direction"] = "dependencies" })).Content)).Text;
 		var unsupported = Assert.IsType<TextContentBlock>(Assert.Single((await CallAsync(
 			server,
-			"related_files",
+			"get_dependencies_and_usages",
 			new Dictionary<string, object?> { ["path"] = "README.md" })).Content)).Text;
 
 		Assert.Contains("pkg/types.py", relative, StringComparison.Ordinal);
@@ -298,25 +298,25 @@ public sealed partial class McpServerProcessTests
 			new StreamClientTransport(process.StandardInput.BaseStream, process.StandardOutput.BaseStream),
 			clientOptions: null, loggerFactory: null, TestContext.Current.CancellationToken))
 		{
-			var typeScript = await client.CallToolAsync("related_files",
+			var typeScript = await client.CallToolAsync("get_dependencies_and_usages",
 				new Dictionary<string, object?> { ["path"] = "main.ts", ["direction"] = "dependencies" },
 				progress: null, options: null, TestContext.Current.CancellationToken);
-			var staticUsing = await client.CallToolAsync("related_files",
+			var staticUsing = await client.CallToolAsync("get_dependencies_and_usages",
 				new Dictionary<string, object?> { ["path"] = "StaticConsumer.cs", ["direction"] = "dependencies" },
 				progress: null, options: null, TestContext.Current.CancellationToken);
-			var python = await client.CallToolAsync("related_files",
+			var python = await client.CallToolAsync("get_dependencies_and_usages",
 				new Dictionary<string, object?> { ["path"] = "consumer.py", ["direction"] = "dependencies" },
 				progress: null, options: null, TestContext.Current.CancellationToken);
-			var conditional = await client.CallToolAsync("related_files",
+			var conditional = await client.CallToolAsync("get_dependencies_and_usages",
 				new Dictionary<string, object?> { ["path"] = "dual.cts", ["direction"] = "dependencies" },
 				progress: null, options: null, TestContext.Current.CancellationToken);
-			var localPython = await client.CallToolAsync("related_files",
+			var localPython = await client.CallToolAsync("get_dependencies_and_usages",
 				new Dictionary<string, object?> { ["path"] = "local_consumer.py", ["direction"] = "dependencies" },
 				progress: null, options: null, TestContext.Current.CancellationToken);
-			var localModel = await client.CallToolAsync("related_files",
+			var localModel = await client.CallToolAsync("get_dependencies_and_usages",
 				new Dictionary<string, object?> { ["path"] = "local_model.py", ["direction"] = "dependencies" },
 				progress: null, options: null, TestContext.Current.CancellationToken);
-			var dottedPython = await client.CallToolAsync("related_files",
+			var dottedPython = await client.CallToolAsync("get_dependencies_and_usages",
 				new Dictionary<string, object?> { ["path"] = "dotted_consumer.py", ["direction"] = "dependencies" },
 				progress: null, options: null, TestContext.Current.CancellationToken);
 			var typeScriptText = Assert.IsType<TextContentBlock>(Assert.Single(typeScript.Content)).Text;
@@ -423,7 +423,7 @@ public sealed partial class McpServerProcessTests
 		{
 			var progress = new InlineProgress<ProgressNotificationValue>();
 			var result = await client.CallToolAsync(
-				"related_files",
+				"get_dependencies_and_usages",
 				new Dictionary<string, object?>
 				{
 					["path"] = "src/Services/Service.cs",
@@ -443,7 +443,7 @@ public sealed partial class McpServerProcessTests
 			Assert.Contains("[Search scope] files=10", text, StringComparison.Ordinal);
 			Assert.Contains("[Effective filters]", text, StringComparison.Ordinal);
 			var overlappingDependencies = await client.CallToolAsync(
-				"related_files",
+				"get_dependencies_and_usages",
 				new Dictionary<string, object?>
 				{
 					["path"] = "src/Relations/Seed.cs",
@@ -459,7 +459,7 @@ public sealed partial class McpServerProcessTests
 			Assert.Equal(2, CountLinesContaining(dependenciesText, "src/Relations/A.cs —", " — ambiguous — "));
 
 			var overlappingDependents = await client.CallToolAsync(
-				"related_files",
+				"get_dependencies_and_usages",
 				new Dictionary<string, object?>
 				{
 					["path"] = "src/Relations/A.cs",
@@ -475,7 +475,7 @@ public sealed partial class McpServerProcessTests
 			Assert.Equal(2, CountLinesContaining(dependentsText, "src/Relations/Seed.cs —", " — ambiguous — "));
 
 			var excluded = await client.CallToolAsync(
-				"related_files",
+				"get_dependencies_and_usages",
 				new Dictionary<string, object?>
 				{
 					["path"] = "src/Services/Service.cs",
@@ -490,7 +490,7 @@ public sealed partial class McpServerProcessTests
 			Assert.DoesNotContain("src/Beta/Widget.cs", excludedText, StringComparison.Ordinal);
 
 			var staged = await client.CallToolAsync(
-				"related_files",
+				"get_dependencies_and_usages",
 				new Dictionary<string, object?>
 				{
 					["path"] = "src/Services/Service.cs",
@@ -504,7 +504,7 @@ public sealed partial class McpServerProcessTests
 			Assert.DoesNotContain("outside/Hidden.cs", stagedText, StringComparison.Ordinal);
 
 			var unsupported = await client.CallToolAsync(
-				"related_files",
+				"get_dependencies_and_usages",
 				new Dictionary<string, object?> { ["path"] = "README.md" },
 				progress: null,
 				options: null,

@@ -18,7 +18,7 @@ internal static class McpStoredResultAdvice
 	{
 		McpStoredResultKind.Pack when toolSet == McpToolSet.Full => "pack_context",
 		McpStoredResultKind.Search => "search_project",
-		McpStoredResultKind.Related => "related_files",
+		McpStoredResultKind.Related => "get_dependencies_and_usages",
 		_ => null
 	};
 

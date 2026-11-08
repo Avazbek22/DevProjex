@@ -120,7 +120,7 @@ static IReadOnlyList<BenchmarkOperation> CreateOperations(string root, Benchmark
 		Pack("pack_context_4k", 4_000),
 		Pack("pack_context_16k", 16_000),
 		Pack("pack_context_64k", 64_000),
-		new("related_files", (client, token) => Call(client, "related_files",
+		new("get_dependencies_and_usages", (client, token) => Call(client, "get_dependencies_and_usages",
 			new Dictionary<string, object?> { ["path"] = seed, ["direction"] = "both" }, token)),
 		new("read_pack", async (client, token) =>
 		{

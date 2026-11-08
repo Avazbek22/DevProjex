@@ -32,7 +32,7 @@ public sealed partial class McpServerIntegrationTests
 				SelectedPaths: ["src/App.cs"]));
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path, live: true);
 
-		var result = await server.CallAsync("related_files", new Dictionary<string, object?>
+		var result = await server.CallAsync("get_dependencies_and_usages", new Dictionary<string, object?>
 		{
 			["path"] = "src/App.cs",
 			["direction"] = "both"
@@ -91,7 +91,7 @@ public sealed partial class McpServerIntegrationTests
 				SelectedPaths: ["Core/Logger.cs", "Core/Enrichers/FixedEnricher.cs", "Core/Secretive/Gadget.cs"]));
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path, live: true);
 
-		var result = await server.CallAsync("related_files", new Dictionary<string, object?>
+		var result = await server.CallAsync("get_dependencies_and_usages", new Dictionary<string, object?>
 		{
 			["path"] = "Core/Logger.cs",
 			["direction"] = "dependencies"

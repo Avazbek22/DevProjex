@@ -22,10 +22,10 @@ public sealed class McpResponseAdviceTests
 		{ McpToolSet.Reduced, false, (int)McpStoredResultKind.Related, null },
 		{ McpToolSet.Full, true, (int)McpStoredResultKind.Pack, "pack_context" },
 		{ McpToolSet.Full, true, (int)McpStoredResultKind.Search, "search_project" },
-		{ McpToolSet.Full, true, (int)McpStoredResultKind.Related, "related_files" },
+		{ McpToolSet.Full, true, (int)McpStoredResultKind.Related, "get_dependencies_and_usages" },
 		{ McpToolSet.Reduced, true, (int)McpStoredResultKind.Pack, null },
 		{ McpToolSet.Reduced, true, (int)McpStoredResultKind.Search, "search_project" },
-		{ McpToolSet.Reduced, true, (int)McpStoredResultKind.Related, "related_files" }
+		{ McpToolSet.Reduced, true, (int)McpStoredResultKind.Related, "get_dependencies_and_usages" }
 	};
 
 	[Theory]

@@ -25,7 +25,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 			Create(target, nameof(DevProjexMcpTools.PackContext), "pack_context", "Pack project context", PackContextInput(agentExclusions), largeResult: true, idempotent: false, openWorld: allowRemote),
 			Create(target, nameof(DevProjexMcpTools.ReadPack), "read_pack", "Read context pack", ReadPackInput, largeResult: true),
 			Create(target, nameof(DevProjexMcpTools.SearchProject), "search_project", "Search project", SearchInput(agentExclusions), openWorld: allowRemote),
-			Create(target, nameof(DevProjexMcpTools.RelatedFiles), "related_files", "Find related files", RelatedFilesInput(agentExclusions), largeResult: true, idempotent: false, openWorld: allowRemote),
+			Create(target, nameof(DevProjexMcpTools.RelatedFiles), "get_dependencies_and_usages", "Get dependencies and usages", RelatedFilesInput(agentExclusions), largeResult: true, idempotent: false, openWorld: allowRemote),
 			Create(target, nameof(DevProjexMcpTools.GetFile), "get_file", "Get project file", GetFileInput(agentExclusions), openWorld: allowRemote),
 			Create(target, nameof(DevProjexMcpTools.GetDiff), "get_diff", "Get project diff", GetDiffInput(agentExclusions), openWorld: allowRemote)
 		];
@@ -41,7 +41,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 			{
 				tool.ProtocolTool.Description = ReducedDescription(tool.ProtocolTool.Description);
 				var schema = tool.ProtocolTool.InputSchema.GetRawText()
-					.Replace("pack_context, search_project, or related_files", "search_project or related_files", StringComparison.Ordinal)
+					.Replace("pack_context, search_project, or get_dependencies_and_usages", "search_project or get_dependencies_and_usages", StringComparison.Ordinal)
 					.Replace("; analyze echoes the result.", ".", StringComparison.Ordinal);
 				tool.ProtocolTool.InputSchema = ParseSchema(schema);
 			}
@@ -61,11 +61,11 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	private static string? ReducedDescription(string? description) => description?
 		.Replace("use analyze instead for size and token metrics, or pack_context for multi-file content.",
 			"use get_file instead for file content.", StringComparison.Ordinal)
-		.Replace("created by pack_context, search_project, or related_files", "created by search_project or related_files", StringComparison.Ordinal)
-		.Replace("use pack_context instead, or related_files for dependencies, when none is valid.",
-			"use search_project for evidence or related_files for dependencies when none is valid.", StringComparison.Ordinal)
+		.Replace("created by pack_context, search_project, or get_dependencies_and_usages", "created by search_project or get_dependencies_and_usages", StringComparison.Ordinal)
+		.Replace("use pack_context instead, or get_dependencies_and_usages for dependencies, when none is valid.",
+			"use search_project for evidence or get_dependencies_and_usages for dependencies when none is valid.", StringComparison.Ordinal)
 		.Replace("use pack_context instead when no valid stored result exists.",
-			"use search_project for evidence or related_files for dependencies when no valid stored result exists.", StringComparison.Ordinal)
+			"use search_project for evidence or get_dependencies_and_usages for dependencies when no valid stored result exists.", StringComparison.Ordinal)
 		.Replace("use pack_context for broad multi-file context.", "use batched requests for several known files.", StringComparison.Ordinal);
 
 	public int Count => _tools.Count;
@@ -99,7 +99,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 			BindingFlags.Instance | BindingFlags.Public) ??
 					 throw new MissingMethodException(typeof(DevProjexMcpTools).FullName, methodName);
 		var description = method.GetCustomAttribute<System.ComponentModel.DescriptionAttribute>()?.Description;
-		if (name is "get_tree" or "analyze" or "pack_context" or "search_project" or "related_files" or "get_file" or "get_diff")
+		if (name is "get_tree" or "analyze" or "pack_context" or "search_project" or "get_dependencies_and_usages" or "get_file" or "get_diff")
 			description += ProjectAddressDescription;
 		var options = new McpServerToolCreateOptions
 		{
@@ -135,7 +135,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 		"pack_context" => "package selected project files into context",
 		"read_pack" => "continue reading a stored project result",
 		"search_project" => "search file contents with a regular expression",
-		"related_files" => "trace static dependencies around known files",
+		"get_dependencies_and_usages" => "trace static dependencies around known files",
 		"get_file" => "read project files by path, range, or symbol",
 		"get_diff" => "review changed lines of staged, uncommitted, or ref-to-ref changes",
 		_ => throw new ArgumentOutOfRangeException(nameof(name), name, null)
@@ -346,7 +346,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	  "properties": {
 	    "seeds": { "type": "array", "minItems": 1, "maxItems": {{McpRelatedExpansion.MaximumSeeds}}, "items": { "type": "string" }, "description": "Selected project-relative seed files; directories and globs are invalid." },
 	    "hops": { "type": "integer", "minimum": {{McpRelatedExpansion.MinimumHops}}, "maximum": {{McpRelatedExpansion.MaximumHops}}, "default": {{McpRelatedExpansion.MinimumHops}}, "description": "Number of edges to follow from each seed." },
-	    "direction": { "type": "string", "enum": ["dependencies", "dependents", "both"], "default": "both", "description": "Traversal direction, matching related_files." }
+	    "direction": { "type": "string", "enum": ["dependencies", "dependents", "both"], "default": "both", "description": "Traversal direction, matching get_dependencies_and_usages." }
 	  },
 	  "required": ["seeds"],
 	  "additionalProperties": false
@@ -431,7 +431,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	{
 	  "type": "object",
 	  "properties": {
-	    "pack_id": { "type": "string", "minLength": 1, "description": "Session id returned by pack_context, search_project, or related_files." },
+	    "pack_id": { "type": "string", "minLength": 1, "description": "Session id returned by pack_context, search_project, or get_dependencies_and_usages." },
 	    "start_line": { "description": "First 1-based returned-text line; accepts integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
 	    "end_line": { "description": "Last inclusive 1-based returned-text line; accepts integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
 	    "start_column": { "description": "First 1-based Unicode character on start_line; use a returned continuation value.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] }

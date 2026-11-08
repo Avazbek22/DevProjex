@@ -14,7 +14,7 @@ public sealed class McpToolSetInstructionTests
 		Assert.Contains("up to 1,800 characters", full, StringComparison.Ordinal);
 		var reduced = McpServerHost.BuildInstructions(rootCount, McpToolSet.Reduced);
 		Assert.Contains("up to 1,800 characters", reduced, StringComparison.Ordinal);
-		foreach (var name in new[] { "list_projects", "get_tree", "search_project", "related_files", "get_file", "read_pack" })
+		foreach (var name in new[] { "list_projects", "get_tree", "search_project", "get_dependencies_and_usages", "get_file", "read_pack" })
 			Assert.Contains(name, reduced, StringComparison.Ordinal);
 		Assert.DoesNotContain("pack_context", reduced, StringComparison.Ordinal);
 		Assert.DoesNotContain("analyze", reduced, StringComparison.Ordinal);
@@ -34,7 +34,7 @@ public sealed class McpToolSetInstructionTests
 			standard + " Live context uses the selection saved by the DevProjex window as the baseline. " +
 			"Every response reports its revision. Named files remain readable outside that selection; " +
 			"tree, search, pack, analysis, and diff results remain inside it; " +
-			"related_files also names readable files outside it by path.",
+			"get_dependencies_and_usages also names readable files outside it by path.",
 			live);
 	}
 
@@ -49,7 +49,7 @@ public sealed class McpToolSetInstructionTests
 			standard + " Live context uses the selection saved by the DevProjex window as the baseline. " +
 			"Every response reports its revision. Named files remain readable outside that selection; " +
 			"tree, search, and diff results remain inside it; " +
-			"related_files also names readable files outside it by path.",
+			"get_dependencies_and_usages also names readable files outside it by path.",
 			live);
 		Assert.DoesNotContain("analyze", live, StringComparison.Ordinal);
 		Assert.DoesNotContain("pack_context", live, StringComparison.Ordinal);

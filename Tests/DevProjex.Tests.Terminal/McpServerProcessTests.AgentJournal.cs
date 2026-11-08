@@ -58,7 +58,7 @@ public sealed partial class McpServerProcessTests
 				new Dictionary<string, object?> { ["pattern"] = "Model" });
 			await AssertSuccessful(
 				server,
-				"related_files",
+				"get_dependencies_and_usages",
 				new Dictionary<string, object?> { ["path"] = "src/Program.cs" });
 			await AssertSuccessful(
 				server,

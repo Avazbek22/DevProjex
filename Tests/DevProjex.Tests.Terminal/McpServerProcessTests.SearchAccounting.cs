@@ -94,7 +94,7 @@ public sealed partial class McpServerProcessTests
 		Assert.Contains("large-marker", AllProcessText(packPage), StringComparison.Ordinal);
 
 		var related = await server.Client.CallToolAsync(
-			"related_files",
+			"get_dependencies_and_usages",
 			new Dictionary<string, object?>
 			{
 				["project"] = projectName,

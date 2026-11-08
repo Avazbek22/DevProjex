@@ -112,7 +112,7 @@ public sealed partial class McpServerIntegrationTests
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
 
 		var beforeIndex = await server.CallAsync("get_file", new Dictionary<string, object?> { ["path"] = "src/a.ts" });
-		var related = await server.CallAsync("related_files", new Dictionary<string, object?>
+		var related = await server.CallAsync("get_dependencies_and_usages", new Dictionary<string, object?>
 		{
 			["path"] = "src/a.ts",
 			["direction"] = "dependents"

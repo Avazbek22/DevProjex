@@ -30,7 +30,7 @@ public sealed partial class McpServerIntegrationTests
 		"pack_context",
 		"read_pack",
 		"search_project",
-		"related_files",
+		"get_dependencies_and_usages",
 		"get_file",
 		"get_diff"
 	];
@@ -71,7 +71,7 @@ public sealed partial class McpServerIntegrationTests
 			Assert.NotEmpty(packId);
 			Assert.NotEqual(true, (await server.CallAsync("read_pack", new Dictionary<string, object?> { ["pack_id"] = packId })).IsError);
 			Assert.NotEqual(true, (await server.CallAsync("search_project", new Dictionary<string, object?> { ["pattern"] = "Model" })).IsError);
-			Assert.NotEqual(true, (await server.CallAsync("related_files", new Dictionary<string, object?> { ["path"] = "src/Program.cs" })).IsError);
+			Assert.NotEqual(true, (await server.CallAsync("get_dependencies_and_usages", new Dictionary<string, object?> { ["path"] = "src/Program.cs" })).IsError);
 			var file = await server.CallAsync("get_file", new Dictionary<string, object?> { ["path"] = "Outside.cs" });
 			Assert.NotEqual(true, file.IsError);
 			Assert.Equal(live, AllText(file).Contains("returned outside the current focus", StringComparison.Ordinal));
@@ -158,7 +158,7 @@ public sealed partial class McpServerIntegrationTests
 		Assert.Contains("[Live context] revision 1", search, StringComparison.Ordinal);
 
 		var related = AllText(await server.CallAsync(
-			"related_files",
+			"get_dependencies_and_usages",
 			new Dictionary<string, object?> { ["path"] = "src/Inside.cs" }));
 		Assert.Contains("[Live context] revision 1", related, StringComparison.Ordinal);
 
@@ -2140,7 +2140,7 @@ public sealed partial class McpServerIntegrationTests
 			options: null,
 			TestContext.Current.CancellationToken);
 
-		string[] delegated = ["get_tree", "analyze", "pack_context", "search_project", "related_files", "get_file", "get_diff"];
+		string[] delegated = ["get_tree", "analyze", "pack_context", "search_project", "get_dependencies_and_usages", "get_file", "get_diff"];
 		foreach (var tool in tools)
 		{
 			var schema = tool.ProtocolTool.InputSchema;
@@ -2508,7 +2508,7 @@ public sealed partial class McpServerIntegrationTests
 			"analyze",
 			"pack_context",
 			"search_project",
-			"related_files",
+			"get_dependencies_and_usages",
 			"get_file",
 			"get_diff"
 		};
@@ -2520,7 +2520,7 @@ public sealed partial class McpServerIntegrationTests
 			["pack_context"] = "package selected project files into context",
 			["read_pack"] = "continue reading a stored project result",
 			["search_project"] = "search file contents with a regular expression",
-			["related_files"] = "trace static dependencies around known files",
+			["get_dependencies_and_usages"] = "trace static dependencies around known files",
 			["get_file"] = "read project files by path, range, or symbol",
 			["get_diff"] = "review changed lines of staged, uncommitted, or ref-to-ref changes"
 		};
@@ -2530,7 +2530,7 @@ public sealed partial class McpServerIntegrationTests
 			Assert.False(string.IsNullOrWhiteSpace(protocol.Title));
 			Assert.True(protocol.Annotations?.ReadOnlyHint);
 			Assert.Equal(
-				tool.Name is not ("pack_context" or "related_files"),
+				tool.Name is not ("pack_context" or "get_dependencies_and_usages"),
 				protocol.Annotations?.IdempotentHint);
 			Assert.Equal(
 				allowRemote && remoteProjectTools.Contains(tool.Name),
@@ -2545,7 +2545,7 @@ public sealed partial class McpServerIntegrationTests
 			Assert.False(protocol.Meta.ContainsKey("anthropic/alwaysLoad"));
 		});
 		Assert.All(tools, static tool => Assert.Null(tool.ProtocolTool.OutputSchema));
-		foreach (var name in new[] { "analyze", "search_project", "related_files" })
+		foreach (var name in new[] { "analyze", "search_project", "get_dependencies_and_usages" })
 		{
 			var protocol = tools.Single(tool => tool.Name == name).ProtocolTool;
 			var parameters = protocol.InputSchema.GetProperty("properties");
@@ -2599,7 +2599,7 @@ public sealed partial class McpServerIntegrationTests
 			["pack_context"] = ["project", "branch", "paths", "include_patterns", "exclude_patterns", "profile", "detail", "detail_by_pattern", "tracked_only", "git_scope", "rank", "focus", "max_tokens", "max_file_bytes", "expand_related", "view", "format"],
 			["read_pack"] = ["pack_id", "start_line", "end_line", "start_column"],
 			["search_project"] = ["project", "branch", "pattern", "paths", "include_patterns", "exclude_patterns", "tracked_only", "git_scope", "max_file_bytes", "context_lines", "ignore_case", "symbols", "max_results"],
-			["related_files"] = ["project", "branch", "path", "direction", "include_patterns", "exclude_patterns", "profile", "tracked_only", "git_scope", "max_file_bytes"],
+			["get_dependencies_and_usages"] = ["project", "branch", "path", "direction", "include_patterns", "exclude_patterns", "profile", "tracked_only", "git_scope", "max_file_bytes"],
 			["get_file"] = ["project", "branch", "profile", "path", "paths", "requests", "start_line", "end_line", "start_column", "symbol"],
 			["get_diff"] = ["project", "branch", "profile", "git_scope", "paths", "include_patterns", "exclude_patterns", "tracked_only", "max_file_bytes", "context_lines"]
 		};
@@ -2687,7 +2687,7 @@ public sealed partial class McpServerIntegrationTests
 				["full", "compact", "signatures"],
 				detail.GetProperty("enum").EnumerateArray().Select(static item => item.GetString()));
 		}
-		foreach (var toolName in new[] { "get_tree", "analyze", "pack_context", "search_project", "related_files" })
+		foreach (var toolName in new[] { "get_tree", "analyze", "pack_context", "search_project", "get_dependencies_and_usages" })
 		{
 			var publishedGitScope = tools.Single(tool => tool.Name == toolName)
 				.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("git_scope");
@@ -2734,7 +2734,7 @@ public sealed partial class McpServerIntegrationTests
 			("read_pack", "start_column"),
 			("search_project", "max_file_bytes"),
 			("search_project", "max_results"),
-			("related_files", "max_file_bytes"),
+			("get_dependencies_and_usages", "max_file_bytes"),
 			("get_file", "start_line"),
 			("get_file", "end_line"),
 			("get_file", "start_column")
@@ -2748,7 +2748,7 @@ public sealed partial class McpServerIntegrationTests
 			Assert.Matches(pattern!, "0002");
 			Assert.DoesNotMatch(pattern!, "0000");
 		}
-		foreach (var name in new[] { "get_tree", "analyze", "pack_context", "search_project", "related_files" })
+		foreach (var name in new[] { "get_tree", "analyze", "pack_context", "search_project", "get_dependencies_and_usages" })
 		{
 			var properties = tools.Single(tool => tool.Name == name)
 				.ProtocolTool.InputSchema.GetProperty("properties");
@@ -2799,11 +2799,11 @@ public sealed partial class McpServerIntegrationTests
 			"requests=[{\"path\":\"src/a.ts\",\"symbol\":\"Router.load\"}]",
 			getFile,
 			StringComparison.Ordinal);
-		Assert.Contains("one batched call for several", instructions, StringComparison.Ordinal);
+		Assert.Contains("batched for several", instructions, StringComparison.Ordinal);
 		Assert.Contains("One local root is configured", instructions, StringComparison.Ordinal);
 		Assert.Contains("Use get_file for known locations", instructions, StringComparison.Ordinal);
 		Assert.Contains("pack_context for multi-file documents", instructions, StringComparison.Ordinal);
-		Assert.Single(Regex.Matches(instructions, "one batched", RegexOptions.None, TimeSpan.FromSeconds(2)));
+		Assert.Single(Regex.Matches(instructions, "batched", RegexOptions.None, TimeSpan.FromSeconds(2)));
 	}
 
 	[Fact]
@@ -7150,7 +7150,7 @@ public sealed partial class McpServerIntegrationTests
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
 
 		var result = await server.CallAsync(
-			"related_files",
+			"get_dependencies_and_usages",
 			new Dictionary<string, object?> { ["path"] = "main.ts" });
 		var text = Text(result);
 
@@ -7178,7 +7178,7 @@ public sealed partial class McpServerIntegrationTests
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
 
 		var result = await server.CallAsync(
-			"related_files",
+			"get_dependencies_and_usages",
 			new Dictionary<string, object?>
 			{
 				["path"] = "Consumer.cs",
@@ -7204,7 +7204,7 @@ public sealed partial class McpServerIntegrationTests
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
 
 		var result = await server.CallAsync(
-			"related_files",
+			"get_dependencies_and_usages",
 			new Dictionary<string, object?> { ["path"] = "Main.cs" });
 
 		Assert.NotEqual(true, result.IsError);
@@ -7255,7 +7255,7 @@ public sealed partial class McpServerIntegrationTests
 			});
 
 		var result = await server.CallAsync(
-			"related_files",
+			"get_dependencies_and_usages",
 			new Dictionary<string, object?> { ["path"] = "File00000.txt" },
 			options: new RequestOptions { ProgressToken = token });
 		Assert.NotEqual(true, result.IsError);
@@ -7431,7 +7431,7 @@ public sealed partial class McpServerIntegrationTests
 		store.SaveProfile(project, new ProjectSelectionProfile([], [".cs", ".csproj"], [], SelectedPaths: null));
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path, live: true);
 		var firstRelated = await server.CallAsync(
-			"related_files",
+			"get_dependencies_and_usages",
 			new Dictionary<string, object?> { ["path"] = relativeConsumer });
 		Assert.Contains(typeName, AllText(firstRelated), StringComparison.Ordinal);
 		await AddPersistentMarkAsync(
@@ -7446,7 +7446,7 @@ public sealed partial class McpServerIntegrationTests
 			"get_file",
 			new Dictionary<string, object?> { ["path"] = relativeConsumer });
 		var related = await server.CallAsync(
-			"related_files",
+			"get_dependencies_and_usages",
 			new Dictionary<string, object?> { ["path"] = relativeConsumer });
 
 		Assert.DoesNotContain(typeName, AllText(file), StringComparison.Ordinal);
@@ -7504,7 +7504,7 @@ public sealed partial class McpServerIntegrationTests
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
 
 		var result = await server.CallAsync(
-			"related_files",
+			"get_dependencies_and_usages",
 			new Dictionary<string, object?> { ["path"] = "Good.kt" });
 		var text = Text(result);
 
@@ -7593,7 +7593,7 @@ public sealed partial class McpServerIntegrationTests
 			dependencyFactsEngine: dependencyFacts);
 
 		var result = await server.CallAsync(
-			"related_files",
+			"get_dependencies_and_usages",
 			new Dictionary<string, object?> { ["path"] = "Target.cs" });
 		var text = ExtractSpotlightBody(Text(result));
 
@@ -7889,7 +7889,7 @@ public sealed partial class McpServerIntegrationTests
 		File.WriteAllText(Path.Combine(project, token + ".ts"), "export default 1;\n");
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
 
-		var inline = await server.CallAsync("related_files", new Dictionary<string, object?>
+		var inline = await server.CallAsync("get_dependencies_and_usages", new Dictionary<string, object?>
 		{
 			["path"] = "Main.ts",
 			["direction"] = "dependencies"
@@ -7906,7 +7906,7 @@ public sealed partial class McpServerIntegrationTests
 			imports.Append("import value").Append(index).Append(" from './").Append(name).AppendLine(".js';");
 		}
 		File.WriteAllText(Path.Combine(project, "Large.ts"), imports.ToString());
-		var stored = await server.CallAsync("related_files", new Dictionary<string, object?>
+		var stored = await server.CallAsync("get_dependencies_and_usages", new Dictionary<string, object?>
 		{
 			["path"] = "Large.ts",
 			["direction"] = "dependencies"
@@ -7937,7 +7937,7 @@ public sealed partial class McpServerIntegrationTests
 		using var measurement = McpRelatedEvidenceRetentionDiagnostics.BeginMeasurement();
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
 
-		var result = await server.CallAsync("related_files", new Dictionary<string, object?>
+		var result = await server.CallAsync("get_dependencies_and_usages", new Dictionary<string, object?>
 		{
 			["path"] = "Target.ts",
 			["direction"] = "dependents"
@@ -7973,7 +7973,7 @@ public sealed partial class McpServerIntegrationTests
 		CallToolResult result;
 		await using (var server = await McpTestServer.StartAsync(project, workspace.Path))
 		{
-			result = await server.CallAsync("related_files", new Dictionary<string, object?>
+			result = await server.CallAsync("get_dependencies_and_usages", new Dictionary<string, object?>
 			{
 				["path"] = "Target.ts",
 				["direction"] = "dependents"
@@ -7990,7 +7990,7 @@ public sealed partial class McpServerIntegrationTests
 			activeSessionProvider: static () => []);
 		var session = Assert.Single(await journal.ListSessionsAsync(cancellationToken: TestContext.Current.CancellationToken));
 		var call = Assert.Single(await journal.ReadCallsAsync(session.Id, TestContext.Current.CancellationToken));
-		Assert.Equal("related_files", call.Tool);
+		Assert.Equal("get_dependencies_and_usages", call.Tool);
 		Assert.Contains(AgentJournalNoticeCodes.Unavailable, call.Notices);
 	}
 
@@ -8014,7 +8014,7 @@ public sealed partial class McpServerIntegrationTests
 			tools.Single(static tool => tool.Name == "list_projects").ProtocolTool.Description,
 			StringComparison.Ordinal);
 		foreach (var tool in tools.Where(static tool => tool.Name is
-			"get_tree" or "analyze" or "pack_context" or "search_project" or "related_files" or "get_file" or "get_diff"))
+			"get_tree" or "analyze" or "pack_context" or "search_project" or "get_dependencies_and_usages" or "get_file" or "get_diff"))
 		{
 			Assert.Contains("absolute path returned by list_projects", tool.ProtocolTool.Description,
 				StringComparison.Ordinal);
@@ -8051,7 +8051,7 @@ public sealed partial class McpServerIntegrationTests
 		});
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
 
-		var result = await server.CallAsync("related_files", new Dictionary<string, object?>
+		var result = await server.CallAsync("get_dependencies_and_usages", new Dictionary<string, object?>
 		{
 			["path"] = "Target.ts",
 			["direction"] = "dependents"
@@ -8222,7 +8222,7 @@ public sealed partial class McpServerIntegrationTests
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
 
 		var result = await server.CallAsync(
-			"related_files",
+			"get_dependencies_and_usages",
 			new Dictionary<string, object?>
 			{
 				["path"] = "main.ts",
@@ -8252,7 +8252,7 @@ public sealed partial class McpServerIntegrationTests
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
 
 		async Task<string> RelatedAsync(string path, string direction) => Text(await server.CallAsync(
-			"related_files",
+			"get_dependencies_and_usages",
 			new Dictionary<string, object?> { ["path"] = path, ["direction"] = direction }));
 		var covered = await RelatedAsync("consumer.ts", "dependencies");
 		var partlyEmpty = await RelatedAsync("consumer.ts", "both");
@@ -8295,7 +8295,7 @@ public sealed partial class McpServerIntegrationTests
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
 
 		var result = await server.CallAsync(
-			"related_files",
+			"get_dependencies_and_usages",
 			new Dictionary<string, object?>
 			{
 				["path"] = "Main.ts",
@@ -8369,11 +8369,11 @@ public sealed partial class McpServerIntegrationTests
 				["ignore_case"] = false,
 				["context_lines"] = 0
 			}),
-			await server.CallAsync("related_files", new Dictionary<string, object?>
+			await server.CallAsync("get_dependencies_and_usages", new Dictionary<string, object?>
 			{
 				["path"] = Path.Combine(scopeName, seed)
 			}),
-			await server.CallAsync("related_files", new Dictionary<string, object?>
+			await server.CallAsync("get_dependencies_and_usages", new Dictionary<string, object?>
 			{
 				["path"] = "unsupported." + sentinel
 			}),
@@ -8395,7 +8395,7 @@ public sealed partial class McpServerIntegrationTests
 		var resultNames = new[]
 		{
 			"list_projects", "get_tree", "analyze", "pack_context-inline", "search_project",
-			"related_files", "related_files-no-facts", "get_file", "pack_context-stored", "read_pack"
+			"get_dependencies_and_usages", "get_dependencies_and_usages-no-facts", "get_file", "pack_context-stored", "read_pack"
 		};
 		for (var index = 0; index < normalResults.Count; index++)
 		{
@@ -8479,7 +8479,7 @@ public sealed partial class McpServerIntegrationTests
 				["pattern"] = "FindFixture",
 				["context_lines"] = 0
 			}), true),
-			("related_files", await server.CallAsync("related_files", new Dictionary<string, object?>(remote)
+			("get_dependencies_and_usages", await server.CallAsync("get_dependencies_and_usages", new Dictionary<string, object?>(remote)
 			{
 				["path"] = "Main.cs"
 			}), true),

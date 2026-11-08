@@ -41,7 +41,7 @@ public sealed partial class McpServerIntegrationTests
 		try
 		{
 			var firstMessage = server.WireMessageCount;
-			var result = await server.CallAsync("related_files",
+			var result = await server.CallAsync("get_dependencies_and_usages",
 				new Dictionary<string, object?> { ["path"] = "File.txt" },
 				options: new RequestOptions { ProgressToken = token });
 			await terminalCompleted.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);

@@ -14,7 +14,7 @@ dotnet run -c Release --project tools/Benchmarks/Mcp/DevProjex.Benchmarks.Mcp.cs
   --synthetic-files 20000 --file d000/f00000.ts --seed d000/f00000.ts --repetitions 5
 ```
 
-Use `--only related_files` (or a comma-separated operation list) for a focused rerun.
+Use `--only get_dependencies_and_usages` (or a comma-separated operation list) for a focused rerun.
 
 Use `--cold-first-search` to measure a fresh MCP process from initialization through
 `list_projects`, `get_tree`, the first `search_project`, and an identical repeat search.

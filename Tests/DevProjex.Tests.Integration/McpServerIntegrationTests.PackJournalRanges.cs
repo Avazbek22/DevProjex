@@ -25,7 +25,7 @@ public sealed partial class McpServerIntegrationTests
 
 		await using (var server = await McpTestServer.StartAsync(project, workspace.Path))
 		{
-			var inline = await server.CallAsync("related_files", new Dictionary<string, object?>
+			var inline = await server.CallAsync("get_dependencies_and_usages", new Dictionary<string, object?>
 			{
 				["path"] = "Main.ts",
 				["direction"] = "dependencies"
@@ -33,7 +33,7 @@ public sealed partial class McpServerIntegrationTests
 			Assert.NotEqual(true, inline.IsError);
 			Assert.Contains("DEVPROJEX_REDACTED[", AllText(inline), StringComparison.Ordinal);
 
-			var stored = await server.CallAsync("related_files", new Dictionary<string, object?>
+			var stored = await server.CallAsync("get_dependencies_and_usages", new Dictionary<string, object?>
 			{
 				["path"] = "Large.ts",
 				["direction"] = "dependencies"
@@ -53,7 +53,7 @@ public sealed partial class McpServerIntegrationTests
 			project,
 			cancellationToken: TestContext.Current.CancellationToken));
 		var calls = await journal.ReadCallsAsync(session.Id, TestContext.Current.CancellationToken);
-		Assert.Equal(["related_files", "related_files", "read_pack"],
+		Assert.Equal(["get_dependencies_and_usages", "get_dependencies_and_usages", "read_pack"],
 			calls.Select(static call => call.Tool));
 		Assert.True(calls[0].SecretsMasked > 0);
 		Assert.Equal(0, calls[1].SecretsMasked);
@@ -85,25 +85,25 @@ public sealed partial class McpServerIntegrationTests
 
 		await using (var server = await McpTestServer.StartAsync(project, workspace.Path))
 		{
-			var lonely = await server.CallAsync("related_files", new Dictionary<string, object?>
+			var lonely = await server.CallAsync("get_dependencies_and_usages", new Dictionary<string, object?>
 			{
 				["path"] = "Lonely.ts"
 			});
 			Assert.NotEqual(true, lonely.IsError);
 			Assert.Contains("[No related files]", AllText(lonely), StringComparison.Ordinal);
-			var dependencies = await server.CallAsync("related_files", new Dictionary<string, object?>
+			var dependencies = await server.CallAsync("get_dependencies_and_usages", new Dictionary<string, object?>
 			{
 				["path"] = "Main.ts",
 				["direction"] = "dependencies"
 			});
 			Assert.Contains("Target.ts", AllText(dependencies), StringComparison.Ordinal);
-			var dependents = await server.CallAsync("related_files", new Dictionary<string, object?>
+			var dependents = await server.CallAsync("get_dependencies_and_usages", new Dictionary<string, object?>
 			{
 				["path"] = "Target.ts",
 				["direction"] = "dependents"
 			});
 			Assert.Contains("Consumer.ts", AllText(dependents), StringComparison.Ordinal);
-			var stored = await server.CallAsync("related_files", new Dictionary<string, object?>
+			var stored = await server.CallAsync("get_dependencies_and_usages", new Dictionary<string, object?>
 			{
 				["path"] = "Large.ts",
 				["direction"] = "dependencies"
@@ -123,7 +123,7 @@ public sealed partial class McpServerIntegrationTests
 			project,
 			cancellationToken: TestContext.Current.CancellationToken));
 		var calls = await journal.ReadCallsAsync(session.Id, TestContext.Current.CancellationToken);
-		Assert.Equal(["related_files", "related_files", "related_files", "related_files", "read_pack"],
+		Assert.Equal(["get_dependencies_and_usages", "get_dependencies_and_usages", "get_dependencies_and_usages", "get_dependencies_and_usages", "read_pack"],
 			calls.Select(static call => call.Tool));
 		// An answer with no relations only names its seed, like a get_tree listing.
 		Assert.Equal(0, calls[0].FilesDelivered);

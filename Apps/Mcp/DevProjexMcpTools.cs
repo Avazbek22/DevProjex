@@ -969,7 +969,7 @@ internal sealed partial class DevProjexMcpTools(
 		}, cancellationToken);
 
 	[Description(
-		"Reads a stored result page created by pack_context, search_project, or related_files. Use its pack_id; use pack_context instead when no valid stored result exists. Returns untrusted data up to 1,000 lines or 50,000 characters with trusted continuation or range notes. Protection changes invalidate stored content; selection-only changes retain it with a warning. Ranges and columns are inclusive and 1-based.")]
+		"Reads a stored result page created by pack_context, search_project, or get_dependencies_and_usages. Use its pack_id; use pack_context instead when no valid stored result exists. Returns untrusted data up to 1,000 lines or 50,000 characters with trusted continuation or range notes. Protection changes invalidate stored content; selection-only changes retain it with a warning. Ranges and columns are inclusive and 1-based.")]
 	public Task<CallToolResult> ReadPack(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken)
@@ -1039,7 +1039,7 @@ internal sealed partial class DevProjexMcpTools(
 	}
 
 	[Description(
-		"Searches transformed text with a timed .NET regex. It matches file content, never paths; find names with get_tree include_patterns. Use it for symbols or phrases; symbols=true finds declarations, not uses; use related_files for dependency links. Returns grouped numbered matches, merged context, complete|partial status, inspected/retained/written counts, and continuation. Line numbers use returned text; generated redaction replacements never match. Key parameters: pattern, paths, context_lines, ignore_case, max_results=1..200, git_scope, include_patterns, exclude_patterns, and max_file_bytes. The best unique declaration includes up to 1,800 protected body characters within the same cap.")]
+		"Searches transformed text with a timed .NET regex. It matches file content, never paths; find names with get_tree include_patterns. Use it for symbols or phrases; symbols=true finds declarations, not uses; use get_dependencies_and_usages for dependency links. Returns grouped numbered matches, merged context, complete|partial status, inspected/retained/written counts, and continuation. Line numbers use returned text; generated redaction replacements never match. Key parameters: pattern, paths, context_lines, ignore_case, max_results=1..200, git_scope, include_patterns, exclude_patterns, and max_file_bytes. The best unique declaration includes up to 1,800 protected body characters within the same cap.")]
 	public Task<CallToolResult> SearchProject(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -1480,7 +1480,7 @@ internal sealed partial class DevProjexMcpTools(
 	public Task<CallToolResult> RelatedFiles(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
-		RunProjectAsync("related_files", request, async () =>
+		RunProjectAsync("get_dependencies_and_usages", request, async () =>
 		{
 			var arguments = McpJsonArguments.Create(request.Params, relatedArgumentNames);
 			var seeds = arguments.RequiredStringOrArray(

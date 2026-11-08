@@ -14,7 +14,7 @@ public sealed partial class McpServerProcessTests
 		workspace.WriteFile("project/Main.scala", "package app\nimport models.{Remote => Renamed}\nclass Main(value: Renamed)\nimport unknown._\n");
 		workspace.WriteFile("project/models/Remote.scala", "package models\nclass Remote\n");
 		await using var server = await ActualMcpProcess.StartAsync(project, workspace.CreateDirectory("data"));
-		var result = await CallAsync(server, "related_files", new Dictionary<string, object?> { ["path"] = "Main.scala", ["direction"] = "dependencies" });
+		var result = await CallAsync(server, "get_dependencies_and_usages", new Dictionary<string, object?> { ["path"] = "Main.scala", ["direction"] = "dependencies" });
 		var text = AllProcessText(result);
 		Assert.NotEqual(true, result.IsError);
 		Assert.Contains("models/Remote.scala", text, StringComparison.Ordinal);

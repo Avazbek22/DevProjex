@@ -12,7 +12,7 @@ public sealed partial class McpServerProcessTests
 		var project = WriteOutsideSelectionProject(workspace);
 		await using var server = await ActualMcpProcess.StartAsync(project, workspace.CreateDirectory("data"));
 
-		var narrowed = await CallAsync(server, "related_files", new Dictionary<string, object?>
+		var narrowed = await CallAsync(server, "get_dependencies_and_usages", new Dictionary<string, object?>
 		{
 			["path"] = "Services/Store.cs",
 			["direction"] = "dependencies",
@@ -38,7 +38,7 @@ public sealed partial class McpServerProcessTests
 		var project = WriteOutsideSelectionProject(workspace);
 		await using var server = await ActualMcpProcess.StartAsync(project, workspace.CreateDirectory("data"));
 
-		var whole = await CallAsync(server, "related_files", new Dictionary<string, object?>
+		var whole = await CallAsync(server, "get_dependencies_and_usages", new Dictionary<string, object?>
 		{
 			["path"] = "Services/Store.cs",
 			["direction"] = "both"
@@ -68,7 +68,7 @@ public sealed partial class McpServerProcessTests
 			workspace.CreateDirectory("data"),
 			["--exclude", "default", "--exclude", "dot-folders"]);
 
-		var result = await CallAsync(server, "related_files", new Dictionary<string, object?>
+		var result = await CallAsync(server, "get_dependencies_and_usages", new Dictionary<string, object?>
 		{
 			["path"] = "Services/Uses.cs",
 			["direction"] = "dependencies",
@@ -87,7 +87,7 @@ public sealed partial class McpServerProcessTests
 
 		// Each filter is what keeps its file out: lifting the call's own filters lists them, and a
 		// server without the startup exclusion lists the dot-folder file too.
-		var unfiltered = await CallAsync(server, "related_files", new Dictionary<string, object?>
+		var unfiltered = await CallAsync(server, "get_dependencies_and_usages", new Dictionary<string, object?>
 		{
 			["path"] = "Services/Uses.cs",
 			["direction"] = "dependencies",
@@ -98,7 +98,7 @@ public sealed partial class McpServerProcessTests
 		Assert.Contains("Models/Large.cs — ", unfilteredText, StringComparison.Ordinal);
 		Assert.DoesNotContain("Hidden.cs", unfilteredText, StringComparison.Ordinal);
 		await using var permissive = await ActualMcpProcess.StartAsync(project, workspace.CreateDirectory("data-permissive"));
-		var permissiveResult = await CallAsync(permissive, "related_files", new Dictionary<string, object?>
+		var permissiveResult = await CallAsync(permissive, "get_dependencies_and_usages", new Dictionary<string, object?>
 		{
 			["path"] = "Services/Uses.cs",
 			["direction"] = "dependencies",
@@ -117,13 +117,13 @@ public sealed partial class McpServerProcessTests
 		NarrowedRelationFixtures.WriteGlobalUsingLibrary(workspace, "project");
 		await using var server = await ActualMcpProcess.StartAsync(project, workspace.CreateDirectory("data"));
 
-		var narrowed = await CallAsync(server, "related_files", new Dictionary<string, object?>
+		var narrowed = await CallAsync(server, "get_dependencies_and_usages", new Dictionary<string, object?>
 		{
 			["path"] = NarrowedRelationFixtures.LibrarySeed,
 			["direction"] = "both",
 			["include_patterns"] = new[] { NarrowedRelationFixtures.LibraryFolder + "/**" }
 		});
-		var whole = await CallAsync(server, "related_files", new Dictionary<string, object?>
+		var whole = await CallAsync(server, "get_dependencies_and_usages", new Dictionary<string, object?>
 		{
 			["path"] = NarrowedRelationFixtures.LibrarySeed,
 			["direction"] = "both"
@@ -169,7 +169,7 @@ public sealed partial class McpServerProcessTests
 			"namespace Lib.Events;\npublic sealed class MarkedEvent { }\n");
 		await using var server = await ActualMcpProcess.StartAsync(project, workspace.CreateDirectory("data"));
 
-		var result = await CallAsync(server, "related_files", new Dictionary<string, object?>
+		var result = await CallAsync(server, "get_dependencies_and_usages", new Dictionary<string, object?>
 		{
 			["path"] = "Core/Marked.cs",
 			["direction"] = "both",

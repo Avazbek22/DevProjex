@@ -14,7 +14,7 @@ public sealed partial class McpServerIntegrationTests
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
 
 		var related = await server.CallAsync(
-			"related_files",
+			"get_dependencies_and_usages",
 			new Dictionary<string, object?> { ["path"] = "Node.cs", ["direction"] = "both" });
 
 		Assert.NotEqual(true, related.IsError);

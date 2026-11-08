@@ -139,7 +139,7 @@ Live context uses `--live`; **Standard** connects the same server but does not f
 
 ### Nine read-only tools
 
-Nine read-only tools cover the whole workflow: `list_projects`, `get_tree`, `analyze`, `search_project`, `related_files`, `get_file`, `get_diff`, `pack_context`, and `read_pack`.
+Nine read-only tools cover the whole workflow: `list_projects`, `get_tree`, `analyze`, `search_project`, `get_dependencies_and_usages`, `get_file`, `get_diff`, `pack_context`, and `read_pack`.
 
 * `search_project` finds text or declarations by name, and `get_file` reads an exact line range or one declaration instead of a whole file.
 * `related_files` answers "what does this file actually use, and who uses it" from real imports, for one file or a handful of seeds, so following a thread never widens the selection.

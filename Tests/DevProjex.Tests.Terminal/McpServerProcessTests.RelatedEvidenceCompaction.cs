@@ -56,7 +56,7 @@ public sealed partial class McpServerProcessTests
 	private static async Task<string> RelatedEvidenceTextAsync(TemporaryDirectory workspace, string project)
 	{
 		await using var server = await ActualMcpProcess.StartAsync(project, workspace.CreateDirectory("data"));
-		var result = await CallAsync(server, "related_files", new Dictionary<string, object?>
+		var result = await CallAsync(server, "get_dependencies_and_usages", new Dictionary<string, object?>
 		{
 			["path"] = "Services/Store.cs",
 			["direction"] = "dependencies"

@@ -25,13 +25,13 @@ public sealed partial class McpServerProcessTests
 		var control = await CallAsync(server, "get_file", new Dictionary<string, object?> { ["path"] = "Visible.txt" });
 		Assert.NotEqual(true, control.IsError);
 		Assert.Contains("inside-control-marker", AllProcessText(control), StringComparison.Ordinal);
-		foreach (var tool in new[] { "get_tree", "analyze", "search_project", "get_file", "pack_context", "related_files" })
+		foreach (var tool in new[] { "get_tree", "analyze", "search_project", "get_file", "pack_context", "get_dependencies_and_usages" })
 		{
 			var arguments = new Dictionary<string, object?>
 			{
 				["project"] = new Uri(outside + Path.DirectorySeparatorChar).AbsoluteUri
 			};
-			if (tool is "get_file" or "related_files")
+			if (tool is "get_file" or "get_dependencies_and_usages")
 				arguments["path"] = "Hidden.txt";
 			if (tool == "search_project")
 				arguments["pattern"] = "outside-content-marker";

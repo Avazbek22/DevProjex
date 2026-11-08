@@ -80,7 +80,7 @@ public sealed class McpStoredSearchRegistryTests
 
 		var failure = Assert.Throws<McpToolException>(() => registry.OpenReadDocument(stored));
 		Assert.Contains("related-files result expired", failure.Message, StringComparison.Ordinal);
-		Assert.Contains("call related_files again", failure.Message, StringComparison.Ordinal);
+		Assert.Contains("call get_dependencies_and_usages again", failure.Message, StringComparison.Ordinal);
 		Assert.DoesNotContain("pack_context", failure.Message, StringComparison.Ordinal);
 	}
 

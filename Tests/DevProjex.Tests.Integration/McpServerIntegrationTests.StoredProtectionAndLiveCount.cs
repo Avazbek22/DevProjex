@@ -64,7 +64,7 @@ public sealed partial class McpServerIntegrationTests
 		store.SaveProfile(physicalProject, new ProjectSelectionProfile([], [".ts"], []));
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
 
-		var stored = await server.CallAsync("related_files", new Dictionary<string, object?>
+		var stored = await server.CallAsync("get_dependencies_and_usages", new Dictionary<string, object?>
 		{
 			["profile"] = "local",
 			["path"] = "Main.ts",

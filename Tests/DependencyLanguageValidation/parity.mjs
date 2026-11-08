@@ -22,7 +22,7 @@ try {
       '--format', 'json', '--git-mode', 'none', '--exclude', 'none', '--progress', 'never', '--plain', '--language', 'en'],
     { cwd: root, env: { ...process.env, DEVPROJEX_INTERNAL_DATA_ROOT: join(dataPath, 'cli') }, windowsHide: true,
       timeout: 300_000, maxBuffer: 16 * 1024 * 1024 });
-    const mcp = await client.callAndPage('related_files', { path: sample.Path, direction: 'dependencies' });
+    const mcp = await client.callAndPage('get_dependencies_and_usages', { path: sample.Path, direction: 'dependencies' });
     if (mcp.isError) throw new Error(mcp.allText);
     const parsed = parseMcpRelated(mcp.allText);
     parsed.seed ??= sample.Path;
