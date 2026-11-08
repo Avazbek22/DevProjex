@@ -518,6 +518,36 @@ internal sealed class McpProjectService(
 		return plan.IncludedFiles.Any(path => !selected.Contains(path)) ? plan : null;
 	}
 
+	/// <summary>
+	/// Every file a named <c>get_file</c> could read under this profile and these exclusions,
+	/// without any per-call path, pattern or Git narrowing.
+	/// </summary>
+	public async Task<ProjectContextPlan> BuildReadableProjectPlanAsync(
+		string? project,
+		string? branch,
+		string? profile,
+		IReadOnlyList<ProjectExclusion>? exclusions,
+		CancellationToken cancellationToken)
+	{
+		var plan = await BuildPlanAsync(
+			project,
+			branch,
+			paths: null,
+			includePatterns: null,
+			excludePatterns: null,
+			profile,
+			trackedOnly: false,
+			gitScope: null,
+			maximumFileBytes: null,
+			cancellationToken,
+			includeOutputMetrics: false,
+			exclusions).ConfigureAwait(false);
+		return liveContext is null
+			? plan
+			: await WidenLiveFocusAsync(plan, excludePatterns: null, maximumFileBytes: null, cancellationToken)
+				.ConfigureAwait(false);
+	}
+
 	// Live checked nodes are a focus, not an access boundary: a named get_file may read any file the
 	// effective filters keep, so the same set bounds what related files may name.
 	private async Task<ProjectContextPlan> WidenLiveFocusAsync(
