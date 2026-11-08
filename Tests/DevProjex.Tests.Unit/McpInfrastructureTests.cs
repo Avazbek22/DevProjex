@@ -2574,6 +2574,96 @@ public sealed class McpInfrastructureTests
 		Assert.InRange(allocatedBytes, 0, 2 * 1024 * 1024);
 	}
 
+	[Theory]
+	[InlineData("^tests/client/", true)]
+	[InlineData("src/.*/", true)]
+	[InlineData("tests/(client|server)/", false)]
+	[InlineData("prefix tests/client/", false)]
+	[InlineData("tests/.+", false)]
+	[InlineData(@"src/.*App.*\.cs$", true)]
+	[InlineData("thing.verylongextension", true)]
+	[InlineData("имя.данные", true)]
+	[InlineData("ordinaryAbsent", false)]
+	[InlineData("^$", false)]
+	public void SearchPathPatternHintsRecognizeOnlyTheSpecifiedShapes(string pattern, bool expected)
+	{
+		Assert.Equal(expected, DevProjexMcpTools.LooksLikeANameSearch(pattern));
+	}
+
+	[Theory]
+	[InlineData(@"def a\nfoo", 0, true)]
+	[InlineData("def a\nfoo", 0, true)]
+	[InlineData(@"def a\nfoo", 1, false)]
+	[InlineData("ordinaryAbsent", 0, false)]
+	[InlineData("", 0, false)]
+	public void SearchPerLinePatternHintIsFixedAndOnlyAppearsWithoutMatches(string pattern, int matches, bool expected)
+	{
+		var notice = DevProjexMcpTools.FormatPerLineSearchNotice(pattern, matches);
+		Assert.Equal(expected, notice is not null);
+		if (notice is not null)
+			Assert.Equal("[Search] matching is per line, so a pattern with \\n cannot match; search for each line separately.", notice);
+	}
+
+	[Theory]
+	[InlineData("readme.md", true)]
+	[InlineData("readme.MDX", true)]
+	[InlineData("guide.rst", true)]
+	[InlineData("notes.txt", true)]
+	[InlineData("manual.adoc", true)]
+	[InlineData("docs/example.cs", true)]
+	[InlineData("nested/doc/example.py", true)]
+	[InlineData("nested/DOCS/example.log", true)]
+	[InlineData(@"nested\doc\example.log", true)]
+	[InlineData("src/example.cs", false)]
+	[InlineData("readme.md.cs", false)]
+	[InlineData("documentation/example.cs", false)]
+	[InlineData("mydocs/example.log", false)]
+	[InlineData("docs", false)]
+	[InlineData("docs.cs", false)]
+	public void SearchDocumentationClassificationIsIndependentOfTheHostPlatform(string path, bool expected)
+	{
+		Assert.Equal(expected, McpSearchSymbols.IsDocumentationPath(path));
+	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public void SearchDocumentationOrderingPreservesEachGroupAndEveryLineOffset(bool includeHeading)
+	{
+		var groups = new[]
+		{
+			SearchDocumentationGroup("docs/first.cs", 1), SearchDocumentationGroup("z.log", 1),
+			SearchDocumentationGroup("a.md", 1), SearchDocumentationGroup("y.log", 1)
+		};
+
+		var original = DevProjexMcpTools.RenderSearchGroups(groups, 50, 1_000);
+		var rendered = DevProjexMcpTools.RenderSearchGroupsWithDocumentationLast(groups, 50, 1_000, includeHeading);
+
+		Assert.Equal(groups.Select(group => group.RelativePath), original.WrittenHits.Select(hit => hit.RelativePath));
+		Assert.Equal(new[] { "z.log", "y.log", "docs/first.cs", "a.md" }, rendered.WrittenHits.Select(hit => hit.RelativePath));
+		Assert.Equal(includeHeading, rendered.Output.ToString().Contains("Matches in documentation files:", StringComparison.Ordinal));
+		Assert.All(rendered.RenderedLines, line => Assert.StartsWith("1:needle", rendered.Output.ToString()[line.Offset..], StringComparison.Ordinal));
+	}
+
+	[Fact]
+	public void SearchDocumentationCannotDisplaceCodeFromTheResponseBudget()
+	{
+		var code = SearchDocumentationGroup("code.log", 8);
+		var documentation = SearchDocumentationGroup("readme.md", 8);
+		var expected = DevProjexMcpTools.RenderSearchGroups([code], 50, 180);
+
+		var rendered = DevProjexMcpTools.RenderSearchGroupsWithDocumentationLast([documentation, code], 50, 180);
+
+		Assert.Equal(expected.WrittenHits.Count, rendered.WrittenHits.Count(hit => hit.RelativePath == "code.log"));
+		Assert.InRange(rendered.Output.Length, 1, 180);
+		Assert.True(rendered.Truncated);
+		Assert.DoesNotContain("Matches in documentation files:", rendered.Output.ToString(), StringComparison.Ordinal);
+	}
+
+	private static McpSearchRenderedGroup SearchDocumentationGroup(string path, int count) =>
+		new(path, path, Enumerable.Range(1, count).ToArray(), Enumerable.Range(1, count)
+			.Select(line => new McpSearchGroupLine(line, true, $"{line}:needle " + new string('x', 20))).ToArray());
+
 	[Fact]
 	public void SearchScannerKeepsOnlyBoundedMatchContext()
 	{

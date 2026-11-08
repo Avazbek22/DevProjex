@@ -28,7 +28,7 @@ public sealed partial class McpServerProcessTests
 			foreach (var text in new[] { contentWithName, contentWithPathRegex })
 			{
 				Assert.Contains("[No matches]", text, StringComparison.Ordinal);
-				Assert.Contains(NameSearchNotice, text, StringComparison.Ordinal);
+				Assert.Contains(SearchPathPatternNotice, text, StringComparison.Ordinal);
 			}
 
 			// A pattern with no '/' and no '**' is root-only, which is the documented rule; the

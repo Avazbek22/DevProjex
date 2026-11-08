@@ -708,6 +708,8 @@ devprojex analyze . --max-file-bytes 1m
 
 ## Search
 
+Text output lists matches in documentation files after code.
+
 ```shell
 devprojex search <PATTERN> [PROJECT|URL] [options]
 ```

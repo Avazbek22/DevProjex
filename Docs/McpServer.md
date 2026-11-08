@@ -1476,6 +1476,9 @@ selection that was already empty are all unchanged.
 
 ### Search hits name the declaration that contains them
 
+Documentation matches (`.md`, `.mdx`, `.rst`, `.txt`, `.adoc`, or files below `docs`/`doc`) follow code under `Matches in documentation files:` and are withheld first when the body budget is exhausted.
+An empty search gets a fixed hint for a newline pattern, because matching is per line, or a path-like pattern, because matching covers content rather than file names.
+
 `search_project` names the declaration each shown hit sits inside. There is no
 parameter for it: a hit without the thing that contains it is what made callers
 guess a line range and read twice. The name heads its hits inside the file's own

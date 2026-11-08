@@ -56,7 +56,6 @@ internal sealed partial class DevProjexMcpTools(
 		"[Name search] File names and paths are matched only by include_patterns: prefix a bare name " +
 		"with '**/' to find it at any depth, or append '/**' to a directory to select its files. " +
 		"search_project matches file content, and paths selects a path that already exists.";
-	private const int MaximumNameSearchExtensionLength = 8;
 	// Calls and static member uses are documented as outside the dependency evidence, so an empty
 	// related section is not evidence that nothing uses a file. A constant: no name reaches it.
 	private const string RelatedScopeNotice =
@@ -1215,7 +1214,8 @@ internal sealed partial class DevProjexMcpTools(
 			// Candidate priority is applied before response sizing, so the retained set and the
 			// displayed slice are both independent of directory traversal order.
 			var candidateSnapshot = candidates.Snapshot();
-			var ordered = BuildOrderedSearchGroups(candidateSnapshot);
+			var ordered = BuildOrderedSearchGroups(candidateSnapshot)
+				.OrderBy(static group => McpSearchSymbols.IsDocumentationPath(group.RelativePath)).ToArray();
 			storeHitMatchBound = candidates.MatchCapacityReached;
 			var retentionCharacterBoundReached = candidates.CharacterCapacityReached;
 			var retainedMatches = candidates.Count;
@@ -1224,7 +1224,7 @@ internal sealed partial class DevProjexMcpTools(
 				.Distinct(StringComparer.Ordinal)
 				.Count();
 
-			var rendered = RenderSearchGroups(ordered, maximumResults, MaximumSearchContentCharacters);
+			var rendered = RenderSearchGroupsWithDocumentationLast(ordered, maximumResults, MaximumSearchContentCharacters);
 			var symbols = McpSearchSymbols.Resolve(
 				rendered.WrittenHits,
 				navigationByFile,
@@ -1247,6 +1247,7 @@ internal sealed partial class DevProjexMcpTools(
 			var resultGroupTruncated = rendered.Truncated;
 			var writtenHits = rendered.WrittenHits;
 			var renderedLines = rendered.RenderedLines;
+			var documentationMatches = writtenHits.Count(static hit => McpSearchSymbols.IsDocumentationPath(hit.RelativePath));
 
 			// What each file withheld, counted first, because it decides both the distribution the
 			// response prints and which files the store has to carry.
@@ -1443,6 +1444,10 @@ internal sealed partial class DevProjexMcpTools(
 						: $"[Symbols] the regular expression was read as {namesReadFromPattern.Count.ToString(CultureInfo.InvariantCulture)} " +
 						  "declaration name(s); they are listed at the top of the results.",
 					FormatNameSearchNotice(plan, paths, pattern, totalMatches),
+					FormatPerLineSearchNotice(pattern, totalMatches),
+					documentationMatches > 0 && documentationMatches < writtenHits.Count
+						? $"[Search] {documentationMatches.ToString(CultureInfo.InvariantCulture)} match(es) in documentation files are listed after code."
+						: null,
 					additionalMatchesNotice,
 					searchTotalsNotice,
 					FormatSearchBoundaryNotice(boundary, storedSearch is not null),
@@ -4955,20 +4960,20 @@ internal sealed partial class DevProjexMcpTools(
 			: null;
 
 	/// <summary>
-	/// The search form of the same pointer. A content pattern that searched files and found
-	/// nothing while reading like a file name was almost certainly aimed at one, and this tool
-	/// never matches a path. A selection that held no file to search explains itself through
-	/// <c>[Empty selection]</c> instead, and is left alone.
+	/// The search pointer describes content-versus-path matching without echoing the pattern.
 	/// </summary>
 	private static string? FormatNameSearchNotice(
 		ProjectContextPlan plan,
 		IReadOnlyList<string>? paths,
 		string pattern,
-		int totalMatches) =>
-		(McpTrustedDiagnosticFormatter.ReportsMissingSelectedPath(plan) && HasBareNamePath(paths)) ||
-		(totalMatches == 0 && plan.IncludedFiles.Count > 0 && LooksLikeANameSearch(pattern))
+		int totalMatches)
+	{
+		if (totalMatches == 0 && LooksLikeANameSearch(pattern))
+			return SearchPathPatternNotice;
+		return McpTrustedDiagnosticFormatter.ReportsMissingSelectedPath(plan) && HasBareNamePath(paths)
 			? NameSearchNotice
 			: null;
+	}
 
 	/// <summary>
 	/// A requested path with no separator names one entry directly in the project root, so a
@@ -4986,22 +4991,36 @@ internal sealed partial class DevProjexMcpTools(
 	/// and the end anchor a caller would write around it. Both are syntactic, both are computed
 	/// only for a response that already found nothing, and neither reaches the response text.
 	/// </summary>
-	private static bool LooksLikeANameSearch(string pattern)
+	internal static bool LooksLikeANameSearch(string pattern)
 	{
 		if (string.IsNullOrWhiteSpace(pattern))
 			return false;
-		if (pattern.Contains('/', StringComparison.Ordinal))
+		var value = pattern.AsSpan();
+		if (value[0] == '^')
+			value = value[1..];
+		if (value.Length > 0 && value[^1] == '$')
+			value = value[..^1];
+		if (value.Length == 0)
+			return false;
+		var simplePath = value.Contains('/');
+		foreach (var character in value)
+		{
+			if (char.IsWhiteSpace(character) || "\\+?[](){}|^$".Contains(character))
+			{
+				simplePath = false;
+				break;
+			}
+		}
+		if (simplePath)
 			return true;
 
-		var end = pattern.Length;
-		if (pattern[end - 1] == '$')
-			end--;
+		var end = value.Length;
 		var start = end;
-		while (start > 0 && char.IsAsciiLetterOrDigit(pattern[start - 1]))
+		while (start > 0 && char.IsLetterOrDigit(value[start - 1]))
 			start--;
-		return end - start is > 0 and <= MaximumNameSearchExtensionLength &&
+		return end > start &&
 			start > 0 &&
-			pattern[start - 1] == '.';
+			value[start - 1] == '.';
 	}
 
 	/// <summary>

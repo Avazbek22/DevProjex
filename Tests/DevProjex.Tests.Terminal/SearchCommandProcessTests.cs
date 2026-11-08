@@ -9,6 +9,27 @@ public sealed class SearchCommandProcessTests
 	private const int MaximumOutputCharacters = 16_000;
 
 	[Fact]
+	public void TextSearchListsDocumentationLastAndKeepsJsonBytesUnchanged()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("search-order");
+		workspace.WriteFile("search-order/a.md", "orderingNeedle\n");
+		workspace.WriteFile("search-order/z.log", "orderingNeedle\n");
+
+		var text = Run(workspace, project, "orderingNeedle", "--format", "text");
+		var json = Run(workspace, project, "orderingNeedle", "--format", "json");
+
+		Assert.Equal(0, text.ExitCode);
+		Assert.Equal(0, json.ExitCode);
+		Assert.True(text.StandardOutput.IndexOf("z.log", StringComparison.Ordinal) <
+			text.StandardOutput.IndexOf("a.md", StringComparison.Ordinal), text.StandardOutput);
+		Assert.DoesNotContain("Matches in documentation files:", text.StandardOutput, StringComparison.Ordinal);
+		var bytes = System.Text.Encoding.UTF8.GetBytes(json.StandardOutput.Replace("\r\n", "\n", StringComparison.Ordinal));
+		Assert.Equal("666FFC65A3F83A4AC9FC46BA6E14CA067AC2F4E99874626626E2F8A61FDBC05C",
+			Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)));
+	}
+
+	[Fact]
 	public void SymbolRegularExpressionReadsNamesWithAStderrHintAndPreservesJsonShape()
 	{
 		using var workspace = new TemporaryDirectory();

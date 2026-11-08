@@ -306,10 +306,10 @@ public sealed class SearchCommandHandler(
 			.Distinct(StringComparer.Ordinal).Count();
 		SearchResult BuildResult(int contentCharacters)
 		{
-			var rendered = DevProjexMcpTools.RenderSearchGroups(
-				ordered,
-				request.MaximumResults,
-				contentCharacters);
+			var rendered = request.Format == SearchOutputFormat.Text
+				? DevProjexMcpTools.RenderSearchGroupsWithDocumentationLast(
+					ordered, request.MaximumResults, contentCharacters, includeHeading: false)
+				: DevProjexMcpTools.RenderSearchGroups(ordered, request.MaximumResults, contentCharacters);
 			var symbols = McpSearchSymbols.Resolve(
 				rendered.WrittenHits,
 				navigationByFile,

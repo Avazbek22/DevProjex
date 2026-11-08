@@ -344,7 +344,8 @@ public sealed class McpRootRegistry
 		new(
 			McpErrorCodes.UnknownProject,
 			$"{McpErrorCodes.UnknownProject}: project is not an allowed root name, path, or index. " +
-			$"Call list_projects and use a listed project index: {FormatRoots()}.");
+			$"Call list_projects and use a listed project index: {FormatRoots()}." +
+			(_roots.Count == 1 ? " This server serves one project; omit project or pass \"#0\"." : string.Empty));
 
 	private McpToolException RootViolation(string path) =>
 		new(
