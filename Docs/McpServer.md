@@ -1477,6 +1477,7 @@ selection that was already empty are all unchanged.
 ### Search hits name the declaration that contains them
 
 When matches span two or more files, the final `Read these in one call: get_file ...` line inside the untrusted block offers declaration or match-context ranges for up to five files, if the line fits the 16,000-character body budget.
+Documentation matches (`.md`, `.mdx`, `.rst`, `.txt`, `.adoc`, or files below `docs`/`doc`) follow code under `Matches in documentation files:` and are withheld first when the body budget is exhausted.
 
 `search_project` names the declaration each shown hit sits inside. There is no
 parameter for it: a hit without the thing that contains it is what made callers

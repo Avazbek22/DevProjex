@@ -1215,7 +1215,8 @@ internal sealed partial class DevProjexMcpTools(
 			// Candidate priority is applied before response sizing, so the retained set and the
 			// displayed slice are both independent of directory traversal order.
 			var candidateSnapshot = candidates.Snapshot();
-			var ordered = BuildOrderedSearchGroups(candidateSnapshot);
+			var ordered = BuildOrderedSearchGroups(candidateSnapshot)
+				.OrderBy(static group => McpSearchSymbols.IsDocumentationPath(group.RelativePath)).ToArray();
 			storeHitMatchBound = candidates.MatchCapacityReached;
 			var retentionCharacterBoundReached = candidates.CharacterCapacityReached;
 			var retainedMatches = candidates.Count;
@@ -1224,7 +1225,7 @@ internal sealed partial class DevProjexMcpTools(
 				.Distinct(StringComparer.Ordinal)
 				.Count();
 
-			var rendered = RenderSearchGroups(ordered, maximumResults, MaximumSearchContentCharacters);
+			var rendered = RenderSearchGroupsWithDocumentationLast(ordered, maximumResults, MaximumSearchContentCharacters);
 			var symbols = McpSearchSymbols.Resolve(
 				rendered.WrittenHits,
 				navigationByFile,
@@ -1247,6 +1248,7 @@ internal sealed partial class DevProjexMcpTools(
 			var resultGroupTruncated = rendered.Truncated;
 			var writtenHits = rendered.WrittenHits;
 			var renderedLines = rendered.RenderedLines;
+			var documentationMatches = writtenHits.Count(static hit => McpSearchSymbols.IsDocumentationPath(hit.RelativePath));
 
 			// What each file withheld, counted first, because it decides both the distribution the
 			// response prints and which files the store has to carry.
@@ -1446,6 +1448,9 @@ internal sealed partial class DevProjexMcpTools(
 						: $"[Symbols] the regular expression was read as {namesReadFromPattern.Count.ToString(CultureInfo.InvariantCulture)} " +
 						  "declaration name(s); they are listed at the top of the results.",
 					FormatNameSearchNotice(plan, paths, pattern, totalMatches),
+					documentationMatches > 0 && documentationMatches < writtenHits.Count
+						? $"[Search] {documentationMatches.ToString(CultureInfo.InvariantCulture)} match(es) in documentation files are listed after code."
+						: null,
 					additionalMatchesNotice,
 					searchTotalsNotice,
 					FormatSearchBoundaryNotice(boundary, storedSearch is not null),

@@ -14,6 +14,21 @@ namespace DevProjex.Mcp;
 /// </remarks>
 internal static class McpSearchSymbols
 {
+	internal static bool IsDocumentationPath(string relativePath)
+	{
+		var path = relativePath.Replace('\\', '/');
+		var segments = path.Split('/');
+		if (segments.Take(segments.Length - 1).Any(static segment =>
+			segment.Equals("docs", StringComparison.OrdinalIgnoreCase) || segment.Equals("doc", StringComparison.OrdinalIgnoreCase)))
+			return true;
+		var extension = Path.GetExtension(path);
+		return extension.Equals(".md", StringComparison.OrdinalIgnoreCase) ||
+			extension.Equals(".mdx", StringComparison.OrdinalIgnoreCase) ||
+			extension.Equals(".rst", StringComparison.OrdinalIgnoreCase) ||
+			extension.Equals(".txt", StringComparison.OrdinalIgnoreCase) ||
+			extension.Equals(".adoc", StringComparison.OrdinalIgnoreCase);
+	}
+
 	/// <summary>
 	/// Limits final declaration annotations, not the navigation parses used to score search candidates.
 	/// Additional matching files are counted as unannotated.
