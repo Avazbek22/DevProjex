@@ -202,6 +202,79 @@ public sealed class DependencyConfigurationDiscoveryIntegrationTests
 		Assert.Contains(edited.Edges, edge => edge.Source == "main.ts" && edge.Target == "second.ts");
 	}
 
+	[Fact]
+	public async Task CompleteReadableManifest_KeepsFactsEdgesCoverageAndConfigurationInvalidation()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("tsconfig.json",
+			"{\"compilerOptions\":{\"paths\":{\"alias\":[\"./first.ts\"]}}}");
+		var first = fixture.CreateFile("first.ts", "export const value = 1;");
+		var second = fixture.CreateFile("second.ts", "export const value = 2;");
+		var source = fixture.CreateFile("main.ts", "import { value } from 'alias';");
+		var manifest = new[] { config, first, second, source };
+		using var discovered = CreateEngine();
+		using var complete = CreateEngine();
+
+		async Task AssertEquivalentAsync(string expectedTarget)
+		{
+			var reference = await discovered.IndexAsync(fixture.Path, manifest,
+				cancellationToken: TestContext.Current.CancellationToken);
+			var actual = await complete.IndexAsync(fixture.Path, manifest,
+				cancellationToken: TestContext.Current.CancellationToken, readableProjectFiles: manifest);
+			Assert.Equal(Snapshot(reference), Snapshot(actual));
+			Assert.Contains(actual.Edges, edge => edge.Source == "main.ts" && edge.Target == expectedTarget);
+			var repeated = await complete.IndexAsync(fixture.Path, manifest,
+				cancellationToken: TestContext.Current.CancellationToken, readableProjectFiles: manifest);
+			Assert.True(repeated.Metrics.ResolutionCacheHit);
+			Assert.Equal(Snapshot(actual), Snapshot(repeated));
+		}
+
+		await AssertEquivalentAsync("first.ts");
+		File.WriteAllText(config,
+			"{\"compilerOptions\":{\"paths\":{\"alias\":[\"./second.ts\"]}}}");
+		File.SetLastWriteTimeUtc(config, new DateTime(2030, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+		await AssertEquivalentAsync("second.ts");
+		File.WriteAllText(source, "import { value } from './first'; export const copy = value;");
+		File.SetLastWriteTimeUtc(source, new DateTime(2030, 1, 2, 0, 0, 0, DateTimeKind.Utc));
+		await AssertEquivalentAsync("first.ts");
+
+		static string Snapshot(DependencyIndexSnapshot snapshot) => System.Text.Json.JsonSerializer.Serialize(new
+		{
+			snapshot.ManifestGeneration,
+			snapshot.DeclarationRevision,
+			snapshot.Files,
+			snapshot.Declarations,
+			snapshot.Edges,
+			snapshot.EdgesBySource,
+			snapshot.EdgesByTarget,
+			snapshot.Coverage
+		});
+	}
+
+	[Fact]
+	public async Task CompleteReadableManifest_OnlyChangesWhenTheReadableBoundChanges()
+	{
+		using var fixture = new TemporaryDirectory();
+		var source = fixture.CreateFile("lib/mod.py", "import colorama");
+		using var engine = CreateEngine();
+		var before = await engine.IndexAsync(fixture.Path, [source],
+			cancellationToken: TestContext.Current.CancellationToken, readableProjectFiles: [source]);
+		var config = fixture.CreateFile("lib/pyproject.toml",
+			"[project]\nname = \"lib\"\ndependencies = [\"colorama\"]");
+		var excluded = await engine.IndexAsync(fixture.Path, [source],
+			cancellationToken: TestContext.Current.CancellationToken, readableProjectFiles: [source]);
+		var admitted = await engine.IndexAsync(fixture.Path, [source, config],
+			cancellationToken: TestContext.Current.CancellationToken, readableProjectFiles: [source, config]);
+
+		Assert.Contains(before.Edges, edge => edge.Reference == "colorama" && edge.Status == ResolutionStatus.Unresolved);
+		Assert.Equal(before.Edges, excluded.Edges);
+		Assert.Contains(admitted.Edges, edge => edge.Reference == "colorama" && edge.Status == ResolutionStatus.External);
+		File.Delete(config);
+		var removed = await engine.IndexAsync(fixture.Path, [source],
+			cancellationToken: TestContext.Current.CancellationToken, readableProjectFiles: [source]);
+		Assert.Equal(before.Edges, removed.Edges);
+	}
+
 	// Every edge the full project resolves between two files of the narrowed view resolves to the
 	// same target there: narrowing changes what is shown, not what is understood.
 	private static void AssertNarrowingKeepsEdges(DependencyIndexSnapshot full, DependencyIndexSnapshot narrowed)
