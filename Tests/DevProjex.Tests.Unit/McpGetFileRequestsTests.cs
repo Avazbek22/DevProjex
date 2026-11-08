@@ -43,6 +43,80 @@ public sealed class McpGetFileRequestsTests
 		Assert.Equal(arrayError.Message, stringError.Message);
 	}
 
+	[Fact]
+	public void PathArrayParsesAsTheWholeFileRequestsBatch()
+	{
+		var paths = new[] { "src/a.ts", "src/b.ts", "README.md" };
+		var expected = Parse(JsonSerializer.SerializeToElement(paths.Select(static path => new { path })));
+		var fromPathArray = ParseNamed("path", JsonSerializer.SerializeToElement(paths));
+		var fromPathsArray = ParseNamed("paths", JsonSerializer.SerializeToElement(paths));
+		Assert.True(fromPathArray.IsBatch);
+		Assert.Equal(JsonSerializer.Serialize(expected), JsonSerializer.Serialize(fromPathArray));
+		Assert.Equal(JsonSerializer.Serialize(expected), JsonSerializer.Serialize(fromPathsArray));
+	}
+
+	[Fact]
+	public void PathsStringParsesAsOneWholeFileRequest()
+	{
+		var expected = Parse(JsonSerializer.SerializeToElement(new[] { new { path = "src/a.ts" } }));
+		var parsed = ParseNamed("paths", JsonSerializer.SerializeToElement("src/a.ts"));
+		Assert.True(parsed.IsBatch);
+		Assert.Equal(JsonSerializer.Serialize(expected), JsonSerializer.Serialize(parsed));
+	}
+
+	[Theory]
+	[InlineData("path")]
+	[InlineData("paths")]
+	public void PathListsKeepTheFileCountLimit(string name)
+	{
+		var tooMany = JsonSerializer.SerializeToElement(Enumerable.Range(0, 9).Select(static index => $"File{index}.cs"));
+		var error = Assert.Throws<McpToolException>(() => ParseNamed(name, tooMany));
+		Assert.Equal($"DPX-MCP-INVALID-ARGUMENTS: '{name}' must be an array with 1 to 8 entries.", error.Message);
+		var empty = Assert.Throws<McpToolException>(() => ParseNamed(name, JsonSerializer.SerializeToElement(Array.Empty<string>())));
+		Assert.Equal(error.Message, empty.Message);
+	}
+
+	[Fact]
+	public void PathListsRejectBlankEntriesAndLineFields()
+	{
+		var blank = Assert.Throws<McpToolException>(() => ParseNamed("paths", JsonSerializer.SerializeToElement(new[] { "a.cs", " " })));
+		Assert.Equal("DPX-MCP-INVALID-ARGUMENTS: paths[1] must be a non-whitespace string.", blank.Message);
+		var lines = Assert.Throws<McpToolException>(() => McpGetFileRequestSet.Parse(Create(new Dictionary<string, JsonElement>
+		{
+			["path"] = JsonSerializer.SerializeToElement(new[] { "a.cs", "b.cs" }),
+			["start_line"] = JsonSerializer.SerializeToElement(2)
+		})));
+		Assert.Equal(
+			"DPX-MCP-INVALID-ARGUMENTS: start_line, end_line, and start_column are valid only with a single 'path'.",
+			lines.Message);
+	}
+
+	[Theory]
+	[InlineData("path", "requests")]
+	[InlineData("paths", "requests")]
+	[InlineData("path", "paths")]
+	public void PathFormsCannotBeCombined(string first, string second)
+	{
+		var arguments = new Dictionary<string, JsonElement>
+		{
+			[first] = first == "requests"
+				? JsonSerializer.SerializeToElement(new[] { new { path = "a.cs" } })
+				: JsonSerializer.SerializeToElement(new[] { "a.cs" }),
+			[second] = second == "requests"
+				? JsonSerializer.SerializeToElement(new[] { new { path = "a.cs" } })
+				: JsonSerializer.SerializeToElement("a.cs")
+		};
+		var error = Assert.Throws<McpToolException>(() => McpGetFileRequestSet.Parse(Create(arguments)));
+		Assert.Equal("DPX-MCP-INVALID-ARGUMENTS: 'path', 'paths' and 'requests' cannot be combined.", error.Message);
+	}
+
+	private static McpGetFileRequestSet ParseNamed(string name, JsonElement element) =>
+		McpGetFileRequestSet.Parse(Create(new Dictionary<string, JsonElement> { [name] = element }));
+
+	private static McpJsonArguments Create(Dictionary<string, JsonElement> arguments) => McpJsonArguments.Create(
+		new CallToolRequestParams { Name = "get_file", Arguments = arguments },
+		"path", "paths", "requests", "start_line", "end_line", "start_column");
+
 	private static McpGetFileRequestSet Parse(JsonElement element) => McpGetFileRequestSet.Parse(McpJsonArguments.Create(
 		new CallToolRequestParams { Name = "get_file", Arguments = new Dictionary<string, JsonElement> { ["requests"] = element } }, "requests"));
 }

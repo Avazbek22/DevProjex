@@ -113,7 +113,7 @@ internal sealed partial class DevProjexMcpTools(
 		"project", "branch", "path", "direction", "include_patterns", "exclude_patterns", "profile",
 		"tracked_only", "git_scope", "max_file_bytes");
 	private readonly IReadOnlySet<string> getFileArgumentNames = Allowed(agentExclusions,
-		"project", "branch", "profile", "path", "requests", "start_line", "end_line", "start_column",
+		"project", "branch", "profile", "path", "paths", "requests", "start_line", "end_line", "start_column",
 		"symbol");
 	private McpProjectService Projects => projectService.Value;
 

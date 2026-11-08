@@ -13,8 +13,9 @@ public sealed partial class McpServerProcessTests
 	// default server and 34,650 when per-call exclusions are enabled, after the shared get_diff
 	// selection parameters added 670 characters to the default catalog. The 31,870 ceiling leaves 272
 	// characters for the next intentional catalog change while the exact mode difference below
-	// isolates the optional exclusion parameter.
-	private const int ToolsListResultCeiling = 31_870;
+	// isolates the optional exclusion parameter. The get_file path array and paths alias added 459
+	// characters (32,057 measured), and the ceiling moved by exactly that amount.
+	private const int ToolsListResultCeiling = 32_329;
 	private const int ToolsListResultFloor = 30_600;
 	private const int ExclusionsParameterCost = 3_052;
 	private const int InstructionsCeiling = 1_200;
