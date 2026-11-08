@@ -2053,10 +2053,23 @@ internal sealed partial class DevProjexMcpTools(
 					cancellationToken);
 				(start, end) = ResolveSymbolRange(located);
 			}
+			var wholeRead = start is null && end is null && startColumn is null && symbol is null;
+			// A long file gets its structure with the first read of this version in the session:
+			// instead of the whole text for a read without a range, after the lines for any other.
+			var outline = wholeRead || McpLargeFileOutlineBuilder.Applies(transformed.Content) && IsFirstOutline(file, transformed.Content)
+				? McpLargeFileOutlineBuilder.Build(
+					relativePath,
+					transformed.Content,
+					() => McpSearchSymbols.CaptureNavigation(Projects.DependencyFactsEngine, relativePath, transformed.Content, cancellationToken),
+					cancellationToken)
+				: null;
+			var structureAfterRange = outline is not null && !wholeRead;
+			if (outline is not null)
+				RecordOutline(file, transformed.Content);
 			var page = McpTextRanges.Slice(
 				transformed.Content,
-				start,
-				end,
+				outline is null || structureAfterRange ? start : 1,
+				outline is null || structureAfterRange ? end : outline.HeadLines,
 				MaximumPageLines,
 				MaximumPageCharacters,
 				cancellationToken,
@@ -2070,6 +2083,8 @@ internal sealed partial class DevProjexMcpTools(
 				? "[The current line exceeded the 50000-character response cap; use search_project to narrow the source.]"
 				: null;
 			var addressedPage = FormatFileReadHeader(relativePath, page) + page.Text;
+			if (outline is not null)
+				addressedPage = AppendSectionLine(addressedPage, FormatOutline(outline));
 			if (await FindImportsLineAsync(arguments, file, page.Text, page.StartLine, cancellationToken).ConfigureAwait(false) is { } importsLine)
 				addressedPage = AppendSectionLine(addressedPage, importsLine);
 			if (start is null && end is null && startColumn is null && symbol is null)
@@ -2087,6 +2102,7 @@ internal sealed partial class DevProjexMcpTools(
 			return McpToolResults.TextSuccess(AppendTrustedNotices(
 				spotlighted,
 				modulePathResolved ? ModulePathResolvedNotice : null,
+				outline is null ? null : structureAfterRange ? LargeFileStructureOnceNotice : LargeFileOutlineNotice,
 				rangeNotice,
 				characterLimitNotice,
 				FormatContentTransformed(inspected.CompressionSnapshot),

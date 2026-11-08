@@ -2,6 +2,7 @@ using System.Text;
 using DevProjex.Kernel;
 using DevProjex.Application.Context;
 using DevProjex.Application.Dependencies;
+using DevProjex.Kernel.Abstractions;
 
 namespace DevProjex.Mcp;
 
@@ -11,6 +12,33 @@ internal sealed partial class DevProjexMcpTools
 	internal const string ModulePathResolvedNotice =
 		"[Path resolved] the requested path does not exist; the module file it names was read, and its path is in the File line.";
 	private const int MaximumNamedImports = 12;
+
+	// A constant: neither the path nor the file reaches it, so it stays trusted.
+	internal const string LargeFileOutlineNotice =
+		"[Large file] only the start and the structure are shown; read any part with start_line and end_line, " +
+		"or the whole file with start_line=1 and end_line set to its last line.";
+
+	// A constant: neither the path nor the file reaches it, so it stays trusted.
+	internal const string LargeFileStructureOnceNotice =
+		"[Large file] the structure of this long file follows the requested lines; it is listed once per file version.";
+
+	// Physical path to the fingerprint of the protected text whose structure this session has
+	// already received, so a long file read in pieces carries its structure once.
+	private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> outlinedFiles =
+		new(PathComparer.Default);
+
+	private static string OutlineFingerprint(string content) =>
+		ContentFingerprint.Compute(content.AsSpan()).ToHexString();
+
+	private bool IsFirstOutline(string physicalPath, string content) =>
+		!outlinedFiles.TryGetValue(physicalPath, out var fingerprint) ||
+		!string.Equals(fingerprint, OutlineFingerprint(content), StringComparison.Ordinal);
+
+	private void RecordOutline(string physicalPath, string content) =>
+		outlinedFiles[physicalPath] = OutlineFingerprint(content);
+
+	private static string FormatOutline(McpLargeFileOutline outline) =>
+		"Structure:\n" + outline.Map.TrimEnd('\n');
 
 	private static readonly string[] ScriptExtensions = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"];
 	private static readonly string[] ScriptEntryExtensions = [".ts", ".tsx", ".js", ".jsx", ".mjs"];
