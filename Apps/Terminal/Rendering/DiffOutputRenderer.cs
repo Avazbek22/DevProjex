@@ -19,7 +19,10 @@ internal static class DiffOutputRenderer
 		Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
 	};
 
-	public static string FormatText(ProjectDiffResult diff, LocalizationService localization)
+	public static string FormatText(
+		ProjectDiffResult diff,
+		LocalizationService localization,
+		DependencyChangeImpact? affected = null)
 	{
 		ArgumentNullException.ThrowIfNull(diff);
 		ArgumentNullException.ThrowIfNull(localization);
@@ -42,6 +45,8 @@ internal static class DiffOutputRenderer
 			foreach (var file in omitted)
 				output.Append(ProjectDiffText.FormatListEntry(file)).Append('\n');
 		}
+		AppendAffected(output, localization["Terminal.Diff.Dependents"], affected?.Dependents ?? []);
+		AppendAffected(output, localization["Terminal.Diff.Tests"], affected?.Tests ?? []);
 		if (output.Length > 0)
 			output.Append('\n');
 		output.Append(localization.Format(
@@ -62,7 +67,18 @@ internal static class DiffOutputRenderer
 		return output.ToString();
 	}
 
-	public static string FormatJson(ProjectDiffResult diff)
+	private static void AppendAffected(StringBuilder output, string heading, IReadOnlyList<string> paths)
+	{
+		if (paths.Count == 0)
+			return;
+		if (output.Length > 0)
+			output.Append('\n');
+		output.Append(heading).Append('\n');
+		foreach (var path in paths)
+			output.Append(ProjectDiffText.EscapePath(path)).Append('\n');
+	}
+
+	public static string FormatJson(ProjectDiffResult diff, DependencyChangeImpact? affected = null)
 	{
 		ArgumentNullException.ThrowIfNull(diff);
 		var shown = diff.Files.Where(static file => file.Omission == ProjectDiffOmission.None).ToArray();
@@ -103,7 +119,8 @@ internal static class DiffOutputRenderer
 				diff.Count(ProjectDiffOmission.ContentUnchanged),
 				diff.DeletedOutsideSelection,
 				diff.NotInWorkingTree),
-			Complete: notShown.Length == 0 && diff.DeletedOutsideSelection == 0 && diff.NotInWorkingTree == 0);
+			Complete: notShown.Length == 0 && diff.DeletedOutsideSelection == 0 && diff.NotInWorkingTree == 0,
+			Affected: affected is null ? null : new DiffAffectedDocument(affected.Dependents, affected.Tests));
 		return JsonSerializer.Serialize(document, JsonOptions) + "\n";
 	}
 
@@ -126,7 +143,10 @@ internal static class DiffOutputRenderer
 		IReadOnlyList<DiffFileDocument> Files,
 		IReadOnlyList<DiffOmittedDocument> NotShown,
 		DiffCountsDocument Counts,
-		bool Complete);
+		bool Complete,
+		DiffAffectedDocument? Affected);
+
+	private sealed record DiffAffectedDocument(IReadOnlyList<string> Dependents, IReadOnlyList<string> Tests);
 
 	private sealed record DiffFileDocument(
 		string Path,

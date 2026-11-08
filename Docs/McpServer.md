@@ -884,6 +884,17 @@ the hunks left out are listed by range under `Not shown (size limit):` as
 `<path> @@ -a,b +c,d @@`, one per line, to read with `get_file`. Every other file that does not fit
 whole is still listed only once, not split.
 
+After the hunks, still inside the block, `Files that depend on the changed files:` lists up to 10
+files with resolved dependency edges into the changed files, and `Tests that cover the changed
+files:` lists up to 10 test files: test dependents plus the naming conventions `get_file` uses.
+Both are ordinal, never name a changed file, and come from the readable project: the selection
+without `git_scope`, `paths`, and `include_patterns`, as `related_files` relates its seeds. The
+dependency index is built on the first such call and reused afterwards. A change with more than
+16 files that have supported facts gets neither list, an empty list is left out, and the lists are
+left out whole when they would not fit within the 50,000 characters, so they never displace a
+hunk. When either list is shown, the trusted line `[Diff] affected: dependents=<n> · tests=<m>`
+counts both before the cap of 10.
+
 The trusted lines after the block hold only counts and fixed words:
 
 ```text
@@ -892,6 +903,7 @@ The trusted lines after the block hold only counts and fixed words:
 [Diff] files changed in this range but absent from the working tree are counted, not shown; check out the range's newer commit to review them.
 [Diff] partial · 1 file(s) not shown to stay within 50,000 characters; narrow paths or include_patterns, or lower context_lines.
 [Diff] partial · 3 hunk(s) of a file that does not fit were not shown; their line ranges are listed, read them with get_file.
+[Diff] affected: dependents=1 · tests=2
 [Diff] no changes in the effective selection for this scope.
 ```
 

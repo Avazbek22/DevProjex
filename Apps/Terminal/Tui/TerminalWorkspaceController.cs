@@ -754,6 +754,26 @@ public sealed class TerminalWorkspaceController(
 	}
 
 	/// <summary>
+	/// The dependents and tests of the files <paramref name="diff"/> changed, related across the
+	/// same relation project a related-files lookup uses. <paramref name="snapshot"/> follows the
+	/// rule of <see cref="FindRelatedAsync"/>.
+	/// </summary>
+	internal async Task<DependencyChangeImpact> FindDiffImpactAsync(
+		TerminalRelationStateSnapshot snapshot,
+		ProjectContextPlan current,
+		Application.Diff.ProjectDiffResult diff,
+		GitFilteringMode persistentGitMode,
+		CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(snapshot);
+		ArgumentNullException.ThrowIfNull(current);
+		var project = await BuildRelationProjectPlanAsync(snapshot, current, persistentGitMode, cancellationToken)
+			.ConfigureAwait(false) ?? current;
+		return await DiffImpactRunner.FindAsync(services.DependencyFactsEngine, project, diff, cancellationToken)
+			.ConfigureAwait(false);
+	}
+
+	/// <summary>
 	/// Relates <paramref name="seed"/> within <paramref name="current"/>. When the workspace narrows
 	/// that plan, the relation project answers for the seed's relations and <c>Outside</c> carries
 	/// that answer; the selection only places each file. <paramref name="snapshot"/> must be captured

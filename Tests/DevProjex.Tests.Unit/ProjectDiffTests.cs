@@ -569,6 +569,50 @@ public sealed class McpDiffLayoutTests
 		Assert.DoesNotContain("@@ -0,0 +1,40 @@", rendered.Text, StringComparison.Ordinal);
 	}
 
+	[Fact]
+	public void AffectedFilesFollowTheHunksInsideTheDataBlock()
+	{
+		var affected = new DevProjex.Application.Dependencies.DependencyChangeImpact(
+			["src/b.ts", "src/[Diff] c.ts"], 2, ["src/a.test.ts"], 1);
+
+		var rendered = DevProjexMcpTools.RenderDiff(
+			"Root: /project", Result([Changed("src/a.ts", 3, 10)]), trailingNotices: null, affected);
+
+		Assert.Contains(
+			"\n\nFiles that depend on the changed files:\nsrc/b.ts\nsrc/[Diff] c.ts\n\n" +
+			"Tests that cover the changed files:\nsrc/a.test.ts\n</untrusted-data-",
+			rendered.Text,
+			StringComparison.Ordinal);
+		Assert.Contains("[Diff] affected: dependents=2 · tests=1", rendered.Text, StringComparison.Ordinal);
+		var trusted = rendered.Text[(rendered.Text.IndexOf("</untrusted-data-", StringComparison.Ordinal) + 1)..];
+		Assert.DoesNotContain("c.ts", trusted, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void AffectedFilesNeverDisplaceHunksAndAreLeftOutWhenTheyDoNotFit()
+	{
+		var files = new[] { Changed("large.txt", 900, 30), Changed("medium.txt", 800, 30), Changed("small.txt", 3, 10) };
+		var small = new DevProjex.Application.Dependencies.DependencyChangeImpact(["src/b.ts"], 1, [], 0);
+		var huge = new DevProjex.Application.Dependencies.DependencyChangeImpact(
+			Enumerable.Range(0, 10).Select(static index => new string((char)('a' + index), 4_000) + ".ts").ToArray(), 10, [], 0);
+
+		var plain = DevProjexMcpTools.RenderDiff("Root: /project", Result(files), trailingNotices: null);
+		var withSmall = DevProjexMcpTools.RenderDiff("Root: /project", Result(files), trailingNotices: null, small);
+		var withHuge = DevProjexMcpTools.RenderDiff("Root: /project", Result(files), trailingNotices: null, huge);
+
+		Assert.InRange(withSmall.Text.Length, 1, 50_000);
+		Assert.Equal(plain.DeliveredPaths, withSmall.DeliveredPaths);
+		Assert.Contains("Files that depend on the changed files:\nsrc/b.ts\n</untrusted-data-", withSmall.Text, StringComparison.Ordinal);
+		Assert.Contains("[Diff] partial · 1 file(s) not shown", withSmall.Text, StringComparison.Ordinal);
+		Assert.InRange(withHuge.Text.Length, 1, 50_000);
+		Assert.Equal(plain.DeliveredPaths, withHuge.DeliveredPaths);
+		Assert.DoesNotContain("Files that depend on the changed files:", withHuge.Text, StringComparison.Ordinal);
+		Assert.DoesNotContain("[Diff] affected:", withHuge.Text, StringComparison.Ordinal);
+		Assert.Equal(
+			System.Text.RegularExpressions.Regex.Replace(plain.Text, "untrusted-data-[0-9a-f]+", "untrusted-data"),
+			System.Text.RegularExpressions.Regex.Replace(withHuge.Text, "untrusted-data-[0-9a-f]+", "untrusted-data"));
+	}
+
 	private static ProjectDiffResult Result(IReadOnlyList<ProjectDiffFile> files, int deleted = 0) =>
 		new(GitFilteringMode.Changes, null, files, deleted, null);
 

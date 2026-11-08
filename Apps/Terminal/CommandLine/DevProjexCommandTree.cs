@@ -1289,6 +1289,14 @@ public sealed class DevProjexCommandTree
 						services,
 						selectedPaths,
 						cancellationToken).ConfigureAwait(false);
+					// The files a change affects are related across the selection without its Git
+					// scope and narrowing, as the related command relates a seed.
+					var projectSpec = await selection.ResolveWithoutNarrowingAsync(
+						parseResult,
+						resolvedSource.ProjectPath,
+						services,
+						selectedPaths,
+						cancellationToken).ConfigureAwait(false) ?? spec;
 					// Without --git-mode the command reviews uncommitted changes, whatever Git mode
 					// the profile keeps for other commands.
 					if (parseResult.GetResult(selection.GitMode) is null)
@@ -1304,7 +1312,8 @@ public sealed class DevProjexCommandTree
 							output,
 							selection.GetMaxFileBytes(parseResult),
 							resolvedSource.RepositorySourceUrl,
-							parseResult.GetValue(outputPath)),
+							parseResult.GetValue(outputPath),
+							projectSpec),
 						cancellationToken).ConfigureAwait(false);
 				},
 				_localization,

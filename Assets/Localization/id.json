@@ -627,6 +627,8 @@
   "Terminal.Validation.DiffContext": "--context harus antara 0 dan 20.",
   "Terminal.Status.ComparingVersions": "Membandingkan versi file",
   "Terminal.Diff.NotShown": "Tidak ditampilkan:",
+  "Terminal.Diff.Dependents": "File yang bergantung pada file yang berubah:",
+  "Terminal.Diff.Tests": "Tes yang mencakup file yang berubah:",
   "Terminal.Diff.Summary": "File berubah: {0}, ditampilkan: {1}; baris ditambahkan: {2}, dihapus: {3}.",
   "Terminal.Diff.Deleted": "File terhapus di luar working tree: {0}.",
   "Terminal.Diff.NotInWorkingTree": "File berubah yang tidak ada di working tree, dihitung tetapi tidak ditampilkan: {0}.",

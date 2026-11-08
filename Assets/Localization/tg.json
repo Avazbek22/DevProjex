@@ -615,6 +615,8 @@
   "Terminal.Validation.DiffContext": "--context бояд аз 0 то 20 бошад.",
   "Terminal.Status.ComparingVersions": "Муқоисаи версияҳои файлҳо",
   "Terminal.Diff.NotShown": "Нишон дода нашуданд:",
+  "Terminal.Diff.Dependents": "Файлҳое, ки ба файлҳои тағйирёфта вобастаанд:",
+  "Terminal.Diff.Tests": "Тестҳое, ки файлҳои тағйирёфтаро фаро мегиранд:",
   "Terminal.Diff.Summary": "Файлҳои тағйирёфта: {0}, нишон дода шуд: {1}; сатрҳо илова шуд: {2}, хориҷ шуд: {3}.",
   "Terminal.Diff.Deleted": "Файлҳои нестшуда берун аз дарахти корӣ: {0}.",
   "Terminal.Diff.NotInWorkingTree": "Файлҳои тағйирёфтае, ки дар дарахти корӣ нестанд, шумурда шуданд, вале нишон дода нашуданд: {0}.",

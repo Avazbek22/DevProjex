@@ -633,6 +633,8 @@
   "Terminal.Validation.DiffContext": "--context muss zwischen 0 und 20 liegen.",
   "Terminal.Status.ComparingVersions": "Dateiversionen werden verglichen",
   "Terminal.Diff.NotShown": "Nicht angezeigt:",
+  "Terminal.Diff.Dependents": "Dateien, die von den geänderten Dateien abhängen:",
+  "Terminal.Diff.Tests": "Tests, die die geänderten Dateien abdecken:",
   "Terminal.Diff.Summary": "Geänderte Dateien: {0}, angezeigt: {1}; Zeilen hinzugefügt: {2}, entfernt: {3}.",
   "Terminal.Diff.Deleted": "Gelöschte Dateien außerhalb des Arbeitsverzeichnisses: {0}.",
   "Terminal.Diff.NotInWorkingTree": "Geänderte Dateien, die im Arbeitsverzeichnis fehlen, gezählt, nicht angezeigt: {0}.",

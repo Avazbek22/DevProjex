@@ -54,9 +54,14 @@ public sealed class DiffCommandHandler(
 			return CommandLineExitCodes.PolicyFailure;
 		}
 
+		var affected = diff.HasChanges
+			? await status.RunAsync(
+				services.Localization["Terminal.Status.IndexingDependencies"],
+				() => FindAffectedAsync(request, diff, cancellationToken)).ConfigureAwait(false)
+			: null;
 		var payload = request.Format == AnalysisOutputFormat.Json
-			? DiffOutputRenderer.FormatJson(diff)
-			: DiffOutputRenderer.FormatText(diff, services.Localization);
+			? DiffOutputRenderer.FormatJson(diff, affected)
+			: DiffOutputRenderer.FormatText(diff, services.Localization, affected);
 		if (destination is null)
 		{
 			await environment.Output.WriteAsync(payload.AsMemory(), cancellationToken).ConfigureAwait(false);
@@ -73,5 +78,37 @@ public sealed class DiffCommandHandler(
 			.ConfigureAwait(false);
 		TerminalTextEscaping.WriteSingleLine(environment.Output, writtenPath);
 		return CommandLineExitCodes.Success;
+	}
+
+	// The affected files add to the diff; a project that cannot be related still prints its diff.
+	private async Task<DependencyChangeImpact> FindAffectedAsync(
+		DiffCommandRequest request,
+		ProjectDiffResult diff,
+		CancellationToken cancellationToken)
+	{
+		if (request.ProjectSelection is null)
+			return DependencyChangeImpact.None;
+		try
+		{
+			var projectPlan = await services.ContextFactory.BuildAsync(
+				request.ProjectPath,
+				request.ProjectSelection,
+				includeOutputMetrics: false,
+				cancellationToken: cancellationToken,
+				repositorySourceUrl: request.RepositorySourceUrl).ConfigureAwait(false);
+			projectPlan = await ProjectFileSizeFilter.ApplyAsync(
+				services.ContextPlanner,
+				projectPlan,
+				request.MaxFileBytes,
+				cancellationToken).ConfigureAwait(false);
+			return projectPlan.HasErrors
+				? DependencyChangeImpact.None
+				: await DiffImpactRunner.FindAsync(services.DependencyFactsEngine, projectPlan, diff, cancellationToken)
+					.ConfigureAwait(false);
+		}
+		catch (Exception exception) when (exception is not OperationCanceledException)
+		{
+			return DependencyChangeImpact.None;
+		}
 	}
 }

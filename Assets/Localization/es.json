@@ -627,6 +627,8 @@
   "Terminal.Validation.DiffContext": "--context debe estar entre 0 y 20.",
   "Terminal.Status.ComparingVersions": "Comparando versiones de archivos",
   "Terminal.Diff.NotShown": "No mostrados:",
+  "Terminal.Diff.Dependents": "Archivos que dependen de los archivos modificados:",
+  "Terminal.Diff.Tests": "Pruebas que cubren los archivos modificados:",
   "Terminal.Diff.Summary": "Archivos modificados: {0}, mostrados: {1}; líneas añadidas: {2}, eliminadas: {3}.",
   "Terminal.Diff.Deleted": "Archivos eliminados fuera del árbol de trabajo: {0}.",
   "Terminal.Diff.NotInWorkingTree": "Archivos modificados ausentes del árbol de trabajo, contados pero no mostrados: {0}.",

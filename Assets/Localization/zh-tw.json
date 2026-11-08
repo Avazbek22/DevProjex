@@ -627,6 +627,8 @@
   "Terminal.Validation.DiffContext": "--context 必須介於 0 和 20 之間。",
   "Terminal.Status.ComparingVersions": "正在比較檔案版本",
   "Terminal.Diff.NotShown": "未顯示：",
+  "Terminal.Diff.Dependents": "相依於已變更檔案的檔案：",
+  "Terminal.Diff.Tests": "涵蓋已變更檔案的測試：",
   "Terminal.Diff.Summary": "已變更檔案：{0}，已顯示：{1}；新增行：{2}，刪除行：{3}。",
   "Terminal.Diff.Deleted": "工作樹之外已刪除的檔案：{0}。",
   "Terminal.Diff.NotInWorkingTree": "工作樹中不存在的已變更檔案（僅計數，未顯示）：{0}。",

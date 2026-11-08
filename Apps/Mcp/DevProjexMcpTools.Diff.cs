@@ -58,16 +58,76 @@ internal sealed partial class DevProjexMcpTools
 			var warnings = McpTrustedDiagnosticFormatter.FormatWarnings(plan.Diagnostics
 				.Where(static diagnostic => diagnostic.Code != GitScopeFilter.DeletedDiagnosticCode)
 				.ToArray());
+			var affected = diff.HasChanges
+				? await FindDiffImpactAsync(arguments, plan, diff, includePatterns, excludePatterns, cancellationToken)
+					.ConfigureAwait(false)
+				: DependencyChangeImpact.None;
 			var rendered = RenderDiff(
 				ContextRootPresentation.FormatLine(Projects.ResolveProtectedDocumentRoot(plan)),
 				diff,
-				trailingNotices: CombineTrustedNotices(warnings, selectionNotices));
+				trailingNotices: CombineTrustedNotices(warnings, selectionNotices),
+				affected);
 			journal?.RecordProtection(diff.Protection);
 			journal?.RecordDeliveredPaths(plan.SourceRoot, rendered.DeliveredPaths);
 			return McpToolResults.TextSuccess(rendered.Text);
 		}, cancellationToken);
 
-	internal static McpDiffRendering RenderDiff(string rootLine, ProjectDiffResult diff, string? trailingNotices)
+	/// <summary>
+	/// Relates the changed files across the readable project: the selection without its Git scope,
+	/// path and include narrowing, exactly as related_files lifts them. Builds the dependency index
+	/// when the engine has none cached for that project. The section is an addition to the diff, so
+	/// any failure to relate leaves the diff itself unchanged.
+	/// </summary>
+	private async Task<DependencyChangeImpact> FindDiffImpactAsync(
+		McpJsonArguments arguments,
+		ProjectContextPlan plan,
+		ProjectDiffResult diff,
+		IReadOnlyList<string>? includePatterns,
+		IReadOnlyList<string>? excludePatterns,
+		CancellationToken cancellationToken)
+	{
+		try
+		{
+			var projectPlan = await Projects.BuildRelationProjectPlanAsync(
+				plan,
+				arguments.OptionalString("project"),
+				arguments.OptionalString("branch"),
+				includePatterns,
+				excludePatterns,
+				arguments.OptionalString("profile"),
+				arguments.OptionalBoolean("tracked_only", false),
+				arguments.OptionalString("git_scope") ?? GitScopeSelection.ToToken(GitFilteringMode.Changes),
+				arguments.OptionalInt64("max_file_bytes", 1, long.MaxValue),
+				ParseExclusionsArgument(arguments),
+				cancellationToken).ConfigureAwait(false) ?? plan;
+			var changed = diff.Files
+				.Where(static file => file.Status != ProjectDiffFileStatus.Deleted)
+				.Select(static file => file.RelativePath)
+				.ToArray();
+			if (changed.Length == 0)
+				return DependencyChangeImpact.None;
+			var index = await Projects.DependencyFactsEngine.IndexAsync(
+				projectPlan.SourceRoot,
+				projectPlan.IncludedFiles,
+				progress: null,
+				cancellationToken,
+				readableProjectFiles: projectPlan.IncludedFiles).ConfigureAwait(false);
+			var candidates = projectPlan.IncludedFiles
+				.Select(path => McpProjectService.ToRelative(projectPlan.SourceRoot, path))
+				.ToHashSet(StringComparer.Ordinal);
+			return DependencyChangeImpact.Compute(index, changed, candidates);
+		}
+		catch (Exception exception) when (exception is not OperationCanceledException)
+		{
+			return DependencyChangeImpact.None;
+		}
+	}
+
+	internal static McpDiffRendering RenderDiff(
+		string rootLine,
+		ProjectDiffResult diff,
+		string? trailingNotices,
+		DependencyChangeImpact? affected = null)
 	{
 		ArgumentNullException.ThrowIfNull(diff);
 		if (!diff.HasChanges)
@@ -94,13 +154,28 @@ internal sealed partial class DevProjexMcpTools
 		var shown = layout.Shown.Count(static file => file.Omission == ProjectDiffOmission.None);
 		var filesPartial = layout.NotShown.Count > 0;
 		var hunksPartial = layout.PartialHunksNotShown > 0;
+		var body = layout.Body;
+		string? affectedNotice = null;
+		if (affected is { IsEmpty: false })
+		{
+			// The section is optional: it is added only when it fits beside everything already laid
+			// out, so it never pushes a hunk or a file out of the response.
+			var section = "\n\n" + FormatAffectedSection(affected);
+			var notice = FormatDiffAffectedNotice(affected);
+			if (body.Length + section.Length + notice.Length + 1 <= budget)
+			{
+				body += section;
+				affectedNotice = notice;
+			}
+		}
 		return new McpDiffRendering(
 			AppendTrustedNotices(
-				McpSpotlight.Wrap(layout.Body),
+				McpSpotlight.Wrap(body),
 				FormatDiffSummary(diff, shown, filesPartial || hunksPartial),
 				FormatDiffNotShownNotice(diff),
 				filesPartial ? FormatDiffPartialNotice(layout.NotShown.Count) : null,
 				hunksPartial ? FormatDiffHunkPartialNotice(layout.PartialHunksNotShown) : null,
+				affectedNotice,
 				trailingNotices),
 			layout.Shown
 				.Where(static file => file.Omission == ProjectDiffOmission.None)
@@ -299,6 +374,33 @@ internal sealed partial class DevProjexMcpTools
 
 	private static string FormatDiffHunkRangeEntry(ProjectDiffFile file, UnifiedDiffHunk hunk) =>
 		ProjectDiffText.EscapePath(file.RelativePath) + " " + UnifiedDiffFormatter.FormatHeader(hunk);
+
+	private const string AffectedDependentsHeading = "Files that depend on the changed files:";
+	private const string AffectedTestsHeading = "Tests that cover the changed files:";
+
+	private static string FormatAffectedSection(DependencyChangeImpact affected)
+	{
+		var section = new StringBuilder();
+		Append(AffectedDependentsHeading, affected.Dependents);
+		Append(AffectedTestsHeading, affected.Tests);
+		return section.ToString().TrimEnd('\n');
+
+		void Append(string heading, IReadOnlyList<string> paths)
+		{
+			if (paths.Count == 0)
+				return;
+			if (section.Length > 0)
+				section.Append('\n');
+			section.Append(heading).Append('\n');
+			foreach (var path in paths)
+				section.Append(ProjectDiffText.EscapePath(path)).Append('\n');
+		}
+	}
+
+	internal static string FormatDiffAffectedNotice(DependencyChangeImpact affected) =>
+		string.Create(
+			CultureInfo.InvariantCulture,
+			$"[Diff] affected: dependents={affected.DependentCount} · tests={affected.TestCount}");
 
 	private const string ChangedFilesHeading = "Changed files (largest first):";
 	// Files with hunks left out only for the response limit; trusted reasons are counted in "[Diff] not shown:".
