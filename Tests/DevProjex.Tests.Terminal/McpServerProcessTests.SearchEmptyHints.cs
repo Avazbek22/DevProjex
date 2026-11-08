@@ -7,6 +7,28 @@ public sealed partial class McpServerProcessTests
 	private const string SearchPerLinePatternNotice =
 		"[Search] matching is per line, so a pattern with \\n cannot match; search for each line separately.";
 
+	[Fact]
+	public async Task RealProcessKeepsMissingPathGuidanceWhenOtherRequestedFilesMatch()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("search-missing-path");
+		workspace.WriteFile("search-missing-path/plain.log", "needle\n");
+		await using var server = await ActualMcpProcess.StartAsync(project, workspace.CreateDirectory("data"));
+
+		var response = await CallAsync(server, "search_project", new Dictionary<string, object?>
+		{
+			["pattern"] = "needle",
+			["paths"] = new[] { "missing.log", "plain.log" }
+		});
+
+		Assert.NotEqual(true, response.IsError);
+		var text = AllProcessText(response);
+		Assert.Contains("matches written=1", text, StringComparison.Ordinal);
+		Assert.Contains(NameSearchNotice, text, StringComparison.Ordinal);
+		Assert.DoesNotContain(SearchPathPatternNotice, text, StringComparison.Ordinal);
+		Assert.DoesNotContain(SearchPerLinePatternNotice, text, StringComparison.Ordinal);
+	}
+
 	[Theory]
 	[InlineData(@"def a\nfoo", true, false)]
 	[InlineData("def a\nfoo", true, false)]

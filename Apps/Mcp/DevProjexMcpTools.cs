@@ -4971,9 +4971,7 @@ internal sealed partial class DevProjexMcpTools(
 		string pattern,
 		int totalMatches)
 	{
-		if (totalMatches != 0)
-			return null;
-		if (LooksLikeANameSearch(pattern))
+		if (totalMatches == 0 && LooksLikeANameSearch(pattern))
 			return SearchPathPatternNotice;
 		return McpTrustedDiagnosticFormatter.ReportsMissingSelectedPath(plan) && HasBareNamePath(paths)
 			? NameSearchNotice

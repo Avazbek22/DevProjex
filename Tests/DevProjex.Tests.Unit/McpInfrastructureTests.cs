@@ -2642,7 +2642,7 @@ public sealed class McpInfrastructureTests
 		Assert.Equal(groups.Select(group => group.RelativePath), original.WrittenHits.Select(hit => hit.RelativePath));
 		Assert.Equal(new[] { "z.log", "y.log", "docs/first.cs", "a.md" }, rendered.WrittenHits.Select(hit => hit.RelativePath));
 		Assert.Equal(includeHeading, rendered.Output.ToString().Contains("Matches in documentation files:", StringComparison.Ordinal));
-		Assert.All(rendered.RenderedLines, line => Assert.True(rendered.Output.ToString()[line.Offset..].StartsWith("1:needle", StringComparison.Ordinal)));
+		Assert.All(rendered.RenderedLines, line => Assert.StartsWith("1:needle", rendered.Output.ToString()[line.Offset..], StringComparison.Ordinal));
 	}
 
 	[Fact]
