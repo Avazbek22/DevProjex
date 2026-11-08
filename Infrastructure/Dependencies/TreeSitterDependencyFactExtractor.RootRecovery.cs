@@ -9,27 +9,36 @@ public sealed partial class TreeSitterDependencyFactExtractor
 
 	private Tree ParseWithSyntaxRecovery(Parser parser, LanguageId language,
 		string source, string relativePath, CancellationToken cancellationToken,
-		out IReadOnlyList<SyntaxDamageRegion> omittedRegions)
+		out IReadOnlyList<SyntaxDamageRegion> omittedRegions,
+		out IReadOnlyList<DependencySyntaxCapture> recoveredHeaders)
 	{
 		var original = ParseWithConditionalProjection(parser, language, source, relativePath,
 			cancellationToken, out omittedRegions);
-		return RecoverDamagedRoot(parser, original, source, cancellationToken, ref omittedRegions);
+		List<DependencySyntaxCapture>? headers = null;
+		var recovered = RecoverDamagedRoot(parser, original, source, language, cancellationToken, ref omittedRegions, ref headers);
+		recoveredHeaders = headers ?? [];
+		return recovered;
 	}
 
 	private Tree RecoverDamagedRoot(
 		Parser parser,
 		Tree original,
 		string source,
+		LanguageId language,
 		CancellationToken cancellationToken,
-		ref IReadOnlyList<SyntaxDamageRegion> omittedRegions)
+		ref IReadOnlyList<SyntaxDamageRegion> omittedRegions,
+		ref List<DependencySyntaxCapture>? recoveredHeaders)
 	{
 		char[]? projected = null;
 		try
 		{
 			for (var attempt = 0; attempt < MaximumRootRecoveryAttempts && original.RootNode.HasError; attempt++)
 			{
-				if (!TryFindDamagedRootConstruction(original.RootNode, cancellationToken, out var region))
+				if (!TryFindDamagedRootConstruction(original.RootNode, cancellationToken, out var region, out var construction))
 					break;
+				if (language is LanguageId.TypeScript or LanguageId.Tsx &&
+					RecoverCallableInterfaceHeader(construction!, region) is { } header)
+					(recoveredHeaders ??= []).Add(header);
 				if (projected is null)
 				{
 					projected = source.ToCharArray();
@@ -56,9 +65,11 @@ public sealed partial class TreeSitterDependencyFactExtractor
 	private static bool TryFindDamagedRootConstruction(
 		Node root,
 		CancellationToken cancellationToken,
-		out SyntaxDamageRegion region)
+		out SyntaxDamageRegion region,
+		out Node? recoveredConstruction)
 	{
 		region = default;
+		recoveredConstruction = null;
 		foreach (var defect in SyntaxTokens(root, cancellationToken))
 		{
 			if (!defect.IsMissing || defect.Type is not ("}" or ")" or "]"))
@@ -100,12 +111,45 @@ public sealed partial class TreeSitterDependencyFactExtractor
 					region = new SyntaxDamageRegion(
 						checked((int)construction.StartIndex), checked((int)token.EndIndex),
 						checked((int)construction.StartPosition.Row + 1), checked((int)token.EndPosition.Row + 1));
+					recoveredConstruction = construction;
 					return true;
 				}
 			}
 		}
 		return false;
 	}
+
+	private static DependencySyntaxCapture? RecoverCallableInterfaceHeader(Node construction, SyntaxDamageRegion region)
+	{
+		var declaration = construction.Type == "export_statement"
+			? construction.GetChildForField("declaration")
+			: construction;
+		if (declaration?.Type != "interface_declaration" ||
+			declaration.GetChildForField("name") is not { HasError: false, IsMissing: false } name ||
+			declaration.GetChildForField("body") is not { } body)
+			return null;
+		var hasCallSignature = false;
+		foreach (var child in declaration.NamedChildren)
+			if (child != body && (child.HasError || child.IsMissing)) return null;
+		foreach (var child in body.NamedChildren)
+			if (child.Type == "call_signature" && !child.HasError) hasCallSignature = true;
+		if (!hasCallSignature) return null;
+
+		// Only the proven header survives; damaged signature bodies still contribute no references.
+		var capture = TryCreateCapture("declaration.interface", declaration, new NodeTextMaterializationCounter());
+		return capture is null ? null : capture with { EndIndex = region.EndIndex, EndLine = region.EndLine };
+	}
+
+	private static IReadOnlyList<NavigationDeclaration> AddRecoveredNavigation(
+		IReadOnlyList<NavigationDeclaration> navigation, IReadOnlyList<DependencySyntaxCapture> headers, string fingerprint) =>
+		headers.Count == 0 ? navigation : navigation.Concat(headers.Select(header => new NavigationDeclaration(
+			header.CapturedName!, NavigationSymbolKind.Type, null, header.Line, header.EndLine, fingerprint)
+		{
+			StartIndex = header.StartIndex,
+			EndIndex = header.EndIndex
+		})).OrderBy(static declaration => declaration.StartLine)
+		.ThenBy(static declaration => declaration.EndLine)
+		.ThenBy(static declaration => declaration.Name, StringComparer.Ordinal).ToArray();
 
 	private static IEnumerable<Node> SyntaxTokens(Node root, CancellationToken cancellationToken)
 	{

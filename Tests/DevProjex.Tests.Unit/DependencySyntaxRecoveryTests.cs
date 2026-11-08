@@ -20,7 +20,7 @@ public sealed class DependencySyntaxRecoveryTests
 	[Theory]
 	[InlineData("\n")]
 	[InlineData("\r\n")]
-	public void GenericCallSignaturesDropOnlyTheirInterfaceAndKeepIndependentFacts(string newline)
+	public void GenericCallSignaturesDropTheirBodyAndKeepTheInterfaceHeaderAndIndependentFacts(string newline)
 	{
 		var source = TypeScriptSource.ReplaceLineEndings(newline);
 		using var extractor = new TreeSitterDependencyFactExtractor();
@@ -33,7 +33,7 @@ public sealed class DependencySyntaxRecoveryTests
 		Assert.Contains(facts.Declarations, declaration => declaration.Identity.QualifiedName.EndsWith("#After", StringComparison.Ordinal));
 		Assert.Single(facts.Imports);
 		Assert.DoesNotContain(facts.References, reference => reference.Name is "H" or "HonoBase");
-		Assert.DoesNotContain(facts.NavigationDeclarations, declaration => declaration.Name == "HandlerInterface");
+		Assert.Contains(facts.NavigationDeclarations, declaration => declaration.Name == "HandlerInterface" && declaration.StartLine == 3 && declaration.EndLine == 7);
 		Assert.Contains(facts.NavigationDeclarations, declaration => declaration.Name == "TypedResponse" && declaration.StartLine == 8);
 		var partial = Assert.IsType<DependencyPartialParseDiagnostic>(facts.PartialParse);
 		Assert.Equal(1, partial.DroppedConstructs);
@@ -53,7 +53,7 @@ public sealed class DependencySyntaxRecoveryTests
 		var facts = Extract(extractor, "types.ts", LanguageId.TypeScript, source);
 
 		Assert.Equal(DependencyFileStatus.Supported, facts.Status);
-		Assert.Equal(803, facts.Declarations.Count);
+		Assert.Equal(804, facts.Declarations.Count);
 		Assert.Contains(facts.Declarations, declaration => declaration.Identity.QualifiedName.EndsWith("#Before399", StringComparison.Ordinal));
 		Assert.Contains(facts.Declarations, declaration => declaration.Identity.QualifiedName.EndsWith("#Tail399", StringComparison.Ordinal));
 		Assert.Contains(facts.NavigationDeclarations, declaration => declaration.Name == "TypedResponse" && declaration.StartLine == 408);
@@ -102,7 +102,8 @@ public sealed class DependencySyntaxRecoveryTests
 	[Fact]
 	public void AFileContainingOnlyTheDamagedConstructionStillHasNoFacts()
 	{
-		var source = string.Join('\n', TypeScriptSource.Split('\n').Skip(2).Take(5));
+		var source = string.Join('\n', TypeScriptSource.Split('\n').Skip(2).Take(5))
+			.Replace("interface HandlerInterface", "interface", StringComparison.Ordinal);
 		using var extractor = new TreeSitterDependencyFactExtractor();
 		var facts = Extract(extractor, "broken.ts", LanguageId.TypeScript, source);
 
