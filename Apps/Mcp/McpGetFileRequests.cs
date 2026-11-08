@@ -70,9 +70,21 @@ internal sealed record McpGetFileRequestSet(bool IsBatch, IReadOnlyList<McpGetFi
 	public static McpGetFileRequestSet Parse(McpJsonArguments arguments)
 	{
 		var hasPath = arguments.Contains("path");
+		var hasPaths = arguments.Contains("paths");
 		var hasRequests = arguments.Contains("requests");
-		if (hasPath == hasRequests)
-			throw Invalid("exactly one of 'path' or 'requests' is required");
+		var formCount = (hasPath ? 1 : 0) + (hasPaths ? 1 : 0) + (hasRequests ? 1 : 0);
+		if (formCount > 1)
+			throw Invalid("'path', 'paths' and 'requests' cannot be combined");
+		if (formCount == 0)
+			throw Invalid("exactly one of 'path', 'paths', or 'requests' is required");
+
+		if (hasPaths)
+			return ParseWholeFilePaths(arguments, "paths");
+		if (hasPath && arguments.TryGetElement("path", out var pathArgument) &&
+			pathArgument.ValueKind == JsonValueKind.Array)
+		{
+			return ParseWholeFilePaths(arguments, "path");
+		}
 
 		if (hasPath)
 		{
@@ -195,6 +207,40 @@ internal sealed record McpGetFileRequestSet(bool IsBatch, IReadOnlyList<McpGetFi
 			requests.Add(new McpGetFileRequest(requestIndex, path, ranges, symbol));
 		}
 
+		return new McpGetFileRequestSet(true, requests);
+	}
+
+	// A path list is the batch form without ranges: every entry reads its whole file under the
+	// same file and selection limits as requests.
+	private static McpGetFileRequestSet ParseWholeFilePaths(McpJsonArguments arguments, string name)
+	{
+		if (arguments.Contains("start_line") || arguments.Contains("end_line") || arguments.Contains("start_column"))
+			throw Invalid("start_line, end_line, and start_column are valid only with a single 'path'");
+		arguments.TryGetElement(name, out var element);
+		JsonElement[] entries = element.ValueKind switch
+		{
+			JsonValueKind.String => [element],
+			JsonValueKind.Array => [.. element.EnumerateArray()],
+			_ => throw Invalid($"'{name}' must be a string or an array of strings")
+		};
+		if (entries.Length is < 1 or > MaximumFiles)
+			throw Invalid($"'{name}' must be an array with 1 to {MaximumFiles} entries");
+
+		var requests = new List<McpGetFileRequest>(entries.Length);
+		for (var index = 0; index < entries.Length; index++)
+		{
+			var entry = entries[index];
+			if (entry.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(entry.GetString()))
+				throw Invalid($"{name}[{index}] must be a non-whitespace string");
+			var path = entry.GetString()!;
+			if (McpUnicodeLength.ExceedsScalarValueCount(path, McpProjectService.MaximumRequestedPathLength))
+				throw Invalid($"{name}[{index}] must contain at most {McpProjectService.MaximumRequestedPathLength} characters");
+			var requestIndex = index + 1;
+			requests.Add(new McpGetFileRequest(
+				requestIndex,
+				path,
+				[new McpGetFileRange(requestIndex, 1, 1, int.MaxValue, IsWholeFile: true)]));
+		}
 		return new McpGetFileRequestSet(true, requests);
 	}
 

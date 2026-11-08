@@ -471,12 +471,25 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{CompactProjectProperty}},
 	    {{CompactBranchProperty}},
 	    {{CompactProfileProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
-	    "path": { "type": "string", "minLength": 1, "description": "Single-file form. Exactly one of path or requests is required. Names an existing selected file; Markdown escapes from the default get_tree format are accepted, while format=text supplies literal names." },
+	    "path": {
+	      "description": "Single-file form, or an array of up to eight whole files. Exactly one of path, paths, or requests is required. Names an existing selected file; Markdown escapes from the default get_tree format are accepted, while format=text supplies literal names.",
+	      "oneOf": [
+	        { "type": "string", "minLength": 1 },
+	        { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "string", "minLength": 1, "maxLength": 4096 } }
+	      ]
+	    },
+	    "paths": {
+	      "description": "Several file paths read in one call, like requests without ranges.",
+	      "oneOf": [
+	        { "type": "string", "minLength": 1, "maxLength": 4096 },
+	        { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "string", "minLength": 1, "maxLength": 4096 } }
+	      ]
+	    },
 	    "requests": {
 	      "type": "array",
 	      "minItems": 1,
 	      "maxItems": 8,
-	      "description": "Batch form. Exactly one of requests or path is required. Reads up to eight files and sixteen selections; a path reads the whole file, while ranges or symbol narrow it. Single-file ranges cannot accompany requests.",
+	      "description": "Batch form. Exactly one of requests, path, or paths is required. Reads up to eight files and sixteen selections; a path reads the whole file, while ranges or symbol narrow it. Single-file ranges cannot accompany requests.",
 	      "items": {
 	        "type": "object",
 	        "properties": {

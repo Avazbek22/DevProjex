@@ -2600,7 +2600,7 @@ public sealed partial class McpServerIntegrationTests
 			["read_pack"] = ["pack_id", "start_line", "end_line", "start_column"],
 			["search_project"] = ["project", "branch", "pattern", "paths", "include_patterns", "exclude_patterns", "tracked_only", "git_scope", "max_file_bytes", "context_lines", "ignore_case", "symbols", "max_results"],
 			["related_files"] = ["project", "branch", "path", "direction", "include_patterns", "exclude_patterns", "profile", "tracked_only", "git_scope", "max_file_bytes"],
-			["get_file"] = ["project", "branch", "profile", "path", "requests", "start_line", "end_line", "start_column", "symbol"],
+			["get_file"] = ["project", "branch", "profile", "path", "paths", "requests", "start_line", "end_line", "start_column", "symbol"],
 			["get_diff"] = ["project", "branch", "profile", "git_scope", "paths", "include_patterns", "exclude_patterns", "tracked_only", "max_file_bytes", "context_lines"]
 		};
 		foreach (var tool in tools)
@@ -2645,11 +2645,11 @@ public sealed partial class McpServerIntegrationTests
 		Assert.False(getFileSchema.TryGetProperty("oneOf", out _));
 		Assert.False(getFileSchema.TryGetProperty("not", out _));
 		Assert.Contains(
-			"Exactly one of path or requests is required",
+			"Exactly one of path, paths, or requests is required",
 			getFileSchema.GetProperty("properties").GetProperty("path").GetProperty("description").GetString(),
 			StringComparison.Ordinal);
 		Assert.Contains(
-			"Exactly one of requests or path is required",
+			"Exactly one of requests, path, or paths is required",
 			batchRequests.GetProperty("description").GetString(),
 			StringComparison.Ordinal);
 		var searchBoolean = tools.Single(static tool => tool.Name == "search_project")

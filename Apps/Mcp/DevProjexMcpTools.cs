@@ -112,7 +112,7 @@ internal sealed partial class DevProjexMcpTools(
 		"project", "branch", "path", "direction", "include_patterns", "exclude_patterns", "profile",
 		"tracked_only", "git_scope", "max_file_bytes");
 	private readonly IReadOnlySet<string> getFileArgumentNames = Allowed(agentExclusions,
-		"project", "branch", "profile", "path", "requests", "start_line", "end_line", "start_column",
+		"project", "branch", "profile", "path", "paths", "requests", "start_line", "end_line", "start_column",
 		"symbol");
 	private McpProjectService Projects => projectService.Value;
 
@@ -2009,6 +2009,12 @@ internal sealed partial class DevProjexMcpTools(
 				? "[The current line exceeded the 50000-character response cap; use search_project to narrow the source.]"
 				: null;
 			var addressedPage = FormatFileReadHeader(relativePath, page) + page.Text;
+			if (start is null && end is null && startColumn is null && symbol is null)
+			{
+				var testsLines = await FindTestsLinesAsync(arguments, [file], cancellationToken).ConfigureAwait(false);
+				if (testsLines.TryGetValue(file, out var testsLine))
+					addressedPage = AppendTestsLine(addressedPage, testsLine);
+			}
 			var spotlighted = McpSpotlight.Wrap(addressedPage);
 			if (liveContext?.IsOutsideSelection(plan.SourceRoot, relativePath) == true)
 			{
@@ -2137,9 +2143,18 @@ internal sealed partial class DevProjexMcpTools(
 			};
 		}
 
+		var testsLines = await FindTestsLinesAsync(
+			arguments,
+			resolvedRequests
+				.Where(static item => item.PhysicalPath is not null && item.UnavailableReason is null &&
+					item.Request.Ranges.All(static range => range.IsWholeFile))
+				.Select(static item => item.PhysicalPath!)
+				.ToArray(),
+			cancellationToken).ConfigureAwait(false);
 		var rendered = RenderBatchFileReads(
 			resolvedRequests,
 			transformed,
+			testsLines,
 			new McpDeclarationReadContext(
 				ResolveActionableProjectReference(plan),
 				plan.SourceIdentity is { SourceType: ProjectSourceType.GitClone } remote
@@ -2402,6 +2417,7 @@ internal sealed partial class DevProjexMcpTools(
 	private static McpBatchFileReadResult RenderBatchFileReads(
 		IReadOnlyList<McpResolvedFileReadRequest> requests,
 		IReadOnlyDictionary<string, TransformedTextFile> transformed,
+		IReadOnlyDictionary<string, string> testsLines,
 		McpDeclarationReadContext continuationContext,
 		string? profile,
 		IReadOnlyList<ProjectExclusion>? exclusions,
@@ -2521,6 +2537,15 @@ internal sealed partial class DevProjexMcpTools(
 				sectionStatus,
 				pathIsEscaped: true);
 			var section = separator + header + page.Text;
+			if (!page.IsTruncated &&
+				group.Ranges.All(static range => range.IsWholeFile) &&
+				testsLines.TryGetValue(group.PhysicalPath, out var testsLine))
+			{
+				var withTests = AppendTestsLine(section, testsLine);
+				if (sections.Length + withTests.Length <= sectionBudgetCharacters &&
+					usedLines + CountResponseLines(withTests) <= sectionBudgetLines)
+					section = withTests;
+			}
 			if (sections.Length + section.Length > sectionBudgetCharacters)
 			{
 				foreach (var range in group.Ranges)
@@ -2719,6 +2744,60 @@ internal sealed partial class DevProjexMcpTools(
 			if (character == '\n') lines++;
 		return lines;
 	}
+
+	private const int MaximumNamedTestFiles = 5;
+
+	/// <summary>
+	/// The "Tests for this file" line for each whole-file read that has tests in the readable
+	/// project, keyed by physical path. Tests come from naming conventions and, only when an index
+	/// for the readable project is already cached, from resolved test dependents; this never builds
+	/// an index. The line is a hint, so a failure to compute it leaves the read unchanged.
+	/// </summary>
+	private async Task<IReadOnlyDictionary<string, string>> FindTestsLinesAsync(
+		McpJsonArguments arguments,
+		IReadOnlyList<string> physicalPaths,
+		CancellationToken cancellationToken)
+	{
+		var lines = new Dictionary<string, string>(PathComparer.Default);
+		if (physicalPaths.Count == 0)
+			return lines;
+		ProjectContextPlan readable;
+		try
+		{
+			readable = await Projects.BuildReadableProjectPlanAsync(
+				arguments.OptionalString("project"),
+				arguments.OptionalString("branch"),
+				arguments.OptionalString("profile"),
+				ParseExclusionsArgument(arguments),
+				cancellationToken).ConfigureAwait(false);
+		}
+		catch (McpToolException)
+		{
+			return lines;
+		}
+		var relativeFiles = readable.IncludedFiles
+			.Select(path => McpProjectService.ToRelative(readable.SourceRoot, path))
+			.ToHashSet(StringComparer.Ordinal);
+		var index = Projects.DependencyFactsEngine.TryGetCachedIndex(
+			readable.SourceRoot,
+			readable.IncludedFiles,
+			readable.IncludedFiles,
+			cancellationToken);
+		foreach (var physicalPath in physicalPaths.Distinct(PathComparer.Default))
+		{
+			var relative = McpProjectService.ToRelative(readable.SourceRoot, physicalPath);
+			var tests = DependencyTestFiles.Find(relative, relativeFiles, index, MaximumNamedTestFiles);
+			if (tests.Count > 0)
+			{
+				lines[physicalPath] = "Tests for this file: " +
+					string.Join(", ", tests.Select(McpTextEscaping.EscapeSingleLine));
+			}
+		}
+		return lines;
+	}
+
+	private static string AppendTestsLine(string section, string testsLine) =>
+		section + (section.EndsWith('\n') ? string.Empty : "\n") + testsLine;
 
 	private static string FormatFileReadHeader(
 		string path,

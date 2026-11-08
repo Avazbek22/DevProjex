@@ -164,6 +164,40 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		}
 	}
 
+	/// <summary>
+	/// The snapshot an earlier <see cref="IndexAsync"/> call cached for exactly this manifest, or null.
+	/// It never reads, parses or stats a file, so a hint built from it may lag edits made since that
+	/// call; callers that need current relations call <see cref="IndexAsync"/> instead.
+	/// </summary>
+	public DependencyIndexSnapshot? TryGetCachedIndex(
+		string sourceRoot,
+		IReadOnlyList<string> manifestFiles,
+		IReadOnlyCollection<string>? readableProjectFiles = null,
+		CancellationToken cancellationToken = default)
+	{
+		ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+		ArgumentException.ThrowIfNullOrWhiteSpace(sourceRoot);
+		ArgumentNullException.ThrowIfNull(manifestFiles);
+		var root = Path.GetFullPath(sourceRoot);
+		var manifestRelativePaths = CreateCanonicalManifest(root, manifestFiles, cancellationToken)
+			.Select(static file => file.RelativePath)
+			.ToArray();
+		var readableFiles = readableProjectFiles is null
+			? null
+			: CreateCanonicalManifest(root, [.. readableProjectFiles], cancellationToken);
+		var manifestRequestKey = new ManifestRequestKey(
+			root,
+			HashWithCancellation(manifestRelativePaths, cancellationToken),
+			readableFiles is null
+				? null
+				: HashWithCancellation(readableFiles.Select(static file => file.RelativePath), cancellationToken));
+		return _manifestSnapshots.TryGetValue(manifestRequestKey, out var cachedSnapshot) &&
+			cachedSnapshot.ManifestPaths.SequenceEqual(manifestRelativePaths, StringComparer.Ordinal) &&
+			_indexCache.ContainsKey(cachedSnapshot.IndexCacheKey)
+				? cachedSnapshot.Snapshot
+				: null;
+	}
+
 	/// <param name="readableProjectFiles">
 	/// The files of the readable project the manifest was narrowed from. Configuration that owns
 	/// manifest files is read from outside the manifest only when it is one of them, so a file the
