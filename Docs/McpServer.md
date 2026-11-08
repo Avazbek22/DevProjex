@@ -1476,6 +1476,8 @@ selection that was already empty are all unchanged.
 
 ### Search hits name the declaration that contains them
 
+When matches span two or more files, the final `Read these in one call: get_file ...` line inside the untrusted block offers declaration or match-context ranges for up to five files, if the line fits the 16,000-character body budget.
+
 `search_project` names the declaration each shown hit sits inside. There is no
 parameter for it: a hit without the thing that contains it is what made callers
 guess a line range and read twice. The name heads its hits inside the file's own
