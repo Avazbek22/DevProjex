@@ -345,6 +345,15 @@ A body longer than the limit shows only its signature head, at most 400 characte
 whole lines, and ends with `[Declaration body truncated: N line(s) remain: lines A-B.]`,
 naming the unshown lines of that declaration.
 
+`--regex` and `--symbols` follow the same "Multi-line patterns" rule as MCP
+`search_project` (`Docs/McpServer.md`): a pattern that can only mean to cross a line
+break is matched against each file's whole text instead of line by line, one match
+spanning lines A–B counts once at line A, and `--symbols` is never affected. Text and
+Markdown add the line
+`[Search] multi-line pattern: a match may span lines and counts once at its first line.`
+when this mode ran; JSON carries no separate flag for it, since `matches[].line` and the
+declaration ranges already describe the match the same way for both modes.
+
 ## Related-files JSON
 
 `related --format json` emits one deterministic document on stdout. Operational

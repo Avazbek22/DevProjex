@@ -339,10 +339,12 @@ Examples:
 `grep` runs the same search as `devprojex search` over the files of the current
 workspace selection: the same text, `--regex`, and `--symbols` matching (the two modes
 are mutually exclusive), the same declaration names, the same secret and private-data
-redaction, and the same default limit of 50 matches. The search runs in the background
-and can be cancelled; its results open in the output panel with project-relative paths,
-line numbers, and the enclosing declaration when one is known. `search` keeps searching
-the current Preview.
+redaction, the same multi-line matching rule for a pattern that can only mean to cross
+a line break (see `Docs/CLI-Output-Contract.md`), and the same default limit of 50
+matches. The search runs in the background and can be cancelled; its results open in
+the output panel with project-relative paths, line numbers, and the enclosing
+declaration when one is known. A match spanning several lines is reported once, at its
+first line, like any other match. `search` keeps searching the current Preview.
 
 The Terminal Workspace `:grep --symbols` reads a regular expression the same way:
 when every alternative reduces to one plain name, the search runs for those names

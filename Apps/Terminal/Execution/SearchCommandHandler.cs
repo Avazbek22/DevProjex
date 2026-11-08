@@ -142,9 +142,14 @@ public sealed class SearchCommandHandler(
 		CancellationToken cancellationToken)
 	{
 		var regexPattern = ToRegexPattern(request.Pattern, request.Mode, out var declarationNames, out var namesReadFromPattern);
+		// A pattern that can only mean to cross a line break is matched against whole files, as in
+		// MCP search_project; --symbols patterns are declaration names and never take this path.
+		var multiline = request.Mode != SearchMode.Symbols && McpSearchRegex.RequiresMultilineMatching(regexPattern);
+		var preserveCarriageReturns = multiline && McpSearchRegex.NamesCarriageReturn(regexPattern);
 		var regex = new McpSearchRegex(
 			regexPattern,
-			ignoreCase: true);
+			ignoreCase: true,
+			multiline: multiline);
 		var context = CreateTransformationContext(plan);
 		// Without a transformation the raw reader below decodes each admitted file itself and
 		// charges what it actually read; the pipeline has its own scannable limit and classifier.
@@ -225,6 +230,18 @@ public sealed class SearchCommandHandler(
 				foreach (var match in declarationMatches)
 					AcceptMatch(match);
 				effectiveMatches = declarationMatches.Count;
+			}
+			else if (multiline)
+			{
+				var scan = McpSearchTextScanner.ScanEachMultiline(
+					file.Content,
+					regex,
+					ContextLines,
+					file.ReplacementRanges,
+					AcceptMatch,
+					token,
+					preserveCarriageReturns);
+				effectiveMatches = scan.TotalMatches;
 			}
 			else
 			{
@@ -398,7 +415,8 @@ public sealed class SearchCommandHandler(
 				boundary,
 				rendered.Output.ToString().TrimEnd(),
 				matchingFiles,
-				namesReadFromPattern ? declarationNames : null);
+				namesReadFromPattern ? declarationNames : null,
+				multiline);
 		}
 
 		var maximumBudget = MaximumContentCharacters;
@@ -715,6 +733,8 @@ public sealed class SearchCommandHandler(
 				.AppendLine(" selected file(s) were not inspected.");
 		else
 			output.AppendLine($"[No matches] The pattern matched nothing in {result.Boundary.InspectedSources} inspected selected file(s).");
+		if (result.MultilinePattern)
+			output.AppendLine(DevProjexMcpTools.MultilineSearchNotice);
 		output.Append("[Resolution] resolved=").Append(result.Resolution.Resolved)
 			.Append(" · ambiguous=").Append(result.Resolution.Ambiguous)
 			.Append(" · unresolved=").Append(result.Resolution.Unresolved)
@@ -834,7 +854,8 @@ public sealed class SearchCommandHandler(
 		McpSearchBoundary Boundary,
 		string Body,
 		int MatchingFiles,
-		IReadOnlyList<string>? NamesReadFromPattern = null);
+		IReadOnlyList<string>? NamesReadFromPattern = null,
+		bool MultilinePattern = false);
 
 	internal sealed record SearchMatch(string Path, int Line, string Text, string? Declaration);
 
