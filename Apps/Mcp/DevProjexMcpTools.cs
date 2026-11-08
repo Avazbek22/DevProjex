@@ -1476,7 +1476,7 @@ internal sealed partial class DevProjexMcpTools(
 		}, cancellationToken);
 
 	[Description(
-		"Finds evidenced dependencies and dependents for one to 16 seed files; a narrowed call also names readable related files outside its selection with evidence, but their contents are never returned. Use it after search_project or get_tree; use search_project for text references or get_file for content. Returns paths, evidence, resolution status, token estimates, language coverage, partial-parse and configuration diagnostics, and scope; results above 50,000 characters use read_pack. Key parameters: path, direction=dependencies|dependents|both, profile, git_scope, include_patterns, exclude_patterns, and max_file_bytes.")]
+		"Get dependencies and usages of a file: who uses it, what it imports, and which tests import it, from real imports and references rather than text search. Use it before changing a file or to review a change; use search_project for text and get_file for content. Takes one to 16 seed files; a narrowed call also names readable files outside its selection. Returns paths with evidence, resolution status and token estimates; results above 50,000 characters use read_pack. Key parameters: path, direction=dependencies|dependents|both, include_patterns, exclude_patterns, git_scope, profile, and max_file_bytes.")]
 	public Task<CallToolResult> RelatedFiles(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>

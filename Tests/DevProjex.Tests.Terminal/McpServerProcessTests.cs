@@ -359,7 +359,7 @@ public sealed partial class McpServerProcessTests
 				["pack_context"] = ("Builds multi-file project context", "use get_file for", "view=tree|content|tree-content"),
 				["read_pack"] = ("Reads a stored result page", "pack_context instead", "1,000 lines"),
 				["search_project"] = ("Searches transformed text", "use related_files for", "max_results=1..200"),
-				["related_files"] = ("Finds evidenced dependencies", "use search_project for", "direction=dependencies|dependents|both"),
+				["related_files"] = ("Get dependencies and usages of a file", "use search_project for text", "direction=dependencies|dependents|both"),
 				["get_file"] = ("Reads selected text", "pack_context for", "sixteen file/range/symbol"),
 				["get_diff"] = ("Shows what changed", "use get_file for whole files", "context_lines=0..20")
 			};
