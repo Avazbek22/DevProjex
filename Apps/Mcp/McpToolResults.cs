@@ -149,8 +149,18 @@ internal static class McpToolResults
 			block.Text = NormalizeLineEndings(block.Text);
 	}
 
-	private static string NormalizeLineEndings(string text) =>
-		text.Contains('\r') ? text.Replace("\r\n", "\n").Replace('\r', '\n') : text;
+	/// <summary>
+	/// Same normalization as <see cref="NormalizeLineEndings(CallToolResult)"/>, for text a builder
+	/// measures before the response boundary. A token or character estimate the server reports
+	/// about its own reply has to be computed on the text that boundary will actually deliver, so a
+	/// CRLF source upstream of that estimate (a shared document writer, a file read back into a
+	/// pack body) cannot be left for the boundary alone to normalize.
+	/// </summary>
+	internal static string NormalizeLineEndings(string text)
+	{
+		ArgumentNullException.ThrowIfNull(text);
+		return text.Contains('\r') ? text.Replace("\r\n", "\n").Replace('\r', '\n') : text;
+	}
 
 	// Secrets are always masked. Private data is masked only when the caller's effective policy
 	// hides it, so an address such as a project root is not rewritten without that opt-in.
