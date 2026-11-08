@@ -1,7 +1,22 @@
+using System.Text;
+
 namespace DevProjex.Mcp;
 
 internal sealed partial class DevProjexMcpTools
 {
+	internal static string FormatDeclarationsNotIndexed(IReadOnlyList<string> paths)
+	{
+		var output = new StringBuilder();
+		foreach (var path in paths.Take(8))
+		{
+			var line = "[Declarations not indexed] " + EscapeSingleLine(path) + Environment.NewLine;
+			if (output.Length + line.Length > MaximumSearchContentCharacters)
+				break;
+			output.Append(line);
+		}
+		return output.ToString();
+	}
+
 	private const string SearchPathPatternNotice =
 		"[Search] the pattern looks like a path, but search_project matches file content; find files by name with get_tree include_patterns.";
 

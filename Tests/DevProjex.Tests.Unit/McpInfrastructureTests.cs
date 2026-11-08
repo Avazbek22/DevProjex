@@ -12,6 +12,20 @@ namespace DevProjex.Tests.Unit;
 public sealed class McpInfrastructureTests
 {
 	[Fact]
+	public void SearchDeclarationsCoverageListsAtMostEightEscapedPathsWithinTheBodyBudget()
+	{
+		var paths = Enumerable.Range(0, 10).Select(index => $"folder\nfile-{index}.ts").ToArray();
+		var output = DevProjexMcpTools.FormatDeclarationsNotIndexed(paths);
+
+		Assert.Equal(8, output.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries).Length);
+		Assert.DoesNotContain("folder\nfile", output, StringComparison.Ordinal);
+		Assert.Contains("file-7.ts", output, StringComparison.Ordinal);
+		Assert.DoesNotContain("file-8.ts", output, StringComparison.Ordinal);
+		Assert.Empty(DevProjexMcpTools.FormatDeclarationsNotIndexed([]));
+		Assert.Empty(DevProjexMcpTools.FormatDeclarationsNotIndexed([new string('a', 16_000)]));
+	}
+
+	[Fact]
 	public void NoFactsTrustedNoticeAllowsOnlyFixedEngineReasons()
 	{
 		var reasons = new[]
