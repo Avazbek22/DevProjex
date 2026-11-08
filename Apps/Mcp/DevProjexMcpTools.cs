@@ -1573,6 +1573,25 @@ internal sealed partial class DevProjexMcpTools(
 				related = outside.Selection;
 				uninspectedEvidenceSources = protectedEvidence.UninspectedSources;
 			}
+			var changeFocus = await BuildRelatedChangeFocusAsync(
+				plan,
+				() => Projects.BuildPlanAsync(
+					project,
+					branch,
+					relativeSeeds,
+					includePatterns: null,
+					excludePatterns: null,
+					profile,
+					trackedOnly: false,
+					GitScopeSelection.ToToken(GitFilteringMode.Changes),
+					maximumFileBytes,
+					cancellationToken,
+					includeOutputMetrics: false,
+					exclusions: exclusions,
+					tolerateMissingPaths: true),
+				related,
+				direction,
+				cancellationToken).ConfigureAwait(false);
 			await progress.CompleteAsync(100, related.Index.Metrics.ResolutionCacheHit
 				? "Dependency index reused"
 				: "Dependency index complete").ConfigureAwait(false);
@@ -1608,6 +1627,7 @@ internal sealed partial class DevProjexMcpTools(
 				$"[Facts coverage] files={coverage.Files}, supported={coverage.Supported}, unsupported={coverage.Unsupported}, extraction-failed={coverage.ExtractionFailed}; supported means facts were extracted for a recognized language, unsupported means no supported extractor was available",
 				FormatDependencyConfigurationDiagnostics(coverage.ConfigurationDiagnostics),
 				$"[Search scope] files={plan.IncludedFiles.Count}",
+				changeFocus.Count > 0 ? RelatedChangeFocusNotice : null,
 				partialEvidenceNotice,
 				SelectionNotices(plan, includeFilters: true, selectionContext),
 				FormatSafeNoFactsNotice(related.Seeds),
@@ -1626,6 +1646,7 @@ internal sealed partial class DevProjexMcpTools(
 					.ToArray(),
 				coverage.FactBudgetLimitedFiles,
 				coverage.PartialParseDiagnostics,
+				changeFocus,
 				cancellationToken,
 				(path, line) => relatedRanges.Add(new ProjectContextFileLineRange(
 					Path.GetFullPath(path, plan.SourceRoot),
@@ -3167,6 +3188,7 @@ internal sealed partial class DevProjexMcpTools(
 		IReadOnlyList<string> extractionFailedFiles,
 		IReadOnlyList<string> factBudgetLimitedFiles,
 		IReadOnlyList<DependencyPartialParseDiagnostic> partialParseDiagnostics,
+		IReadOnlyDictionary<string, McpRelatedChangeFocus> changeFocus,
 		CancellationToken cancellationToken,
 		Action<string, int>? recordPath = null)
 	{
@@ -3215,13 +3237,23 @@ internal sealed partial class DevProjexMcpTools(
 					cancellationToken,
 					_ => recordPath?.Invoke(seed.Seed, currentLine));
 			if (direction is DependencyDirection.Dependents or DependencyDirection.Both)
-				WriteRelatedSection(
-					output,
-					StartLine,
-					"Dependents",
-					seed.Dependents,
-					cancellationToken,
-					file => recordPath?.Invoke(file.Path, currentLine));
+			{
+				if (changeFocus.TryGetValue(seed.Seed, out var focus))
+					WriteRelatedChangeFocus(
+						output,
+						StartLine,
+						focus,
+						cancellationToken,
+						path => recordPath?.Invoke(path, currentLine));
+				else
+					WriteRelatedSection(
+						output,
+						StartLine,
+						"Dependents",
+						seed.Dependents,
+						cancellationToken,
+						file => recordPath?.Invoke(file.Path, currentLine));
+			}
 			if (outsideBySeed?.GetValueOrDefault(seed.Seed) is not { } outsideSeed)
 				continue;
 			if (outsideSeed.DependencyCount > 0)
