@@ -5,10 +5,11 @@ internal sealed partial class DevProjexMcpTools
 	private const string SearchPathPatternNotice =
 		"[Search] the pattern looks like a path, but search_project matches file content; find files by name with get_tree include_patterns.";
 
-	internal static string? FormatPerLineSearchNotice(string pattern, int totalMatches) =>
-		totalMatches == 0 && (pattern.Contains("\\n", StringComparison.Ordinal) || pattern.Contains('\n'))
-			? "[Search] matching is per line, so a pattern with \\n cannot match; search for each line separately."
-			: null;
+	internal const string MultilineSearchNotice =
+		"[Search] multi-line pattern: a match may span lines and counts once at its first line.";
+
+	// Lines of one multi-line match shown before the rest are summarised in a single line.
+	internal const int MaximumShownSpanLines = 20;
 
 	internal static McpSearchRenderSlice RenderSearchGroupsWithDocumentationLast(
 		IReadOnlyList<McpSearchRenderedGroup> ordered,

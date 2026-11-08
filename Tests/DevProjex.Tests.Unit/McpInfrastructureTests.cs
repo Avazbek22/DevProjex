@@ -2591,17 +2591,28 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Theory]
-	[InlineData(@"def a\nfoo", 0, true)]
-	[InlineData("def a\nfoo", 0, true)]
-	[InlineData(@"def a\nfoo", 1, false)]
-	[InlineData("ordinaryAbsent", 0, false)]
-	[InlineData("", 0, false)]
-	public void SearchPerLinePatternHintIsFixedAndOnlyAppearsWithoutMatches(string pattern, int matches, bool expected)
+	[InlineData(@"def a\nfoo", true)]
+	[InlineData("def a\nfoo", true)]
+	[InlineData(@"line\r", true)]
+	[InlineData(@"a[\s\S]*b", true)]
+	[InlineData(@"a[\S\s]*b", true)]
+	[InlineData(@"a[\w\W]*b", true)]
+	[InlineData(@"a[\W\w]*b", true)]
+	[InlineData(@"a[\d\D]*b", true)]
+	[InlineData(@"a[\D\d]*b", true)]
+	[InlineData("(?s)a.*b", true)]
+	[InlineData("(?is)a.*b", true)]
+	[InlineData("(?s:a.*b)", true)]
+	[InlineData("(?i-s)a.*b", false)]
+	[InlineData(@"\\n", false)]
+	[InlineData(@"a\s+b", false)]
+	[InlineData("(?i)a.*b", false)]
+	[InlineData("(?<s>a)", false)]
+	[InlineData("ordinaryAbsent", false)]
+	[InlineData("", false)]
+	public void SearchSwitchesToMultilineMatchingOnlyForLineBreakPatterns(string pattern, bool expected)
 	{
-		var notice = DevProjexMcpTools.FormatPerLineSearchNotice(pattern, matches);
-		Assert.Equal(expected, notice is not null);
-		if (notice is not null)
-			Assert.Equal("[Search] matching is per line, so a pattern with \\n cannot match; search for each line separately.", notice);
+		Assert.Equal(expected, McpSearchRegex.RequiresMultilineMatching(pattern));
 	}
 
 	[Theory]
