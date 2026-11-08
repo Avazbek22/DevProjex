@@ -6,17 +6,19 @@ namespace DevProjex.Tests.Unit;
 public sealed class DependencyDeclarationGapTests
 {
 	[Theory]
-	[InlineData("types.ts", LanguageId.TypeScript)]
-	[InlineData("types.tsx", LanguageId.Tsx)]
-	public void CallableInterfaceKeepsItsHeaderAndExactRangeWhenItsBodyNeedsRecovery(string path, LanguageId language)
+	[InlineData("types.ts", LanguageId.TypeScript, "\n")]
+	[InlineData("types.ts", LanguageId.TypeScript, "\r\n")]
+	[InlineData("types.tsx", LanguageId.Tsx, "\n")]
+	[InlineData("types.tsx", LanguageId.Tsx, "\r\n")]
+	public void CallableInterfaceKeepsItsHeaderAndExactRangeWhenItsBodyNeedsRecovery(string path, LanguageId language, string newline)
 	{
-		const string source = """
+		var source = """
 			export interface Respond {
 			  <T extends string = string>(value: T): Response<T>
 			  <T extends string = string>(value: T): Response<T>
 			}
 			export type After = string
-			""";
+			""".ReplaceLineEndings(newline);
 		using var extractor = new TreeSitterDependencyFactExtractor();
 		var facts = Extract(extractor, path, language, source);
 
@@ -25,7 +27,7 @@ public sealed class DependencyDeclarationGapTests
 		Assert.Equal((1, 4), (Assert.Single(declaration.DeclarationSites).Line, declaration.DeclarationSites[0].EndLine));
 		var navigation = Assert.Single(facts.NavigationDeclarations, item => item.Name == "Respond");
 		Assert.Equal((1, 4), (navigation.StartLine, navigation.EndLine));
-		Assert.Equal(source[..source.IndexOf("\nexport type", StringComparison.Ordinal)]["export ".Length..],
+		Assert.Equal(source["export ".Length..source.IndexOf(newline + "export type", StringComparison.Ordinal)],
 			source[navigation.StartIndex..navigation.EndIndex]);
 		Assert.DoesNotContain(facts.References, item => item.Name == "Response");
 		Assert.Equal(facts.NavigationDeclarations,
@@ -33,12 +35,15 @@ public sealed class DependencyDeclarationGapTests
 	}
 
 	[Theory]
-	[InlineData("functions.ts", LanguageId.TypeScript)]
-	[InlineData("functions.tsx", LanguageId.Tsx)]
-	[InlineData("functions.js", LanguageId.JavaScript)]
-	public void ExportedConstFunctionsHaveDependencyFactsAndExactNavigationRanges(string path, LanguageId language)
+	[InlineData("functions.ts", LanguageId.TypeScript, "\n")]
+	[InlineData("functions.ts", LanguageId.TypeScript, "\r\n")]
+	[InlineData("functions.tsx", LanguageId.Tsx, "\n")]
+	[InlineData("functions.tsx", LanguageId.Tsx, "\r\n")]
+	[InlineData("functions.js", LanguageId.JavaScript, "\n")]
+	[InlineData("functions.js", LanguageId.JavaScript, "\r\n")]
+	public void ExportedConstFunctionsHaveDependencyFactsAndExactNavigationRanges(string path, LanguageId language, string newline)
 	{
-		const string source = """
+		var source = """
 			export const arrow = (value) => {
 			  return value
 			}
@@ -47,7 +52,7 @@ public sealed class DependencyDeclarationGapTests
 			}
 			const local = () => 1
 			export let mutable = () => 1
-			""";
+			""".ReplaceLineEndings(newline);
 		using var extractor = new TreeSitterDependencyFactExtractor();
 		var facts = Extract(extractor, path, language, source);
 
@@ -59,8 +64,8 @@ public sealed class DependencyDeclarationGapTests
 		var expression = Assert.Single(facts.NavigationDeclarations, item => item.Name == "expression");
 		Assert.Equal((1, 3), (arrow.StartLine, arrow.EndLine));
 		Assert.Equal((4, 6), (expression.StartLine, expression.EndLine));
-		Assert.Equal("arrow = (value) => {\n  return value\n}", source[arrow.StartIndex..arrow.EndIndex]);
-		Assert.Equal("expression = function (value) {\n  return value\n}", source[expression.StartIndex..expression.EndIndex]);
+		Assert.Equal("arrow = (value) => {\n  return value\n}".ReplaceLineEndings(newline), source[arrow.StartIndex..arrow.EndIndex]);
+		Assert.Equal("expression = function (value) {\n  return value\n}".ReplaceLineEndings(newline), source[expression.StartIndex..expression.EndIndex]);
 	}
 
 	[Theory]

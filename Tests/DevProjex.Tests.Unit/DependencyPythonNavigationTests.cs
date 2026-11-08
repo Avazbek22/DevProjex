@@ -5,10 +5,12 @@ namespace DevProjex.Tests.Unit;
 
 public sealed class DependencyPythonNavigationTests
 {
-	[Fact]
-	public void ModuleAssignmentsHaveExactNavigationRangesWithoutCreatingDependencyDeclarations()
+	[Theory]
+	[InlineData("\n")]
+	[InlineData("\r\n")]
+	public void ModuleAssignmentsHaveExactNavigationRangesWithoutCreatingDependencyDeclarations(string newline)
 	{
-		const string source = """
+		var source = """
 			DEFAULT_TIMEOUT = 5
 			ANNOTATED: tuple[int, int] = (
 			    1, 2
@@ -19,7 +21,7 @@ public sealed class DependencyPythonNavigationTests
 			    CLASS_FIELD = 1
 			def run():
 			    LOCAL = 1
-			""";
+			""".ReplaceLineEndings(newline);
 		using var extractor = new TreeSitterDependencyFactExtractor();
 		var facts = Extract(extractor, source);
 
@@ -35,7 +37,7 @@ public sealed class DependencyPythonNavigationTests
 		Assert.Equal(facts.NavigationDeclarations,
 			extractor.ExtractNavigation("constants.py", source, "snapshot", TestContext.Current.CancellationToken));
 		var annotation = Assert.Single(facts.NavigationDeclarations, item => item.Name == "ANNOTATED");
-		Assert.Equal("ANNOTATED: tuple[int, int] = (\n    1, 2\n)", source[annotation.StartIndex..annotation.EndIndex]);
+		Assert.Equal("ANNOTATED: tuple[int, int] = (\n    1, 2\n)".ReplaceLineEndings(newline), source[annotation.StartIndex..annotation.EndIndex]);
 	}
 
 	[Theory]
