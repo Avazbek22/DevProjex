@@ -341,7 +341,8 @@ empty result emits `[Search partial]`. Neither state is described as `[No matche
 When a declaration body is included, text and Markdown print its project-relative
 address followed by an executable `devprojex export context ... --view content`
 command for reading that file through the CLI; they never print an MCP-only call.
-A cut body ends with `[Declaration body truncated: N line(s) remain: lines A-B.]`,
+A body longer than the limit shows only its signature head, at most 400 characters of
+whole lines, and ends with `[Declaration body truncated: N line(s) remain: lines A-B.]`,
 naming the unshown lines of that declaration.
 
 ## Related-files JSON
