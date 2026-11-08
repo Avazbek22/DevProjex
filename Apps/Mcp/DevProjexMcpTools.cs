@@ -1941,10 +1941,10 @@ internal sealed partial class DevProjexMcpTools(
 			}
 
 			ValidateLineRange(start, end);
-			var plan = await Projects.BuildPlanAsync(
+			Task<ProjectContextPlan> BuildReadPlanAsync(string path) => Projects.BuildPlanAsync(
 				arguments.OptionalString("project"),
 				arguments.OptionalString("branch"),
-				paths: [requestedPath],
+				paths: [path],
 				includePatterns: null,
 				excludePatterns: null,
 				profile: arguments.OptionalString("profile"),
@@ -1954,9 +1954,41 @@ internal sealed partial class DevProjexMcpTools(
 				cancellationToken,
 				includeOutputMetrics: false,
 				exclusions: ParseExclusionsArgument(arguments),
-				allowNamedPathsOutsideSelection: liveContext is not null).ConfigureAwait(false);
+				allowNamedPathsOutsideSelection: liveContext is not null);
+			ProjectContextPlan plan;
+			string file;
+			var modulePathResolved = false;
+			McpToolException? notFound = null;
+			try
+			{
+				plan = await BuildReadPlanAsync(requestedPath).ConfigureAwait(false);
+				file = Projects.ResolveFile(plan, requestedPath);
+			}
+			catch (McpToolException exception) when (exception.Code == McpErrorCodes.PathNotFound &&
+													 !exception.NamesReadableEntries)
+			{
+				notFound = exception;
+				plan = null!;
+				file = null!;
+			}
+			if (notFound is not null)
+			{
+				// Only a file the call could read anyway is a candidate, and it goes through the same
+				// selection and access checks; any refusal returns the original error unchanged.
+				var modulePath = await FindReadableModuleFileAsync(arguments, requestedPath, cancellationToken)
+					.ConfigureAwait(false) ?? throw notFound;
+				try
+				{
+					plan = await BuildReadPlanAsync(modulePath).ConfigureAwait(false);
+					file = Projects.ResolveFile(plan, modulePath);
+				}
+				catch (McpToolException)
+				{
+					throw notFound;
+				}
+				modulePathResolved = true;
+			}
 			RecordPlan(plan);
-			var file = Projects.ResolveFile(plan, requestedPath);
 
 			TransformedTextFile? transformed = null;
 			await using var inspected = await Projects.ConsumeSearchTextAsync(
@@ -2009,6 +2041,8 @@ internal sealed partial class DevProjexMcpTools(
 				? "[The current line exceeded the 50000-character response cap; use search_project to narrow the source.]"
 				: null;
 			var addressedPage = FormatFileReadHeader(relativePath, page) + page.Text;
+			if (await FindImportsLineAsync(arguments, file, page.Text, page.StartLine, cancellationToken).ConfigureAwait(false) is { } importsLine)
+				addressedPage = AppendSectionLine(addressedPage, importsLine);
 			if (start is null && end is null && startColumn is null && symbol is null)
 			{
 				var testsLines = await FindTestsLinesAsync(arguments, [file], cancellationToken).ConfigureAwait(false);
@@ -2023,6 +2057,7 @@ internal sealed partial class DevProjexMcpTools(
 			}
 			return McpToolResults.TextSuccess(AppendTrustedNotices(
 				spotlighted,
+				modulePathResolved ? ModulePathResolvedNotice : null,
 				rangeNotice,
 				characterLimitNotice,
 				FormatContentTransformed(inspected.CompressionSnapshot),
@@ -2151,6 +2186,13 @@ internal sealed partial class DevProjexMcpTools(
 				.Select(static item => item.PhysicalPath!)
 				.ToArray(),
 			cancellationToken).ConfigureAwait(false);
+		var importsByPath = await FindImportsAsync(
+			arguments,
+			resolvedRequests
+				.Where(static item => item.PhysicalPath is not null && item.UnavailableReason is null)
+				.Select(static item => item.PhysicalPath!)
+				.ToArray(),
+			cancellationToken).ConfigureAwait(false);
 		var rendered = RenderBatchFileReads(
 			resolvedRequests,
 			transformed,
@@ -2162,7 +2204,8 @@ internal sealed partial class DevProjexMcpTools(
 					: null),
 			profile,
 			exclusions,
-			cancellationToken);
+			cancellationToken,
+			importsByPath);
 		journal?.RecordDeliveredPaths(plan.SourceRoot, rendered.DeliveredPaths);
 		var redactionCountsByPath = new Dictionary<string, IReadOnlyDictionary<int, int>>(PathComparer.Default);
 		foreach (var returned in rendered.DeliveredRanges)
@@ -2421,7 +2464,8 @@ internal sealed partial class DevProjexMcpTools(
 		McpDeclarationReadContext continuationContext,
 		string? profile,
 		IReadOnlyList<ProjectExclusion>? exclusions,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		IReadOnlyDictionary<string, IReadOnlyList<DependencyFileImport>>? importsByPath = null)
 	{
 		var status = requests
 			.SelectMany(static request => request.Request.Ranges)
@@ -2537,6 +2581,14 @@ internal sealed partial class DevProjexMcpTools(
 				sectionStatus,
 				pathIsEscaped: true);
 			var section = separator + header + page.Text;
+			if (importsByPath?.GetValueOrDefault(group.PhysicalPath) is { } imports &&
+				FormatImportsLine(imports, page.Text, page.StartLine) is { } importsLine)
+			{
+				var withImports = AppendSectionLine(section, importsLine);
+				if (sections.Length + withImports.Length <= sectionBudgetCharacters &&
+					usedLines + CountResponseLines(withImports) <= sectionBudgetLines)
+					section = withImports;
+			}
 			if (!page.IsTruncated &&
 				group.Ranges.All(static range => range.IsWholeFile) &&
 				testsLines.TryGetValue(group.PhysicalPath, out var testsLine))
