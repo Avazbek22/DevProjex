@@ -17,6 +17,9 @@ Reduced instructions and catalog guidance do not mention omitted tools. Calling 
 the normal unknown-tool protocol error (`-32602`) naming that tool. `read_pack`
 continues to read retained search and dependency results in either set.
 
+Every text block the server composes itself uses LF line endings on every platform,
+including Windows, so a response does not depend on the host's newline convention.
+
 `--search-body-chars off|N` fixes the search declaration-body limit at startup:
 `N` is an integer from 1 to 16,000 characters, with a default of 1,800;
 `off` disables the body. Zero, negative, fractional, and out-of-range values
