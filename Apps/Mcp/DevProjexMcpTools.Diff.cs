@@ -375,8 +375,8 @@ internal sealed partial class DevProjexMcpTools
 	private static string FormatDiffHunkRangeEntry(ProjectDiffFile file, UnifiedDiffHunk hunk) =>
 		ProjectDiffText.EscapePath(file.RelativePath) + " " + UnifiedDiffFormatter.FormatHeader(hunk);
 
-	private const string AffectedDependentsHeading = "Files that depend on the changed files:";
-	private const string AffectedTestsHeading = "Tests that cover the changed files:";
+	private const string AffectedDependentsHeading = "Files that import the changed files:";
+	private const string AffectedTestsHeading = "Tests that import or are named after the changed files:";
 
 	private static string FormatAffectedSection(DependencyChangeImpact affected)
 	{

@@ -16,8 +16,8 @@ public sealed partial class GitModeCommandContractTests
 	}
 
 	[Theory]
-	[InlineData("en", "Files that depend on the changed files:", "Tests that cover the changed files:")]
-	[InlineData("ru", "Файлы, которые зависят от изменённых:", "Тесты, которые покрывают изменённые файлы:")]
+	[InlineData("en", "Files that import the changed files:", "Tests that import or are named after the changed files:")]
+	[InlineData("ru", "Файлы, которые импортируют изменённые файлы:", "Тесты, которые импортируют изменённые файлы или названы по ним:")]
 	public void RealDiffCommandListsWhatTheChangeAffectsAfterTheHunks(
 		string language,
 		string dependentsHeading,
@@ -53,5 +53,48 @@ public sealed partial class GitModeCommandContractTests
 		var affected = document.RootElement.GetProperty("affected");
 		Assert.Equal(["src/b.ts"], affected.GetProperty("dependents").EnumerateArray().Select(static item => item.GetString()));
 		Assert.Equal(["src/a.test.ts"], affected.GetProperty("tests").EnumerateArray().Select(static item => item.GetString()));
+	}
+
+	private static GitModeRepository CreatePackageReExportDiffRepository()
+	{
+		var repository = new GitModeRepository();
+		repository.Write("pyproject.toml", "[project]\nname = \"fixture\"\n");
+		repository.Write("pkg/__init__.py", "from ._config import Timeout\nfrom ._api import get\n");
+		repository.Write("pkg/_config.py", "class Timeout: pass\n");
+		repository.Write("pkg/_api.py", "from ._config import Timeout\ndef get(): return Timeout()\n");
+		repository.Write("tests/test_config.py", "def test_timeout(): pass\n");
+		repository.Write("tests/test_api.py", "from pkg import Timeout\ndef test_api(): pass\n");
+		repository.Write("tests/test_direct.py", "from pkg._config import Timeout\ndef test_direct(): pass\n");
+		repository.Commit("first");
+		repository.Write("pkg/_config.py", "class Timeout:\n    seconds = 5\n");
+		return repository;
+	}
+
+	[Fact]
+	public void RealDiffCommandListsOnlyDirectImportersAndTestsNamedAfterTheChange()
+	{
+		using var repository = CreatePackageReExportDiffRepository();
+		using var state = new TemporaryDirectory();
+
+		var text = RunScopeCommand(repository, state.Path,
+			["diff", "--project", repository.Root, "--language", "en", "--plain"]);
+		var json = RunScopeCommand(repository, state.Path,
+			["diff", "--project", repository.Root, "--format", "json"]);
+
+		Assert.True(text.ExitCode == 0, text.StandardError);
+		Assert.Contains(
+			"\n\nFiles that import the changed files:\npkg/_api.py\n\n" +
+			"Tests that import or are named after the changed files:\ntests/test_config.py\ntests/test_direct.py\n\n",
+			text.StandardOutput,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain("pkg/__init__.py", text.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("tests/test_api.py", text.StandardOutput, StringComparison.Ordinal);
+		Assert.True(json.ExitCode == 0, json.StandardError);
+		using var document = JsonDocument.Parse(json.StandardOutput);
+		var affected = document.RootElement.GetProperty("affected");
+		Assert.Equal(["pkg/_api.py"], affected.GetProperty("dependents").EnumerateArray().Select(static item => item.GetString()));
+		Assert.Equal(
+			["tests/test_config.py", "tests/test_direct.py"],
+			affected.GetProperty("tests").EnumerateArray().Select(static item => item.GetString()));
 	}
 }

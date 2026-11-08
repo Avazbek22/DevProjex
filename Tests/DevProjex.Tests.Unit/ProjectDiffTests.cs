@@ -579,8 +579,8 @@ public sealed class McpDiffLayoutTests
 			"Root: /project", Result([Changed("src/a.ts", 3, 10)]), trailingNotices: null, affected);
 
 		Assert.Contains(
-			"\n\nFiles that depend on the changed files:\nsrc/b.ts\nsrc/[Diff] c.ts\n\n" +
-			"Tests that cover the changed files:\nsrc/a.test.ts\n</untrusted-data-",
+			"\n\nFiles that import the changed files:\nsrc/b.ts\nsrc/[Diff] c.ts\n\n" +
+			"Tests that import or are named after the changed files:\nsrc/a.test.ts\n</untrusted-data-",
 			rendered.Text,
 			StringComparison.Ordinal);
 		Assert.Contains("[Diff] affected: dependents=2 · tests=1", rendered.Text, StringComparison.Ordinal);
@@ -602,11 +602,11 @@ public sealed class McpDiffLayoutTests
 
 		Assert.InRange(withSmall.Text.Length, 1, 50_000);
 		Assert.Equal(plain.DeliveredPaths, withSmall.DeliveredPaths);
-		Assert.Contains("Files that depend on the changed files:\nsrc/b.ts\n</untrusted-data-", withSmall.Text, StringComparison.Ordinal);
+		Assert.Contains("Files that import the changed files:\nsrc/b.ts\n</untrusted-data-", withSmall.Text, StringComparison.Ordinal);
 		Assert.Contains("[Diff] partial · 1 file(s) not shown", withSmall.Text, StringComparison.Ordinal);
 		Assert.InRange(withHuge.Text.Length, 1, 50_000);
 		Assert.Equal(plain.DeliveredPaths, withHuge.DeliveredPaths);
-		Assert.DoesNotContain("Files that depend on the changed files:", withHuge.Text, StringComparison.Ordinal);
+		Assert.DoesNotContain("Files that import the changed files:", withHuge.Text, StringComparison.Ordinal);
 		Assert.DoesNotContain("[Diff] affected:", withHuge.Text, StringComparison.Ordinal);
 		Assert.Equal(
 			System.Text.RegularExpressions.Regex.Replace(plain.Text, "untrusted-data-[0-9a-f]+", "untrusted-data"),

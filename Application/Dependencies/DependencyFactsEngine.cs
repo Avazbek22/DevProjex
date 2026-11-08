@@ -1678,7 +1678,8 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			foreach (var edge in raw)
 			{
 				var key = new EdgeAggregationKey(
-					edge.Source, edge.Target, edge.Layer, edge.Status, edge.Reference, edge.CrossScope, edge.ModuleOnly);
+					edge.Source, edge.Target, edge.Layer, edge.Status, edge.Reference, edge.CrossScope, edge.ModuleOnly,
+					edge.ThroughReExport);
 				if (!groups.TryGetValue(key, out var accumulator))
 					groups.Add(key, accumulator = new EdgeAccumulator());
 				accumulator.Add(edge);
@@ -1699,7 +1700,8 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			ResolutionStatus Status,
 			string Reference,
 			bool CrossScope,
-			bool ModuleOnly);
+			bool ModuleOnly,
+			bool ThroughReExport);
 
 		private sealed class EdgeAccumulator
 		{
@@ -1743,7 +1745,8 @@ public sealed partial class DependencyFactsEngine : IDisposable
 					key.CrossScope)
 				{
 					DeclarationFiles = _declarationFiles!.Order(StringComparer.Ordinal).ToArray(),
-					ModuleOnly = key.ModuleOnly
+					ModuleOnly = key.ModuleOnly,
+					ThroughReExport = key.ThroughReExport
 				};
 			}
 
@@ -2904,7 +2907,9 @@ public sealed partial class DependencyFactsEngine : IDisposable
 						.Order(StringComparer.Ordinal)
 						.ToArray();
 					if (assigned.Length > 0)
-						return ModuleOnlyImport(source, import, assigned, resolvedReason);
+						return MarkPythonReExport(
+							ModuleOnlyImport(source, import, assigned, resolvedReason),
+							import, searchRoots, module, moduleCandidates);
 					if (moduleCandidates.Any(HasPythonWildcardReExport))
 						return Edge(source, import, ResolutionStatus.Unresolved, null,
 							"Python wildcard re-export bindings are not indexed", []);
@@ -2931,7 +2936,29 @@ public sealed partial class DependencyFactsEngine : IDisposable
 				_files.TryGetValue(candidate, out var facts) && facts.Aliases.ContainsKey("$dynamic-all")))
 				return Edge(source, import, ResolutionStatus.Unresolved, null,
 					"dynamic __all__ is an unsupported mechanism", candidates);
-			return FinishImport(source, import, candidates, resolvedReason);
+			return MarkPythonReExport(
+				FinishImport(source, import, candidates, resolvedReason),
+				import, searchRoots, module, moduleCandidates);
+		}
+
+		// An import resolved to a file that is neither the module it names nor the child module of
+		// the imported name reached that file through the module's re-exports.
+		private DependencyEdge MarkPythonReExport(
+			DependencyEdge edge,
+			ImportFact import,
+			IReadOnlyList<string> searchRoots,
+			string module,
+			IReadOnlyCollection<string> moduleCandidates)
+		{
+			if (edge is not { Status: ResolutionStatus.Resolved, Target: { } target } ||
+				moduleCandidates.Count == 0 ||
+				moduleCandidates.Contains(target, StringComparer.Ordinal) ||
+				import.ImportedName is not { Length: > 0 } imported)
+				return edge;
+			var child = module.Length == 0 ? imported : module + "." + imported;
+			return ProbePythonModule(searchRoots, child).Contains(target, StringComparer.Ordinal)
+				? edge
+				: edge with { ThroughReExport = true };
 		}
 
 		private IReadOnlyList<string> ResolvePythonStaticBinding(

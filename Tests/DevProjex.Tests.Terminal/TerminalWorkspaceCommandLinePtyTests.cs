@@ -179,9 +179,9 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 			timeout: TimeSpan.FromSeconds(45),
 			cancellationToken: TestContext.Current.CancellationToken);
 
-		Assert.Contains("Files that depend on the changed files:", result, StringComparison.Ordinal);
+		Assert.Contains("Files that import the changed files:", result, StringComparison.Ordinal);
 		Assert.Contains("src/b.ts", result, StringComparison.Ordinal);
-		Assert.Contains("Tests that cover the changed files:", result, StringComparison.Ordinal);
+		Assert.Contains("Tests that import or are named after the changed files:", result, StringComparison.Ordinal);
 		Assert.Contains("src/a.test.ts", result, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
