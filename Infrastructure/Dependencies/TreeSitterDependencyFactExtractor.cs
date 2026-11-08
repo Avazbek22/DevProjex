@@ -411,7 +411,7 @@ public sealed partial class TreeSitterDependencyFactExtractor : IDependencyFactE
 				ReadQuery(definition.QueryDirectory, "references.scm") + "\0" +
 				ReadQuery(definition.QueryDirectory, "navigation.scm") + "\0" + DiagnosticErrorQuery));
 			var projectionIdentity = id == LanguageId.CSharp ? ":conditional-projection-v3" : string.Empty;
-			var callableHeaderIdentity = id is LanguageId.TypeScript or LanguageId.Tsx ? ":callable-headers-v1" : string.Empty;
+			var callableHeaderIdentity = id is LanguageId.TypeScript or LanguageId.Tsx ? ":callable-headers-v2" : string.Empty;
 			var pythonNavigationIdentity = id == LanguageId.Python ? ":module-navigation-v1" : string.Empty;
 			return $"{definition.Library}:TreeSitter.DotNet-1.3.0:{queryHash}{projectionIdentity}:root-recovery-v1{callableHeaderIdentity}{pythonNavigationIdentity}";
 		});
@@ -1338,9 +1338,10 @@ public sealed partial class TreeSitterDependencyFactExtractor : IDependencyFactE
 		var capturedNameStartIndex = nameNode is null ? -1 : checked((int)nameNode.StartIndex);
 		var typeParameters = node.Children.FirstOrDefault(static child =>
 			child.Type is "type_parameter_list" or "type_parameters");
-		if (typeParameters is null && node.Type == "variable_declarator")
-			typeParameters = node.GetChildForField("value")?.GetChildForField("type_parameters");
 		var genericArity = typeParameters is null ? 0 : CountGenericArity(materialization.Read(typeParameters));
+		if (node.Type == "variable_declarator" &&
+			node.GetChildForField("value")?.GetChildForField("type_parameters") is { } initializerParameters)
+			genericArity = initializerParameters.NamedChildren.Count(static parameter => parameter.Type == "type_parameter");
 		var evidence = string.IsNullOrEmpty(capturedName)
 			? string.Empty
 			: capturedName + (genericArity == 0 ? string.Empty : $"`{genericArity}");

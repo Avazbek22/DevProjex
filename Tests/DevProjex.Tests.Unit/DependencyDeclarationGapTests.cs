@@ -63,6 +63,27 @@ public sealed class DependencyDeclarationGapTests
 		Assert.Equal("expression = function (value) {\n  return value\n}", source[expression.StartIndex..expression.EndIndex]);
 	}
 
+	[Theory]
+	[InlineData("functions.ts", LanguageId.TypeScript)]
+	[InlineData("functions.tsx", LanguageId.Tsx)]
+	public void ExportedGenericFunctionsKeepTheArityOfTheirInitializer(string path, LanguageId language)
+	{
+		const string source = """
+			export const identity = <T,>(value: T): T => value
+			export const pair = function <T, U>(first: T, second: U) {
+			  return [first, second]
+			}
+			""";
+		using var extractor = new TreeSitterDependencyFactExtractor();
+		var facts = Extract(extractor, path, language, source);
+
+		var identity = Assert.Single(facts.Declarations, item => item.Identity.QualifiedName.EndsWith("#identity", StringComparison.Ordinal));
+		var pair = Assert.Single(facts.Declarations, item => item.Identity.QualifiedName.EndsWith("#pair", StringComparison.Ordinal));
+		Assert.Equal(1, identity.Identity.GenericArity);
+		Assert.Equal(2, pair.Identity.GenericArity);
+		Assert.Equal((2, 4), (Assert.Single(pair.DeclarationSites).Line, pair.DeclarationSites[0].EndLine));
+	}
+
 	private static FileFacts Extract(TreeSitterDependencyFactExtractor extractor, string path, LanguageId language, string source) =>
 		extractor.Extract(new PreparedDependencySource(path, path, "fixture", language, "snapshot", "fixture", source),
 			new DependencyFactsLimits(), TestContext.Current.CancellationToken);
