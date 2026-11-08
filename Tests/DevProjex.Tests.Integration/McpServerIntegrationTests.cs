@@ -110,6 +110,58 @@ public sealed partial class McpServerIntegrationTests
 		Assert.Equal(calls.Sum(static call => (long)call.FilesDelivered), session.Totals.FilesDelivered);
 	}
 
+	// Issue #468: the server composes every text block itself with LF, so a response does not
+	// depend on Environment.NewLine and the same call costs the same tokens on every platform.
+	[Fact]
+	public async Task EveryToolComposesOnlyLineFeedTextBlocks()
+	{
+		if (!OperatingSystem.IsWindows())
+			Assert.Skip("Environment.NewLine already is \"\\n\" off Windows; this regression only reproduces there.");
+
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var source = Path.Combine(project, "src");
+		Directory.CreateDirectory(source);
+		File.WriteAllText(Path.Combine(source, "Program.cs"), "class Program { Model Value = new(); }\r\n");
+		File.WriteAllText(Path.Combine(source, "Model.cs"), "class Model { }\r\n");
+		File.WriteAllText(Path.Combine(source, "Large.txt"), new string('x', 60_000));
+		File.WriteAllText(Path.Combine(project, "Outside.cs"), $"class Outside {{ string Token = \"{Secret}\"; }}\r\n");
+		InitializeCommittedRepository(project);
+		File.WriteAllText(Path.Combine(source, "Program.cs"), "class Program { Model Value = new(); int Added; }\r\n");
+
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var results = new List<(string Tool, CallToolResult Result)>
+		{
+			("list_projects", await server.CallAsync("list_projects")),
+			("get_tree", await server.CallAsync("get_tree", new Dictionary<string, object?> { ["format"] = "text" })),
+			("analyze", await server.CallAsync("analyze")),
+			("search_project", await server.CallAsync("search_project", new Dictionary<string, object?> { ["pattern"] = "Model" })),
+			("related_files", await server.CallAsync("related_files", new Dictionary<string, object?> { ["path"] = "src/Program.cs" })),
+			("get_file", await server.CallAsync("get_file", new Dictionary<string, object?> { ["path"] = "Outside.cs" })),
+			("get_diff", await server.CallAsync("get_diff")),
+		};
+
+		var pack = await server.CallAsync("pack_context");
+		results.Add(("pack_context", pack));
+		Assert.NotEqual(true, pack.IsError);
+		var packId = Regex.Match(AllText(pack), "'(?<id>[a-f0-9]{48})'").Groups["id"].Value;
+		Assert.NotEmpty(packId);
+		results.Add((
+			"read_pack",
+			await server.CallAsync("read_pack", new Dictionary<string, object?> { ["pack_id"] = packId })));
+
+		foreach (var (tool, result) in results)
+		{
+			Assert.NotEqual(true, result.IsError);
+			foreach (var block in result.Content.OfType<TextContentBlock>())
+				Assert.DoesNotContain("\r\n", block.Text, StringComparison.Ordinal);
+		}
+		Assert.Equal(
+			ExpectedTools.OrderBy(static tool => tool, StringComparer.Ordinal),
+			results.Select(static entry => entry.Tool).OrderBy(static tool => tool, StringComparer.Ordinal));
+	}
+
 	[Fact]
 	public async Task LiveContextRefreshesTheWindowSelectionAcrossAllTools()
 	{
@@ -367,8 +419,8 @@ public sealed partial class McpServerIntegrationTests
 		Assert.Matches(
 			@"revision 1 · 0 files in the saved selection · saved \d{4}-\d{2}-\d{2} · root 2 of 2",
 			secondTree);
-		Assert.Contains("Live context root 1 name:" + Environment.NewLine + "first", firstTree, StringComparison.Ordinal);
-		Assert.Contains("Live context root 2 name:" + Environment.NewLine + "second", secondTree, StringComparison.Ordinal);
+		Assert.Contains("Live context root 1 name:\nfirst", firstTree, StringComparison.Ordinal);
+		Assert.Contains("Live context root 2 name:\nsecond", secondTree, StringComparison.Ordinal);
 		Assert.Contains("the saved selection has no checked files", secondTree, StringComparison.Ordinal);
 	}
 
