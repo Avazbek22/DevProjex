@@ -831,20 +831,10 @@ internal sealed class McpSearchDeclarationPreviewCache
 		for (var line = startLine; line <= endLine; line++)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			var start = starts[line - 1];
-			var end = line < starts.Length ? starts[line] : content.Length;
-			if (end > start && content[end - 1] == '\n')
-				end--;
-			if (end > start && content[end - 1] == '\r')
-				end--;
-			var lineText = content.AsSpan(start, end - start);
+			var lineText = ReadLine(line);
 			var separator = hasLine ? 1 : 0;
 			if ((long)output.Length + separator + lineText.Length > maximumCharacters)
-			{
-				if (!hasLine)
-					AppendPrefix(output, lineText, maximumCharacters);
-				return (output.ToString(), endLine - line + 1);
-			}
+				return SliceHead(startLine, endLine);
 
 			if (hasLine)
 				output.Append('\n');
@@ -853,6 +843,50 @@ internal sealed class McpSearchDeclarationPreviewCache
 		}
 
 		return (output.ToString(), 0);
+	}
+
+	/// <summary>
+	/// A body over the limit is read in full anyway, so only its head is shown: whole leading
+	/// lines within <see cref="McpDeclarationHead.MaximumCharacters"/>, cut after the signature.
+	/// </summary>
+	private (string Text, int RemainingLines) SliceHead(int startLine, int endLine)
+	{
+		var budget = Math.Min(McpDeclarationHead.MaximumCharacters, maximumCharacters);
+		var candidates = new List<string>();
+		var length = 0;
+		for (var line = startLine; line <= endLine; line++)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var lineText = ReadLine(line);
+			var separator = candidates.Count > 0 ? 1 : 0;
+			if (length + separator + lineText.Length > budget)
+			{
+				if (candidates.Count == 0)
+				{
+					var prefix = new StringBuilder(budget);
+					AppendPrefix(prefix, lineText, budget);
+					return (prefix.ToString(), endLine - startLine + 1);
+				}
+				break;
+			}
+			candidates.Add(lineText.ToString());
+			length += separator + lineText.Length;
+		}
+
+		var headLines = McpDeclarationHead.CountHeadLines(relativePath, candidates);
+		return (string.Join('\n', candidates.Take(headLines)), endLine - startLine + 1 - headLines);
+	}
+
+	private ReadOnlySpan<char> ReadLine(int line)
+	{
+		var starts = lineStarts!;
+		var start = starts[line - 1];
+		var end = line < starts.Length ? starts[line] : content.Length;
+		if (end > start && content[end - 1] == '\n')
+			end--;
+		if (end > start && content[end - 1] == '\r')
+			end--;
+		return content.AsSpan(start, end - start);
 	}
 
 	private static int[] BuildLineStarts(string content, CancellationToken cancellationToken)
