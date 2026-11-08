@@ -1072,9 +1072,13 @@ internal sealed partial class DevProjexMcpTools(
 					McpErrorCodes.InvalidArguments,
 					$"{McpErrorCodes.InvalidArguments}: symbols=true needs a declared name in pattern, such as OrderService or Foo|Bar.");
 			}
+			// A pattern that can only mean to cross a line break is matched against whole files.
+			var multiline = !declarationsOnly && McpSearchRegex.RequiresMultilineMatching(pattern);
+			var preserveCarriageReturns = multiline && McpSearchRegex.NamesCarriageReturn(pattern);
 			var regex = new McpSearchRegex(
 				declarationsOnly ? McpSearchSymbols.ToDeclarationNamePattern(declarationNames) : pattern,
-				ignoreCase);
+				ignoreCase,
+				multiline: multiline);
 			var paths = ParsePaths(arguments);
 			var includePatterns = arguments.OptionalStringArray("include_patterns");
 			var excludePatterns = arguments.OptionalStringArray("exclude_patterns");
@@ -1188,6 +1192,17 @@ internal sealed partial class DevProjexMcpTools(
 						foreach (var match in declarationMatches)
 							AcceptMatch(match);
 						fileMatches = declarationMatches.Count;
+					}
+					else if (multiline)
+					{
+						fileMatches = McpSearchTextScanner.ScanEachMultiline(
+							file.Content,
+							regex,
+							contextLines,
+							file.ReplacementRanges,
+							AcceptMatch,
+							token,
+							preserveCarriageReturns).TotalMatches;
 					}
 					else
 					{
@@ -1458,7 +1473,7 @@ internal sealed partial class DevProjexMcpTools(
 						: $"[Symbols] the regular expression was read as {namesReadFromPattern.Count.ToString(CultureInfo.InvariantCulture)} " +
 						  "declaration name(s); they are listed at the top of the results.",
 					FormatNameSearchNotice(plan, paths, pattern, totalMatches),
-					FormatPerLineSearchNotice(pattern, totalMatches),
+					multiline ? MultilineSearchNotice : null,
 					documentationMatches > 0 && documentationMatches < writtenHits.Count
 						? $"[Search] {documentationMatches.ToString(CultureInfo.InvariantCulture)} match(es) in documentation files are listed after code."
 						: null,
@@ -4033,25 +4048,41 @@ internal sealed partial class DevProjexMcpTools(
 			foreach (var matchLine in match.MatchLineNumbers)
 			{
 				var line = match.Lines.First(item => item.LineNumber == matchLine);
-				var firstContextLine = Math.Max(1, matchLine - contextLines);
-				var lastContextLine = checked(matchLine + contextLines);
-				var candidateContext = new McpSearchMatchContext(
-					[matchLine],
-					match.Lines
-						.Where(item => item.LineNumber >= firstContextLine && item.LineNumber <= lastContextLine)
-						.ToArray(),
-					StartsNewGroup: false);
-				var rendered = RenderGroupLines(relativePath, content, candidateContext);
-				var storageCharacters = StorageCharacters(relativePath, rendered);
-				if (candidateContext.Lines.Count > 1 &&
-					(rendered.Count == 0 || storageCharacters > MaximumStoredSearchCharacters))
+				IReadOnlyList<McpSearchGroupLine> rendered;
+				int storageCharacters;
+				int? elisionLine = null;
+				if (match.SpansLines)
 				{
-					// A very long context line must not hide a shorter matching line.
-					rendered = RenderGroupLines(
-						relativePath,
-						content,
-						candidateContext with { Lines = [line] });
+					rendered = RenderSpanGroupLines(relativePath, content, match, withContext: true, out elisionLine);
 					storageCharacters = StorageCharacters(relativePath, rendered);
+					if (rendered.Count == 0 || storageCharacters > MaximumStoredSearchCharacters)
+					{
+						rendered = RenderSpanGroupLines(relativePath, content, match, withContext: false, out elisionLine);
+						storageCharacters = StorageCharacters(relativePath, rendered);
+					}
+				}
+				else
+				{
+					var firstContextLine = Math.Max(1, matchLine - contextLines);
+					var lastContextLine = checked(matchLine + contextLines);
+					var candidateContext = new McpSearchMatchContext(
+						[matchLine],
+						match.Lines
+							.Where(item => item.LineNumber >= firstContextLine && item.LineNumber <= lastContextLine)
+							.ToArray(),
+						StartsNewGroup: false);
+					rendered = RenderGroupLines(relativePath, content, candidateContext);
+					storageCharacters = StorageCharacters(relativePath, rendered);
+					if (candidateContext.Lines.Count > 1 &&
+						(rendered.Count == 0 || storageCharacters > MaximumStoredSearchCharacters))
+					{
+						// A very long context line must not hide a shorter matching line.
+						rendered = RenderGroupLines(
+							relativePath,
+							content,
+							candidateContext with { Lines = [line] });
+						storageCharacters = StorageCharacters(relativePath, rendered);
+					}
 				}
 				if (rendered.Count == 0)
 					continue;
@@ -4076,7 +4107,7 @@ internal sealed partial class DevProjexMcpTools(
 				var protectedLines = protectionCountsByLine is not { Count: > 0 }
 					? null
 					: rendered
-						.Where(item => protectionCountsByLine.ContainsKey(item.LineNumber))
+						.Where(item => item.LineNumber != elisionLine && protectionCountsByLine.ContainsKey(item.LineNumber))
 						.Select(item => new McpSearchProtectedLine(
 							item.LineNumber,
 							protectionCountsByLine[item.LineNumber]))
@@ -4097,6 +4128,49 @@ internal sealed partial class DevProjexMcpTools(
 					protectedLines));
 			}
 		}
+	}
+
+	/// <summary>
+	/// Renders one multi-line match: its lines are all marked as matched, only the first counts,
+	/// and a span longer than <see cref="MaximumShownSpanLines"/> shows that many lines and then
+	/// one line that says how many more the match covers.
+	/// </summary>
+	private static IReadOnlyList<McpSearchGroupLine> RenderSpanGroupLines(
+		string relativePath,
+		string content,
+		McpSearchMatchContext match,
+		bool withContext,
+		out int? elisionLine)
+	{
+		var first = match.MatchLineNumber;
+		var last = match.SpanEndLineNumber;
+		var lastShown = Math.Min(last, first + MaximumShownSpanLines - 1);
+		var shownLines = match.Lines
+			.Where(item => (withContext && item.LineNumber < first) ||
+						   (item.LineNumber >= first && item.LineNumber <= lastShown) ||
+						   (withContext && item.LineNumber > last))
+			.ToArray();
+		var spanNumbers = Enumerable.Range(first, lastShown - first + 1).ToArray();
+		var rendered = RenderGroupLines(
+			relativePath,
+			content,
+			new McpSearchMatchContext(spanNumbers, shownLines, StartsNewGroup: false));
+		elisionLine = null;
+		if (rendered.Count == 0)
+			return [];
+
+		var lines = new List<McpSearchGroupLine>(rendered.Count + 1);
+		foreach (var item in rendered)
+		{
+			var inSpan = item.LineNumber >= first && item.LineNumber <= lastShown;
+			lines.Add(item with { IsMatch = item.LineNumber == first, InMatchSpan = inSpan && item.LineNumber != first });
+			if (item.LineNumber != lastShown || lastShown == last)
+				continue;
+			elisionLine = lastShown + 1;
+			var hidden = (last - lastShown).ToString(CultureInfo.InvariantCulture);
+			lines.Add(new McpSearchGroupLine(lastShown + 1, false, $"(+{hidden} more matched lines)", InMatchSpan: true));
+		}
+		return lines;
 	}
 
 	private static int StorageCharacters(string relativePath, IReadOnlyList<McpSearchGroupLine> lines) =>
@@ -4152,10 +4226,12 @@ internal sealed partial class DevProjexMcpTools(
 					if (currentLines.TryGetValue(line.LineNumber, out var existing))
 					{
 						var isMatch = existing.IsMatch || line.IsMatch;
+						var inMatchSpan = existing.InMatchSpan || line.InMatchSpan;
 						currentLines[line.LineNumber] = existing with
 						{
 							IsMatch = isMatch,
-							Text = isMatch && !existing.IsMatch
+							InMatchSpan = inMatchSpan,
+							Text = (isMatch || inMatchSpan) && !existing.IsMatch && !existing.InMatchSpan
 								? MarkRenderedLineAsMatch(existing)
 								: existing.Text
 						};

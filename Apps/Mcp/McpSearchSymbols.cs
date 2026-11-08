@@ -722,8 +722,10 @@ internal readonly record struct McpSearchHitKey(string RelativePath, int Line);
 /// <summary>
 /// One rendered line of one group, kept so that the slice a response shows can be chosen after the
 /// whole result is known rather than as each file streams past.
+/// A line inside a multi-line match after its first is shown as matched but counts nothing:
+/// <see cref="IsMatch"/> stays on the first line only, and <see cref="InMatchSpan"/> marks the rest.
 /// </summary>
-internal readonly record struct McpSearchGroupLine(int LineNumber, bool IsMatch, string Text);
+internal readonly record struct McpSearchGroupLine(int LineNumber, bool IsMatch, string Text, bool InMatchSpan = false);
 
 /// <summary>
 /// One context group, rendered and set aside. The path heading and the group separator are not in
