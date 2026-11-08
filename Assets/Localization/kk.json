@@ -615,8 +615,6 @@
   "Terminal.Validation.DiffContext": "--context 0 мен 20 аралығында болуы керек.",
   "Terminal.Status.ComparingVersions": "Файл нұсқаларын салыстыру",
   "Terminal.Diff.NotShown": "Көрсетілмегендер:",
-  "Terminal.Diff.Dependents": "Өзгерген файлдарды импорттайтын файлдар:",
-  "Terminal.Diff.Tests": "Өзгерген файлдарды импорттайтын немесе солардың атымен аталған тесттер:",
   "Terminal.Diff.Summary": "Өзгерген файлдар: {0}, көрсетілгені: {1}; қосылған жолдар: {2}, жойылғаны: {3}.",
   "Terminal.Diff.Deleted": "Жұмыс ағашынан тыс жойылған файлдар: {0}.",
   "Terminal.Diff.NotInWorkingTree": "Жұмыс ағашында жоқ өзгерген файлдар, саналды, бірақ көрсетілмеді: {0}.",

@@ -939,11 +939,7 @@ last line without a newline is followed by `\ No newline at end of file`. Tabs s
 control characters in a line or path are escaped so each output line is one physical line. Files
 listed without hunks follow under a localized `Not shown:` heading as `path [status, reason]`, with
 `binary`, `too-large` (a version is too large), `change-too-large` (the change is too large to
-compare line by line), or `line-endings-only` as the reason. Two localized lists follow, each only when it is not empty:
-the non-test files that import a changed file directly, and the tests named after a changed file or
-importing one directly, up to 5 each, related
-across the selection without its Git scope and path narrowing exactly as `get_diff` relates them.
-A localized summary line ends the
+compare line by line), or `line-endings-only` as the reason. A localized summary line ends the
 output with the changed, shown, added, and removed counts, followed by the count of deleted files
 that are no longer in the working tree and the count of changed files the working tree does not
 have, such as files added on a branch that is not checked out; their paths are not printed, and a

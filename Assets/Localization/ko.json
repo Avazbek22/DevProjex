@@ -627,8 +627,6 @@
   "Terminal.Validation.DiffContext": "--context는 0에서 20 사이여야 합니다.",
   "Terminal.Status.ComparingVersions": "파일 버전 비교 중",
   "Terminal.Diff.NotShown": "표시되지 않음:",
-  "Terminal.Diff.Dependents": "변경된 파일을 가져오는 파일:",
-  "Terminal.Diff.Tests": "변경된 파일을 가져오거나 그 이름을 딴 테스트:",
   "Terminal.Diff.Summary": "변경된 파일: {0}, 표시됨: {1}; 추가된 줄: {2}, 삭제된 줄: {3}.",
   "Terminal.Diff.Deleted": "작업 트리 밖에서 삭제된 파일: {0}.",
   "Terminal.Diff.NotInWorkingTree": "작업 트리에 없는 변경 파일(개수만 표시, 내용 미표시): {0}.",

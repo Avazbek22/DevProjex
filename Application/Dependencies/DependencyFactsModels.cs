@@ -226,13 +226,6 @@ public sealed record DependencyEdge(
 	/// ranking leaves it out of its graph.
 	/// </summary>
 	public bool ModuleOnly { get; init; }
-
-	/// <summary>
-	/// True when the source names a module other than the target, and the imported name reaches
-	/// the target only through that module's re-exports, as a package initializer re-exports a
-	/// private module. The source depends on the target, but does not import it directly.
-	/// </summary>
-	public bool ThroughReExport { get; init; }
 }
 
 public sealed record DependencyFactsCoverage(

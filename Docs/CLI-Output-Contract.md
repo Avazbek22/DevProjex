@@ -499,11 +499,7 @@ selection diagnostics stay on stderr. The shape is:
     "deleted": 0,
     "notInWorkingTree": 0
   },
-  "complete": false,
-  "affected": {
-    "dependents": ["src/b.ts"],
-    "tests": ["src/a.test.ts"]
-  }
+  "complete": false
 }
 ```
 
@@ -525,10 +521,7 @@ deleted files that are no longer in the working tree, and `counts.notInWorkingTr
 apply only the selection rules a path alone decides, and their paths are never listed. `complete`
 is `true` when every changed file is in `files` and neither count is above zero. When
 the selection hides secrets or private data, both versions are redacted before they are compared,
-so placeholders appear in `lines` exactly as in text output. `affected` is present whenever the
-diff has changes: `dependents` holds up to 5 portable paths of non-test files that import a changed
-file directly, in ordinal order, and `tests` up to 5 test files named after a changed file, then
-those that import one directly; both possibly empty, with the same rules as `get_diff`.
+so placeholders appear in `lines` exactly as in text output.
 
 ## Tree JSON and XML
 

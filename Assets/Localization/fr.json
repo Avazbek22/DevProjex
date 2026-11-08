@@ -633,8 +633,6 @@
   "Terminal.Validation.DiffContext": "--context doit être compris entre 0 et 20.",
   "Terminal.Status.ComparingVersions": "Comparaison des versions de fichiers",
   "Terminal.Diff.NotShown": "Non affichés :",
-  "Terminal.Diff.Dependents": "Fichiers qui importent les fichiers modifiés :",
-  "Terminal.Diff.Tests": "Tests qui importent les fichiers modifiés ou portent leur nom :",
   "Terminal.Diff.Summary": "Fichiers modifiés : {0}, affichés : {1} ; lignes ajoutées : {2}, supprimées : {3}.",
   "Terminal.Diff.Deleted": "Fichiers supprimés hors de l’arbre de travail : {0}.",
   "Terminal.Diff.NotInWorkingTree": "Fichiers modifiés absents de l’arbre de travail, comptés mais non affichés : {0}.",

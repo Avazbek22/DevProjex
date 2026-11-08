@@ -159,36 +159,6 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 	}
 
 	[Fact(Timeout = 120_000)]
-	public async Task DiffCommandListsWhatTheChangeAffectsAfterTheHunks()
-	{
-		using var repository = new GitModeRepository();
-		repository.Write("tsconfig.json", "{\"compilerOptions\":{\"moduleResolution\":\"bundler\"}}\n");
-		repository.Write("src/a.ts", "export default 1;\n");
-		repository.Write("src/b.ts", "import a from './a.js'; export const b = a;\n");
-		repository.Write("src/a.test.ts", "import a from './a.js'; export const checked = a;\n");
-		repository.Commit();
-		repository.Write("src/a.ts", "export default 2;\n");
-		await using var terminal = await StartAsync(repository.Root, columns: 160, rows: 40);
-		await terminal.WaitForScreenAsync(
-			"PROJECT TREE",
-			cancellationToken: TestContext.Current.CancellationToken);
-
-		await terminal.SendAsync(":diff\r", TestContext.Current.CancellationToken);
-		var result = await terminal.WaitForScreenAsync(
-			"Changed files: 1",
-			timeout: TimeSpan.FromSeconds(45),
-			cancellationToken: TestContext.Current.CancellationToken);
-
-		Assert.Contains("Files that import the changed files:", result, StringComparison.Ordinal);
-		Assert.Contains("src/b.ts", result, StringComparison.Ordinal);
-		Assert.Contains("Tests that import or are named after the changed files:", result, StringComparison.Ordinal);
-		Assert.Contains("src/a.test.ts", result, StringComparison.Ordinal);
-		Assert.False(terminal.HasExited);
-		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
-		await QuitAsync(terminal);
-	}
-
-	[Fact(Timeout = 120_000)]
 	public async Task DiffCommandReplacesAnActiveMomentaryScopeInsteadOfIntersectingWithIt()
 	{
 		// "set git diff:HEAD..HEAD" narrows the live workspace plan to an empty file set (a range

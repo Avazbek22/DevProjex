@@ -106,5 +106,4 @@ public sealed record DiffCommandRequest(
 	TerminalOutputOptions Output,
 	long? MaxFileBytes = null,
 	string? RepositorySourceUrl = null,
-	string? OutputPath = null,
-	ProjectSelectionSpec? ProjectSelection = null);
+	string? OutputPath = null);

@@ -627,8 +627,6 @@
   "Terminal.Validation.DiffContext": "--context має бути від 0 до 20.",
   "Terminal.Status.ComparingVersions": "Порівняння версій файлів",
   "Terminal.Diff.NotShown": "Не показано:",
-  "Terminal.Diff.Dependents": "Файли, що імпортують змінені файли:",
-  "Terminal.Diff.Tests": "Тести, що імпортують змінені файли або названі за ними:",
   "Terminal.Diff.Summary": "Змінених файлів: {0}, показано: {1}; рядків додано: {2}, видалено: {3}.",
   "Terminal.Diff.Deleted": "Видалених файлів поза робочим деревом: {0}.",
   "Terminal.Diff.NotInWorkingTree": "Змінених файлів немає в робочому дереві, пораховано, але не показано: {0}.",

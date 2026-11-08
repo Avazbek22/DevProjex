@@ -23,9 +23,6 @@ internal sealed partial class TerminalWorkspaceSession
 		var contextLines = command.ContextLines ?? DiffQueryRunner.DefaultContextLines;
 		var state = _state;
 		var persistentGitMode = _preferredGitMode;
-		// Taken on the UI thread, as for :related, so the affected files are related against the
-		// filters in force when the command was entered.
-		var relationSnapshot = TerminalWorkspaceController.CaptureRelationSnapshot(state);
 		TrackActiveOperation(RunOperationAsync(
 			L("Terminal.Tui.Command.Diff.Title"),
 			async token =>
@@ -89,38 +86,14 @@ internal sealed partial class TerminalWorkspaceSession
 						GitScopeFilter.UnavailableDiagnosticCode,
 						L("Terminal.Diff.Unavailable"));
 				}
-				var affected = await FindDiffImpactAsync(relationSnapshot, plan, diff, persistentGitMode, token)
-					.ConfigureAwait(false);
 				var output = LimitDiffPanelOutput(
-					DiffOutputRenderer.FormatText(diff, _services.Localization, affected).TrimEnd('\n'));
+					DiffOutputRenderer.FormatText(diff, _services.Localization).TrimEnd('\n'));
 				return planDiagnostics.Length == 0
 					? output
 					: $"{planDiagnostics}\n\n{output}";
 			},
 			originatedFromCommandLine: true));
 		return TerminalWorkspaceCommandExecutionResult.Deferred();
-	}
-
-	// The affected files add to the diff; a project that cannot be related still shows its diff.
-	private async Task<DependencyChangeImpact?> FindDiffImpactAsync(
-		TerminalRelationStateSnapshot snapshot,
-		ProjectContextPlan plan,
-		ProjectDiffResult diff,
-		GitFilteringMode persistentGitMode,
-		CancellationToken cancellationToken)
-	{
-		if (!diff.HasChanges)
-			return null;
-		try
-		{
-			return await _controller
-				.FindDiffImpactAsync(snapshot, plan, diff, persistentGitMode, cancellationToken)
-				.ConfigureAwait(false);
-		}
-		catch (Exception exception) when (exception is not OperationCanceledException)
-		{
-			return null;
-		}
 	}
 
 	/// <summary>
