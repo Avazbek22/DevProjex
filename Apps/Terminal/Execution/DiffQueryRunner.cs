@@ -12,11 +12,18 @@ internal static class DiffQueryRunner
 	public const int DefaultContextLines = 3;
 	public const int MaximumContextLines = 20;
 
+	/// <param name="resolvedDiffRange">
+	/// The commit range a <c>diff:&lt;A&gt;..&lt;B&gt;</c> scope was resolved to against a Git URL
+	/// source's remote, from <see cref="TerminalProjectContextFactory.TryGetResolvedDiffRange"/> or
+	/// <see cref="TerminalProjectContextFactory.ResolveDiffRangeAsync"/>; null for a local project,
+	/// which compares the plan's own unresolved range unchanged.
+	/// </param>
 	public static Task<ProjectDiffResult> CompareAsync(
 		TerminalServices services,
 		ProjectContextPlan plan,
 		int contextLines,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		string? resolvedDiffRange = null)
 	{
 		ArgumentNullException.ThrowIfNull(services);
 		ArgumentNullException.ThrowIfNull(plan);
@@ -32,7 +39,7 @@ internal static class DiffQueryRunner
 			new ProjectDiffRequest(
 				plan,
 				mode,
-				mode == GitFilteringMode.Diff ? plan.Selection.GitDiffRange : null,
+				mode == GitFilteringMode.Diff ? resolvedDiffRange ?? plan.Selection.GitDiffRange : null,
 				contextLines,
 				redaction,
 				(path, token) => workingFiles.ReadClassifiedAsync(

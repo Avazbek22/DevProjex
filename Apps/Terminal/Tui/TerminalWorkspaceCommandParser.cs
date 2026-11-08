@@ -37,6 +37,8 @@ internal sealed class TerminalWorkspaceCommandParser
 	private const string SymbolsOption = "--symbols";
 	private const string MaximumResultsOption = "--max";
 	private const string MaximumTokensOption = "--max-tokens";
+	private const string DiffContextOption = "--context";
+	private static readonly string[] DiffOptions = [DiffContextOption];
 	private const string RankOption = "--rank";
 	private static readonly string[] GrepOptions = [RegexOption, SymbolsOption, MaximumResultsOption];
 	private static readonly string[] ContextBudgetOptions = [MaximumTokensOption, RankOption];
@@ -884,22 +886,45 @@ internal sealed class TerminalWorkspaceCommandParser
 		TerminalWorkspaceCommandDefinition definition,
 		IReadOnlyList<ParsedToken> tokens)
 	{
-		if (tokens.Count > 2)
-			return Unexpected(tokens[2]);
-		if (tokens.Count == 1)
+		ParsedToken? scopeToken = null;
+		int? contextLines = null;
+		for (var index = 1; index < tokens.Count; index++)
 		{
-			return TerminalWorkspaceCommandParseResult.Success(new TerminalWorkspaceCommand(
-				definition,
-				Text: GitScopeSelection.ToToken(GitFilteringMode.Changes)));
+			var token = tokens[index];
+			if (string.Equals(token.Value, DiffContextOption, StringComparison.OrdinalIgnoreCase))
+			{
+				if (contextLines is not null)
+					return Unexpected(token);
+				if (index + 1 >= tokens.Count)
+					return Missing(tokens, []);
+				var value = tokens[++index];
+				if (!int.TryParse(value.Value, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed) ||
+					parsed is < 0 or > DiffQueryRunner.MaximumContextLines)
+				{
+					return InvalidOption(value, "Terminal.Validation.DiffContext");
+				}
+				contextLines = parsed;
+				continue;
+			}
+			if (scopeToken is not null)
+				return Unexpected(token);
+			scopeToken = token;
 		}
-		if (!GitScopeSelection.TryParse(tokens[1].Value, out var mode, out var diffRange) ||
-			!GitScopeSelection.IsMomentary(mode))
+
+		var mode = GitFilteringMode.Changes;
+		string? diffRange = null;
+		if (scopeToken is { } requestedScope)
 		{
-			return Unknown(tokens[1], DiffScopes);
+			if (!GitScopeSelection.TryParse(requestedScope.Value, out mode, out diffRange) ||
+				!GitScopeSelection.IsMomentary(mode))
+			{
+				return Unknown(requestedScope, DiffScopes);
+			}
 		}
 		return TerminalWorkspaceCommandParseResult.Success(new TerminalWorkspaceCommand(
 			definition,
-			Text: GitScopeSelection.ToToken(mode, diffRange)));
+			Text: GitScopeSelection.ToToken(mode, diffRange),
+			ContextLines: contextLines));
 	}
 
 	private static TerminalWorkspaceCommandParseResult ParseGrep(
@@ -1062,8 +1087,22 @@ internal sealed class TerminalWorkspaceCommandParser
 		IReadOnlyList<ParsedToken> tokens,
 		string current,
 		TerminalWorkspaceCommandParseContext context,
-		CancellationToken cancellationToken) =>
-		argumentIndex == 0 ? new CompletionCandidateSource(DiffScopes) : default;
+		CancellationToken cancellationToken)
+	{
+		if (argumentIndex < 0)
+			return default;
+		var preceding = PrecedingArguments(tokens, argumentIndex);
+		if (preceding.Count > 0 &&
+			string.Equals(preceding[^1].Value, DiffContextOption, StringComparison.OrdinalIgnoreCase))
+		{
+			return default;
+		}
+		if (preceding.Any(token => string.Equals(token.Value, DiffContextOption, StringComparison.OrdinalIgnoreCase)))
+			return default;
+		return preceding.Count == 0
+			? new CompletionCandidateSource([.. DiffScopes, .. DiffOptions])
+			: new CompletionCandidateSource(DiffOptions);
+	}
 
 	private static CompletionCandidateSource CompleteView(
 		int argumentIndex,

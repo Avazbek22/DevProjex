@@ -359,7 +359,7 @@ internal sealed partial class DevProjexMcpTools(
 			return McpToolResults.TextSuccess(AppendTrustedNotices(
 				McpSpotlight.Wrap(treeWriter.IsTruncated ? treeWriter.CompleteLinesText : treeWriter.Text),
 				treeTruncationNotice,
-				FormatTreeDepthNotice(plan, depth, paths),
+				FormatTreeDepthNotice(plan, depth, paths, treeWriter.IsTruncated),
 				McpTrustedDiagnosticFormatter.FormatWarnings(plan),
 				FormatNameSearchNotice(plan, paths),
 				FormatGitScopeDiffNotice(arguments),
@@ -1413,7 +1413,7 @@ internal sealed partial class DevProjexMcpTools(
 			{
 				var namesPrelude = namesReadFromPattern is null
 					? string.Empty
-					: "Pattern read as declaration names: " + string.Join(", ", namesReadFromPattern) + Environment.NewLine;
+					: "Pattern read as declaration names: " + string.Join(", ", namesReadFromPattern) + "\n";
 				var projectContent = McpSpotlight.Wrap(namesPrelude + output.ToString().TrimEnd());
 				var boundaryPrelude = FormatSearchBoundaryPrelude(boundary, storedSearch is not null);
 				if (boundaryPrelude is not null)
@@ -1471,7 +1471,7 @@ internal sealed partial class DevProjexMcpTools(
 		}, cancellationToken);
 
 	[Description(
-		"Finds evidenced dependencies and dependents for one to 16 seed files; a narrowed call also names readable related files outside its selection, by path only. Use it after search_project or get_tree; use search_project for text references or get_file for content. Returns paths, evidence, resolution status, token estimates, language coverage, partial-parse and configuration diagnostics, and scope; results above 50,000 characters use read_pack. Key parameters: path, direction=dependencies|dependents|both, profile, git_scope, include_patterns, exclude_patterns, and max_file_bytes.")]
+		"Finds evidenced dependencies and dependents for one to 16 seed files; a narrowed call also names readable related files outside its selection with evidence, but their contents are never returned. Use it after search_project or get_tree; use search_project for text references or get_file for content. Returns paths, evidence, resolution status, token estimates, language coverage, partial-parse and configuration diagnostics, and scope; results above 50,000 characters use read_pack. Key parameters: path, direction=dependencies|dependents|both, profile, git_scope, include_patterns, exclude_patterns, and max_file_bytes.")]
 	public Task<CallToolResult> RelatedFiles(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -1510,42 +1510,42 @@ internal sealed partial class DevProjexMcpTools(
 			var resolvedSeeds = Projects.ResolveRequestedFiles(plan, seeds, cancellationToken);
 			var relativeSeeds = resolvedSeeds
 				.Select(seed => McpProjectService.ToRelative(plan.SourceRoot, seed))
+				.Distinct(StringComparer.Ordinal)
 				.ToArray();
 			var progress = new McpProgressReporter(request, cancellationToken);
 			progress.Milestone(5, "Preparing dependency manifest");
+			// The readable project bounds the configuration the selection may be resolved with, so it
+			// is known before the selection is indexed.
+			var projectPlan = await Projects.BuildRelationProjectPlanAsync(
+				plan,
+				project,
+				branch,
+				includePatterns,
+				excludePatterns,
+				profile,
+				trackedOnly,
+				gitScope,
+				maximumFileBytes,
+				exclusions,
+				cancellationToken).ConfigureAwait(false);
 			var related = await Projects.DependencyFactsEngine.FindRelatedAsync(
 				plan.SourceRoot,
 				plan.IncludedFiles,
 				relativeSeeds,
 				direction,
 				progress.MeasureFacts("Indexing dependency facts", 5, 70),
-				cancellationToken).ConfigureAwait(false);
+				cancellationToken,
+				(projectPlan ?? plan).IncludedFiles).ConfigureAwait(false);
 			DependencyOutsideSelectionResult? outside = null;
-			ProjectContextPlan? projectPlan = null;
-			if (DependencyFactsEngine.CanRelateOutsideSelection(related))
+			if (projectPlan is not null && DependencyFactsEngine.CanRelateOutsideSelection(related))
 			{
-				projectPlan = await Projects.BuildRelationProjectPlanAsync(
-					plan,
-					project,
-					branch,
-					includePatterns,
-					excludePatterns,
-					profile,
-					trackedOnly,
-					gitScope,
-					maximumFileBytes,
-					exclusions,
+				outside = await Projects.DependencyFactsEngine.FindOutsideSelectionAsync(
+					plan.SourceRoot,
+					related,
+					projectPlan.IncludedFiles,
+					direction,
+					progress.MeasureFacts("Relating files outside the selection", 70, 90),
 					cancellationToken).ConfigureAwait(false);
-				if (projectPlan is not null)
-				{
-					outside = await Projects.DependencyFactsEngine.FindOutsideSelectionAsync(
-						plan.SourceRoot,
-						related,
-						projectPlan.IncludedFiles,
-						direction,
-						progress.MeasureFacts("Relating files outside the selection", 70, 90),
-						cancellationToken).ConfigureAwait(false);
-				}
 			}
 			int uninspectedEvidenceSources;
 			if (outside is null)
@@ -1583,7 +1583,7 @@ internal sealed partial class DevProjexMcpTools(
 				HasRootOnlyPattern: HasRootOnlyPattern(includePatterns));
 			var noRelatedNotice = resolution.Resolved == 0
 				? resolution.OutsideSelection > 0
-					? "[No related files] in the effective selection; related files outside it are listed by path."
+					? "[No related files] in the effective selection; related files outside it are named with evidence, but their contents are not returned."
 					: resolution.Unresolved == 0
 						? "[No related files] in the effective selection."
 						: $"[No related files] in the effective selection; unresolved references={resolution.Unresolved.ToString(CultureInfo.InvariantCulture)}."
@@ -1599,6 +1599,7 @@ internal sealed partial class DevProjexMcpTools(
 			var trustedNotices = CombineTrustedNotices(
 				FormatRelatedResolution(resolution),
 				FormatOutsideSelectionNotice(outside),
+				FormatSelectionAnswerNotice(outside?.SelectionAnsweredSeeds ?? 0),
 				$"[Facts coverage] files={coverage.Files}, supported={coverage.Supported}, unsupported={coverage.Unsupported}, extraction-failed={coverage.ExtractionFailed}; supported means facts were extracted for a recognized language, unsupported means no supported extractor was available",
 				FormatDependencyConfigurationDiagnostics(coverage.ConfigurationDiagnostics),
 				$"[Search scope] files={plan.IncludedFiles.Count}",
@@ -1702,8 +1703,12 @@ internal sealed partial class DevProjexMcpTools(
 				}
 				: seed).ToArray());
 		var projectFiles = outside.Index.FileByPath;
-		var evidenceEdges = SeedEdges(outside.Index, selection.Seeds)
-			.Concat(SeedEdges(selection.Index, selection.Seeds).Where(edge => projectFiles.ContainsKey(edge.Source)))
+		// Each seed's Dependencies/Dependents in "combined" are already capped to the rows a
+		// section actually lists (outside sections cap at MaximumFilesPerSection); filtering by
+		// those same lists, rather than by every seed in the broader "selection", keeps an edge
+		// to a file past that cap from being treated as evidence for a row that is shown.
+		var evidenceEdges = SeedEdges(outside.Index, combined.Seeds)
+			.Concat(SeedEdges(selection.Index, combined.Seeds).Where(edge => projectFiles.ContainsKey(edge.Source)))
 			.Distinct()
 			.ToArray();
 		var protectedEvidence = await ProtectRelatedEvidenceAsync(
@@ -1741,14 +1746,27 @@ internal sealed partial class DevProjexMcpTools(
 	}
 
 	// Every listed row comes from an edge one of its seeds starts or receives. A reason names no
-	// source file, so evidence is looked up only there: the same text in an unrelated file must
-	// neither be read nor decide whether a listed row may quote it.
+	// source file, so two different files importing the same name the same way can format the
+	// identical reason text; matching only by that text would let an edge whose other file was
+	// never listed - such as one past an outside-selection section's display cap - still open that
+	// file for evidence. Restricting each seed's edges to the files its own Dependencies and
+	// Dependents already list keeps evidence to files a row actually shows.
 	private static IEnumerable<DependencyEdge> SeedEdges(
 		DependencyIndexSnapshot index,
 		IEnumerable<SeedRelatedFiles> seeds) =>
-		seeds.SelectMany(seed => (index.EdgesBySource.GetValueOrDefault(seed.Seed) ?? [])
-				.Concat(index.EdgesByTarget.GetValueOrDefault(seed.Seed) ?? []))
-			.Distinct();
+		seeds.SelectMany(seed => SeedEdges(index, seed)).Distinct();
+
+	private static IEnumerable<DependencyEdge> SeedEdges(DependencyIndexSnapshot index, SeedRelatedFiles seed)
+	{
+		var dependencyPaths = seed.Dependencies.Select(static file => file.Path).ToHashSet(PathComparer.Default);
+		var dependentPaths = seed.Dependents.Select(static file => file.Path).ToHashSet(PathComparer.Default);
+		foreach (var edge in index.EdgesBySource.GetValueOrDefault(seed.Seed) ?? [])
+			if (edge.Target is not null && dependencyPaths.Contains(edge.Target))
+				yield return edge;
+		foreach (var edge in index.EdgesByTarget.GetValueOrDefault(seed.Seed) ?? [])
+			if (dependentPaths.Contains(edge.Source))
+				yield return edge;
+	}
 
 	/// <param name="evidenceEdges">The edges whose evidence the displayed reasons may quote.</param>
 	private async Task<(DependencyRelatedResult Result, int UninspectedSources)> ProtectRelatedEvidenceAsync(
@@ -2034,6 +2052,7 @@ internal sealed partial class DevProjexMcpTools(
 		RecordPlan(plan);
 
 		var resolvedRequests = new List<McpResolvedFileReadRequest>(requestSet.Requests.Count);
+		var requestedMissingPath = false;
 		foreach (var item in requestSet.Requests)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
@@ -2048,12 +2067,20 @@ internal sealed partial class DevProjexMcpTools(
 				// Standard batches keep the single fixed phrase. Live batches separate a filtered file
 				// from a missing one, because the window filters are the one thing the user can change.
 				// A directory with readable entries keeps its whole message: it names the file to read.
+				// That message repeats the requested path and entry names, so it is escaped onto one
+				// line like a single-file error; a raw line break would split the status table.
 				resolvedRequests.Add(new McpResolvedFileReadRequest(
 					item,
 					PhysicalPath: null,
 					UnavailableReason: exception.NamesReadableEntries
-						? exception.Message
+						? McpTextEscaping.EscapeSingleLine(McpToolResults.ProtectMetadataString(exception.Message))
 						: liveContext is null ? null : exception.BatchReason ?? exception.Code));
+				// Standard batches never flag this: the escaped per-item message already carries the
+				// detail, and the journal notice is a live-only signal, same as before this directory
+				// case also named its readable entries in NamesReadableEntries' own message text.
+				requestedMissingPath |= liveContext is not null &&
+					exception.Code == McpErrorCodes.PathNotFound &&
+					exception.BatchReason is null;
 			}
 		}
 
@@ -2148,7 +2175,7 @@ internal sealed partial class DevProjexMcpTools(
 		}
 		if (rendered.UnavailableNotice is not null)
 			journal?.RecordNotice(AgentJournalNoticeCodes.Unavailable);
-		if (resolvedRequests.Any(static item => item.UnavailableReason == McpErrorCodes.PathNotFound))
+		if (requestedMissingPath)
 			journal?.RecordNotice(AgentJournalNoticeCodes.MissingPath);
 		return McpToolResults.TextSuccess(AppendTrustedNotices(
 			spotlighted,
@@ -3304,9 +3331,15 @@ internal sealed partial class DevProjexMcpTools(
 		var listed = outside.Seeds.Sum(static seed => seed.Dependencies.Count + seed.Dependents.Count);
 		return $"[Outside selection] relations={relations.ToString(CultureInfo.InvariantCulture)} · " +
 			   $"listed={listed.ToString(CultureInfo.InvariantCulture)}; " +
-			   "these files are readable but outside this call's selection, so only their paths are listed; " +
+			   "these files are readable but outside this call's selection, so they are named with evidence; their contents are not returned; " +
 			   "read any of them with get_file.";
 	}
+
+	internal static string? FormatSelectionAnswerNotice(int selectionAnsweredSeeds) =>
+		selectionAnsweredSeeds == 0
+			? null
+			: $"[Dependency facts limited] project index partial · selection-answer-seeds={selectionAnsweredSeeds.ToString(CultureInfo.InvariantCulture)}; " +
+			  "a fact or work limit dropped facts these seeds rely on, so they keep the selection's own answer and list no files outside it.";
 
 	internal static RelatedResolutionCounts CountRelatedResolution(
 		DependencyIndexSnapshot index,
@@ -4807,7 +4840,8 @@ internal sealed partial class DevProjexMcpTools(
 	private string? FormatTreeDepthNotice(
 		ProjectContextPlan plan,
 		int? explicitMaxDepth,
-		IReadOnlyList<string>? paths)
+		IReadOnlyList<string>? paths,
+		bool treeTruncated)
 	{
 		if (explicitMaxDepth is not { } maxDepth || !HasItems(paths))
 			return null;
@@ -4831,6 +4865,9 @@ internal sealed partial class DevProjexMcpTools(
 			}
 
 			var relative = PathUtility.GetPortableRelativePath(plan.SourceRoot, fullPath);
+			// The root itself, named as "." or by its absolute path, sits at depth 0.
+			if (relative == ".")
+				relative = string.Empty;
 			var depth = relative.Length == 0 ? 0 : relative.Count(static character => character == '/') + 1;
 			var isDirectory = Directory.Exists(fullPath);
 			var isHidden = isDirectory ? depth >= maxDepth : depth > maxDepth;
@@ -4848,8 +4885,10 @@ internal sealed partial class DevProjexMcpTools(
 			largestSuggestedDepth = Math.Max(largestSuggestedDepth, isDirectory ? depth + 2 : depth);
 		}
 
+		// A cut tree never reached part of the collapsed folders, and the rendered text cannot tell
+		// which ones, so a count of them would name folders the response does not show.
 		if (hiddenCount == 0)
-			return FormatCollapsedFoldersNotice(plan, visibleDirectories, maxDepth);
+			return treeTruncated ? null : FormatCollapsedFoldersNotice(plan, visibleDirectories, maxDepth);
 
 		// A file has nothing under it, so the directory wording would contradict itself: the
 		// useful depth is the one that shows the file.

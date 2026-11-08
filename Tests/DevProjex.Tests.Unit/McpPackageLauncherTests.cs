@@ -9,14 +9,14 @@ public sealed class McpPackageLauncherTests
 {
 	public static TheoryData<string, string, string[]> PackageCases => new()
 	{
-		{ @"C:\Users\Person Name\npm-cache\_npx\abc123\node_modules\@devprojex\cli-win32-x64\bin\devprojex.exe", "npx", ["-y", "devprojex"] },
-		{ @"C:\Cache Юникод\_npx\def456\node_modules\@devprojex\cli-win32-arm64\bin\devprojex.exe", "npx", ["-y", "devprojex"] },
+		{ @"C:\Users\Person Name\npm-cache\_npx\abc123\node_modules\@devprojex\cli-win32-x64\bin\devprojex.exe", "cmd", ["/c", "npx", "-y", "devprojex"] },
+		{ @"C:\Cache Юникод\_npx\def456\node_modules\@devprojex\cli-win32-arm64\bin\devprojex.exe", "cmd", ["/c", "npx", "-y", "devprojex"] },
 		{ "/home/person/.npm/_npx/abc123/node_modules/@devprojex/cli-linux-x64/bin/devprojex", "npx", ["-y", "devprojex"] },
 		{ "/home/person/cache with spaces/_npx/abc123/node_modules/@devprojex/cli-linux-arm64/bin/devprojex", "npx", ["-y", "devprojex"] },
 		{ "/Users/person/.npm/_npx/abc123/node_modules/@devprojex/cli-darwin-x64/bin/devprojex", "npx", ["-y", "devprojex"] },
 		{ "/Users/person/.npm/_npx/abc123/node_modules/@devprojex/cli-darwin-arm64/bin/devprojex", "npx", ["-y", "devprojex"] },
-		{ @"C:\Users\Person Name\.nuget\packages\devprojex.win-x64\5.2.0\tools\any\win-x64\devprojex.exe", "dnx", ["devprojex"] },
-		{ @"C:\Users\person\.nuget\packages\devprojex.win-arm64\5.2.2-rc.1\tools\any\win-arm64\devprojex.exe", "dnx", ["devprojex"] },
+		{ @"C:\Users\Person Name\.nuget\packages\devprojex.win-x64\5.2.0\tools\any\win-x64\devprojex.exe", "cmd", ["/c", "dnx", "devprojex"] },
+		{ @"C:\Users\person\.nuget\packages\devprojex.win-arm64\5.2.2-rc.1\tools\any\win-arm64\devprojex.exe", "cmd", ["/c", "dnx", "devprojex"] },
 		{ "/home/person/.nuget/packages/devprojex.linux-x64/5.2.0/tools/any/linux-x64/devprojex", "dnx", ["devprojex"] },
 		{ "/home/person/.nuget/packages/devprojex.linux-arm64/5.2.0/tools/any/linux-arm64/devprojex", "dnx", ["devprojex"] },
 		{ "/Users/person/.nuget/packages/devprojex.osx-x64/5.2.0/tools/any/osx-x64/devprojex", "dnx", ["devprojex"] },
@@ -64,7 +64,8 @@ public sealed class McpPackageLauncherTests
 	{
 		using var sandbox = FlatpakEnvironment.UseForTesting(new(false, null));
 		var windows = OperatingSystem.IsWindows();
-		var executable = PackageCases.First(row => row.Data.Item2 == (nuget ? "dnx" : "npx") &&
+		var launcher = nuget ? "dnx" : "npx";
+		var executable = PackageCases.First(row => (row.Data.Item2 == launcher || row.Data.Item3.Contains(launcher)) &&
 			row.Data.Item1.StartsWith(windows ? "C:" : "/", StringComparison.Ordinal)).Data.Item1;
 		var root = windows ? "C:\\Project with spaces\\Юникод ! $HOME `text` 'quote'" : "/project with spaces/Юникод ! $HOME `text` 'quote' \"double\" \\slash";
 		var fragment = McpConnectionFragmentGenerator.Generate(McpConnectionClient.ClaudeCode, McpConnectionMode.Live, executable, root);
@@ -111,7 +112,8 @@ public sealed class McpPackageLauncherTests
 		Assert.True(process.ExitCode == 0, await error);
 		var actual = windows ? JsonSerializer.Deserialize<string[]>(await output)! : (await output).Split('\0', StringSplitOptions.RemoveEmptyEntries);
 		string[] expected = ["mcp", "add", "--scope", "local", "devprojex", .. windows ? Array.Empty<string>() : ["--"],
-			nuget ? "dnx" : "npx", .. nuget ? new[] { "devprojex" } : ["-y", "devprojex"], "mcp", "--root", root, "--live"];
+			.. windows ? new[] { "cmd", "/c" } : [],
+			launcher, .. nuget ? new[] { "devprojex" } : ["-y", "devprojex"], "mcp", "--root", root, "--live"];
 		Assert.Equal(expected, actual);
 	}
 }

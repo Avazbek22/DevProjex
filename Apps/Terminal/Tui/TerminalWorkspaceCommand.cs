@@ -97,7 +97,8 @@ internal sealed record TerminalWorkspaceCommand(
 	SearchMode SearchMode = SearchMode.Text,
 	int? MaximumResults = null,
 	long? MaximumEstimatedTokens = null,
-	ProjectContextRank? Rank = null);
+	ProjectContextRank? Rank = null,
+	int? ContextLines = null);
 
 internal enum TerminalWorkspaceMcpAction
 {
@@ -276,13 +277,6 @@ internal static class TerminalWorkspaceCommandCatalog
 			"related src/App.cs --direction dependencies --depth 2",
 			static (session, command) => session.ExecuteRelatedCommand(command)),
 		Define(
-			TerminalWorkspaceCommandVerb.Diff,
-			TerminalWorkspaceCommandGrammar.Diff,
-			"diff",
-			"diff [changes|staged|diff:<ref>..<ref>]",
-			"diff staged",
-			static (session, command) => session.ExecuteDiffCommand(command)),
-		Define(
 			TerminalWorkspaceCommandVerb.Reveal,
 			TerminalWorkspaceCommandGrammar.ProjectPath,
 			"reveal",
@@ -358,6 +352,15 @@ internal static class TerminalWorkspaceCommandCatalog
 			"diagnostics",
 			"diagnostics",
 			static (session, command) => session.ExecuteDiagnosticsCommand(command)),
+		// Catalog order is completion order: diff follows diagnostics, so ':di' + Tab keeps completing
+		// the command it completed before diff existed.
+		Define(
+			TerminalWorkspaceCommandVerb.Diff,
+			TerminalWorkspaceCommandGrammar.Diff,
+			"diff",
+			"diff [changes|staged|diff:<ref>..<ref>] [--context N]",
+			"diff staged",
+			static (session, command) => session.ExecuteDiffCommand(command)),
 		Define(
 			TerminalWorkspaceCommandVerb.Help,
 			TerminalWorkspaceCommandGrammar.Help,

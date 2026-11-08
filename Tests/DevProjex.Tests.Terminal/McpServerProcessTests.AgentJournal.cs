@@ -181,6 +181,91 @@ public sealed partial class McpServerProcessTests
 		Assert.Contains(AgentJournalNoticeCodes.BudgetSkipped, pack.Notices);
 	}
 
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task MissingPathNoticeFiresOnlyInLiveModeForADirectoryRequestThatNamesItsReadableEntries(bool live)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var dataRoot = workspace.CreateDirectory("data");
+		workspace.CreateDirectory("project/src");
+		workspace.WriteFile("project/src/A.cs", "class A { }\n");
+		workspace.WriteFile("project/src/B.cs", "class B { }\n");
+		if (live)
+		{
+			new ProjectProfileStore(() => dataRoot).SaveProfile(
+				project,
+				new ProjectSelectionProfile([], [], [], SelectedPaths: ["src"]));
+		}
+		var arguments = live ? new[] { "--live" } : Array.Empty<string>();
+
+		await using (var server = await ActualMcpProcess.StartAsync(
+			project,
+			dataRoot,
+			arguments,
+			clientInfo: new Implementation { Name = "journal-missing-path-test", Version = "1.0" }))
+		{
+			// "src" holds readable entries, so the directory exception names them in its message
+			// instead of the plain error code; the batch journal notice still has to fire from
+			// exception.Code, not from matching that whole message against the code literally.
+			var directoryRead = await server.Client.CallToolAsync(
+				"get_file",
+				new Dictionary<string, object?>
+				{
+					["requests"] = new object[] { new { path = "src" } }
+				},
+				progress: null,
+				options: null,
+				TestContext.Current.CancellationToken);
+			Assert.NotEqual(true, directoryRead.IsError);
+		}
+
+		using var journal = new AgentJournalStore(() => dataRoot, activeSessionProvider: static () => []);
+		var session = Assert.Single(await journal.ListSessionsAsync(
+			project,
+			cancellationToken: TestContext.Current.CancellationToken));
+		var calls = await journal.ReadCallsAsync(session.Id, TestContext.Current.CancellationToken);
+		var directoryCall = Assert.Single(calls, static call => call.Tool == "get_file");
+
+		// Standard mode keeps its existing behavior unchanged: only live sessions get the notice.
+		Assert.Equal(live, directoryCall.Notices.Contains(AgentJournalNoticeCodes.MissingPath));
+	}
+
+	[Fact]
+	public async Task RequestsSentAsAnEncodedJsonStringAreCountedTheSameAsALiteralArray()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var dataRoot = workspace.CreateDirectory("data");
+		workspace.CreateDirectory("project/src");
+		workspace.WriteFile("project/src/A.cs", "class A { }\n");
+		workspace.WriteFile("project/src/B.cs", "class B { }\n");
+
+		await using (var server = await ActualMcpProcess.StartAsync(
+			project,
+			dataRoot,
+			clientInfo: new Implementation { Name = "journal-requests-string-test", Version = "1.0" }))
+		{
+			await AssertSuccessful(
+				server,
+				"get_file",
+				new Dictionary<string, object?>
+				{
+					["requests"] = "[{\"path\":\"src/A.cs\"},{\"path\":\"src/B.cs\"}]"
+				});
+		}
+
+		using var journal = new AgentJournalStore(() => dataRoot, activeSessionProvider: static () => []);
+		var session = Assert.Single(await journal.ListSessionsAsync(
+			project,
+			cancellationToken: TestContext.Current.CancellationToken));
+		var calls = await journal.ReadCallsAsync(session.Id, TestContext.Current.CancellationToken);
+		var call = Assert.Single(calls, static item => item.Tool == "get_file");
+
+		Assert.Equal("2", call.Arguments["paths"]);
+	}
+
 	private static async Task AssertSuccessful(
 		ActualMcpProcess server,
 		string tool,

@@ -942,7 +942,7 @@ that prevents an accepted option from becoming a no-op.
 | `mcp` | `--git-mode` | standard-profile mode | selects the server baseline from `none`, `gitignore`, or `tracked` when no explicit profile is requested; accepts `off` as an input alias for `none` | startup-only; momentary modes are rejected; conflicts with `--unrestricted` | stdout remains JSON-RPC-only; startup failure exits `2` | parser, MCP contract, process |
 | `mcp` | `--exclude` | MCP default set: `smart-ignore`, `empty-folders` | selects the server baseline path-exclusion set from the shared exclusion tokens when no explicit profile is requested; `none` starts with every toggle off; `default` expands to the MCP default set so a list can extend it | startup-only; repeatable; a list without `default` replaces the default set; `none` conflicts with other values; redaction toggles are rejected as unknown; conflicts with `--unrestricted` | stdout remains JSON-RPC-only; startup failure exits `2` | parser, MCP contract, process |
 | `mcp` | `--unrestricted` | off | starts the widest baseline: every exclusion toggle off and the Git baseline `none`, equivalent to `--exclude none --git-mode none` | startup-only; conflicts with `--exclude` and `--git-mode`; secret redaction remains mandatory | stdout remains JSON-RPC-only; invalid combination exits `2` | parser, MCP contract, process |
-| `mcp` | `--allow-agent-exclusions` | off | publishes an `exclusions` array parameter on the six selection tools (`get_tree`, `analyze`, `pack_context`, `search_project`, `related_files`, `get_file`) so the agent may set the exclusion toggles per call; the value outranks the server baseline and profile exclusions | startup-only; without the flag the parameter is absent from every schema and rejected as an unknown argument; tokens match case-insensitively, duplicates are rejected, redaction toggles never appear in the vocabulary | stdout remains JSON-RPC-only; invalid tokens are `DPX-MCP-INVALID-ARGUMENTS` | parser, MCP schema, integration |
+| `mcp` | `--allow-agent-exclusions` | off | publishes an `exclusions` array parameter on the seven selection tools (`get_tree`, `analyze`, `pack_context`, `search_project`, `related_files`, `get_file`, `get_diff`) so the agent may set the exclusion toggles per call; the value outranks the server baseline and profile exclusions | startup-only; without the flag the parameter is absent from every schema and rejected as an unknown argument; tokens match case-insensitively, duplicates are rejected, redaction toggles never appear in the vocabulary | stdout remains JSON-RPC-only; invalid tokens are `DPX-MCP-INVALID-ARGUMENTS` | parser, MCP schema, integration |
 | `mcp` | `--live` | off | rereads the local project profile before each tool call and uses its saved tree frontier and filters as the server baseline | startup-only; `profile` may be absent or `local`; another profile source is rejected; explicit call paths and globs only narrow the saved focus; named `get_file` reads may cross the focus but never the effective filters | every tool response adds trusted revision state; stored packs retain their build revision | parser, profile store, MCP process |
 | `mcp connect` | `[PROJECT]`, `--client`, `--mode`, `--replace`, `--print`, `--open` | current directory, `claude-code`, `standard`, off, off, off | connects the selected client using the absolute installed CLI path; `--replace` confirms replacing extra Cursor or VS Code entry fields, Codex's single global entry when it points at another project, or a Claude Code or Codex `devprojex` entry that DevProjex did not write; such an entry that already starts DevProjex for this project and mode through `npx`, `dnx`, or `flatpak run` is left unchanged and reported as connected; `--print` only generates its configuration; `--open` opens the client after registration | clients are `claude-code`, `codex`, `cursor`, `vscode`, `json`; modes are `live`, `standard`; Claude Code is project-local, Codex configuration is global with one entry, Cursor writes `.cursor/mcp.json`, VS Code writes `.vscode/mcp.json` (both with a `${workspaceFolder}` root), and `json` is manual-only; `--print` performs no client process or project write; `--print` and `--open` conflict; `--open` with `json` is rejected | default stdout describes the connection result, client, mode, project, live-selection state, and a restart reminder before the open result; `--print` stdout is only the fragment; `--open` failure after successful registration reports the manual launch command and exits `1`; invalid choices exit `2`; a `PROJECT` that does not exist or is a file exits `2` with `DPX-PROJECT-NOT-FOUND` and a message naming the problem before any client work, with or without `--print`, and nothing is registered or printed; connection failure exits `1` | parser, path resolver, connection and launch services, process, atomic project configuration |
 | MCP `get_tree` | `format` | `markdown` | selects compact Markdown, drawing-character text, JSON, or XML tree output | values are `markdown`, `text`, `json`, `xml`; JSON/XML over 2,000 lines fail instead of returning a partial document | text payload remains spotlight-wrapped; invalid value is `DPX-MCP-INVALID-ARGUMENTS`, structured overflow is `DPX-MCP-PAYLOAD-TRUNCATED` | MCP schema, tree serializer, integration |
@@ -965,7 +965,7 @@ that prevents an accepted option from becoming a no-op.
 | `diff` | `--git-mode` | `changes` | compares `HEAD` with the working tree, `HEAD` with the index, or two commits | values are `changes`, `staged`, `diff:<REF>..<REF>`; persistent modes are refused | unified diff or JSON on stdout; invalid value exits `2`; unreadable Git state exits `3` | parser, reader, process |
 | `diff` | `--context` | `3` | sets the unchanged lines around each change | integer `0..20` | invalid value exits `2` | parser, renderer, process |
 | `diff` | `-f`, `--format` | `text` | selects the unified text diff or deterministic `devprojex-diff` JSON | values are `text`, `json` | one complete payload on stdout; invalid value exits `2` | parser, serializer, process |
-| `search` | `--regex`, `--symbols` | literal text | `--regex` treats `PATTERN` as a timed .NET regular expression; `--symbols` treats it as one or more declaration names separated by `\|` and matches only those declarations | mutually exclusive; a `--symbols` pattern that looks like a regular expression is refused before the project is read | evidence on stdout; an invalid or refused pattern exits `2` with `DPX-CLI-SEARCH-PATTERN` | parser, search handler, process |
+| `search` | `--regex`, `--symbols` | literal text | `--regex` treats `PATTERN` as a timed .NET regular expression; `--symbols` treats it as one or more declaration names separated by `\|` and matches only those declarations | mutually exclusive; a `--symbols` regular expression in which every alternative reduces to one plain name after declaration keywords and the separators `\s+`, `\s*`, `\s`, `.*`, `.+` and `\b` are removed, such as `func\s+Run`, runs for those names; an alternative that starts or ends with `.*` or `.+` once a leading `^`, a trailing `$` and outer `\b` are removed, such as `def\s+test_.*` or `.*Handler$`, asks for a prefix or suffix and is refused, as is any other pattern that looks like a regular expression, before the project is read | evidence on stdout; names read from a regular expression add one `hint:` line on stderr; an invalid or refused pattern exits `2` with `DPX-CLI-SEARCH-PATTERN` | parser, search handler, process |
 | URL-capable commands | `--branch` | remote default branch | selects a validated repository branch under an operation lease | rejected for local paths and with `open --last` | ordinary command payload remains on stdout; clone/branch failure exits `1` or invalid name exits `2` | parser, resolver, Git fixture |
 | analyze/related/tree/context/project | `--progress` | `auto` | selects automatic, forced, or disabled operational progress on stderr | quiet/minimal suppress optional progress; URL-source Git operations use bounded milestones when rewriting is unavailable | requested payload stays byte-clean on stdout | parser, rendering, process |
 | analyze/related/tree/context/project | `--verbosity`, `-q` | `normal` | controls optional operational stderr from quiet through safe diagnostic context; `-q` selects `quiet` | `-q` conflicts with an explicit `--verbosity`; neither removes requested stdout nor suppresses errors | requested payload stays on stdout; invalid value or conflict exits `2` | parser, rendering, process |
@@ -1261,7 +1261,7 @@ and profile text uses localized yes/no values.
 `devprojex mcp --allow-remote` is an additive, opt-in startup capability. Without
 the flag, MCP project tools retain the local-only, zero-network contract. With
 the flag, `get_tree`, `analyze`, `pack_context`, `search_project`,
-`related_files`, and `get_file` accept a Git URL in `project` plus an optional
+`related_files`, `get_file`, and `get_diff` accept a Git URL in `project` plus an optional
 URL-only `branch`. RepoCache owns
 clone publication and the server pins each resolved checkout until shutdown.
 `list_projects` remains the stable list of configured local roots.
@@ -1274,9 +1274,9 @@ The MCP `analyze` tool exposes the matching optional `top_files` parameter with
 default `10`; both surfaces share the same bounded, deterministic ranking.
 
 `--max-file-bytes SIZE` is an additive, invocation-only option on `analyze`,
-`tree`, and `export context`. The five MCP selection tools that narrow a file set
-— `get_tree`, `analyze`, `pack_context`, `search_project`, and `related_files` —
-expose the equivalent `max_file_bytes` parameter, as a positive integer or the
+`tree`, and `export context`. The six MCP selection tools that narrow a file set
+— `get_tree`, `analyze`, `pack_context`, `search_project`, `related_files`, and
+`get_diff` — expose the equivalent `max_file_bytes` parameter, as a positive integer or the
 same value written as a numeric string. Both surfaces use one Application
 filter and exclude files strictly larger than the limit without changing profile
 schemas. Existing machine documents add no property; their inventory, byte
@@ -1285,8 +1285,9 @@ metrics, trees, and content reflect the effective narrowed selection.
 Git-axis v2 is an additive CLI-v1 extension. Direct selection commands accept
 the momentary `staged`, `changes`, and `diff:<REF>..<REF>` tokens. MCP adds the
 persistent server baseline `--git-mode` and the narrowing `git_scope` parameter
-on the same five selection tools. Profile schemas remain unchanged and reject
-momentary values.
+on the same selection tools except `get_diff`, whose `git_scope` takes the same
+momentary tokens to choose the changes it compares. Profile schemas remain
+unchanged and reject momentary values.
 
 MCP exclusions are a v5.2 extension with one deliberate default change: a
 server started without exclusion flags runs with `smart-ignore` and
@@ -1300,8 +1301,8 @@ only when a tool does not name an explicit profile.
 `devprojex mcp --unrestricted` is the widest-baseline preset, equivalent to
 `--exclude none --git-mode none` and in conflict with both spelled-out flags.
 `devprojex mcp --allow-agent-exclusions` additionally publishes an `exclusions` array
-parameter on the six selection tools (`get_tree`, `analyze`, `pack_context`,
-`search_project`, `related_files`, and `get_file`); the value is the full
+parameter on the seven selection tools (`get_tree`, `analyze`, `pack_context`,
+`search_project`, `related_files`, `get_file`, and `get_diff`); the value is the full
 desired toggle set, an empty array disables
 every toggle, and it outranks the server baseline and profile exclusions.
 Without the flag the parameter does not exist in any schema. Redaction toggles

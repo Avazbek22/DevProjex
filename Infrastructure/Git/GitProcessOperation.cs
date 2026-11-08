@@ -34,6 +34,8 @@ internal enum GitOperationKind
 	ReadShallowRepositoryState,
 	ReadTreeEntries,
 	ReadIndexEntries,
+	ReadFullTreeEntries,
+	ReadFullIndexEntries,
 	ReadObjectHeaders,
 	ReadObjectContents
 }
@@ -357,6 +359,24 @@ internal sealed record GitProcessOperation
 			paths: ValidatePaths(paths));
 
 	/// <summary>
+	/// Lists every blob entry a resolved commit holds, without a path filter. Used only as a
+	/// fallback when a literal-pathspec lookup misses a path that differs from the tree's recorded
+	/// spelling only by case or Unicode normalization form.
+	/// </summary>
+	public static GitProcessOperation ReadFullTreeEntries(string commitObjectId) =>
+		new(
+			GitOperationKind.ReadFullTreeEntries,
+			GitProcessProfile.LocalRead,
+			ValidateObjectId(commitObjectId));
+
+	/// <summary>
+	/// Lists every index entry, all stages, without a path filter. Used only as the staged-side
+	/// counterpart of <see cref="ReadFullTreeEntries"/>.
+	/// </summary>
+	public static GitProcessOperation ReadFullIndexEntries() =>
+		new(GitOperationKind.ReadFullIndexEntries, GitProcessProfile.LocalRead);
+
+	/// <summary>
 	/// Reports type and size for object ids written to standard input. The caller writes only ids
 	/// accepted by <see cref="ValidateObjectId"/>, one per line, so no revision expression reaches
 	/// Git's name resolution.
@@ -470,6 +490,10 @@ internal sealed record GitProcessOperation
 				["--literal-pathspecs", "ls-tree", "-r", "-z", "--full-tree", Value!, "--", .. Paths],
 			GitOperationKind.ReadIndexEntries =>
 				["--literal-pathspecs", "ls-files", "--stage", "-z", "--", .. Paths],
+			GitOperationKind.ReadFullTreeEntries =>
+				["--literal-pathspecs", "ls-tree", "-r", "-z", "--full-tree", Value!],
+			GitOperationKind.ReadFullIndexEntries =>
+				["--literal-pathspecs", "ls-files", "--stage", "-z"],
 			GitOperationKind.ReadObjectHeaders => ["cat-file", "--batch-check"],
 			GitOperationKind.ReadObjectContents => ["cat-file", "--batch"],
 			_ => throw new ArgumentOutOfRangeException()
@@ -484,7 +508,7 @@ internal sealed record GitProcessOperation
 			["config", "--name-only", "--get-regexp", "^(filter\\..*\\.(clean|smudge|process|required)|diff\\..*\\.(command|textconv)|diff\\.external)$"],
 		GitConfigReadKind.WorktreeBranch => ["config", "--worktree", "--get", "devprojex.branch"],
 		GitConfigReadKind.PromisorRemotes =>
-			["config", "--name-only", "--get-regexp", "^remote\\..*\\.promisor$"],
+			["config", "--name-only", "--get-regexp", "^(remote\\..*\\.promisor|extensions\\.partialclone)$"],
 		GitConfigReadKind.NetworkOverrides =>
 			["config", "--name-only", "--get-regexp", "^(url\\..*\\.insteadof|http(\\..*)?\\.(extraheader|cookiefile|proxy)|core\\.(gitproxy|sshcommand)|remote\\..*\\.uploadpack)$"],
 		GitConfigReadKind.RepositoryLineEndings => ["config", "-z", "--get-regexp", LineEndingPattern],

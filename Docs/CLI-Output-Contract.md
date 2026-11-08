@@ -314,6 +314,11 @@ prints the same ranges (at most six, then `and N more`). Declaration `body` is n
 when body output is disabled or no body fits, and `remainingBodyLines` reports a
 bounded prefix honestly.
 
+A `--symbols` pattern that looks like a regular expression still runs as a declaration-name
+search when every alternative reduces to one plain name after declaration keywords and
+separators are removed; stdout is unaffected, but stderr gets one additional line:
+`hint: --symbols read the pattern as declaration names: <names>`.
+
 `resolution` has the same four stable field names as the text `[Resolution]` line.
 For search it describes containing-declaration evidence for written matches:
 `resolved` means one containing declaration was named and `unresolved` means none
@@ -438,11 +443,12 @@ files: `seed`, `dependencies`, `dependencyCount`, `dependents`, and `dependentCo
 uses the related-item shape above, holds resolved items only, at most 20 in path order, and its
 count reports how many exist. `resolution` counts evidence groups exactly as the command without
 narrowing does, except that `resolution.outsideSelection` holds the resolved groups that reach
-only files outside the selection and `resolved` the rest; `coverage` and `searchScope` still
-describe the selection. Text output prints those lists under `Dependencies outside the selection`
-and `Dependents outside the selection` and appends `· outside-selection=N` to `[Resolution]`. A
-document with nothing outside its selection omits both members, and a command that narrows
-nothing writes exactly the document it wrote before.
+only files outside the selection and `resolved` the rest, at depth 1; `resolved` plus
+`outsideSelection` is therefore what the unnarrowed command resolves at that depth, and `coverage`
+and `searchScope` still describe the selection. Text output prints those lists under
+`Dependencies outside the selection` and `Dependents outside the selection` and appends
+`· outside-selection=N` to `[Resolution]`. A document with nothing outside its selection omits both
+members, and a command that narrows nothing writes exactly the document it wrote before.
 Traversal follows only resolved edges and is limited to 256 distinct seed files.
 Crossing that limit emits `DPX-DEPENDENCY-TRAVERSAL-LIMIT`, returns policy exit
 code `3`, and writes no partial related-files document.
@@ -488,8 +494,10 @@ selection diagnostics stay on stderr. The shape is:
     "removed": 1,
     "binary": 1,
     "tooLarge": 0,
+    "changeTooLarge": 0,
     "lineEndingsOnly": 0,
-    "deleted": 0
+    "deleted": 0,
+    "notInWorkingTree": 0
   },
   "complete": false
 }
@@ -502,9 +510,16 @@ project-relative, and `oldPath` appears only for a rename shown against its sour
 lines starts at the line before the hunk, `0` at the top of the file. `lines` holds the hunk lines
 with their unified prefix (` `, `-`, or `+`), unescaped, and the separate entry
 `\ No newline at end of file` after a line that has no newline. `notShown` lists the changed files
-without hunks, with `reason` `binary`, `too-large`, or `line-endings-only`. `counts.deleted` counts
-deleted files that are no longer in the working tree; their paths are never listed. `complete` is
-`true` when every changed file is in `files` and no deleted file was left uncounted by path. When
+without hunks, with `reason` `binary`, `too-large`, `change-too-large`, `line-endings-only`, or
+`content-unchanged`; `change-too-large` means both versions fit but the change needs more than 2,000
+added and removed lines of search, and `counts.changeTooLarge` counts those files.
+`content-unchanged` means the bytes are identical on both sides and Git reported the file as
+changed only because its mode changed, such as a `chmod` that flips the executable bit; `line-endings-only`
+is reserved for an actual line-ending or byte-order-mark difference. `counts.deleted` counts
+deleted files that are no longer in the working tree, and `counts.notInWorkingTree` counts files a
+`staged` or ref-to-ref scope adds, changes, or renames to that the working tree does not have; both
+apply only the selection rules a path alone decides, and their paths are never listed. `complete`
+is `true` when every changed file is in `files` and neither count is above zero. When
 the selection hides secrets or private data, both versions are redacted before they are compared,
 so placeholders appear in `lines` exactly as in text output.
 

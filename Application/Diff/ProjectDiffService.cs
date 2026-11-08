@@ -33,8 +33,9 @@ public sealed class ProjectDiffService(IGitFileVersionReader versions)
 		var deletedOutsideSelection = plan.Diagnostics
 			.Where(static diagnostic => diagnostic.Code == GitScopeFilter.DeletedDiagnosticCode)
 			.Sum(static diagnostic => diagnostic.Count ?? 0);
+		var notInWorkingTree = plan.GitScopeFilesNotInWorkingTree;
 		if (files.Length == 0)
-			return new ProjectDiffResult(request.Mode, request.DiffRange, [], deletedOutsideSelection, null);
+			return new ProjectDiffResult(request.Mode, request.DiffRange, [], deletedOutsideSelection, null, notInWorkingTree);
 
 		var stored = await versions
 			.ReadAsync(new GitFileVersionRequest(plan.SourceRoot, request.Mode, request.DiffRange, files), cancellationToken)
@@ -70,7 +71,13 @@ public sealed class ProjectDiffService(IGitFileVersionReader versions)
 			.OrderByDescending(static file => file.ChangedLines)
 			.ThenBy(static file => file.RelativePath, StringComparer.Ordinal)
 			.ToArray();
-		return new ProjectDiffResult(request.Mode, request.DiffRange, ordered, deletedOutsideSelection, scope?.Complete());
+		return new ProjectDiffResult(
+			request.Mode,
+			request.DiffRange,
+			ordered,
+			deletedOutsideSelection,
+			scope?.Complete(),
+			notInWorkingTree);
 	}
 
 	private static async Task<ProjectDiffFile?> CompareFileAsync(
@@ -93,7 +100,12 @@ public sealed class ProjectDiffService(IGitFileVersionReader versions)
 			? await ReadWorkingAsync(request, file, cancellationToken).ConfigureAwait(false)
 			: version.New is null ? null : Decode(file, version.New, cancellationToken);
 		if (oldText is null && newText is null)
-			return null;
+		{
+			// The selection named this file, but neither side has an entry for it: a rename whose
+			// source was requested on its own, or a path a momentary Git scope could not resolve.
+			// It is shown, not silently dropped, the same way an unreadable path is.
+			return Omitted(ProjectDiffFileStatus.Modified, ProjectDiffOmission.Binary);
+		}
 		var status = oldText is null
 			? ProjectDiffFileStatus.Added
 			: newText is null
@@ -106,15 +118,30 @@ public sealed class ProjectDiffService(IGitFileVersionReader versions)
 		if (omission != ProjectDiffOmission.None)
 			return Omitted(status, omission);
 
-		var (oldMasked, newMasked) = Mask(file, oldText?.Text ?? string.Empty, newText?.Text ?? string.Empty, scope, cancellationToken);
+		var (oldMasked, newMasked) = Mask(
+			file,
+			version.RenamedFrom,
+			oldText?.Text ?? string.Empty,
+			newText?.Text ?? string.Empty,
+			scope,
+			cancellationToken);
 		var diff = LineDiff.Compare(oldMasked, newMasked, request.ContextLines, cancellationToken);
 		switch (diff.Outcome)
 		{
 			case LineDiffOutcome.TooLarge:
 				return Omitted(status, ProjectDiffOmission.TooLarge);
-			case LineDiffOutcome.LineEndingsOnly or LineDiffOutcome.Unchanged
-				when status == ProjectDiffFileStatus.Modified:
+			case LineDiffOutcome.ChangeTooLarge:
+				return Omitted(status, ProjectDiffOmission.ChangeTooLarge);
+			case LineDiffOutcome.LineEndingsOnly when status == ProjectDiffFileStatus.Modified:
 				return Omitted(status, ProjectDiffOmission.LineEndingsOnly);
+			case LineDiffOutcome.Unchanged when status == ProjectDiffFileStatus.Modified:
+				// Git still reported this file as changed, so an unchanged comparison here means the
+				// difference is in the file mode (for example chmod +x), never in its content.
+				return Omitted(
+					status,
+					IsContentByteIdentical(version, oldText!, newText!, request.Mode)
+						? ProjectDiffOmission.ContentUnchanged
+						: ProjectDiffOmission.LineEndingsOnly);
 			case LineDiffOutcome.LineEndingsOnly or LineDiffOutcome.Unchanged:
 				// An added or deleted empty file, or a pure rename, still names the change.
 				return Omitted(status, ProjectDiffOmission.None);
@@ -138,6 +165,7 @@ public sealed class ProjectDiffService(IGitFileVersionReader versions)
 
 	private static (string Old, string New) Mask(
 		string file,
+		string? renamedFrom,
 		string oldText,
 		string newText,
 		SecretRedactionScope? scope,
@@ -145,11 +173,13 @@ public sealed class ProjectDiffService(IGitFileVersionReader versions)
 	{
 		if (scope is null)
 			return (oldText, newText);
-		// Both versions use the selected path as their identity, so path-based detector policy and
-		// hand marks apply to the old side exactly as they apply to the file a read returns.
-		var oldResult = scope.Redact(file, oldText, cancellationToken);
+		// Each version is redacted under the path that holds it, so path-based detector policy and
+		// hand marks of a rename source apply to its old content. A value either pass masks is then
+		// masked in both versions. The rename source is not compared on its own, so its old content
+		// is redacted, and counted, exactly once.
+		var oldResult = scope.Redact(renamedFrom ?? file, oldText, cancellationToken);
 		var newResult = scope.Redact(file, newText, cancellationToken);
-		return CrossVersionRedaction.Apply(oldText, oldResult, newText, newResult);
+		return CrossVersionRedaction.Apply(oldText, oldResult, newText, newResult, cancellationToken);
 	}
 
 	private static VersionText Decode(string file, GitStoredFile stored, CancellationToken cancellationToken)
@@ -168,7 +198,7 @@ public sealed class ProjectDiffService(IGitFileVersionReader versions)
 			stored.Content,
 			SecretRedactionOutputPreparer.MaximumScannableFileBytes,
 			cancellationToken);
-		return FromClassification(fact.Classification, fact.Content);
+		return FromClassification(fact.Classification, fact.Content, fact.Encoding);
 	}
 
 	private static async Task<VersionText> ReadWorkingAsync(
@@ -177,18 +207,68 @@ public sealed class ProjectDiffService(IGitFileVersionReader versions)
 		CancellationToken cancellationToken)
 	{
 		var read = await request.ReadWorkingFile(file, cancellationToken).ConfigureAwait(false);
-		return FromClassification(read.Classification, read.Content?.Content);
+		return FromClassification(read.Classification, read.Content?.Content, read.Encoding);
 	}
 
-	private static VersionText FromClassification(FileContentClassification classification, string? content) =>
+	private static VersionText FromClassification(
+		FileContentClassification classification,
+		string? content,
+		TextFileEncoding? encoding) =>
 		classification switch
 		{
-			FileContentClassification.Text when content is not null => new VersionText(content, ProjectDiffOmission.None),
+			FileContentClassification.Text when content is not null =>
+				new VersionText(content, ProjectDiffOmission.None, encoding),
 			FileContentClassification.TooLarge => VersionText.Omitted(ProjectDiffOmission.TooLarge),
 			_ => VersionText.Omitted(ProjectDiffOmission.Binary)
 		};
 
-	private sealed record VersionText(string Text, ProjectDiffOmission Omission)
+	/// <summary>
+	/// Whether the old and new side of a file Git reported as modified are the exact same bytes,
+	/// which means the only real difference is the file's mode (for example an executable bit
+	/// flipped by <c>chmod</c>), never its content. A staged or ref-to-ref scope compares the raw
+	/// bytes Git stored on each side directly; the changes scope has no stored bytes for the
+	/// working file, so its decoded text is re-encoded with the same encoding it was read with.
+	/// </summary>
+	private static bool IsContentByteIdentical(
+		GitFileVersions version,
+		VersionText oldText,
+		VersionText newText,
+		GitFilteringMode mode)
+	{
+		if (version.Old is not { Kind: GitStoredFileKind.Regular, Content: { } oldBytes })
+			return false;
+		if (mode == GitFilteringMode.Changes)
+		{
+			return newText.Encoding is { } encoding &&
+				EncodeForComparison(newText.Text, encoding).AsSpan().SequenceEqual(oldBytes);
+		}
+		return version.New is { Kind: GitStoredFileKind.Regular, Content: { } newBytes } &&
+			newBytes.AsSpan().SequenceEqual(oldBytes);
+	}
+
+	private static byte[] EncodeForComparison(string text, TextFileEncoding encoding)
+	{
+		Encoding instance = encoding switch
+		{
+			TextFileEncoding.Utf8 => new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+			TextFileEncoding.Utf8Bom => new UTF8Encoding(encoderShouldEmitUTF8Identifier: true),
+			TextFileEncoding.Utf16LittleEndian => new UnicodeEncoding(bigEndian: false, byteOrderMark: true),
+			TextFileEncoding.Utf16BigEndian => new UnicodeEncoding(bigEndian: true, byteOrderMark: true),
+			TextFileEncoding.Utf32LittleEndian => new UTF32Encoding(bigEndian: false, byteOrderMark: true),
+			TextFileEncoding.Utf32BigEndian => new UTF32Encoding(bigEndian: true, byteOrderMark: true),
+			_ => new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)
+		};
+		var preamble = instance.GetPreamble();
+		var body = instance.GetBytes(text);
+		if (preamble.Length == 0)
+			return body;
+		var combined = new byte[preamble.Length + body.Length];
+		preamble.CopyTo(combined, 0);
+		body.CopyTo(combined, preamble.Length);
+		return combined;
+	}
+
+	private sealed record VersionText(string Text, ProjectDiffOmission Omission, TextFileEncoding? Encoding = null)
 	{
 		public static VersionText Omitted(ProjectDiffOmission omission) => new(string.Empty, omission);
 	}

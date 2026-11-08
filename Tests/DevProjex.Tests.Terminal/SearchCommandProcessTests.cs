@@ -241,13 +241,15 @@ public sealed class SearchCommandProcessTests
 		Assert.Empty(result.StandardOutput);
 	}
 
-	[Fact]
-	public void SymbolModeRefusesARegularExpressionWithAHintInsteadOfReportingNoMatches()
+	[Theory]
+	[InlineData("Run\\(")]
+	[InlineData("Ru.*")]
+	public void SymbolModeRefusesARegularExpressionWithAHintInsteadOfReportingNoMatches(string pattern)
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = CreateProject(workspace);
 
-		var refused = Run(workspace, project, "Run\\(", "--symbols");
+		var refused = Run(workspace, project, pattern, "--symbols");
 		var named = Run(workspace, project, "string Run(", "--symbols", "--format", "json");
 
 		Assert.Equal(CommandLineExitCodes.UsageError, refused.ExitCode);

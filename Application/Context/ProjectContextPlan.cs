@@ -152,6 +152,9 @@ public sealed record ProjectContextPlan(
 
 	internal bool IncludesOutputMetrics { get; init; } = true;
 	internal IReadOnlyList<ProjectControlFileIdentity> ObservedControlFiles { get; init; } = [];
+
+	/// <summary>Selected files a staged or ref-to-ref Git scope changes that the working tree lacks.</summary>
+	internal int GitScopeFilesNotInWorkingTree { get; init; }
 }
 
 public sealed record ProjectContextRequest(

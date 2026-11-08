@@ -2,25 +2,37 @@ using System.Text.RegularExpressions;
 
 namespace DevProjex.Application.Services;
 
-public sealed record McpServerLaunch(string Command, IReadOnlyList<string> PrefixArguments);
+public sealed record McpServerLaunch(
+	string Command,
+	IReadOnlyList<string> PrefixArguments,
+	bool IsPackageLauncher = false);
 
 public static partial class McpServerLaunchResolver
 {
 	public const string NpmExecutableVariable = "DEVPROJEX_NPM_EXECUTABLE";
 
-	public static McpServerLaunch Resolve(string executablePath) => Resolve(
+	/// <summary>
+	/// Characters cmd.exe interprets on its command line even where a client quotes the argument, or where the
+	/// client leaves an argument without spaces unquoted. A root containing one cannot pass through cmd /c.
+	/// '!' is left out: it is special only with delayed expansion, which cmd /c leaves off by default.
+	/// </summary>
+	private static readonly char[] CommandShellUnsafeCharacters = ['%', '&', '^', '|', '<', '>', '"'];
+
+	public static McpServerLaunch Resolve(string executablePath, string? projectRoot = null) => Resolve(
 		executablePath,
 		Environment.GetEnvironmentVariable(NpmExecutableVariable),
 		Environment.GetEnvironmentVariable("NUGET_PACKAGES"),
 		File.Exists,
-		ReferToSameEntry);
+		ReferToSameEntry,
+		projectRoot);
 
 	internal static McpServerLaunch Resolve(
 		string executablePath,
 		string? npmExecutable,
 		string? nugetPackages,
 		Func<string, bool> fileExists,
-		Func<string, string, bool>? sameEntry = null)
+		Func<string, string, bool>? sameEntry = null,
+		string? projectRoot = null)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(executablePath);
 		if (FlatpakEnvironment.Current.IsActive)
@@ -32,6 +44,10 @@ public static partial class McpServerLaunchResolver
 		var parts = path.Split('/');
 		if (parts.Any(static part => part is "." or ".."))
 			return new(executablePath, []);
+		// Windows clients start a process without a shell, and npx and dnx are batch files there.
+		var shellWrapped = windowsPath;
+		if (shellWrapped && !CanPassThroughCommandShell(projectRoot))
+			return new(executablePath, []);
 
 		if (parts.Length >= 5 &&
 			parts[^5].Equals("node_modules", comparison) &&
@@ -41,7 +57,7 @@ public static partial class McpServerLaunchResolver
 			(parts.Length >= 7 && parts[^7].Equals("_npx", comparison) && parts[^6].Length > 0 ||
 			 PathsMatch(path, npmExecutable, comparison, sameEntry)))
 		{
-			return new("npx", ["-y", "devprojex"]);
+			return PackageLaunch("npx", ["-y", "devprojex"], shellWrapped);
 		}
 
 		if (parts.Length >= 7 &&
@@ -49,18 +65,61 @@ public static partial class McpServerLaunchResolver
 			IsNuGetBinary(parts[^6], parts[^2], parts[^1], comparison) &&
 			PackageVersion().IsMatch(parts[^5]))
 		{
-			var packageRoot = string.Join('/', parts[..^6]);
+			var storeIndex = Array.FindIndex(parts, part => part.Equals(".store", comparison));
 			// Global tools have stable shims and their own .store; only the NuGet cache needs dnx.
-			if (!parts.Any(part => part.Equals(".store", comparison)) &&
-				(packageRoot.EndsWith("/.nuget/packages", comparison) ||
-				 PathsMatch(packageRoot, nugetPackages is null ? null : Normalize(nugetPackages).TrimEnd('/'), comparison, sameEntry) ||
-				 fileExists(string.Join('/', parts[..^4]) + "/.nupkg.metadata")))
+			if (storeIndex >= 0)
 			{
-				return new("dnx", ["devprojex"]);
+				var shim = ResolveShimLaunch(parts, storeIndex, windowsPath, fileExists);
+				if (shim is not null)
+					return shim;
+			}
+			else
+			{
+				var packageRoot = string.Join('/', parts[..^6]);
+				if (packageRoot.EndsWith("/.nuget/packages", comparison) ||
+					PathsMatch(packageRoot, nugetPackages is null ? null : Normalize(nugetPackages).TrimEnd('/'), comparison, sameEntry) ||
+					fileExists(string.Join('/', parts[..^4]) + "/.nupkg.metadata"))
+				{
+					return PackageLaunch("dnx", ["devprojex"], shellWrapped);
+				}
 			}
 		}
 		return new(executablePath, []);
 	}
+
+	/// <summary>
+	/// The dotnet-tool shim that sits next to .store and survives <c>dotnet tool update</c>, unlike the
+	/// versioned apphost path inside .store. Returns null when the shim is missing on disk, or when its
+	/// Windows batch wrapper could not pass through <c>cmd /c call</c> safely; the caller then keeps the
+	/// installed .store path as-is.
+	/// </summary>
+	private static McpServerLaunch? ResolveShimLaunch(
+		IReadOnlyList<string> parts, int storeIndex, bool windowsPath, Func<string, bool> fileExists)
+	{
+		var shimRoot = string.Join('/', parts.Take(storeIndex));
+		var shimPath = shimRoot + "/" + (windowsPath ? "devprojex.cmd" : "devprojex");
+		if (!fileExists(shimPath))
+			return null;
+		if (!windowsPath)
+			return new(shimPath, [], IsPackageLauncher: true);
+		if (shimPath.IndexOfAny(CommandShellUnsafeCharacters) >= 0)
+			return null;
+		return new("cmd", ["/c", "call", ToWindowsSeparators(shimPath)], IsPackageLauncher: true);
+	}
+
+	private static string ToWindowsSeparators(string normalizedPath) => normalizedPath.Replace('/', '\\');
+
+	/// <summary>
+	/// True when a project root reaches the server unchanged through <c>cmd /c</c>, whichever way the client
+	/// quotes it. Otherwise a Windows connection names this installation's executable directly.
+	/// </summary>
+	public static bool CanPassThroughCommandShell(string? projectRoot) =>
+		projectRoot is null || projectRoot.IndexOfAny(CommandShellUnsafeCharacters) < 0;
+
+	private static McpServerLaunch PackageLaunch(string launcher, string[] arguments, bool shellWrapped) =>
+		shellWrapped
+			? new("cmd", ["/c", launcher, .. arguments], IsPackageLauncher: true)
+			: new(launcher, arguments, IsPackageLauncher: true);
 
 	private static bool IsNpmBinary(string package, string binary, StringComparison comparison)
 	{

@@ -270,13 +270,17 @@ public sealed class ImportanceRankingService(
 					static pair => pair.Key,
 					static pair => pair.Value.ContentHash ?? string.Empty,
 					PathComparer.Default));
+			// Bounding configuration reads to the ranked candidates keeps a hidden or excluded
+			// configuration file, such as a gitignored tsconfig path-alias map, from feeding edges
+			// that favor files the ranked set never actually shows.
 			var snapshot = await dependencyFactsEngine
 				.IndexAsync(
 					root,
 					candidatePaths,
 					progress,
 					cancellationToken,
-					contentIdentities)
+					contentIdentities,
+					readableProjectFiles: candidatePaths)
 				.ConfigureAwait(false);
 			if (!ContentChangedDuringIndexing(versions, snapshot.ContentObservations))
 				return (snapshot, versions);

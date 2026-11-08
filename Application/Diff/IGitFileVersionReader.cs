@@ -78,4 +78,8 @@ public enum GitStoredFileKind
 }
 
 /// <param name="Content">The raw bytes for a regular file within the read limits; null otherwise.</param>
-public sealed record GitStoredFile(GitStoredFileKind Kind, long Size, byte[]? Content);
+/// <param name="Mode">
+/// The Git file mode ("100644" or "100755") recorded for a regular file, exactly as <c>ls-tree</c>
+/// or <c>ls-files --stage</c> reported it; null for a non-regular entry or an absent side.
+/// </param>
+public sealed record GitStoredFile(GitStoredFileKind Kind, long Size, byte[]? Content, string? Mode = null);

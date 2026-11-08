@@ -467,6 +467,51 @@ public sealed class DependencyPythonAndConfigurationSemanticsIntegrationTests
 	}
 
 	[Fact]
+	public async Task ABareAnnotationWithADefaultInsideItsBracketsIsNeverReadAsAnAssignment()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("pyproject.toml", "[project]\nname = \"fixture\"");
+		// "x" has no value at all: the "=" belongs to Field's own default keyword argument, nested
+		// inside Annotated[...]'s brackets, not to a top-level assignment on this statement.
+		var module = fixture.CreateFile(
+			"module.py",
+			"from typing import Annotated\nx: Annotated[int, Field(default=1)]\nclass Item: pass");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, module],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var moduleFacts = Assert.Single(result.Files, item => item.Path == "module.py");
+		Assert.DoesNotContain("$python-assignment:x", moduleFacts.Aliases.Keys);
+	}
+
+	[Fact]
+	public async Task AnAnnotatedDynamicAllIsTreatedTheSameAsThePlainForm()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("pyproject.toml", "[project]\nname = \"fixture\"");
+		var module = fixture.CreateFile(
+			"module.py",
+			"__all__: list[str] = build_names()\nclass Item: pass");
+		var source = fixture.CreateFile("consumer.py", "from module import *");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, module, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var moduleFacts = Assert.Single(result.Files, item => item.Path == "module.py");
+		Assert.True(moduleFacts.Aliases.ContainsKey("$dynamic-all"),
+			string.Join(", ", moduleFacts.Aliases.Keys));
+		var edge = Assert.Single(result.Edges, item => item.Source == "consumer.py");
+		Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
+		Assert.Equal("dynamic __all__ is an unsupported mechanism", Assert.Single(edge.Reasons));
+	}
+
+	[Fact]
 	public async Task ModuleAssignmentsHaveAnExplicitResolutionLimitation()
 	{
 		using var fixture = new TemporaryDirectory();

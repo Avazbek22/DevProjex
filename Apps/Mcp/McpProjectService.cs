@@ -375,7 +375,11 @@ internal sealed class McpProjectService(
 					scope.DiffRange,
 					selectionFrontier?.ProjectionPaths,
 					cancellationToken,
-					resolvedDiffRange)
+					resolvedDiffRange,
+					hasSelectionFilters
+						? path => MatchesRequested(path, requested.Paths, requested.Directories) &&
+							globs.Includes(ToRelative(projectRoot, path))
+						: null)
 				.ConfigureAwait(false);
 			if (plan.HasErrors)
 			{
@@ -1921,9 +1925,15 @@ internal sealed class McpProjectService(
 	/// <summary>
 	/// A directory read is usually a guess at the file that holds a folder's code, such as an
 	/// import of "./helper" that resolves to its index file. Naming the readable entries lets the
-	/// next call read that file instead of listing the directory first. Only selection members are
+	/// next call read that file instead of listing the directory first. Only readable files are
 	/// named, so a file the effective filters hide never appears, not even through its folder.
 	/// </summary>
+	/// <remarks>
+	/// Live checked items are a focus, not an access boundary: a named get_file reads any file the
+	/// window filters keep, while get_tree stays inside the focus. A folder outside the focus is
+	/// therefore listed from the filter ceiling, or the only answer would be a listing that cannot
+	/// show it.
+	/// </remarks>
 	private McpToolException CreateDirectoryRequestedException(
 		ProjectContextPlan plan,
 		string requestedPath,
@@ -1934,7 +1944,10 @@ internal sealed class McpProjectService(
 		// File name to the member path, so a suggestion keeps the on-disk spelling get_file accepts.
 		var files = new SortedDictionary<string, string>(StringComparer.Ordinal);
 		var folders = new SortedSet<string>(StringComparer.Ordinal);
-		foreach (var file in Membership(plan).Files)
+		var readableFiles = liveContext is null
+			? Membership(plan).Files
+			: EnumerateEffectiveTreeFiles(plan.EffectiveTree, prefix);
+		foreach (var file in readableFiles)
 		{
 			if (!file.StartsWith(prefix, PathComparer.Comparison))
 				continue;
@@ -1978,6 +1991,27 @@ internal sealed class McpProjectService(
 		{
 			NamesReadableEntries = true
 		};
+
+		static IEnumerable<string> EnumerateEffectiveTreeFiles(TreeNodeDescriptor effectiveTree, string directoryPrefix)
+		{
+			var pending = new Stack<TreeNodeDescriptor>();
+			pending.Push(effectiveTree);
+			while (pending.TryPop(out var node))
+			{
+				if (!node.IsDirectory)
+				{
+					if (node.FullPath.StartsWith(directoryPrefix, PathComparer.Comparison))
+						yield return node.FullPath;
+					continue;
+				}
+				var nodePrefix = Path.TrimEndingDirectorySeparator(node.FullPath) + Path.DirectorySeparatorChar;
+				if (!directoryPrefix.StartsWith(nodePrefix, PathComparer.Comparison) &&
+					!nodePrefix.StartsWith(directoryPrefix, PathComparer.Comparison))
+					continue;
+				foreach (var child in node.Children)
+					pending.Push(child);
+			}
+		}
 	}
 
 	// The file a language loads when an import names the directory itself.

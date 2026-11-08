@@ -112,6 +112,45 @@ public sealed partial class GitModeCommandContractTests
 	}
 
 	[Fact]
+	public void RealDiffCommandCountsARangeFileMissingFromTheCheckedOutCommitApartFromDeletions()
+	{
+		using var repository = new GitModeRepository();
+		using var state = new TemporaryDirectory();
+		repository.Write("app.txt", "one\n");
+		repository.Commit();
+		var main = repository.Git("rev-parse", "HEAD").Trim();
+		repository.Git("checkout", "--quiet", "-b", "feature");
+		repository.Write("feature-only.txt", "feature\n");
+		repository.Write("app.txt", "two\n");
+		repository.Commit();
+		repository.Git("checkout", "--quiet", main);
+
+		var json = RunScopeCommand(repository, state.Path,
+			["diff", "--project", repository.Root, "--git-mode", $"diff:{main}..feature", "--format", "json",
+			 "--exclude", "none"]);
+		var text = RunScopeCommand(repository, state.Path,
+			["diff", "--project", repository.Root, "--git-mode", $"diff:{main}..feature", "--exclude", "none",
+			 "--language", "en", "--plain"]);
+
+		Assert.True(json.ExitCode == 0, json.StandardError);
+		using var document = JsonDocument.Parse(json.StandardOutput);
+		var counts = document.RootElement.GetProperty("counts");
+		Assert.Equal(0, counts.GetProperty("deleted").GetInt32());
+		Assert.Equal(1, counts.GetProperty("notInWorkingTree").GetInt32());
+		Assert.False(document.RootElement.GetProperty("complete").GetBoolean());
+		Assert.Equal("app.txt", Assert.Single(document.RootElement.GetProperty("files").EnumerateArray())
+			.GetProperty("path").GetString());
+		Assert.True(text.ExitCode == 0, text.StandardError);
+		Assert.EndsWith(
+			"Changed files absent from the working tree, counted but not shown: 1.\n" +
+			"Check out the range's newer commit to review them.\n",
+			text.StandardOutput,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain("feature-only", text.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("Deleted files", text.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void RealDiffCommandReportsAnEmptyScopeAsSuccess()
 	{
 		using var repository = new GitModeRepository();

@@ -73,7 +73,9 @@ public sealed partial class DependencyFactsEngine
 		if (depth < 1)
 			throw new ArgumentOutOfRangeException(nameof(depth));
 
-		var project = await IndexAsync(sourceRoot, projectManifestFiles, progress, cancellationToken)
+		// The project manifest is everything the caller may read, so no configuration outside it is.
+		var project = await IndexAsync(
+				sourceRoot, projectManifestFiles, progress, cancellationToken, readableProjectFiles: projectManifestFiles)
 			.ConfigureAwait(false);
 		return FindOutsideSelection(selection.Index, project, seedRelativePaths, direction, depth, cancellationToken);
 	}
@@ -87,8 +89,10 @@ public sealed partial class DependencyFactsEngine
 		CancellationToken cancellationToken)
 	{
 		var visible = selection.FileByPath;
+		var projectFiles = project.FileByPath;
 		var outsideSeeds = new List<SeedOutsideSelection>();
 		var answers = new List<(DependencyIndexSnapshot Index, string Seed)>();
+		var selectionAnsweredSeeds = 0;
 		var seeds = TraverseRelated(
 			seedRelativePaths,
 			direction,
@@ -100,19 +104,25 @@ public sealed partial class DependencyFactsEngine
 			project,
 			new DependencyRelatedResult(selection, seeds),
 			outsideSeeds,
-			CountResolution(answers, direction, visible));
+			CountResolution(answers, direction, visible))
+		{
+			SelectionAnsweredSeeds = selectionAnsweredSeeds
+		};
 
 		SeedRelatedFiles Relate(string seed)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			if (!project.FileByPath.TryGetValue(seed, out var projectFacts) ||
+			var own = FindRelated(selection, [seed], direction).Seeds[0];
+			if (visible.GetValueOrDefault(seed)?.Status != DependencyFileStatus.Supported)
+				return own;
+			if (!projectFiles.TryGetValue(seed, out var projectFacts) ||
 				projectFacts.Status != DependencyFileStatus.Supported ||
-				visible.GetValueOrDefault(seed)?.Status != DependencyFileStatus.Supported)
+				ProjectDroppedFactsOf(own))
 			{
-				// Without project facts for the seed, the selection's own answer is the best one.
-				var own = FindRelated(selection, [seed], direction).Seeds[0];
-				if (own.NoFactsReason is null)
-					answers.Add((selection, seed));
+				// The project cannot answer for this seed in full, so the selection's own answer,
+				// which holds every relation it could see, is the best one.
+				answers.Add((selection, seed));
+				selectionAnsweredSeeds++;
 				return own;
 			}
 
@@ -142,14 +152,50 @@ public sealed partial class DependencyFactsEngine
 				null);
 		}
 
+		// A file the selection relates to the seed reaches the project's answer only through facts
+		// the project kept: the seed's own resolved edges, a dependency's declarations, and a
+		// dependent's resolved edges. A limit that dropped any of them would silently lose a
+		// relation the selection shows.
+		bool ProjectDroppedFactsOf(SeedRelatedFiles own)
+		{
+			if (direction != DependencyDirection.Dependents && HasLimitEdge(own.Seed))
+				return true;
+			foreach (var dependency in own.Dependencies)
+			{
+				if (IsFactBudgetLimited(dependency.Path))
+					return true;
+			}
+			foreach (var dependent in own.Dependents)
+			{
+				if (IsFactBudgetLimited(dependent.Path) || HasLimitEdge(dependent.Path))
+					return true;
+			}
+			return false;
+		}
+
+		bool IsFactBudgetLimited(string path) =>
+			projectFiles.GetValueOrDefault(path) is { FactBudgetLimited: true };
+
+		bool HasLimitEdge(string path) =>
+			(project.EdgesBySource.GetValueOrDefault(path) ?? []).Any(static edge =>
+				edge.Target is null && string.Equals(edge.Reference, LimitReference, StringComparison.Ordinal));
+
 		// An ambiguous row names the candidate it chose, so it is listed only where that file
-		// is shown; outside sections hold resolved relations only.
+		// is shown; outside sections hold resolved relations only. A target that is no file of the
+		// project, such as a Python namespace package, is never left out by narrowing.
 		RelatedFile[] InsideSelection(IReadOnlyList<RelatedFile> files) =>
-			files.Where(file => visible.ContainsKey(file.Path)).ToArray();
+			files.Where(file => IsShown(visible, projectFiles, file.Path)).ToArray();
 
 		RelatedFile[] OutsideSelection(IReadOnlyList<RelatedFile> files) =>
-			files.Where(file => file.Status == ResolutionStatus.Resolved && !visible.ContainsKey(file.Path)).ToArray();
+			files.Where(file => file.Status == ResolutionStatus.Resolved && !IsShown(visible, projectFiles, file.Path))
+				.ToArray();
 	}
+
+	private static bool IsShown(
+		IReadOnlyDictionary<string, FileFacts> visible,
+		IReadOnlyDictionary<string, FileFacts> indexFiles,
+		string path) =>
+		visible.ContainsKey(path) || !indexFiles.ContainsKey(path);
 
 	/// <param name="visible">
 	/// The narrowed selection's files, or null when nothing was narrowed and every resolved edge
@@ -173,7 +219,7 @@ public sealed partial class DependencyFactsEngine
 				foreach (var edge in index.EdgesBySource.GetValueOrDefault(seed) ?? [])
 				{
 					if (!ReachesOnlyItsSource(edge))
-						Add(edge, visible is null || DependencyReachesSelection(edge, seed, visible));
+						Add(edge, visible is null || DependencyReachesSelection(edge, seed, visible, index.FileByPath));
 				}
 			}
 			if (direction is DependencyDirection.Dependents or DependencyDirection.Both)
@@ -221,17 +267,19 @@ public sealed partial class DependencyFactsEngine
 	}
 
 	// The seed itself is never listed as its own dependency, so it does not keep an edge inside.
+	// A target that is no file of the answering index stays inside, where its row is listed.
 	private static bool DependencyReachesSelection(
 		DependencyEdge edge,
 		string seed,
-		IReadOnlyDictionary<string, FileFacts> visible)
+		IReadOnlyDictionary<string, FileFacts> visible,
+		IReadOnlyDictionary<string, FileFacts> indexFiles)
 	{
 		var reachesOtherFile = false;
 		foreach (var target in ResolvedTargetFiles(edge))
 		{
 			if (StringComparer.Ordinal.Equals(target, seed))
 				continue;
-			if (visible.ContainsKey(target))
+			if (IsShown(visible, indexFiles, target))
 				return true;
 			reachesOtherFile = true;
 		}

@@ -32,6 +32,7 @@ internal static class RelatedQueryRunner
 		string seed,
 		DependencyDirection direction,
 		int depth,
+		IReadOnlyCollection<string> readableProjectFiles,
 		CancellationToken cancellationToken)
 	{
 		ArgumentNullException.ThrowIfNull(engine);
@@ -44,7 +45,8 @@ internal static class RelatedQueryRunner
 				[seed],
 				direction,
 				depth,
-				cancellationToken: cancellationToken)
+				cancellationToken: cancellationToken,
+				readableProjectFiles: readableProjectFiles)
 			.ConfigureAwait(false);
 	}
 }

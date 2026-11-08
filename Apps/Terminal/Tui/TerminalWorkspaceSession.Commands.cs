@@ -389,6 +389,9 @@ internal sealed partial class TerminalWorkspaceSession
 		var depth = command.Depth ?? RelatedQueryRunner.MinimumDepth;
 		var state = _state;
 		var persistentGitMode = _preferredGitMode;
+		// Taken here, on the UI thread, so a filter toggled while this command runs in the
+		// background cannot change what the relation query answers.
+		var relationSnapshot = TerminalWorkspaceController.CaptureRelationSnapshot(state);
 		TrackActiveOperation(RunOperationAsync(
 			L("Terminal.Tui.Command.Related.Title"),
 			async token =>
@@ -407,7 +410,7 @@ internal sealed partial class TerminalWorkspaceSession
 				try
 				{
 					(related, outside) = await _controller.FindRelatedAsync(
-							state,
+							relationSnapshot,
 							plan,
 							seed,
 							direction,

@@ -203,12 +203,16 @@ public sealed class McpPackageConnectionTests
 
 		public Setup(bool nuget, McpConnectionClient client, McpConnectionMode mode)
 		{
-			Command = nuget ? "dnx" : "npx";
+			var launcher = nuget ? "dnx" : "npx";
+			// A Windows root makes a Windows connection, where the batch launchers go through cmd /c.
+			var windows = OperatingSystem.IsWindows();
+			Command = windows ? "cmd" : launcher;
 			var binary = Path.Combine(Root.Path, nuget
 				? ".nuget/packages/devprojex.linux-x64/5.2.0/tools/any/linux-x64/devprojex"
 				: "npm cache/_npx/abc/node_modules/@devprojex/cli-linux-x64/bin/devprojex");
 			Request = new(client, mode, binary, Root.Path);
-			Arguments = [.. nuget ? new[] { "devprojex" } : ["-y", "devprojex"], "mcp", "--root", Root.Path, .. mode == McpConnectionMode.Live ? new[] { "--live" } : []];
+			Arguments = [.. windows ? new[] { "/c", launcher } : [], .. nuget ? new[] { "devprojex" } : ["-y", "devprojex"],
+				"mcp", "--root", Root.Path, .. mode == McpConnectionMode.Live ? new[] { "--live" } : []];
 			var locator = new McpClientExecutableLocator(new McpClientExecutableLocatorOptions
 			{
 				Platform = TerminalCommandHostPlatform.Linux,

@@ -390,6 +390,12 @@ public sealed class McpInfrastructureTests
 	[InlineData(@"proecord\s+Foo")]
 	[InlineData("")]
 	[InlineData(" ")]
+	[InlineData(@"def\s+test_.*")]
+	[InlineData(@"func\s+Test.*")]
+	[InlineData(".*Handler$")]
+	[InlineData("^get.+")]
+	[InlineData(@"class\s+Foo|bar.*")]
+	[InlineData(@"\bFoo.*\b")]
 	public void ComplexRegularExpressionsNeverBecomePartialDeclarationNameQueries(string pattern)
 	{
 		Assert.False(McpSearchSymbols.TryReadDeclarationNames(pattern, out var names));

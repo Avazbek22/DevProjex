@@ -4,6 +4,7 @@ using System.Globalization;
 using DevProjex.Application.Context;
 using DevProjex.Application.Diff;
 using DevProjex.Infrastructure.FileSystem;
+using DevProjex.Kernel.Models;
 
 namespace DevProjex.Infrastructure.Git;
 
@@ -118,7 +119,11 @@ public sealed class GitFileVersionReader : IGitFileVersionReader
 				results[file] = new GitFileVersions(null, null, Unsupported: true);
 				continue;
 			}
-			var gitPath = Path.GetRelativePath(repositoryRoot, file).Replace('\\', '/');
+			// Only Windows separates directories with '\'; elsewhere it is part of a file name, which
+			// the safe-path check refuses, so such a file is reported unsupported instead of being
+			// read as the '/'-separated path of another file.
+			var relativePath = Path.GetRelativePath(repositoryRoot, file);
+			var gitPath = OperatingSystem.IsWindows() ? relativePath.Replace('\\', '/') : relativePath;
 			if (!GitProcessOperation.IsSafeRepositoryPath(gitPath) || Path.IsPathRooted(gitPath))
 			{
 				results[file] = new GitFileVersions(null, null, Unsupported: true);
@@ -199,7 +204,9 @@ public sealed class GitFileVersionReader : IGitFileVersionReader
 				.ConfigureAwait(false) ?? renames;
 		}
 
-		var requestedByGitPath = files.ToDictionary(static file => file.GitPath, StringComparer.Ordinal);
+		var requestedByGitPath = new Dictionary<string, RepositoryFile>(files.Count, StringComparer.Ordinal);
+		foreach (var file in files)
+			requestedByGitPath.TryAdd(file.GitPath, file);
 		var plans = new List<FilePlan>(files.Count);
 		foreach (var file in files)
 		{
@@ -221,13 +228,17 @@ public sealed class GitFileVersionReader : IGitFileVersionReader
 				conflicted.Contains(file.GitPath)));
 		}
 
-		var contents = await ReadContentsAsync(repositoryRoot, plans, budget, cancellationToken).ConfigureAwait(false);
-		if (contents is null)
+		var read = await ReadContentsAsync(repositoryRoot, plans, budget, cancellationToken).ConfigureAwait(false);
+		if (read is null)
 			return GitFileVersionSet.Unavailable("Git object contents could not be read.");
+		var (contents, missingObjects) = read.Value;
 		foreach (var plan in plans)
 		{
-			if (plan.Conflicted)
+			if (plan.Conflicted || IsMissing(plan.Old, missingObjects) || IsMissing(plan.New, missingObjects))
 			{
+				// The repository no longer has the object this entry names: the loose object file is
+				// gone even though the tree or index still records it. Only this file is affected; the
+				// rest of the selection is still read and shown.
 				results[plan.File.FullPath] = new GitFileVersions(null, null, Unsupported: true);
 				continue;
 			}
@@ -239,6 +250,9 @@ public sealed class GitFileVersionReader : IGitFileVersionReader
 		return null;
 	}
 
+	private static bool IsMissing(StoredEntry? entry, IReadOnlySet<string> missingObjects) =>
+		entry is { IsRegularFile: true } && missingObjects.Contains(entry.ObjectId);
+
 	private static GitStoredFile? ToStoredFile(StoredEntry? entry, IReadOnlyDictionary<string, ObjectContent> contents)
 	{
 		if (entry is null)
@@ -246,8 +260,8 @@ public sealed class GitFileVersionReader : IGitFileVersionReader
 		if (!entry.IsRegularFile)
 			return new GitStoredFile(GitStoredFileKind.NotRegularFile, 0, null);
 		if (!contents.TryGetValue(entry.ObjectId, out var content) || content.Bytes is null)
-			return new GitStoredFile(GitStoredFileKind.TooLarge, content?.Size ?? 0, null);
-		return new GitStoredFile(GitStoredFileKind.Regular, content.Size, content.Bytes);
+			return new GitStoredFile(GitStoredFileKind.TooLarge, content?.Size ?? 0, null, entry.Mode);
+		return new GitStoredFile(GitStoredFileKind.Regular, content.Size, content.Bytes, entry.Mode);
 	}
 
 	private static async Task<CommitResolution> ResolveCommitAsync(
@@ -308,11 +322,80 @@ public sealed class GitFileVersionReader : IGitFileVersionReader
 				{
 					entries[path] = new StoredEntry(
 						fields[2],
-						fields[1] == "blob" && fields[0] is RegularFileMode or ExecutableFileMode);
+						fields[1] == "blob" && fields[0] is RegularFileMode or ExecutableFileMode,
+						fields[0]);
 				}
 			}
 		}
+
+		var unresolved = gitPaths.Where(path => !entries.ContainsKey(path)).ToArray();
+		if (unresolved.Length == 0)
+			return entries;
+		if (!await TryResolveCaseInsensitiveTreeMatchesAsync(repositoryRoot, commit, unresolved, entries, cancellationToken)
+				.ConfigureAwait(false))
+		{
+			return null;
+		}
 		return entries;
+	}
+
+	/// <summary>
+	/// Resolves tree paths that a literal pathspec lookup missed only because the requested
+	/// spelling differs from the tree's recorded one by case or Unicode normalization form.
+	/// <c>ls-tree --literal-pathspecs</c> matches by exact bytes regardless of
+	/// <c>core.ignorecase</c>, so this full listing is read only once, and only when the
+	/// repository's comparison semantics call for it. A match is accepted only when the
+	/// requested path's identity, computed the same way the tracked-path index reconciles a
+	/// disk path, is unambiguous among the tree's own entries; a requested spelling that does
+	/// not currently exist on disk resolves to nothing here rather than guessing.
+	/// </summary>
+	private static async Task<bool> TryResolveCaseInsensitiveTreeMatchesAsync(
+		string repositoryRoot,
+		string commit,
+		IReadOnlyList<string> unresolvedPaths,
+		Dictionary<string, StoredEntry> entries,
+		CancellationToken cancellationToken)
+	{
+		var semantics = GitConfigPathComparisonSemanticsResolver.Instance.Resolve(repositoryRoot);
+		if (!semantics.IsAuthoritative || !(semantics.IgnoreCase || semantics.NormalizeUnicode))
+			return true;
+
+		var listing = await RunListingAsync(
+				repositoryRoot,
+				GitProcessOperation.ReadFullTreeEntries(commit),
+				cancellationToken)
+			.ConfigureAwait(false);
+		if (!listing.Succeeded)
+			return false;
+
+		var treePaths = new List<string>();
+		var storedByTreePath = new Dictionary<string, StoredEntry>(StringComparer.Ordinal);
+		foreach (var record in SplitRecords(listing.Text))
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var tab = record.IndexOf('\t');
+			if (tab < 0)
+				return false;
+			var fields = record[..tab].Split(' ');
+			var path = record[(tab + 1)..];
+			if (fields.Length != 3 || !GitProcessOperation.IsObjectId(fields[2]))
+				return false;
+			treePaths.Add(path);
+			storedByTreePath[path] = new StoredEntry(
+				fields[2],
+				fields[1] == "blob" && fields[0] is RegularFileMode or ExecutableFileMode,
+				fields[0]);
+		}
+
+		ResolveByIdentity(
+			repositoryRoot,
+			semantics,
+			treePaths,
+			unresolvedPaths,
+			cancellationToken,
+			entries.ContainsKey,
+			(requestedPath, matchedTreePath) => entries[requestedPath] = storedByTreePath[matchedTreePath]);
+		return true;
 	}
 
 	private static async Task<Dictionary<string, StoredEntry>?> ReadIndexEntriesAsync(
@@ -349,11 +432,126 @@ public sealed class GitFileVersionReader : IGitFileVersionReader
 					conflicted.Add(path);
 					continue;
 				}
-				entries[path] = new StoredEntry(fields[1], fields[0] is RegularFileMode or ExecutableFileMode);
+				entries[path] = new StoredEntry(fields[1], fields[0] is RegularFileMode or ExecutableFileMode, fields[0]);
 			}
+		}
+
+		var unresolved = gitPaths.Where(path => !entries.ContainsKey(path) && !conflicted.Contains(path)).ToArray();
+		if (unresolved.Length == 0)
+			return entries;
+		if (!await TryResolveCaseInsensitiveIndexMatchesAsync(repositoryRoot, unresolved, entries, cancellationToken)
+				.ConfigureAwait(false))
+		{
+			return null;
 		}
 		return entries;
 	}
+
+	/// <summary>
+	/// The staged-index counterpart of <see cref="TryResolveCaseInsensitiveTreeMatchesAsync"/>: a
+	/// stage-0 entry whose recorded spelling differs from the request only by case or Unicode
+	/// normalization form is matched the same way, against the full index listing. A path staged
+	/// only as a conflict is left for the caller's existing conflict handling and never matched
+	/// here.
+	/// </summary>
+	private static async Task<bool> TryResolveCaseInsensitiveIndexMatchesAsync(
+		string repositoryRoot,
+		IReadOnlyList<string> unresolvedPaths,
+		Dictionary<string, StoredEntry> entries,
+		CancellationToken cancellationToken)
+	{
+		var semantics = GitConfigPathComparisonSemanticsResolver.Instance.Resolve(repositoryRoot);
+		if (!semantics.IsAuthoritative || !(semantics.IgnoreCase || semantics.NormalizeUnicode))
+			return true;
+
+		var listing = await RunListingAsync(
+				repositoryRoot,
+				GitProcessOperation.ReadFullIndexEntries(),
+				cancellationToken)
+			.ConfigureAwait(false);
+		if (!listing.Succeeded)
+			return false;
+
+		var indexPaths = new List<string>();
+		var storedByIndexPath = new Dictionary<string, StoredEntry>(StringComparer.Ordinal);
+		foreach (var record in SplitRecords(listing.Text))
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var tab = record.IndexOf('\t');
+			if (tab < 0)
+				return false;
+			var fields = record[..tab].Split(' ');
+			var path = record[(tab + 1)..];
+			if (fields.Length != 3 || !GitProcessOperation.IsObjectId(fields[1]))
+				return false;
+			if (fields[2] != "0")
+				continue;
+			indexPaths.Add(path);
+			storedByIndexPath[path] = new StoredEntry(fields[1], fields[0] is RegularFileMode or ExecutableFileMode, fields[0]);
+		}
+
+		ResolveByIdentity(
+			repositoryRoot,
+			semantics,
+			indexPaths,
+			unresolvedPaths,
+			cancellationToken,
+			entries.ContainsKey,
+			(requestedPath, matchedIndexPath) => entries[requestedPath] = storedByIndexPath[matchedIndexPath]);
+		return true;
+	}
+
+	/// <summary>
+	/// Matches each of <paramref name="requestedPaths"/> against <paramref name="candidatePaths"/>
+	/// by the identity <see cref="GitTrackedPathIndex"/> already uses to reconcile a disk path with
+	/// the tracked index: a candidate keeps its own identity when it does not collide with another
+	/// candidate under the repository's comparison semantics; a requested path absent from the
+	/// candidates resolves only when exactly one candidate shares its folded identity and the
+	/// requested spelling currently exists on disk under that identity.
+	/// </summary>
+	private static void ResolveByIdentity(
+		string repositoryRoot,
+		GitPathComparisonSemantics semantics,
+		IReadOnlyList<string> candidatePaths,
+		IReadOnlyList<string> requestedPaths,
+		CancellationToken cancellationToken,
+		Func<string, bool> isAlreadyResolved,
+		Action<string, string> accept)
+	{
+		var index = new GitTrackedPathIndex(repositoryRoot, candidatePaths, semantics);
+		var pathByIdentity = new Dictionary<string, string>(StringComparer.Ordinal);
+		var ambiguousIdentities = new HashSet<string>(StringComparer.Ordinal);
+		foreach (var candidatePath in candidatePaths)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (!index.TryGetPathIdentity(ToFullPath(repositoryRoot, candidatePath), out var identity))
+				continue;
+			if (pathByIdentity.TryGetValue(identity, out var existingPath))
+			{
+				if (!StringComparer.Ordinal.Equals(existingPath, candidatePath))
+					ambiguousIdentities.Add(identity);
+				continue;
+			}
+			pathByIdentity[identity] = candidatePath;
+		}
+
+		foreach (var requestedPath in requestedPaths)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (isAlreadyResolved(requestedPath))
+				continue;
+			if (!index.TryGetPathIdentity(ToFullPath(repositoryRoot, requestedPath), out var identity) ||
+				ambiguousIdentities.Contains(identity) ||
+				!pathByIdentity.TryGetValue(identity, out var matchedPath))
+			{
+				continue;
+			}
+			accept(requestedPath, matchedPath);
+		}
+	}
+
+	private static string ToFullPath(string repositoryRoot, string gitPath) =>
+		Path.Combine(repositoryRoot, gitPath.Replace('/', Path.DirectorySeparatorChar));
 
 	/// <summary>Maps each rename destination to its source; a listing that cannot be read yields none.</summary>
 	private static async Task<IReadOnlyDictionary<string, string>?> ReadRenamesAsync(
@@ -385,7 +583,7 @@ public sealed class GitFileVersionReader : IGitFileVersionReader
 		return renames;
 	}
 
-	private static async Task<Dictionary<string, ObjectContent>?> ReadContentsAsync(
+	private static async Task<(Dictionary<string, ObjectContent> Contents, HashSet<string> Missing)?> ReadContentsAsync(
 		string repositoryRoot,
 		IReadOnlyList<FilePlan> plans,
 		BlobBudget budget,
@@ -405,14 +603,17 @@ public sealed class GitFileVersionReader : IGitFileVersionReader
 		}
 		var contents = new Dictionary<string, ObjectContent>(StringComparer.Ordinal);
 		if (wanted.Count == 0)
-			return contents;
+			return (contents, new HashSet<string>(StringComparer.Ordinal));
 
-		var sizes = await ReadObjectSizesAsync(repositoryRoot, wanted, cancellationToken).ConfigureAwait(false);
-		if (sizes is null)
+		var headers = await ReadObjectSizesAsync(repositoryRoot, wanted, cancellationToken).ConfigureAwait(false);
+		if (headers is null)
 			return null;
+		var (sizes, missing) = headers.Value;
 		var readable = new List<string>(wanted.Count);
 		foreach (var objectId in wanted)
 		{
+			if (missing.Contains(objectId))
+				continue;
 			var size = sizes[objectId];
 			if (size <= MaximumBlobBytes && budget.TryReserve(size))
 				readable.Add(objectId);
@@ -420,12 +621,18 @@ public sealed class GitFileVersionReader : IGitFileVersionReader
 				contents[objectId] = new ObjectContent(size, null);
 		}
 		if (readable.Count == 0)
-			return contents;
-		return await ReadObjectBytesAsync(repositoryRoot, readable, sizes, contents, cancellationToken)
+			return (contents, missing);
+		var result = await ReadObjectBytesAsync(repositoryRoot, readable, sizes, contents, cancellationToken)
 			.ConfigureAwait(false);
+		return result is null ? null : (result, missing);
 	}
 
-	private static async Task<Dictionary<string, long>?> ReadObjectSizesAsync(
+	/// <summary>
+	/// Reports each object's size, or that it is missing from the object store: the tree or index
+	/// still names it, but its loose object file is gone. A missing object fails only the file(s)
+	/// that name it, not the rest of the batch.
+	/// </summary>
+	private static async Task<(Dictionary<string, long> Sizes, HashSet<string> Missing)?> ReadObjectSizesAsync(
 		string repositoryRoot,
 		IReadOnlyList<string> objectIds,
 		CancellationToken cancellationToken)
@@ -440,10 +647,16 @@ public sealed class GitFileVersionReader : IGitFileVersionReader
 		if (!result.Succeeded || result.Value is null)
 			return null;
 		var sizes = new Dictionary<string, long>(StringComparer.Ordinal);
+		var missing = new HashSet<string>(StringComparer.Ordinal);
 		foreach (var line in result.Value.Split('\n', StringSplitOptions.RemoveEmptyEntries))
 		{
 			// <object> SP <type> SP <size>; a missing object is "<object> missing".
 			var fields = line.Split(' ');
+			if (fields.Length == 2 && fields[1] == "missing" && GitProcessOperation.IsObjectId(fields[0]))
+			{
+				missing.Add(fields[0]);
+				continue;
+			}
 			if (fields.Length != 3 || fields[1] != "blob" ||
 				!long.TryParse(fields[2], NumberStyles.None, CultureInfo.InvariantCulture, out var size))
 			{
@@ -451,7 +664,9 @@ public sealed class GitFileVersionReader : IGitFileVersionReader
 			}
 			sizes[fields[0]] = size;
 		}
-		return objectIds.All(sizes.ContainsKey) ? sizes : null;
+		return objectIds.All(objectId => sizes.ContainsKey(objectId) || missing.Contains(objectId))
+			? (sizes, missing)
+			: null;
 	}
 
 	private static async Task<Dictionary<string, ObjectContent>?> ReadObjectBytesAsync(
@@ -657,7 +872,7 @@ public sealed class GitFileVersionReader : IGitFileVersionReader
 
 	private readonly record struct RepositoryFile(string FullPath, string GitPath);
 
-	private sealed record StoredEntry(string ObjectId, bool IsRegularFile);
+	private sealed record StoredEntry(string ObjectId, bool IsRegularFile, string Mode);
 
 	private sealed record FilePlan(
 		RepositoryFile File,

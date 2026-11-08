@@ -112,7 +112,7 @@ public static class McpConnectionFragmentGenerator
 		builder.Append("claude mcp add --scope local devprojex");
 		AppendClaudeEnvironment(builder, GetRequiredServerEnvironment());
 		builder.Append(" -- ");
-		var launch = McpServerLaunchResolver.Resolve(executablePath);
+		var launch = McpServerLaunchResolver.Resolve(executablePath, projectRoot);
 		builder.Append(launch.PrefixArguments.Count == 0 ? quoteArgument(launch.Command) : launch.Command);
 		foreach (var argument in launch.PrefixArguments)
 			builder.Append(' ').Append(FlatpakEnvironment.QuoteArgument(argument));
@@ -131,7 +131,7 @@ public static class McpConnectionFragmentGenerator
 		var arguments = BuildServerArguments(mode, projectRoot, executablePath);
 		var builder = new StringBuilder()
 			.Append("[mcp_servers.devprojex]").AppendLine()
-			.Append("command = ").Append(ToTomlString(ResolveServerExecutable(executablePath))).AppendLine()
+			.Append("command = ").Append(ToTomlString(ResolveServerExecutable(executablePath, projectRoot))).AppendLine()
 			.Append("args = [").Append(string.Join(", ", arguments.Select(ToTomlString))).Append(']');
 		var environment = GetRequiredServerEnvironment();
 		if (environment.Count > 0)
@@ -151,7 +151,7 @@ public static class McpConnectionFragmentGenerator
 		var environment = GetRequiredServerEnvironment();
 		var server = new Dictionary<string, object?>(StringComparer.Ordinal)
 		{
-			["command"] = ResolveServerExecutable(executablePath),
+			["command"] = ResolveServerExecutable(executablePath, projectRoot),
 			["args"] = BuildServerArguments(mode, projectRoot, executablePath)
 		};
 		if (environment.Count > 0)
@@ -178,7 +178,7 @@ public static class McpConnectionFragmentGenerator
 		var server = new Dictionary<string, object?>(StringComparer.Ordinal)
 		{
 			["type"] = "stdio",
-			["command"] = ResolveServerExecutable(executablePath),
+			["command"] = ResolveServerExecutable(executablePath, projectRoot),
 			["args"] = BuildServerArguments(mode, projectRoot, executablePath)
 		};
 		if (environment.Count > 0)
@@ -196,8 +196,8 @@ public static class McpConnectionFragmentGenerator
 		});
 	}
 
-	public static string ResolveServerExecutable(string executablePath) =>
-		McpServerLaunchResolver.Resolve(executablePath).Command;
+	public static string ResolveServerExecutable(string executablePath, string? projectRoot = null) =>
+		McpServerLaunchResolver.Resolve(executablePath, projectRoot).Command;
 
 	public static string[] BuildServerArguments(McpConnectionMode mode, string projectRoot) =>
 		BuildServerArguments(mode, projectRoot, executablePath: null);
@@ -208,7 +208,7 @@ public static class McpConnectionFragmentGenerator
 			? ["mcp", "--root", projectRoot, "--live"]
 			: ["mcp", "--root", projectRoot];
 		if (executablePath is not null)
-			return [.. McpServerLaunchResolver.Resolve(executablePath).PrefixArguments, .. arguments];
+			return [.. McpServerLaunchResolver.Resolve(executablePath, projectRoot).PrefixArguments, .. arguments];
 		return FlatpakEnvironment.Current.IsActive
 			? ["run", FlatpakEnvironment.Current.AppId!, .. arguments]
 			: arguments;
