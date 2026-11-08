@@ -172,6 +172,13 @@ public interface IDependencyFactExtractor : IDisposable
 		return Extract(source, limits);
 	}
 
+	/// <summary>
+	/// The language and owning scope <see cref="PrepareAsync"/> would give <paramref name="fullPath"/>,
+	/// decided from the path and the configuration alone, without reading the file.
+	/// </summary>
+	(LanguageId LanguageId, string ScopeId) DescribePath(string fullPath, DependencyResolverConfiguration configuration) =>
+		throw new NotSupportedException();
+
 	int ParseCount { get; }
 	int CompiledQuerySetCount { get; }
 }
