@@ -21,7 +21,7 @@ public sealed partial class McpServerIntegrationTests
 
 		Assert.Contains("File: pkg/client.py\nLines: 1-4 of 407\n", text, StringComparison.Ordinal);
 		Assert.Contains("from ._config import LIMIT\n", text, StringComparison.Ordinal);
-		Assert.Contains("Structure:\n5-204 Client (type)\n  6-204 Client.send (function)\n205-406 Server (type)\n  206-406 Server.serve (function)", text, StringComparison.Ordinal);
+		Assert.Contains("Structure:\n5-204 Client (type)\n  6-204 send (function)\n205-406 Server (type)\n  206-406 serve (function)", text, StringComparison.Ordinal);
 		Assert.Contains("Imports: ._config → pkg/_config.py", text, StringComparison.Ordinal);
 		Assert.DoesNotContain("value_399", text, StringComparison.Ordinal);
 		Assert.Contains(LargeFileOutlineText, OutsideUntrustedText(text), StringComparison.Ordinal);
@@ -53,7 +53,7 @@ public sealed partial class McpServerIntegrationTests
 			Assert.DoesNotContain("[Large file]", withoutStructure, StringComparison.Ordinal);
 		}
 		Assert.Contains("Lines: 206-406 of 407\n", third, StringComparison.Ordinal);
-		Assert.Contains("Structure:\n5-204 Client (type)\n  6-204 Client.send (function)\n205-406 Server (type)", third, StringComparison.Ordinal);
+		Assert.Contains("Structure:\n5-204 Client (type)\n  6-204 send (function)\n205-406 Server (type)", third, StringComparison.Ordinal);
 		Assert.Contains(LargeFileStructureOnceText, OutsideUntrustedText(third), StringComparison.Ordinal);
 	}
 
@@ -207,9 +207,9 @@ public sealed partial class McpServerIntegrationTests
 
 		var text = Text(await server.CallAsync("get_file", new Dictionary<string, object?> { ["path"] = "src/Big.cs" }));
 
-		Assert.Contains("Structure:\n3-365 Fixture.Big (type, 45 members)\n  5-12 Fixture.Big.Method0 (method)\n  13-20 Fixture.Big.Method1 (method)\n", text, StringComparison.Ordinal);
-		Assert.Contains("  69-76 Fixture.Big.Method8 (method)\n", text, StringComparison.Ordinal);
-		Assert.Contains("  357-364 Fixture.Big.Method44 (method)\n", text, StringComparison.Ordinal);
+		Assert.Contains("Structure:\n3-365 Fixture.Big (type, 45 members)\n  5-12 Method0 (method)\n  13-20 Method1 (method)\n", text, StringComparison.Ordinal);
+		Assert.Contains("  69-76 Method8 (method)\n", text, StringComparison.Ordinal);
+		Assert.Contains("  357-364 Method44 (method)\n", text, StringComparison.Ordinal);
 		Assert.DoesNotContain(" more)", text, StringComparison.Ordinal);
 	}
 
@@ -223,11 +223,31 @@ public sealed partial class McpServerIntegrationTests
 
 		var text = Text(await server.CallAsync("get_file", new Dictionary<string, object?> { ["path"] = "src/Pair.cs" }));
 
-		Assert.Contains("Structure:\n3-181 Fixture.Reader (type, 22 members)\n  5-12 Fixture.Reader.Method0 (method)\n", text, StringComparison.Ordinal);
+		Assert.Contains("Structure:\n3-181 Fixture.Reader (type, 22 members)\n  5-12 Method0 (method)\n", text, StringComparison.Ordinal);
 		Assert.Contains(
-			"  173-180 Fixture.Reader.Method21 (method)\n182-360 Fixture.Writer (type, 22 members)\n  184-191 Fixture.Writer.Method0 (method)\n",
+			"  173-180 Method21 (method)\n182-360 Fixture.Writer (type, 22 members)\n  184-191 Method0 (method)\n",
 			text,
 			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task GetFileFitsEveryMethodOfALargeClassWithoutRepeatingItsName()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		const int methods = 74;
+		WriteProjectFile(project, "src/DefaultValidatorExtensions.cs", CSharpClasses(("DefaultValidatorExtensions", methods)));
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var text = Text(await server.CallAsync("get_file", new Dictionary<string, object?> { ["path"] = "src/DefaultValidatorExtensions.cs" }));
+
+		// Qualified member names would need about 4,000 characters here; without the type name all members fit.
+		var structure = text[(text.IndexOf("Structure:\n", StringComparison.Ordinal) + "Structure:\n".Length)..];
+		var memberLines = structure.Split('\n').Count(static line => line.StartsWith("  ", StringComparison.Ordinal) && line.EndsWith(" (method)", StringComparison.Ordinal));
+		Assert.Equal(methods, memberLines);
+		Assert.Contains("  589-596 Method73 (method)\n", structure, StringComparison.Ordinal);
+		Assert.DoesNotContain("Fixture.DefaultValidatorExtensions.Method", structure, StringComparison.Ordinal);
+		Assert.DoesNotContain(" more)", structure, StringComparison.Ordinal);
 	}
 
 	// Classes of methods eight lines each, after a two-line preamble.

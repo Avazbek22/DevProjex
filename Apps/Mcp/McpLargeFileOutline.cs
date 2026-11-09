@@ -54,6 +54,7 @@ internal static partial class McpLargeFileOutlineBuilder
 			".md" or ".mdx" or ".markdown" => MarkdownEntries(lines, cancellationToken),
 			_ => DeclarationEntries(navigation(), lines.Length)
 		};
+		counted = WithoutParentNames(counted);
 		var entries = counted.Where(static entry => entry.Depth < MaximumNestingShown).ToArray();
 		if (entries.Length < 2)
 			return null;
@@ -88,6 +89,41 @@ internal static partial class McpLargeFileOutlineBuilder
 				.Select(static member => member.Entry));
 		}
 		return compact;
+	}
+
+	private static readonly string[] MemberSeparators = [".", "::", "#"];
+
+	// A nested entry drops the name of the entry it sits in when it repeats it: "Client.send" under "Client" reads "send".
+	private static IReadOnlyList<OutlineEntry> WithoutParentNames(IReadOnlyList<OutlineEntry> entries)
+	{
+		var parents = new List<string>();
+		var shortened = new List<OutlineEntry>(entries.Count);
+		foreach (var entry in entries)
+		{
+			if (parents.Count > entry.Depth)
+				parents.RemoveRange(entry.Depth, parents.Count - entry.Depth);
+			var name = entry.Name;
+			if (entry.Depth > 0 && parents.Count == entry.Depth)
+				name = WithoutPrefix(name, parents[^1]);
+			while (parents.Count < entry.Depth)
+				parents.Add(string.Empty);
+			parents.Add(entry.Name);
+			shortened.Add(entry with { Name = name });
+		}
+		return shortened;
+	}
+
+	private static string WithoutPrefix(string name, string parent)
+	{
+		if (parent.Length == 0 || !name.StartsWith(parent, StringComparison.Ordinal))
+			return name;
+		foreach (var separator in MemberSeparators)
+		{
+			if (string.CompareOrdinal(name, parent.Length, separator, 0, separator.Length) == 0 &&
+				name.Length > parent.Length + separator.Length)
+				return name[(parent.Length + separator.Length)..];
+		}
+		return name;
 	}
 
 	// Entries of one depth with the number of entries one level deeper listed after each of them.
