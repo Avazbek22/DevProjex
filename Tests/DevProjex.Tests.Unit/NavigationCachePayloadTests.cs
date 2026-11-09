@@ -111,6 +111,28 @@ public sealed class NavigationCachePayloadTests
 	}
 
 	[Fact]
+	public void SupportedFilesWithoutDeclarationsAreReparsedOnlyAfterCachePressure()
+	{
+		var emptyExtractor = new TreeSitterDependencyFactExtractor();
+		var extractor = new NavigationExtractor(500, emptyExtractor);
+		using var engine = new DependencyFactsEngine(extractor, new FileDependencyConfigurationProvider());
+		var token = TestContext.Current.CancellationToken;
+		const string source = "// no declarations\n";
+		Assert.Empty(engine.ExtractNavigationFromProtectedText("Empty.cs", source, "empty", token));
+		Assert.Empty(engine.ExtractNavigationFromProtectedText("Empty.cs", source, "empty", token));
+		Assert.Equal(1, emptyExtractor.ParseCount);
+		for (var index = 0; index < 40; index++)
+			engine.ExtractNavigationFromProtectedText($"positive/{index}.cs", "source", "fingerprint", token);
+		Assert.True(engine.NavigationCacheState.Packed > 0);
+		var parsed = emptyExtractor.ParseCount;
+		Assert.Empty(engine.ExtractNavigationFromProtectedText("Empty.cs", source, "empty", token));
+		Assert.Empty(engine.ExtractNavigationFromProtectedText("Empty.cs", source, "empty", token));
+		Assert.Equal(parsed + 2, emptyExtractor.ParseCount);
+		Assert.Equal(40, engine.NavigationCacheState.Entries);
+		Assert.InRange(engine.NavigationCacheState.Bytes, 1, DependencyFactsEngine.MaximumNavigationCacheBytes);
+	}
+
+	[Fact]
 	public void CancellationDuringScanningStopsFurtherCandidateDelivery()
 	{
 		using var cancellation = new CancellationTokenSource();
@@ -160,14 +182,17 @@ public sealed class NavigationCachePayloadTests
 		IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 	}
 
-	private sealed class NavigationExtractor(int count) : IDependencyFactExtractor, IDependencyNavigationExtractor
+	private sealed class NavigationExtractor(int count, TreeSitterDependencyFactExtractor? emptyExtractor = null) : IDependencyFactExtractor, IDependencyNavigationExtractor
 	{
 		private int parseCount;
-		public int ParseCount => Volatile.Read(ref parseCount);
+		public int ParseCount => Volatile.Read(ref parseCount) + (emptyExtractor?.ParseCount ?? 0);
 		public int CompiledQuerySetCount => 0;
 		public IReadOnlyList<NavigationDeclaration> ExtractNavigation(string relativePath, string source, string contentFingerprint, CancellationToken cancellationToken)
 		{
-			cancellationToken.ThrowIfCancellationRequested(); Interlocked.Increment(ref parseCount);
+			cancellationToken.ThrowIfCancellationRequested();
+			if (relativePath == "Empty.cs" && emptyExtractor is not null)
+				return emptyExtractor.ExtractNavigation(relativePath, source, contentFingerprint, cancellationToken);
+			Interlocked.Increment(ref parseCount);
 			if (source.Length == 0) return [];
 			return Enumerable.Range(0, count).Select(index => new NavigationDeclaration(
 			 "Example." + new string('n', 120) + ".Type" + index, NavigationSymbolKind.Type,
@@ -176,6 +201,6 @@ public sealed class NavigationCachePayloadTests
 		}
 		public ValueTask<PreparedDependencySource> PrepareAsync(string sourceRoot, string fullPath, DependencyResolverConfiguration configuration, DependencyFactsLimits limits, CancellationToken cancellationToken, string? contentIdentity = null) => throw new NotSupportedException();
 		public FileFacts Extract(PreparedDependencySource source, DependencyFactsLimits limits) => throw new NotSupportedException();
-		public void Dispose() { }
+		public void Dispose() => emptyExtractor?.Dispose();
 	}
 }
