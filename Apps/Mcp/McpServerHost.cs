@@ -163,7 +163,8 @@ public static class McpServerHost
 		bool live = false,
 		Func<IReadOnlyList<string>, McpRootRegistry>? rootRegistryFactory = null,
 		Func<StoreUserDataMigrationStatus>? migrationProbe = null,
-		Action<TimeSpan>? migrationWait = null)
+		Action<TimeSpan>? migrationWait = null,
+		McpIdleMemoryOptions? idleMemoryOptions = null)
 	{
 		ArgumentNullException.ThrowIfNull(roots);
 		ArgumentNullException.ThrowIfNull(input);
@@ -243,6 +244,7 @@ public static class McpServerHost
 			searchBodyCharacters,
 			live);
 
+		await using var idleMemory = new McpIdleMemoryPolicy(idleMemoryOptions ?? new());
 		var builder = Host.CreateApplicationBuilder([]);
 		builder.Logging.ClearProviders();
 		builder.Services.AddSingleton(packs);
@@ -264,6 +266,11 @@ public static class McpServerHost
 			.WithTools<DevProjexMcpToolCatalog>(catalog);
 		serverBuilder.WithMessageFilters(filters => filters.AddIncomingFilter(next => async (context, token) =>
 		{
+			using var activity = McpMemoryActivity.Enter();
+			var call = context.JsonRpcMessage is JsonRpcRequest { Method: "tools/call", Params: { } callParams }
+				? callParams.Deserialize<CallToolRequestParams>(McpJsonUtilities.DefaultOptions) : null;
+			using var callActivity = call is null ? null : idleMemory.EnterCall();
+			using var invocation = call is null ? null : journal.BeginCall(call.Name, call);
 			Implementation? client = null;
 			if (context.JsonRpcMessage is JsonRpcRequest { Context.ClientInfo: { } requestClient })
 			{
@@ -280,7 +287,12 @@ public static class McpServerHost
 				liveSession.UpdateClient(client.Name, client.Version);
 				await journal.StartAsync(client.Name, client.Version, token).ConfigureAwait(false);
 			}
-			await next(context, token).ConfigureAwait(false);
+			try { await next(context, token).ConfigureAwait(false); }
+			catch (OperationCanceledException)
+			{
+				if (call is not null) journal.Complete(new CallToolResult { Content = [] }, "cancelled");
+				throw;
+			}
 		}));
 		serverBuilder.WithRequestFilters(filters => filters.AddListToolsFilter(next => async (request, token) =>
 			{
@@ -294,10 +306,27 @@ public static class McpServerHost
 		try
 		{
 			using var host = builder.Build();
-			await host.RunAsync(cancellationToken).ConfigureAwait(false);
+			using var connection = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+			var transport = host.Services.GetRequiredService<ITransport>();
+			var watcher = WatchTransportAsync();
+			try { await host.RunAsync(connection.Token).ConfigureAwait(false); }
+			catch (OperationCanceledException) when (connection.IsCancellationRequested && !cancellationToken.IsCancellationRequested) { }
+			finally
+			{
+				await connection.CancelAsync().ConfigureAwait(false);
+				await watcher.ConfigureAwait(false);
+			}
+			async Task WatchTransportAsync()
+			{
+				try { await transport.MessageReader.Completion.WaitAsync(connection.Token).ConfigureAwait(false); }
+				catch (OperationCanceledException) when (connection.IsCancellationRequested) { }
+				catch (Exception exception) { System.Diagnostics.Trace.TraceWarning("MCP transport closed: {0}", exception.GetType().Name); }
+				finally { await connection.CancelAsync().ConfigureAwait(false); }
+			}
 		}
 		finally
 		{
+			await idleMemory.DisposeAsync().ConfigureAwait(false);
 			if (projectService.IsValueCreated)
 				projectService.Value.Dispose();
 			if (services.IsValueCreated)

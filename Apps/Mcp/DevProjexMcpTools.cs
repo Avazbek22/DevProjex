@@ -3176,6 +3176,7 @@ internal sealed partial class DevProjexMcpTools(
 		}
 		catch (OperationCanceledException)
 		{
+			journal?.Complete(new CallToolResult { Content = [] }, "cancelled");
 			throw;
 		}
 		catch (RegexMatchTimeoutException)

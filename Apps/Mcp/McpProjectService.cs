@@ -779,9 +779,13 @@ internal sealed class McpProjectService(
 		ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this);
 		return await BuildUncachedAsync(cancellationToken).ConfigureAwait(false);
 
-		Task<ProjectContextPlan> BuildUncachedAsync(CancellationToken buildCancellationToken) => includeOutputMetrics
-			? services.Planner.BuildAsync(request, buildCancellationToken)
-			: services.Planner.BuildStructureAsync(request, buildCancellationToken);
+		async Task<ProjectContextPlan> BuildUncachedAsync(CancellationToken buildCancellationToken)
+		{
+			using var activity = McpMemoryActivity.Enter();
+			return await (includeOutputMetrics
+				? services.Planner.BuildAsync(request, buildCancellationToken)
+				: services.Planner.BuildStructureAsync(request, buildCancellationToken)).ConfigureAwait(false);
+		}
 	}
 
 	private ProjectContextPlan RefreshEffectiveFileSizes(

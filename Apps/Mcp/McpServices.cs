@@ -88,7 +88,7 @@ internal sealed class McpServices : IDisposable
 		try
 		{
 			redactionSession = SecretRedactionSession.CreateWithPrivateData(
-				new SmartSecretsDetector(new GitleaksSecretDetector(), smartIgnore),
+				new SmartSecretsDetector(McpSecretDetectors.Create(), smartIgnore),
 				new PrivateDataDetector(),
 				profileStore,
 				persistentIdentity);
