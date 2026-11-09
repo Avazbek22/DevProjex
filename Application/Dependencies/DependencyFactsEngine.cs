@@ -140,17 +140,31 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			else if (Volatile.Read(ref _disposed) == 0)
 			{
 				var entry = new NavigationCacheEntry(key, retained, null, weight);
-				if (!_compactNavigationCache && _navigationCacheBytes + weight > MaximumNavigationCacheBytes)
+				if (!_compactNavigationCache && (_navigationCacheBytes + weight > MaximumNavigationCacheBytes ||
+					_navigationCache.Count >= MaximumCachedNavigationFiles))
 				{
 					// Small working sets keep their existing allocation-free cache-hit path.
-					for (var node = _navigationCacheOrder.First; node is not null; node = node.Next)
+					for (var node = _navigationCacheOrder.First; node is not null;)
+					{
+						cancellationToken.ThrowIfCancellationRequested();
+						var next = node.Next;
+						if (node.Value.Declarations is { Count: 0 })
+						{
+							_navigationCache.Remove(node.Value.Key);
+							_navigationCacheOrder.Remove(node);
+							_navigationCacheBytes -= node.Value.Weight;
+						}
+						else
 					{
 						var compacted = CompactNavigationEntry(node.Value, cancellationToken);
 						_navigationCacheBytes += compacted.Weight - node.Value.Weight;
 						node.Value = compacted;
 					}
+						node = next;
+					}
 					_compactNavigationCache = true;
 				}
+				if (_compactNavigationCache && retained.Count == 0) return retained;
 				if (_compactNavigationCache) entry = CompactNavigationEntry(entry, cancellationToken);
 				cancellationToken.ThrowIfCancellationRequested();
 			_navigationCache[key] = _navigationCacheOrder.AddLast(entry);

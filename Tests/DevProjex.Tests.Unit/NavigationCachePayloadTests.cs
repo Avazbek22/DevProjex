@@ -1,5 +1,6 @@
 using System.Collections;
 using System.IO.Compression;
+using DevProjex.Mcp;
 using DevProjex.Application.Dependencies;
 using DevProjex.Infrastructure.Dependencies;
 
@@ -82,6 +83,39 @@ public sealed class NavigationCachePayloadTests
 		Assert.Throws<OperationCanceledException>(() => engine.ExtractNavigationFromProtectedText("small.cs", "source", "two", cancellation.Token));
 	}
 
+	[Fact]
+	public void EmptyNavigationCannotDisplaceTheLargePositiveWorkingSet()
+	{
+		var extractor = new NavigationExtractor(500);
+		using var engine = new DependencyFactsEngine(extractor, new FileDependencyConfigurationProvider());
+		var token = TestContext.Current.CancellationToken;
+		for (var index = 0; index < 40; index++)
+			engine.ExtractNavigationFromProtectedText($"positive/{index}.cs", "source", "fingerprint", token);
+		Assert.True(engine.NavigationCacheState.Packed > 0);
+		for (var index = 0; index < 2_100; index++)
+			Assert.Empty(engine.ExtractNavigationFromProtectedText($"empty/{index}.txt", "", "empty", token));
+		var parsed = extractor.ParseCount;
+		for (var index = 0; index < 40; index++)
+			Assert.Equal(500, engine.ExtractNavigationFromProtectedText($"positive/{index}.cs", "source", "fingerprint", token).Count);
+		Assert.Equal(parsed, extractor.ParseCount);
+		Assert.Equal(40, engine.NavigationCacheState.Entries);
+		Assert.InRange(engine.NavigationCacheState.Bytes, 1, DependencyFactsEngine.MaximumNavigationCacheBytes);
+	}
+
+	[Fact]
+	public void CancellationDuringScanningStopsFurtherCandidateDelivery()
+	{
+		using var cancellation = new CancellationTokenSource();
+		var delivered = 0;
+		var source = string.Concat(Enumerable.Repeat("needle\r\n", 20_000));
+		Assert.Throws<OperationCanceledException>(() => McpSearchTextScanner.ScanEach(
+			source, new McpSearchRegex("needle", false), 2, [], _ =>
+			{
+				if (++delivered == 3) cancellation.Cancel();
+			}, cancellation.Token));
+		Assert.Equal(3, delivered);
+	}
+
 	private sealed class CancellingList(IReadOnlyList<NavigationDeclaration> declarations, CancellationTokenSource cancellation) : IReadOnlyList<NavigationDeclaration>
 	{
 		public int Count => declarations.Count;
@@ -104,6 +138,7 @@ public sealed class NavigationCachePayloadTests
 		public IReadOnlyList<NavigationDeclaration> ExtractNavigation(string relativePath, string source, string contentFingerprint, CancellationToken cancellationToken)
 		{
 			cancellationToken.ThrowIfCancellationRequested(); ParseCount++;
+			if (source.Length == 0) return [];
 			return Enumerable.Range(0, count).Select(index => new NavigationDeclaration(
 			 "Example." + new string('n', 120) + ".Type" + index, NavigationSymbolKind.Type,
 			 "Example." + new string('n', 120), index + 1, index + 2, contentFingerprint)
