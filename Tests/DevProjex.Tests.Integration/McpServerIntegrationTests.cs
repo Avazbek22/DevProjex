@@ -2882,7 +2882,7 @@ public sealed partial class McpServerIntegrationTests
 			StringComparison.Ordinal);
 		Assert.Contains("matches file content, never paths", search, StringComparison.Ordinal);
 		Assert.Contains("get_tree include_patterns", search, StringComparison.Ordinal);
-		Assert.Contains("counts levels below the project root", tree, StringComparison.Ordinal);
+		Assert.Contains("counts levels below each paths entry", tree, StringComparison.Ordinal);
 		Assert.Contains("below the project root", depth, StringComparison.Ordinal);
 		Assert.Contains("paths", depth, StringComparison.Ordinal);
 	}
@@ -3301,21 +3301,15 @@ public sealed partial class McpServerIntegrationTests
 			});
 
 		Assert.NotEqual(true, hidden.IsError);
-		AssertTrustedTrailerOutsideSpotlight(
-			hidden,
-			"[Tree depth] max_depth counts from the project root; 1 requested path(s) sit at depth 3 " +
-			"or deeper, so nothing under them is shown. Omit max_depth, or pass 5 to show two levels " +
-			"below them.");
+		Assert.Contains("App.java", AllText(hidden), StringComparison.Ordinal);
+		Assert.DoesNotContain("[Tree depth]", AllText(hidden), StringComparison.Ordinal);
 		var hiddenText = AllText(hidden);
 		var hiddenTrustedTail = hiddenText[(hiddenText.LastIndexOf("</untrusted-data-", StringComparison.Ordinal) + 1)..];
 		Assert.DoesNotContain("src/main/java", hiddenTrustedTail, StringComparison.Ordinal);
 
-		// The requested path is visible at depth 5, but its deepest folder renders without App.java.
+		// Each requested directory starts its own depth window.
 		Assert.NotEqual(true, notHidden.IsError);
-		AssertTrustedTrailerOutsideSpotlight(
-			notHidden,
-			"[Tree depth] max_depth counts from the project root; 1 folder(s) under the requested paths reach depth 5 " +
-			"and are shown without their contents. Omit max_depth, or pass 6 to open them.");
+		Assert.DoesNotContain("[Tree depth]", AllText(notHidden), StringComparison.Ordinal);
 		var complete = await server.CallAsync(
 			"get_tree",
 			new Dictionary<string, object?>
@@ -3330,11 +3324,7 @@ public sealed partial class McpServerIntegrationTests
 		Assert.DoesNotContain("[Tree depth]", AllText(noMaxDepth), StringComparison.Ordinal);
 
 		Assert.NotEqual(true, scalarPath.IsError);
-		AssertTrustedTrailerOutsideSpotlight(
-			scalarPath,
-			"[Tree depth] max_depth counts from the project root; 1 requested path(s) sit at depth 3 " +
-			"or deeper, so nothing under them is shown. Omit max_depth, or pass 5 to show two levels " +
-			"below them.");
+		Assert.DoesNotContain("[Tree depth]", AllText(scalarPath), StringComparison.Ordinal);
 
 		// A file has nothing under it: the trailer names the depth that shows the file itself.
 		var hiddenFile = await server.CallAsync(
@@ -3360,20 +3350,13 @@ public sealed partial class McpServerIntegrationTests
 			});
 
 		Assert.NotEqual(true, hiddenFile.IsError);
-		AssertTrustedTrailerOutsideSpotlight(
-			hiddenFile,
-			"[Tree depth] max_depth counts from the project root; 1 requested file(s) sit at depth 6 " +
-			"or deeper, so they are not shown. Omit max_depth, or pass 6 to show them.");
+		Assert.DoesNotContain("[Tree depth]", AllText(hiddenFile), StringComparison.Ordinal);
 		Assert.DoesNotContain("levels below", AllText(hiddenFile), StringComparison.Ordinal);
 		Assert.NotEqual(true, shownFile.IsError);
 		Assert.Contains("App.java", ExtractSpotlightBody(Text(shownFile)), StringComparison.Ordinal);
 		Assert.DoesNotContain("[Tree depth]", AllText(shownFile), StringComparison.Ordinal);
 		Assert.NotEqual(true, fileAndDirectory.IsError);
-		AssertTrustedTrailerOutsideSpotlight(
-			fileAndDirectory,
-			"[Tree depth] max_depth counts from the project root; 2 requested path(s) sit at depth 3 " +
-			"or deeper, so nothing under them is shown. Omit max_depth, or pass 6 to show two levels " +
-			"below them.");
+		Assert.DoesNotContain("[Tree depth]", AllText(fileAndDirectory), StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -3397,10 +3380,7 @@ public sealed partial class McpServerIntegrationTests
 			new Dictionary<string, object?> { ["paths"] = new[] { "." }, ["max_depth"] = 2 });
 
 		Assert.NotEqual(true, depthOne.IsError);
-		AssertTrustedTrailerOutsideSpotlight(
-			depthOne,
-			"[Tree depth] max_depth counts from the project root; 1 folder(s) under the requested paths reach depth 1 " +
-			"and are shown without their contents. Omit max_depth, or pass 2 to open them.");
+		Assert.DoesNotContain("[Tree depth]", AllText(depthOne), StringComparison.Ordinal);
 
 		// Nothing in this two-level project reaches past depth 2, so there is nothing left to collapse.
 		Assert.NotEqual(true, depthTwo.IsError);

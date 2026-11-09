@@ -368,7 +368,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{CompactGitScopeProperty}},
 	    {{CompactMaxFileBytesProperty}},
 	    "max_depth": {
-	      "description": "Limits levels below the project root without descending below a paths entry; omit it for the deepest complete tree that fits.",
+	      "description": "Limits levels below each requested paths entry, or below the project root when paths is omitted; omit it for the deepest complete tree that fits.",
 	      "oneOf": [ { "type": "integer", "minimum": 0, "maximum": 1000 }, { "type": "string", "pattern": "^[0-9]+$" } ]
 	    },
 	    {{TreeFormatProperty}}

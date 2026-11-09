@@ -667,3 +667,7 @@ when a desktop-control or startup check fails there.
 | `DPX-TUI-CLIPBOARD-PAYLOAD-TOO-LARGE` | The content is too large to copy to the clipboard. |
 | `DPX-TUI-SETTINGS-REFRESH-FAILED` | Reloading Workspace settings after a change failed. |
 | `DPX-TUI-OPERATION-FAILED` | A Workspace operation failed without a more specific code. |
+
+The tree command has no depth parameter and prints the selected tree in full. MCP
+`get_tree` counts `max_depth` from each requested `paths` entry, or from the project
+root when `paths` is omitted.
