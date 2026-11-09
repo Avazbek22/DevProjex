@@ -22,20 +22,47 @@ internal sealed partial class DevProjexMcpTools
 	internal const string LargeFileStructureOnceNotice =
 		"[Large file] the structure of this long file follows the requested lines; it is listed once per file version.";
 
-	// Physical path to the fingerprint of the protected text whose structure this session has
-	// already received, so a long file read in pieces carries its structure once.
-	private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> outlinedFiles =
+	// A file read by range this many times is being paged through, so its structure follows the lines.
+	private const int RangedReadsBeforeOutline = 3;
+
+	/// <param name="Fingerprint">The protected text this state describes; another text starts over.</param>
+	/// <param name="RangedReads">Single reads of this version that named a range or a symbol.</param>
+	/// <param name="Outlined">Whether this session has already received the structure of this version.</param>
+	private sealed record OutlineReadState(string Fingerprint, int RangedReads, bool Outlined);
+
+	// Physical path to the outline state of the protected text this session last read, so a long
+	// file read in pieces carries its structure once, and only when it is being paged through.
+	private readonly System.Collections.Concurrent.ConcurrentDictionary<string, OutlineReadState> outlinedFiles =
 		new(PathComparer.Default);
 
 	private static string OutlineFingerprint(string content) =>
 		ContentFingerprint.Compute(content.AsSpan()).ToHexString();
 
-	private bool IsFirstOutline(string physicalPath, string content) =>
-		!outlinedFiles.TryGetValue(physicalPath, out var fingerprint) ||
-		!string.Equals(fingerprint, OutlineFingerprint(content), StringComparison.Ordinal);
+	// Counts a ranged read and tells whether its lines should be followed by the structure.
+	private bool IsOutlineDueAfterRange(string physicalPath, string content)
+	{
+		var fingerprint = OutlineFingerprint(content);
+		var state = outlinedFiles.AddOrUpdate(
+			physicalPath,
+			static (_, current) => new OutlineReadState(current, 1, false),
+			static (_, existing, current) => string.Equals(existing.Fingerprint, current, StringComparison.Ordinal)
+				? existing with { RangedReads = existing.RangedReads + 1 }
+				: new OutlineReadState(current, 1, false),
+			fingerprint);
+		return !state.Outlined && state.RangedReads >= RangedReadsBeforeOutline;
+	}
 
-	private void RecordOutline(string physicalPath, string content) =>
-		outlinedFiles[physicalPath] = OutlineFingerprint(content);
+	private void RecordOutline(string physicalPath, string content)
+	{
+		var fingerprint = OutlineFingerprint(content);
+		outlinedFiles.AddOrUpdate(
+			physicalPath,
+			static (_, current) => new OutlineReadState(current, 0, true),
+			static (_, existing, current) => string.Equals(existing.Fingerprint, current, StringComparison.Ordinal)
+				? existing with { Outlined = true }
+				: new OutlineReadState(current, 0, true),
+			fingerprint);
+	}
 
 	private static string FormatOutline(McpLargeFileOutline outline) =>
 		"Structure:\n" + outline.Map.TrimEnd('\n');

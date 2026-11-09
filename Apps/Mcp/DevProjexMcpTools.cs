@@ -2054,9 +2054,9 @@ internal sealed partial class DevProjexMcpTools(
 				(start, end) = ResolveSymbolRange(located);
 			}
 			var wholeRead = start is null && end is null && startColumn is null && symbol is null;
-			// A long file gets its structure with the first read of this version in the session:
-			// instead of the whole text for a read without a range, after the lines for any other.
-			var outline = wholeRead || McpLargeFileOutlineBuilder.Applies(transformed.Content) && IsFirstOutline(file, transformed.Content)
+			// A long file gets its structure instead of the whole text for a read without a range, and
+			// after the lines of the third ranged read of this version, unless the session already has it.
+			var outline = wholeRead || McpLargeFileOutlineBuilder.Applies(transformed.Content) && IsOutlineDueAfterRange(file, transformed.Content)
 				? McpLargeFileOutlineBuilder.Build(
 					relativePath,
 					transformed.Content,
