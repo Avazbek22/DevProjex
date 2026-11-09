@@ -635,6 +635,15 @@ jobs:
       - name: Test MCP usage recorder
         run: node --test tools/McpUsageRecorder/tests/recorder.test.mjs
 
+      - name: Test agent benchmark scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          for script in tools/AgentBenchmark/*.mjs; do node --check "$script"; done
+          node --test tools/AgentBenchmark/tests/session.test.mjs
+          python3 -m py_compile tools/AgentBenchmark/*.py
+          python3 -m unittest discover -s tools/AgentBenchmark/tests -v
+
       - name: Confirm the ranking evaluator tests executed
         if: ${{ success() }}
         shell: pwsh
