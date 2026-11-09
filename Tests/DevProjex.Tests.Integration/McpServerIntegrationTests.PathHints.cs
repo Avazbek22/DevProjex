@@ -255,6 +255,13 @@ public sealed partial class McpServerIntegrationTests
 		WriteProjectFile(project, "src/middleware/etag/digest.ts", "export const digest = 1;\n");
 		WriteProjectFile(project, "src/middleware/index.ts", "export * from './cors';\n");
 		WriteProjectFile(project, "src/other/deep/file.ts", "export const other = 1;\n");
+		// Thirteen entries keep each folder too large to be listed in full past max_depth.
+		for (var index = 0; index < 12; index++)
+		{
+			WriteProjectFile(project, $"src/middleware/cors/extra{index:D2}.ts", "export {};\n");
+			WriteProjectFile(project, $"src/middleware/etag/extra{index:D2}.ts", "export {};\n");
+			WriteProjectFile(project, $"src/other/deep/extra{index:D2}.ts", "export {};\n");
+		}
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
 
 		var collapsed = await server.CallAsync(

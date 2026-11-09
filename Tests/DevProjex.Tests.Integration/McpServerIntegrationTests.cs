@@ -3273,6 +3273,9 @@ public sealed partial class McpServerIntegrationTests
 		var project = workspace.CreateDirectory("project");
 		var deepDirectory = workspace.CreateDirectory("project/src/main/java/org/app");
 		File.WriteAllText(Path.Combine(deepDirectory, "App.java"), "class App {}\n");
+		// Thirteen entries keep the folders too large to be listed in full past max_depth.
+		for (var index = 0; index < 12; index++)
+			File.WriteAllText(Path.Combine(deepDirectory, $"Extra{index:D2}.java"), "class Extra {}\n");
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
 
 		var hidden = await server.CallAsync(
@@ -3383,6 +3386,9 @@ public sealed partial class McpServerIntegrationTests
 		var project = workspace.CreateDirectory("project");
 		workspace.CreateDirectory("project/a");
 		File.WriteAllText(Path.Combine(project, "a", "b.txt"), string.Empty);
+		// Thirteen entries keep "a" too large to be listed in full past max_depth.
+		for (var index = 0; index < 12; index++)
+			File.WriteAllText(Path.Combine(project, "a", $"extra{index:D2}.txt"), string.Empty);
 		File.WriteAllText(Path.Combine(project, "c.txt"), string.Empty);
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
 

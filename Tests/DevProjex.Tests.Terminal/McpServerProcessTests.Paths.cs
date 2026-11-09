@@ -134,6 +134,9 @@ public sealed partial class McpServerProcessTests
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("depth-project");
 		workspace.WriteFile("depth-project/src/router/trie/node.ts", "export const node = 1\n");
+		// Thirteen entries keep each folder too large to be listed in full past max_depth.
+		for (var index = 0; index < 12; index++)
+			workspace.WriteFile($"depth-project/src/router/trie/extra{index:D2}.ts", "export {}\n");
 		await using var server = await ActualMcpProcess.StartAsync(
 			project,
 			workspace.CreateDirectory("data"));
@@ -166,5 +169,41 @@ public sealed partial class McpServerProcessTests
 		Assert.Contains("router", depthTwo, StringComparison.Ordinal);
 		Assert.DoesNotContain("trie", depthTwo, StringComparison.Ordinal);
 		Assert.Contains("node.ts", depthFour, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RealProcessListsSmallFoldersPastMaxDepthInFull()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("small-folders-project");
+		workspace.WriteFile("small-folders-project/pkg/_transports/base.py", "base = 1\n");
+		workspace.WriteFile("small-folders-project/pkg/_transports/default.py", "default = 1\n");
+		for (var index = 0; index < 13; index++)
+			workspace.WriteFile($"small-folders-project/pkg/large/module{index:D2}.py", "value = 1\n");
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			workspace.CreateDirectory("data"));
+
+		var result = await server.Client.CallToolAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["max_depth"] = 2 },
+			progress: null,
+			options: null,
+			TestContext.Current.CancellationToken);
+
+		Assert.NotEqual(true, result.IsError);
+		var text = AllProcessText(result);
+		var closing = text.LastIndexOf("</untrusted-data-", StringComparison.Ordinal);
+		Assert.True(closing > 0);
+		var body = text[..closing];
+		var trustedTail = text[closing..];
+		Assert.Contains("base.py", body, StringComparison.Ordinal);
+		Assert.Contains("default.py", body, StringComparison.Ordinal);
+		Assert.DoesNotContain("module00.py", body, StringComparison.Ordinal);
+		Assert.Contains(
+			"[Tree depth] folders past max_depth with up to 12 entries are listed in full.",
+			trustedTail,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain("_transports", trustedTail, StringComparison.Ordinal);
 	}
 }
