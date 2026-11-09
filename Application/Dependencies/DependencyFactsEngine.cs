@@ -123,12 +123,14 @@ public sealed partial class DependencyFactsEngine : IDisposable
 				hit = cached.Value;
 			}
 		}
-		if (hit is not null) return hit.Materialize(cancellationToken);
+		if (hit is not null)
+			return hit.Materialize(cancellationToken);
 		var declarations = ExtractNavigation(relativePath, source, contentFingerprint, cancellationToken);
 		cancellationToken.ThrowIfCancellationRequested();
 		var retained = Array.AsReadOnly(declarations.ToArray());
 		var weight = EstimateNavigationCacheBytes(key, retained);
-		if (weight > MaximumNavigationCacheBytes) return retained;
+		if (weight > MaximumNavigationCacheBytes)
+			return retained;
 		lock (_navigationCacheSync)
 		{
 			if (_navigationCache.TryGetValue(key, out var cached))
@@ -164,8 +166,10 @@ public sealed partial class DependencyFactsEngine : IDisposable
 					}
 					_compactNavigationCache = true;
 				}
-				if (_compactNavigationCache && retained.Count == 0) return retained;
-				if (_compactNavigationCache) entry = CompactNavigationEntry(entry, cancellationToken);
+				if (_compactNavigationCache && retained.Count == 0)
+					return retained;
+				if (_compactNavigationCache)
+					entry = CompactNavigationEntry(entry, cancellationToken);
 				cancellationToken.ThrowIfCancellationRequested();
 				_navigationCache[key] = _navigationCacheOrder.AddLast(entry);
 				_navigationCacheBytes += entry.Weight;
@@ -183,7 +187,8 @@ public sealed partial class DependencyFactsEngine : IDisposable
 
 	private static NavigationCacheEntry CompactNavigationEntry(NavigationCacheEntry entry, CancellationToken cancellationToken)
 	{
-		if (entry.Declarations is not { Count: > 0 } declarations || entry.Weight < 4096) return entry;
+		if (entry.Declarations is not { Count: > 0 } declarations || entry.Weight < 4096)
+			return entry;
 		var packed = NavigationCachePayload.Encode(declarations, cancellationToken);
 		var strings = new RetainedStringEstimator();
 		var weight = 224 + strings.Add(entry.Key.RelativePath) + strings.Add(entry.Key.ContentFingerprint) + packed.Length;
@@ -1375,9 +1380,9 @@ public sealed partial class DependencyFactsEngine : IDisposable
 
 	private sealed record NavigationCacheEntry(
 		NavigationCacheKey Key,
-	 IReadOnlyList<NavigationDeclaration>? Declarations,
-	 byte[]? Packed,
-	 long Weight)
+		IReadOnlyList<NavigationDeclaration>? Declarations,
+		byte[]? Packed,
+		long Weight)
 	{
 		public IReadOnlyList<NavigationDeclaration> Materialize(CancellationToken cancellationToken)
 		{

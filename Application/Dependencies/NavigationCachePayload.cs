@@ -14,7 +14,8 @@ internal static class NavigationCachePayload
 		var strings = new List<string>();
 		int Intern(string value)
 		{
-			if (identifiers.TryGetValue(value, out var identifier)) return identifier;
+			if (identifiers.TryGetValue(value, out var identifier))
+				return identifier;
 			identifier = strings.Count;
 			identifiers.Add(value, identifier);
 			strings.Add(value);
@@ -24,7 +25,8 @@ internal static class NavigationCachePayload
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			Intern(declaration.Name);
-			if (declaration.Owner is not null) Intern(declaration.Owner);
+			if (declaration.Owner is not null)
+				Intern(declaration.Owner);
 			Intern(declaration.ContentFingerprint);
 		}
 		using var output = new MemoryStream();
@@ -70,7 +72,8 @@ internal static class NavigationCachePayload
 			cancellationToken.ThrowIfCancellationRequested();
 			var length = ReadCount(reader);
 			characters += length;
-			if (characters > DependencyFactsEngine.MaximumNavigationCacheBytes / sizeof(char)) throw new InvalidDataException();
+			if (characters > DependencyFactsEngine.MaximumNavigationCacheBytes / sizeof(char))
+				throw new InvalidDataException();
 			var value = new char[length];
 			compressed.ReadExactly(MemoryMarshal.AsBytes(value.AsSpan()));
 			strings[index] = new string(value);
@@ -98,7 +101,8 @@ internal static class NavigationCachePayload
 			};
 		}
 		cancellationToken.ThrowIfCancellationRequested();
-		if (compressed.ReadByte() != -1) throw new InvalidDataException();
+		if (compressed.ReadByte() != -1)
+			throw new InvalidDataException();
 		return Array.AsReadOnly(declarations);
 	}
 
