@@ -9531,7 +9531,7 @@ public sealed partial class McpServerIntegrationTests
 		Assert.True(result.Succeeded);
 	}
 
-	private sealed class McpTestServer : IAsyncDisposable
+	internal sealed class McpTestServer : IAsyncDisposable
 	{
 		private readonly Pipe _clientToServer;
 		private readonly Pipe _serverToClient;
