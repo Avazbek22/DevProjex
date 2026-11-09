@@ -8,6 +8,9 @@ Code reports for a session, with cache reads counted separately. Quotations are 
 the session logs; the servers were anonymous to the agents (`server_a`, `server_b`) and to
 the judge (`Answer A`, `Answer B`).
 
+The same history, one file per key day with what was kept and what was rolled back, and the
+November 5.2.2 series that came after it, is in [Benchmarks/](Benchmarks/README.md).
+
 ## The short version
 
 Final series, 29 to 30 September, DevProjex `02c0fde7` against Repomix 1.18.1: eleven tasks
