@@ -41,7 +41,7 @@ public static class McpServerHost
 
 	internal static int ParseSearchBodyCharacters(string? value)
 	{
-		if (string.Equals(value, "off", StringComparison.Ordinal))
+		if (string.Equals(value, "off", StringComparison.OrdinalIgnoreCase))
 			return 0;
 		if (int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var limit) &&
 			limit is >= 1 and <= MaximumSearchBodyCharacters)

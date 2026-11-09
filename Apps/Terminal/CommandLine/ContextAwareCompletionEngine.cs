@@ -24,9 +24,10 @@ internal static class ContextAwareCompletionEngine
 		var currentWord = !useBashTokenization
 			? null
 			: BashCompletionWordDecoder.Decode(rawBashCurrentWord ?? string.Empty);
+		var configuration = new ParserConfiguration { ResponseFileTokenReplacer = null };
 		var parseResult = useBashTokenization
-			? root.Parse(TokenizeBashCommandLine(normalized.Value, rawBashCurrentWord))
-			: root.Parse(normalized.Value.CommandLine);
+			? root.Parse(TokenizeBashCommandLine(normalized.Value, rawBashCurrentWord), configuration)
+			: root.Parse(normalized.Value.CommandLine, configuration);
 		var command = parseResult.CommandResult.Command;
 		var options = root.Options
 			.Where(static option => option.Recursive)

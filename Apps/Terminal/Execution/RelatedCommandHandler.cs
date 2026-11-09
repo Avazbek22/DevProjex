@@ -24,7 +24,7 @@ public sealed class RelatedCommandHandler(
 			request.MaxFileBytes,
 			cancellationToken).ConfigureAwait(false);
 		new ContextDiagnosticRenderer(environment, request.Output, services.Localization).Write(plan.Diagnostics);
-		if (plan.HasErrors) return CommandLineExitCodes.PolicyFailure;
+		if (plan.HasErrors) return PlanDiagnosticExitCode.For(plan.Diagnostics);
 
 		var destination = request.OutputPath is null or "-"
 			? null
