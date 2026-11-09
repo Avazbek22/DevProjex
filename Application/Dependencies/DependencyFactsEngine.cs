@@ -155,11 +155,11 @@ public sealed partial class DependencyFactsEngine : IDisposable
 							_navigationCacheBytes -= node.Value.Weight;
 						}
 						else
-					{
-						var compacted = CompactNavigationEntry(node.Value, cancellationToken);
-						_navigationCacheBytes += compacted.Weight - node.Value.Weight;
-						node.Value = compacted;
-					}
+						{
+							var compacted = CompactNavigationEntry(node.Value, cancellationToken);
+							_navigationCacheBytes += compacted.Weight - node.Value.Weight;
+							node.Value = compacted;
+						}
 						node = next;
 					}
 					_compactNavigationCache = true;
@@ -167,16 +167,16 @@ public sealed partial class DependencyFactsEngine : IDisposable
 				if (_compactNavigationCache && retained.Count == 0) return retained;
 				if (_compactNavigationCache) entry = CompactNavigationEntry(entry, cancellationToken);
 				cancellationToken.ThrowIfCancellationRequested();
-			_navigationCache[key] = _navigationCacheOrder.AddLast(entry);
+				_navigationCache[key] = _navigationCacheOrder.AddLast(entry);
 				_navigationCacheBytes += entry.Weight;
 				while ((_navigationCache.Count > MaximumCachedNavigationFiles || _navigationCacheBytes > MaximumNavigationCacheBytes) &&
 				   _navigationCacheOrder.First is { Value: var oldest })
-			{
-				_navigationCache.Remove(oldest.Key);
-				_navigationCacheOrder.RemoveFirst();
-				_navigationCacheBytes -= oldest.Weight;
+				{
+					_navigationCache.Remove(oldest.Key);
+					_navigationCacheOrder.RemoveFirst();
+					_navigationCacheBytes -= oldest.Weight;
+				}
 			}
-		}
 		}
 		return hit?.Materialize(cancellationToken) ?? retained;
 	}
