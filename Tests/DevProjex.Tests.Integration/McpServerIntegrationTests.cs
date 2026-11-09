@@ -9531,7 +9531,7 @@ public sealed partial class McpServerIntegrationTests
 		Assert.True(result.Succeeded);
 	}
 
-	private sealed class McpTestServer : IAsyncDisposable
+	internal sealed class McpTestServer : IAsyncDisposable
 	{
 		private readonly Pipe _clientToServer;
 		private readonly Pipe _serverToClient;
@@ -9571,7 +9571,9 @@ public sealed partial class McpServerIntegrationTests
 			IReadOnlySet<string>? remoteHosts = null,
 			bool live = false,
 			Implementation? clientInfo = null,
-			Func<IReadOnlyList<string>, McpRootRegistry>? rootRegistryFactory = null)
+			Func<IReadOnlyList<string>, McpRootRegistry>? rootRegistryFactory = null,
+			McpIdleMemoryOptions? idleMemoryOptions = null,
+			Action<McpServices>? configureServices = null)
 		{
 			return await StartAsync(
 				[project],
@@ -9587,7 +9589,8 @@ public sealed partial class McpServerIntegrationTests
 				remoteHosts,
 				live,
 				clientInfo,
-				rootRegistryFactory);
+				rootRegistryFactory,
+				idleMemoryOptions, configureServices);
 		}
 
 		public static async Task<McpTestServer> StartAsync(
@@ -9604,7 +9607,9 @@ public sealed partial class McpServerIntegrationTests
 			IReadOnlySet<string>? remoteHosts = null,
 			bool live = false,
 			Implementation? clientInfo = null,
-			Func<IReadOnlyList<string>, McpRootRegistry>? rootRegistryFactory = null)
+			Func<IReadOnlyList<string>, McpRootRegistry>? rootRegistryFactory = null,
+			McpIdleMemoryOptions? idleMemoryOptions = null,
+			Action<McpServices>? configureServices = null)
 		{
 			var clientToServer = new Pipe();
 			var serverToClient = new Pipe();
@@ -9616,15 +9621,17 @@ public sealed partial class McpServerIntegrationTests
 				TestContext.Current.CancellationToken,
 				() => Path.Combine(sandbox, "app-data"),
 				Path.Combine(sandbox, "temp"),
-				servicesCreated is null && dependencyFactsEngine is null
+				servicesCreated is null && dependencyFactsEngine is null && configureServices is null
 					? null
 					: roots =>
 					{
 						servicesCreated?.Invoke();
-						return McpServices.Create(
+						var created = McpServices.Create(
 							roots,
 							() => Path.Combine(sandbox, "app-data"),
 							dependencyFactsEngine);
+						configureServices?.Invoke(created);
+						return created;
 					},
 				allowRemote,
 				remoteServicesFactory,
@@ -9633,7 +9640,8 @@ public sealed partial class McpServerIntegrationTests
 				agentExclusions,
 				remoteHosts,
 				live: live,
-				rootRegistryFactory: rootRegistryFactory);
+				rootRegistryFactory: rootRegistryFactory,
+				idleMemoryOptions: idleMemoryOptions);
 			var recordingInput = new RecordingWriteStream(clientToServer.Writer.AsStream());
 			var recordingOutput = new RecordingReadStream(serverToClient.Reader.AsStream());
 			var transport = new StreamClientTransport(

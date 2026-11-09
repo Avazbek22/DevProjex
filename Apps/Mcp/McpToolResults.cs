@@ -10,10 +10,10 @@ internal static class McpToolResults
 	private const string MaxResultSizeKey = "anthropic/maxResultSizeChars";
 	private const string RedactedMetadataMarker = "[redacted]";
 	private static readonly Lazy<IReadOnlyList<ISecretDetector>> MetadataDetectors = new(
-		static () => [new GitleaksSecretDetector(), new PrivateDataDetector()],
+		static () => [McpSecretDetectors.Create(), new PrivateDataDetector()],
 		LazyThreadSafetyMode.ExecutionAndPublication);
 	private static readonly Lazy<IReadOnlyList<ISecretDetector>> SecretMetadataDetectors = new(
-		static () => [new GitleaksSecretDetector()],
+		static () => [McpSecretDetectors.Create()],
 		LazyThreadSafetyMode.ExecutionAndPublication);
 	/// <summary>
 	/// JSON an agent reads rather than HTML embeds: a quote costs two characters instead of six and

@@ -629,6 +629,7 @@ public sealed partial class McpServerProcessTests
 		}
 
 		public McpClient Client { get; }
+		internal Process ChildProcess => process;
 
 		public static async Task<ActualMcpProcess> StartAsync(
 			string project,

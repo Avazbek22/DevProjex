@@ -32,8 +32,7 @@ internal sealed partial class DevProjexMcpTools
 
 	// Physical path to the outline state of the protected text this session last read, so a long
 	// file read in pieces carries its structure once, and only when it is being paged through.
-	private readonly System.Collections.Concurrent.ConcurrentDictionary<string, OutlineReadState> outlinedFiles =
-		new(PathComparer.Default);
+	private readonly McpOutlineReadCache<OutlineReadState> outlinedFiles = new(1024);
 
 	private static string OutlineFingerprint(string content) =>
 		ContentFingerprint.Compute(content.AsSpan()).ToHexString();
