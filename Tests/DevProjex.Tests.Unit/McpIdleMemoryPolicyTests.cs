@@ -106,7 +106,10 @@ public sealed class McpIdleMemoryPolicyTests
 		var collected = 0;
 		await using var policy = new McpIdleMemoryPolicy(new()
 		{
-			Threshold = 0, PrivateBytes = () => 1, Collect = () => collected++, Reset = () => { },
+			Threshold = 0,
+			PrivateBytes = () => 1,
+			Collect = () => collected++,
+			Reset = () => { },
 			Wait = (_, _, _) => Task.CompletedTask
 		});
 		using (McpMemoryActivity.Enter())
