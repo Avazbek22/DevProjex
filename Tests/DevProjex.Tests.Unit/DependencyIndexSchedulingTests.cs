@@ -171,34 +171,30 @@ public sealed class DependencyIndexSchedulingTests
 		pipelinedExtractor.Release.SetResult();
 		using var serial = new DependencyFactsEngine(serialExtractor, new Configuration(), null, 2, int.MaxValue);
 		using var pipelined = new DependencyFactsEngine(pipelinedExtractor, new Configuration(), null, 2, 1);
+		using var cold = DependencyEngineDiagnostics.BeginMeasurement();
 		var expected = await serial.IndexAsync(fixture.Path, files, cancellationToken: TestContext.Current.CancellationToken);
 		var actual = await pipelined.IndexAsync(fixture.Path, files, cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Equal(Serialize(expected), Serialize(actual));
-		for (var repeat = 0; repeat < 3; repeat++)
+		Assert.Equal(3, cold.Capture().ExtractionPipelineResourceCreations);
+		using var warm = DependencyEngineDiagnostics.BeginMeasurement();
+		for (var repeat = 0; repeat < 32; repeat++)
 		{
-			MeasureWarm(serial);
-			MeasureWarm(pipelined);
+			AssertWarmSnapshot(serial);
+			AssertWarmSnapshot(pipelined);
 		}
 
-		var serialBytes = MeasureWarm(serial);
-		var pipelinedBytes = MeasureWarm(pipelined);
-
-		Assert.Equal(serialBytes, pipelinedBytes);
+		Assert.Equal(0, warm.Capture().ExtractionPipelineResourceCreations);
+		Assert.Equal(64, warm.Capture().ResolutionCacheHits);
 		Assert.Equal(files.Length, serialExtractor.PrepareCount);
 		Assert.Equal(files.Length, pipelinedExtractor.PrepareCount);
 		Assert.Equal(files.Length, serialExtractor.ExtractCount);
 		Assert.Equal(files.Length, pipelinedExtractor.ExtractCount);
 
-		long MeasureWarm(DependencyFactsEngine engine)
+		void AssertWarmSnapshot(DependencyFactsEngine engine)
 		{
-			var before = GC.GetAllocatedBytesForCurrentThread();
-			for (var repeat = 0; repeat < 32; repeat++)
-			{
-				var call = engine.IndexAsync(fixture.Path, files, cancellationToken: TestContext.Current.CancellationToken);
-				if (!call.IsCompletedSuccessfully || !call.GetAwaiter().GetResult().Metrics.ResolutionCacheHit)
-					throw new InvalidOperationException("The warmed manifest did not return synchronously from its snapshot.");
-			}
-			return GC.GetAllocatedBytesForCurrentThread() - before;
+			var call = engine.IndexAsync(fixture.Path, files, cancellationToken: TestContext.Current.CancellationToken);
+			Assert.True(call.IsCompletedSuccessfully);
+			Assert.True(call.GetAwaiter().GetResult().Metrics.ResolutionCacheHit);
 		}
 	}
 
