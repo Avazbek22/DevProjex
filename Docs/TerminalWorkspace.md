@@ -236,7 +236,10 @@ schemas, help, completion hints, results, and errors are localized. Resolution i
 strict: only a complete token executes. Tab accepts or cycles completion, while an
 invalid token reports its position and up to three similar candidates. Arguments
 containing whitespace can use single or double quotes; path completion inserts
-and preserves the required quotes automatically.
+and preserves the required quotes automatically. To put the quote character
+itself inside a quoted argument, double it: `"a""b"` is `a"b`. Free text after
+`:search` and `:filter` keeps its inner spaces; quote it to keep leading or
+trailing spaces.
 Welcome exposes the focused subset `open`, `recent`, `language`, `help`, and `quit`;
 `help` without a verb lists only these, and any other workspace command reports
 that it needs an open project.
