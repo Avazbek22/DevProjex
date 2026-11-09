@@ -16,6 +16,10 @@ internal sealed partial class DevProjexMcpTools(
 	McpAgentJournal? journal = null)
 {
 	private const int MaximumTreeLines = 2_000;
+	private const int SmallFolderMaximumEntries = 12;
+	private const int SmallFolderExpansionLineBudget = 60;
+	private const string SmallFoldersExpandedNotice =
+		"[Tree depth] folders past max_depth with up to 12 entries are listed in full.";
 	private const int MaximumTreeCharacters = 50_000;
 	private const int MaximumInlinePackCharacters = 50_000;
 	internal const int MaximumStoredPackResponseCharacters = 50_000;
@@ -318,12 +322,15 @@ internal sealed partial class DevProjexMcpTools(
 					automaticDepth = found.Depth < depthFit.FullDepth ? found.Depth : null;
 				}
 			}
-			using var treeWriter = fittingWriter ?? await RenderBoundedTreeAsync(
+			var expandedFolders = new HashSet<string>(PathComparer.Default);
+			using var treeWriter = fittingWriter ?? await RenderExplicitDepthTreeAsync(
 					plan,
-					depth is null
-						? plan.ProjectedTree
-						: PruneToDepthWithCancellation(plan.ProjectedTree, depth.Value, cancellationToken),
+					depth,
 					format,
+					expandsSmallFolders: depth > 0 &&
+						format is TreeTextFormat.Ascii or TreeTextFormat.Markdown &&
+						!RequestsAFile(plan, paths),
+					expandedFolders,
 					cancellationToken)
 				.ConfigureAwait(false);
 			if (treeWriter.IsTruncated && format is TreeTextFormat.Json or TreeTextFormat.Xml)
@@ -358,7 +365,8 @@ internal sealed partial class DevProjexMcpTools(
 			return McpToolResults.TextSuccess(AppendTrustedNotices(
 				McpSpotlight.Wrap(treeWriter.IsTruncated ? treeWriter.CompleteLinesText : treeWriter.Text),
 				treeTruncationNotice,
-				FormatTreeDepthNotice(plan, depth, paths, treeWriter.IsTruncated),
+				FormatTreeDepthNotice(plan, depth, paths, treeWriter.IsTruncated, expandedFolders),
+				expandedFolders.Count > 0 ? SmallFoldersExpandedNotice : null,
 				McpTrustedDiagnosticFormatter.FormatWarnings(plan),
 				FormatNameSearchNotice(plan, paths),
 				FormatGitScopeDiffNotice(arguments),
@@ -5088,7 +5096,8 @@ internal sealed partial class DevProjexMcpTools(
 		ProjectContextPlan plan,
 		int? explicitMaxDepth,
 		IReadOnlyList<string>? paths,
-		bool treeTruncated)
+		bool treeTruncated,
+		IReadOnlySet<string> expandedFolders)
 	{
 		if (explicitMaxDepth is not { } maxDepth || !HasItems(paths))
 			return null;
@@ -5117,7 +5126,10 @@ internal sealed partial class DevProjexMcpTools(
 				relative = string.Empty;
 			var depth = relative.Length == 0 ? 0 : relative.Count(static character => character == '/') + 1;
 			var isDirectory = Directory.Exists(fullPath);
-			var isHidden = isDirectory ? depth >= maxDepth : depth > maxDepth;
+			// A requested folder at exactly max_depth that was listed in full hides nothing.
+			var isHidden = isDirectory
+				? depth >= maxDepth && !expandedFolders.Contains(relative)
+				: depth > maxDepth;
 			if (!isHidden)
 			{
 				if (isDirectory)
@@ -5135,7 +5147,9 @@ internal sealed partial class DevProjexMcpTools(
 		// A cut tree never reached part of the collapsed folders, and the rendered text cannot tell
 		// which ones, so a count of them would name folders the response does not show.
 		if (hiddenCount == 0)
-			return treeTruncated ? null : FormatCollapsedFoldersNotice(plan, visibleDirectories, maxDepth);
+			return treeTruncated
+				? null
+				: FormatCollapsedFoldersNotice(plan, visibleDirectories, maxDepth, expandedFolders);
 
 		// A file has nothing under it, so the directory wording would contradict itself: the
 		// useful depth is the one that shows the file.
@@ -5163,7 +5177,8 @@ internal sealed partial class DevProjexMcpTools(
 	private static string? FormatCollapsedFoldersNotice(
 		ProjectContextPlan plan,
 		IReadOnlyList<string> visibleDirectories,
-		int maxDepth)
+		int maxDepth,
+		IReadOnlySet<string> expandedFolders)
 	{
 		if (visibleDirectories.Count == 0)
 			return null;
@@ -5176,6 +5191,8 @@ internal sealed partial class DevProjexMcpTools(
 				continue;
 
 			var folder = string.Join('/', segments, 0, maxDepth);
+			if (expandedFolders.Contains(folder))
+				continue;
 			if (visibleDirectories.Any(directory =>
 					directory.Length == 0 || folder.StartsWith(directory + "/", PathComparer.Comparison)))
 				collapsedFolders.Add(folder);
@@ -5571,6 +5588,172 @@ internal sealed partial class DevProjexMcpTools(
 		Analysis,
 		Pack,
 		Search
+	}
+
+	/// <summary>
+	/// Renders the tree for an explicit or omitted max_depth. With expansion, folders at the depth
+	/// boundary whose whole selected subtree is small are listed in full; if that rendering would
+	/// cross a response limit, the plain pruned tree is rendered instead, so expansion never
+	/// displaces lines the plain tree would show.
+	/// </summary>
+	private async Task<McpBoundedLineTextWriter> RenderExplicitDepthTreeAsync(
+		ProjectContextPlan plan,
+		int? depth,
+		TreeTextFormat format,
+		bool expandsSmallFolders,
+		HashSet<string> expandedFolders,
+		CancellationToken cancellationToken)
+	{
+		if (depth is not { } maxDepth)
+			return await RenderBoundedTreeAsync(plan, plan.ProjectedTree, format, cancellationToken).ConfigureAwait(false);
+
+		if (expandsSmallFolders)
+		{
+			var expandedFullPaths = new List<string>();
+			var expandedTree = PruneToDepthExpandingSmallFolders(
+				plan.ProjectedTree,
+				maxDepth,
+				SmallFolderMaximumEntries,
+				SmallFolderExpansionLineBudget,
+				expandedFullPaths,
+				cancellationToken);
+			if (expandedFullPaths.Count > 0)
+			{
+				var expandedWriter = await RenderBoundedTreeAsync(plan, expandedTree, format, cancellationToken)
+					.ConfigureAwait(false);
+				if (!expandedWriter.IsTruncated)
+				{
+					foreach (var fullPath in expandedFullPaths)
+						expandedFolders.Add(PathUtility.GetPortableRelativePath(plan.SourceRoot, fullPath));
+					return expandedWriter;
+				}
+				expandedWriter.Dispose();
+			}
+		}
+
+		return await RenderBoundedTreeAsync(
+				plan,
+				PruneToDepthWithCancellation(plan.ProjectedTree, maxDepth, cancellationToken),
+				format,
+				cancellationToken)
+			.ConfigureAwait(false);
+	}
+
+	/// <summary>
+	/// A requested file keeps the exact max_depth rendering, so its own depth notice stays true.
+	/// </summary>
+	private bool RequestsAFile(ProjectContextPlan plan, IReadOnlyList<string>? paths)
+	{
+		if (!HasItems(paths))
+			return false;
+
+		foreach (var path in paths!)
+		{
+			try
+			{
+				if (File.Exists(roots.ResolveExistingPath(plan.SourceRoot, path)))
+					return true;
+			}
+			catch (McpToolException)
+			{
+				// Missing paths are already reported by the existing selection diagnostics.
+			}
+		}
+		return false;
+	}
+
+	/// <summary>
+	/// Prunes like <see cref="PruneToDepthWithCancellation"/>, except that a folder at the depth
+	/// boundary keeps its whole subtree when that subtree holds at most
+	/// <paramref name="maximumEntries"/> entries. Folders are considered in rendering order, and
+	/// expansion stops at the first one whose entries no longer fit <paramref name="lineBudget"/>.
+	/// </summary>
+	internal static TreeNodeDescriptor PruneToDepthExpandingSmallFolders(
+		TreeNodeDescriptor node,
+		int remainingDepth,
+		int maximumEntries,
+		int lineBudget,
+		ICollection<string> expandedFullPaths,
+		CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(node);
+		ArgumentNullException.ThrowIfNull(expandedFullPaths);
+		ArgumentOutOfRangeException.ThrowIfNegative(remainingDepth);
+		cancellationToken.ThrowIfCancellationRequested();
+
+		var remainingBudget = lineBudget;
+		var stack = new Stack<TreeDepthFrame>();
+		stack.Push(new TreeDepthFrame(node, remainingDepth));
+		TreeNodeDescriptor? result = null;
+		while (stack.Count > 0)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var frame = stack.Peek();
+			if (frame.RemainingDepth > 0 && frame.NextChildIndex < frame.Node.Children.Count)
+			{
+				var child = frame.Node.Children[frame.NextChildIndex++];
+				if (frame.RemainingDepth == 1 && remainingBudget > 0 && child is { IsDirectory: true, Children.Count: > 0 })
+				{
+					var entries = CountSubtreeEntries(child, maximumEntries + 1, cancellationToken);
+					if (entries <= maximumEntries)
+					{
+						if (entries > remainingBudget)
+						{
+							remainingBudget = 0;
+						}
+						else
+						{
+							remainingBudget -= entries;
+							expandedFullPaths.Add(child.FullPath);
+							frame.ProjectedChildren[frame.NextProjectedChildIndex++] = child;
+							continue;
+						}
+					}
+				}
+				stack.Push(new TreeDepthFrame(child, frame.RemainingDepth - 1));
+				continue;
+			}
+
+			var projected = frame.Node with
+			{
+				Children = frame.RemainingDepth == 0
+					? []
+					: frame.ProjectedChildren
+			};
+			stack.Pop();
+			if (stack.TryPeek(out var parent))
+				parent.ProjectedChildren[parent.NextProjectedChildIndex++] = projected;
+			else
+				result = projected;
+		}
+
+		return result!;
+	}
+
+	/// <summary>
+	/// Counts the files and folders below <paramref name="directory"/>, stopping at
+	/// <paramref name="limit"/>.
+	/// </summary>
+	private static int CountSubtreeEntries(
+		TreeNodeDescriptor directory,
+		int limit,
+		CancellationToken cancellationToken)
+	{
+		var count = 0;
+		var pending = new Stack<TreeNodeDescriptor>();
+		pending.Push(directory);
+		while (pending.TryPop(out var current))
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			foreach (var child in current.Children)
+			{
+				if (++count >= limit)
+					return count;
+				if (child.IsDirectory)
+					pending.Push(child);
+			}
+		}
+		return count;
 	}
 
 	internal static TreeNodeDescriptor PruneToDepth(TreeNodeDescriptor node, int remainingDepth) =>
