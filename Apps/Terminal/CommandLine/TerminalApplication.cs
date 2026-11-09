@@ -99,7 +99,9 @@ public sealed class TerminalApplication
 			arguments.ToArray(),
 			new ParserConfiguration
 			{
-				EnablePosixBundling = false
+				EnablePosixBundling = false,
+				// A leading '@' is literal data (annotations, npm scopes), never a response file.
+				ResponseFileTokenReplacer = null
 			});
 		if (CliInputIntegrityGuard.TryFindError(
 			    arguments,

@@ -18,7 +18,10 @@ public sealed class DevProjexRootCommand(string description) : RootCommand(descr
 	public new ParseResult Parse(
 		IReadOnlyList<string> arguments,
 		ParserConfiguration? configuration = null) =>
-		CommandLineParser.Parse(this, NormalizeToggleValues(arguments), configuration);
+		CommandLineParser.Parse(
+			this,
+			NormalizeToggleValues(arguments),
+			configuration ?? new ParserConfiguration { ResponseFileTokenReplacer = null });
 
 	private static IReadOnlyList<string> NormalizeToggleValues(IReadOnlyList<string> arguments)
 	{
