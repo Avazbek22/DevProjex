@@ -24,6 +24,8 @@ public sealed partial class DependencyFactsEngine : IDisposable
 	private readonly IDependencyFactExtractor _extractor;
 	private readonly IDependencyConfigurationProvider _configurationProvider;
 	private readonly DependencyFactsLimits _limits;
+	private readonly int _extractionParallelism;
+	private readonly int _minimumPipelinedFiles;
 	private readonly ConcurrentDictionary<FileCacheKey, FileCacheEntry> _fileCache = [];
 	private readonly LinkedList<FileCacheEntry> _fileCacheOrder = [];
 	private readonly ConcurrentDictionary<IndexCacheKey, IndexCacheEntry> _indexCache = [];
@@ -43,11 +45,26 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		IDependencyFactExtractor extractor,
 		IDependencyConfigurationProvider configurationProvider,
 		DependencyFactsLimits? limits = null)
+		: this(extractor, configurationProvider, limits, Math.Clamp(Environment.ProcessorCount, 1, 8))
+	{
+	}
+
+	internal DependencyFactsEngine(
+		IDependencyFactExtractor extractor,
+		IDependencyConfigurationProvider configurationProvider,
+		DependencyFactsLimits? limits,
+		int extractionParallelism,
+		int minimumPipelinedFiles = 1024)
 	{
 		_extractor = extractor ?? throw new ArgumentNullException(nameof(extractor));
 		_configurationProvider = configurationProvider ??
 			throw new ArgumentNullException(nameof(configurationProvider));
 		_limits = limits ?? new DependencyFactsLimits();
+		ArgumentOutOfRangeException.ThrowIfLessThan(extractionParallelism, 1);
+		ArgumentOutOfRangeException.ThrowIfGreaterThan(extractionParallelism, 8);
+		_extractionParallelism = extractionParallelism;
+		ArgumentOutOfRangeException.ThrowIfLessThan(minimumPipelinedFiles, 1);
+		_minimumPipelinedFiles = minimumPipelinedFiles;
 		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(_limits.MaximumAccumulatedFactBytes);
 	}
 
@@ -278,107 +295,17 @@ public sealed partial class DependencyFactsEngine : IDisposable
 				readableFiles?.Select(static file => file.FullPath).ToHashSet(PathComparer),
 				cancellationToken)
 			.ConfigureAwait(false);
-		var prepared = new PreparedDependencyIdentity[manifest.Length];
-		var observations = new DependencySourceObservation[manifest.Length];
-		var parsedBefore = _extractor.ParseCount;
-		var facts = new FileFacts[prepared.Length];
-		var scopeIds = new string[prepared.Length];
-		var cacheable = new bool[prepared.Length];
-		var factBudget = new AccumulatedFactBudget(_limits.MaximumAccumulatedFactBytes);
-		var completed = 0;
-		var reusedFiles = 0;
-		var extractionParallelism = Math.Clamp(Environment.ProcessorCount, 1, 8);
-		for (var batchStart = 0; batchStart < prepared.Length; batchStart += extractionParallelism)
-		{
-			var batchCount = Math.Min(extractionParallelism, prepared.Length - batchStart);
-			await Parallel.ForEachAsync(
-				Enumerable.Range(batchStart, batchCount),
-				new ParallelOptions
-				{
-					CancellationToken = cancellationToken,
-					MaxDegreeOfParallelism = extractionParallelism
-				},
-				async (index, token) =>
-				{
-					var contentIdentity = alignedContentIdentities?[index];
-					var source = await _extractor
-						.PrepareAsync(root, manifest[index], configuration, _limits, token, contentIdentity)
-						.ConfigureAwait(false);
-					prepared[index] = new PreparedDependencyIdentity(
-						canonicalManifest[index].RelativePath,
-						source.ContentFingerprint,
-						source.LanguageId);
-					observations[index] = source.ContentObservation;
-					scopeIds[index] = source.ScopeId;
-					FileFacts extracted;
-					if (source.PreparedStatus != DependencyFileStatus.Supported)
-					{
-						extracted = _extractor.Extract(source, _limits, token);
-					}
-					else
-					{
-						var key = CreateFileCacheKey(source);
-						while (true)
-						{
-							token.ThrowIfCancellationRequested();
-							FileCacheEntry? created = null;
-							if (!_fileCache.TryGetValue(key, out var lazy))
-							{
-								created = new FileCacheEntry(key, new Lazy<Task<FileFacts>>(
-									() => Task.Run(() => _extractor.Extract(source, _limits, token), token),
-									LazyThreadSafetyMode.ExecutionAndPublication));
-								lazy = GetOrAddFileCacheEntry(created);
-							}
-							var shared = !ReferenceEquals(lazy, created);
-							if (shared)
-								DependencyEngineDiagnostics.RecordFileCacheHit();
-							try
-							{
-								var extraction = lazy.Value.Value;
-								extracted = await (shared ? extraction.WaitAsync(token) : extraction)
-									.ConfigureAwait(false);
-								if (shared)
-									Interlocked.Increment(ref reusedFiles);
-								if (!extracted.CanCache)
-									RemoveFileCacheEntry(key, lazy);
-								else if (!shared)
-									RegisterFileCacheWeight(key, lazy, EstimateFileFactsBytes(extracted));
-								break;
-							}
-							catch (OperationCanceledException) when (shared && token.IsCancellationRequested)
-							{
-								throw;
-							}
-							catch (OperationCanceledException) when (shared && !token.IsCancellationRequested)
-							{
-								// Retry with this caller's token if the shared producer was canceled.
-								RemoveFileCacheEntry(key, lazy);
-							}
-							catch
-							{
-								RemoveFileCacheEntry(key, lazy);
-								throw;
-							}
-						}
-					}
-
-					cacheable[index] = source.CanCache && extracted.CanCache;
-					facts[index] = extracted;
-				}).ConfigureAwait(false);
-
-			for (var index = batchStart; index < batchStart + batchCount; index++)
-			{
-				var extracted = facts[index];
-				facts[index] = factBudget.TryAdmit(EstimateFileFactsBytes(extracted))
-					? RebindScope(extracted, scopeIds[index])
-					: CreateFactBudgetLimited(extracted, scopeIds[index]);
-				progress?.Report(new DependencyIndexProgress(++completed, prepared.Length));
-			}
-		}
-
+		var extractedFiles = await ExtractFilesAsync(root, manifest, canonicalManifest, configuration,
+			alignedContentIdentities, progress, cancellationToken).ConfigureAwait(false);
+		var prepared = extractedFiles.Prepared;
+		var observations = extractedFiles.Observations;
+		var facts = extractedFiles.Facts;
+		var cacheable = extractedFiles.Cacheable;
+		var factBudget = extractedFiles.Budget;
+		var parsedFiles = extractedFiles.ParsedFiles;
+		var reusedFiles = extractedFiles.ReusedFiles;
 		var manifestGeneration = HashWithCancellation(prepared.Select(source =>
 			$"{source.RelativePath}\0{source.ContentFingerprint}\0{source.LanguageId}"), cancellationToken);
-		var parsedFiles = _extractor.ParseCount - parsedBefore;
 		// Parallel extraction writes by canonical manifest index, so this array is already ordered.
 		var orderedFacts = facts;
 		var declarations = MergeDeclarations(orderedFacts);
