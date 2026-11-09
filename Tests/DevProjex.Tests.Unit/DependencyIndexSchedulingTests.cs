@@ -51,8 +51,14 @@ public sealed class DependencyIndexSchedulingTests
 
 	private static string Serialize(DependencyIndexSnapshot index) => JsonSerializer.Serialize(new
 	{
-		index.ManifestGeneration, index.DeclarationRevision, index.Files, index.Declarations,
-		index.Edges, index.EdgesBySource, index.EdgesByTarget, index.Coverage
+		index.ManifestGeneration,
+		index.DeclarationRevision,
+		index.Files,
+		index.Declarations,
+		index.Edges,
+		index.EdgesBySource,
+		index.EdgesByTarget,
+		index.Coverage
 	});
 
 	[Fact]
@@ -153,15 +159,80 @@ public sealed class DependencyIndexSchedulingTests
 		Assert.Equal(0, extractor.Active);
 	}
 
+	[Fact]
+	public async Task WarmManifestReturnsWithoutPreparingFilesOrAllocatingPipelineResources()
+	{
+		using var fixture = new TemporaryDirectory();
+		var files = Enumerable.Range(0, 4).Select(index => fixture.CreateFile($"{index}.cs", "class Model {}"))
+			.ToArray();
+		using var serialExtractor = new GatedExtractor();
+		using var pipelinedExtractor = new GatedExtractor();
+		serialExtractor.Release.SetResult();
+		pipelinedExtractor.Release.SetResult();
+		using var serial = new DependencyFactsEngine(serialExtractor, new Configuration(), null, 2, int.MaxValue);
+		using var pipelined = new DependencyFactsEngine(pipelinedExtractor, new Configuration(), null, 2, 1);
+		var expected = await serial.IndexAsync(fixture.Path, files, cancellationToken: TestContext.Current.CancellationToken);
+		var actual = await pipelined.IndexAsync(fixture.Path, files, cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Equal(Serialize(expected), Serialize(actual));
+		for (var repeat = 0; repeat < 3; repeat++)
+		{
+			MeasureWarm(serial);
+			MeasureWarm(pipelined);
+		}
+
+		var serialBytes = MeasureWarm(serial);
+		var pipelinedBytes = MeasureWarm(pipelined);
+
+		Assert.Equal(serialBytes, pipelinedBytes);
+		Assert.Equal(files.Length, serialExtractor.PrepareCount);
+		Assert.Equal(files.Length, pipelinedExtractor.PrepareCount);
+		Assert.Equal(files.Length, serialExtractor.ExtractCount);
+		Assert.Equal(files.Length, pipelinedExtractor.ExtractCount);
+
+		long MeasureWarm(DependencyFactsEngine engine)
+		{
+			var before = GC.GetAllocatedBytesForCurrentThread();
+			for (var repeat = 0; repeat < 32; repeat++)
+			{
+				var call = engine.IndexAsync(fixture.Path, files, cancellationToken: TestContext.Current.CancellationToken);
+				if (!call.IsCompletedSuccessfully || !call.GetAwaiter().GetResult().Metrics.ResolutionCacheHit)
+					throw new InvalidOperationException("The warmed manifest did not return synchronously from its snapshot.");
+			}
+			return GC.GetAllocatedBytesForCurrentThread() - before;
+		}
+	}
+
+	[Fact]
+	public async Task CancellationCallbackFailuresDoNotMaskProgressFailureOrSkipDraining()
+	{
+		using var fixture = new TemporaryDirectory();
+		var files = Enumerable.Range(0, 4).Select(index => fixture.CreateFile($"{index}.cs", "class Model {}"))
+			.ToArray();
+		var failure = new InvalidOperationException("Progress callback failed.");
+		using var extractor = new GatedExtractor(throwDuringCancellation: true);
+		using var engine = new DependencyFactsEngine(extractor, new Configuration(), null, 2, minimumPipelinedFiles: 1);
+
+		var observed = await Assert.ThrowsAsync<InvalidOperationException>(() => engine.IndexAsync(fixture.Path, files,
+			new FailingProgress(failure), TestContext.Current.CancellationToken)
+			.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+
+		Assert.Same(failure, observed);
+		Assert.Equal(0, extractor.Active);
+	}
+
 	private sealed class FailingProgress(Exception failure) : IProgress<DependencyIndexProgress>
 	{
 		public void Report(DependencyIndexProgress value) => throw failure;
 	}
 
-	private sealed class GatedExtractor(Exception? failure = null, int blockedIndex = 1) : IDependencyFactExtractor
+	private sealed class GatedExtractor(Exception? failure = null, int blockedIndex = 1, bool throwDuringCancellation = false) : IDependencyFactExtractor
 	{
 		private int _active;
 		private int _maximum;
+		private int _preparations;
+		private int _extractions;
+		public int PrepareCount => Volatile.Read(ref _preparations);
+		public int ExtractCount => Volatile.Read(ref _extractions);
 		public TaskCompletionSource Blocked { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 		public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 		public TaskCompletionSource NextStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -174,6 +245,7 @@ public sealed class DependencyIndexSchedulingTests
 			DependencyResolverConfiguration configuration, DependencyFactsLimits limits, CancellationToken token,
 			string? contentIdentity = null)
 		{
+			Interlocked.Increment(ref _preparations);
 			var active = Interlocked.Increment(ref _active);
 			RecordMaximumConcurrency(active);
 			try
@@ -181,8 +253,12 @@ public sealed class DependencyIndexSchedulingTests
 				var name = Path.GetFileNameWithoutExtension(path);
 				if (name == (failure is null ? blockedIndex.ToString(System.Globalization.CultureInfo.InvariantCulture) : "0"))
 				{
+					var release = Release.Task.WaitAsync(token);
+					using var registration = throwDuringCancellation
+						? token.Register(static () => throw new InvalidOperationException("Cancellation callback failed."))
+						: default;
 					Blocked.TrySetResult();
-					await Release.Task.WaitAsync(token);
+					await release;
 				}
 				if (failure is not null && name == "1")
 				{
@@ -202,10 +278,13 @@ public sealed class DependencyIndexSchedulingTests
 			while (Interlocked.CompareExchange(ref _maximum, active, previous) != previous);
 		}
 
-		public FileFacts Extract(PreparedDependencySource source, DependencyFactsLimits limits) => new(
-			source.RelativePath, source.ScopeId, source.LanguageId, source.ContentFingerprint, 0,
-			DependencyFileStatus.Supported, null, false, new Dictionary<string, int>(), [], [], [], [],
-			new Dictionary<string, string>(), [], new Dictionary<string, string>(), []);
+		public FileFacts Extract(PreparedDependencySource source, DependencyFactsLimits limits)
+		{
+			Interlocked.Increment(ref _extractions);
+			return new(source.RelativePath, source.ScopeId, source.LanguageId, source.ContentFingerprint, 0,
+				DependencyFileStatus.Supported, null, false, new Dictionary<string, int>(), [], [], [], [],
+				new Dictionary<string, string>(), [], new Dictionary<string, string>(), []);
+		}
 		public void Dispose() { }
 	}
 
