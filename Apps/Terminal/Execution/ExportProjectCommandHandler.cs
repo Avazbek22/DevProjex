@@ -42,7 +42,7 @@ public sealed class ExportProjectCommandHandler(
 		new ContextDiagnosticRenderer(environment, request.Output, services.Localization)
 			.Write(plan.Diagnostics);
 		if (plan.HasErrors)
-			return CommandLineExitCodes.PolicyFailure;
+			return PlanDiagnosticExitCode.For(plan.Diagnostics);
 
 		var writesToStandardOutput = request.Format == ProjectCopyExportFormat.Zip &&
 		                             request.OutputPath == "-";

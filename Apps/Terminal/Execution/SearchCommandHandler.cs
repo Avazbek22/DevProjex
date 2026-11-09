@@ -59,7 +59,7 @@ public sealed class SearchCommandHandler(
 		new ContextDiagnosticRenderer(environment, request.Output, services.Localization)
 			.Write(plan.Diagnostics);
 		if (plan.HasErrors)
-			return CommandLineExitCodes.PolicyFailure;
+			return PlanDiagnosticExitCode.For(plan.Diagnostics);
 
 		string payload;
 		try

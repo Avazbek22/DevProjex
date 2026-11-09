@@ -29,7 +29,7 @@ public sealed class DiffCommandHandler(
 			cancellationToken).ConfigureAwait(false);
 		new ContextDiagnosticRenderer(environment, request.Output, services.Localization).Write(plan.Diagnostics);
 		if (plan.HasErrors)
-			return CommandLineExitCodes.PolicyFailure;
+			return PlanDiagnosticExitCode.For(plan.Diagnostics);
 
 		var destination = request.OutputPath is null or "-"
 			? null
