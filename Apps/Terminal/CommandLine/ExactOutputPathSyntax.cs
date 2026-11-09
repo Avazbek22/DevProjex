@@ -92,7 +92,7 @@ internal static class ExactOutputPathSyntax
 	{
 		isDeviceNamespace = false;
 		if (path.StartsWith(@"\\.\", StringComparison.Ordinal) ||
-		    path.StartsWith("//./", StringComparison.Ordinal))
+			path.StartsWith("//./", StringComparison.Ordinal))
 		{
 			isDeviceNamespace = true;
 			return path.Length;
