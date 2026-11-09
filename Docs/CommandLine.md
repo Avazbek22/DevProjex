@@ -500,7 +500,9 @@ explicit CLI collections remain exact and invocation-only.
 
 Selected paths are relative to the project root. A file selects that file; a
 directory selects its effective subtree. Parent/child overlaps are deduplicated.
-An empty selected-path set means the complete effective tree. Absolute paths,
+Without any path selection the complete effective tree is used. An explicit
+`--select-from` source that lists no paths selects nothing, so an empty
+`git diff --name-only` produces an empty result, never the whole project. Absolute paths,
 `..`, and link-based escapes are rejected.
 
 `--select-from FILE` reads strict UTF-8 source-relative paths, with an optional
