@@ -348,15 +348,15 @@ public sealed class DocumentationAndPackagingContractTests
 			StringComparison.Ordinal);
 		Assert.Contains("Placement is all or nothing", normalized, StringComparison.Ordinal);
 		Assert.DoesNotContain("Enclosing declarations:", server, StringComparison.Ordinal);
-		Assert.Contains(
-			"[Symbols] annotated=N · files-without-declarations=K.",
-			server,
-			StringComparison.Ordinal);
+		Assert.DoesNotContain("[Symbols] annotated=", server, StringComparison.Ordinal);
+		Assert.Contains("Naming adds no trusted line of its own.", normalized, StringComparison.Ordinal);
 		Assert.Contains("There is no parameter for it", normalized, StringComparison.Ordinal);
 		Assert.Contains("### Reading a declaration by name", server, StringComparison.Ordinal);
 		Assert.Contains("### The search result carries the selector", server, StringComparison.Ordinal);
 		Assert.Contains("Declarations found (path, symbol, lines):", server, StringComparison.Ordinal);
-		Assert.Contains("[Next read] Read only declarations needed for the task", server, StringComparison.Ordinal);
+		Assert.DoesNotContain("batch known selections in one get_file call", server, StringComparison.Ordinal);
+		Assert.Contains("that list is the continuation and no `[Next read]` line repeats it", normalized,
+			StringComparison.Ordinal);
 		Assert.Contains("Best declaration body (1 of 3):", server, StringComparison.Ordinal);
 		Assert.Contains("Exact ordinal equality with the full printed name or its last segment", normalized,
 			StringComparison.Ordinal);

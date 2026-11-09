@@ -31,7 +31,6 @@ internal static class McpSearchSymbols
 
 	/// <summary>
 	/// Limits final declaration annotations, not the navigation parses used to score search candidates.
-	/// Additional matching files are counted as unannotated.
 	/// </summary>
 	public const int MaximumAnnotatedFiles = 64;
 
@@ -342,16 +341,12 @@ internal static class McpSearchSymbols
 
 		var files = new List<McpSearchHit>();
 		var seen = new HashSet<string>(StringComparer.Ordinal);
-		var skippedFiles = 0;
 		foreach (var hit in hits)
 		{
 			if (!seen.Add(hit.RelativePath))
 				continue;
 			if (files.Count >= MaximumAnnotatedFiles)
-			{
-				skippedFiles++;
-				continue;
-			}
+				break;
 
 			files.Add(hit);
 		}
@@ -380,15 +375,11 @@ internal static class McpSearchSymbols
 		var repeatedNameRanges = new Dictionary<McpSearchDeclaration, IReadOnlyList<(int StartLine, int EndLine)>>();
 		var declared = new HashSet<string>(StringComparer.Ordinal);
 		var annotated = 0;
-		var unannotatedFiles = new HashSet<string>(StringComparer.Ordinal);
 		foreach (var hit in hits)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			if (!spansByFile.TryGetValue(hit.RelativePath, out var spans))
-			{
-				unannotatedFiles.Add(hit.RelativePath);
 				continue;
-			}
 
 			// The innermost declaration is the narrowest one that still contains the line.
 			DeclarationSpan? best = null;
@@ -402,10 +393,7 @@ internal static class McpSearchSymbols
 			}
 
 			if (best is null || string.IsNullOrEmpty(best.Name))
-			{
-				unannotatedFiles.Add(hit.RelativePath);
 				continue;
-			}
 
 			names[new McpSearchHitKey(hit.RelativePath, hit.Line)] = best.Name;
 			// One entry per declaration, not per hit: this is the list a caller reads back, and a
@@ -430,9 +418,7 @@ internal static class McpSearchSymbols
 		return new McpSearchSymbolResult(
 			names,
 			declarations,
-			annotated,
-			unannotatedFiles.Count,
-			skippedFiles)
+			annotated)
 		{
 			DeclarationRanges = new McpDeclarationLineRanges(repeatedNameRanges)
 		};
@@ -937,12 +923,10 @@ internal sealed class McpSearchDeclarationPreviewCache
 internal sealed record McpSearchSymbolResult(
 	IReadOnlyDictionary<McpSearchHitKey, string> Names,
 	IReadOnlyList<McpSearchDeclaration> Declarations,
-	int AnnotatedHits,
-	int FilesWithoutDeclarations,
-	int FilesBeyondTheLimit)
+	int AnnotatedHits)
 {
 	public static readonly McpSearchSymbolResult None =
-		new(new Dictionary<McpSearchHitKey, string>(), [], 0, 0, 0);
+		new(new Dictionary<McpSearchHitKey, string>(), [], 0);
 
 	public McpDeclarationLineRanges DeclarationRanges { get; init; } = McpDeclarationLineRanges.None;
 }

@@ -40,10 +40,6 @@ internal sealed partial class DevProjexMcpTools(
 	private const int MaximumWithheldFilesReported = 20;
 	private const string WithheldHeading = "Withheld matches by file:";
 	private const string DeclarationsHeading = "Declarations found (path, symbol, lines):";
-	// The one sentence that turns the list above into a call. Seven of twelve whole-file reads in
-	// the recorded sessions were issued with the declaration's name already on screen.
-	private const string ReadDeclarationsNotice =
-		"[Next read] Read only declarations needed for the task; batch known selections in one get_file call.";
 	private const int MaximumDeclarationsReported = 20;
 	// Closes a run of named hits when the next one belongs to nothing. A constant, not a name.
 	private static readonly string OutsideDeclarationHeader = $"in (no declaration){Environment.NewLine}";
@@ -1354,8 +1350,6 @@ internal sealed partial class DevProjexMcpTools(
 					symbols.DeclarationRanges)
 				: MaximumSearchContentCharacters;
 			var namesRefused = !InsertDeclarationHeaders(output, renderedLines, symbols, matchContentLimit);
-			if (namesRefused)
-				symbols = symbols with { AnnotatedHits = 0 };
 			var responseCharacterLimitReached = resultGroupTruncated || namesRefused;
 			var declarationSection = AppendDeclarationSelectors(
 				output,
@@ -1463,7 +1457,6 @@ internal sealed partial class DevProjexMcpTools(
 						storedSearch,
 						withheldStored,
 						withheldByFile.Count),
-					FormatSymbolCoverageNotice(symbols, namesRefused),
 					declarationsNotIndexed == 0
 						? null
 						: $"[Symbols coverage] declarations-not-indexed={declarationsNotIndexed.ToString(CultureInfo.InvariantCulture)}; " +
@@ -4973,38 +4966,6 @@ internal sealed partial class DevProjexMcpTools(
 		return true;
 	}
 
-	/// <summary>
-	/// Reports how far the naming reached, in counts alone, so a caller can tell "this hit is in no
-	/// declaration" from "this file was never parsed".
-	/// </summary>
-	private static string? FormatSymbolCoverageNotice(McpSearchSymbolResult symbols, bool namesRefused)
-	{
-		if (!namesRefused &&
-			symbols.AnnotatedHits == 0 &&
-			symbols.FilesWithoutDeclarations == 0 &&
-			symbols.FilesBeyondTheLimit == 0)
-		{
-			return null;
-		}
-		var reported =
-			$"[Symbols] annotated={symbols.AnnotatedHits.ToString(CultureInfo.InvariantCulture)} · " +
-			$"files-without-declarations={symbols.FilesWithoutDeclarations.ToString(CultureInfo.InvariantCulture)}";
-		if (symbols.FilesBeyondTheLimit > 0)
-		{
-			reported +=
-				$" · files-past-the-" +
-				$"{McpSearchSymbols.MaximumAnnotatedFiles.ToString(CultureInfo.InvariantCulture)}-file " +
-				$"naming limit={symbols.FilesBeyondTheLimit.ToString(CultureInfo.InvariantCulture)}";
-		}
-
-		// Names were resolved and then not spent, which is a different thing from nothing to name.
-		return namesRefused
-			? $"{reported}; the names did not fit the " +
-			  $"{MaximumSearchContentCharacters.ToString(CultureInfo.InvariantCulture)}-character " +
-			  "search cap, so none were written."
-			: $"{reported}.";
-	}
-
 	internal static string FormatSearchBoundaryNotice(McpSearchBoundary boundary, bool hasStoredContinuation)
 	{
 		var prefix = boundary.IsComplete ? "[Search boundary] complete" : "[Search boundary] partial";
@@ -5065,15 +5026,16 @@ internal sealed partial class DevProjexMcpTools(
 			: "[Search boundary] partial; available matches are shown below.";
 	}
 
-	private static string? FormatSearchNextRead(
+	internal static string? FormatSearchNextRead(
 		McpSearchBoundary boundary,
 		bool hasStoredContinuation,
 		bool declarationsToRead)
 	{
 		if (hasStoredContinuation)
 			return "[Next read] Call read_pack with the reported pack_id for the remaining retained matches.";
+		// The declaration list above already is the continuation; a rerun would only repeat it.
 		if (declarationsToRead)
-			return ReadDeclarationsNotice;
+			return null;
 		return boundary.IsComplete
 			? null
 			: "[Next read] Narrow pattern, paths, or include_patterns and rerun the search.";

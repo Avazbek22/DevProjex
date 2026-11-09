@@ -273,16 +273,16 @@ public sealed partial class McpServerProcessTests
 		Assert.Contains("src/Helper.cs\nin P.Helper.Assist\n5:", Normalize(code), StringComparison.Ordinal);
 		Assert.DoesNotContain("src/App.cs:5:", code, StringComparison.Ordinal);
 		Assert.DoesNotContain("src/Helper.cs:5:", code, StringComparison.Ordinal);
-		Assert.Contains("[Symbols] annotated=2 · files-without-declarations=0.", code, StringComparison.Ordinal);
+		Assert.DoesNotContain("[Symbols] annotated=", code, StringComparison.Ordinal);
 
 		// A declaration name is project text, so it stays inside the untrusted block with the match
-		// lines, and only the counts are trusted.
+		// lines.
 		var untrustedEnd = code.LastIndexOf("</untrusted-data-", StringComparison.Ordinal);
 		Assert.True(untrustedEnd > 0);
 		Assert.True(
 			code.IndexOf("in P.App.Run", StringComparison.Ordinal) < untrustedEnd,
 			"The declaration name must not be reported outside the untrusted block.");
-		Assert.True(code.IndexOf("[Symbols]", StringComparison.Ordinal) > untrustedEnd);
+		Assert.DoesNotContain("in P.App.Run", code[untrustedEnd..], StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -379,11 +379,11 @@ public sealed partial class McpServerProcessTests
 		// headed again. That collapsing is the whole saving over a row per hit.
 		Assert.Equal(1, CountOccurrences(text, "in P.App.One\n"));
 		Assert.Equal(1, CountOccurrences(text, "in P.Other.Three\n"));
-		Assert.Contains("[Symbols] annotated=3 · files-without-declarations=0.", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("[Symbols] annotated=", text, StringComparison.Ordinal);
 	}
 
 	[Fact]
-	public async Task RealProcessCountsAHitInAFileThatDeclaresNothingInsteadOfNamingIt()
+	public async Task RealProcessWritesNoHeaderOrCounterForAHitInAFileThatDeclaresNothing()
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("prose-project");
@@ -399,10 +399,10 @@ public sealed partial class McpServerProcessTests
 
 		// Matches are grouped under their path, so the file heads its own block and the
 		// matched line carries only its number. Nothing declares anything here, so no header
-		// is written and the coverage notice says so rather than going silent.
+		// is written, and no counter line stands in for the absent header.
 		Assert.Contains("README.md\n3:marker line", prose, StringComparison.Ordinal);
 		Assert.DoesNotContain("\nin ", prose, StringComparison.Ordinal);
-		Assert.Contains("[Symbols] annotated=0 · files-without-declarations=1.", prose, StringComparison.Ordinal);
+		Assert.DoesNotContain("[Symbols]", prose, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -453,7 +453,7 @@ public sealed partial class McpServerProcessTests
 		// The selector list still ships on a cut response: that is exactly when a caller would
 		// otherwise open a whole file to find a declaration it is already holding.
 		Assert.Contains("Declarations found (path, symbol, lines):", wide, StringComparison.Ordinal);
-		Assert.Contains("[Symbols] annotated=0", wide, StringComparison.Ordinal);
+		Assert.DoesNotContain("[Symbols] annotated=", wide, StringComparison.Ordinal);
 		Assert.True(wide.Length <= 18_000, $"Capped search returned {wide.Length} characters.");
 	}
 
@@ -569,15 +569,14 @@ public sealed partial class McpServerProcessTests
 				["max_results"] = 200
 			})));
 
-		// Placement is all or nothing, so nothing is named. The response says that rather than
-		// going silent about naming it computed and then refused to spend.
+		// Placement is all or nothing, so nothing is named. The boundary line carries that fact:
+		// no declaration file was named and the response character bound applied.
 		Assert.DoesNotContain("[Search truncated]", text, StringComparison.Ordinal);
 		Assert.DoesNotContain("\nin P.W", text, StringComparison.Ordinal);
-		Assert.Contains(
-			"[Symbols] annotated=0 · files-without-declarations=0; the names did not fit the " +
-			"16000-character search cap, so none were written.",
-			text,
-			StringComparison.Ordinal);
+		Assert.DoesNotContain("[Symbols] annotated=", text, StringComparison.Ordinal);
+		Assert.Matches(
+			@"\[Search boundary\] partial · [^\n]*declaration files named=0 · limits=[^\n]*response-characters",
+			text);
 	}
 
 	[Fact]
@@ -604,17 +603,12 @@ public sealed partial class McpServerProcessTests
 		Assert.Equal(1, CountOccurrences(text, "src/App.cs P.App.One 5-5"));
 		Assert.Equal(1, CountOccurrences(text, "src/App.cs P.App.Two 7-7"));
 
-		// The sentence that turns the list into a call is a constant and sits outside the block,
-		// while the paths and names inside it are project text and stay in.
+		// The paths and names in the list are project text and stay inside the block. The list is
+		// the continuation itself, so no instruction line repeats it after the block.
 		var untrustedEnd = text.LastIndexOf("</untrusted-data-", StringComparison.Ordinal);
 		Assert.True(text.IndexOf("src/App.cs P.App.One 5-5", StringComparison.Ordinal) < untrustedEnd);
-		Assert.True(
-			text.IndexOf("[Next read]", StringComparison.Ordinal) > untrustedEnd,
-			"The instruction must be trusted text, outside the untrusted block.");
-		Assert.Contains(
-			"[Next read] Read only declarations needed for the task; batch known selections in one get_file call.",
-			text,
-			StringComparison.Ordinal);
+		Assert.DoesNotContain("[Next read]", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("batch known selections", text, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -808,7 +802,7 @@ public sealed partial class McpServerProcessTests
 				["pattern"] = "route-marker-(alpha|beta)",
 				["context_lines"] = 0
 			})));
-		Assert.Contains("[Next read] Read only declarations needed for the task", searched, StringComparison.Ordinal);
+		Assert.DoesNotContain("[Next read] Read only declarations", searched, StringComparison.Ordinal);
 		var selectors = Regex.Matches(
 			SpotlightBody(searched),
 			@"^(?<path>src/[^ ]+\.cs) (?<symbol>[^ ]+) (?<start>[0-9]+)-(?<end>[0-9]+)$",
