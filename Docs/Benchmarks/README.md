@@ -22,7 +22,7 @@ Related documents:
 | [2026-08-29](2026-08-29.md) | Token estimate calibrated against cl100k and o200k; divisor 4 kept |
 | [2026-09-07](2026-09-07.md) | Scan speed against Repomix; frozen ranking protocol: importance ranking stays experimental, `focus-v1` passes its gates |
 | [2026-09-08](2026-09-08.md) | First hands-on comparison with Repomix; the defect list fixed in #308 and #331 |
-| [2026-09-09](2026-09-09.md) | Review of ranking and dependency facts; three verified defects (#338) |
+| [2026-09-09](2026-09-09.md) | Ranking and dependency facts checked against the code; three defects confirmed (#338) |
 | [2026-09-10](2026-09-10.md) | First blind runs; `get_file` hidden by its schema and the redactor breaking code, both fixed in #342 |
 | [2026-09-11](2026-09-11.md) | The task profile decides which tool is cheaper; whole-file reads explained; Python constants rolled back; the ranking timing gate replaced |
 | [2026-09-12](2026-09-12.md) | Unused capabilities, silent truncation and "tokens" that were characters divided by four; #391 and #392 |
