@@ -1,0 +1,136 @@
+{
+ "series": "rich-fluentvalidation",
+ "description": "Four tasks on two repositories never used before, first run on 2026-11-09.",
+ "autocrlf": true,
+ "repos": {
+  "rich": {
+   "language": "Python",
+   "url": "https://github.com/Textualize/rich.git",
+   "tag": "v14.3.4",
+   "commit": "ee8378c3bbbd7c75abc2f55c6c19e83b218ae81d",
+   "files": 553
+  },
+  "fluentvalidation": {
+   "language": "C#",
+   "url": "https://github.com/FluentValidation/FluentValidation.git",
+   "tag": "12.2.0",
+   "commit": "299ef377bde844af7d28b7aa21786a6853f930e3",
+   "files": 296
+  }
+ },
+ "tasks": [
+  {
+   "id": "P1",
+   "repo": "rich",
+   "kind": "change impact",
+   "text": "I am going to change the cell-width helper in rich/cells.py that pads or crops a string to an exact cell width (set_cell_size) so that it takes a new required argument. List every place in the library that calls it and would break, naming the enclosing function or method of each call, and the test files that exercise it directly or through those callers.",
+   "key": {
+    "core": [
+     "rich/cells.py"
+    ],
+    "supporting": [
+     "rich/rule.py",
+     "rich/segment.py",
+     "rich/text.py"
+    ],
+    "tests": [
+     "tests/test_cells.py"
+    ],
+    "acceptable": [
+     "tests/test_text.py",
+     "tests/test_segment.py",
+     "tests/test_rule.py"
+    ],
+    "unrelated": [
+     "rich/_wrap.py",
+     "rich/panel.py",
+     "rich/containers.py",
+     "rich/pretty.py"
+    ],
+    "notes": "set_cell_size is defined in rich/cells.py and called in exactly three library files: rich/rule.py (Rule.__rich_console__, twice), rich/segment.py (Segment.adjust_line_length) and rich/text.py (Text.truncate, twice). tests/test_cells.py tests it directly; tests/test_text.py (truncate), tests/test_segment.py (adjust_line_length) and tests/test_rule.py exercise the callers. Other modules import only cell_len or chop_cells from rich.cells and do not call set_cell_size."
+   }
+  },
+  {
+   "id": "P2",
+   "repo": "rich",
+   "kind": "where to change",
+   "text": "I want to add a new progress column to rich that shows the estimated wall-clock time when a task will finish, following the project's conventions exactly. Tell me which existing column to use as the template, where columns are defined and how they plug into Progress, where the available columns are documented for users, and which test file and existing tests to follow. List the files with one reason each.",
+   "key": {
+    "core": [
+     "rich/progress.py"
+    ],
+    "supporting": [
+     "docs/source/progress.rst"
+    ],
+    "tests": [
+     "tests/test_progress.py"
+    ],
+    "acceptable": [
+     "CHANGELOG.md",
+     "examples/downloader.py",
+     "docs/source/reference/progress.rst"
+    ],
+    "unrelated": [],
+    "notes": "All columns are ProgressColumn subclasses in rich/progress.py implementing render(task); TimeRemainingColumn (uses task.time_remaining and max_refresh) is the closest template, TimeElapsedColumn is also valid. Progress takes columns as positional arguments and Progress.get_default_columns lists the defaults. docs/source/progress.rst lists the available columns; docs/source/reference/progress.rst is the autodoc page. tests/test_progress.py has per-column tests such as the TimeRemainingColumn tests; CHANGELOG.md records additions."
+   }
+  },
+  {
+   "id": "C1",
+   "repo": "fluentvalidation",
+   "kind": "change impact",
+   "text": "I am going to add a new required parameter to the asynchronous validation method of FluentValidation's async property validator interface (IAsyncPropertyValidator.IsValidAsync). List every implementation in the library and in the test suite that would break, every place that calls the method, and the rule-builder surface that accepts async validators.",
+   "key": {
+    "core": [
+     "src/FluentValidation/Validators/IPropertyValidator.cs"
+    ],
+    "supporting": [
+     "src/FluentValidation/Validators/AsyncPropertyValidator.cs",
+     "src/FluentValidation/Validators/AsyncPredicateValidator.cs",
+     "src/FluentValidation/Validators/ChildValidatorAdaptor.cs",
+     "src/FluentValidation/Internal/RuleComponent.cs",
+     "src/FluentValidation/Internal/RuleComponentForNullableStruct.cs",
+     "src/FluentValidation/Internal/RuleBuilder.cs",
+     "src/FluentValidation/Syntax.cs",
+     "src/FluentValidation/DefaultValidatorExtensions.cs"
+    ],
+    "tests": [
+     "src/FluentValidation.Tests/ForEachRuleTests.cs"
+    ],
+    "acceptable": [
+     "docs/async.md",
+     "docs/custom-validators.md"
+    ],
+    "unrelated": [],
+    "notes": "IAsyncPropertyValidator<T,TProperty> is declared in src/FluentValidation/Validators/IPropertyValidator.cs with Task<bool> IsValidAsync(ValidationContext<T>, TProperty, CancellationToken). Implementations: AsyncPropertyValidator (abstract base; AsyncPredicateValidator overrides it) and ChildValidatorAdaptor in the library, MyAsyncNotNullValidator in src/FluentValidation.Tests/ForEachRuleTests.cs. Callers: Internal/RuleComponent.cs and Internal/RuleComponentForNullableStruct.cs. Surface that accepts async validators: IRuleBuilder.SetAsyncValidator in Syntax.cs, its implementation in Internal/RuleBuilder.cs, and DefaultValidatorExtensions.cs (SetAsyncValidator overload, MustAsync)."
+   }
+  },
+  {
+   "id": "C2",
+   "repo": "fluentvalidation",
+   "kind": "where to change",
+   "text": "I want to add a new built-in FluentValidation rule, .IsUlid(), that checks a string is a valid ULID, following the project's conventions exactly. Tell me which existing built-in validator to copy as a template, where the extension method that users call must be added, where the default error message must be defined, which documentation page lists the built-in validators, and which test file to follow. List the files with one reason each.",
+   "key": {
+    "core": [
+     "src/FluentValidation/DefaultValidatorExtensions.cs",
+     "src/FluentValidation/Resources/Languages/EnglishLanguage.cs"
+    ],
+    "supporting": [
+     "src/FluentValidation/Validators/CreditCardValidator.cs",
+     "docs/built-in-validators.md"
+    ],
+    "tests": [
+     "src/FluentValidation.Tests/CreditCardValidatorTests.cs"
+    ],
+    "acceptable": [
+     "src/FluentValidation/Validators/EmailValidator.cs",
+     "src/FluentValidation.Tests/EmailValidatorTests.cs",
+     "src/FluentValidation/Validators/PropertyValidator.cs",
+     "src/FluentValidation/Resources/LanguageManager.cs",
+     "src/FluentValidation.Tests/LanguageManagerTests.cs"
+    ],
+    "unrelated": [],
+    "notes": "Built-in validators live in src/FluentValidation/Validators as PropertyValidator subclasses whose Name matches the message key; CreditCardValidator or EmailValidator are close templates. The user-facing method goes into src/FluentValidation/DefaultValidatorExtensions.cs. Default messages are keyed by validator name in src/FluentValidation/Resources/Languages, English in EnglishLanguage.cs (for example the CreditCardValidator key); other language files are optional. docs/built-in-validators.md documents the built-in rules. Tests follow src/FluentValidation.Tests/CreditCardValidatorTests.cs."
+   }
+  }
+ ]
+}

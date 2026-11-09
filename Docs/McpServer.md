@@ -1198,16 +1198,16 @@ every match was kept, and only the written response stopped at `max_results` or 
 character cap, the opening line says so instead: `[Search boundary] partial output:
 every selected file was searched; W of R matches are written here and the rest are
 stored for read_pack.` (ending after `written here.` when nothing is stored). The
-closing counters and `limits=` stay the same. It emits exactly one primary next step for
+closing counters and `limits=` stay the same. It emits at most one primary next step for
 the limiting condition. With a stored continuation that step is `[Next read] Call
-read_pack with the reported pack_id for the remaining retained matches.` When known
-declarations are the needed continuation it is `[Next read] Read only declarations
-needed for the task; batch known selections in one get_file call.` A response with
-nothing left to read carries no `[Next read]` line: a complete search without listed
-declarations, or one whose only listed declaration is shown whole. Consequently, a
-complete zero-match response is evidence that the whole effective selection was
-searched, while a partial zero-match response is only evidence about its inspected
-sources.
+read_pack with the reported pack_id for the remaining retained matches.` When the
+response lists declarations still to read, that list is the continuation and no
+`[Next read]` line repeats it. Otherwise a partial search ends with `[Next read] Narrow
+pattern, paths, or include_patterns and rerun the search.` A response with nothing
+left to read carries no `[Next read]` line, and a complete search never does.
+Consequently, a complete zero-match response is evidence that the whole effective
+selection was searched, while a partial zero-match response is only evidence about
+its inspected sources.
 
 Unavailable compression is reduced optimization, not unsafe output. The affected
 file remains complete, and `analyze`, `pack_context`, and `get_file` append
@@ -1537,11 +1537,12 @@ only to close a run that a name had opened; a file whose hits never sit in a
 declaration carries no header at all.
 
 A declaration name is text this project wrote, so it stays inside the untrusted
-block with the match lines it describes. Only counts leave it, as one trusted
-line: `[Symbols] annotated=N · files-without-declarations=K.`, which
-distinguishes a hit that sits in no declaration from a file that was never
-parsed, plus a `files-past-the-64-file naming limit=` term when a search touched
-more files than the naming bound allows.
+block with the match lines it describes. Naming adds no trusted line of its own.
+A search that touched more files than the 64-file naming bound reports
+`limits=annotation-files` in its `[Search boundary]` line, names that did not fit the
+character cap report `limits=response-characters` with `declaration files named=0`,
+and with `symbols=true` a file that has no declaration index is reported by
+`[Symbols coverage] declarations-not-indexed=N`.
 
 The names come from bounded navigation extraction over files that actually produced
 hits: one parse per matching file as it passes, never one per hit, and never over
@@ -1750,14 +1751,10 @@ or in `read_pack`. Run these checks with:
 dotnet test Tests/DevProjex.Tests.Terminal/DevProjex.Tests.Terminal.csproj -c Release -m:1 --filter "FullyQualifiedName~RealProcessPreservesTheExactNameMatchAtTheEndOfTheSearchSlice|FullyQualifiedName~RealProcessKeepsEveryMatchingFileWhenTheBodyWouldNeedItsSpace|FullyQualifiedName~RealProcessPrintsOverlappingDeclarationContextOnlyOnce|FullyQualifiedName~RealProcessBodyPlacementKeepsEveryRetainedMatchInlineOrInTheStoredPack"
 ```
 
-When declaration reads are the applicable continuation, one trusted constant closes it:
-
-```text
-[Next read] Read only declarations needed for the task; batch known selections in one get_file call.
-```
-
-It is left out when the only listed declaration's body is already shown whole, which
-`[Declaration body] shown=1/1; no other declarations require a read.` states instead.
+When declaration reads are the applicable continuation, the list itself is the next
+step: no trusted instruction line follows it. When the only listed declaration's body
+is already shown whole, `[Declaration body] shown=1/1; no other declarations require a
+read.` states that nothing is left to read.
 
 The list ships on every search that showed a hit, including a search the character
 cap cut, because a cut response is exactly when a caller would otherwise open a whole

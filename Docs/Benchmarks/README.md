@@ -61,6 +61,8 @@ Related documents:
 
 ## How the sessions were run
 
+- **Stand.** [tools/AgentBenchmark](../../tools/AgentBenchmark/README.md) reproduces the November
+  series from a checkout: pinned clones, host builds, runner, key metrics, judge and report.
 - **Client.** Headless Claude Code (`claude -p`) with `--strict-mcp-config` and no built-in file
   tools, so the agent can only use the MCP server under test.
 - **Model.** Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) for every session and every judge

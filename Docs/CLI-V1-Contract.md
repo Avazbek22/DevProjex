@@ -1360,9 +1360,8 @@ MCP `search_project` names the declaration each shown hit sits inside. It takes 
 input: inside the untrusted block, an `in <Name>` header heads its hits within the
 file's own block and is written again only when the declaration changes, the way the
 path is written once. A run of hits that belongs to no declaration is closed with the
-constant `in (no declaration)` so the header above it stops claiming them. One trusted
-`[Symbols] annotated=N · files-without-declarations=K.` line reports coverage in
-counts. Names come from the dependency index over the files that produced hits, one
+constant `in (no declaration)` so the header above it stops claiming them. Naming adds
+no trusted counter line. Names come from the dependency index over the files that produced hits, one
 bounded parse per such file. Naming shares the 16,000-character search cap rather
 than adding to it, a response that cap already cut carries none, and placement is all
 or nothing, so no response grows past the bound it already had. Match lines, group

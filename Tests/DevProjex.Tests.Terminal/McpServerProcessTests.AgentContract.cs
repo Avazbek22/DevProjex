@@ -51,7 +51,7 @@ public sealed partial class McpServerProcessTests
 	}
 
 	[Fact]
-	public async Task RealProcessSearchPointsOnlyAtNeededKnownDeclarationsWhenNothingIsStored()
+	public async Task RealProcessSearchListsKnownDeclarationsWithoutAReadInstructionWhenNothingIsStored()
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
@@ -73,10 +73,8 @@ public sealed partial class McpServerProcessTests
 			})));
 
 		Assert.Contains("[Declaration body] shown=1/2 · other declarations=1.", text, StringComparison.Ordinal);
-		Assert.Contains(
-			"[Next read] Read only declarations needed for the task; batch known selections in one get_file call.",
-			text,
-			StringComparison.Ordinal);
+		Assert.DoesNotContain("batch known selections", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("[Next read]", text, StringComparison.Ordinal);
 		Assert.DoesNotContain("[Read declarations]", text, StringComparison.Ordinal);
 		Assert.DoesNotContain("in full", text, StringComparison.Ordinal);
 	}
