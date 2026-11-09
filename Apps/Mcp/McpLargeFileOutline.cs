@@ -13,18 +13,23 @@ internal sealed record McpLargeFileOutline(int HeadLines, string Map, int Entrie
 /// The start and the structure of a long file, returned instead of its whole text when a read
 /// names no range. Structure comes from the protected text being returned: declarations for code,
 /// top-level keys for JSON, headings for Markdown. A file without at least two structure entries
-/// has no outline and is read whole, as before.
+/// has no outline and is read whole, as before. A structure of more than 40 entries is listed by its
+/// top level only, each entry with the number of its nested entries, or, when that level holds one
+/// or two entries, by those entries and their direct members; the list stays within 2,500 characters.
 /// </summary>
 internal static partial class McpLargeFileOutlineBuilder
 {
 	public const int MinimumLines = 300;
-	public const int MinimumCharacters = 12_000;
+	public const int MinimumCharacters = 20_000;
 	private const int MaximumHeadLines = 40;
 	private const int MaximumHeadCharacters = 3_000;
 	private const int MaximumCodeHeadLines = 80;
 	private const int MaximumCodeHeadCharacters = 4_000;
 	private const int MaximumEntries = 80;
 	private const int MaximumNestingShown = 2;
+	private const int MaximumFullEntries = 40;
+	private const int MaximumMapCharacters = 2_500;
+	private const int MaximumTopLevelExpanded = 2;
 
 	public static bool Applies(string content) =>
 		content.Length > MinimumCharacters && CountLines(content) > MinimumLines;
@@ -42,36 +47,138 @@ internal static partial class McpLargeFileOutlineBuilder
 		var lines = content.Split('\n');
 		var extension = Path.GetExtension(relativePath).ToLowerInvariant();
 		var isCode = extension is not (".json" or ".md" or ".mdx" or ".markdown");
-		var entries = extension switch
+		// One level deeper than listed, so a member shown in place of its type can count its own members.
+		var counted = extension switch
 		{
 			".json" => JsonEntries(lines, cancellationToken),
 			".md" or ".mdx" or ".markdown" => MarkdownEntries(lines, cancellationToken),
 			_ => DeclarationEntries(navigation(), lines.Length)
 		};
-		if (entries.Count < 2)
+		counted = WithoutParentNames(counted);
+		var entries = counted.Where(static entry => entry.Depth < MaximumNestingShown).ToArray();
+		if (entries.Length < 2)
 			return null;
-		var map = new StringBuilder();
-		foreach (var entry in entries.Take(MaximumEntries))
-		{
-			cancellationToken.ThrowIfCancellationRequested();
-			map.Append(' ', 2 * Math.Min(entry.Depth, MaximumNestingShown - 1))
-				.Append(entry.StartLine.ToString(CultureInfo.InvariantCulture))
-				.Append('-')
-				.Append(entry.EndLine.ToString(CultureInfo.InvariantCulture))
-				.Append(' ')
-				.Append(McpTextEscaping.EscapeSingleLine(entry.Label))
-				.Append('\n');
-		}
-		if (entries.Count > MaximumEntries)
-			map.Append("(+").Append((entries.Count - MaximumEntries).ToString(CultureInfo.InvariantCulture)).Append(" more)\n");
+		var map = FormatMap(entries.Length > MaximumFullEntries ? CompactEntries(counted) : entries, cancellationToken);
 		// Code keeps its whole preamble, imports included, when it ends early enough.
 		var head = isCode && entries[0].StartLine > 1
 			? HeadLineCount(lines, Math.Min(entries[0].StartLine - 1, MaximumCodeHeadLines), MaximumCodeHeadCharacters)
 			: HeadLineCount(lines, MaximumHeadLines, MaximumHeadCharacters);
-		return new McpLargeFileOutline(head, map.ToString(), entries.Count);
+		return new McpLargeFileOutline(head, map, entries.Length);
 	}
 
-	private readonly record struct OutlineEntry(int StartLine, int EndLine, int Depth, string Label);
+	/// <param name="Kind">The declaration kind shown after the name; null for JSON keys and headings.</param>
+	/// <param name="Members">Nested entries, counted only when a large structure is listed compactly.</param>
+	private readonly record struct OutlineEntry(int StartLine, int EndLine, int Depth, string Name, string? Kind, int Members = 0);
+
+	// The top level with member counts; one or two top-level entries are each followed by
+	// their direct members, which then carry their own counts.
+	private static IReadOnlyList<OutlineEntry> CompactEntries(IReadOnlyList<OutlineEntry> entries)
+	{
+		var topLevel = WithMemberCounts(entries, 0);
+		if (topLevel.Count > MaximumTopLevelExpanded)
+			return topLevel.Select(static index => index.Entry).ToArray();
+		var members = WithMemberCounts(entries, 1);
+		var compact = new List<OutlineEntry>();
+		foreach (var parent in topLevel)
+		{
+			compact.Add(parent.Entry);
+			var next = topLevel.Where(other => other.Index > parent.Index).Select(static other => other.Index)
+				.DefaultIfEmpty(int.MaxValue).First();
+			compact.AddRange(members
+				.Where(member => member.Index > parent.Index && member.Index < next)
+				.Select(static member => member.Entry));
+		}
+		return compact;
+	}
+
+	private static readonly string[] MemberSeparators = [".", "::", "#"];
+
+	// A nested entry drops the name of the entry it sits in when it repeats it: "Client.send" under "Client" reads "send".
+	private static IReadOnlyList<OutlineEntry> WithoutParentNames(IReadOnlyList<OutlineEntry> entries)
+	{
+		var parents = new List<string>();
+		var shortened = new List<OutlineEntry>(entries.Count);
+		foreach (var entry in entries)
+		{
+			if (parents.Count > entry.Depth)
+				parents.RemoveRange(entry.Depth, parents.Count - entry.Depth);
+			var name = entry.Name;
+			if (entry.Depth > 0 && parents.Count == entry.Depth)
+				name = WithoutPrefix(name, parents[^1]);
+			while (parents.Count < entry.Depth)
+				parents.Add(string.Empty);
+			parents.Add(entry.Name);
+			shortened.Add(entry with { Name = name });
+		}
+		return shortened;
+	}
+
+	private static string WithoutPrefix(string name, string parent)
+	{
+		if (parent.Length == 0 || !name.StartsWith(parent, StringComparison.Ordinal))
+			return name;
+		foreach (var separator in MemberSeparators)
+		{
+			if (string.CompareOrdinal(name, parent.Length, separator, 0, separator.Length) == 0 &&
+				name.Length > parent.Length + separator.Length)
+				return name[(parent.Length + separator.Length)..];
+		}
+		return name;
+	}
+
+	// Entries of one depth with the number of entries one level deeper listed after each of them.
+	private static IReadOnlyList<(int Index, OutlineEntry Entry)> WithMemberCounts(IReadOnlyList<OutlineEntry> entries, int depth)
+	{
+		var selected = new List<(int Index, OutlineEntry Entry)>();
+		for (var index = 0; index < entries.Count; index++)
+		{
+			var entry = entries[index];
+			if (entry.Depth == depth)
+				selected.Add((index, entry));
+			else if (entry.Depth < depth)
+				selected.Add((-1, entry));
+			else if (entry.Depth == depth + 1 && selected.Count > 0 && selected[^1].Index >= 0)
+				selected[^1] = selected[^1] with { Entry = selected[^1].Entry with { Members = selected[^1].Entry.Members + 1 } };
+		}
+		return selected.Where(static item => item.Index >= 0).ToArray();
+	}
+
+	private static string FormatMap(IReadOnlyList<OutlineEntry> entries, CancellationToken cancellationToken)
+	{
+		// Room for the closing "(+N more)" line, so the whole list stays within its cap.
+		var reserved = $"(+{entries.Count.ToString(CultureInfo.InvariantCulture)} more)\n".Length;
+		var map = new StringBuilder();
+		var written = 0;
+		foreach (var entry in entries.Take(MaximumEntries))
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var line = FormatEntry(entry);
+			var isLast = written == entries.Count - 1;
+			if (map.Length + line.Length > MaximumMapCharacters - (isLast ? 0 : reserved))
+				break;
+			map.Append(line);
+			written++;
+		}
+		if (written < entries.Count)
+			map.Append("(+").Append((entries.Count - written).ToString(CultureInfo.InvariantCulture)).Append(" more)\n");
+		return map.ToString();
+	}
+
+	private static string FormatEntry(OutlineEntry entry)
+	{
+		var members = entry.Members.ToString(CultureInfo.InvariantCulture) + (entry.Members == 1 ? " member" : " members");
+		var suffix = (entry.Kind, entry.Members) switch
+		{
+			(null, 0) => string.Empty,
+			(null, _) => $" ({members})",
+			(_, 0) => $" ({entry.Kind})",
+			_ => $" ({entry.Kind}, {members})"
+		};
+		return new string(' ', 2 * Math.Min(entry.Depth, MaximumNestingShown - 1)) +
+			   entry.StartLine.ToString(CultureInfo.InvariantCulture) + "-" +
+			   entry.EndLine.ToString(CultureInfo.InvariantCulture) + " " +
+			   McpTextEscaping.EscapeSingleLine(entry.Name) + suffix + "\n";
+	}
 
 	private static int HeadLineCount(IReadOnlyList<string> lines, int maximumLines, int maximumCharacters)
 	{
@@ -101,13 +208,14 @@ internal static partial class McpLargeFileOutlineBuilder
 			var depth = shown.Count(other => !ReferenceEquals(other, declaration) &&
 											 other.StartLine <= declaration.StartLine && declaration.EndLine <= other.EndLine &&
 											 (other.StartLine != declaration.StartLine || other.EndLine != declaration.EndLine));
-			if (depth >= MaximumNestingShown)
+			if (depth > MaximumNestingShown)
 				continue;
 			entries.Add(new OutlineEntry(
 				declaration.StartLine,
 				Math.Min(declaration.EndLine, lineCount),
 				depth,
-				$"{declaration.Name} ({KindLabel(declaration.Kind)})"));
+				declaration.Name,
+				KindLabel(declaration.Kind)));
 		}
 		return entries;
 	}
@@ -142,7 +250,7 @@ internal static partial class McpLargeFileOutlineBuilder
 		for (var index = 0; index < starts.Count; index++)
 		{
 			var end = index + 1 < starts.Count ? starts[index + 1].Line - 1 : Math.Max(starts[index].Line, lastContentLine - 1);
-			entries.Add(new OutlineEntry(starts[index].Line, Math.Max(starts[index].Line, end), 0, $"\"{starts[index].Key}\""));
+			entries.Add(new OutlineEntry(starts[index].Line, Math.Max(starts[index].Line, end), 0, $"\"{starts[index].Key}\"", null));
 		}
 		return entries;
 	}
@@ -202,9 +310,9 @@ internal static partial class McpLargeFileOutlineBuilder
 				}
 			}
 			var depth = headings[index].Level - minimumLevel;
-			if (depth >= MaximumNestingShown)
+			if (depth > MaximumNestingShown)
 				continue;
-			entries.Add(new OutlineEntry(headings[index].Line, Math.Max(headings[index].Line, end), depth, headings[index].Title));
+			entries.Add(new OutlineEntry(headings[index].Line, Math.Max(headings[index].Line, end), depth, headings[index].Title, null));
 		}
 		return entries;
 	}
