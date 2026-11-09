@@ -136,13 +136,14 @@ public sealed partial class McpServerIntegrationTests
 			}
 		}
 		source.Append("def helper():\n    return 1\n");
+		source.Append("class Lonely:\n    def run(self):\n        return 1\n");
 		WriteProjectFile(project, "pkg/services.py", source.ToString());
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
 
 		var text = Text(await server.CallAsync("get_file", new Dictionary<string, object?> { ["path"] = "pkg/services.py" }));
 
 		Assert.Contains("Structure:\n3-13 Service0 (type, 2 members)\n14-24 Service1 (type, 2 members)\n", text, StringComparison.Ordinal);
-		Assert.Contains("322-332 Service29 (type, 2 members)\n333-334 helper (function)", text, StringComparison.Ordinal);
+		Assert.Contains("322-332 Service29 (type, 2 members)\n333-334 helper (function)\n335-337 Lonely (type, 1 member)\n", text, StringComparison.Ordinal);
 		Assert.DoesNotContain("Service0.load", text, StringComparison.Ordinal);
 		Assert.DoesNotContain("more)", text, StringComparison.Ordinal);
 	}
@@ -194,6 +195,58 @@ public sealed partial class McpServerIntegrationTests
 		var listed = map.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length - 1;
 		Assert.Equal(functions, listed + int.Parse(more.Groups["count"].Value, System.Globalization.CultureInfo.InvariantCulture));
 		Assert.StartsWith("1-7 function_with_a_rather_long_and_descriptive_name_0 (function)\n", map, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task GetFileListsTheMethodsOfASingleLargeCSharpClass()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		WriteProjectFile(project, "src/Big.cs", CSharpClasses(("Big", 45)));
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var text = Text(await server.CallAsync("get_file", new Dictionary<string, object?> { ["path"] = "src/Big.cs" }));
+
+		Assert.Contains("Structure:\n3-365 Fixture.Big (type, 45 members)\n  5-12 Fixture.Big.Method0 (method)\n  13-20 Fixture.Big.Method1 (method)\n", text, StringComparison.Ordinal);
+		Assert.Contains("  69-76 Fixture.Big.Method8 (method)\n", text, StringComparison.Ordinal);
+		Assert.Contains("  357-364 Fixture.Big.Method44 (method)\n", text, StringComparison.Ordinal);
+		Assert.DoesNotContain(" more)", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task GetFileListsTheMembersOfBothTopLevelTypesOfALargeFile()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		WriteProjectFile(project, "src/Pair.cs", CSharpClasses(("Reader", 22), ("Writer", 22)));
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var text = Text(await server.CallAsync("get_file", new Dictionary<string, object?> { ["path"] = "src/Pair.cs" }));
+
+		Assert.Contains("Structure:\n3-181 Fixture.Reader (type, 22 members)\n  5-12 Fixture.Reader.Method0 (method)\n", text, StringComparison.Ordinal);
+		Assert.Contains(
+			"  173-180 Fixture.Reader.Method21 (method)\n182-360 Fixture.Writer (type, 22 members)\n  184-191 Fixture.Writer.Method0 (method)\n",
+			text,
+			StringComparison.Ordinal);
+	}
+
+	// Classes of methods eight lines each, after a two-line preamble.
+	private static string CSharpClasses(params (string Name, int Methods)[] classes)
+	{
+		var source = new StringBuilder("namespace Fixture;\n\n");
+		foreach (var (name, methods) in classes)
+		{
+			source.Append($"public sealed class {name}\n{{\n");
+			for (var index = 0; index < methods; index++)
+			{
+				source.Append($"\tpublic int Method{index}(int value)\n\t{{\n");
+				for (var line = 0; line < 5; line++)
+					source.Append($"\t\tvalue = checked(value + {index} * {line} + 1000000000 - 2000000000 + 3000000000 - 1000000000);\n");
+				source.Append("\t}\n");
+			}
+			source.Append("}\n");
+		}
+		return source.ToString();
 	}
 
 	private static Dictionary<string, object?> Range(string path, int start, int end) => new()
