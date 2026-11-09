@@ -16,6 +16,7 @@ public sealed class McpTreeDepthProjectionTests
 		TreeNodeDescriptor Node(string path, params TreeNodeDescriptor[] children) =>
 			new(Path.GetFileName(path), Path.Combine(rootPath, path), !path.EndsWith(".ts", StringComparison.Ordinal), false, "", children);
 		var root = Node("", Node("src", Node("src/router", Node("src/router/trie", Node("src/router/trie/node.ts")))));
+		Assert.Equal(2, DevProjexMcpTools.CalculateRequestedTreeDepth(root, ["src/router"], CancellationToken.None));
 		var result = DevProjexMcpTools.PruneRequestedTree(root, depth, ["src/router"], CancellationToken.None);
 		var router = Assert.Single(Assert.Single(result.Children).Children);
 		Assert.Equal(directoryVisible, router.Children.Count > 0);

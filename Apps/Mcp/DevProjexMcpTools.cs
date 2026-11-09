@@ -293,6 +293,8 @@ internal sealed partial class DevProjexMcpTools(
 				format,
 				MaximumTreeLines,
 				cancellationToken);
+			if (HasItems(paths))
+				depthFit = depthFit with { FullDepth = CalculateRequestedTreeDepth(plan.ProjectedTree, paths!, cancellationToken) };
 			// Line counts are known before rendering, so no depth deeper than this can fit; the
 			// character limit is only known by rendering, which stops at the limit.
 			var lineFittingDepth = depthFit.FullTreeFits ? depthFit.FullDepth : depthFit.DeepestCompleteDepth;
@@ -304,7 +306,7 @@ internal sealed partial class DevProjexMcpTools(
 						plan,
 						format,
 						HasItems(paths) ? depthFit.FullDepth : lineFittingDepth,
-						minimumDepth: 1,
+						minimumDepth: HasItems(paths) ? 0 : 1,
 						depthFit.FullDepth,
 						cancellationToken,
 						paths)
@@ -5578,6 +5580,33 @@ internal sealed partial class DevProjexMcpTools(
 		}
 
 		return new McpTreeDepthFit(fullDepth, deepestCompleteDepth);
+	}
+
+	internal static int CalculateRequestedTreeDepth(
+		TreeNodeDescriptor root, IReadOnlyList<string> paths, CancellationToken cancellationToken)
+	{
+		var requested = paths.Select(path => Path.GetFullPath(path, root.FullPath)).ToArray();
+		var pending = new Stack<TreeNodeDescriptor>();
+		pending.Push(root);
+		var maximum = 0;
+		while (pending.TryPop(out var node))
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var nearest = int.MaxValue;
+			foreach (var path in requested)
+			{
+				var relative = PathUtility.GetPortableRelativePath(path, node.FullPath);
+				if (relative == ".")
+					nearest = 0;
+				else if (relative != ".." && !relative.StartsWith("../", StringComparison.Ordinal) && !Path.IsPathRooted(relative))
+					nearest = Math.Min(nearest, relative.Count(character => character == '/') + 1);
+			}
+			if (nearest != int.MaxValue)
+				maximum = Math.Max(maximum, nearest);
+			foreach (var child in node.Children)
+				pending.Push(child);
+		}
+		return maximum;
 	}
 
 	internal static TreeNodeDescriptor PruneRequestedTree(
