@@ -973,7 +973,8 @@ including conditional targets, fallback arrays, and wildcard subpaths. The same
 manifests appear as dependents in `related_files`, with export-key evidence.
 A compiled target is mapped to a source only with explicit `rootDir` and `outDir`
 in the package's readable `tsconfig.json` and a unique source; inherited or referenced
-configurations are not inferred. No source mapping is made over an existing output
+configurations and explicit compilation membership filters are not inferred. Compiled
+source mapping is limited to `.ts`, `.mts`, and `.cts`. No source mapping is made over an existing output
 file. These publication hints do not add import edges to the ranking graph.
 
 `list_projects` and `analyze` return their JSON object only as spotlighted text

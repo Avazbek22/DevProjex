@@ -21,6 +21,18 @@ public sealed class PackageExportMapTests
 	}
 
 	[Fact]
+	public void RootStringAndConditionalRootExportsUseTheDotKey()
+	{
+		foreach (var exports in new[] { "\"./index.ts\"", "{\"types\":\"./index.ts\",\"default\":\"./index.ts\"}", "[\"./missing.ts\",\"./index.ts\"]" })
+		{
+			var documents = new Dictionary<string, string> { ["package.json"] = "{\"exports\":" + exports + "}" };
+			var result = Assert.Single(PackageExportMap.Find(documents, new HashSet<string> { "package.json", "index.ts" }));
+			Assert.Equal(".", result.Key);
+			Assert.Equal("index.ts", result.Target);
+		}
+	}
+
+	[Fact]
 	public void HiddenManifestAndOrdinarySourceHaveNoExports()
 	{
 		var documents = new Dictionary<string, string> { ["package.json"] = """{"exports":"./src/index.ts"}""" };
@@ -41,6 +53,20 @@ public sealed class PackageExportMapTests
 		var files = new HashSet<string> { "package.json", "tsconfig.json", "src/index.ts" };
 		if (ambiguous) files.Add("src/index.tsx");
 		Assert.Equal(expected, PackageExportMap.Find(documents, files).Count > 0);
+	}
+
+	[Theory]
+	[InlineData("\"exclude\":[\"src/**\"],")]
+	[InlineData("\"include\":[\"other/**\"],")]
+	[InlineData("\"extends\":\"./base.json\",")]
+	public void UnprovenCompilationMembershipDoesNotMapCompiledOutput(string configuration)
+	{
+		var documents = new Dictionary<string, string>
+		{
+			["package.json"] = """{"exports":"./dist/index.js"}""",
+			["tsconfig.json"] = "{" + configuration + "\"compilerOptions\":{\"rootDir\":\"src\",\"outDir\":\"dist\"}}"
+		};
+		Assert.Empty(PackageExportMap.Find(documents, new HashSet<string> { "package.json", "tsconfig.json", "src/index.ts" }));
 	}
 
 	[Theory]

@@ -79,6 +79,7 @@ public static class PackageExportMap
 		{
 			using var config = JsonDocument.Parse(content, new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip });
 			if (config.RootElement.ValueKind != JsonValueKind.Object || config.RootElement.TryGetProperty("extends", out _) || config.RootElement.TryGetProperty("references", out _) ||
+				config.RootElement.TryGetProperty("files", out _) || config.RootElement.TryGetProperty("include", out _) || config.RootElement.TryGetProperty("exclude", out _) ||
 				!config.RootElement.TryGetProperty("compilerOptions", out var options) ||
 				options.ValueKind != JsonValueKind.Object ||
 				!options.TryGetProperty("rootDir", out var root) || root.ValueKind != JsonValueKind.String ||
@@ -92,13 +93,16 @@ public static class PackageExportMap
 			outDir = outDir.TrimEnd('/');
 			if (rootDir.Length == 0 || outDir.Length == 0 || root.GetString()!.Contains("..", StringComparison.Ordinal) || output.GetString()!.Contains("..", StringComparison.Ordinal))
 				return new Dictionary<string, string>();
-			if (Path.IsPathRooted(rootDir) || Path.IsPathRooted(outDir) || rootDir.Contains(':') || outDir.Contains(':') || options.TryGetProperty("outFile", out _))
+			if (Path.IsPathRooted(rootDir) || Path.IsPathRooted(outDir) || rootDir.Contains(':') || outDir.Contains(':') ||
+				options.TryGetProperty("outFile", out _) || options.TryGetProperty("declarationDir", out _) ||
+				options.TryGetProperty("noEmit", out var noEmit) && noEmit.ValueKind != JsonValueKind.False)
 				return new Dictionary<string, string>();
 			var prefix = (directory.Length == 0 ? "" : directory + "/") + rootDir + "/";
 			return visibleFiles.Where(IsSource).Where(path => path.StartsWith(prefix, StringComparison.Ordinal))
 				.SelectMany(path => OutputExtensions(path).Select(extension =>
 					(Key: outDir + "/" + Path.ChangeExtension(path[prefix.Length..], null) + extension, Source: path)))
 				.GroupBy(pair => pair.Key, StringComparer.Ordinal).Where(group => group.Count() == 1)
+				.Where(group => Path.GetExtension(group.Single().Source) is ".ts" or ".mts" or ".cts")
 				.Where(group => !visibleFiles.Contains((directory.Length == 0 ? "" : directory + "/") + group.Key))
 				.ToDictionary(group => group.Key, group => group.Single().Source, StringComparer.Ordinal);
 		}
