@@ -1,0 +1,4 @@
+{
+ "server_b": { "product": "v5.2.2 a194709a", "host": "v522" },
+ "server_c": { "product": "Repomix 1.18.1", "repomix": "1.18.1" }
+}
