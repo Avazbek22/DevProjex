@@ -30,6 +30,14 @@ public sealed class NavigationCachePayloadTests
 	}
 
 	[Fact]
+	public void AStringAtTheSourceCharacterLimitRoundTrips()
+	{
+		var declaration = new NavigationDeclaration(new string('x', 2 * 1024 * 1024), NavigationSymbolKind.Type, null, 1, 1, "fingerprint");
+		var payload = NavigationCachePayload.Encode([declaration], TestContext.Current.CancellationToken);
+		Assert.Equal(declaration, Assert.Single(NavigationCachePayload.Decode(payload, TestContext.Current.CancellationToken)));
+	}
+
+	[Fact]
 	public void EncodingObservesCancellationAfterEnumerationHasStarted()
 	{
 		using var cancelled = new CancellationTokenSource();
