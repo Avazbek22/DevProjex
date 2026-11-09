@@ -99,7 +99,8 @@ internal static class McpSearchTextScanner
 			for (var index = active.Count - 1; index >= 0; index--)
 			{
 				var pending = active[index];
-				pending.Lines.Add(line);
+				if (line.Offset < content.Length)
+					pending.Lines.Add(line);
 				pending.RemainingContextLines--;
 				if (pending.RemainingContextLines == 0)
 				{
@@ -189,7 +190,9 @@ internal static class McpSearchTextScanner
 		{
 			totalMatches++;
 			var first = Math.Max(1, pendingStart - contextLines);
-			var last = Math.Min(lines.Count, pendingEnd + contextLines);
+			var contextEnd = lines.Count > 0 && lines[^1].Offset == content.Length
+				? lines.Count - 1 : lines.Count;
+			var last = Math.Min(Math.Max(contextEnd, pendingEnd), pendingEnd + contextLines);
 			var covered = new McpTextLineRange[last - first + 1];
 			for (var number = first; number <= last; number++)
 				covered[number - first] = lines[number - 1];

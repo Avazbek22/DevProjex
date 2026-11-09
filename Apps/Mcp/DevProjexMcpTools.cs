@@ -2060,7 +2060,9 @@ internal sealed partial class DevProjexMcpTools(
 				? McpLargeFileOutlineBuilder.Build(
 					relativePath,
 					transformed.Content,
-					() => McpSearchSymbols.CaptureNavigation(Projects.DependencyFactsEngine, relativePath, transformed.Content, cancellationToken),
+					() => McpSearchSymbols.CaptureNavigation(Projects.DependencyFactsEngine, relativePath,
+						transformed.Content.Contains('\r') ? McpLargeFileOutlineBuilder.NormalizeLineEndings(transformed.Content) : transformed.Content,
+						cancellationToken),
 					cancellationToken)
 				: null;
 			var structureAfterRange = outline is not null && !wholeRead;

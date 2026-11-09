@@ -311,7 +311,8 @@ internal static class McpSearchSymbols
 				var firstLine = Math.Max(1, declaration.StartLine - contextLines);
 				var lastLine = checked(declaration.StartLine + contextLines);
 				var evidence = lines
-					.Where(line => line.LineNumber >= firstLine && line.LineNumber <= lastLine)
+					.Where(line => line.LineNumber >= firstLine && line.LineNumber <= lastLine &&
+						(line.Offset < content.Length || line.LineNumber == declaration.StartLine))
 					.ToArray();
 				if (evidence.Length > 0)
 				{

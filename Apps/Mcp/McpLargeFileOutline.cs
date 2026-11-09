@@ -31,6 +31,9 @@ internal static partial class McpLargeFileOutlineBuilder
 	private const int MaximumMapCharacters = 2_500;
 	private const int MaximumTopLevelExpanded = 2;
 
+	internal static string NormalizeLineEndings(string content) =>
+		content.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
+
 	public static bool Applies(string content) =>
 		content.Length > MinimumCharacters && CountLines(content) > MinimumLines;
 
@@ -44,7 +47,7 @@ internal static partial class McpLargeFileOutlineBuilder
 		ArgumentNullException.ThrowIfNull(navigation);
 		if (!Applies(content))
 			return null;
-		var lines = content.Split('\n');
+		var lines = NormalizeLineEndings(content).Split('\n');
 		var extension = Path.GetExtension(relativePath).ToLowerInvariant();
 		var isCode = extension is not (".json" or ".md" or ".mdx" or ".markdown");
 		// One level deeper than listed, so a member shown in place of its type can count its own members.
@@ -319,10 +322,18 @@ internal static partial class McpLargeFileOutlineBuilder
 
 	private static int CountLines(string content)
 	{
+		if (content.Length == 0) return 0;
 		var lines = 1;
-		foreach (var character in content)
-			if (character == '\n') lines++;
-		return content.EndsWith('\n') ? lines - 1 : lines;
+		for (var index = 0; index < content.Length; index++)
+		{
+			if (content[index] == '\r')
+			{
+				lines++;
+				if (index + 1 < content.Length && content[index + 1] == '\n') index++;
+			}
+			else if (content[index] == '\n') lines++;
+		}
+		return lines;
 	}
 
 	[GeneratedRegex("^\\s*\"(?<key>[^\"\\\\]{1,120})\"\\s*:", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
