@@ -535,4 +535,30 @@ public sealed partial class McpServerIntegrationTests
 		McpSearchOutputAssertions.ContainsMatch(text, "Unicode.txt", 2, "λ needle evidence");
 		Assert.Contains("sources inspected=1/1 · matches retained=1/1 · matches written=1", text, StringComparison.Ordinal);
 	}
+
+	[Fact]
+	public async Task SearchWithListedDeclarationsEndsWithoutAReadInstructionOrNamingCounters()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(
+			Path.Combine(project, "Service.cs"),
+			"namespace P;\npublic sealed class Service\n{\n\tpublic int Probe() => 1;\n}\n" +
+			"public sealed class Client\n{\n\tpublic int Call(Service service) => service.Probe();\n}\n");
+		File.WriteAllText(Path.Combine(project, "notes.md"), "Probe is documented here.\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync("search_project", new Dictionary<string, object?>
+		{
+			["pattern"] = "Probe",
+			["context_lines"] = 0
+		});
+		var text = Text(result);
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.Contains("Declarations found (path, symbol, lines):", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("batch known selections in one get_file call", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("[Symbols] annotated=", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("[Next read]", text, StringComparison.Ordinal);
+	}
 }

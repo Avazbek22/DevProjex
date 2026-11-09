@@ -482,6 +482,63 @@ public sealed class McpInfrastructureTests
 		Assert.False(boundary.OnlyOutputCapped && boundary.IsComplete);
 	}
 
+	[Theory]
+	[InlineData(true, false, false, null)]
+	[InlineData(true, false, true, null)]
+	[InlineData(false, false, true, null)]
+	[InlineData(false, false, false, "[Next read] Narrow pattern, paths, or include_patterns and rerun the search.")]
+	[InlineData(false, true, true, "[Next read] Call read_pack with the reported pack_id for the remaining retained matches.")]
+	[InlineData(true, true, false, "[Next read] Call read_pack with the reported pack_id for the remaining retained matches.")]
+	public void SearchNextReadKeepsActionableStepsAndLetsTheDeclarationListSpeakForItself(
+		bool complete,
+		bool hasStoredContinuation,
+		bool declarationsToRead,
+		string? expected)
+	{
+		var boundary = new McpSearchBoundary(
+			EligibleSources: 4,
+			InspectedSources: complete ? 4 : 2,
+			EncounteredMatches: 6,
+			RetainedMatches: 6,
+			WrittenMatches: 6,
+			NamedDeclarationFiles: 1,
+			InspectionByteLimitReached: !complete,
+			RetainedMatchLimitReached: false,
+			AnnotationFileLimitReached: false,
+			ResponseCharacterLimitReached: false,
+			RequestResultLimitReached: false,
+			RetainedCharacterLimitReached: false,
+			StoredCharacterLimitReached: false,
+			UnscannableSources: 0);
+
+		var nextRead = DevProjexMcpTools.FormatSearchNextRead(boundary, hasStoredContinuation, declarationsToRead);
+
+		Assert.Equal(complete, boundary.IsComplete);
+		Assert.Equal(expected, nextRead);
+	}
+
+	[Fact]
+	public void SearchNamingStopsAtTheAnnotatedFileBoundWithoutCountingTheRest()
+	{
+		var navigation = new Dictionary<string, IReadOnlyList<NavigationDeclaration>>(StringComparer.Ordinal);
+		var hits = new List<McpSearchHit>();
+		for (var index = 0; index <= McpSearchSymbols.MaximumAnnotatedFiles; index++)
+		{
+			var path = $"src/File{index}.cs";
+			navigation[path] = [new NavigationDeclaration($"Type{index}", NavigationSymbolKind.Type, null, 1, 5, "fingerprint")];
+			hits.Add(new McpSearchHit(path, "/repo/" + path, 2));
+			hits.Add(new McpSearchHit(path, "/repo/" + path, 3));
+		}
+
+		var result = McpSearchSymbols.Resolve(hits, navigation, TestContext.Current.CancellationToken);
+
+		Assert.Equal(McpSearchSymbols.MaximumAnnotatedFiles * 2, result.AnnotatedHits);
+		Assert.Equal(McpSearchSymbols.MaximumAnnotatedFiles, result.Declarations.Count);
+		Assert.DoesNotContain(
+			result.Declarations,
+			declaration => declaration.RelativePath == $"src/File{McpSearchSymbols.MaximumAnnotatedFiles}.cs");
+	}
+
 	[Fact]
 	public void AmbiguousSymbolListsTheFirstSixCandidateRangesAndCountsTheRest()
 	{
