@@ -116,6 +116,27 @@ public sealed class NavigationCachePayloadTests
 		Assert.Equal(3, delivered);
 	}
 
+	[Fact]
+	public async Task ConcurrentCachePressureKeepsSnapshotsAndAccountingCoherent()
+	{
+		var extractor = new NavigationExtractor(500);
+		using var engine = new DependencyFactsEngine(extractor, new FileDependencyConfigurationProvider());
+		var token = TestContext.Current.CancellationToken;
+		await Task.WhenAll(Enumerable.Range(0, 2).Select(worker => Task.Run(() =>
+		{
+			for (var index = 0; index < 60; index++)
+			{
+				var fingerprint = worker == 0 ? "first" : "second";
+				var result = engine.ExtractNavigationFromProtectedText($"src/{index}.cs", "source", fingerprint, token);
+				Assert.Equal(500, result.Count);
+				Assert.All(result, declaration => Assert.Equal(fingerprint, declaration.ContentFingerprint));
+			}
+		}, token)));
+		Assert.True(engine.NavigationCacheState.Packed > 0);
+		Assert.InRange(engine.NavigationCacheState.Bytes, 1, DependencyFactsEngine.MaximumNavigationCacheBytes);
+		Assert.Equal(120, engine.NavigationCacheState.Entries);
+	}
+
 	private sealed class CancellingList(IReadOnlyList<NavigationDeclaration> declarations, CancellationTokenSource cancellation) : IReadOnlyList<NavigationDeclaration>
 	{
 		public int Count => declarations.Count;
@@ -133,11 +154,12 @@ public sealed class NavigationCachePayloadTests
 
 	private sealed class NavigationExtractor(int count) : IDependencyFactExtractor, IDependencyNavigationExtractor
 	{
-		public int ParseCount { get; private set; }
+		private int parseCount;
+		public int ParseCount => Volatile.Read(ref parseCount);
 		public int CompiledQuerySetCount => 0;
 		public IReadOnlyList<NavigationDeclaration> ExtractNavigation(string relativePath, string source, string contentFingerprint, CancellationToken cancellationToken)
 		{
-			cancellationToken.ThrowIfCancellationRequested(); ParseCount++;
+			cancellationToken.ThrowIfCancellationRequested(); Interlocked.Increment(ref parseCount);
 			if (source.Length == 0) return [];
 			return Enumerable.Range(0, count).Select(index => new NavigationDeclaration(
 			 "Example." + new string('n', 120) + ".Type" + index, NavigationSymbolKind.Type,
