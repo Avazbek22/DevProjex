@@ -324,6 +324,7 @@ public sealed class DevProjexCommandTree
 		outputPath.CompletionSources.Add(context => FileSystemCompletionSource.Complete(
 			context,
 			FileSystemCompletionKind.FilesAndDirectories));
+		AddExactOutputPathValidator(outputPath);
 		command.Arguments.Add(project);
 		command.Options.Add(session);
 		command.Options.Add(last);
@@ -1608,12 +1609,18 @@ public sealed class DevProjexCommandTree
 			if (outputKind == ProjectCopyExportFormat.Zip &&
 				CliParseValue.TryGet(result, outputPath, out var destination) &&
 				destination is not null &&
-				destination != "-" &&
-				!destination.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+				destination != "-")
 			{
-				result.AddError(LocalizedParseError.Create(
-					"DPX-CLI-ZIP-EXTENSION-REQUIRED",
-					L("Terminal.Error.ZipExtensionRequired")));
+				if (DescribeExactOutputPathProblem(destination) is { } problem)
+				{
+					result.AddError(problem);
+				}
+				else if (!destination.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+				{
+					result.AddError(LocalizedParseError.Create(
+						"DPX-CLI-ZIP-EXTENSION-REQUIRED",
+						L("Terminal.Error.ZipExtensionRequired")));
+				}
 			}
 		});
 		command.SetAction(async (parseResult, cancellationToken) =>
@@ -1896,6 +1903,7 @@ public sealed class DevProjexCommandTree
 		output.CompletionSources.Add(context => FileSystemCompletionSource.Complete(
 			context,
 			FileSystemCompletionKind.FilesAndDirectories));
+		AddExactOutputPathValidator(output);
 		var force = new Option<bool>("--force") { Description = L("Terminal.Option.ForceProfile") };
 		var dryRun = new Option<bool>("--dry-run", "-n") { Description = L("Terminal.Option.DryRun") };
 		command.Arguments.Add(project);
@@ -2993,8 +3001,9 @@ public sealed class DevProjexCommandTree
 		return argument;
 	}
 
-	private Option<string?> OutputPathOption() =>
-		new("--output", "-o")
+	private Option<string?> OutputPathOption()
+	{
+		var option = new Option<string?>("--output", "-o")
 		{
 			Description = L("Terminal.Option.Output"),
 			HelpName = "PATH|-",
@@ -3006,6 +3015,34 @@ public sealed class DevProjexCommandTree
 					FileSystemCompletionKind.FilesAndDirectories)
 			}
 		};
+		AddExactOutputPathValidator(option);
+		return option;
+	}
+
+	private void AddExactOutputPathValidator(Option option) =>
+		option.Validators.Add(result =>
+		{
+			if (result.Implicit || result.Tokens.Count != 1)
+				return;
+			if (DescribeExactOutputPathProblem(result.Tokens[0].Value) is { } problem)
+				result.AddError(problem);
+		});
+
+	private string? DescribeExactOutputPathProblem(string path)
+	{
+		var message = ExactOutputPathSyntax.Check(path) switch
+		{
+			ExactOutputPathProblem.None => null,
+			ExactOutputPathProblem.Empty => L("Terminal.Error.OutputPathEmpty"),
+			ExactOutputPathProblem.TrailingSeparator => L("Terminal.Error.OutputPathTrailingSeparator"),
+			ExactOutputPathProblem.InvalidSyntax => _localization.Format("Terminal.Error.OutputPathInvalid", path),
+			ExactOutputPathProblem.DeviceName => _localization.Format("Terminal.Error.OutputPathDevice", path),
+			var problem => throw new ArgumentOutOfRangeException(nameof(path), problem, null)
+		};
+		return message is null
+			? null
+			: LocalizedParseError.Create("DPX-CLI-INVALID-VALUE", message);
+	}
 
 	private Option<string?> OptionalOutputPath() =>
 		new("--output", "-o")
