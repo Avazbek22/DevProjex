@@ -94,8 +94,11 @@ internal sealed class TerminalWorkspaceCommandParser
 			[TerminalWorkspaceCommandGrammar.Format] = new(
 				static (definition, tokens, _) => ParseFormat(definition, tokens),
 				CompleteFormat),
+			// Parse() handles this grammar directly so it can see the raw input text;
+			// the entry only keeps the grammar registry complete.
 			[TerminalWorkspaceCommandGrammar.Text] = new(
-				static (definition, tokens, _) => ParseText(definition, tokens),
+				static (_, _, _) => throw new InvalidOperationException(
+					"Free text commands are parsed directly by Parse(), not through this dispatch."),
 				NoCompletions),
 			[TerminalWorkspaceCommandGrammar.Export] = new(
 				static (definition, tokens, _) => ParseExport(definition, tokens),
@@ -194,6 +197,11 @@ internal sealed class TerminalWorkspaceCommandParser
 				verbToken.Value,
 				[]);
 		}
+
+		// Free text (search/filter) keeps the caller's exact spacing, which the generic
+		// token-join dispatch below cannot express, so it is parsed from the raw input directly.
+		if (definition.Grammar == TerminalWorkspaceCommandGrammar.Text)
+			return ParseText(definition, text ?? string.Empty, tokenization.Tokens);
 
 		return GrammarHandlers[definition.Grammar].Parse(definition, tokenization.Tokens, context);
 	}
@@ -487,14 +495,36 @@ internal sealed class TerminalWorkspaceCommandParser
 			Format: format));
 	}
 
+	// Free text keeps whatever the caller typed between its argument tokens (spaces, tabs,
+	// repeated runs) instead of collapsing it to a single space. Each token's own Value is
+	// already dequoted (doubled quotes resolved, inner edge spaces of a quoted token kept),
+	// so only the raw gaps between tokens need to be copied back in from the original text.
 	private static TerminalWorkspaceCommandParseResult ParseText(
 		TerminalWorkspaceCommandDefinition definition,
-		IReadOnlyList<ParsedToken> tokens) =>
-		TerminalWorkspaceCommandParseResult.Success(new TerminalWorkspaceCommand(
+		string text,
+		IReadOnlyList<ParsedToken> tokens)
+	{
+		if (tokens.Count == 1)
+		{
+			return TerminalWorkspaceCommandParseResult.Success(new TerminalWorkspaceCommand(
+				definition,
+				Text: string.Empty));
+		}
+
+		var builder = new StringBuilder(text.Length);
+		builder.Append(tokens[1].Value);
+		for (var index = 2; index < tokens.Count; index++)
+		{
+			var gapStart = tokens[index - 1].End;
+			var gapLength = tokens[index].Start - gapStart;
+			builder.Append(text, gapStart, gapLength);
+			builder.Append(tokens[index].Value);
+		}
+
+		return TerminalWorkspaceCommandParseResult.Success(new TerminalWorkspaceCommand(
 			definition,
-			Text: tokens.Count == 1
-				? string.Empty
-				: string.Join(' ', tokens.Skip(1).Select(static token => token.Value))));
+			Text: builder.ToString()));
+	}
 
 	private static TerminalWorkspaceCommandParseResult ParseExport(
 		TerminalWorkspaceCommandDefinition definition,

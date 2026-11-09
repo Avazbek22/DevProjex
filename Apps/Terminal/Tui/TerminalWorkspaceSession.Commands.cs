@@ -270,7 +270,9 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		if (_preview is null)
 			return InvalidCommandExecution();
-		var query = command.Text?.Trim() ?? string.Empty;
+		// The parser already trims unquoted free text and preserves a quoted
+		// argument's inner edge spaces, so the text is used exactly as parsed.
+		var query = command.Text ?? string.Empty;
 		if (query.Length > 0 && !PreviewTextDocumentSearch.CanSearch(query))
 		{
 			return TerminalWorkspaceCommandExecutionResult.Failure(
@@ -302,7 +304,8 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		if (_state is null || _tree is null)
 			return InvalidCommandExecution();
-		var query = command.Text?.Trim() ?? string.Empty;
+		// See ExecuteSearchCommand: the parser already applies the right trimming.
+		var query = command.Text ?? string.Empty;
 		_searchQuery = query.Length == 0 ? null : query;
 		var selectedPath = CaptureCurrentTreePath();
 		_state.ApplyTreeFilter(query);

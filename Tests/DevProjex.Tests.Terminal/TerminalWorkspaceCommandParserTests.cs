@@ -116,6 +116,70 @@ public sealed class TerminalWorkspaceCommandParserTests
 		Assert.Equal(expected, result.Command!.Text);
 	}
 
+	[Theory]
+	// Repeated/odd whitespace between unquoted words is kept exactly as typed.
+	[InlineData("search a  b", "a  b")]
+	[InlineData("search a\tb", "a\tb")]
+	[InlineData("search a \t b", "a \t b")]
+	[InlineData("search a   b   c", "a   b   c")]
+	// Outer whitespace around unquoted text is trimmed.
+	[InlineData("search   a b", "a b")]
+	[InlineData("search   a b   ", "a b")]
+	[InlineData("search    ", "")]
+	[InlineData("search\t\t", "")]
+	// A quoted argument spanning the whole remainder keeps its inner edge spaces exactly.
+	[InlineData("search \"  a  \"", "  a  ")]
+	[InlineData("filter '\ta\t'", "\ta\t")]
+	[InlineData("search \"\"", "")]
+	[InlineData("search \"   \"", "   ")]
+	// Doubling the quote character inside a quoted argument embeds a literal quote.
+	[InlineData("search \"a\"\"b\"", "a\"b")]
+	[InlineData("filter 'a''b'", "a'b")]
+	[InlineData("search \"a\"\"\"\"b\"", "a\"\"b")]
+	// A quoted segment followed by unquoted text is not re-trimmed; only the token values
+	// are dequoted, the raw gap between them is kept as typed (current, documented result).
+	[InlineData("search \"a\" b", "a b")]
+	[InlineData("search \"a\"   b", "a   b")]
+	[InlineData("search a   \"b\"", "a   b")]
+	[InlineData("search \"a\"\tb", "a\tb")]
+	// A quote that closes before the token ends keeps trailing literal characters attached
+	// (existing tokenizer behavior for e.g. "ab"cd).
+	[InlineData("search \"ab\"cd", "abcd")]
+	// Unicode and Cyrillic text round-trip untouched.
+	[InlineData("search привет  мир", "привет  мир")]
+	[InlineData("filter \"  привет  \"", "  привет  ")]
+	// Regex-special characters are passed through as literal text (no interpretation here).
+	[InlineData("search a.*+?[b](c)^$", "a.*+?[b](c)^$")]
+	internal void Parse_SearchAndFilterPreserveFreeTextSpacingAndQuoting(string text, string expected)
+	{
+		var result = _parser.Parse(text, Context);
+
+		Assert.True(result.IsSuccess, result.Error?.ToString());
+		Assert.Equal(expected, result.Command!.Text);
+	}
+
+	[Fact]
+	public void Parse_SearchPreservesFreeTextAcrossAVeryLongInput()
+	{
+		var longWord = new string('a', 5_000);
+		var text = $"search {longWord}  {longWord}";
+
+		var result = _parser.Parse(text, Context);
+
+		Assert.True(result.IsSuccess, result.Error?.ToString());
+		Assert.Equal($"{longWord}  {longWord}", result.Command!.Text);
+	}
+
+	[Fact]
+	public void Parse_SearchWithUnterminatedQuoteStillReportsTheExistingError()
+	{
+		var result = _parser.Parse("search \"unfinished", Context);
+
+		Assert.False(result.IsSuccess);
+		Assert.Equal(TerminalWorkspaceCommandErrorCode.UnterminatedQuote, result.Error!.Code);
+		Assert.Equal(7, result.Error.Position);
+	}
+
 	[Fact]
 	public void Parse_QuotedDestinationPreservesSpacesAndBackslashes()
 	{
