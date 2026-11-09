@@ -4,6 +4,9 @@ namespace DevProjex.Terminal.CommandLine;
 
 internal static class CliInputIntegrityGuard
 {
+	// System.CommandLine splits an option token at the first of these characters.
+	private static readonly char[] InlineValueDelimiters = ['=', ':'];
+
 	// System.CommandLine 2.0.10 drops an empty inline value and can bind the next argv token.
 	// This guard validates only that lexical boundary; command and option resolution stay model-owned.
 	public static bool TryFindError(
@@ -55,11 +58,16 @@ internal static class CliInputIntegrityGuard
 		{
 			if (argument == "--")
 				break;
-			if (argument.Length < 2 || argument[^1] != '=')
+			var delimiterIndex = argument.IndexOfAny(InlineValueDelimiters);
+			if (delimiterIndex < 1)
 				continue;
 
-			var identifier = argument[..^1];
+			var identifier = argument[..delimiterIndex];
 			if (!applicableOptions.TryGetValue(identifier, out var option))
+				continue;
+
+			var hasInlineValue = delimiterIndex < argument.Length - 1;
+			if (hasInlineValue && !IsFlag(option))
 				continue;
 
 			error = new CliInputIntegrityError(
@@ -103,6 +111,12 @@ internal static class CliInputIntegrityGuard
 		error = default;
 		return false;
 	}
+
+	// System.CommandLine gives every bool option an optional value (arity 0..1), so a bool option is a
+	// flag unless it is one of the documented on|off toggles; options with arity 0 never take a value.
+	internal static bool IsFlag(Option option) =>
+		option.Arity.MaximumNumberOfValues == 0 ||
+		(option.ValueType == typeof(bool) && !DevProjexRootCommand.AcceptsToggleValue(option.Name));
 
 	private static IEnumerable<Option> GetApplicableOptions(
 		RootCommand root,
