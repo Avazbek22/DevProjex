@@ -1242,14 +1242,8 @@ internal sealed class McpProjectService(
 		McpProjectRootJail roots,
 		string projectRoot,
 		IReadOnlyList<string> includedFiles,
-		CancellationToken cancellationToken)
-	{
-		foreach (var file in includedFiles)
-		{
-			cancellationToken.ThrowIfCancellationRequested();
-			_ = roots.ResolveExistingPath(projectRoot, file);
-		}
-	}
+		CancellationToken cancellationToken) =>
+		roots.EnsureExistingPathsWithin(projectRoot, includedFiles, cancellationToken);
 
 	internal static void ValidatePlanContainment(
 		McpRootRegistry roots,
