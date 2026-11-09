@@ -14,9 +14,10 @@ public sealed class McpPlanContainmentTests
 	public void AcceptsEveryFileAndWalksSharedDirectoriesOnce()
 	{
 		using var workspace = new TemporaryDirectory();
-		var project = workspace.CreateFolder("project");
+		var basePath = PhysicalPath(workspace);
+		var project = CreateFolder(basePath, "project");
 		var files = Enumerable.Range(0, 12)
-			.Select(index => workspace.CreateFile(
+			.Select(index => CreateFile(basePath,
 				Path.Combine("project", "src", "deep", $"nested{index % 3}", $"file{index}.cs"),
 				"class Sample { }"))
 			.ToArray();
@@ -47,9 +48,10 @@ public sealed class McpPlanContainmentTests
 	public void RejectsAFileOutsideTheRootAfterAcceptedSiblings()
 	{
 		using var workspace = new TemporaryDirectory();
-		var project = workspace.CreateFolder("project");
-		var inside = workspace.CreateFile(Path.Combine("project", "src", "inside.cs"), "class Inside { }");
-		var outside = workspace.CreateFile(Path.Combine("outside", "src", "outside.cs"), "class Outside { }");
+		var basePath = PhysicalPath(workspace);
+		var project = CreateFolder(basePath, "project");
+		var inside = CreateFile(basePath, Path.Combine("project", "src", "inside.cs"), "class Inside { }");
+		var outside = CreateFile(basePath, Path.Combine("outside", "src", "outside.cs"), "class Outside { }");
 		var registry = new McpRootRegistry([project]);
 
 		var expected = Assert.Throws<McpToolException>(() => registry.ResolveExistingPath(project, outside));
@@ -68,8 +70,9 @@ public sealed class McpPlanContainmentTests
 	public void ReportsAMissingFileWithTheSameErrorAsResolvingItAlone()
 	{
 		using var workspace = new TemporaryDirectory();
-		var project = workspace.CreateFolder("project");
-		var present = workspace.CreateFile(Path.Combine("project", "src", "present.cs"), "class Present { }");
+		var basePath = PhysicalPath(workspace);
+		var project = CreateFolder(basePath, "project");
+		var present = CreateFile(basePath, Path.Combine("project", "src", "present.cs"), "class Present { }");
 		var missing = Path.Combine(project, "src", "missing.cs");
 		var registry = new McpRootRegistry([project]);
 
@@ -89,10 +92,11 @@ public sealed class McpPlanContainmentTests
 	public void RejectsALinkedDirectoryThatLeavesTheRootEvenAfterItsParentWasAccepted()
 	{
 		using var workspace = new TemporaryDirectory();
-		var project = workspace.CreateFolder("project");
-		var outside = workspace.CreateFolder("outside");
+		var basePath = PhysicalPath(workspace);
+		var project = CreateFolder(basePath, "project");
+		var outside = CreateFolder(basePath, "outside");
 		File.WriteAllText(Path.Combine(outside, "escaped.cs"), "class Escaped { }");
-		var accepted = workspace.CreateFile(Path.Combine("project", "src", "accepted.cs"), "class Accepted { }");
+		var accepted = CreateFile(basePath, Path.Combine("project", "src", "accepted.cs"), "class Accepted { }");
 		var link = Path.Combine(project, "src", "linked");
 		CreateDirectoryLinkOrSkip(link, outside);
 		var escaped = Path.Combine(link, "escaped.cs");
@@ -114,10 +118,11 @@ public sealed class McpPlanContainmentTests
 	public void ResolvesThroughAnInternalLinkedDirectoryLikeASingleResolution()
 	{
 		using var workspace = new TemporaryDirectory();
-		var project = workspace.CreateFolder("project");
-		var target = workspace.CreateFolder(Path.Combine("project", "real"));
-		var first = workspace.CreateFile(Path.Combine("project", "real", "first.cs"), "class First { }");
-		workspace.CreateFile(Path.Combine("project", "real", "second.cs"), "class Second { }");
+		var basePath = PhysicalPath(workspace);
+		var project = CreateFolder(basePath, "project");
+		var target = CreateFolder(basePath, Path.Combine("project", "real"));
+		var first = CreateFile(basePath, Path.Combine("project", "real", "first.cs"), "class First { }");
+		CreateFile(basePath, Path.Combine("project", "real", "second.cs"), "class Second { }");
 		var link = Path.Combine(project, "alias");
 		CreateDirectoryLinkOrSkip(link, target);
 		var registry = new McpRootRegistry([project]);
@@ -139,8 +144,9 @@ public sealed class McpPlanContainmentTests
 	public void StopsBeforeTheFirstFileWhenCancelled()
 	{
 		using var workspace = new TemporaryDirectory();
-		var project = workspace.CreateFolder("project");
-		var file = workspace.CreateFile(Path.Combine("project", "file.cs"), "class File { }");
+		var basePath = PhysicalPath(workspace);
+		var project = CreateFolder(basePath, "project");
+		var file = CreateFile(basePath, Path.Combine("project", "file.cs"), "class File { }");
 		var registry = new McpRootRegistry([project]);
 		using var cancellation = new CancellationTokenSource();
 		cancellation.Cancel();
@@ -156,7 +162,8 @@ public sealed class McpPlanContainmentTests
 	public void AnEmptyPlanNeedsNoResolutionEvenWhenCancelled()
 	{
 		using var workspace = new TemporaryDirectory();
-		var project = workspace.CreateFolder("project");
+		var basePath = PhysicalPath(workspace);
+		var project = CreateFolder(basePath, "project");
 		var registry = new McpRootRegistry([project]);
 		using var cancellation = new CancellationTokenSource();
 		cancellation.Cancel();
@@ -171,9 +178,10 @@ public sealed class McpPlanContainmentTests
 	public void AnInjectedResolverStillResolvesEveryFile()
 	{
 		using var workspace = new TemporaryDirectory();
-		var project = workspace.CreateFolder("project");
+		var basePath = PhysicalPath(workspace);
+		var project = CreateFolder(basePath, "project");
 		var files = Enumerable.Range(0, 5)
-			.Select(index => workspace.CreateFile(Path.Combine("project", "src", $"file{index}.cs"), "class F { }"))
+			.Select(index => CreateFile(basePath, Path.Combine("project", "src", $"file{index}.cs"), "class F { }"))
 			.ToArray();
 		var resolvedFiles = new List<string>();
 		var registry = new McpRootRegistry(
@@ -192,6 +200,112 @@ public sealed class McpPlanContainmentTests
 			TestContext.Current.CancellationToken);
 
 		Assert.Equal(files.Length, resolvedFiles.Count);
+	}
+
+	/// <summary>
+	/// A project can sit below a linked directory, as macOS temporary folders do below
+	/// <c>/var</c> -> <c>/private/var</c>. Whichever spelling names the root and the files, one pass
+	/// has to answer exactly as resolving each file alone through the root jail.
+	/// </summary>
+	[Theory]
+	[InlineData(false, false)]
+	[InlineData(false, true)]
+	[InlineData(true, false)]
+	[InlineData(true, true)]
+	public void AProjectBelowALinkedDirectoryIsJudgedLikeEachFileAlone(bool linkedRoot, bool linkedFiles)
+	{
+		using var workspace = new TemporaryDirectory();
+		var basePath = PhysicalPath(workspace);
+		var real = CreateFolder(basePath, "real");
+		var project = CreateFolder(basePath, Path.Combine("real", "project"));
+		var relativeFiles = new[]
+		{
+			Path.Combine("src", "first.cs"),
+			Path.Combine("src", "deep", "second.cs"),
+			Path.Combine("src", "deep", "third.cs")
+		};
+		foreach (var relative in relativeFiles)
+			CreateFile(basePath, Path.Combine("real", "project", relative), "class Sample { }");
+		var alias = Path.Combine(basePath, "alias");
+		CreateDirectoryLinkOrSkip(alias, real);
+		var linkedProject = Path.Combine(alias, "project");
+		var registry = new McpRootRegistry([linkedProject]);
+		var root = linkedRoot ? linkedProject : project;
+		var files = relativeFiles
+			.Select(relative => Path.Combine(linkedFiles ? linkedProject : project, relative))
+			.ToArray();
+		var jail = new McpProjectRootJail(registry);
+
+		var expected = files.Select(file => Outcome(() => jail.ResolveExistingPath(root, file)))
+			.FirstOrDefault(static outcome => outcome is not null);
+		var actual = Outcome(() => McpProjectService.ValidatePlanContainment(
+			registry,
+			root,
+			files,
+			TestContext.Current.CancellationToken));
+
+		Assert.Equal(expected, actual);
+	}
+
+	[Fact]
+	public void TheResolvedRootOfAProjectOpenedThroughALinkAcceptsItsFiles()
+	{
+		using var workspace = new TemporaryDirectory();
+		var basePath = PhysicalPath(workspace);
+		var real = CreateFolder(basePath, "real");
+		CreateFolder(basePath, Path.Combine("real", "project"));
+		CreateFile(basePath, Path.Combine("real", "project", "src", "first.cs"), "class First { }");
+		CreateFile(basePath, Path.Combine("real", "project", "src", "deep", "second.cs"), "class Second { }");
+		var alias = Path.Combine(basePath, "alias");
+		CreateDirectoryLinkOrSkip(alias, real);
+		var registry = new McpRootRegistry([Path.Combine(alias, "project")]);
+		// Plans are built under the root the registry resolves, as list_projects reports it.
+		var root = registry.ResolveProject(Path.Combine(alias, "project"));
+		string[] files =
+		[
+			Path.Combine(root, "src", "first.cs"),
+			Path.Combine(root, "src", "deep", "second.cs")
+		];
+
+		McpProjectService.ValidatePlanContainment(
+			registry,
+			root,
+			files,
+			TestContext.Current.CancellationToken);
+
+		Assert.All(files, file => Assert.Equal(file, registry.ResolveExistingPath(root, file)));
+	}
+
+	/// <summary>
+	/// Plans are built under the physical root the registry resolves. A temporary folder can itself
+	/// sit below a link (macOS keeps it below <c>/var</c> -> <c>/private/var</c>), so cases start from
+	/// its physical spelling unless they test a linked spelling on purpose.
+	/// </summary>
+	private static string PhysicalPath(TemporaryDirectory workspace) =>
+		McpRootRegistry.ResolvePhysicalExistingPath(workspace.Path, requireDirectory: true);
+
+	private static string CreateFolder(string basePath, string relativePath) =>
+		Directory.CreateDirectory(Path.Combine(basePath, relativePath)).FullName;
+
+	private static string CreateFile(string basePath, string relativePath, string content)
+	{
+		var fullPath = Path.Combine(basePath, relativePath);
+		Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+		File.WriteAllText(fullPath, content);
+		return fullPath;
+	}
+
+	private static string? Outcome(Action action)
+	{
+		try
+		{
+			action();
+			return null;
+		}
+		catch (McpToolException exception)
+		{
+			return exception.Code + ": " + exception.Message;
+		}
 	}
 
 	/// <summary>
