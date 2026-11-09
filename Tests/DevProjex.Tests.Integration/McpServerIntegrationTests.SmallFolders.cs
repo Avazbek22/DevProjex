@@ -119,6 +119,51 @@ public sealed partial class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task GetTreeDoesNotExpandDotFoldersOrFoldersUnderThem()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		WriteProjectFile(project, ".github/workflows/ci.yml", "on: push\n");
+		WriteProjectFile(project, ".github/workflows/release.yml", "on: push\n");
+		WriteProjectFile(project, ".github/.config/settings.yml", "a: 1\n");
+		WriteProjectFile(project, "pkg/small/one.py", "one = 1\n");
+		WriteProjectFile(project, "pkg/small/two.py", "two = 1\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var tree = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["max_depth"] = 2, ["format"] = "text" });
+		var dotOnly = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["paths"] = new[] { ".github" },
+				["max_depth"] = 2,
+				["format"] = "text"
+			});
+		var dotContents = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["paths"] = new[] { ".github/workflows" }, ["format"] = "text" });
+
+		Assert.NotEqual(true, tree.IsError);
+		var body = ExtractSpotlightBody(Text(tree));
+		Assert.Contains("workflows", body, StringComparison.Ordinal);
+		Assert.DoesNotContain("ci.yml", body, StringComparison.Ordinal);
+		Assert.DoesNotContain("settings.yml", body, StringComparison.Ordinal);
+		Assert.Contains("one.py", body, StringComparison.Ordinal);
+		Assert.Contains("two.py", body, StringComparison.Ordinal);
+		AssertTrustedTrailerOutsideSpotlight(tree, SmallFoldersTrailer);
+
+		Assert.NotEqual(true, dotOnly.IsError);
+		Assert.DoesNotContain("ci.yml", ExtractSpotlightBody(Text(dotOnly)), StringComparison.Ordinal);
+		Assert.DoesNotContain(SmallFoldersTrailer, AllText(dotOnly), StringComparison.Ordinal);
+
+		Assert.NotEqual(true, dotContents.IsError);
+		Assert.Contains("ci.yml", ExtractSpotlightBody(Text(dotContents)), StringComparison.Ordinal);
+		Assert.Contains("release.yml", ExtractSpotlightBody(Text(dotContents)), StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task GetTreeExpansionShowsNothingTheSelectionHides()
 	{
 		using var workspace = new TemporaryDirectory();

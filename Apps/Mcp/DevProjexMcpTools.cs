@@ -5692,7 +5692,9 @@ internal sealed partial class DevProjexMcpTools(
 			if (frame.RemainingDepth > 0 && frame.NextChildIndex < frame.Node.Children.Count)
 			{
 				var child = frame.Node.Children[frame.NextChildIndex++];
-				if (frame.RemainingDepth == 1 && remainingBudget > 0 && child is { IsDirectory: true, Children.Count: > 0 })
+				if (frame.RemainingDepth == 1 && remainingBudget > 0 &&
+					child is { IsDirectory: true, Children.Count: > 0 } &&
+					!IsInsideDotFolder(node.FullPath, child.FullPath))
 				{
 					var entries = CountSubtreeEntries(child, maximumEntries + 1, cancellationToken);
 					if (entries <= maximumEntries)
@@ -5729,6 +5731,15 @@ internal sealed partial class DevProjexMcpTools(
 
 		return result!;
 	}
+
+	/// <summary>
+	/// Tooling folders such as .github or .vscode, and folders under them, are rarely what a
+	/// structure overview is read for, so they never spend the expansion budget.
+	/// </summary>
+	private static bool IsInsideDotFolder(string rootPath, string directoryPath) =>
+		PathUtility.GetPortableRelativePath(rootPath, directoryPath)
+			.Split('/')
+			.Any(static segment => segment.Length > 1 && segment[0] == '.' && segment != "..");
 
 	/// <summary>
 	/// Counts the files and folders below <paramref name="directory"/>, stopping at
