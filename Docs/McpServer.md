@@ -963,6 +963,19 @@ response is byte-identical to a server without it.
 
 ## Result Contract
 
+Whole-file `get_file` reads also name package entry-point declarations in the data
+block, next to the import and test hints: `Exported by: jsr.json "./bun", package.json "./bun"`.
+Manifests and keys are ordered deterministically; at most eight entries and 1,200
+characters of names are shown, followed by a remaining-entry count. Complete
+whole-file batch sections use the same rule; range and symbol reads omit it.
+Only readable, unmasked `package.json`, `jsr.json`, and `deno.json` exports are used,
+including conditional targets, fallback arrays, and wildcard subpaths. The same
+manifests appear as dependents in `related_files`, with export-key evidence.
+A compiled target is mapped to a source only with explicit `rootDir` and `outDir`
+in the package's readable `tsconfig.json` and a unique source; inherited or referenced
+configurations are not inferred. No source mapping is made over an existing output
+file. These publication hints do not add import edges to the ranking graph.
+
 `list_projects` and `analyze` return their JSON object only as spotlighted text
 inside `content`; they deliberately omit `structuredContent` and `outputSchema`.
 Some clients discard all text whenever `structuredContent` exists, which would
