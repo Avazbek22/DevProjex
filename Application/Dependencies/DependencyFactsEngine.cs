@@ -17,7 +17,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 	// because the file exceeded the edge limit or the index ran out of resolution work.
 	private const string LimitReference = "<limit>";
 	private const int MaximumCachedNavigationFiles = 2_048;
-	private const long MaximumNavigationCacheBytes = 8L * 1024 * 1024;
+	internal const long MaximumNavigationCacheBytes = 8L * 1024 * 1024;
 	private const int MaximumCachedPhysicalFileProbes = 4_096;
 	private const int MaximumSharedIndexCancellationRetries = 1;
 
@@ -39,6 +39,11 @@ public sealed partial class DependencyFactsEngine : IDisposable
 	private long _fileCacheBytes;
 	private long _indexCacheBytes;
 	private long _navigationCacheBytes;
+	private bool _compactNavigationCache;
+	internal (int Entries, long Bytes, int Packed) NavigationCacheState
+	{
+		get { lock (_navigationCacheSync) return (_navigationCache.Count, _navigationCacheBytes, _navigationCacheOrder.Count(entry => entry.Packed is not null)); }
+	}
 	private int _disposed;
 
 	public DependencyFactsEngine(
@@ -108,21 +113,19 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			_extractor is not IDependencyNavigationExtractor)
 			return [];
 		var key = new NavigationCacheKey(relativePath, contentFingerprint);
+		NavigationCacheEntry? hit = null;
 		lock (_navigationCacheSync)
 		{
 			if (_navigationCache.TryGetValue(key, out var cached))
 			{
-				cancellationToken.ThrowIfCancellationRequested();
 				_navigationCacheOrder.Remove(cached);
 				_navigationCacheOrder.AddLast(cached);
-				return cached.Value.Declarations;
+				hit = cached.Value;
 			}
 		}
-		var declarations = ExtractNavigation(
-			relativePath,
-			source,
-			contentFingerprint,
-			cancellationToken);
+		if (hit is not null)
+			return hit.Materialize(cancellationToken);
+		var declarations = ExtractNavigation(relativePath, source, contentFingerprint, cancellationToken);
 		cancellationToken.ThrowIfCancellationRequested();
 		var retained = Array.AsReadOnly(declarations.ToArray());
 		var weight = EstimateNavigationCacheBytes(key, retained);
@@ -132,26 +135,64 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		{
 			if (_navigationCache.TryGetValue(key, out var cached))
 			{
-				cancellationToken.ThrowIfCancellationRequested();
 				_navigationCacheOrder.Remove(cached);
 				_navigationCacheOrder.AddLast(cached);
-				return cached.Value.Declarations;
+				hit = cached.Value;
 			}
-			if (Volatile.Read(ref _disposed) != 0)
-				return retained;
-			var entry = new NavigationCacheEntry(key, retained, weight);
-			_navigationCache[key] = _navigationCacheOrder.AddLast(entry);
-			_navigationCacheBytes += weight;
-			while ((_navigationCache.Count > MaximumCachedNavigationFiles ||
-					_navigationCacheBytes > MaximumNavigationCacheBytes) &&
-				   _navigationCacheOrder.First is { Value: var oldest })
+			else if (Volatile.Read(ref _disposed) == 0)
 			{
-				_navigationCache.Remove(oldest.Key);
-				_navigationCacheOrder.RemoveFirst();
-				_navigationCacheBytes -= oldest.Weight;
+				var entry = new NavigationCacheEntry(key, retained, null, weight);
+				if (!_compactNavigationCache && (_navigationCacheBytes + weight > MaximumNavigationCacheBytes ||
+					_navigationCache.Count >= MaximumCachedNavigationFiles))
+				{
+					// Small working sets keep their existing allocation-free cache-hit path.
+					for (var node = _navigationCacheOrder.First; node is not null;)
+					{
+						cancellationToken.ThrowIfCancellationRequested();
+						var next = node.Next;
+						if (node.Value.Declarations is { Count: 0 })
+						{
+							_navigationCache.Remove(node.Value.Key);
+							_navigationCacheOrder.Remove(node);
+							_navigationCacheBytes -= node.Value.Weight;
+						}
+						else
+						{
+							var compacted = CompactNavigationEntry(node.Value, cancellationToken);
+							_navigationCacheBytes += compacted.Weight - node.Value.Weight;
+							node.Value = compacted;
+						}
+						node = next;
+					}
+					_compactNavigationCache = true;
+				}
+				if (_compactNavigationCache && retained.Count == 0)
+					return retained;
+				if (_compactNavigationCache)
+					entry = CompactNavigationEntry(entry, cancellationToken);
+				cancellationToken.ThrowIfCancellationRequested();
+				_navigationCache[key] = _navigationCacheOrder.AddLast(entry);
+				_navigationCacheBytes += entry.Weight;
+				while ((_navigationCache.Count > MaximumCachedNavigationFiles || _navigationCacheBytes > MaximumNavigationCacheBytes) &&
+				   _navigationCacheOrder.First is { Value: var oldest })
+				{
+					_navigationCache.Remove(oldest.Key);
+					_navigationCacheOrder.RemoveFirst();
+					_navigationCacheBytes -= oldest.Weight;
+				}
 			}
 		}
-		return retained;
+		return hit?.Materialize(cancellationToken) ?? retained;
+	}
+
+	private static NavigationCacheEntry CompactNavigationEntry(NavigationCacheEntry entry, CancellationToken cancellationToken)
+	{
+		if (entry.Declarations is not { Count: > 0 } declarations || entry.Weight < 4096)
+			return entry;
+		var packed = NavigationCachePayload.Encode(declarations, cancellationToken);
+		var strings = new RetainedStringEstimator();
+		var weight = 224 + strings.Add(entry.Key.RelativePath) + strings.Add(entry.Key.ContentFingerprint) + packed.Length;
+		return weight < entry.Weight ? new NavigationCacheEntry(entry.Key, null, packed, weight) : entry;
 	}
 
 	private static long EstimateNavigationCacheBytes(
@@ -1339,8 +1380,17 @@ public sealed partial class DependencyFactsEngine : IDisposable
 
 	private sealed record NavigationCacheEntry(
 		NavigationCacheKey Key,
-		IReadOnlyList<NavigationDeclaration> Declarations,
-		long Weight);
+		IReadOnlyList<NavigationDeclaration>? Declarations,
+		byte[]? Packed,
+		long Weight)
+	{
+		public IReadOnlyList<NavigationDeclaration> Materialize(CancellationToken cancellationToken)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			return Declarations ?? NavigationCachePayload.Decode(Packed!, cancellationToken);
+		}
+	}
+
 
 	private readonly record struct PreparedDependencyIdentity(
 		string RelativePath,
