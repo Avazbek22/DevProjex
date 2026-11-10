@@ -12,13 +12,16 @@ public sealed partial class McpServerProcessTests
 {
 	private const string CacheManualValue = "marked-manual-value-4702";
 
+	// The live footer prints the profile save date, so the protected digests pin it.
+	private static readonly DateTimeOffset CacheProfileSavedUtc = new(2026, 11, 9, 12, 0, 0, TimeSpan.Zero);
+
 	[Fact]
 	public async Task SearchKeepsTheProtectedBaselineAfterNavigationCachePressure()
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = BuildNavigationPressureProject(workspace);
 		var data = workspace.CreateDirectory("data");
-		Assert.True(new ProjectProfileStore(() => data).TrySaveProfile(project, new(["src"], [".cs", ".txt", ".dat"], [], SelectedPaths: null)));
+		Assert.True(new ProjectProfileStore(() => data).TrySaveProfile(project, new(["src"], [".cs", ".txt", ".dat"], [], SelectedPaths: null), CacheProfileSavedUtc));
 		using (var identityProvider = new PersistentSecretIdentityProvider(() => data))
 		{
 			Assert.Equal(PersistentSecretIdentityAvailability.Ready, await identityProvider.EnsureAvailableAsync(TestContext.Current.CancellationToken));
@@ -40,6 +43,7 @@ public sealed partial class McpServerProcessTests
 				Assert.DoesNotContain(CacheManualValue, text, StringComparison.Ordinal);
 				Assert.Contains("DEVPROJEX_REDACTED[", text, StringComparison.Ordinal);
 				Assert.Contains("matches retained=5000/", text, StringComparison.Ordinal);
+				Assert.Contains("· saved 2026-11-09", text, StringComparison.Ordinal);
 				digests.Add(CacheResponseDigest(text));
 				if (index == 1)
 				{
