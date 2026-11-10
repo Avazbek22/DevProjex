@@ -60,6 +60,27 @@ public sealed class DependencySyntaxRecoveryTests
 		Assert.Equal(new DependencySourceLineRange(403, 407), Assert.Single(facts.PartialParse!.Ranges));
 	}
 
+	[Theory]
+	[InlineData("\n")]
+	[InlineData("\r\n")]
+	public void SeparateDamagedInterfacesKeepTheDeclarationBetweenTheirExactDroppedRanges(string ending)
+	{
+		var damaged = string.Join('\n', TypeScriptSource.Split('\n').Skip(2).Take(5));
+		var source = ("export type Before = string\n" + damaged.Replace("HandlerInterface", "First", StringComparison.Ordinal) +
+			"\nexport type Middle = Before\n" + damaged.Replace("HandlerInterface", "Second", StringComparison.Ordinal) +
+			"\nexport type After = Middle\n").ReplaceLineEndings(ending);
+		using var extractor = new TreeSitterDependencyFactExtractor();
+		var facts = Extract(extractor, "types.ts", LanguageId.TypeScript, source);
+		Assert.Equal(DependencyFileStatus.Supported, facts.Status);
+		foreach (var name in new[] { "Before", "Middle", "After" })
+			Assert.Contains(facts.Declarations, declaration => declaration.Identity.QualifiedName.EndsWith("#" + name, StringComparison.Ordinal));
+		Assert.Contains(facts.NavigationDeclarations, declaration => declaration.Name == "First" && declaration.StartLine == 2 && declaration.EndLine == 6);
+		Assert.Contains(facts.NavigationDeclarations, declaration => declaration.Name == "Second" && declaration.StartLine == 8 && declaration.EndLine == 12);
+		Assert.Equal(2, facts.PartialParse!.DroppedConstructs);
+		Assert.Equal(new[] { new DependencySourceLineRange(2, 6), new DependencySourceLineRange(8, 12) }, facts.PartialParse.Ranges);
+		Assert.DoesNotContain(facts.References, reference => reference.Name is "H" or "HonoBase");
+	}
+
 	[Fact]
 	public void ExplicitSignatureSeparatorsNeedNoRecovery()
 	{

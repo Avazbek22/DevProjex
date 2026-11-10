@@ -28,7 +28,8 @@ public sealed partial class McpServerIntegrationTests
 		Assert.DoesNotContain("Exported by:", AllText(whole), StringComparison.Ordinal);
 		var dependents = await server.CallAsync("related_files", new Dictionary<string, object?>
 		{
-			["path"] = source, ["direction"] = "dependents"
+			["path"] = source,
+			["direction"] = "dependents"
 		});
 		Assert.NotEqual(true, dependents.IsError);
 		Assert.DoesNotContain("package export", AllText(dependents), StringComparison.Ordinal);

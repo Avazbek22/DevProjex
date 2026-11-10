@@ -110,14 +110,9 @@ public sealed partial class McpServerIntegrationTests
 		Assert.Equal(calls.Sum(static call => (long)call.FilesDelivered), session.Totals.FilesDelivered);
 	}
 
-	// Issue #468: the server composes every text block itself with LF, so a response does not
-	// depend on Environment.NewLine and the same call costs the same tokens on every platform.
 	[Fact]
 	public async Task EveryToolComposesOnlyLineFeedTextBlocks()
 	{
-		if (!OperatingSystem.IsWindows())
-			Assert.Skip("Environment.NewLine already is \"\\n\" off Windows; this regression only reproduces there.");
-
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
 		var source = Path.Combine(project, "src");
@@ -9536,6 +9531,8 @@ public sealed partial class McpServerIntegrationTests
 		}
 
 		public McpClient Client { get; }
+		internal Task Completion => _serverTask;
+		internal ValueTask CompleteInputAsync(Exception? exception = null) => _clientToServer.Writer.CompleteAsync(exception);
 
 		public static async Task<McpTestServer> StartAsync(
 			string project,

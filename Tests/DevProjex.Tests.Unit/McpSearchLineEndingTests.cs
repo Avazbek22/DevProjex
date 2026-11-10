@@ -50,6 +50,45 @@ public sealed class McpSearchLineEndingTests
 	}
 
 	[Fact]
+	public void OutlineHistoryMatchesABoundedRecencyModelAcrossUpdatesAndEvictions()
+	{
+		const int seed = 92351;
+		var random = new Random(seed);
+		var cache = new McpOutlineReadCache<int>(8);
+		var model = new List<(string Path, int Reads)>();
+		for (var index = 0; index < 1000; index++)
+		{
+			var path = "folder/名前" + random.Next(24) + ".ts";
+			var previous = model.FindIndex(item => item.Path == path);
+			var expected = previous < 0 ? 1 : model[previous].Reads + 1;
+			if (previous >= 0)
+				model.RemoveAt(previous);
+			model.Insert(0, (path, expected));
+			if (model.Count > 8)
+				model.RemoveAt(8);
+			Assert.True(expected == cache.AddOrUpdate(path, (_, _) => 1, (_, value, _) => value + 1, 0), $"seed={seed}; operation={index}");
+			Assert.Equal(model.Count, cache.Count);
+		}
+	}
+
+	[Fact]
+	public async Task ConcurrentOutlineReadsCannotLoseUpdatesOfTheSameVersion()
+	{
+		var cache = new McpOutlineReadCache<int>(8);
+		var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var workers = Enumerable.Range(0, 24).Select(_ => Task.Run(async () =>
+		{
+			await start.Task.ConfigureAwait(false);
+			for (var index = 0; index < 50; index++)
+				cache.AddOrUpdate("same.cs", (_, increment) => increment, (_, value, increment) => value + increment, 1);
+		}, TestContext.Current.CancellationToken)).ToArray();
+		start.SetResult();
+		await Task.WhenAll(workers);
+		Assert.Equal(1201, cache.AddOrUpdate("same.cs", (_, _) => 1, (_, value, _) => value + 1, 0));
+		Assert.Equal(1, cache.Count);
+	}
+
+	[Fact]
 	public void MarkdownOutlineIsIndependentOfLineEndings()
 	{
 		var text = string.Join("\n", Enumerable.Range(0, 400).Select(index => "# Section " + index + new string('x', 70))) + "\n";
