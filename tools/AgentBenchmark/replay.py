@@ -21,6 +21,7 @@ NORMALIZATIONS = (
     'spotlight envelope nonces become a fixed nonce',
     'stored-result identifiers are mapped in first-occurrence order',
     'Repomix output paths/IDs and error-envelope timestamps only, never source timestamps',
+    'Repomix error stacks retain the exception and first eight application frames, excluding Node scheduler frames',
 )
 
 
@@ -32,6 +33,10 @@ def normalize_response(text, roots=(), identifiers=None, tool=None):
             data = json.loads(text)
             if 'errorMessage' in data and isinstance(data.get('details'), dict) and 'timestamp' in data['details']:
                 data['details']['timestamp'] = '<TIMESTAMP>'
+                stack = data['details'].get('stack')
+                if isinstance(stack, str):
+                    frames = [line for line in stack.splitlines() if 'node:internal/' not in line]
+                    data['details']['stack'] = '\n'.join(frames[:9])
                 text = json.dumps(data, ensure_ascii=False, sort_keys=True)
             for key, placeholder in (('outputFilePath', '<OUTPUT>'), ('outputId', None)):
                 value = data.get(key)

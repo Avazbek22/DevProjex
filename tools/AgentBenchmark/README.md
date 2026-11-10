@@ -286,7 +286,9 @@ prepared first; use a new output folder. Calls retain their order and arguments;
 paths are relocated and stored-result IDs follow the corresponding newly created result.
 Each run saves complete responses and durations, plus per-tool counts and full unified diffs.
 Normalization is deliberately narrow: line endings, exact corpus/state roots and their path
-separators, spotlight envelope nonces, and stored-result IDs. Source timestamps, arbitrary IDs,
+separators, spotlight envelope nonces, stored-result IDs, and Repomix output paths and error
+timestamps. Repomix error stacks keep the exception and first eight application frames; Node
+scheduler frames and the unstable stack tail are excluded. Source timestamps, arbitrary IDs,
 durations in source code, numbers and file contents are preserved. New response-level timing
 fields must be identified and tested before adding a normalization; unexplained differences
 must not be hidden by broader substitutions.

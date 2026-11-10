@@ -20,7 +20,7 @@ def text_content(value):
 
 def recorded_calls(path):
     """Keep invocation order, join Claude results by ID, and admit completed Codex items once."""
-    calls, pending, completed = [], {}, set()
+    calls, pending, completed, codex_calls = [], {}, set(), {}
     with Path(path).open(encoding='utf-8') as source:
         for number, line in enumerate(source, 1):
             if not line.strip() or not line.lstrip().startswith('{'):
@@ -30,15 +30,19 @@ def recorded_calls(path):
             except json.JSONDecodeError as error:
                 raise ValueError(f'invalid transcript JSON at line {number}') from error
             item = event.get('item', {})
-            if event.get('type') == 'item.completed' and item.get('type') == 'mcp_tool_call':
-                if item['id'] in completed:
-                    continue
-                completed.add(item['id'])
-                calls.append(dict(sequence=len(calls) + 1, id=item['id'], server=item.get('server'),
-                                  tool=item['tool'], arguments=item.get('arguments', {}),
-                                  text=text_content(item.get('result')), result=item.get('result'),
-                                  is_error=bool(item.get('error') or item.get('status') == 'failed'
-                                                or (item.get('result') or {}).get('isError'))))
+            if event.get('type') in ('item.started', 'item.updated', 'item.completed') and item.get('type') == 'mcp_tool_call':
+                identifier = item['id']
+                if identifier not in codex_calls:
+                    call = dict(sequence=len(calls) + 1, id=identifier, server=item.get('server'), tool=item['tool'],
+                                arguments=item.get('arguments', {}), text='', result=None, is_error=True)
+                    calls.append(call)
+                    codex_calls[identifier] = call
+                if event['type'] == 'item.completed' and identifier not in completed:
+                    completed.add(identifier)
+                    codex_calls[identifier].update(
+                        text=text_content(item.get('result')), result=item.get('result'), completionOrder=number,
+                        is_error=bool(item.get('error') or item.get('status') == 'failed'
+                                      or (item.get('result') or {}).get('isError')))
             if event.get('type') == 'assistant':
                 for block in event.get('message', {}).get('content', []):
                     if block.get('type') != 'tool_use' or not block.get('name', '').startswith('mcp__'):
@@ -53,7 +57,7 @@ def recorded_calls(path):
                     if block.get('type') == 'tool_result' and block.get('tool_use_id') in pending:
                         call = pending.pop(block['tool_use_id'])
                         call.update(text=text_content(block.get('content')), result=block.get('content'),
-                                    is_error=bool(block.get('is_error')))
+                                    is_error=bool(block.get('is_error')), completionOrder=number)
     for call in pending.values():
         call['is_error'] = True
     return calls

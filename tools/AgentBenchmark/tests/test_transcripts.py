@@ -48,7 +48,17 @@ class AttributionTests(unittest.TestCase):
         self.assertEqual([row['exposure'] for row in rows], ['content-shown', 'listed', 'listed'])
 
     def test_markdown_escaped_tree_names_are_paths_not_windows_separators(self):
-        self.assertEqual(attribution.tree_paths('- tests/\r\n  - test\\_a.py\r\n'), {'tests/test_a.py'})
+        self.assertIn('tests/test_a.py', attribution.tree_paths('- tests/\r\n  - test\\_a.py\r\n'))
+
+    def test_all_four_tree_formats_keep_directory_context(self):
+        for text in ('- src/\n  - nested/\n    - a.py\n  - b.py\n',
+                     'root:\n├── src\n│   ├── nested\n│   │   └── a.py\n│   └── b.py\n',
+                     '{"rootPath":"/root","tree":{"src":[{"nested":["a.py"]},"b.py"]}}',
+                     '<t r="/root"><d n="src"><d n="nested"><f>a.py</f></d><f>b.py</f></d></t>'):
+            with self.subTest(text=text):
+                paths = attribution.tree_paths(text)
+                self.assertIn('src/nested/a.py', paths)
+                self.assertIn('src/b.py', paths)
 
     def test_absolute_outside_paths_do_not_satisfy_evidence(self):
         rows = attribution.attribute([call('get_file', 'File: /elsewhere/src/a.py\nLines: 1-1 of 1\nx')],
@@ -79,6 +89,26 @@ class AttributionTests(unittest.TestCase):
         self.assertTrue(claude[1]['is_error'])
         self.assertEqual(len(codex), 1)
         self.assertEqual(codex[0]['text'], 'MCP_PROBE_OK')
+        file_call = recorded_calls(fixtures / 'codex-file.jsonl')[0]
+        self.assertEqual(attribution.content_paths(file_call, '/corpus'),
+                         {'src/FluentValidation/DefaultValidatorExtensions.cs'})
+
+    def test_parallel_codex_calls_keep_invocation_indexes_and_first_delivery_order(self):
+        events = []
+        for identifier in ('one', 'two'):
+            item = {'id': identifier, 'type': 'mcp_tool_call', 'server': 'server_b', 'tool': 'get_tree', 'arguments': {}}
+            events.append({'type': 'item.started', 'item': item})
+        for identifier in ('two', 'one'):
+            item = {'id': identifier, 'type': 'mcp_tool_call', 'server': 'server_b', 'tool': 'get_tree', 'arguments': {},
+                    'status': 'completed', 'result': {'content': [{'type': 'text', 'text': 'src/a.py'}]}}
+            events.append({'type': 'item.completed', 'item': item})
+            events.append({'type': 'item.completed', 'item': item})
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'stream.jsonl'
+            path.write_text('\n'.join(json.dumps(event) for event in events), encoding='utf-8')
+            calls = recorded_calls(path)
+        self.assertEqual([c['id'] for c in calls], ['one', 'two'])
+        self.assertEqual(attribution.attribute(calls, self.task, '')[0]['firstShown']['call'], 2)
 
 
 class ProvenanceTests(unittest.TestCase):
@@ -151,6 +181,33 @@ class ProvenanceTests(unittest.TestCase):
 
 
 class ReplayTests(unittest.TestCase):
+    def test_stdio_replay_sends_original_arguments_to_an_isolated_process_and_closes_it(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            source = folder / 'session'
+            source.mkdir()
+            (source / 'prompt.txt').write_text('local checkout at this absolute path:\n/old/corpus\n', encoding='utf-8')
+            item = {'id': 'one', 'type': 'mcp_tool_call', 'server': 'server_b', 'tool': 'get_file',
+                    'arguments': {'project': '/old/corpus', 'path': 'src/a.py'}, 'status': 'completed',
+                    'result': {'content': [{'type': 'text', 'text': 'original'}]}}
+            (source / 'stream.jsonl').write_text(json.dumps({'type': 'item.completed', 'item': item}), encoding='utf-8')
+            script = folder / 'server.py'
+            script.write_text(
+                'import sys,json,os\n'
+                'for line in sys.stdin:\n'
+                ' request=json.loads(line)\n'
+                ' if "id" not in request: continue\n'
+                ' if request["method"]=="tools/call":\n'
+                '  text=json.dumps({"arguments":request["params"]["arguments"],"state":os.environ["DEVPROJEX_INTERNAL_DATA_ROOT"]})\n'
+                '  result={"content":[{"type":"text","text":text}]}\n'
+                ' else: result={"tools":[]}\n'
+                ' print(json.dumps({"jsonrpc":"2.0","id":request["id"],"result":result}),flush=True)\n', encoding='utf-8')
+            rows = replay.replay_session(source, [sys.executable, str(script)], folder, folder / 'output')
+            response = json.loads(rows[0]['text'])
+            self.assertEqual(response['arguments'], {'project': str(folder), 'path': 'src/a.py'})
+            self.assertEqual(Path(response['state']), folder / 'output/state')
+            self.assertTrue((folder / 'output/responses.json').is_file())
+
     def test_explicit_normalizations_preserve_source_values_and_semantics(self):
         first = '<untrusted-data-' + 'a' * 24 + '>\r\nC:\\corpus\\src\\a.py\r\npack_id=' + 'a' * 32
         second = '<untrusted-data-' + 'b' * 24 + '>\nD:/clone/src/a.py\npack_id=' + 'b' * 32
@@ -176,6 +233,30 @@ class ReplayTests(unittest.TestCase):
         self.assertEqual(replay.compare_calls(before, before)['changed'], 0)
         with self.assertRaises(ValueError):
             replay.compare_calls(before, [])
+
+    def test_repomix_metadata_changes_do_not_hide_source_timestamps_or_unrelated_ids(self):
+        a = json.dumps({'outputFilePath': 'C:/temp/one/output.xml', 'outputId': 'a' * 16,
+                        'result': json.dumps({'outputFilePath': 'C:/temp/one/output.xml'})})
+        b = json.dumps({'outputFilePath': 'D:/scratch/two/output.xml', 'outputId': 'b' * 16,
+                        'result': json.dumps({'outputFilePath': 'D:/scratch/two/output.xml'})})
+        self.assertEqual(replay.normalize_response(a, tool='pack_codebase'),
+                         replay.normalize_response(b, tool='pack_codebase'))
+        for tool in ('get_file', None):
+            self.assertNotEqual(replay.normalize_response(a, tool=tool), replay.normalize_response(b, tool=tool))
+        a = '{"errorMessage":"bad","details":{"timestamp":"2026-01-01"}}'
+        b = a.replace('2026-01-01', '2026-01-02')
+        self.assertEqual(replay.normalize_response(a, tool='pack_remote_repository'),
+                         replay.normalize_response(b, tool='pack_remote_repository'))
+        self.assertNotEqual(replay.normalize_response(a, tool='get_file'), replay.normalize_response(b, tool='get_file'))
+        frames = ['Error: bad'] + [f'    at caller{i} (file:///server.js:{i}:1)' for i in range(10)]
+        first = json.dumps({'errorMessage': 'bad', 'details': {'timestamp': 'now', 'stack': '\n'.join(frames)}})
+        frames.insert(2, '    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)')
+        second = json.dumps({'errorMessage': 'bad', 'details': {'timestamp': 'later', 'stack': '\n'.join(frames[:11])}})
+        self.assertEqual(replay.normalize_response(first, tool='pack_remote_repository'),
+                         replay.normalize_response(second, tool='pack_remote_repository'))
+        changed = second.replace('caller0', 'differentOrigin')
+        self.assertNotEqual(replay.normalize_response(first, tool='pack_remote_repository'),
+                            replay.normalize_response(changed, tool='pack_remote_repository'))
 
 
 if __name__ == '__main__':

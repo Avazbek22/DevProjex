@@ -299,7 +299,9 @@ def load_runs(results, task, arm, include_invalid=False):
                 folder = Path(path).parent
                 if (folder / 'stream.jsonl').is_file() and (folder / 'prompt.txt').is_file():
                     from provenance import inspect_session
-                    summary['provenance'] = inspect_session(folder)
+                    manifest_path = Path(results).parent.parent / 'corpora' / f"{summary.get('repo', '')}.stand.json"
+                    manifest = json.loads(manifest_path.read_text(encoding='utf-8')) if manifest_path.is_file() else None
+                    summary['provenance'] = inspect_session(folder, manifest=manifest)
                     summary['_session_dir'] = str(folder)
                 if include_invalid or eligible_run(summary):
                     runs.append((int(match.group(1)), summary))
