@@ -1,11 +1,15 @@
+using DevProjex.Application.Secrets;
 using DevProjex.Infrastructure.ProjectProfiles;
+using DevProjex.Infrastructure.Secrets;
 
 namespace DevProjex.Tests.Integration;
 
 public sealed partial class McpServerIntegrationTests
 {
-	[Fact]
-	public async Task PackageExportMetadataHonorsManualMarksOutsideManifestContent()
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task PackageExportMetadataHonorsManualMarksOutsideManifestContent(bool keyed)
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
@@ -17,7 +21,7 @@ public sealed partial class McpServerIntegrationTests
 		var appData = Path.Combine(workspace.Path, "app-data");
 		var store = new ProjectProfileStore(() => appData);
 		store.SaveProfile(project, new ProjectSelectionProfile([], [], [], SelectedPaths: null));
-		await AddGlobalExportMarkAsync(store, project, marked);
+		await AddGlobalExportMarkAsync(store, project, marked, keyed, appData);
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path, live: true);
 
 		var markRead = await server.CallAsync("get_file", new Dictionary<string, object?> { ["path"] = "mark.txt" });
@@ -38,13 +42,14 @@ public sealed partial class McpServerIntegrationTests
 	[Theory]
 	[InlineData("automatic")]
 	[InlineData("manual")]
+	[InlineData("manual-v2")]
 	[InlineData("source-bound")]
 	[InlineData("private")]
 	public async Task ProtectedManifestContentCannotProducePackageExportMetadata(string protection)
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
-		var manual = protection is "manual" or "source-bound";
+		var manual = protection is "manual" or "manual-v2" or "source-bound";
 		var protectedValue = manual ? "manually-protected-export-9472" : protection == "private" ? "alice.smith@company.io" : Secret;
 		WriteProjectFile(project, "src/entry.ts", "export const entry = 1;\n");
 		var manifestName = protection == "private" ? "jsr.json" : "package.json";
@@ -64,7 +69,7 @@ public sealed partial class McpServerIntegrationTests
 				await AddPersistentMarkAsync(store, appData, project, "package.json", manifest.IndexOf(protectedValue, StringComparison.Ordinal), protectedValue);
 			}
 			else
-				await AddGlobalExportMarkAsync(store, project, protectedValue);
+				await AddGlobalExportMarkAsync(store, project, protectedValue, protection == "manual-v2", appData);
 		}
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path, hidePrivateData: protection == "private", live: true);
 		var manifestRead = await server.CallAsync("get_file", new Dictionary<string, object?> { ["path"] = manifestName });
@@ -83,12 +88,25 @@ public sealed partial class McpServerIntegrationTests
 			Assert.DoesNotContain("package export", AllText(result), StringComparison.Ordinal);
 		}
 	}
-	private static async Task AddGlobalExportMarkAsync(ProjectProfileStore store, string project, string value)
+
+	private static async Task AddGlobalExportMarkAsync(
+		ProjectProfileStore store, string project, string value, bool keyed, string appData)
 	{
-		Assert.True(DevProjex.Application.Secrets.MarkedSecretValueNormalizer.TryCreate(value, out var normalized, out _));
-		var result = await store.AddMarkAsync(project, new MarkedSecretProfileEntry(normalized.Hash, null, normalized.Length),
-			TestContext.Current.CancellationToken);
+		MarkedSecretProfileEntry mark;
+		if (keyed)
+		{
+			using var provider = new PersistentSecretIdentityProvider(() => appData);
+			Assert.Equal(PersistentSecretIdentityAvailability.Ready,
+				await provider.EnsureAvailableAsync(TestContext.Current.CancellationToken));
+			Assert.True(PersistentSecretIdentity.TryCreateV2(provider, value, out var identity));
+			mark = new(identity, null, value.Length);
+		}
+		else
+		{
+			Assert.True(MarkedSecretValueNormalizer.TryCreate(value, out var normalized, out _));
+			mark = new(normalized.Hash, null, normalized.Length);
+		}
+		var result = await store.AddMarkAsync(project, mark, TestContext.Current.CancellationToken);
 		Assert.True(result.Succeeded);
 	}
-
 }
