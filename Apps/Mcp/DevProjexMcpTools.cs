@@ -1602,10 +1602,32 @@ internal sealed partial class DevProjexMcpTools(
 				? "Dependency index reused"
 				: "Dependency index complete").ConfigureAwait(false);
 
+			var exports = direction == DependencyDirection.Dependencies
+				? []
+				: await FindPackageExportsAsync(plan, cancellationToken).ConfigureAwait(false);
+			var exportRelations = 0;
+			related = related with
+			{
+				Seeds = related.Seeds.Select(seed =>
+				{
+					var manifests = exports.Where(item => item.Target == seed.Seed)
+						.GroupBy(item => item.Manifest, StringComparer.Ordinal)
+						.Select(group => new RelatedFile(group.Key, ResolutionStatus.Resolved,
+							group.Take(8).Select(item => "package export " + JsonSerializer.Serialize(item.Key) + " at " + group.Key).ToArray(),
+							[], false, group.First().EstimatedTokens)).ToArray();
+					exportRelations += manifests.Length;
+					if (manifests.Length == 0)
+						return seed;
+					return seed with { Dependents = seed.Dependents.Concat(manifests).OrderBy(item => item.Path, StringComparer.Ordinal).ToArray() };
+				}).ToArray()
+			};
+			if (outside is not null)
+				outside = outside with { Selection = related };
 			var coverage = related.Index.Coverage;
 			var resolution = outside is null
 				? CountRelatedResolution(related.Index, relativeSeeds, direction)
 				: ToRelatedResolutionCounts(outside.Resolution);
+			resolution = resolution with { Resolved = resolution.Resolved + exportRelations };
 			var configurationData = FormatDependencyConfigurationData(coverage.ConfigurationDiagnostics);
 			var selectionContext = new McpSelectionNoticeContext(
 				HasPaths: false,
@@ -2873,6 +2895,7 @@ internal sealed partial class DevProjexMcpTools(
 		var relativeFiles = readable.IncludedFiles
 			.Select(path => McpProjectService.ToRelative(readable.SourceRoot, path))
 			.ToHashSet(StringComparer.Ordinal);
+		var exports = await FindPackageExportsAsync(readable, cancellationToken).ConfigureAwait(false);
 		var index = Projects.DependencyFactsEngine.TryGetCachedIndex(
 			readable.SourceRoot,
 			readable.IncludedFiles,
@@ -2887,6 +2910,8 @@ internal sealed partial class DevProjexMcpTools(
 				lines[physicalPath] = "Tests for this file: " +
 					string.Join(", ", tests.Select(McpTextEscaping.EscapeSingleLine));
 			}
+			if (FormatPackageExports(exports, relative) is { } exportLine)
+				lines[physicalPath] = lines.TryGetValue(physicalPath, out var existing) ? existing + "\n" + exportLine : exportLine;
 		}
 		return lines;
 	}
