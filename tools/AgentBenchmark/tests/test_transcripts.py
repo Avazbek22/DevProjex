@@ -82,6 +82,15 @@ class AttributionTests(unittest.TestCase):
         rows = attribution.attribute([call('read_repomix_output', '{"content":"def f():"}')], self.task, '')
         self.assertEqual(rows[0]['exposure'], 'never-shown')
 
+    def test_repomix_pack_directory_structure_lists_files_without_claiming_content(self):
+        packed = json.dumps({'directoryStructure': 'src/\r\n  a.py\r\n  nested/\r\n    b.py\r\ntests/\r\n  test_a.py'})
+        rows = attribution.attribute([call('pack_codebase', packed)], self.task, '')
+        self.assertEqual(rows[0]['exposure'], 'listed')
+        self.assertEqual(rows[2]['exposure'], 'listed')
+        self.assertEqual(rows[0]['firstShown'], {'call': 1, 'tool': 'pack_codebase'})
+        self.assertIsNone(rows[0]['firstContent'])
+        self.assertIn('src/nested/b.py', attribution.tree_paths(json.loads(packed)['directoryStructure'], plain=True))
+
     def test_existing_real_client_fixtures_join_calls_without_counting_updates_twice(self):
         fixtures = TOOL_DIR / 'tests/fixtures'
         claude = recorded_calls(fixtures / 'stream.jsonl')

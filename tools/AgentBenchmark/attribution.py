@@ -10,7 +10,7 @@ import benchlib
 LEVELS = ('never-shown', 'listed', 'content-shown')
 
 
-def tree_paths(text):
+def tree_paths(text, plain=False):
     parents, found = [], set()
     block = re.search(r'<untrusted-data-[^>]+>(.*?)</untrusted-data-[^>]+>', text, re.S)
     body = block[1].strip() if block else text.strip()
@@ -49,6 +49,8 @@ def tree_paths(text):
         branch = re.match(r'^([│ ]*)[├└]── (.+)$', line)
         if branch:
             match = branch
+        if plain and match is None:
+            match = re.match(r'^( *)(\S.*?)\s*$', line)
         if not match:
             continue
         indent = len(match[1])
@@ -121,6 +123,14 @@ def attribute(calls, task, answer, root=None, key_version=None):
         listed = benchlib.paths_in(call['text'], root)
         if call['tool'] == 'get_tree':
             listed |= tree_paths(call['text'])
+        if call['tool'] == 'pack_codebase':
+            try:
+                data = json.loads(call['text'])
+                listed |= tree_paths(data.get('directoryStructure', ''), plain=True)
+            except (ValueError, AttributeError):
+                pass
+        for block in re.findall(r'<directory_structure>(.*?)</directory_structure>', call['text'], re.S):
+            listed |= tree_paths(block.strip(), plain=True)
         content = content_paths(call, root)
         for path, entry in entries.items():
             evidence = {'call': call['sequence'], 'tool': call['tool']}
