@@ -1,11 +1,52 @@
 using DevProjex.Application.Secrets;
 using DevProjex.Infrastructure.ProjectProfiles;
 using DevProjex.Infrastructure.Secrets;
+using DevProjex.Mcp;
 
 namespace DevProjex.Tests.Integration;
 
 public sealed partial class McpServerIntegrationTests
 {
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task MetadataHintsDoNotReplaceTheSourceSecretScanCache(bool imports)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		WriteProjectFile(project, "package.json", """{"exports":{".":"./src/entry.ts"}}""");
+		WriteProjectFile(project, "tsconfig.json", """{"compilerOptions":{"module":"esnext","moduleResolution":"bundler"}}""");
+		WriteProjectFile(project, "src/entry.ts", "export const entry = \"" + Secret + "\";\n");
+		WriteProjectFile(project, "src/consumer.ts", "import { entry } from './entry';\nexport const token = \"" + Secret + "\";\n");
+		McpServices? services = null;
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path, configureServices: created => services = created);
+		var arguments = new Dictionary<string, object?> { ["path"] = imports ? "src/consumer.ts" : "src/entry.ts" };
+		var first = await server.CallAsync("get_file", arguments);
+		Assert.NotEqual(true, first.IsError);
+		var firstText = AllText(first);
+		Assert.DoesNotContain(Secret, firstText, StringComparison.Ordinal);
+		Assert.Contains(imports ? "Imports:" : "Exported by:", firstText, StringComparison.Ordinal);
+		Assert.NotNull(services);
+		var runs = services.RedactionSession.GetCacheDiagnostics().DetectionRuns;
+		var second = await server.CallAsync("get_file", arguments);
+		Assert.NotEqual(true, second.IsError);
+		Assert.DoesNotContain(Secret, AllText(second), StringComparison.Ordinal);
+		Assert.Equal(runs, services.RedactionSession.GetCacheDiagnostics().DetectionRuns);
+		Assert.Equal(ExtractSpotlightBody(firstText), ExtractSpotlightBody(AllText(second)));
+		var path = Path.Combine(project, arguments["path"]!.ToString()!);
+		File.AppendAllText(path, "export const updatedValue = true;\n");
+		var changed = await server.CallAsync("get_file", arguments);
+		Assert.NotEqual(true, changed.IsError);
+		Assert.Contains("updatedValue", AllText(changed), StringComparison.Ordinal);
+		Assert.DoesNotContain(Secret, AllText(changed), StringComparison.Ordinal);
+		var updatedRuns = services.RedactionSession.GetCacheDiagnostics().DetectionRuns;
+		Assert.True(updatedRuns > runs);
+		var warmed = await server.CallAsync("get_file", arguments);
+		Assert.DoesNotContain(Secret, AllText(warmed), StringComparison.Ordinal);
+		Assert.Equal(updatedRuns, services.RedactionSession.GetCacheDiagnostics().DetectionRuns);
+		Assert.Equal(ExtractSpotlightBody(AllText(changed)), ExtractSpotlightBody(AllText(warmed)));
+	}
+
 	[Theory]
 	[InlineData(false)]
 	[InlineData(true)]

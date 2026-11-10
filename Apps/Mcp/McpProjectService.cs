@@ -1509,7 +1509,8 @@ internal sealed class McpProjectService(
 		ArgumentNullException.ThrowIfNull(content);
 		var redaction = CreateTransformationContext(plan).Redaction ??
 						throw new InvalidOperationException("MCP text redaction is unavailable.");
-		var scope = redaction.BeginOutput([identityPath], cancellationToken);
+		// Synthetic hints share a file identity, but must not replace that file's scan entry.
+		var scope = redaction.BeginOutput([identityPath], cancellationToken, transformIdentity: "mcp-synthetic-metadata-v1");
 		var result = scope.Redact(identityPath, content, cancellationToken);
 		return (result.Text, scope.Complete());
 	}
