@@ -31,6 +31,7 @@ def main():
     parser.add_argument('--tasks', default='', help='default: every task')
     parser.add_argument('--by-task', action='store_true')
     parser.add_argument('--json', action='store_true')
+    parser.add_argument('--key-version', type=int, help='override recorded key versions; absent metadata uses version 1')
     parser.add_argument('--skip-invented', action='store_true', help='do not count invented paths')
     parser.add_argument('--work')
     parser.add_argument('--agent', choices=('claude', 'codex'), default='claude')
@@ -49,11 +50,18 @@ def main():
     if not arms:
         print(f'no sessions in {results}', file=sys.stderr)
         return 1
-    table = {arm: {'all': benchlib.score_arm(results, tasks_data, arm, task_ids, roots)} for arm in arms}
+    try:
+        for task in tasks_data['tasks']:
+            if task['id'] in task_ids and args.key_version is not None:
+                benchlib.task_key(task, args.key_version)
+        table = {arm: {'all': benchlib.score_arm(results, tasks_data, arm, task_ids, roots, args.key_version)} for arm in arms}
+    except benchlib.BenchmarkError as error:
+        print(f'error: {error}', file=sys.stderr)
+        return 1
     if args.by_task:
         for arm in arms:
             for task_id in task_ids:
-                table[arm][task_id] = benchlib.score_arm(results, tasks_data, arm, [task_id], roots)
+                table[arm][task_id] = benchlib.score_arm(results, tasks_data, arm, [task_id], roots, args.key_version)
     if args.json:
         print(json.dumps(table, indent=1))
         return 0

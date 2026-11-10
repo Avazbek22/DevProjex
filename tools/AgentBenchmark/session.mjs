@@ -205,7 +205,9 @@ export function summarize(job, stdout, exitCode, wallMs) {
   if (!result) error = 'no result event';
   else if (result.is_error) error = result.api_error_status ? `api ${result.api_error_status}: ${String(result.result).slice(0, 120)}` : (result.subtype || 'error');
   return {
-    id: job.id, task: job.task.id, repo: job.task.repo, server: job.server, product: job.product, repeat: job.repeat,
+    id: job.id, task: job.task.id, repo: job.task.repo,
+    ...(job.keyVersion === undefined && job.task.keyVersion === undefined ? {} :
+      { keyVersion: job.keyVersion ?? job.task.keyVersion }), server: job.server, product: job.product, repeat: job.repeat,
     exitCode, durationMs: result?.duration_ms ?? wallMs, wallMs, numTurns: result?.num_turns ?? null,
     error, apiErrorStatus: result?.api_error_status ?? null,
     usage, toolCalls, toolResponseChars: toolCalls.reduce((sum, call) => sum + call.responseChars, 0),

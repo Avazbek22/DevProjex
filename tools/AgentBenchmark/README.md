@@ -248,6 +248,23 @@ paths only inside the prepared corpus root, including Windows drive paths in Mar
 paths outside the corpus cannot satisfy a key. Separators and parent segments are normalized
 before checking that boundary. Recalculate older summaries when comparing path counts.
 
+## Task key versions
+
+New run summaries record the task's `keyVersion`. A summary without this field always uses
+version 1, including after a task key changes. The current key remains in `key`; `previousKeys`
+preserves earlier versions verbatim. Historical results and published tables are not rewritten.
+`keyscore.py` and `report.py` disclose the versions used; `--key-version N` explicitly recalculates
+selected tasks against that version without editing their summaries. Select only tasks that have
+the requested version. Mixed recorded versions are listed separately in the version label.
+
+D1 version 2 distinguishes message-only exceptions from supplied responses and names the exact
+explicit Content-Type value. JWT/JWK supplied-response cases are acceptable context, not required
+fallback coverage. Request cloning, proxy validation and the timeout default are included as
+message-only producers, alongside their tests. For the original D1 counts use
+`keyscore.py --tasks-file tasks/fourteen.json --tasks D1 --key-version 1` (plus the usual work/agent
+options); use `--key-version 2` for the corrected coverage set. Existing verdict files remain
+historical; this option recalculates key metrics, not model judgments.
+
 ## Task files
 
 ```json

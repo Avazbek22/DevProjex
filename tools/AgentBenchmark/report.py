@@ -42,6 +42,7 @@ def table(header, rows):
 
 def key_metrics_table(scores, arms, cost_precision=2):
     rows = [
+        ('Key versions', lambda s: benchlib.format_key_versions(s['key_versions'])),
         ('Sessions', lambda s: s['sessions']),
         ('Required files', lambda s: f"{s['files']}/{s['files_needed']}"),
         ('Required tests', lambda s: f"{s['tests']}/{s['tests_needed']}"),
@@ -58,12 +59,12 @@ def key_metrics_table(scores, arms, cost_precision=2):
                  [[name] + [render(scores[arm]) for arm, _ in arms] for name, render in rows])
 
 
-def per_task_table(results, tasks_data, arms, task_ids, roots):
+def per_task_table(results, tasks_data, arms, task_ids, roots, key_version=None):
     by_id = {task['id']: task for task in tasks_data['tasks']}
     labels = ' / '.join(label for _, label in arms)
     rows = []
     for task_id in task_ids:
-        scores = [benchlib.score_arm(results, tasks_data, arm, [task_id], roots) for arm, _ in arms]
+        scores = [benchlib.score_arm(results, tasks_data, arm, [task_id], roots, key_version) for arm, _ in arms]
         task = by_id[task_id]
         language = tasks_data['repos'][task['repo']]['language']
         rows.append([f"{task_id} {task['kind']}", f"{task['repo']} ({language})",
@@ -138,11 +139,15 @@ def excluded_sessions(results, arms, task_ids):
             table(['Arm', 'Task', 'Repeat', 'Reason', 'Calculated cost', 'Complete usage'], rows)) if rows else ''
 
 
-def build_report(work, tasks_data, arms, task_ids, skip_invented, agent='claude'):
+def build_report(work, tasks_data, arms, task_ids, skip_invented, agent='claude', key_version=None):
+    if key_version is not None:
+        for task in tasks_data['tasks']:
+            if task['id'] in task_ids:
+                benchlib.task_key(task, key_version)
     results = benchlib.results_dir(work, tasks_data['series'], agent)
     benchlib.validate_series_agent(results, [arm for arm, _ in arms], task_ids, agent)
     roots = corpus_roots(work, tasks_data, task_ids, skip_invented)
-    scores = {arm: benchlib.score_arm(results, tasks_data, arm, task_ids, roots) for arm, _ in arms}
+    scores = {arm: benchlib.score_arm(results, tasks_data, arm, task_ids, roots, key_version) for arm, _ in arms}
     trusts = {arm: [self_trust(s) for t in task_ids for s in benchlib.load_runs(results, t, arm)] for arm, _ in arms}
     parts = [
         f"# Series {results.name}: {', '.join(label for _, label in arms)}", '',
@@ -150,7 +155,7 @@ def build_report(work, tasks_data, arms, task_ids, skip_invented, agent='claude'
         '', '## Run configuration', '', run_configuration(results, arms),
         '', '## Key metrics', '', key_metrics_table(scores, arms, 6 if agent == 'codex' else 2), '',
         'Agent self-trust scores: ' + ' / '.join(' '.join(str(t) for t in trusts[arm] if t) or '-' for arm, _ in arms),
-        '', '## Per task', '', per_task_table(results, tasks_data, arms, task_ids, roots),
+        '', '## Per task', '', per_task_table(results, tasks_data, arms, task_ids, roots, key_version),
     ]
     labels = dict(arms)
     judge_files = sorted((results / 'judge').glob('*.json')) if (results / 'judge').is_dir() else []
@@ -169,6 +174,7 @@ def main():
     parser.add_argument('--tasks-file', required=True)
     parser.add_argument('--arms', default='', help='server_b=label,server_c=label')
     parser.add_argument('--tasks', default='')
+    parser.add_argument('--key-version', type=int, help='override recorded key versions; absent metadata uses version 1')
     parser.add_argument('--skip-invented', action='store_true')
     parser.add_argument('--work')
     parser.add_argument('--agent', choices=('claude', 'codex'), default='claude')
@@ -181,7 +187,7 @@ def main():
             raise benchlib.BenchmarkError('no sessions to report')
         task_ids = [t for t in args.tasks.split(',') if t] or [task['id'] for task in tasks_data['tasks']]
         sys.stdout.reconfigure(encoding='utf-8')
-        sys.stdout.write(build_report(work, tasks_data, arms, task_ids, args.skip_invented, args.agent))
+        sys.stdout.write(build_report(work, tasks_data, arms, task_ids, args.skip_invented, args.agent, args.key_version))
     except benchlib.BenchmarkError as error:
         print(f'error: {error}', file=sys.stderr)
         return 1

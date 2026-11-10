@@ -1,6 +1,6 @@
 {
  "series": "fourteen",
- "description": "Fourteen tasks on eight repositories, first run on 2026-11-07, keys corrected on 2026-11-08 (judge v3).",
+ "description": "Fourteen tasks on eight repositories, first run on 2026-11-07, keys corrected on 2026-11-08 (judge v3); D1 key v2 preserves v1 for historical sessions.",
  "autocrlf": true,
  "repos": {
   "httpx": {
@@ -501,28 +501,69 @@
     "supporting": [
      "src/hono-base.ts",
      "src/validator/validator.ts",
-     "src/adapter/cloudflare-pages/handler.ts"
+     "src/adapter/cloudflare-pages/handler.ts",
+     "src/request.ts",
+     "src/middleware/timeout/index.ts",
+     "src/helper/proxy/index.ts"
     ],
     "tests": [
      "src/http-exception.test.ts",
      "src/middleware/body-limit/index.test.ts",
      "src/hono.test.ts",
      "src/validator/validator.test.ts",
+     "src/middleware/timeout/index.test.ts",
+     "src/request.test.ts",
+     "src/helper/proxy/index.test.ts"
+    ],
+    "acceptable": [
      "src/middleware/jwt/index.test.ts",
      "src/middleware/jwk/index.test.ts",
-     "src/middleware/timeout/index.test.ts"
-    ],
-    "acceptable": [],
-    "unrelated": [
-     "src/adapter/aws-lambda/handler.test.ts",
+     "src/middleware/jwt/jwt.ts",
+     "src/middleware/jwk/jwk.ts",
      "src/adapter/cloudflare-pages/handler.test.ts",
-     "src/adapter/lambda-edge/handler.test.ts",
      "src/middleware/basic-auth/index.test.ts",
      "src/middleware/bearer-auth/index.test.ts",
-     "src/middleware/csrf/index.test.ts",
-     "src/request.test.ts"
+     "src/middleware/csrf/index.test.ts"
     ],
-    "notes": "The last commit changes three files. src/http-exception.ts: getResponse() now adds Content-Type: text/plain; charset=UTF-8 when the exception carries no res, so every HTTPException thrown with only a message gets that header. src/middleware/body-limit/index.ts: the default onError now throws HTTPException(413, { message: 'Payload Too Large' }) instead of building its own Response, so the default 413 now carries the text content type; a custom onError is unchanged. src/http-exception.test.ts: a new test for the header. Affected: the default error handler in src/hono-base.ts returns err.getResponse(), so every message-only HTTPException in an app changes, including validator 400s (src/validator/validator.ts), src/request.ts, the jwt/jwk middlewares, the timeout default and the proxy helper; middlewares that pass their own res (basic-auth, bearer-auth, csrf, and ip-restriction) are unchanged, as is src/adapter/cloudflare-pages/handler.ts beyond the same getResponse() call. src/adapter/cloudflare-pages/handler.ts calls getResponse() directly. Tests: src/http-exception.test.ts and src/middleware/body-limit/index.test.ts; src/hono.test.ts, src/validator/validator.test.ts and the jwt, jwk and timeout middleware tests exercise message-only exceptions through the default handler."
+    "unrelated": [
+     "src/adapter/aws-lambda/handler.test.ts",
+     "src/adapter/lambda-edge/handler.test.ts"
+    ],
+    "notes": "The fixture changes three files. HTTPException.getResponse() explicitly sets the exact Content-Type value text/plain; charset=UTF-8 only in its fallback without res. A Fetch Response with a string body already synthesizes a text content type (commonly text/plain;charset=UTF-8); the fixture makes the value explicit, including its formatting, rather than introducing a universally absent header. Its supplied-res branch still copies the supplied headers and returns before the changed fallback. The default body-limit onError now constructs HTTPException(413, { message: 'Payload Too Large' }) instead of passing its own Response; custom onError and the request-stream processing are unchanged. hono-base.ts uses structural getResponse dispatch. validator.ts, request.ts, the timeout default, and the proxy helper construct exceptions without res; cloudflare-pages/handler.ts calls getResponse() for HTTPException, so its behavior depends on whether res was supplied. The required tests cover the changed fallback, default body-limit, or those message-only producers and their integration; only the added http-exception.test.ts assertion pins the exact new header. JWT/JWK attach res: unauthorizedResponse(...), so their existing cases do not prove the changed fallback; their files and tests are acceptable context, not required or known-wrong. Other supplied-response tests are acceptable controls, not evidence of changed fallback behavior. The AWS Lambda and Lambda Edge body-limit tests explicitly configure custom onError, bypassing the changed default; those tests remain unrelated to this change."
+   },
+   "keyVersion": 2,
+   "previousKeys": {
+    "1": {
+     "core": [
+      "src/http-exception.ts",
+      "src/middleware/body-limit/index.ts"
+     ],
+     "supporting": [
+      "src/hono-base.ts",
+      "src/validator/validator.ts",
+      "src/adapter/cloudflare-pages/handler.ts"
+     ],
+     "tests": [
+      "src/http-exception.test.ts",
+      "src/middleware/body-limit/index.test.ts",
+      "src/hono.test.ts",
+      "src/validator/validator.test.ts",
+      "src/middleware/jwt/index.test.ts",
+      "src/middleware/jwk/index.test.ts",
+      "src/middleware/timeout/index.test.ts"
+     ],
+     "acceptable": [],
+     "unrelated": [
+      "src/adapter/aws-lambda/handler.test.ts",
+      "src/adapter/cloudflare-pages/handler.test.ts",
+      "src/adapter/lambda-edge/handler.test.ts",
+      "src/middleware/basic-auth/index.test.ts",
+      "src/middleware/bearer-auth/index.test.ts",
+      "src/middleware/csrf/index.test.ts",
+      "src/request.test.ts"
+     ],
+     "notes": "The last commit changes three files. src/http-exception.ts: getResponse() now adds Content-Type: text/plain; charset=UTF-8 when the exception carries no res, so every HTTPException thrown with only a message gets that header. src/middleware/body-limit/index.ts: the default onError now throws HTTPException(413, { message: 'Payload Too Large' }) instead of building its own Response, so the default 413 now carries the text content type; a custom onError is unchanged. src/http-exception.test.ts: a new test for the header. Affected: the default error handler in src/hono-base.ts returns err.getResponse(), so every message-only HTTPException in an app changes, including validator 400s (src/validator/validator.ts), src/request.ts, the jwt/jwk middlewares, the timeout default and the proxy helper; middlewares that pass their own res (basic-auth, bearer-auth, csrf, and ip-restriction) are unchanged, as is src/adapter/cloudflare-pages/handler.ts beyond the same getResponse() call. src/adapter/cloudflare-pages/handler.ts calls getResponse() directly. Tests: src/http-exception.test.ts and src/middleware/body-limit/index.test.ts; src/hono.test.ts, src/validator/validator.test.ts and the jwt, jwk and timeout middleware tests exercise message-only exceptions through the default handler."
+    }
    }
   }
  ]
