@@ -104,6 +104,8 @@ def content_paths(call, root):
             found |= benchlib.paths_in(match[1], root)
         for match in re.finditer(r'(?m)^## (?:File: )?([^\n]+\.[A-Za-z0-9]+)\n+```[^\n]*\n([^`]+)', text):
             found |= benchlib.paths_in(match[1], root)
+    if call['tool'] == 'read_pack':
+        found |= content_paths({**call, 'tool': 'search_project'}, root)
     return found
 
 

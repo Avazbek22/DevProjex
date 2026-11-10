@@ -46,6 +46,8 @@ class AttributionTests(unittest.TestCase):
         text = 'src/a.py\n3: def f():\nImports: src/b.py\nTests for this file: tests/test_a.py'
         rows = attribution.attribute([call('search_project', text)], self.task, '')
         self.assertEqual([row['exposure'] for row in rows], ['content-shown', 'listed', 'listed'])
+        stored = attribution.attribute([call('read_pack', text)], self.task, '')
+        self.assertEqual([row['exposure'] for row in stored], ['content-shown', 'listed', 'listed'])
 
     def test_markdown_escaped_tree_names_are_paths_not_windows_separators(self):
         self.assertIn('tests/test_a.py', attribution.tree_paths('- tests/\r\n  - test\\_a.py\r\n'))
