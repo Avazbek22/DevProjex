@@ -266,6 +266,8 @@ def run_dir_name(task, arm, repeat):
 
 
 def eligible_run(summary):
+    if summary.get('provenance', {}).get('status', 'passed') != 'passed':
+        return False
     return summary.get('agent', 'claude') != 'codex' or (
         summary.get('eligibleForMetrics') is True and summary.get('isolation', {}).get('status') == 'passed'
         and not summary.get('isolation', {}).get('violations') and summary.get('usage', {}).get('costComplete') is True
@@ -294,6 +296,11 @@ def load_runs(results, task, arm, include_invalid=False):
         if match:
             with open(path, encoding='utf-8') as handle:
                 summary = json.load(handle)
+                folder = Path(path).parent
+                if (folder / 'stream.jsonl').is_file() and (folder / 'prompt.txt').is_file():
+                    from provenance import inspect_session
+                    summary['provenance'] = inspect_session(folder)
+                    summary['_session_dir'] = str(folder)
                 if include_invalid or eligible_run(summary):
                     runs.append((int(match.group(1)), summary))
     return [summary for _, summary in sorted(runs, key=lambda item: item[0])]
@@ -405,16 +412,21 @@ def format_key_versions(versions):
 
 def empty_score():
     return dict(sessions=0, files=0, files_needed=0, tests=0, tests_needed=0, known_wrong=0, invented=0,
-                calls=0, tool_errors=0, context=0, cost=0.0, duration_ms=0, tool_output_chars=0, key_versions={})
+                calls=0, tool_errors=0, context=0, cost=0.0, duration_ms=0, tool_output_chars=0, key_versions={},
+                attribution_sessions=0, missed_never_shown=0, missed_listed=0, missed_content_shown=0,
+                named_never_shown=0, named_listed=0, named_content_shown=0)
 
 
 def score_session(summary, task, corpus_root, key_version=None):
     """Key metrics of one session. corpus_root=None skips the invented-path count."""
     if not eligible_run(summary):
-        raise BenchmarkError('A failed or isolation-violating Codex session cannot enter key metrics')
+        raise BenchmarkError('A failed, isolation-violating or corpus-violating session cannot enter key metrics')
     version = key_version if key_version is not None else summary.get('keyVersion', 1)
     key = task_key(task, version)
-    found = paths_in(summary.get('answer') or '', corpus_root)
+    from transcripts import recorded_root
+    folder = summary.get('_session_dir')
+    original_root = recorded_root(folder) if folder else None
+    found = paths_in(summary.get('answer') or '', original_root or corpus_root)
     needed = set(key['core']) | set(key['supporting'])
     tests = set(key['tests'])
     calls = summary['toolCalls']
@@ -430,6 +442,15 @@ def score_session(summary, task, corpus_root, key_version=None):
         context=context_tokens(summary['usage']), cost=summary['usage']['costUsd'],
         duration_ms=summary.get('durationMs') or 0, tool_output_chars=summary.get('toolResponseChars', 0),
     )
+    if folder:
+        from attribution import attribute
+        from transcripts import recorded_calls
+        entries = attribute(recorded_calls(Path(folder) / 'stream.jsonl'), task,
+                            summary.get('answer') or '', original_root or corpus_root, version)
+        score['attribution_sessions'] = 1
+        for entry in entries:
+            category = ('named_' if entry['named'] else 'missed_') + entry['exposure'].replace('-', '_')
+            score[category] += 1
     return score
 
 
@@ -457,4 +478,6 @@ def score_arm(results, tasks_data, arm, task_ids, corpus_roots, key_version=None
 def format_score(score):
     return (f"keys {format_key_versions(score['key_versions'])} · files {score['files']}/{score['files_needed']} · tests {score['tests']}/{score['tests_needed']} · "
             f"known-wrong {score['known_wrong']} · invented {score['invented']} · calls {score['calls']} · "
-            f"ctx {score['context'] / 1e6:.2f}M · ${score['cost']:.2f}")
+            f"ctx {score['context'] / 1e6:.2f}M · ${score['cost']:.2f} · "
+            f"misses never/listed/content {score['missed_never_shown']}/{score['missed_listed']}/{score['missed_content_shown']} "
+            f"({score['attribution_sessions']} transcripts)")

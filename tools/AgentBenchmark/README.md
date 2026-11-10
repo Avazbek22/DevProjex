@@ -25,6 +25,9 @@ outside it.
 | `report.py` | Markdown report of a series |
 | `benchlib.py`, `session.mjs` | Shared code; no network, no model |
 | `codex.mjs` | Codex configuration, execution and stream normalization |
+| `transcripts.py`, `attribution.py` | Client-neutral recorded calls and evidence for required paths |
+| `provenance.py` | Reject successful calls that read another corpus or an unpinned remote |
+| `replay.py` | Repeat recorded MCP calls without a model; compare hosts or recorded text |
 | `tests/` | Checks that need neither network nor `claude` |
 
 ## Requirements
@@ -216,6 +219,15 @@ disk, retain their cost, appear separately in reports, and never enter key metri
 incomplete Codex sessions are also excluded. Before a new CLI version is used, repeat the direct
 read challenge on a random marker outside the empty workspace and verify an actual MCP success.
 
+Corpus provenance is checked separately for both clients. Successful local packs and project
+selectors must remain inside the prepared corpus; remote packs need its exact repository and
+immutable commit. Reads of unknown packed outputs fail the check. Failed tool attempts that
+return no corpus data do not invalidate a later local read. The runner stops when provenance
+cannot be established, preserves the transcript and cost, and excludes that session from metrics.
+Python must be available (`python` on Windows, `python3` elsewhere); set
+`AGENT_BENCHMARK_PYTHON` to choose the executable. Historical transcripts are checked in memory
+when loaded; scoring never rewrites their files.
+
 `stream.jsonl` contains the unmodified CLI JSONL. `summary.json` maps MCP names to
 `mcp__<server>__<tool>`, collects response characters/errors, the final answer and token usage.
 Input excludes cache reads/writes, which have their own existing fields. Cost is calculated
@@ -247,6 +259,37 @@ Relative paths keep the historical suffix matching. Absolute paths are converted
 paths only inside the prepared corpus root, including Windows drive paths in Markdown links;
 paths outside the corpus cannot satisfy a key. Separators and parent segments are normalized
 before checking that boundary. Recalculate older summaries when comparing path counts.
+
+### Path evidence and replay
+
+When `stream.jsonl` and `prompt.txt` are available, key metrics also count missing required
+paths as `never-shown`, `listed`, or `content-shown`. The first means the path never appeared
+in a response, the second includes trees and dependency references, and the third requires
+observed source text, including numbered search windows and partial reads. Requested paths alone
+are not evidence of delivery. Each required path records its first showing call/tool and first
+content call/tool through `attribution.attribute`; named paths receive the same classification.
+Sessions lacking transcripts are counted separately, not classified as never shown.
+Repomix snippets without an observed file boundary cannot be attributed to a source file;
+unlabelled code is not guessed from its contents. The categories measure observable delivery,
+not whether the final explanation is correct or whether a whole file was read.
+
+Replay needs no client sign-in and makes no model call:
+
+```text
+python replay.py --session <run-folder> --corpus <prepared-clone> --host <devprojex> --output <new-folder>
+python replay.py --session <run-folder> --corpus <prepared-clone> --host <before> --other-host <after> --output <new-folder>
+python replay.py --session <run-folder> --corpus <prepared-clone> --host <devprojex> --recorded --output <new-folder>
+```
+
+The default compares two fresh server sessions of the same host. The corpus must be pinned and
+prepared first; use a new output folder. Calls retain their order and arguments; absolute corpus
+paths are relocated and stored-result IDs follow the corresponding newly created result.
+Each run saves complete responses and durations, plus per-tool counts and full unified diffs.
+Normalization is deliberately narrow: line endings, exact corpus/state roots and their path
+separators, spotlight envelope nonces, and stored-result IDs. Source timestamps, arbitrary IDs,
+durations in source code, numbers and file contents are preserved. New response-level timing
+fields must be identified and tested before adding a normalization; unexplained differences
+must not be hidden by broader substitutions.
 
 ## Task key versions
 

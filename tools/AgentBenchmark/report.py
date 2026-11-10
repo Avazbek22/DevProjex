@@ -48,6 +48,9 @@ def key_metrics_table(scores, arms, cost_precision=2):
         ('Required tests', lambda s: f"{s['tests']}/{s['tests_needed']}"),
         ('Known-wrong files', lambda s: s['known_wrong']),
         ('Invented paths', lambda s: s['invented']),
+        ('Misses: never shown / listed / content shown', lambda s:
+         f"{s['missed_never_shown']} / {s['missed_listed']} / {s['missed_content_shown']}"),
+        ('Sessions with attribution', lambda s: s['attribution_sessions']),
         ('Tool calls', lambda s: s['calls']),
         ('Tool errors', lambda s: s['tool_errors']),
         ('Context tokens', lambda s: f"{s['context']:,}"),
@@ -71,8 +74,9 @@ def per_task_table(results, tasks_data, arms, task_ids, roots, key_version=None)
                      ' / '.join(f"{s['files']}/{s['files_needed']}" for s in scores),
                      ' / '.join(f"{s['tests']}/{s['tests_needed']}" for s in scores),
                      ' / '.join(str(s['calls']) for s in scores),
-                     ' / '.join(f"{s['context']:,}" for s in scores)])
-    return table(['Task', 'Repo', f'Files {labels}', 'Tests', 'Calls', 'Context'], rows)
+                     ' / '.join(f"{s['context']:,}" for s in scores),
+                     ' / '.join(f"{s['missed_never_shown']},{s['missed_listed']},{s['missed_content_shown']}" for s in scores)])
+    return table(['Task', 'Repo', f'Files {labels}', 'Tests', 'Calls', 'Context', 'Misses never,listed,content'], rows)
 
 
 def judge_section(path, labels):
@@ -133,7 +137,8 @@ def excluded_sessions(results, arms, task_ids):
         for task_id in task_ids:
             for summary in benchlib.load_runs(results, task_id, arm, include_invalid=True):
                 if not benchlib.eligible_run(summary):
-                    rows.append([label, task_id, summary['repeat'], summary.get('error') or 'isolation violated',
+                    rows.append([label, task_id, summary['repeat'], summary.get('error') or
+                                 json.dumps(summary.get('provenance') or summary.get('isolation'), ensure_ascii=False),
                                  f"${summary['usage']['costUsd']:.6f}", summary['usage'].get('costComplete', False)])
     return ('\n## Excluded sessions (outside key metrics)\n\n' +
             table(['Arm', 'Task', 'Repeat', 'Reason', 'Calculated cost', 'Complete usage'], rows)) if rows else ''
