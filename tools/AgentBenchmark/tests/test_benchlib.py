@@ -27,6 +27,55 @@ def make_corpus(root, paths):
 
 
 class PathExtractionTests(unittest.TestCase):
+    def test_absolute_windows_paths_are_relative_only_inside_the_corpus(self):
+        root = 'C:/bench/corpora/rich'
+        for path in ('C:/bench/corpora/rich/rich/text.py',
+                     r'c:\bench\corpora\rich\rich\text.py',
+                     '/C:/bench/corpora/rich/rich/text.py',
+                     r'C:/bench\corpora/rich\rich/text.py'):
+            with self.subTest(path=path):
+                self.assertEqual(benchlib.paths_in(f'[source]({path})', root), {'rich/text.py'})
+
+    def test_absolute_posix_paths_use_the_corpus_boundary(self):
+        self.assertEqual(benchlib.paths_in('/bench/rich/rich/text.py', '/bench/rich'), {'rich/text.py'})
+        self.assertFalse(benchlib.mentions('rich/text.py', benchlib.paths_in('/other/rich/text.py', '/bench/rich')))
+        self.assertFalse(benchlib.mentions('rich/text.py', benchlib.paths_in('/bench/richer/rich/text.py', '/bench/rich')))
+
+    def test_unc_paths_keep_the_share_boundary(self):
+        root = r'\\host\share\rich'
+        self.assertEqual(benchlib.paths_in(r'\\host\share\rich\rich\text.py', root), {'rich/text.py'})
+        outside = benchlib.paths_in(r'\\host\other\rich\rich\text.py', root)
+        self.assertFalse(benchlib.mentions('rich/text.py', outside))
+
+    def test_outside_absolute_paths_do_not_match_keys_or_bare_names(self):
+        for path in ('D:/bench/corpora/rich/rich/text.py', 'C:/other/rich/text.py',
+                     'C:/bench/corpora/richer/rich/text.py', '/other/context.go'):
+            with self.subTest(path=path):
+                found = benchlib.paths_in(path, 'C:/bench/corpora/rich')
+                self.assertFalse(benchlib.mentions('rich/text.py', found))
+                self.assertFalse(benchlib.mentions('context.go', found))
+
+    def test_parent_segments_cannot_escape_the_corpus(self):
+        root = 'C:/bench/corpora/rich'
+        for path in ('../rich/text.py', 'C:/bench/corpora/rich/../other/rich/text.py'):
+            with self.subTest(path=path):
+                self.assertFalse(benchlib.mentions('rich/text.py', benchlib.paths_in(path, root)))
+        self.assertEqual(benchlib.paths_in('C:/bench/corpora/rich/sub/../rich/text.py', root), {'rich/text.py'})
+
+    def test_absolute_path_with_spaces_in_markdown_is_not_split(self):
+        root = 'C:/bench folder/corpora/rich'
+        self.assertEqual(benchlib.paths_in(f'[source]({root}/rich/text.py)', root), {'rich/text.py'})
+
+    def test_relative_backslashes_and_root_level_absolute_file(self):
+        self.assertEqual(benchlib.paths_in(r'rich\text.py'), {'rich/text.py'})
+        self.assertEqual(benchlib.paths_in('/bench/context.go', '/bench'), {'context.go'})
+
+    def test_template_placeholders_do_not_turn_suffixes_into_absolute_paths(self):
+        for path in ('src/middleware/{name}/index.ts', 'src/middleware/<name>/index.ts',
+                     'src/middleware/**/index.ts'):
+            with self.subTest(path=path):
+                self.assertEqual(benchlib.paths_in(f'`{path}`'), set())
+
     def test_finds_paths_with_folders_and_bare_source_files(self):
         found = benchlib.paths_in('See `./rich/text.py` and test_cells.py, not https://x.io or notes.txt.')
         self.assertIn('rich/text.py', found)
@@ -79,6 +128,13 @@ class ScoreTests(unittest.TestCase):
     def test_an_arm_without_sessions_scores_zero(self):
         score = benchlib.score_arm(self.results, self.tasks, 'server_q', ['P1', 'P2'], {'rich': self.corpus})
         self.assertEqual(score['sessions'], 0)
+
+    def test_absolute_links_to_existing_files_are_not_invented(self):
+        task = next(t for t in self.tasks['tasks'] if t['id'] == 'P1')
+        summary = {'answer': f'[source]({self.corpus.as_posix()}/rich/text.py)', 'toolCalls': [],
+                   'usage': {'input': 1, 'cacheRead': 0, 'cacheCreation': 0, 'costUsd': 0}}
+        score = benchlib.score_session(summary, task, self.corpus)
+        self.assertEqual((score['files'], score['invented']), (1, 0))
 
 
 class RunLoadingTests(unittest.TestCase):

@@ -6,11 +6,12 @@ comes from an argument or the AGENT_BENCHMARK_WORK environment variable.
 import glob
 import json
 import os
+import posixpath
 import re
 import shutil
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 TOOL_DIR = Path(__file__).resolve().parent
 REPOSITORY_ROOT = TOOL_DIR.parent.parent
@@ -298,31 +299,72 @@ def context_tokens(usage):
 
 
 # ---------------------------------------------------------------- key metrics
-# Path extraction and matching are kept identical to the scorer used since 2026-11-08, so numbers
-# measured with this tool are comparable with Docs/Benchmarks.
+# Relative-path suffix matching follows the historical scorer; absolute paths must belong to the corpus.
 
-_PATH_WITH_FOLDER = re.compile(r'[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+\.[A-Za-z0-9]+')
+_PATH_WITH_FOLDER = re.compile(r'[A-Za-z0-9_.-]+(?:[\\/][A-Za-z0-9_.-]+)+\.[A-Za-z0-9]+')
+_ABSOLUTE_PATH = re.compile(
+    r'(?<![A-Za-z0-9_./\\:}>*-])(?:/?[A-Za-z]:[\\/]|[\\/]{2}|/)(?:[A-Za-z0-9_.-]+[\\/])*[A-Za-z0-9_.-]+\.[A-Za-z0-9]+')
+_DELIMITED_PATH = re.compile(r'(?P<quote>[`\"\'])(?P<quoted>[^\r\n]*?)(?P=quote)|\]\((?P<link>[^\r\n)]*)\)')
 _BARE_FILE = re.compile(
-    r'(?<![A-Za-z0-9_./-])([A-Za-z0-9_-]+\.(?:go|py|ts|tsx|js|json|cs|java|rs|toml|md))(?![A-Za-z0-9_])')
+    r'(?<![A-Za-z0-9_./\\-])([A-Za-z0-9_-]+\.(?:go|py|ts|tsx|js|json|cs|java|rs|toml|md))(?![A-Za-z0-9_])')
 
 
-def paths_in(text):
-    found = {path.lstrip('./') for path in _PATH_WITH_FOLDER.findall(text or '')}
-    found |= set(_BARE_FILE.findall(text or ''))
+def _absolute_answer_path(path):
+    return path.startswith('/') or bool(re.match(r'^[A-Za-z]:/', path))
+
+
+def _normalize_answer_path(path, root=None):
+    path = path.replace('\\', '/')
+    if re.match(r'^/[A-Za-z]:/', path):
+        path = path[1:]
+    path = posixpath.normpath(path)
+    if _absolute_answer_path(path) and root is not None:
+        root_path = str(root).replace('\\', '/')
+        if re.match(r'^/[A-Za-z]:/', root_path):
+            root_path = root_path[1:]
+        root_path = posixpath.normpath(root_path)
+        windows = bool(re.match(r'^(?:[A-Za-z]:/|//)', path))
+        root_windows = bool(re.match(r'^(?:[A-Za-z]:/|//)', root_path))
+        if windows == root_windows:
+            path_type = PureWindowsPath if windows else PurePosixPath
+            try:
+                return path_type(path).relative_to(path_type(root_path)).as_posix()
+            except ValueError:
+                pass
+    return path
+
+
+def paths_in(text, root=None):
+    found = set()
+
+    def collect_absolute(match):
+        candidate = match.groupdict().get('quoted') or match.groupdict().get('link') or match.group(0)
+        normalized = _normalize_answer_path(candidate)
+        if not _absolute_answer_path(normalized) or not re.search(r'\.[A-Za-z0-9]+$', candidate):
+            return match.group(0)
+        found.add(_normalize_answer_path(candidate, root))
+        # Do not extract a second, relative suffix or a bare filename from an absolute path.
+        return ' ' * len(match.group(0))
+
+    remaining = _DELIMITED_PATH.sub(collect_absolute, text or '')
+    remaining = _ABSOLUTE_PATH.sub(collect_absolute, remaining)
+    found |= {_normalize_answer_path(path) for path in _PATH_WITH_FOLDER.findall(remaining)}
+    found |= set(_BARE_FILE.findall(remaining))
     return found
 
 
 def mentions(key_path, found):
-    return any(path == key_path
+    return any(not _absolute_answer_path(path) and not path.startswith('../') and (path == key_path
                or ('/' in path and (path.endswith('/' + key_path) or path.endswith(key_path)))
-               or ('/' in key_path and '/' in path and key_path.endswith(path))
+               or ('/' in key_path and '/' in path and key_path.endswith(path)))
                for path in found)
 
 
 def invented_paths(found, root):
     """Paths with a folder that do not exist in the clone."""
     return sorted(path for path in found
-                  if '/' in path and not path.startswith(('http', 'node:')) and not (Path(root) / path).exists())
+                  if '/' in path and not path.startswith(('http', 'node:'))
+                  and (_absolute_answer_path(path) or path.startswith('../') or not (Path(root) / path).exists()))
 
 
 def empty_score():
@@ -335,7 +377,7 @@ def score_session(summary, task, corpus_root):
     if not eligible_run(summary):
         raise BenchmarkError('A failed or isolation-violating Codex session cannot enter key metrics')
     key = task['key']
-    found = paths_in(summary.get('answer') or '')
+    found = paths_in(summary.get('answer') or '', corpus_root)
     needed = set(key['core']) | set(key['supporting'])
     tests = set(key['tests'])
     calls = summary['toolCalls']
