@@ -155,6 +155,8 @@ public sealed class DocumentationAndPackagingContractTests
 			"[Live context] changed since revision 14: +2 folders, -1 file",
 			"[Live context] changed since revision 14: +7 folders, -2 files · 5 names shown, 4 more",
 			"[Live context] changed since revision 14: selection settings changed",
+			"[Live context] changed since revision 2: window filters changed (2 files no longer readable, 5 now readable) · -4 folders, +all",
+			"[Live context] changed since revision 2: window filters changed (2 files no longer readable)",
 			"[Live context] changed since revision 14: -all, +2 folders",
 			"[Live context] changed since revision 14: -1 folder, +all",
 			"[Live context] no window selection saved for this root; using server defaults.",
@@ -171,6 +173,9 @@ public sealed class DocumentationAndPackagingContractTests
 			Assert.Contains(outputContract, server, StringComparison.Ordinal);
 		Assert.Contains("Live context root 1 name:", server, StringComparison.Ordinal);
 		Assert.Contains("Live context changed paths since revision 14:", server, StringComparison.Ordinal);
+		Assert.Contains("Window filters changed since revision 2:", server, StringComparison.Ordinal);
+		Assert.Contains("inside an untrusted block", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("[Window filters]", server, StringComparison.Ordinal);
 		Assert.Contains("remain inside the same randomized untrusted-data boundary", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("including an error result", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("once a plan has been built at that revision", normalizedServer, StringComparison.Ordinal);

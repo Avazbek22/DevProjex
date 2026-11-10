@@ -798,7 +798,7 @@ public sealed partial class McpLiveContextStateTests
 				response,
 				StringComparison.Ordinal);
 			Assert.Contains(
-				"[Live context] changed since revision 1: window filters changed · -1 path, +all",
+				"[Live context] changed since revision 1: -1 path, +all",
 				response,
 				StringComparison.Ordinal);
 			AssertMarkerIsInsideUntrustedData(response, "src");

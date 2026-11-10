@@ -142,6 +142,42 @@ the full tree uses `+all`:
 [Live context] changed since revision 14: -1 folder, +all
 ```
 
+Window filters are a separate access boundary from the checked focus. A change
+reports the difference between readable file sets **before** applying that focus:
+
+```text
+[Live context] changed since revision 2: window filters changed (2 files no longer readable, 5 now readable) · -4 folders, +all
+[Live context] changed since revision 2: window filters changed (2 files no longer readable)
+[Live context] changed since revision 2: window filters changed
+
+Window filters changed since revision 2:
+-extension .md
++extension .ts
++exclusion extension .md
++exclusion dot-files
+-git mode none
++git mode gitignore
+```
+
+Only nonzero counts appear. Counts are omitted when either revision has no complete
+readable-file snapshot: no plan was built, access or Git readiness is incomplete,
+the call applies its own Git scope, tracked-only restriction or exclusions, the monitored root
+changed while the plan was built, or the snapshot
+would exceed 100,000 files. The filter change is still reported. Without a focus
+change there is no ` · ` focus suffix. Unreported changes coalesce against the last
+reported revision, independently for each root.
+
+Filter values appear only inside untrusted data blocks: extensions, selected root
+folders (quoted), explicit unchecked extension/folder exclusions, other exclusions,
+and Git mode. Transformations and checked paths are not window
+access filters. Each value is escaped onto one line; at most ten lines are shown,
+followed by `· N more` when needed. `[Effective filters]` adds
+`Saved window filters apply.` when a saved live profile exists, with its values under `[Window filters]`
+inside an untrusted block. Any filter change resends this report instead of
+`[Unchanged] effective filters, protection.`, even when only an undisplayed value
+changed. A file hidden by the window filters retains its existing
+`DPX-MCP-PATH-NOT-FOUND` refusal.
+
 Revision 1 is the first profile read in a server session. It advances whenever
 the saved frontier, extensions, ignores, Git mode, transformations, or saved
 secret marks change. Revisions are maintained independently for each configured

@@ -43,7 +43,7 @@ public sealed partial class McpServerIntegrationTests
 		RunGit(first, "commit", "--quiet", "-m", "baseline");
 		File.AppendAllText(Path.Combine(selected, sourceName), "// edited " + marker + "\n");
 		var profileStore = new ProjectProfileStore(() => Path.Combine(workspace.Path, "app-data"));
-		profileStore.SaveProfile(first, new ProjectSelectionProfile([], [], [], SelectedPaths: [selectedName]));
+		profileStore.SaveProfile(first, new ProjectSelectionProfile([], [".cs", ".txt", "." + marker], [], SelectedPaths: [selectedName]));
 		profileStore.SaveProfile(second, new ProjectSelectionProfile([], [], [], SelectedPaths: null));
 		await using var server = await McpTestServer.StartAsync(
 			[first, second],
@@ -109,8 +109,12 @@ public sealed partial class McpServerIntegrationTests
 					new { path = outsideName + "/" + secondOutsideFileName }
 				}
 			})));
-		profileStore.SaveProfile(first, new ProjectSelectionProfile([], [], [], SelectedPaths: [changedName]));
+		profileStore.SaveProfile(first, new ProjectSelectionProfile([], [".cs", ".txt", "." + marker], [], SelectedPaths: [changedName]));
 		results.Add(("changed-profile", await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["project"] = first, ["format"] = "text" })));
+		profileStore.SaveProfile(first, new ProjectSelectionProfile([], [".cs", ".txt", "." + marker + "_changed"], [], SelectedPaths: [changedName]));
+		results.Add(("changed-window-filters", await server.CallAsync(
 			"get_tree",
 			new Dictionary<string, object?> { ["project"] = first, ["format"] = "text" })));
 
@@ -118,6 +122,7 @@ public sealed partial class McpServerIntegrationTests
 		{
 			Assert.NotEqual(true, result.IsError);
 			AssertMarkerOnlyInsideUntrustedData(result, marker, name);
+			Assert.DoesNotContain(marker.ToLowerInvariant(), TrustedText(result), StringComparison.Ordinal);
 			if (!OperatingSystem.IsWindows())
 				AssertMarkerOnlyInsideUntrustedData(result, "second-line", name + " line-break name");
 		}

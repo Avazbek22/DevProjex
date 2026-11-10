@@ -6,25 +6,35 @@ internal static class McpWindowFilters
 
 	public static string[] Values(ProjectSelectionProfile? profile)
 	{
-		if (profile is null)
-			return ["window profile absent"];
+		profile ??= new ProjectSelectionProfile([], [], []);
 		var selection = ProjectSelectionAdapter.FromLegacyProfile(profile, ProjectProfileReference.Local);
 		var values = new List<string>();
-		AddSelection("extension", selection.Extensions, StringComparer.OrdinalIgnoreCase);
-		AddSelection("root folder", selection.Roots, ProjectTreePathIdentity.CanonicalComparer);
+		AddSelection("extension", selection.Extensions, profile.ExtensionStates, StringComparer.OrdinalIgnoreCase);
+		AddSelection("root folder", selection.Roots, profile.RootFolderStates, ProjectTreePathIdentity.CanonicalComparer);
 		values.Add("git mode " + ProjectSelectionTokens.ToToken(selection.GitMode!.Value));
 		values.AddRange((selection.Exclusions ?? []).Select(exclusion => "exclusion " + ProjectSelectionTokens.ToToken(exclusion)));
 		return values.Order(StringComparer.Ordinal).ToArray();
 
-		void AddSelection(string kind, IReadOnlyCollection<string>? items, StringComparer comparer)
+		void AddSelection(string kind, IReadOnlyCollection<string>? items, IReadOnlyDictionary<string, bool>? states, StringComparer comparer)
 		{
 			if (items is null || items.Count == 0)
 			{
 				values.Add(kind + " selection " + (items is null ? "all" : "none"));
-				return;
 			}
-			values.AddRange(items.Distinct(comparer).Select(item => kind + " " +
-				(kind == "extension" ? item.ToLowerInvariant() : item.Replace('\\', '/'))));
+			else
+				values.AddRange(items.Distinct(comparer).Select(item => kind + " " + Name(item)));
+			if (states is not null)
+				values.AddRange(states.Where(pair => !pair.Value).Select(pair => "exclusion " + kind + " " + Name(pair.Key)));
+
+			string Name(string item)
+			{
+				if (kind != "extension")
+					return JsonSerializer.Serialize(item.Replace('\\', '/'));
+				var extension = item.ToLowerInvariant();
+				return extension.StartsWith('.') && !extension.Any(char.IsWhiteSpace) && !extension.Any(char.IsControl)
+					? extension
+					: JsonSerializer.Serialize(extension);
+			}
 		}
 	}
 

@@ -288,7 +288,8 @@ internal sealed class McpProjectService(
 			projectRoot,
 			plan,
 			rootRevisionBeforePlan == rootRevisionAfterPlan ? rootRevisionAfterPlan : null,
-			captureReadableBoundary: !trackedOnly && parsedScope is null && rootRevisionBeforePlan == rootRevisionAfterPlan);
+			captureReadableBoundary: !trackedOnly && parsedScope is null && exclusions is not { Count: > 0 } &&
+				rootRevisionBeforePlan == rootRevisionAfterPlan);
 		if (allowNamedPathsOutsideSelection && liveContext is not null)
 		{
 			var hiddenFiles = new List<string>();

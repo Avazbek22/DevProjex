@@ -6,10 +6,11 @@ namespace DevProjex.Tests.Unit;
 public sealed partial class McpLiveContextStateTests
 {
 	[Theory]
-	[InlineData(3, 1, " (2 files no longer readable)")]
-	[InlineData(1, 3, " (2 now readable)")]
-	[InlineData(1, 1, "")]
-	public void WindowFilterCountsUseTheTreeBeforeFocus(int before, int after, string counts)
+	[InlineData(3, 1, " (2 files no longer readable)", true)]
+	[InlineData(1, 3, " (2 now readable)", true)]
+	[InlineData(1, 1, "", true)]
+	[InlineData(3, 1, "", false)]
+	public void WindowFilterCountsUseTheTreeBeforeFocus(int before, int after, string counts, bool capture)
 	{
 		using var temporary = new TemporaryDirectory();
 		var first = new ProjectSelectionProfile([], [".md", ".py"], [], SelectedPaths: ["src"]);
@@ -25,7 +26,7 @@ public sealed partial class McpLiveContextStateTests
 		using (state.BeginInvocation())
 		{
 			state.ReadProfile(temporary.Path);
-			state.RecordPlan(temporary.Path, BoundaryPlan(after));
+			state.RecordPlan(temporary.Path, BoundaryPlan(after), captureReadableBoundary: capture);
 			var text = Text(state.AppendNotices(McpToolResults.TextSuccess("ok")));
 			Assert.Contains("changed since revision 1: window filters changed" + counts, text, StringComparison.Ordinal);
 			Assert.DoesNotContain("selection settings changed", text, StringComparison.Ordinal);
@@ -97,12 +98,17 @@ public sealed partial class McpLiveContextStateTests
 	public void FilterStateMapsDistinguishAllNoneAndExplicitSelections()
 	{
 		var all = new ProjectSelectionProfile([], [], []);
+		Assert.Empty(McpWindowFilters.Changes(all, null));
 		var none = all with { ExtensionStates = new Dictionary<string, bool> { [".md"] = false } };
 		var selected = all with { ExtensionStates = new Dictionary<string, bool> { [".md"] = true }, RootFolderStates = new Dictionary<string, bool> { ["src\\nested"] = true } };
 		Assert.Contains("-extension selection all", McpWindowFilters.Changes(all, none));
 		Assert.Contains("+extension selection none", McpWindowFilters.Changes(all, none));
 		Assert.Contains("+extension .md", McpWindowFilters.Changes(none, selected));
-		Assert.Contains("+root folder src/nested", McpWindowFilters.Changes(none, selected));
+		Assert.Contains("+root folder \"src/nested\"", McpWindowFilters.Changes(none, selected));
+		var newExclusion = selected with { ExtensionStates = new Dictionary<string, bool> { [".md"] = true, [".py"] = false } };
+		Assert.Contains("+exclusion extension .py", McpWindowFilters.Changes(selected, newExclusion));
+		Assert.NotEqual(McpWindowFilters.Identity(selected), McpWindowFilters.Identity(newExclusion));
+		Assert.NotEqual(McpWindowFilters.Identity(all), McpWindowFilters.Identity(all with { SelectedRootFolders = ["selection all"] }));
 	}
 
 	[Theory]
@@ -116,6 +122,17 @@ public sealed partial class McpLiveContextStateTests
 		{
 			GitReadiness = new ProjectContextGitReadiness(GitFilteringMode.TrackedFilesOnly, 0, !denied),
 			Analysis = plan.Analysis with { Diagnostics = new ProjectAnalysisDiagnosticsReport(false, !denied, []) }
+		};
+		Assert.Null(McpWindowFilters.CaptureReadableFiles(plan));
+	}
+
+	[Fact]
+	public void ReadableBoundariesBeyondTheLimitStayUnknown()
+	{
+		using var temporary = new TemporaryDirectory();
+		var plan = Plan(temporary.Path, 1, Tree(temporary.Path, McpWindowFilters.MaximumReadableFiles + 1)) with
+		{
+			GitReadiness = new ProjectContextGitReadiness(GitFilteringMode.None, 0, true)
 		};
 		Assert.Null(McpWindowFilters.CaptureReadableFiles(plan));
 	}
