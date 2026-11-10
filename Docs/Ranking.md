@@ -368,3 +368,18 @@ The minimum of every cell moved as well, so this is a real cost of about 10 to 2
 roughly one hundred directories listed, not drift. Warm indexing is unaffected beyond the stamp
 checks for those directories. Reducing the listing cost is tracked as separate work, and that
 work must keep these results byte-identical.
+
+### Baseline on v5.2.2
+
+The frozen protocol was rerun on 2026-11-10 on `9342912f9da03c2776e665f91474266152d7576c` with
+the registry, tasks, budgets, comparators, sufficient sets and gates unchanged. Against the
+2026-11-07 result, 269 of 270 cells are identical. The one difference is Flask
+`context-lifetime` at 16,000 tokens under `directed-from-seed`: the irrelevant-token share moved
+from `0.6947` to `0.6984`, while its RecallNew, AllRequired, oracle and oracle-after-seeds values
+are unchanged. The release criterion passes with the same values, an overall
+`focus-v1 - seed-first` RecallNew delta of `+0.3667` and zero AllRequired regressions. The
+difference comes from dependency-extraction changes merged between `41a721f8` and `9342912f`;
+the protocol keeps no per-commit record between them, so it is recorded here rather than
+attributed to one change. The complete result is
+`tools/RankingEval/results/2026-11-10-v5.2.2.json`, which replaces the 2026-11-07 result as the
+current baseline, so the next change to dependency facts is compared against this commit.
