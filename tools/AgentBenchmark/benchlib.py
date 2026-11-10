@@ -59,8 +59,8 @@ def stand_manifest_path(work, repo):
     return Path(work) / 'corpora' / f'{repo}.stand.json'
 
 
-def results_dir(work, series):
-    return Path(work) / 'results' / series
+def results_dir(work, series, agent='claude'):
+    return Path(work) / 'results' / (series + '-codex' if agent == 'codex' else series)
 
 
 def remove_tree(path):
@@ -245,7 +245,27 @@ def run_dir_name(task, arm, repeat):
     return f'{task}-{arm}-r{repeat}'
 
 
-def load_runs(results, task, arm):
+def eligible_run(summary):
+    return summary.get('agent', 'claude') != 'codex' or (
+        summary.get('eligibleForMetrics') is True and summary.get('isolation', {}).get('status') == 'passed'
+        and not summary.get('isolation', {}).get('violations') and summary.get('usage', {}).get('costComplete') is True
+        and not summary.get('error') and summary.get('exitCode') == 0)
+
+
+def validate_series_agent(results, arms, task_ids, expected):
+    for arm in arms:
+        record_path = Path(results) / 'arms' / f'{arm}.json'
+        if record_path.is_file():
+            record = json.loads(record_path.read_text(encoding='utf-8'))
+            if record.get('agent', 'claude') != expected:
+                raise BenchmarkError(f'{arm} belongs to another agent; select the matching --agent series')
+        for task_id in task_ids:
+            for summary in load_runs(results, task_id, arm, include_invalid=True):
+                if summary.get('agent', 'claude') != expected:
+                    raise BenchmarkError(f'{summary["id"]} belongs to another agent; sessions cannot be mixed')
+
+
+def load_runs(results, task, arm, include_invalid=False):
     """Summaries of one task and arm, ordered by repeat. Failed attempts are not summaries."""
     pattern = os.path.join(glob.escape(str(results)), 'runs', f'{glob.escape(task)}-{glob.escape(arm)}-r*', 'summary.json')
     runs = []
@@ -253,7 +273,9 @@ def load_runs(results, task, arm):
         match = re.search(r'-r(\d+)$', os.path.basename(os.path.dirname(path)))
         if match:
             with open(path, encoding='utf-8') as handle:
-                runs.append((int(match.group(1)), json.load(handle)))
+                summary = json.load(handle)
+                if include_invalid or eligible_run(summary):
+                    runs.append((int(match.group(1)), summary))
     return [summary for _, summary in sorted(runs, key=lambda item: item[0])]
 
 
@@ -310,6 +332,8 @@ def empty_score():
 
 def score_session(summary, task, corpus_root):
     """Key metrics of one session. corpus_root=None skips the invented-path count."""
+    if not eligible_run(summary):
+        raise BenchmarkError('A failed or isolation-violating Codex session cannot enter key metrics')
     key = task['key']
     found = paths_in(summary.get('answer') or '')
     needed = set(key['core']) | set(key['supporting'])

@@ -19,11 +19,12 @@ outside it.
 | `arms.example.json` | Template of an arms file: which neutral server name runs which build |
 | `prepare_corpora.py` | Clones the repositories at pinned tags, builds the special stands, verifies all of them |
 | `build_hosts.py` | Builds DevProjex at given commits; installs an exact Repomix version |
-| `run.mjs` | Runs the sessions (`claude -p`), one folder per session |
+| `run.mjs` | Runs Claude sessions by default, or explicitly selected Codex arms, one folder per session |
 | `keyscore.py` | Key metrics: required files and tests, known-wrong files, invented paths, calls, context, cost |
 | `judge.py` | Blind pairwise judge (v3), both orders |
 | `report.py` | Markdown report of a series |
 | `benchlib.py`, `session.mjs` | Shared code; no network, no model |
+| `codex.mjs` | Codex configuration, execution and stream normalization |
 | `tests/` | Checks that need neither network nor `claude` |
 
 ## Requirements
@@ -126,6 +127,10 @@ that with the tool verdict. `--dry-run`, `keyscore.py`, `report.py` and the test
 
 ## Rules
 
+Paid sessions run only on the owner's explicit request.
+
+Use the cheapest model that reliably calls MCP tools: Claude Haiku 4.5 for Claude sessions, the documented cheapest suitable model for Codex sessions; never larger models for benchmark series.
+
 1. **One heavy command at a time.** Do not build hosts, run tests or run another series while
    sessions are running: timing and token numbers move with machine load.
 2. **Fresh arm names.** An arm name with results in the series folder is refused. A reused name
@@ -144,6 +149,85 @@ that with the tool verdict. `--dry-run`, `keyscore.py`, `report.py` and the test
    not a result.
 7. **Compare against the exact base commit**, built under its own host name in the same series.
 
+## Codex sessions
+
+Codex is an explicit arm option, not a replacement for the default Claude path. Use an installed
+Codex CLI (validated with 0.167.0) with existing file-based authentication in `CODEX_HOME/auth.json`
+or `~/.codex/auth.json`. The runner copies that file into a private per-session home and deletes
+the copy afterwards; it never changes the original configuration or starts a login flow.
+Keyring-only authentication is not supported by this isolated path.
+
+The default is `gpt-6-luna`, verified in the signed-in model catalog and with an MCP call.
+On 2026-11-10 its published Standard API rates per million tokens were $0.10 uncached input,
+$0.01 cached input, $0.125 cache writes and $0.50 output
+([model and pricing](https://developers.openai.com/api/docs/models/gpt-6-luna)). It was cheaper
+than the other listed small model, [GPT-5.6 Luna](https://developers.openai.com/api/docs/models/gpt-5.6-luna)
+($0.20 input, $0.02 cached, $1.20 output).
+Availability and prices can change: check `codex debug models` and the official price before a
+new paid series. `--model ID` overrides the arm/default model; a different model requires an
+explicit matching `pricing` object in the arm, with a source and rates per million tokens.
+
+```json
+{
+  "server_k": { "product": "v5.2.2 <commit>", "host": "v522", "agent": "codex" },
+  "server_l": { "product": "Repomix 1.19.0", "repomix": "1.19.0", "agent": "codex" }
+}
+```
+
+The arm record includes agent, model, CLI version, isolation profile and prices. Codex results
+use `<series>-codex`; one invocation refuses a mixture of Claude and Codex arms. Resuming still
+requires the recorded fingerprint. The source task file and `prompt.txt` remain the same.
+
+```text
+node run.mjs --tasks-file tasks/rich-fluentvalidation.json --arms-file codex-arms.json --tasks P1,C1 --repeats 1 --parallel 1 --budget-usd 3 --dry-run
+node run.mjs --tasks-file tasks/rich-fluentvalidation.json --arms-file codex-arms.json --tasks P1,C1 --repeats 1 --parallel 1 --budget-usd 3
+python keyscore.py --tasks-file tasks/rich-fluentvalidation.json --agent codex --tasks P1,C1 --by-task
+python report.py --tasks-file tasks/rich-fluentvalidation.json --agent codex --tasks P1,C1
+```
+
+`--codex-bin` selects a native executable or the npm JavaScript launcher. Windows npm shims are
+resolved to their JavaScript launcher, without shell interpolation. For Codex, `--max-turns`
+bounds MCP call count; `numTurns` records completed CLI turns, not Claude's turn unit. Sessions
+have the same timeout. A budget requires serial execution, includes recorded attempts on resume,
+and stops subsequent sessions when completed spend or the first-session projection exceeds the
+limit, or usage is incomplete. This is a between-session check, not a provider billing limit.
+
+### Isolation
+
+Each session runs `codex exec --json --ephemeral --strict-config --ignore-rules` from an empty
+workspace outside the corpus, with the read-only sandbox, no project instructions, no user
+configuration, and exactly the arm's MCP server in its generated private configuration. Only
+that server is preapproved; its process runs with the corpus as its own working directory.
+Shell, browser, computer, image, apps, plugins, memories, hooks and collaboration features are
+disabled. The installed CLI's model catalog is restricted to direct tool presentation with no
+shell, patch or Node execution and no deferred discovery. The model ID and inference provider
+are unchanged. This avoids a code-execution wrapper being needed to reach MCP tools.
+
+The profile uses the documented [`model_catalog_json`](https://learn.chatgpt.com/docs/config-file/config-reference)
+setting. The [0.167.0 tool registry](https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/core/src/tools/spec_plan.rs)
+gates shell and patch registration on those capabilities; the real probe checks the installed binary too.
+The read-only sandbox does **not** establish a filesystem read jail. The guarantee is therefore
+a restricted tool surface plus a fail-closed transcript check, not an OS-level read boundary.
+Every started/updated/completed item is checked: only MCP calls to the selected server and text
+or reasoning items are admitted. Foreign servers, built-in tools, malformed or unknown events
+mark `isolation.status = "violated"` and `eligibleForMetrics = false`. Unsupported tool calls
+reported on stderr are rejected too. Such sessions remain on
+disk, retain their cost, appear separately in reports, and never enter key metrics. Failed or
+incomplete Codex sessions are also excluded. Before a new CLI version is used, repeat the direct
+read challenge on a random marker outside the empty workspace and verify an actual MCP success.
+
+`stream.jsonl` contains the unmodified CLI JSONL. `summary.json` maps MCP names to
+`mcp__<server>__<tool>`, collects response characters/errors, the final answer and token usage.
+Input excludes cache reads/writes, which have their own existing fields. Cost is calculated
+from the recorded rates and marked `costSource = "calculated"`; `costComplete` distinguishes
+finished usage from an interrupted lower bound. A ChatGPT sign-in may consume subscription
+allowance rather than incur the API dollar estimate: the CLI does not expose an invoice.
+Codex series use key metrics; `judge.py --agent codex` refuses before starting Claude.
+
+The committed Codex stream fixture is a shortened real 0.167.0 isolation-probe stream. Its thread
+identifier is replaced; no credential, user path or corpus content is included. Tests use this
+fixture and a fake CLI, and never need an installed Codex or a model call.
+
 ## Reading the report
 
 - **Required files / tests**: mentions of key files (`core` plus `supporting`) and key tests over
@@ -155,7 +239,7 @@ that with the tool verdict. `--dry-run`, `keyscore.py`, `report.py` and the test
 - **Context tokens**: every input token the model processed, cached input included
   (`input + cacheRead + cacheCreation`). Each call resends the whole conversation, so this follows
   the number of calls more than the size of responses.
-- **Cost, time**: as the client reported them.
+- **Cost, time**: as the client reported them; Codex cost is the recorded API-rate estimate above.
 - **Judge tables**: wins of each arm, ties and order-dependent pairs per criterion, then mean 1-5
   scores and the claims the judge flagged.
 

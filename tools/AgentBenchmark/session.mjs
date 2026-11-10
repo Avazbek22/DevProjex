@@ -3,9 +3,22 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { CODEX_MODEL } from './codex.mjs';
 
 export const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
 export const ARM_NAME = /^server_[a-z0-9]+$/;
+
+export function armAgent(arm) {
+  return arm.agent ?? 'claude';
+}
+
+export function armModel(arm, override = '') {
+  return override || arm.model || (armAgent(arm) === 'codex' ? CODEX_MODEL : DEFAULT_MODEL);
+}
+
+export function agentSeries(series, agent) {
+  return agent === 'codex' ? `${series}-codex` : series;
+}
 
 export function countWorktreeFiles(root) {
   let total = 0;
@@ -68,6 +81,7 @@ export function validateArms(arms) {
     if (!ARM_NAME.test(name)) errors.push(`${name}: arm names must look like server_b, so the agent and the judge cannot tell the product`);
     if (!arm?.product) errors.push(`${name}: product is missing`);
     if (Boolean(arm?.host) === Boolean(arm?.repomix)) errors.push(`${name}: set exactly one of host or repomix`);
+    if (arm && !['claude', 'codex'].includes(armAgent(arm))) errors.push(`${name}: agent must be claude or codex`);
   }
   return errors;
 }

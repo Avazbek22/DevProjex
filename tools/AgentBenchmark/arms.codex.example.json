@@ -1,0 +1,34 @@
+{
+  "server_k": {
+    "product": "DevProjex v5.2.2",
+    "host": "v522",
+    "agent": "codex",
+    "model": "gpt-6-luna",
+    "pricing": {
+      "model": "gpt-6-luna",
+      "input": 0.1,
+      "cacheRead": 0.01,
+      "cacheCreation": 0.125,
+      "output": 0.5,
+      "unit": "USD per million tokens",
+      "source": "https://developers.openai.com/api/docs/models/gpt-6-luna",
+      "checked": "2026-11-10"
+    }
+  },
+  "server_l": {
+    "product": "Repomix 1.19.0",
+    "repomix": "1.19.0",
+    "agent": "codex",
+    "model": "gpt-6-luna",
+    "pricing": {
+      "model": "gpt-6-luna",
+      "input": 0.1,
+      "cacheRead": 0.01,
+      "cacheCreation": 0.125,
+      "output": 0.5,
+      "unit": "USD per million tokens",
+      "source": "https://developers.openai.com/api/docs/models/gpt-6-luna",
+      "checked": "2026-11-10"
+    }
+  }
+}
