@@ -25,6 +25,9 @@ outside it.
 | `report.py` | Markdown report of a series |
 | `benchlib.py`, `session.mjs` | Shared code; no network, no model |
 | `codex.mjs` | Codex configuration, execution and stream normalization |
+| `transcripts.py`, `attribution.py` | Client-neutral recorded calls and evidence for required paths |
+| `provenance.py` | Reject successful calls that read another corpus or an unpinned remote |
+| `replay.py` | Repeat recorded MCP calls without a model; compare hosts or recorded text |
 | `tests/` | Checks that need neither network nor `claude` |
 
 ## Requirements
@@ -216,6 +219,18 @@ disk, retain their cost, appear separately in reports, and never enter key metri
 incomplete Codex sessions are also excluded. Before a new CLI version is used, repeat the direct
 read challenge on a random marker outside the empty workspace and verify an actual MCP success.
 
+Corpus provenance is checked separately for both clients. Successful local packs and project
+selectors must remain inside the prepared corpus; remote packs need its exact repository and
+immutable commit in a supported GitHub `/tree/<40-character-SHA>` or `/commit/<SHA>` URL.
+An extra `ref`/`branch` argument or URL fragment is not proof: Repomix's MCP tool does not pass
+those arguments to its downloader. Reported pack directories and JSON tree roots are checked too.
+Reads of unknown packed outputs fail the check. Failed tool attempts that
+return no corpus data do not invalidate a later local read. The runner stops when provenance
+cannot be established, preserves the transcript and cost, and excludes that session from metrics.
+Python must be available (`python` on Windows, `python3` elsewhere); set
+`AGENT_BENCHMARK_PYTHON` to choose the executable. Historical transcripts are checked in memory
+when loaded; scoring never rewrites their files.
+
 `stream.jsonl` contains the unmodified CLI JSONL. `summary.json` maps MCP names to
 `mcp__<server>__<tool>`, collects response characters/errors, the final answer and token usage.
 Input excludes cache reads/writes, which have their own existing fields. Cost is calculated
@@ -248,6 +263,39 @@ paths only inside the prepared corpus root, including Windows drive paths in Mar
 paths outside the corpus cannot satisfy a key. Separators and parent segments are normalized
 before checking that boundary. Recalculate older summaries when comparing path counts.
 
+### Path evidence and replay
+
+When `stream.jsonl` and `prompt.txt` are available, key metrics also count missing required
+paths as `never-shown`, `listed`, or `content-shown`. The first means the path never appeared
+in a response, the second includes trees and dependency references, and the third requires
+observed source text, including numbered search windows and partial reads. Requested paths alone
+are not evidence of delivery. Each required path records its first showing call/tool and first
+content call/tool through `attribution.attribute`; named paths receive the same classification.
+Sessions lacking transcripts are counted separately, not classified as never shown.
+Repomix snippets without an observed file boundary cannot be attributed to a source file;
+unlabelled code is not guessed from its contents. The categories measure observable delivery,
+not whether the final explanation is correct or whether a whole file was read.
+
+Replay needs no client sign-in and makes no model call:
+
+```text
+python replay.py --session <run-folder> --corpus <prepared-clone> --host <devprojex> --output <new-folder>
+python replay.py --session <run-folder> --corpus <prepared-clone> --host <before> --other-host <after> --output <new-folder>
+python replay.py --session <run-folder> --corpus <prepared-clone> --host <devprojex> --recorded --output <new-folder>
+```
+
+The default compares two fresh server sessions of the same host. The corpus must be pinned and
+prepared first; use a new output folder. Calls retain their order and arguments; absolute corpus
+paths are relocated and stored-result IDs follow the corresponding newly created result.
+Each run saves complete responses and durations, plus per-tool counts and full unified diffs.
+Normalization is deliberately narrow: line endings, exact corpus/state roots and their path
+separators, spotlight envelope nonces, stored-result IDs, and Repomix output paths and error
+timestamps. Repomix error stacks keep the exception and first eight application frames; Node
+scheduler frames and the unstable stack tail are excluded. Source timestamps, arbitrary IDs,
+durations in source code, numbers and file contents are preserved. New response-level timing
+fields must be identified and tested before adding a normalization; unexplained differences
+must not be hidden by broader substitutions.
+
 ## Task key versions
 
 New run summaries record the task's `keyVersion`. A summary without this field always uses
@@ -255,7 +303,8 @@ version 1, including after a task key changes. The current key remains in `key`;
 preserves earlier versions verbatim. Historical results and published tables are not rewritten.
 `keyscore.py` and `report.py` disclose the versions used; `--key-version N` explicitly recalculates
 selected tasks against that version without editing their summaries. Select only tasks that have
-the requested version. Mixed recorded versions are listed separately in the version label.
+the requested version. `--key-version current` uses each selected task's latest key, including a
+mixture of versions. Mixed recorded versions are listed separately in the version label.
 
 D1 version 2 distinguishes message-only exceptions from supplied responses and names the exact
 explicit Content-Type value. JWT/JWK supplied-response cases are acceptable context, not required
@@ -264,6 +313,12 @@ message-only producers, alongside their tests. For the original D1 counts use
 `keyscore.py --tasks-file tasks/fourteen.json --tasks D1 --key-version 1` (plus the usual work/agent
 options); use `--key-version 2` for the corrected coverage set. Existing verdict files remain
 historical; this option recalculates key metrics, not model judgments.
+
+T5 version 2 includes tests that use positional JSON response arguments. T6 and C2 version 2
+measure the mandatory shared registration/documentation surfaces without requiring several
+alternative templates together; template suitability remains outside the path-only metric.
+T7 version 2 corrects the matching algorithm description without changing path counts.
+T8 version 2 distinguishes signature edits from useful indirect regression tests.
 
 ## Task files
 

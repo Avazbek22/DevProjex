@@ -222,27 +222,61 @@
     ],
     "tests": [
      "src/context.test.ts",
-     "src/types.test.ts"
+     "src/types.test.ts",
+     "runtime-tests/lambda/index.test.ts",
+     "src/client/client.test.ts",
+     "src/client/utils.test.ts",
+     "src/middleware/combine/index.test.ts",
+     "src/middleware/jwk/index.test.ts",
+     "src/middleware/jwt/index.test.ts",
+     "src/validator/validator.test.ts",
+     "src/middleware/method-not-allowed/index.test.ts"
     ],
     "acceptable": [
      "src/middleware/bearer-auth/index.ts",
      "src/middleware/cors/index.ts",
-     "src/middleware/method-not-allowed/index.test.ts",
-     "src/middleware/method-not-allowed/index.ts"
+     "src/middleware/method-not-allowed/index.ts",
+     "src/hono.test.ts"
     ],
     "unrelated": [
-     "runtime-tests/lambda/index.test.ts",
-     "src/client/client.test.ts",
-     "src/client/types.test.ts",
-     "src/client/utils.test.ts",
-     "src/hono.test.ts",
-     "src/middleware/combine/index.test.ts",
-     "src/middleware/jwk/index.test.ts",
-     "src/middleware/jwt/index.test.ts",
-     "src/validator/validator.test.ts"
+     "src/client/types.test.ts"
     ],
-    "notes": "Context.json: JSONRespond (context.ts ~725); TypedResponse/MergeTypedResponse in types.ts; client inference in client/types.ts; no built-in middleware calls c.json in its implementation: bearer-auth and cors mention it only in doc-comment examples, and method-not-allowed only in a doc example with positional status and headers; tests: context.test.ts and the json() type tests in types.test.ts."
-   }
+    "notes": "Context.json and JSONRespond/JSONRespondReturn are defined in context.ts, with TypedResponse and response inference in types.ts and client/types.ts. No built-in middleware implementation calls c.json: bearer-auth, cors and method-not-allowed contain documentation examples. context.test.ts and types.test.ts directly test the helper and its types. Positional status callers also occur in runtime-tests/lambda/index.test.ts, client/client.test.ts, client/utils.test.ts, middleware/combine/index.test.ts, middleware/jwk/index.test.ts, middleware/jwt/index.test.ts, validator/validator.test.ts, and method-not-allowed/index.test.ts; these calls must use the new options form. hono.test.ts already demonstrates a ResponseOrInit options object and is an acceptable control, not a positional caller. client/types.test.ts exercises typed-client behavior but does not itself use positional c.json status arguments. Existing notes that labelled the positional callers unrelated were incorrect."
+   },
+   "previousKeys": {
+    "1": {
+     "core": [
+      "src/context.ts",
+      "src/types.ts"
+     ],
+     "supporting": [
+      "src/client/types.ts"
+     ],
+     "tests": [
+      "src/context.test.ts",
+      "src/types.test.ts"
+     ],
+     "acceptable": [
+      "src/middleware/bearer-auth/index.ts",
+      "src/middleware/cors/index.ts",
+      "src/middleware/method-not-allowed/index.test.ts",
+      "src/middleware/method-not-allowed/index.ts"
+     ],
+     "unrelated": [
+      "runtime-tests/lambda/index.test.ts",
+      "src/client/client.test.ts",
+      "src/client/types.test.ts",
+      "src/client/utils.test.ts",
+      "src/hono.test.ts",
+      "src/middleware/combine/index.test.ts",
+      "src/middleware/jwk/index.test.ts",
+      "src/middleware/jwt/index.test.ts",
+      "src/validator/validator.test.ts"
+     ],
+     "notes": "Context.json: JSONRespond (context.ts ~725); TypedResponse/MergeTypedResponse in types.ts; client inference in client/types.ts; no built-in middleware calls c.json in its implementation: bearer-auth and cors mention it only in doc-comment examples, and method-not-allowed only in a doc example with positional status and headers; tests: context.test.ts and the json() type tests in types.test.ts."
+    }
+   },
+   "keyVersion": 2
   },
   {
    "id": "T6",
@@ -254,20 +288,45 @@
      "package.json",
      "jsr.json"
     ],
-    "supporting": [
+    "supporting": [],
+    "tests": [],
+    "acceptable": [
      "src/middleware/method-not-allowed/index.ts",
      "src/middleware/body-limit/index.ts",
-     "src/middleware/powered-by/index.ts"
-    ],
-    "tests": [
+     "src/middleware/powered-by/index.ts",
      "src/middleware/method-not-allowed/index.test.ts",
      "src/middleware/body-limit/index.test.ts",
-     "src/middleware/powered-by/index.test.ts"
+     "src/middleware/powered-by/index.test.ts",
+     "src/middleware/ip-restriction/index.ts",
+     "src/middleware/ip-restriction/index.test.ts",
+     "src/middleware/method-override/index.ts",
+     "src/middleware/method-override/index.test.ts"
     ],
-    "acceptable": [],
     "unrelated": [],
-    "notes": "Any small existing middleware pair counts as the template (index.ts + index.test.ts in src/middleware/<name>/); registration = package.json exports and jsr.json exports (the last added middleware touched exactly those four files)."
-   }
+    "notes": "Distribution requires package.json exports and jsr.json exports. A single small middleware with options and its colocated index.test.ts is a valid template; three different templates are not jointly required. Examples include powered-by (PoweredByOptions and poweredBy), body-limit (BodyLimitOptions and bodyLimit), method-not-allowed (MethodNotAllowedOptions), ip-restriction, and method-override. Their files and tests are acceptable alternatives, not separate mandatory paths. This path-only key measures the two mandatory distribution manifests; it does not measure whether the chosen template or its test explanation is suitable. src/index.ts does not centrally register all middleware."
+   },
+   "previousKeys": {
+    "1": {
+     "core": [
+      "package.json",
+      "jsr.json"
+     ],
+     "supporting": [
+      "src/middleware/method-not-allowed/index.ts",
+      "src/middleware/body-limit/index.ts",
+      "src/middleware/powered-by/index.ts"
+     ],
+     "tests": [
+      "src/middleware/method-not-allowed/index.test.ts",
+      "src/middleware/body-limit/index.test.ts",
+      "src/middleware/powered-by/index.test.ts"
+     ],
+     "acceptable": [],
+     "unrelated": [],
+     "notes": "Any small existing middleware pair counts as the template (index.ts + index.test.ts in src/middleware/<name>/); registration = package.json exports and jsr.json exports (the last added middleware touched exactly those four files)."
+    }
+   },
+   "keyVersion": 2
   },
   {
    "id": "T7",
@@ -292,8 +351,31 @@
     "unrelated": [
      "test/Serilog.PerformanceTests/SourceContextMatchBenchmark.cs"
     ],
-    "notes": "GetEffectiveLevel walks the overrides ordered descending by key and shortens the context at dot boundaries; falls back to the default minimum level or the default level switch. Logger consults the map per source context."
-   }
+    "notes": "LevelOverrideMap.GetEffectiveLevel iterates override keys ordered descending by key. It compares the unchanged source context with each key using OrdinalIgnoreCase StartsWith, requiring either an exact length or a dot immediately after the key. It does not repeatedly shorten the context; the question's wording must not be interpreted as evidence of a shortening loop. Descending key order gives more specific matching prefixes priority. If none matches, it returns the default minimum level and default level switch. Logger.ForContext consults the map when a SourceContext property is assigned. LoggerConfiguration builds the map, LoggerMinimumLevelConfiguration collects overrides; LevelOverrideMapTests, ChildLoggerTests and LoggerConfigurationTests cover matching, inheritance and configuration."
+   },
+   "previousKeys": {
+    "1": {
+     "core": [
+      "src/Serilog/Core/LevelOverrideMap.cs",
+      "src/Serilog/Core/Logger.cs"
+     ],
+     "supporting": [
+      "src/Serilog/LoggerConfiguration.cs",
+      "src/Serilog/Configuration/LoggerMinimumLevelConfiguration.cs"
+     ],
+     "tests": [
+      "test/Serilog.Tests/Core/LevelOverrideMapTests.cs",
+      "test/Serilog.Tests/Core/ChildLoggerTests.cs",
+      "test/Serilog.Tests/Configuration/LoggerConfigurationTests.cs"
+     ],
+     "acceptable": [],
+     "unrelated": [
+      "test/Serilog.PerformanceTests/SourceContextMatchBenchmark.cs"
+     ],
+     "notes": "GetEffectiveLevel walks the overrides ordered descending by key and shortens the context at dot boundaries; falls back to the default minimum level or the default level switch. Logger consults the map per source context."
+    }
+   },
+   "keyVersion": 2
   },
   {
    "id": "T8",
@@ -316,13 +398,14 @@
      "src/Serilog/Context/LogContext.cs"
     ],
     "tests": [
-     "test/Serilog.Tests/Core/LoggerTests.cs",
-     "test/Serilog.Tests/Context/LogContextTests.cs",
      "test/Serilog.Tests/Support/DelegatingEnricher.cs",
      "test/Serilog.Tests/Support/CollectingEnricher.cs",
      "test/TestDummies/DummyThreadIdEnricher.cs"
     ],
-    "acceptable": [],
+    "acceptable": [
+     "test/Serilog.Tests/Core/LoggerTests.cs",
+     "test/Serilog.Tests/Context/LogContextTests.cs"
+    ],
     "unrelated": [
      "src/Serilog/Context/EnricherStack.cs",
      "src/Serilog/Core/Pipeline/SilentLogger.cs",
@@ -341,8 +424,54 @@
      "test/Serilog.Tests/Support/DisposableLogger.cs",
      "test/TestDummies/DummyLoggerConfigurationExtensions.cs"
     ],
-    "notes": "Enrich(LogEvent, ILogEventPropertyFactory) is implemented by the enrichers under Core/Enrichers, by LogContextEnricher, and aggregated by SafeAggregateEnricher; LoggerEnrichmentConfiguration is the configuration surface; Logger calls it on every event. LogContext walks the enricher stack and calls Enrich; the test suite implements the interface in Support/CollectingEnricher, Support/DelegatingEnricher and TestDummies/DummyThreadIdEnricher."
-   }
+    "notes": "Enrich(LogEvent, ILogEventPropertyFactory) is declared by ILogEventEnricher and implemented in the five Core/Enrichers classes, LogContextEnricher, Support/CollectingEnricher, Support/DelegatingEnricher and TestDummies/DummyThreadIdEnricher. Logger, ConditionalEnricher, SafeAggregateEnricher, LogContext and LogContextEnricher directly call Enrich. LoggerEnrichmentConfiguration.With accepts enrichers. LoggerTests and LogContextTests are useful regression tests but do not declare or directly call the changed Enrich method; they remain compilable when implementations accept an additional argument. In particular, DelegatingEnricher owns an independent two-argument Action delegate whose constructor contract need not change with the interface. Those two integration test files are acceptable context, not mandatory signature edits."
+   },
+   "previousKeys": {
+    "1": {
+     "core": [
+      "src/Serilog/Core/ILogEventEnricher.cs",
+      "src/Serilog/Core/Logger.cs"
+     ],
+     "supporting": [
+      "src/Serilog/Core/Enrichers/PropertyEnricher.cs",
+      "src/Serilog/Core/Enrichers/FixedPropertyEnricher.cs",
+      "src/Serilog/Core/Enrichers/ConditionalEnricher.cs",
+      "src/Serilog/Core/Enrichers/SafeAggregateEnricher.cs",
+      "src/Serilog/Core/Enrichers/EmptyEnricher.cs",
+      "src/Serilog/Context/LogContextEnricher.cs",
+      "src/Serilog/Configuration/LoggerEnrichmentConfiguration.cs",
+      "src/Serilog/Context/LogContext.cs"
+     ],
+     "tests": [
+      "test/Serilog.Tests/Core/LoggerTests.cs",
+      "test/Serilog.Tests/Context/LogContextTests.cs",
+      "test/Serilog.Tests/Support/DelegatingEnricher.cs",
+      "test/Serilog.Tests/Support/CollectingEnricher.cs",
+      "test/TestDummies/DummyThreadIdEnricher.cs"
+     ],
+     "acceptable": [],
+     "unrelated": [
+      "src/Serilog/Context/EnricherStack.cs",
+      "src/Serilog/Core/Pipeline/SilentLogger.cs",
+      "src/Serilog/ILogger.cs",
+      "src/Serilog/Log.cs",
+      "src/Serilog/LoggerConfiguration.cs",
+      "src/Serilog/Settings/KeyValuePairs/SurrogateConfigurationMethods.cs",
+      "test/Serilog.PerformanceTests/AllocationsBenchmark.cs",
+      "test/Serilog.PerformanceTests/LogContextEnrichmentBenchmark.cs",
+      "test/Serilog.Tests/Configuration/LoggerConfigurationTests.cs",
+      "test/Serilog.Tests/Configuration/LoggerSinkConfigurationTests.cs",
+      "test/Serilog.Tests/Core/LoggerExtensionsTests.cs",
+      "test/Serilog.Tests/MethodOverloadConventionTests.cs",
+      "test/Serilog.Tests/Settings/CallableConfigurationMethodFinderTests.cs",
+      "test/Serilog.Tests/Settings/KeyValuePairSettingsTests.cs",
+      "test/Serilog.Tests/Support/DisposableLogger.cs",
+      "test/TestDummies/DummyLoggerConfigurationExtensions.cs"
+     ],
+     "notes": "Enrich(LogEvent, ILogEventPropertyFactory) is implemented by the enrichers under Core/Enrichers, by LogContextEnricher, and aggregated by SafeAggregateEnricher; LoggerEnrichmentConfiguration is the configuration surface; Logger calls it on every event. LogContext walks the enricher stack and calls Enrich; the test suite implements the interface in Support/CollectingEnricher, Support/DelegatingEnricher and TestDummies/DummyThreadIdEnricher."
+    }
+   },
+   "keyVersion": 2
   },
   {
    "id": "G1",

@@ -12,6 +12,7 @@ import {
 } from '../session.mjs';
 import { CODEX_MODEL, CODEX_PRICING, budgetStop, codexArguments, codexConfiguration, codexPricing, executeCodex,
   restrictedCatalog, saveCodexSummary, summarizeCodex } from '../codex.mjs';
+import { sessionProvenance } from '../provenance.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const TOOL_DIR = join(HERE, '..');
@@ -296,4 +297,18 @@ test('explicit task key versions survive both summary formats without changing l
   assert.equal(summarize({ ...job, task: { ...job.task, keyVersion: 2 } }, stream, 0, 5000).keyVersion, 2);
   assert.equal(summarize(job, stream, 0, 5000).keyVersion, undefined);
   assert.equal(summarizeCodex(codexJob, codexStream, 0, 10, CODEX_PRICING).keyVersion, undefined);
+});
+
+test('the runner checks corpus provenance and fails closed without changing raw streams', () => {
+  const folder = scratch();
+  try {
+    writeFileSync(join(folder, 'summary.json'), JSON.stringify({ server: 'server_probe' }));
+    writeFileSync(join(folder, 'manifest.json'), '{}');
+    writeFileSync(join(folder, 'stream.jsonl'), codexStream);
+    assert.equal(sessionProvenance(folder, '/corpus', join(folder, 'manifest.json')).status, 'passed');
+    writeFileSync(join(folder, 'stream.jsonl'), codexStream.replaceAll('server_probe', 'server_other'));
+    assert.equal(sessionProvenance(folder, '/corpus', join(folder, 'manifest.json')).status, 'violated');
+    rmSync(join(folder, 'stream.jsonl'));
+    assert.equal(sessionProvenance(folder, '/corpus', join(folder, 'manifest.json')).status, 'unverified');
+  } finally { rmSync(folder, { recursive: true, force: true }); }
 });

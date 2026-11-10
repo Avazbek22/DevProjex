@@ -8043,13 +8043,14 @@ public sealed partial class McpServerIntegrationTests
 		foreach (var tool in tools.Where(static tool => tool.Name is
 			"get_tree" or "analyze" or "pack_context" or "search_project" or "related_files" or "get_file" or "get_diff"))
 		{
-			Assert.Contains("absolute path returned by list_projects", tool.ProtocolTool.Description,
+			Assert.Contains("omit for one local root", tool.ProtocolTool.Description,
 				StringComparison.Ordinal);
-			Assert.Contains("unique listed name", tool.ProtocolTool.Description, StringComparison.Ordinal);
+			Assert.Contains("unique name", tool.ProtocolTool.Description, StringComparison.Ordinal);
 			var address = tool.ProtocolTool.InputSchema.GetProperty("properties")
 				.GetProperty("project").GetProperty("description").GetString();
-			Assert.Contains("absolute path returned by list_projects", address, StringComparison.Ordinal);
-			Assert.Contains("unique listed name", address, StringComparison.Ordinal);
+			Assert.Contains("Omit for one local root", address, StringComparison.Ordinal);
+			Assert.Contains("absolute path", address, StringComparison.Ordinal);
+			Assert.Contains("unique name", address, StringComparison.Ordinal);
 			Assert.Contains("#index", address, StringComparison.Ordinal);
 		}
 	}

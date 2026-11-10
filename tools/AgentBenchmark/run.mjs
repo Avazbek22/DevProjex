@@ -14,6 +14,7 @@ import {
   armAgent, armModel, agentSeries,
 } from './session.mjs';
 import { budgetStop, codexLauncher, codexPricing, executeCodex, summarizeCodex } from './codex.mjs';
+import { sessionProvenance } from './provenance.mjs';
 
 const TOOL_DIR = dirname(fileURLToPath(import.meta.url));
 const REPOSITORY_ROOT = resolve(TOOL_DIR, '..', '..');
@@ -178,6 +179,7 @@ function runJob(job) {
       writeFileSync(join(job.out, 'stream.jsonl'), stdout);
       writeFileSync(join(job.out, 'stderr.txt'), stderr);
       const summary = summarize(job, stdout, code, Date.now() - started);
+      summary.provenance = sessionProvenance(job.out, plan.repoPath, join(work, 'corpora', `${job.task.repo}.stand.json`), job.server);
       const name = isTransientFailure(summary) ? `failed-${Date.now()}.json` : 'summary.json';
       writeFileSync(join(job.out, name), JSON.stringify(summary, null, 2));
       console.log(`${job.id}: exit=${code} turns=${summary.numTurns} calls=${summary.toolCalls.length} `
@@ -202,6 +204,9 @@ async function runCodexJob(job) {
     summary.error = `Codex setup or output failed: ${error.message}`;
     writeFileSync(join(job.out, 'summary.json'), JSON.stringify(summary, null, 2));
   }
+  summary.provenance = sessionProvenance(job.out, plan.repoPath, join(work, 'corpora', `${job.task.repo}.stand.json`), job.server);
+  if (summary.provenance.status !== 'passed') summary.eligibleForMetrics = false;
+  writeFileSync(join(job.out, 'summary.json'), JSON.stringify(summary, null, 2));
   if (summary.isolation.status === 'passed' && isTransientFailure(summary)) {
     writeFileSync(join(job.out, `failed-${Date.now()}.json`), JSON.stringify(summary, null, 2));
     rmSync(join(job.out, 'summary.json'));
@@ -234,7 +239,8 @@ await Promise.all(Array.from({ length: Math.min(options.parallel, queue.length) 
     const summary = await runJob(queue.shift());
     spent += summary.usage.costUsd;
     finished++;
-    const reason = agent === 'codex' ? budgetStop(summary, spent, options['budget-usd'], finished === 1, jobs.length) : null;
+    const reason = summary.provenance.status !== 'passed' ? 'Corpus provenance failed' :
+      agent === 'codex' ? budgetStop(summary, spent, options['budget-usd'], finished === 1, jobs.length) : null;
     if (reason) {
       console.error(`${reason}: $${spent.toFixed(4)} recorded; do not start the remaining sessions`);
       stopped = true;
