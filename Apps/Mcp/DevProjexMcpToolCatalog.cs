@@ -8,7 +8,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	private const string MaximumResultSizeKey = "anthropic/maxResultSizeChars";
 	private const string SearchHintKey = "anthropic/searchHint";
 	private const string ProjectAddressDescription =
-		" Project: unique listed name, absolute path returned by list_projects, or #index.";
+		" Project: omit for one local root; otherwise unique name, absolute path, or #index.";
 	private readonly IReadOnlyList<McpServerTool> _tools;
 
 	public DevProjexMcpToolCatalog(DevProjexMcpTools target, bool allowRemote, bool agentExclusions = false,
@@ -193,7 +193,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	private const string CompactProjectProperty = """
 	"project": {
 	  "type": "string",
-	  "description": "unique listed name, absolute path returned by list_projects, or #index."
+	  "description": "Omit for one local root; otherwise unique name, absolute path, or #index."
 	}
 	""";
 
