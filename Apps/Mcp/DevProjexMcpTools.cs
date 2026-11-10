@@ -2991,12 +2991,14 @@ internal sealed partial class DevProjexMcpTools(
 		McpSelectionNoticeContext request,
 		bool includeProtection = true)
 	{
+		var windowProfile = liveContext?.ReadProfile(plan.SourceRoot).Profile;
 		var selection = McpEffectiveFilters.SelectionNoticeParts(
 			plan,
 			agentExclusions,
-			includeFilters,
+			includeFilters || liveContext?.HasPendingWindowFilterChange(plan.SourceRoot) == true,
 			request,
-			live: liveContext is not null);
+			live: liveContext is not null,
+			windowProfile: windowProfile);
 		var protection = includeProtection
 			? $"[Protection] secrets=always · private-data={(McpProjectService.IsPrivateDataHidden(plan) ? "enabled" : "disabled")}."
 			: null;
@@ -3007,7 +3009,10 @@ internal sealed partial class DevProjexMcpTools(
 			NoticeIdentity(plan),
 			selection.Filters,
 			protection,
-			alwaysSend: selection.EmptySelection is not null || plan.FileSizeFilter is not null);
+			alwaysSend: selection.EmptySelection is not null || plan.FileSizeFilter is not null,
+			effectiveFiltersIdentity: windowProfile is null || selection.Filters is null
+				? null
+				: selection.Filters + McpWindowFilters.Identity(windowProfile));
 		return CombineTrustedNotices(
 			notices.Continuation,
 			notices.Filters,
