@@ -320,11 +320,11 @@ public sealed class DocumentationAndPackagingContractTests
 		var normalized = Regex.Replace(server, @"\s+", " ");
 
 		Assert.Contains(
-			"`max_depth` counts levels below the project root",
+			"`max_depth` counts levels below each requested `paths` entry",
 			normalized,
 			StringComparison.Ordinal);
 		Assert.Contains(
-			"`paths` narrows the selection but never re-roots the tree",
+			"Overlapping requests use the union of their depth windows",
 			normalized,
 			StringComparison.Ordinal);
 		Assert.Contains(

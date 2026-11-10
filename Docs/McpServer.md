@@ -1237,23 +1237,10 @@ When the character cap falls inside one long line, the trailer keeps that line a
 adds the next 1-based Unicode column:
 `[Showing lines A-A of N; continue with start_line=A start_column=C.]`.
 
-`max_depth` counts levels below the project root. Depth 0 returns the root alone,
-depth 1 adds its direct children, and a file inside `src/router` first appears at
-depth 3. `paths` narrows the selection but never re-roots the tree, so the depth a
-subtree needs is still counted from the project root, not from the `paths` entry.
-When an explicit `max_depth` already hides one or more requested `paths` entries —
-a directory entry whose own depth reaches `max_depth`, or a file entry deeper than
-`max_depth` — the response appends a `[Tree depth]` trailer stating how many
-entries are hidden, the shallowest depth among them, and a `max_depth` value that
-shows two levels below the deepest one; the trailer carries only counts, never the
-path itself. When every hidden entry is a file, which has nothing below it, the
-trailer instead says those files are not shown and gives the `max_depth` that shows
-them, as in `[Tree depth] max_depth counts from the project root; 1 requested file(s)
-sit at depth 6 or deeper, so they are not shown. Omit max_depth, or pass 6 to show them.`
-When the requested `paths` stay visible but folders under them reach `max_depth`, those folders render
-without their contents, so the trailer counts the ones that hold selected files and gives the `max_depth`
-that opens them, as in `[Tree depth] max_depth counts from the project root; 26 folder(s) under the
-requested paths reach depth 3 and are shown without their contents. Omit max_depth, or pass 4 to open them.`
+`max_depth` counts levels below each requested `paths` entry; without `paths`, it counts
+from the project root. Depth 0 shows each requested entry alone, depth 1 adds its
+children. Ancestors remain visible. Overlapping requests use the union of their
+depth windows, and a requested file remains visible at depth 0.
 The three narrowing parameters compose in a fixed order and never widen each other:
 `paths` and the pattern arrays intersect to form the selection, and `max_depth`
 then prunes the rendering of that selection. Listing one directory therefore needs

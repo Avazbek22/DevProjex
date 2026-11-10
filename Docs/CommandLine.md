@@ -1403,3 +1403,7 @@ legacy shapes do not receive a speculative replacement. See
 - [CLI-Profiles.md](CLI-Profiles.md): portable profiles and precedence
 - [Desktop-Control.md](Desktop-Control.md): local IPC
 - [TerminalWorkspace.md](TerminalWorkspace.md): interactive TUI
+
+The tree command has no depth parameter and prints the selected tree in full. MCP
+`get_tree` counts `max_depth` from each requested `paths` entry, or from the project
+root when `paths` is omitted.

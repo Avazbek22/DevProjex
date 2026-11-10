@@ -259,7 +259,7 @@ internal sealed partial class DevProjexMcpTools(
 	}
 
 	[Description(
-		"Returns filtered structure without contents. Use it to find files by name; use analyze instead for size and token metrics, or pack_context for multi-file content. Returns Markdown/text/JSON/XML within 2,000 lines and 50,000 characters. paths selects literal locations; include_patterns selects names or directories in one call, e.g. include_patterns=[\"src/middleware/{powered-by,body-limit,bearer-auth}/**/*handler*.ts\"]. format=markdown|text|json|xml; max_depth=0..1000 counts levels below the project root; git_scope and filters only narrow.")]
+		"Returns filtered structure without contents. Use it to find files by name; use analyze instead for size and token metrics, or pack_context for multi-file content. Returns Markdown/text/JSON/XML within 2,000 lines and 50,000 characters. paths selects literal locations; include_patterns selects names or directories in one call, e.g. include_patterns=[\"src/middleware/{powered-by,body-limit,bearer-auth}/**/*handler*.ts\"]. format=markdown|text|json|xml; max_depth=0..1000 counts levels below each paths entry, or the project root without paths; git_scope and filters only narrow.")]
 	public Task<CallToolResult> GetTree(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -293,6 +293,8 @@ internal sealed partial class DevProjexMcpTools(
 				format,
 				MaximumTreeLines,
 				cancellationToken);
+			if (HasItems(paths))
+				depthFit = depthFit with { FullDepth = CalculateRequestedTreeDepth(plan.ProjectedTree, paths!, cancellationToken) };
 			// Line counts are known before rendering, so no depth deeper than this can fit; the
 			// character limit is only known by rendering, which stops at the limit.
 			var lineFittingDepth = depthFit.FullTreeFits ? depthFit.FullDepth : depthFit.DeepestCompleteDepth;
@@ -303,10 +305,11 @@ internal sealed partial class DevProjexMcpTools(
 				var fitting = await RenderDeepestFittingTreeAsync(
 						plan,
 						format,
-						lineFittingDepth,
-						minimumDepth: 1,
+						HasItems(paths) ? depthFit.FullDepth : lineFittingDepth,
+						minimumDepth: HasItems(paths) ? 0 : 1,
 						depthFit.FullDepth,
-						cancellationToken)
+						cancellationToken,
+						paths)
 					.ConfigureAwait(false);
 				if (fitting is { } found)
 				{
@@ -318,7 +321,7 @@ internal sealed partial class DevProjexMcpTools(
 					plan,
 					depth is null
 						? plan.ProjectedTree
-						: PruneToDepthWithCancellation(plan.ProjectedTree, depth.Value, cancellationToken),
+						: PruneRequestedTree(plan.ProjectedTree, depth.Value, paths, cancellationToken),
 					format,
 					cancellationToken)
 				.ConfigureAwait(false);
@@ -328,10 +331,11 @@ internal sealed partial class DevProjexMcpTools(
 				var suggestion = await RenderDeepestFittingTreeAsync(
 						plan,
 						format,
-						Math.Min(renderedDepth - 1, lineFittingDepth),
+						HasItems(paths) ? renderedDepth - 1 : Math.Min(renderedDepth - 1, lineFittingDepth),
 						minimumDepth: 0,
 						depthFit.FullDepth,
-						cancellationToken)
+						cancellationToken,
+						paths)
 					.ConfigureAwait(false);
 				suggestion?.Writer.Dispose();
 				var guidance = suggestion is { } fits
@@ -354,7 +358,6 @@ internal sealed partial class DevProjexMcpTools(
 			return McpToolResults.TextSuccess(AppendTrustedNotices(
 				McpSpotlight.Wrap(treeWriter.IsTruncated ? treeWriter.CompleteLinesText : treeWriter.Text),
 				treeTruncationNotice,
-				FormatTreeDepthNotice(plan, depth, paths, treeWriter.IsTruncated),
 				McpTrustedDiagnosticFormatter.FormatWarnings(plan),
 				FormatNameSearchNotice(plan, paths),
 				FormatGitScopeDiffNotice(arguments),
@@ -5041,119 +5044,7 @@ internal sealed partial class DevProjexMcpTools(
 			: "[Next read] Narrow pattern, paths, or include_patterns and rerun the search.";
 	}
 
-	/// <summary>
-	/// max_depth counts levels from the project root, never from a requested path. A directory
-	/// entry that already sits at or past that depth renders with no children, and a file entry
-	/// past that depth does not render at all — both read as "not found" rather than "too deep".
-	/// Depth is resolved against the real path, not the selection anchors a narrowed projection
-	/// keeps: a non-empty selected directory is represented there by its descendant files, not
-	/// by its own path.
-	/// </summary>
-	private string? FormatTreeDepthNotice(
-		ProjectContextPlan plan,
-		int? explicitMaxDepth,
-		IReadOnlyList<string>? paths,
-		bool treeTruncated)
-	{
-		if (explicitMaxDepth is not { } maxDepth || !HasItems(paths))
-			return null;
 
-		var hiddenCount = 0;
-		var hiddenDirectoryCount = 0;
-		var smallestHiddenDepth = int.MaxValue;
-		var largestSuggestedDepth = 0;
-		var visibleDirectories = new List<string>();
-		foreach (var path in paths!)
-		{
-			string fullPath;
-			try
-			{
-				fullPath = roots.ResolveExistingPath(plan.SourceRoot, path);
-			}
-			catch (McpToolException)
-			{
-				// Missing paths are already reported by the existing selection diagnostics.
-				continue;
-			}
-
-			var relative = PathUtility.GetPortableRelativePath(plan.SourceRoot, fullPath);
-			// The root itself, named as "." or by its absolute path, sits at depth 0.
-			if (relative == ".")
-				relative = string.Empty;
-			var depth = relative.Length == 0 ? 0 : relative.Count(static character => character == '/') + 1;
-			var isDirectory = Directory.Exists(fullPath);
-			var isHidden = isDirectory ? depth >= maxDepth : depth > maxDepth;
-			if (!isHidden)
-			{
-				if (isDirectory)
-					visibleDirectories.Add(relative);
-				continue;
-			}
-
-			hiddenCount++;
-			if (isDirectory)
-				hiddenDirectoryCount++;
-			smallestHiddenDepth = Math.Min(smallestHiddenDepth, depth);
-			largestSuggestedDepth = Math.Max(largestSuggestedDepth, isDirectory ? depth + 2 : depth);
-		}
-
-		// A cut tree never reached part of the collapsed folders, and the rendered text cannot tell
-		// which ones, so a count of them would name folders the response does not show.
-		if (hiddenCount == 0)
-			return treeTruncated ? null : FormatCollapsedFoldersNotice(plan, visibleDirectories, maxDepth);
-
-		// A file has nothing under it, so the directory wording would contradict itself: the
-		// useful depth is the one that shows the file.
-		if (hiddenDirectoryCount == 0)
-		{
-			return "[Tree depth] max_depth counts from the project root; " +
-				$"{hiddenCount.ToString(CultureInfo.InvariantCulture)} requested file(s) sit at depth " +
-				$"{smallestHiddenDepth.ToString(CultureInfo.InvariantCulture)} or deeper, so they are not shown. " +
-				$"Omit max_depth, or pass {largestSuggestedDepth.ToString(CultureInfo.InvariantCulture)} " +
-				"to show them.";
-		}
-
-		return "[Tree depth] max_depth counts from the project root; " +
-			$"{hiddenCount.ToString(CultureInfo.InvariantCulture)} requested path(s) sit at depth " +
-			$"{smallestHiddenDepth.ToString(CultureInfo.InvariantCulture)} or deeper, so nothing under them is shown. " +
-			$"Omit max_depth, or pass {largestSuggestedDepth.ToString(CultureInfo.InvariantCulture)} " +
-			"to show two levels below them.";
-	}
-
-	/// <summary>
-	/// A requested directory that stays visible can still render its deepest folders as bare names:
-	/// a folder at exactly max_depth shows without the files under it, which reads as an empty
-	/// folder. Counts only folders that hold selected files.
-	/// </summary>
-	private static string? FormatCollapsedFoldersNotice(
-		ProjectContextPlan plan,
-		IReadOnlyList<string> visibleDirectories,
-		int maxDepth)
-	{
-		if (visibleDirectories.Count == 0)
-			return null;
-
-		var collapsedFolders = new HashSet<string>(PathComparer.Default);
-		foreach (var file in plan.IncludedFiles)
-		{
-			var segments = PathUtility.GetPortableRelativePath(plan.SourceRoot, file).Split('/');
-			if (segments.Length <= maxDepth)
-				continue;
-
-			var folder = string.Join('/', segments, 0, maxDepth);
-			if (visibleDirectories.Any(directory =>
-					directory.Length == 0 || folder.StartsWith(directory + "/", PathComparer.Comparison)))
-				collapsedFolders.Add(folder);
-		}
-
-		if (collapsedFolders.Count == 0)
-			return null;
-
-		return "[Tree depth] max_depth counts from the project root; " +
-			$"{collapsedFolders.Count.ToString(CultureInfo.InvariantCulture)} folder(s) under the requested paths reach depth " +
-			$"{maxDepth.ToString(CultureInfo.InvariantCulture)} and are shown without their contents. " +
-			$"Omit max_depth, or pass {(maxDepth + 1).ToString(CultureInfo.InvariantCulture)} to open them.";
-	}
 
 	/// <summary>
 	/// Points at the form that finds a file by name when this call asked for one in the only way
@@ -5589,13 +5480,14 @@ internal sealed partial class DevProjexMcpTools(
 		int startDepth,
 		int minimumDepth,
 		int fullDepth,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		IReadOnlyList<string>? paths = null)
 	{
 		for (var candidate = startDepth; candidate >= minimumDepth; candidate--)
 		{
 			var tree = candidate >= fullDepth
 				? plan.ProjectedTree
-				: PruneToDepthWithCancellation(plan.ProjectedTree, candidate, cancellationToken);
+				: PruneRequestedTree(plan.ProjectedTree, candidate, paths, cancellationToken);
 			var writer = await RenderBoundedTreeAsync(plan, tree, format, cancellationToken).ConfigureAwait(false);
 			if (!writer.IsTruncated)
 				return (candidate, writer);
@@ -5688,6 +5580,79 @@ internal sealed partial class DevProjexMcpTools(
 		}
 
 		return new McpTreeDepthFit(fullDepth, deepestCompleteDepth);
+	}
+
+	internal static int CalculateRequestedTreeDepth(
+		TreeNodeDescriptor root, IReadOnlyList<string> paths, CancellationToken cancellationToken)
+	{
+		var requested = paths.Select(path => Path.GetFullPath(path, root.FullPath)).ToArray();
+		var pending = new Stack<TreeNodeDescriptor>();
+		pending.Push(root);
+		var maximum = 0;
+		while (pending.TryPop(out var node))
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var nearest = int.MaxValue;
+			foreach (var path in requested)
+			{
+				var relative = PathUtility.GetPortableRelativePath(path, node.FullPath);
+				if (relative == ".")
+					nearest = 0;
+				else if (relative != ".." && !relative.StartsWith("../", StringComparison.Ordinal) && !Path.IsPathRooted(relative))
+					nearest = Math.Min(nearest, relative.Count(character => character == '/') + 1);
+			}
+			if (nearest != int.MaxValue)
+				maximum = Math.Max(maximum, nearest);
+			foreach (var child in node.Children)
+				pending.Push(child);
+		}
+		return maximum;
+	}
+
+	internal static TreeNodeDescriptor PruneRequestedTree(
+		TreeNodeDescriptor root,
+		int depth,
+		IReadOnlyList<string>? paths,
+		CancellationToken cancellationToken)
+	{
+		if (paths is not { Count: > 0 })
+			return PruneToDepthWithCancellation(root, depth, cancellationToken);
+		ArgumentOutOfRangeException.ThrowIfNegative(depth);
+		var requested = paths.Select(path => Path.GetFullPath(path, root.FullPath)).ToArray();
+		var projected = new Dictionary<string, TreeNodeDescriptor>(ProjectTreePathIdentity.CanonicalComparer);
+		var pending = new Stack<(TreeNodeDescriptor Node, bool Visited)>();
+		pending.Push((root, false));
+		while (pending.TryPop(out var frame))
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (frame.Visited)
+			{
+				projected[frame.Node.FullPath] = frame.Node with
+				{
+					Children = frame.Node.Children.Where(child => projected.ContainsKey(child.FullPath))
+						.Select(child => projected[child.FullPath]).ToArray()
+				};
+				continue;
+			}
+			pending.Push((frame.Node, true));
+			foreach (var child in frame.Node.Children.Reverse())
+			{
+				if (requested.Any(path => IsVisible(child.FullPath, path)))
+					pending.Push((child, false));
+			}
+		}
+		return projected[root.FullPath];
+
+		bool IsVisible(string candidate, string path)
+		{
+			var below = PathUtility.GetPortableRelativePath(path, candidate);
+			if (below == ".")
+				return true;
+			if (below != ".." && !below.StartsWith("../", StringComparison.Ordinal) && !Path.IsPathRooted(below))
+				return below.Count(character => character == '/') + 1 <= depth;
+			var above = PathUtility.GetPortableRelativePath(candidate, path);
+			return above != ".." && !above.StartsWith("../", StringComparison.Ordinal) && !Path.IsPathRooted(above);
+		}
 	}
 
 	internal static TreeNodeDescriptor PruneToDepthWithCancellation(

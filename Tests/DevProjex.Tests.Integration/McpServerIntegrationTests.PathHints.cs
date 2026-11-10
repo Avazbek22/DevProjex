@@ -274,20 +274,15 @@ public sealed partial class McpServerIntegrationTests
 			"get_tree",
 			new Dictionary<string, object?> { ["max_depth"] = 2 });
 
-		const string trailer =
-			"[Tree depth] max_depth counts from the project root; 2 folder(s) under the requested paths reach depth 3 " +
-			"and are shown without their contents. Omit max_depth, or pass 4 to open them.";
 		Assert.NotEqual(true, collapsed.IsError);
-		AssertTrustedTrailerOutsideSpotlight(collapsed, trailer);
+		Assert.Contains("digest.ts", AllText(collapsed), StringComparison.Ordinal);
+		Assert.DoesNotContain("[Tree depth]", AllText(collapsed), StringComparison.Ordinal);
 		var collapsedText = AllText(collapsed);
 		var trustedTail = collapsedText[(collapsedText.LastIndexOf("</untrusted-data-", StringComparison.Ordinal) + 1)..];
 		Assert.DoesNotContain("middleware", trustedTail, StringComparison.Ordinal);
 
-		// A requested path below the depth limit keeps the existing hidden-path wording, which
-		// already gives the depth that shows it.
 		Assert.NotEqual(true, overlapping.IsError);
-		Assert.Contains("requested path(s) sit at depth", AllText(overlapping), StringComparison.Ordinal);
-		Assert.DoesNotContain("folder(s) under the requested paths", AllText(overlapping), StringComparison.Ordinal);
+		Assert.Contains("digest.ts", AllText(overlapping), StringComparison.Ordinal);
 
 		Assert.NotEqual(true, opened.IsError);
 		Assert.DoesNotContain("[Tree depth]", AllText(opened), StringComparison.Ordinal);
