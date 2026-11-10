@@ -102,9 +102,27 @@ def content_paths(call, root):
                 text = data.get('content', text)
         except (ValueError, AttributeError):
             pass
+        block = re.search(r'<untrusted-data-[^>]+>(.*?)</untrusted-data-[^>]+>', text, re.S)
+        document = block[1].strip() if block else text.strip()
+        try:
+            data = json.loads(document)
+            for file in data.get('files', []):
+                if isinstance(file.get('content'), str):
+                    found |= benchlib.paths_in(file.get('path', ''), root)
+        except (ValueError, AttributeError, TypeError):
+            pass
+        try:
+            xml = ElementTree.fromstring(document)
+            for file in xml.iter('file'):
+                if file.find('content') is not None:
+                    found |= benchlib.paths_in(file.get('path', ''), root)
+        except ElementTree.ParseError:
+            pass
         for match in re.finditer(r'<file path="([^"]+)">\s*([^<].*?)(?:</file>|$)', text, re.S):
             found |= benchlib.paths_in(match[1], root)
-        for match in re.finditer(r'(?m)^## (?:File: )?([^\n]+\.[A-Za-z0-9]+)\n+```[^\n]*\n([^`]+)', text):
+        for match in re.finditer(r'(?m)^## (?:File: )?`?([^`\n]+\.[A-Za-z0-9]+)`?\n+```[^\n]*\n([^`]+)', text):
+            found |= benchlib.paths_in(match[1], root)
+        for match in re.finditer(r'(?m)^([^\n]+\.[A-Za-z0-9]+):\n\n(?!\[(?:Large text file|Binary|Non-text))\S', text):
             found |= benchlib.paths_in(match[1], root)
     if call['tool'] == 'read_pack':
         found |= content_paths({**call, 'tool': 'search_project'}, root)

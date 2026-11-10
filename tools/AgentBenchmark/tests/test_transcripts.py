@@ -91,6 +91,17 @@ class AttributionTests(unittest.TestCase):
         self.assertIsNone(rows[0]['firstContent'])
         self.assertIn('src/nested/b.py', attribution.tree_paths(json.loads(packed)['directoryStructure'], plain=True))
 
+    def test_context_documents_distinguish_source_from_omitted_content_in_all_formats(self):
+        for text in ('## `src/a.py`\n\n```py\nreturn 1\n```',
+                     'src/a.py:\n\nreturn 1',
+                     '<context><files><file path="src/a.py" classification="text"><content>return 1</content></file></files></context>',
+                     '{"files":[{"path":"src/a.py","content":"return 1"}]}'):
+            with self.subTest(text=text):
+                self.assertIn('src/a.py', attribution.content_paths(call('pack_context', text), '/corpus'))
+        for text in ('src/a.py:\n\n[Large text file; content omitted from bounded preview]',
+                     '{"files":[{"path":"src/a.py","content":null}]}'):
+            self.assertNotIn('src/a.py', attribution.content_paths(call('pack_context', text), '/corpus'))
+
     def test_existing_real_client_fixtures_join_calls_without_counting_updates_twice(self):
         fixtures = TOOL_DIR / 'tests/fixtures'
         claude = recorded_calls(fixtures / 'stream.jsonl')
