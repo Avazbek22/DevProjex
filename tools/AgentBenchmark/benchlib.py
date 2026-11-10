@@ -365,6 +365,7 @@ def paths_in(text, root=None):
 
     def collect_absolute(match):
         candidate = match.groupdict().get('quoted') or match.groupdict().get('link') or match.group(0)
+        candidate = re.sub(r'(\.[A-Za-z0-9]+)(?::\d+(?::\d+)?|#L\d+(?:-L?\d+)?)$', r'\1', candidate)
         normalized = _normalize_answer_path(candidate)
         if not _absolute_answer_path(normalized) or not re.search(r'\.[A-Za-z0-9]+$', candidate):
             return match.group(0)
@@ -395,6 +396,8 @@ def invented_paths(found, root):
 
 def task_key(task, version):
     current = task.get('keyVersion', 1)
+    if version == 'current':
+        version = current
     if type(version) is not int or version < 1:
         raise BenchmarkError(f"task {task['id']}: invalid key version {version!r}")
     if version == current:
@@ -403,6 +406,15 @@ def task_key(task, version):
     if key is None:
         raise BenchmarkError(f"task {task['id']}: key version {version} is not available")
     return key
+
+
+def parse_key_version(value):
+    if value == 'current':
+        return value
+    number = int(value)
+    if number < 1:
+        raise ValueError('key version must be positive or current')
+    return number
 
 
 def format_key_versions(versions):
@@ -422,6 +434,8 @@ def score_session(summary, task, corpus_root, key_version=None):
     if not eligible_run(summary):
         raise BenchmarkError('A failed, isolation-violating or corpus-violating session cannot enter key metrics')
     version = key_version if key_version is not None else summary.get('keyVersion', 1)
+    if version == 'current':
+        version = task.get('keyVersion', 1)
     key = task_key(task, version)
     from transcripts import recorded_root
     folder = summary.get('_session_dir')

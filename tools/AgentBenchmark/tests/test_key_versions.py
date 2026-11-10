@@ -90,6 +90,54 @@ class KeyVersionTests(unittest.TestCase):
                 self.assertEqual(rendered.returncode, 0, rendered.stderr)
                 self.assertIn(f'D1=v{version}', rendered.stdout)
 
+    def test_alternative_templates_do_not_require_several_mutually_optional_examples(self):
+        rich = benchlib.load_tasks(TOOL_DIR / 'tasks/rich-fluentvalidation.json')
+        for task_id, tasks in (('T6', self.tasks), ('C2', rich)):
+            task = next(task for task in tasks['tasks'] if task['id'] == task_id)
+            key = benchlib.task_key(task, 2)
+            summary = {**self.summary, 'task': task_id, 'answer': '\n'.join(key['core'] + key['supporting'])}
+            latest = benchlib.score_session(summary, task, None, 2)
+            previous = benchlib.score_session(summary, task, None, 1)
+            self.assertEqual(latest['files'], latest['files_needed'])
+            self.assertEqual(latest['tests_needed'], 0)
+            self.assertGreater(previous['files_needed'], latest['files_needed'])
+            self.assertIn('template', key['notes'])
+            self.assertEqual(benchlib.score_session(summary, task, None), previous)
+
+    def test_positional_json_callers_are_required_in_the_new_signature_key(self):
+        task = next(task for task in self.tasks['tasks'] if task['id'] == 'T5')
+        summary = {**self.summary, 'answer': 'src/validator/validator.test.ts src/client/client.test.ts'}
+        before = benchlib.score_session(summary, task, None, 1)
+        after = benchlib.score_session(summary, task, None, 2)
+        self.assertEqual((before['known_wrong'], before['tests']), (2, 0))
+        self.assertEqual((after['known_wrong'], after['tests']), (0, 2))
+
+    def test_enrichment_callers_are_distinct_from_indirect_regression_tests(self):
+        task = next(task for task in self.tasks['tasks'] if task['id'] == 'T8')
+        summary = {**self.summary, 'answer': 'test/Serilog.Tests/Core/LoggerTests.cs'}
+        self.assertEqual(benchlib.score_session(summary, task, None, 1)['tests'], 1)
+        self.assertEqual(benchlib.score_session(summary, task, None, 2)['tests'], 0)
+        self.assertIn('test/Serilog.Tests/Core/LoggerTests.cs', task['key']['acceptable'])
+
+    def test_matching_description_correction_keeps_historical_key_and_path_counts(self):
+        task = next(task for task in self.tasks['tasks'] if task['id'] == 'T7')
+        before, after = benchlib.task_key(task, 1), benchlib.task_key(task, 2)
+        for name in benchlib.KEY_LISTS:
+            self.assertEqual(before[name], after[name])
+        self.assertIn('shortens', before['notes'])
+        self.assertIn('does not repeatedly shorten', after['notes'])
+
+    def test_current_override_resolves_each_task_and_records_numeric_versions(self):
+        for task in self.tasks['tasks']:
+            current = benchlib.score_session(self.summary, task, None, 'current')
+            expected = benchlib.score_session(self.summary, task, None, task.get('keyVersion', 1))
+            self.assertEqual(current, expected)
+        self.assertEqual(benchlib.parse_key_version('current'), 'current')
+        self.assertEqual(benchlib.parse_key_version('2'), 2)
+        for value in ('0', '-1', 'latest'):
+            with self.assertRaises(ValueError):
+                benchlib.parse_key_version(value)
+
 
 if __name__ == '__main__':
     unittest.main()

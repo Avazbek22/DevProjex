@@ -298,7 +298,8 @@ version 1, including after a task key changes. The current key remains in `key`;
 preserves earlier versions verbatim. Historical results and published tables are not rewritten.
 `keyscore.py` and `report.py` disclose the versions used; `--key-version N` explicitly recalculates
 selected tasks against that version without editing their summaries. Select only tasks that have
-the requested version. Mixed recorded versions are listed separately in the version label.
+the requested version. `--key-version current` uses each selected task's latest key, including a
+mixture of versions. Mixed recorded versions are listed separately in the version label.
 
 D1 version 2 distinguishes message-only exceptions from supplied responses and names the exact
 explicit Content-Type value. JWT/JWK supplied-response cases are acceptable context, not required
@@ -307,6 +308,12 @@ message-only producers, alongside their tests. For the original D1 counts use
 `keyscore.py --tasks-file tasks/fourteen.json --tasks D1 --key-version 1` (plus the usual work/agent
 options); use `--key-version 2` for the corrected coverage set. Existing verdict files remain
 historical; this option recalculates key metrics, not model judgments.
+
+T5 version 2 includes tests that use positional JSON response arguments. T6 and C2 version 2
+measure the mandatory shared registration/documentation surfaces without requiring several
+alternative templates together; template suitability remains outside the path-only metric.
+T7 version 2 corrects the matching algorithm description without changing path counts.
+T8 version 2 distinguishes signature edits from useful indirect regression tests.
 
 ## Task files
 

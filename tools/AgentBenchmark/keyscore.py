@@ -31,7 +31,8 @@ def main():
     parser.add_argument('--tasks', default='', help='default: every task')
     parser.add_argument('--by-task', action='store_true')
     parser.add_argument('--json', action='store_true')
-    parser.add_argument('--key-version', type=int, help='override recorded key versions; absent metadata uses version 1')
+    parser.add_argument('--key-version', type=benchlib.parse_key_version,
+                        help='override recorded key versions with a number or current; absent metadata uses version 1')
     parser.add_argument('--skip-invented', action='store_true', help='do not count invented paths')
     parser.add_argument('--work')
     parser.add_argument('--agent', choices=('claude', 'codex'), default='claude')

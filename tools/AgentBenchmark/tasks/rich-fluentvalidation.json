@@ -115,22 +115,48 @@
      "src/FluentValidation/Resources/Languages/EnglishLanguage.cs"
     ],
     "supporting": [
-     "src/FluentValidation/Validators/CreditCardValidator.cs",
      "docs/built-in-validators.md"
     ],
-    "tests": [
-     "src/FluentValidation.Tests/CreditCardValidatorTests.cs"
-    ],
+    "tests": [],
     "acceptable": [
      "src/FluentValidation/Validators/EmailValidator.cs",
      "src/FluentValidation.Tests/EmailValidatorTests.cs",
      "src/FluentValidation/Validators/PropertyValidator.cs",
      "src/FluentValidation/Resources/LanguageManager.cs",
-     "src/FluentValidation.Tests/LanguageManagerTests.cs"
+     "src/FluentValidation.Tests/LanguageManagerTests.cs",
+     "src/FluentValidation/Validators/CreditCardValidator.cs",
+     "src/FluentValidation.Tests/CreditCardValidatorTests.cs",
+     "src/FluentValidation/Validators/RegularExpressionValidator.cs",
+     "src/FluentValidation.Tests/RegularExpressionValidatorTests.cs"
     ],
     "unrelated": [],
-    "notes": "Built-in validators live in src/FluentValidation/Validators as PropertyValidator subclasses whose Name matches the message key; CreditCardValidator or EmailValidator are close templates. The user-facing method goes into src/FluentValidation/DefaultValidatorExtensions.cs. Default messages are keyed by validator name in src/FluentValidation/Resources/Languages, English in EnglishLanguage.cs (for example the CreditCardValidator key); other language files are optional. docs/built-in-validators.md documents the built-in rules. Tests follow src/FluentValidation.Tests/CreditCardValidatorTests.cs."
-   }
+    "notes": "The required shared surfaces are DefaultValidatorExtensions.cs, Resources/Languages/EnglishLanguage.cs and docs/built-in-validators.md. The task permits choosing one existing string validator and its matching test as a template, not CreditCardValidator exclusively. CreditCardValidator, AspNetCoreCompatibleEmailValidator in EmailValidator.cs, and RegularExpressionValidator are PropertyValidator subclasses with Name, IsValid and localized default messages; their corresponding test files demonstrate the conventions. Template files and tests are acceptable alternatives. This path-only key does not measure the suitability or completeness of a chosen template; it does not require mutually alternative templates to be named together. New error messages use the validator Name as the language key; LanguageManager and PropertyValidator supply the shared localization behavior."
+   },
+   "previousKeys": {
+    "1": {
+     "core": [
+      "src/FluentValidation/DefaultValidatorExtensions.cs",
+      "src/FluentValidation/Resources/Languages/EnglishLanguage.cs"
+     ],
+     "supporting": [
+      "src/FluentValidation/Validators/CreditCardValidator.cs",
+      "docs/built-in-validators.md"
+     ],
+     "tests": [
+      "src/FluentValidation.Tests/CreditCardValidatorTests.cs"
+     ],
+     "acceptable": [
+      "src/FluentValidation/Validators/EmailValidator.cs",
+      "src/FluentValidation.Tests/EmailValidatorTests.cs",
+      "src/FluentValidation/Validators/PropertyValidator.cs",
+      "src/FluentValidation/Resources/LanguageManager.cs",
+      "src/FluentValidation.Tests/LanguageManagerTests.cs"
+     ],
+     "unrelated": [],
+     "notes": "Built-in validators live in src/FluentValidation/Validators as PropertyValidator subclasses whose Name matches the message key; CreditCardValidator or EmailValidator are close templates. The user-facing method goes into src/FluentValidation/DefaultValidatorExtensions.cs. Default messages are keyed by validator name in src/FluentValidation/Resources/Languages, English in EnglishLanguage.cs (for example the CreditCardValidator key); other language files are optional. docs/built-in-validators.md documents the built-in rules. Tests follow src/FluentValidation.Tests/CreditCardValidatorTests.cs."
+    }
+   },
+   "keyVersion": 2
   }
  ]
 }
