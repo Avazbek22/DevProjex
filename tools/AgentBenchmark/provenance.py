@@ -41,7 +41,8 @@ def check_provenance(calls, root, server, manifest=None):
         if call.get('server') != server:
             reason = 'foreign-server'
         project = args.get('project')
-        if project is not None and project not in (name, '#1') and relative_to_root(project, root) != '.':
+        index_alias = isinstance(project, str) and re.fullmatch(r'#0*[01]', project)
+        if project is not None and project != name and not index_alias and relative_to_root(project, root) != '.':
             reason = 'foreign-project'
         if tool in ('get_tree', 'get_diff'):
             reported = re.search(r'(?m)^Root: ([^\r\n]+)', call['text'])

@@ -149,6 +149,12 @@ class ProvenanceTests(unittest.TestCase):
             summary = {'agent': agent, 'provenance': {'status': 'violated'}}
             self.assertFalse(benchlib.eligible_run(summary))
 
+    def test_single_root_index_aliases_follow_the_server_without_accepting_another_root(self):
+        for selector in ('#0', '#1', '#00', '#0001'):
+            self.assertEqual(self.check([call('get_file', 'source', {'project': selector})])['status'], 'passed')
+        for selector in ('#2', '#0010', '#-1', '#+1'):
+            self.assertEqual(self.check([call('get_file', 'source', {'project': selector})])['status'], 'violated')
+
     def test_implicit_project_is_checked_against_reported_roots(self):
         for text in ('Root: C:/other\n- a.py',
                      '{"projects":[{"path":"C:/other"}]}'):
