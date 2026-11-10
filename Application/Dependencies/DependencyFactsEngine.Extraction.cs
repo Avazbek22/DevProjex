@@ -34,11 +34,11 @@ public sealed partial class DependencyFactsEngine
 		var pipelined = prepared.Length >= _minimumPipelinedFiles;
 		var windowSize = pipelined ? Math.Min(_extractionParallelism * 2, prepared.Length) : 0;
 		using var extractionCancellation = pipelined
-			? CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)
+			? CreateExtractionCancellation(cancellationToken)
 			: null;
-		using var extractionBudget = pipelined ? new SemaphoreSlim(_extractionParallelism, _extractionParallelism) : null;
+		using var extractionBudget = pipelined ? CreateExtractionBudget(_extractionParallelism) : null;
 		ExceptionDispatchInfo? producerFailure = null;
-		var pending = pipelined ? new Task[windowSize] : Array.Empty<Task>();
+		var pending = pipelined ? CreateExtractionWindow(windowSize) : Array.Empty<Task>();
 		try
 		{
 			if (pipelined)
@@ -190,4 +190,25 @@ public sealed partial class DependencyFactsEngine
 		}
 
 	}
+	private static CancellationTokenSource CreateExtractionCancellation(CancellationToken cancellationToken)
+	{
+		var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+		DependencyEngineDiagnostics.RecordExtractionPipelineResourceCreation();
+		return cancellation;
+	}
+
+	private static SemaphoreSlim CreateExtractionBudget(int parallelism)
+	{
+		var budget = new SemaphoreSlim(parallelism, parallelism);
+		DependencyEngineDiagnostics.RecordExtractionPipelineResourceCreation();
+		return budget;
+	}
+
+	private static Task[] CreateExtractionWindow(int windowSize)
+	{
+		var window = new Task[windowSize];
+		DependencyEngineDiagnostics.RecordExtractionPipelineResourceCreation();
+		return window;
+	}
+
 }

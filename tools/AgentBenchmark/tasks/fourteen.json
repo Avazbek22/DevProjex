@@ -171,12 +171,12 @@
     "tests": [
      "tests/client/test_client.py"
     ],
-    "acceptable": [],
-    "unrelated": [
+    "acceptable": [
      "docs/advanced/clients.md",
      "tests/client/test_async_client.py",
      "tests/client/test_headers.py"
     ],
+    "unrelated": [],
     "notes": "build_request merges extensions with timeout (lines ~353-388); _merge_headers/_merge_cookies/_merge_queryparams pattern (~391-440); Request.extensions in _models.py; RequestExtensions type in _types.py; extensions docs in docs/advanced/extensions.md; build_request tests in tests/client/test_client.py."
    }
   },
