@@ -221,7 +221,10 @@ read challenge on a random marker outside the empty workspace and verify an actu
 
 Corpus provenance is checked separately for both clients. Successful local packs and project
 selectors must remain inside the prepared corpus; remote packs need its exact repository and
-immutable commit. Reads of unknown packed outputs fail the check. Failed tool attempts that
+immutable commit in a supported GitHub `/tree/<40-character-SHA>` or `/commit/<SHA>` URL.
+An extra `ref`/`branch` argument or URL fragment is not proof: Repomix's MCP tool does not pass
+those arguments to its downloader. Reported pack directories and JSON tree roots are checked too.
+Reads of unknown packed outputs fail the check. Failed tool attempts that
 return no corpus data do not invalidate a later local read. The runner stops when provenance
 cannot be established, preserves the transcript and cost, and excludes that session from metrics.
 Python must be available (`python` on Windows, `python3` elsewhere); set
