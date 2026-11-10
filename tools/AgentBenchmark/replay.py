@@ -20,11 +20,34 @@ NORMALIZATIONS = (
     'separators in those relocated paths become forward slashes',
     'spotlight envelope nonces become a fixed nonce',
     'stored-result identifiers are mapped in first-occurrence order',
+    'Repomix output paths/IDs and error-envelope timestamps only, never source timestamps',
 )
 
 
-def normalize_response(text, roots=(), identifiers=None):
+def normalize_response(text, roots=(), identifiers=None, tool=None):
     text = text.replace('\r\n', '\n').replace('\r', '\n')
+    identifiers = identifiers if identifiers is not None else {}
+    if tool in ('pack_codebase', 'pack_remote_repository', 'attach_packed_output', 'grep_repomix_output'):
+        try:
+            data = json.loads(text)
+            if 'errorMessage' in data and isinstance(data.get('details'), dict) and 'timestamp' in data['details']:
+                data['details']['timestamp'] = '<TIMESTAMP>'
+                text = json.dumps(data, ensure_ascii=False, sort_keys=True)
+            for key, placeholder in (('outputFilePath', '<OUTPUT>'), ('outputId', None)):
+                value = data.get(key)
+                if isinstance(value, str) and value:
+                    if placeholder is None:
+                        identifiers.setdefault(value, f'ID{len(identifiers) + 1}')
+                        placeholder = identifiers[value]
+                    spellings = [value]
+                    for _ in range(3):
+                        spellings.append(json.dumps(spellings[-1])[1:-1])
+                    for spelling in reversed(spellings):
+                        text = text.replace(spelling, placeholder)
+            for value, placeholder in identifiers.items():
+                text = text.replace(value, placeholder)
+        except (ValueError, TypeError, AttributeError):
+            pass
     for root in sorted(filter(None, map(str, roots)), key=len, reverse=True):
         for spelling in sorted({root, root.replace('\\', '/'), root.replace('/', '\\')}, key=len, reverse=True):
             for value in (json.dumps(spelling)[1:-1], spelling):
@@ -32,7 +55,6 @@ def normalize_response(text, roots=(), identifiers=None):
     text = re.sub(r'<ROOT>(?:[\\/][^\s<>"\'`]+)*',
                   lambda match: re.sub(r'\\+', '/', match[0]), text)
     text = re.sub(r'(?<=untrusted-data-)[0-9a-f]{24}(?=>)', 'NONCE', text)
-    identifiers = identifiers if identifiers is not None else {}
 
     def replace(match):
         value = match[2]
@@ -51,9 +73,13 @@ class StdioClient:
                                              'DEVPROJEX_LANGUAGE': 'en'},
                                         creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         threading.Thread(target=self._read, daemon=True).start()
-        self.request('initialize', {'protocolVersion': '2025-11-25', 'capabilities': {},
-                                   'clientInfo': {'name': 'benchmark-replay', 'version': '1'}})
-        self.send({'jsonrpc': '2.0', 'method': 'notifications/initialized'})
+        try:
+            self.initialization = self.request('initialize', {'protocolVersion': '2025-11-25', 'capabilities': {},
+                                                              'clientInfo': {'name': 'benchmark-replay', 'version': '1'}})
+            self.send({'jsonrpc': '2.0', 'method': 'notifications/initialized'})
+        except BaseException:
+            self.close()
+            raise
 
     def _read(self):
         for line in self.process.stdout:
@@ -108,7 +134,7 @@ def rewrite_arguments(value, original, current, ids=None):
     return value
 
 
-def replay_session(folder, command, corpus, output):
+def replay_session(folder, command, corpus, output, append_root=True):
     original = recorded_root(folder)
     if not original:
         raise ValueError('The recorded prompt does not identify a corpus')
@@ -117,7 +143,9 @@ def replay_session(folder, command, corpus, output):
     data_root.mkdir(parents=True)
     client, rows, ids = None, [], {}
     try:
-        client = StdioClient([*command, 'mcp', '--root', str(corpus)], corpus, data_root)
+        client = StdioClient([*command, *(['mcp', '--root', str(corpus)] if append_root else [])], corpus, data_root)
+        (output / 'initialize.json').write_text(json.dumps(client.initialization, indent=1), encoding='utf-8')
+        (output / 'tools.json').write_text(json.dumps(client.request('tools/list', {}), indent=1), encoding='utf-8')
         for call in recorded_calls(Path(folder) / 'stream.jsonl'):
             arguments = rewrite_arguments(call['arguments'], original, corpus, ids)
             started = time.perf_counter_ns()
@@ -128,6 +156,15 @@ def replay_session(folder, command, corpus, output):
             old_ids = re.findall(r'pack_id[=":\s]+([a-zA-Z0-9_-]{16,64})', call['text'])
             new_ids = re.findall(r'pack_id[=":\s]+([a-zA-Z0-9_-]{16,64})', rendered)
             ids.update(zip(old_ids, new_ids))
+            for text, key in ((call['text'], 'old'), (rendered, 'new')):
+                try:
+                    identifier = json.loads(text).get('outputId')
+                except (ValueError, AttributeError):
+                    identifier = None
+                if key == 'old':
+                    previous_output = identifier
+                elif previous_output and identifier:
+                    ids[previous_output] = identifier
             rows.append({'sequence': call['sequence'], 'tool': call['tool'], 'arguments': arguments,
                          'response': result, 'text': rendered, 'is_error': bool(result.get('isError') or 'error' in response),
                          'durationMs': elapsed})
@@ -146,8 +183,8 @@ def compare_calls(left, right, roots=()):
     for before, after in zip(left, right):
         if (before['sequence'], before['tool']) != (after['sequence'], after['tool']):
             raise ValueError('Replays have different call order')
-        a = normalize_response(before['text'], roots, left_ids)
-        b = normalize_response(after['text'], roots, right_ids)
+        a = normalize_response(before['text'], roots, left_ids, before['tool'])
+        b = normalize_response(after['text'], roots, right_ids, after['tool'])
         if a != b or before.get('is_error', False) != after.get('is_error', False):
             totals[before['tool']] += 1
             differences.append({'call': before['sequence'], 'tool': before['tool'],

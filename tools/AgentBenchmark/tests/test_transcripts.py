@@ -55,6 +55,14 @@ class AttributionTests(unittest.TestCase):
                                      self.task, '', '/corpus')
         self.assertEqual(rows[0]['exposure'], 'never-shown')
 
+    def test_markdown_source_locations_with_spaces_preserve_the_absolute_boundary(self):
+        for suffix in (':35', ':35:2', '#L35', '#L35-L40'):
+            with self.subTest(suffix=suffix):
+                inside = f'[source](C:/bench folder/corpus/src/a.py{suffix})'
+                outside = f'[source](D:/other folder/corpus/src/a.py{suffix})'
+                self.assertEqual(benchlib.paths_in(inside, 'C:/bench folder/corpus'), {'src/a.py'})
+                self.assertFalse(benchlib.mentions('src/a.py', benchlib.paths_in(outside, 'C:/bench folder/corpus')))
+
     def test_repomix_content_requires_an_observed_file_boundary(self):
         source = json.dumps({'content': '<file path="src/a.py">\ndef f():\n</file>'})
         rows = attribution.attribute([call('read_repomix_output', source)], self.task, '')
