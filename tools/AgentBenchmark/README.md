@@ -243,8 +243,10 @@ fixture and a fake CLI, and never need an installed Codex or a model call.
 - **Judge tables**: wins of each arm, ties and order-dependent pairs per criterion, then mean 1-5
   scores and the claims the judge flagged.
 
-The path matching is the one used for every number in `Docs/Benchmarks` since 2026-11-08, so new
-results compare with the log.
+Relative paths keep the historical suffix matching. Absolute paths are converted to relative
+paths only inside the prepared corpus root, including Windows drive paths in Markdown links;
+paths outside the corpus cannot satisfy a key. Separators and parent segments are normalized
+before checking that boundary. Recalculate older summaries when comparing path counts.
 
 ## Task files
 
