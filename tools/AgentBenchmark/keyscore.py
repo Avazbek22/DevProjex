@@ -33,13 +33,15 @@ def main():
     parser.add_argument('--json', action='store_true')
     parser.add_argument('--skip-invented', action='store_true', help='do not count invented paths')
     parser.add_argument('--work')
+    parser.add_argument('--agent', choices=('claude', 'codex'), default='claude')
     args = parser.parse_args()
     try:
         tasks_data = benchlib.load_tasks(args.tasks_file)
         work = benchlib.work_root(args.work)
-        results = benchlib.results_dir(work, tasks_data['series'])
+        results = benchlib.results_dir(work, tasks_data['series'], args.agent)
         arms = [a for a in args.arms.split(',') if a] or benchlib.arms_with_runs(results)
         task_ids = [t for t in args.tasks.split(',') if t] or [task['id'] for task in tasks_data['tasks']]
+        benchlib.validate_series_agent(results, arms, task_ids, args.agent)
         roots = corpus_roots(work, tasks_data, task_ids, args.skip_invented)
     except benchlib.BenchmarkError as error:
         print(f'error: {error}', file=sys.stderr)

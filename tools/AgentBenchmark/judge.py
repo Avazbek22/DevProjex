@@ -192,6 +192,8 @@ def collect_pairs(results, tasks, task_ids, ours, theirs):
     for task_id in task_ids:
         mine = {s['repeat']: s for s in benchlib.load_runs(results, task_id, ours)}
         other = {s['repeat']: s for s in benchlib.load_runs(results, task_id, theirs)}
+        if any(s.get('agent', 'claude') != 'claude' for s in [*mine.values(), *other.values()]):
+            raise benchlib.BenchmarkError('Codex sessions use keyscore.py; the Claude judge is disabled for them')
         for repeat in sorted(set(mine) & set(other)):
             pairs.append((tasks[task_id], repeat, split_answer(mine[repeat]), split_answer(other[repeat])))
     return pairs
@@ -208,8 +210,11 @@ def main():
     parser.add_argument('--model', default=benchlib.DEFAULT_MODEL)
     parser.add_argument('--parallel', type=int, default=3)
     parser.add_argument('--work')
+    parser.add_argument('--agent', choices=('claude', 'codex'), default='claude')
     args = parser.parse_args()
     try:
+        if args.agent == 'codex':
+            raise benchlib.BenchmarkError('Codex series use keyscore.py; the Claude judge is disabled for them')
         tasks_data = benchlib.load_tasks(args.tasks_file)
         results = benchlib.results_dir(benchlib.work_root(args.work), tasks_data['series'])
         out_path = results / 'judge' / f'{args.name}.json'

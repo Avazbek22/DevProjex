@@ -40,7 +40,7 @@ def table(header, rows):
     return '\n'.join(lines)
 
 
-def key_metrics_table(scores, arms):
+def key_metrics_table(scores, arms, cost_precision=2):
     rows = [
         ('Sessions', lambda s: s['sessions']),
         ('Required files', lambda s: f"{s['files']}/{s['files_needed']}"),
@@ -51,7 +51,7 @@ def key_metrics_table(scores, arms):
         ('Tool errors', lambda s: s['tool_errors']),
         ('Context tokens', lambda s: f"{s['context']:,}"),
         ('Tool output, chars', lambda s: f"{s['tool_output_chars']:,}"),
-        ('Cost', lambda s: f"${s['cost']:.2f}"),
+        ('Cost', lambda s: f"${s['cost']:.{cost_precision}f}"),
         ('Time, s (sum)', lambda s: f"{s['duration_ms'] / 1000:.0f}"),
     ]
     return table(['Metric'] + [label for _, label in arms],
@@ -113,15 +113,42 @@ def tool_usage(results, arms, task_ids):
     return '\n'.join(lines)
 
 
-def build_report(work, tasks_data, arms, task_ids, skip_invented):
-    results = benchlib.results_dir(work, tasks_data['series'])
+def run_configuration(results, arms):
+    rows = []
+    for arm, label in arms:
+        record_path = results / 'arms' / f'{arm}.json'
+        record = json.loads(record_path.read_text(encoding='utf-8')) if record_path.is_file() else {}
+        summaries = [json.loads(path.read_text(encoding='utf-8'))
+                     for path in (results / 'runs').glob(f'*-{arm}-r*/summary.json')]
+        models = sorted({s.get('usage', {}).get('model') for s in summaries if s.get('usage', {}).get('model')})
+        rows.append([label, record.get('agent', 'claude'), record.get('model') or ', '.join(models) or 'unrecorded',
+                     'calculated API estimate' if record.get('agent') == 'codex' else 'client reported'])
+    return table(['Arm', 'Agent', 'Model', 'Cost'], rows)
+
+
+def excluded_sessions(results, arms, task_ids):
+    rows = []
+    for arm, label in arms:
+        for task_id in task_ids:
+            for summary in benchlib.load_runs(results, task_id, arm, include_invalid=True):
+                if not benchlib.eligible_run(summary):
+                    rows.append([label, task_id, summary['repeat'], summary.get('error') or 'isolation violated',
+                                 f"${summary['usage']['costUsd']:.6f}", summary['usage'].get('costComplete', False)])
+    return ('\n## Excluded sessions (outside key metrics)\n\n' +
+            table(['Arm', 'Task', 'Repeat', 'Reason', 'Calculated cost', 'Complete usage'], rows)) if rows else ''
+
+
+def build_report(work, tasks_data, arms, task_ids, skip_invented, agent='claude'):
+    results = benchlib.results_dir(work, tasks_data['series'], agent)
+    benchlib.validate_series_agent(results, [arm for arm, _ in arms], task_ids, agent)
     roots = corpus_roots(work, tasks_data, task_ids, skip_invented)
     scores = {arm: benchlib.score_arm(results, tasks_data, arm, task_ids, roots) for arm, _ in arms}
     trusts = {arm: [self_trust(s) for t in task_ids for s in benchlib.load_runs(results, t, arm)] for arm, _ in arms}
     parts = [
-        f"# Series {tasks_data['series']}: {', '.join(label for _, label in arms)}", '',
+        f"# Series {results.name}: {', '.join(label for _, label in arms)}", '',
         f"{len(task_ids)} tasks. Context tokens are every input token the model processed, cached input included.",
-        '', '## Key metrics', '', key_metrics_table(scores, arms), '',
+        '', '## Run configuration', '', run_configuration(results, arms),
+        '', '## Key metrics', '', key_metrics_table(scores, arms, 6 if agent == 'codex' else 2), '',
         'Agent self-trust scores: ' + ' / '.join(' '.join(str(t) for t in trusts[arm] if t) or '-' for arm, _ in arms),
         '', '## Per task', '', per_task_table(results, tasks_data, arms, task_ids, roots),
     ]
@@ -133,6 +160,7 @@ def build_report(work, tasks_data, arms, task_ids, skip_invented):
         parts += ['', '## Blind judge (second opinion)', '']
         parts += ['\n\n'.join(judge_section(path, labels) for path in shown)]
     parts += ['', '## Tool calls by tool', '', tool_usage(results, arms, task_ids)]
+    parts += [excluded_sessions(results, arms, task_ids)]
     return '\n'.join(parts) + '\n'
 
 
@@ -143,16 +171,17 @@ def main():
     parser.add_argument('--tasks', default='')
     parser.add_argument('--skip-invented', action='store_true')
     parser.add_argument('--work')
+    parser.add_argument('--agent', choices=('claude', 'codex'), default='claude')
     args = parser.parse_args()
     try:
         tasks_data = benchlib.load_tasks(args.tasks_file)
         work = benchlib.work_root(args.work)
-        arms = parse_arms(args.arms, benchlib.results_dir(work, tasks_data['series']))
+        arms = parse_arms(args.arms, benchlib.results_dir(work, tasks_data['series'], args.agent))
         if not arms:
             raise benchlib.BenchmarkError('no sessions to report')
         task_ids = [t for t in args.tasks.split(',') if t] or [task['id'] for task in tasks_data['tasks']]
         sys.stdout.reconfigure(encoding='utf-8')
-        sys.stdout.write(build_report(work, tasks_data, arms, task_ids, args.skip_invented))
+        sys.stdout.write(build_report(work, tasks_data, arms, task_ids, args.skip_invented, args.agent))
     except benchlib.BenchmarkError as error:
         print(f'error: {error}', file=sys.stderr)
         return 1
