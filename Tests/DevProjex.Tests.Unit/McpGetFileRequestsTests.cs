@@ -6,6 +6,21 @@ namespace DevProjex.Tests.Unit;
 public sealed class McpGetFileRequestsTests
 {
 	[Theory]
+	[InlineData(0, 1)]
+	[InlineData(-1, 1)]
+	[InlineData(3, 2)]
+	public void InvalidCoordinatesRejectTheEntireBatchBeforeDelivery(int start, int end)
+	{
+		var argument = JsonSerializer.SerializeToElement(new[]
+		{
+			new { path = "Source.txt", ranges = new[] { new { start_line = start, end_line = end } } }
+		});
+		var error = Assert.Throws<McpToolException>(() => Parse(argument));
+		Assert.Equal("DPX-MCP-INVALID-ARGUMENTS", error.Code);
+		Assert.Contains("requests[0].ranges[0]", error.Message, StringComparison.Ordinal);
+	}
+
+	[Theory]
 	[InlineData("[{\"path\":\"src/File.cs\"}]")]
 	[InlineData(" \n[{\"path\":\"src/File.cs\",\"ranges\":[{\"start_line\":1,\"end_line\":2}]}] \t")]
 	[InlineData("[{\"path\":\"src/File.cs\",\"symbol\":\"Run\"}]")]

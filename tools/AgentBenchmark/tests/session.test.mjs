@@ -287,3 +287,13 @@ test('a fake Codex executable runs in an empty workspace and credentials are rem
     assert.equal(existsSync(join(limitedOut, 'codex-home')), false);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+
+test('explicit task key versions survive both summary formats without changing legacy summaries', () => {
+  const stream = readFileSync(join(HERE, 'fixtures', 'stream.jsonl'), 'utf8');
+  assert.equal(summarize({ ...job, keyVersion: 2 }, stream, 0, 5000).keyVersion, 2);
+  assert.equal(summarizeCodex({ ...codexJob, keyVersion: 2 }, codexStream, 0, 10, CODEX_PRICING).keyVersion, 2);
+  assert.equal(summarize({ ...job, task: { ...job.task, keyVersion: 2 } }, stream, 0, 5000).keyVersion, 2);
+  assert.equal(summarize(job, stream, 0, 5000).keyVersion, undefined);
+  assert.equal(summarizeCodex(codexJob, codexStream, 0, 10, CODEX_PRICING).keyVersion, undefined);
+});

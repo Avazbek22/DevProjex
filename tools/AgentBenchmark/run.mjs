@@ -109,7 +109,7 @@ for (const task of selectedTasks) {
       const id = `${task.id}-${server}-r${repeat}`;
       const out = join(results, 'runs', id);
       if (existsSync(join(out, 'summary.json'))) continue;
-      jobs.push({ id, task, server, product: arms[server].product, repeat, out, agent, model: models[server] });
+      jobs.push({ id, task, server, product: arms[server].product, repeat, out, agent, keyVersion: task.keyVersion ?? 1, model: models[server] });
     }
   }
 }

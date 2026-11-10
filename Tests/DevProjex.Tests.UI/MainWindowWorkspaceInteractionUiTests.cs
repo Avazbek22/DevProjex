@@ -853,57 +853,20 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
 		var appDataPath = Path.Combine(workspace.Project.AppDataPath, Guid.NewGuid().ToString("N"));
 		Directory.CreateDirectory(appDataPath);
 
-		var options = new DesktopStartupOptions(
-			new DesktopOpenRequest(workspace.Project.RootPath, Language: AppLanguage.En));
-		var baseServices = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath);
 		var flakyStore = new FlakyProjectProfileStore(Path.Combine(appDataPath, "DevProjex", "project-profiles.json"));
-		var services = baseServices with
-		{
-			ProjectProfileStore = flakyStore
-		};
-
-		var window = new MainWindow(options, services)
-		{
-			Width = 1500,
-			Height = 920
-		};
-		UiTestDriver.TrackTopLevelWindow(window);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			workspace.Project,
+			appDataPathOverride: appDataPath,
+			configureServices: services => services with { ProjectProfileStore = flakyStore });
 
 		try
 		{
-			window.Show();
-
-			await UiTestDriver.WaitForConditionAsync(
-				window,
-				() =>
-				{
-					var viewModel = UiTestDriver.GetViewModel(window);
-					return viewModel.IsProjectLoaded &&
-						   viewModel.TreeNodes.Count > 0 &&
-						   !viewModel.StatusBusy;
-				},
-				"project to finish loading with a transient profile save failure");
-
-			await UiTestDriver.WaitForConditionAsync(
-				window,
-				() =>
-				{
-					var settingsContainer = UiTestDriver.GetRequiredControl<Border>(window, "SettingsContainer");
-					return UiTestDriver.GetBoundsInWindow(settingsContainer, window).Width >= 200;
-				},
-				"initial settings pane to become visually available before applying settings");
-
-			await UiTestDriver.ClickExtensionCheckBoxAsync(window, ".md");
-			var applyButton = UiTestDriver.GetRequiredApplySettingsButton(window);
-			await UiTestDriver.RaiseButtonClickAsync(applyButton);
-			await UiTestDriver.WaitForConditionAsync(
-				window,
-				() => flakyStore.SaveAttemptCount >= 1,
-				"initial profile persistence attempt to run after applying settings");
-			await UiTestDriver.WaitForConditionAsync(
-				window,
-				() => !UiTestDriver.GetViewModel(window).StatusBusy,
-				"apply settings operation to finish after the profile save attempt");
+			var viewModel = UiTestDriver.GetViewModel(window);
+			var markdown = viewModel.Extensions.Single(static option => option.Name == ".md");
+			var markdownWasSelected = markdown.IsChecked;
+			await window.Dispatcher.InvokeAsync(() => markdown.IsChecked = !markdownWasSelected);
+			Assert.True(viewModel.HasPendingFilterSettingsChanges);
+			await ApplyPendingProfileSettingsAsync(window);
 			Assert.Equal(1, flakyStore.SaveAttemptCount);
 			var profileCoordinator = GetRequiredPrivateField<ProjectProfilePersistenceCoordinator>(
 				window,
@@ -921,6 +884,7 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
 			Assert.True(flakyStore.SaveAttemptCount >= 2);
 			Assert.True(flakyStore.TryLoadProfile(workspace.Project.RootPath, out var switchedProfile));
 			Assert.NotNull(switchedProfile);
+			Assert.Equal(!markdownWasSelected, switchedProfile.SelectedExtensions.Contains(".md"));
 			await SaveUi5ArtifactAsync(
 				window,
 				"issue-03-profile-flushed-after-switch",
@@ -958,39 +922,13 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
 		var appDataPath = Path.Combine(workspace.Project.AppDataPath, Guid.NewGuid().ToString("N"));
 		Directory.CreateDirectory(appDataPath);
 		var store = new ProjectProfileStore(() => appDataPath);
-		var options = new DesktopStartupOptions(
-			new DesktopOpenRequest(workspace.Project.RootPath, Language: AppLanguage.En));
-		var services = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath) with
-		{
-			ProjectProfileStore = store
-		};
-		var window = new MainWindow(options, services)
-		{
-			Width = 1500,
-			Height = 920
-		};
-		UiTestDriver.TrackTopLevelWindow(window);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			workspace.Project,
+			appDataPathOverride: appDataPath,
+			configureServices: services => services with { ProjectProfileStore = store });
 
 		try
 		{
-			window.Show();
-			await UiTestDriver.WaitForConditionAsync(
-				window,
-				() =>
-				{
-					var viewModel = UiTestDriver.GetViewModel(window);
-					return viewModel.IsProjectLoaded &&
-						   viewModel.TreeNodes.Count > 0 &&
-						   !viewModel.StatusBusy;
-				},
-				"project to finish loading before the pending Apply write");
-			await UiTestDriver.WaitForConditionAsync(
-				window,
-				() => UiTestDriver.GetBoundsInWindow(
-					UiTestDriver.GetRequiredControl<Border>(window, "SettingsContainer"),
-					window).Width >= 200,
-				"settings pane to become available before the pending Apply write");
-
 			var lockPath = store.GetPath() + ".lock";
 			Directory.CreateDirectory(Path.GetDirectoryName(lockPath)!);
 			var markdownWasSelected = UiTestDriver.GetViewModel(window).Extensions
@@ -1002,17 +940,12 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
 							 FileAccess.ReadWrite,
 							 FileShare.None))
 			{
-				await UiTestDriver.ClickExtensionCheckBoxAsync(window, ".md");
-				await UiTestDriver.RaiseButtonClickAsync(
-					UiTestDriver.GetRequiredApplySettingsButton(window));
-				await UiTestDriver.WaitForConditionAsync(
-					window,
-					() =>
-						!UiTestDriver.GetViewModel(window).StatusBusy &&
-						GetRequiredPrivateField<ProjectProfilePersistenceCoordinator>(
-							window,
-							"_projectProfiles").HasPendingWrites,
-					"failed Apply profile write to become pending");
+				await window.Dispatcher.InvokeAsync(() => UiTestDriver.GetViewModel(window).Extensions
+					.Single(static option => option.Name == ".md").IsChecked = !markdownWasSelected);
+				Assert.True(UiTestDriver.GetViewModel(window).HasPendingFilterSettingsChanges);
+				await ApplyPendingProfileSettingsAsync(window);
+				Assert.True(GetRequiredPrivateField<ProjectProfilePersistenceCoordinator>(
+					window, "_projectProfiles").HasPendingWrites);
 			}
 
 			var root = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
@@ -1055,13 +988,23 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
 		}
 	}
 
+	private static async Task ApplyPendingProfileSettingsAsync(MainWindow window)
+	{
+		var viewModel = UiTestDriver.GetViewModel(window);
+		Assert.True(viewModel.HasPendingFilterSettingsChanges);
+		await UiTestDriver.RaiseButtonClickAsync(UiTestDriver.GetRequiredApplySettingsButton(window));
+		await window.LatestApplySettingsTask.WaitAsync(
+			TimeSpan.FromSeconds(20), TestContext.Current.CancellationToken);
+		Assert.False(viewModel.HasPendingFilterSettingsChanges);
+	}
+
 	private sealed class FlakyProjectProfileStore(string storagePath) : IProjectProfileStore
 	{
 		private readonly Dictionary<string, ProjectSelectionProfile> _profiles = new(PathComparer.Default);
 		private int _saveAttemptCount;
 
 		public string StoragePath { get; } = storagePath;
-		public int SaveAttemptCount => _saveAttemptCount;
+		public int SaveAttemptCount => Volatile.Read(ref _saveAttemptCount);
 
 		public bool EnsureStorageExists()
 		{

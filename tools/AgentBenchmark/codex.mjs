@@ -145,7 +145,9 @@ export function summarizeCodex(job, stdout, exitCode, wallMs, pricing, stderr = 
     usage.cacheCreation * (pricing.cacheCreation ?? 0) + usage.output * pricing.output) / 1e6;
   usage.costComplete = completed && exitCode === 0 && !error;
   const isolation = { status: violations.size ? 'violated' : 'passed', violations: [...violations] };
-  return { id: job.id, task: job.task.id, repo: job.task.repo, server: job.server, product: job.product, repeat: job.repeat,
+  return { id: job.id, task: job.task.id, repo: job.task.repo,
+    ...(job.keyVersion === undefined && job.task.keyVersion === undefined ? {} :
+      { keyVersion: job.keyVersion ?? job.task.keyVersion }), server: job.server, product: job.product, repeat: job.repeat,
     agent: 'codex', exitCode, durationMs: wallMs, wallMs, numTurns: turns, error, apiErrorStatus: null, usage,
     toolCalls, toolResponseChars: toolCalls.reduce((sum, call) => sum + call.responseChars, 0), answer, isolation,
     eligibleForMetrics: isolation.status === 'passed' && !error };

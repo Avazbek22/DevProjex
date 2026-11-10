@@ -2522,7 +2522,7 @@ internal sealed partial class DevProjexMcpTools(
 			: (0, 0);
 	}
 
-	private static McpBatchFileReadResult RenderBatchFileReads(
+	internal static McpBatchFileReadResult RenderBatchFileReads(
 		IReadOnlyList<McpResolvedFileReadRequest> requests,
 		IReadOnlyDictionary<string, TransformedTextFile> transformed,
 		IReadOnlyDictionary<string, string> testsLines,
@@ -2550,10 +2550,27 @@ internal sealed partial class DevProjexMcpTools(
 		}
 		var groups = BuildMergedReadGroups(requests);
 		var lineViews = new Dictionary<string, McpBatchTextLineView>(PathComparer.Default);
+		var invalidRangeReasons = new Dictionary<(int RequestIndex, int RangeIndex), string>();
+		foreach (var group in groups)
+		{
+			if (group.PhysicalPath is null || !transformed.TryGetValue(group.PhysicalPath, out var file) ||
+				group.Ranges.All(static range => range.IsWholeFile))
+				continue;
+			var lineView = GetLineView(group.PhysicalPath, file);
+			foreach (var range in group.Ranges)
+			{
+				if (lineView.DescribeInvalidRange(range) is not { } reason)
+					continue;
+				var path = McpTextEscaping.EscapeSingleLine(McpToolResults.ProtectMetadataString(group.DisplayPath));
+				if (path.Length > 256)
+					path = TakeCompleteScalarPrefix(path, 255) + "…";
+				invalidRangeReasons[(range.RequestIndex, range.RangeIndex)] = $"{path}: {reason}";
+			}
+		}
 		var sectionBudgetLines = MaximumPageLines - status.Count - 1;
 		var statusReserve = "Requests:\n" + string.Join('\n', status.Keys.Select(key =>
 			$"{key.RequestIndex}.{key.RangeIndex} — not-returned" +
-			(unavailableReasons.TryGetValue(key, out var reason) ? $" — {reason}" : string.Empty)));
+			FormatReason(key)));
 		var sectionBudgetCharacters = MaximumPageCharacters - statusReserve.Length;
 		var sections = new StringBuilder();
 		var continuations = new List<string>();
@@ -2598,16 +2615,7 @@ internal sealed partial class DevProjexMcpTools(
 			McpTextPage page;
 			try
 			{
-				if (!lineViews.TryGetValue(group.PhysicalPath, out var lineView))
-				{
-					lineView = new McpBatchTextLineView(
-						file.Content,
-						groups.Where(candidate => PathComparer.Default.Equals(
-							candidate.PhysicalPath,
-							group.PhysicalPath)).Select(static candidate => candidate.StartLine),
-						cancellationToken);
-					lineViews.Add(group.PhysicalPath, lineView);
-				}
+				var lineView = GetLineView(group.PhysicalPath, file);
 				page = lineView.Slice(
 					isEmptyContent ? null : group.StartLine,
 					isEmptyContent ? null : group.EndLine,
@@ -2716,7 +2724,7 @@ internal sealed partial class DevProjexMcpTools(
 
 		var statusText = "Requests:\n" + string.Join('\n', status.Select(pair =>
 			$"{pair.Key.RequestIndex}.{pair.Key.RangeIndex} — {pair.Value}" +
-			(unavailableReasons.TryGetValue(pair.Key, out var reason) ? $" — {reason}" : string.Empty)));
+			FormatReason(pair.Key)));
 		var body = sections.Length == 0 ? statusText : statusText + "\n\n" + sections;
 		var counts = status.Values.GroupBy(static value => value, StringComparer.Ordinal)
 			.ToDictionary(static group => group.Key, static group => group.Count(), StringComparer.Ordinal);
@@ -2740,6 +2748,24 @@ internal sealed partial class DevProjexMcpTools(
 				: string.Join('\n', continuations.Concat(rangeNotices)),
 			deliveredPaths,
 			deliveredRanges);
+
+		string FormatReason((int RequestIndex, int RangeIndex) key) =>
+			unavailableReasons.TryGetValue(key, out var unavailable) ? $" — {unavailable}" :
+			invalidRangeReasons.TryGetValue(key, out var invalid) ? $" — {invalid}" : string.Empty;
+
+		McpBatchTextLineView GetLineView(string physicalPath, TransformedTextFile file)
+		{
+			if (!lineViews.TryGetValue(physicalPath, out var lineView))
+			{
+				lineView = new McpBatchTextLineView(
+					file.Content,
+					groups.Where(candidate => PathComparer.Default.Equals(candidate.PhysicalPath, physicalPath))
+						.Select(static candidate => candidate.StartLine),
+					cancellationToken);
+				lineViews.Add(physicalPath, lineView);
+			}
+			return lineView;
+		}
 
 		int GetCount(string value) => counts.GetValueOrDefault(value);
 
@@ -3572,7 +3598,7 @@ internal sealed partial class DevProjexMcpTools(
 		int External,
 		int OutsideSelection = 0);
 
-	private sealed record McpResolvedFileReadRequest(
+	internal sealed record McpResolvedFileReadRequest(
 		McpGetFileRequest Request,
 		string? PhysicalPath,
 		string? UnavailableReason = null);
@@ -3591,7 +3617,7 @@ internal sealed partial class DevProjexMcpTools(
 		public List<McpGetFileRange> Ranges { get; } = [.. ranges];
 	}
 
-	private sealed record McpBatchFileReadResult(
+	internal sealed record McpBatchFileReadResult(
 		string Text,
 		string Summary,
 		string? UnavailableNotice,
@@ -3599,7 +3625,7 @@ internal sealed partial class DevProjexMcpTools(
 		IReadOnlyList<string> DeliveredPaths,
 		IReadOnlyList<McpDeliveredFileRange> DeliveredRanges);
 
-	private readonly record struct McpDeliveredFileRange(
+	internal readonly record struct McpDeliveredFileRange(
 		string? PhysicalPath,
 		int StartLine,
 		int EndLine);

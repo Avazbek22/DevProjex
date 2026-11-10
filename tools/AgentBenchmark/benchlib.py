@@ -165,7 +165,25 @@ def _validate_task(task, repos, seen):
     for field in ('kind', 'text'):
         if not isinstance(task.get(field), str) or not task[field].strip():
             errors.append(f'{where}: {field} is missing')
-    key = task.get('key')
+    errors.extend(_validate_key(task.get('key'), where))
+    version = task.get('keyVersion', 1)
+    if type(version) is not int or version < 1:
+        errors.append(f'{where}: keyVersion must be a positive integer')
+        return errors
+    previous = task.get('previousKeys', {})
+    if not isinstance(previous, dict):
+        return errors + [f'{where}: previousKeys must be an object']
+    if version > 1 and '1' not in previous:
+        errors.append(f'{where}: previousKeys must preserve version 1')
+    for number, key in previous.items():
+        if not isinstance(number, str) or not number.isdigit() or str(int(number)) != number or not 1 <= int(number) < version:
+            errors.append(f'{where}: previous key version {number!r} must precede keyVersion')
+        errors.extend(_validate_key(key, f'{where} key v{number}'))
+    return errors
+
+
+def _validate_key(key, where):
+    errors = []
     if not isinstance(key, dict):
         return errors + [f'{where}: key is missing']
     for name in KEY_LISTS:
@@ -194,7 +212,8 @@ def _is_clean_relative_path(path):
 
 def key_paths(task):
     key = task['key']
-    return [path for name in KEY_LISTS for path in key[name]]
+    keys = [key, *task.get('previousKeys', {}).values()]
+    return list(dict.fromkeys(path for key in keys for name in KEY_LISTS for path in key[name]))
 
 
 def missing_key_paths(tasks_data, repo, root):
@@ -367,23 +386,41 @@ def invented_paths(found, root):
                   and (_absolute_answer_path(path) or path.startswith('../') or not (Path(root) / path).exists()))
 
 
+def task_key(task, version):
+    current = task.get('keyVersion', 1)
+    if type(version) is not int or version < 1:
+        raise BenchmarkError(f"task {task['id']}: invalid key version {version!r}")
+    if version == current:
+        return task['key']
+    key = task.get('previousKeys', {}).get(str(version))
+    if key is None:
+        raise BenchmarkError(f"task {task['id']}: key version {version} is not available")
+    return key
+
+
+def format_key_versions(versions):
+    return ', '.join(f"{task}=" + '/'.join(f'v{number}' for number in sorted(numbers))
+                     for task, numbers in sorted(versions.items())) or 'none'
+
+
 def empty_score():
     return dict(sessions=0, files=0, files_needed=0, tests=0, tests_needed=0, known_wrong=0, invented=0,
-                calls=0, tool_errors=0, context=0, cost=0.0, duration_ms=0, tool_output_chars=0)
+                calls=0, tool_errors=0, context=0, cost=0.0, duration_ms=0, tool_output_chars=0, key_versions={})
 
 
-def score_session(summary, task, corpus_root):
+def score_session(summary, task, corpus_root, key_version=None):
     """Key metrics of one session. corpus_root=None skips the invented-path count."""
     if not eligible_run(summary):
         raise BenchmarkError('A failed or isolation-violating Codex session cannot enter key metrics')
-    key = task['key']
+    version = key_version if key_version is not None else summary.get('keyVersion', 1)
+    key = task_key(task, version)
     found = paths_in(summary.get('answer') or '', corpus_root)
     needed = set(key['core']) | set(key['supporting'])
     tests = set(key['tests'])
     calls = summary['toolCalls']
     score = empty_score()
     score.update(
-        sessions=1,
+        sessions=1, key_versions={task['id']: [version]},
         files=sum(mentions(path, found) for path in needed), files_needed=len(needed),
         tests=sum(mentions(path, found) for path in tests), tests_needed=len(tests),
         known_wrong=sum(mentions(path, found) for path in key['unrelated']),
@@ -398,22 +435,26 @@ def score_session(summary, task, corpus_root):
 
 def add_scores(total, score):
     for name, value in score.items():
-        total[name] += value
+        if name == 'key_versions':
+            for task, versions in value.items():
+                total[name][task] = sorted(set(total[name].get(task, [])) | set(versions))
+        else:
+            total[name] += value
     return total
 
 
-def score_arm(results, tasks_data, arm, task_ids, corpus_roots):
+def score_arm(results, tasks_data, arm, task_ids, corpus_roots, key_version=None):
     """Sum of key metrics over all sessions of one arm. corpus_roots maps repo -> clone or None."""
     by_id = {task['id']: task for task in tasks_data['tasks']}
     total = empty_score()
     for task_id in task_ids:
         task = by_id[task_id]
         for summary in load_runs(results, task_id, arm):
-            add_scores(total, score_session(summary, task, corpus_roots.get(task['repo'])))
+            add_scores(total, score_session(summary, task, corpus_roots.get(task['repo']), key_version))
     return total
 
 
 def format_score(score):
-    return (f"files {score['files']}/{score['files_needed']} · tests {score['tests']}/{score['tests_needed']} · "
+    return (f"keys {format_key_versions(score['key_versions'])} · files {score['files']}/{score['files_needed']} · tests {score['tests']}/{score['tests_needed']} · "
             f"known-wrong {score['known_wrong']} · invented {score['invented']} · calls {score['calls']} · "
             f"ctx {score['context'] / 1e6:.2f}M · ${score['cost']:.2f}")
