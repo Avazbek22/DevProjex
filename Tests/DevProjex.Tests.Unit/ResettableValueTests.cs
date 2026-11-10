@@ -4,6 +4,99 @@ namespace DevProjex.Tests.Unit;
 
 public sealed class ResettableValueTests
 {
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public void ConcurrentReadersRetryAFailedFirstInitializationWithoutDuplicateCompilations(bool exhausted)
+	{
+		using var ready = new CountdownEvent(8);
+		var expected = new object();
+		Exception failure = exhausted ? new OutOfMemoryException() : new InvalidOperationException();
+		var calls = 0;
+		var holder = new ResettableValue<object>(() =>
+		{
+			if (Interlocked.Increment(ref calls) == 1)
+			{
+				ready.Wait(TestContext.Current.CancellationToken);
+				throw failure;
+			}
+			return expected;
+		});
+		var values = new System.Collections.Concurrent.ConcurrentBag<object>();
+		var failures = new System.Collections.Concurrent.ConcurrentBag<Exception>();
+		var readers = Enumerable.Range(0, 8).Select(_ => new Thread(() =>
+		{
+			ready.Signal();
+			try { values.Add(holder.Value); }
+			catch (Exception exception) { failures.Add(exception); }
+		})).ToArray();
+		foreach (var reader in readers)
+			reader.Start();
+		foreach (var reader in readers)
+			reader.Join();
+		Assert.Same(failure, Assert.Single(failures));
+		Assert.Equal(7, values.Count);
+		Assert.All(values, value => Assert.Same(expected, value));
+		Assert.Equal(2, calls);
+	}
+
+	[Fact]
+	public void RepeatedFailuresAndResetsNeverPublishAPartialValue()
+	{
+		var calls = 0;
+		var failure = new OutOfMemoryException("controlled failure");
+		var expected = new object();
+		var holder = new ResettableValue<object>(() => ++calls <= 3 ? throw failure : expected);
+		for (var attempt = 0; attempt < 3; attempt++)
+		{
+			Assert.Same(failure, Assert.Throws<OutOfMemoryException>(() => holder.Value));
+			holder.Reset();
+		}
+		Assert.Same(expected, holder.Value);
+		Assert.Same(expected, holder.Value);
+		Assert.Equal(4, calls);
+		holder.Reset();
+		Assert.Same(expected, holder.Value);
+		Assert.Equal(5, calls);
+	}
+
+	[Fact]
+	public async Task ResetDuringInitializationCannotRepublishTheDiscardedGeneration()
+	{
+		using var release = new ManualResetEventSlim();
+		var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var resetRequested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var calls = 0;
+		var holder = new ResettableValue<object>(() =>
+		{
+			if (Interlocked.Increment(ref calls) == 1)
+			{
+				entered.SetResult();
+				release.Wait(TestContext.Current.CancellationToken);
+			}
+			return new();
+		});
+		var initial = Task.Run(() => holder.Value, TestContext.Current.CancellationToken);
+		await entered.Task.WaitAsync(TestContext.Current.CancellationToken);
+		var reset = Task.Run(() =>
+		{
+			resetRequested.SetResult();
+			holder.Reset();
+		}, TestContext.Current.CancellationToken);
+		try
+		{
+			await resetRequested.Task.WaitAsync(TestContext.Current.CancellationToken);
+		}
+		finally
+		{
+			release.Set();
+		}
+		var previous = await initial;
+		await reset;
+		Assert.NotSame(previous, holder.Value);
+		Assert.Equal(2, calls);
+	}
+
 	[Fact]
 	public async Task ConcurrentAccessPublishesOneValue()
 	{

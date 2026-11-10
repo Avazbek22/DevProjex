@@ -19,10 +19,16 @@ internal sealed partial class DevProjexMcpTools
 					documents[McpProjectService.ToRelative(plan.SourceRoot, file.Path)] = file.Content;
 				return ValueTask.CompletedTask;
 			}, cancellationToken).ConfigureAwait(false);
-		return PackageExportMap.Find(documents, plan.IncludedFiles
+		var exports = PackageExportMap.Find(documents, plan.IncludedFiles
 			.Select(path => McpProjectService.ToRelative(plan.SourceRoot, path))
 			.Where(path => McpToolResults.ProtectMetadataString(path, McpProjectService.IsPrivateDataHidden(plan)) == path)
 			.ToHashSet(StringComparer.Ordinal));
+		return exports.Where(item =>
+		{
+			var metadata = string.Join('\n', item.Manifest, item.Key, item.Target);
+			return Projects.RedactSyntheticText(plan, Path.Combine(plan.SourceRoot, item.Target), metadata,
+				cancellationToken).Text == metadata;
+		}).ToArray();
 	}
 
 	private static string? FormatPackageExports(IReadOnlyList<PackageExport> exports, string relativePath)

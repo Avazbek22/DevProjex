@@ -11,6 +11,49 @@ namespace DevProjex.Tests.Unit;
 public sealed class McpPlanContainmentTests
 {
 	[Fact]
+	public void ANewPassDoesNotTrustADirectoryLinkRepointedAfterAnAcceptedPass()
+	{
+		using var workspace = new TemporaryDirectory();
+		var basePath = PhysicalPath(workspace);
+		var project = CreateFolder(basePath, "project");
+		var inside = CreateFolder(basePath, "project/real");
+		var outside = CreateFolder(basePath, "project-sibling");
+		File.WriteAllText(Path.Combine(inside, "same.ts"), "export const inside = 1;");
+		File.WriteAllText(Path.Combine(outside, "same.ts"), "export const outside = 2;");
+		var alias = Path.Combine(project, "alias");
+		CreateDirectoryLinkOrSkip(alias, inside);
+		var candidate = Path.Combine(alias, "same.ts");
+		var registry = new McpRootRegistry([project]);
+		McpProjectService.ValidatePlanContainment(registry, project, [candidate], TestContext.Current.CancellationToken);
+		Assert.True(File.GetAttributes(alias).HasFlag(FileAttributes.ReparsePoint));
+		Directory.Delete(alias);
+		CreateDirectoryLinkOrSkip(alias, outside);
+
+		var error = Assert.Throws<McpToolException>(() => McpProjectService.ValidatePlanContainment(
+			registry, project, [candidate], TestContext.Current.CancellationToken));
+		Assert.Equal(McpErrorCodes.RootViolation, error.Code);
+		Assert.True(File.Exists(Path.Combine(inside, "same.ts")));
+		Assert.True(File.Exists(Path.Combine(outside, "same.ts")));
+	}
+
+	[Theory]
+	[InlineData("project-other")]
+	[InlineData("project🙂")]
+	[InlineData("project.else")]
+	public void ASharedLexicalPrefixDoesNotMakeASiblingPartOfTheRoot(string sibling)
+	{
+		using var workspace = new TemporaryDirectory();
+		var basePath = PhysicalPath(workspace);
+		var project = CreateFolder(basePath, "project");
+		var accepted = CreateFile(basePath, "project/src/file.ts", "inside");
+		var outside = CreateFile(basePath, sibling + "/src/file.ts", "outside");
+		var registry = new McpRootRegistry([project]);
+		var error = Assert.Throws<McpToolException>(() => McpProjectService.ValidatePlanContainment(
+			registry, project, [accepted, accepted, outside], TestContext.Current.CancellationToken));
+		Assert.Equal(McpErrorCodes.RootViolation, error.Code);
+	}
+
+	[Fact]
 	public void AcceptsEveryFileAndWalksSharedDirectoriesOnce()
 	{
 		using var workspace = new TemporaryDirectory();

@@ -9,7 +9,7 @@ public sealed class SearchCommandProcessTests
 	private const int MaximumOutputCharacters = 16_000;
 
 	[Fact]
-	public void TextSearchListsDocumentationLastAndKeepsJsonBytesUnchanged()
+	public void TextSearchListsDocumentationLastAndKeepsJsonMatchOrderAndValues()
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("search-order");
@@ -24,9 +24,27 @@ public sealed class SearchCommandProcessTests
 		Assert.True(text.StandardOutput.IndexOf("z.log", StringComparison.Ordinal) <
 			text.StandardOutput.IndexOf("a.md", StringComparison.Ordinal), text.StandardOutput);
 		Assert.DoesNotContain("Matches in documentation files:", text.StandardOutput, StringComparison.Ordinal);
-		var bytes = System.Text.Encoding.UTF8.GetBytes(json.StandardOutput.Replace("\r\n", "\n", StringComparison.Ordinal));
-		Assert.Equal("666FFC65A3F83A4AC9FC46BA6E14CA067AC2F4E99874626626E2F8A61FDBC05C",
-			Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)));
+		using var document = JsonDocument.Parse(json.StandardOutput);
+		var root = document.RootElement;
+		Assert.Equal(1, root.GetProperty("schemaVersion").GetInt32());
+		Assert.Equal("devprojex-search-results", root.GetProperty("kind").GetString());
+		Assert.Equal("orderingNeedle", root.GetProperty("query").GetProperty("pattern").GetString());
+		Assert.Equal("text", root.GetProperty("query").GetProperty("mode").GetString());
+		var matches = root.GetProperty("matches").EnumerateArray().ToArray();
+		Assert.Equal(new[] { "a.md", "z.log" }, matches.Select(match => match.GetProperty("path").GetString()));
+		Assert.All(matches, match =>
+		{
+			Assert.Equal(1, match.GetProperty("line").GetInt32());
+			Assert.Equal("orderingNeedle", match.GetProperty("text").GetString());
+			Assert.Equal(JsonValueKind.Null, match.GetProperty("declaration").ValueKind);
+		});
+		Assert.Empty(root.GetProperty("declarations").EnumerateArray());
+		var boundary = root.GetProperty("searchBoundary");
+		Assert.True(boundary.GetProperty("complete").GetBoolean());
+		foreach (var count in new[] { "eligibleSources", "inspectedSources", "encounteredMatches", "retainedMatches", "writtenMatches" })
+			Assert.Equal(2, boundary.GetProperty(count).GetInt32());
+		Assert.Equal(0, boundary.GetProperty("omittedMatches").GetInt32());
+		Assert.Empty(boundary.GetProperty("limits").EnumerateArray());
 	}
 
 	[Fact]

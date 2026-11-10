@@ -9,6 +9,58 @@ public sealed class TerminalWorkspaceCommandParserTests
 		[".cs", ".md", ".generated"]);
 	private readonly TerminalWorkspaceCommandParser _parser = new();
 
+	[Fact]
+	public void GeneratedQuotedFreeTextRoundTripsWithoutCollapsingWhitespaceOrUnicode()
+	{
+		const int seed = 18427;
+		var random = new Random(seed);
+		string[] pieces = ["name", "  ", "\t", "Ж", "名前", "🙂", "'", "\"", "\\", "@file", ".*", "\r\n"];
+		for (var sample = 0; sample < 250; sample++)
+		{
+			var value = string.Concat(Enumerable.Range(0, random.Next(1, 30)).Select(_ => pieces[random.Next(pieces.Length)]));
+			foreach (var verb in new[] { "search", "filter" })
+			{
+				foreach (var quote in new[] { "'", "\"" })
+				{
+					var result = _parser.Parse(verb + " " + quote + value.Replace(quote, quote + quote, StringComparison.Ordinal) + quote, Context);
+					Assert.True(result.IsSuccess, $"seed={seed}; sample={sample}; error={result.Error}");
+					Assert.Equal(value, result.Command!.Text);
+				}
+			}
+		}
+	}
+
+	[Fact]
+	public void GeneratedMixedFreeTextKeepsTheOriginalGapsBetweenDecodedTokens()
+	{
+		const int seed = 73819;
+		var random = new Random(seed);
+		string[] gaps = [" ", "  ", "\t", " \t  "];
+		for (var sample = 0; sample < 200; sample++)
+		{
+			var input = new StringBuilder();
+			var expected = new StringBuilder();
+			for (var index = 0; index < 8; index++)
+			{
+				if (index > 0)
+				{
+					var gap = gaps[random.Next(gaps.Length)];
+					input.Append(gap);
+					expected.Append(gap);
+				}
+				var value = "名前🙂" + index;
+				expected.Append(value);
+				input.Append(random.Next(2) == 0 ? value : "'" + value + "'");
+			}
+			foreach (var verb in new[] { "search", "filter" })
+			{
+				var result = _parser.Parse(verb + " " + input, Context);
+				Assert.True(result.IsSuccess, $"seed={seed}; sample={sample}; error={result.Error}");
+				Assert.Equal(expected.ToString(), result.Command!.Text);
+			}
+		}
+	}
+
 	[Theory]
 	[MemberData(nameof(ValidCommands))]
 	internal void Parse_RecognizesEveryGrammarForm(
