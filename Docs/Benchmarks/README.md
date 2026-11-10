@@ -33,6 +33,7 @@ Related documents:
 | [2026-11-07](2026-11-07.md) | #488 and #491 for narrowed views; check before release; v5.2.2 against master and Repomix on fourteen tasks |
 | [2026-11-08](2026-11-08.md) | #502, #503 and #505 measured; #507 and #508 closed; keys and judge corrected; #509 to #513 measured |
 | [2026-11-09](2026-11-09.md) | #516 and #518 kept, #519 closed; blind run on rich and FluentValidation; #517 and #520 |
+| [2026-11-10](2026-11-10.md) | `get_tree` depth from the requested path (#533) and the `Exported by:` line (#534) measured and kept; new ranking baseline |
 
 ## How the days connect
 
@@ -58,6 +59,9 @@ Related documents:
    the keys and the judge were corrected, and the real complaints led to #509 to #513.
 10. **Replace content, test on unseen code** (9 November). The large-file structure kept, the
     expanded tree dropped, and the gains confirmed on two repositories never used before.
+11. **Fixes from the analysis, measured** (10 November). The tree depth and package manifest
+    fixes removed empty subtrees and found the manifest in every session, without adding reads;
+    the first series run from `tools/AgentBenchmark`.
 
 ## How the sessions were run
 
