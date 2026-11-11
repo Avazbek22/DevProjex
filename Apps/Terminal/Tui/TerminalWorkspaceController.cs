@@ -760,10 +760,21 @@ public sealed class TerminalWorkspaceController(
 	/// with <see cref="CaptureRelationSnapshot"/> on the UI thread before the caller starts this
 	/// query, so a concurrent filter change on the live workspace cannot change its answer mid-flight.
 	/// </summary>
-	internal async Task<(DependencyRelatedResult Related, DependencyOutsideSelectionResult? Outside)> FindRelatedAsync(
+	internal Task<(DependencyRelatedResult Related, DependencyOutsideSelectionResult? Outside)> FindRelatedAsync(
 		TerminalRelationStateSnapshot snapshot,
 		ProjectContextPlan current,
 		string seed,
+		DependencyDirection direction,
+		int depth,
+		GitFilteringMode persistentGitMode,
+		CancellationToken cancellationToken) =>
+		FindRelatedAsync(snapshot, current, RelatedQueryRunner.ResolveSeeds(current, seed), direction, depth,
+			persistentGitMode, cancellationToken);
+
+	internal async Task<(DependencyRelatedResult Related, DependencyOutsideSelectionResult? Outside)> FindRelatedAsync(
+		TerminalRelationStateSnapshot snapshot,
+		ProjectContextPlan current,
+		IReadOnlyList<string> seeds,
 		DependencyDirection direction,
 		int depth,
 		GitFilteringMode persistentGitMode,
@@ -777,7 +788,7 @@ public sealed class TerminalWorkspaceController(
 		var related = await RelatedQueryRunner.FindAsync(
 				services.DependencyFactsEngine,
 				current,
-				seed,
+				seeds,
 				direction,
 				depth,
 				(project ?? current).IncludedFiles,
@@ -790,7 +801,7 @@ public sealed class TerminalWorkspaceController(
 				current.SourceRoot,
 				related,
 				project.IncludedFiles,
-				[seed],
+				seeds,
 				direction,
 				depth,
 				cancellationToken: cancellationToken)

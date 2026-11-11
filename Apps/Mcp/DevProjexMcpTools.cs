@@ -1545,7 +1545,8 @@ internal sealed partial class DevProjexMcpTools(
 				exclusions: exclusions).ConfigureAwait(false);
 			RecordPlan(plan);
 			liveContext?.RecordFocusUse(plan.SourceRoot, McpLiveFocusUse.Related);
-			var resolvedSeeds = Projects.ResolveRequestedFiles(plan, seeds, cancellationToken);
+			var seedResolution = Projects.ResolveRelationSeeds(plan, seeds, cancellationToken);
+			var resolvedSeeds = seedResolution.Files;
 			var relativeSeeds = resolvedSeeds
 				.Select(seed => McpProjectService.ToRelative(plan.SourceRoot, seed))
 				.Distinct(StringComparer.Ordinal)
@@ -1657,6 +1658,7 @@ internal sealed partial class DevProjexMcpTools(
 				: $"[Related evidence] partial · uninspected-sources={uninspectedEvidenceSources.ToString(CultureInfo.InvariantCulture)}; " +
 				  "unverified reference text was withheld.";
 			var trustedNotices = CombineTrustedNotices(
+				seedResolution.Folders == 0 ? null : $"[Read as] {seedResolution.Folders} folder(s) were replaced by the {seedResolution.FolderFiles} file(s) directly inside them as seeds.",
 				FormatRelatedResolution(resolution),
 				FormatOutsideSelectionNotice(outside),
 				FormatSelectionAnswerNotice(outside?.SelectionAnsweredSeeds ?? 0),

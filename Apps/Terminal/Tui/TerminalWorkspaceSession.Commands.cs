@@ -407,7 +407,7 @@ internal sealed partial class TerminalWorkspaceSession
 						"DPX-TUI-RELATED-SELECTION-FAILED",
 						planDiagnostics);
 				}
-				var seed = RelatedQueryRunner.ResolveSeed(plan, command.Target);
+				var seedSelection = RelatedQueryRunner.ResolveSeedSelection(plan, command.Target);
 				DependencyRelatedResult related;
 				DependencyOutsideSelectionResult? outside;
 				try
@@ -415,7 +415,7 @@ internal sealed partial class TerminalWorkspaceSession
 					(related, outside) = await _controller.FindRelatedAsync(
 							relationSnapshot,
 							plan,
-							seed,
+							seedSelection.Files,
 							direction,
 							depth,
 							persistentGitMode,
@@ -431,6 +431,8 @@ internal sealed partial class TerminalWorkspaceSession
 							exception.MaximumSeeds));
 				}
 				using var writer = new StringWriter(CultureInfo.CurrentCulture);
+				if (seedSelection.ExpandedFolder)
+					await writer.WriteLineAsync(RelatedQueryRunner.FormatFolderNotice(seedSelection.Files.Count)).ConfigureAwait(false);
 				if (planDiagnostics.Length > 0)
 				{
 					await writer.WriteLineAsync(planDiagnostics).ConfigureAwait(false);

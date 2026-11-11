@@ -31,7 +31,10 @@ public sealed class RelatedCommandHandler(
 			: Path.GetFullPath(request.OutputPath);
 		if (destination is not null)
 			_ = ExactOutputDestinationValidator.ValidateAnalysis(plan.SourceRoot, destination, overwrite: false);
-		var relative = RelatedQueryRunner.ResolveSeed(plan, request.SeedPath);
+		var seedSelection = RelatedQueryRunner.ResolveSeedSelection(plan, request.SeedPath);
+		var seeds = seedSelection.Files;
+		if (seedSelection.ExpandedFolder)
+			environment.Error.WriteLine(RelatedQueryRunner.FormatFolderNotice(seeds.Count));
 		DependencyRelatedResult related;
 		DependencyOutsideSelectionResult? outside;
 		try
@@ -39,12 +42,12 @@ public sealed class RelatedCommandHandler(
 			// The readable project bounds the configuration the selection may be resolved with.
 			var projectPlan = await BuildProjectPlanAsync(request, plan, cancellationToken).ConfigureAwait(false);
 			related = await status.RunAsync(
-			services.Localization["Terminal.Status.IndexingDependencies"],
+				services.Localization["Terminal.Status.IndexingDependencies"],
 				() => RelatedQueryRunner.FindAsync(
 					services.DependencyFactsEngine,
 					plan,
-					relative,
-				request.Direction,
+					seeds,
+					request.Direction,
 					request.Depth,
 					(projectPlan ?? plan).IncludedFiles,
 					cancellationToken)).ConfigureAwait(false);
@@ -57,7 +60,7 @@ public sealed class RelatedCommandHandler(
 						plan.SourceRoot,
 						related,
 						projectPlan.IncludedFiles,
-						[relative],
+						seeds,
 						request.Direction,
 						request.Depth,
 						cancellationToken: cancellationToken)).ConfigureAwait(false);

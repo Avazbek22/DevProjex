@@ -1651,24 +1651,52 @@ internal sealed class McpProjectService(
 				.ConfigureAwait(false);
 	}
 
-	public IReadOnlyList<string> ResolveRequestedFiles(
+	public IReadOnlyList<string> ResolveRequestedFiles(ProjectContextPlan plan, IReadOnlyList<string> paths,
+		CancellationToken cancellationToken) => ResolveRequestedFilesCore(plan, paths, cancellationToken, false).Files;
+
+	public McpSeedResolution ResolveRelationSeeds(ProjectContextPlan plan, IReadOnlyList<string> paths,
+		CancellationToken cancellationToken) => ResolveRequestedFilesCore(plan, paths, cancellationToken, true);
+
+	internal sealed record McpSeedResolution(IReadOnlyList<string> Files, int Folders, int FolderFiles);
+
+	private McpSeedResolution ResolveRequestedFilesCore(
 		ProjectContextPlan plan,
 		IReadOnlyList<string> paths,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		bool expandSeedFolders)
 	{
 		var requested = ResolveRequestedPaths(plan.SourceRoot, paths, cancellationToken);
 		ValidateRequestedPathCasing(plan, requested);
-		var resolved = new string[requested.InputTokens.Count];
+		var resolved = new List<string>();
+		var folders = new HashSet<string>(PathComparer.Default);
+		var folderFiles = new HashSet<string>(PathComparer.Default);
 		for (var index = 0; index < requested.InputTokens.Count; index++)
 		{
 			var token = requested.InputTokens[index];
 			var physical = token.ResolvedPath ?? throw token.ResolutionError ?? new McpToolException(
 				McpErrorCodes.PathNotFound,
 				$"{McpErrorCodes.PathNotFound}: file '{token.Value}' was not found.");
-			ValidateResolvedFile(plan, token.Value, physical, token.IsDirectory);
-			resolved[index] = physical;
+			if (expandSeedFolders && token.IsDirectory)
+			{
+				var direct = DependencySeedFolders.DirectFiles(physical, plan.IncludedFiles);
+				if (direct.Count == 0 || resolved.Concat(direct).Distinct(PathComparer.Default).Count() > 16)
+					throw CreateDirectoryRequestedException(plan, token.Value, physical);
+				resolved.AddRange(direct);
+				folders.Add(physical);
+				folderFiles.UnionWith(direct);
+			}
+			else
+			{
+				ValidateResolvedFile(plan, token.Value, physical, token.IsDirectory);
+				resolved.Add(physical);
+				if (expandSeedFolders && resolved.Distinct(PathComparer.Default).Count() > 16)
+				{
+					var directory = requested.InputTokens.First(static item => item.IsDirectory);
+					throw CreateDirectoryRequestedException(plan, directory.Value, directory.ResolvedPath!);
+				}
+			}
 		}
-		return resolved;
+		return new(expandSeedFolders ? resolved.Distinct(PathComparer.Default).ToArray() : resolved.ToArray(), folders.Count, folderFiles.Count);
 	}
 
 	public bool HasLocalProfile(string projectRoot) =>
