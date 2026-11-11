@@ -1968,7 +1968,7 @@ internal sealed partial class DevProjexMcpTools(
 				request.Params,
 				getFileArgumentNames,
 				McpGetFileRequestSet.HintForUnknownArguments);
-			var requestSet = McpGetFileRequestSet.Parse(arguments);
+			var requestSet = McpGetFileRequestSet.Parse(arguments, deferCombinedPathValidation: true);
 			if (requestSet.IsBatch)
 				return await GetFileBatchAsync(arguments, requestSet, cancellationToken).ConfigureAwait(false);
 
@@ -2160,6 +2160,17 @@ internal sealed partial class DevProjexMcpTools(
 			exclusions: exclusions,
 			tolerateMissingPaths: liveContext is not null,
 			allowNamedPathsOutsideSelection: liveContext is not null).ConfigureAwait(false);
+		requestSet = requestSet.ResolveCombinedPaths(path =>
+		{
+			try
+			{
+				return Projects.ResolveFileRequestIdentity(plan, path);
+			}
+			catch (McpToolException exception) when (exception.Code is McpErrorCodes.PathNotFound or McpErrorCodes.RootViolation)
+			{
+				return path;
+			}
+		});
 		RecordPlan(plan);
 
 		var resolvedRequests = new List<McpResolvedFileReadRequest>(requestSet.Requests.Count);

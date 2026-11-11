@@ -1558,6 +1558,18 @@ internal sealed class McpProjectService(
 	public IFileContentAnalyzer CreatePreparedAnalyzer(PreparedSecretRedactionOutput prepared) =>
 		services.OutputPreparer.CreatePreparedAnalyzer(prepared);
 
+	internal string ResolveFileRequestIdentity(ProjectContextPlan plan, string path)
+	{
+		try
+		{
+			return ResolveExistingInputPath(plan.SourceRoot, path);
+		}
+		catch (McpToolException exception) when (exception.Code == McpErrorCodes.PathNotFound)
+		{
+			return NormalizeRequestedPathToken(plan.SourceRoot, path);
+		}
+	}
+
 	public string ResolveFile(ProjectContextPlan plan, string path)
 	{
 		string physical;
