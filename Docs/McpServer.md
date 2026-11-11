@@ -1232,9 +1232,8 @@ not a claim about sources that were not inspected. A group cut only in its trail
 lines withheld no match, so it receives the cap notice without an additional-match
 line. Trusted counts and constants remain outside the untrusted block; no path enters
 them. The selected uniquely addressable declaration body, its selector, and the withheld-file
-distribution share this same 16,000-character body cap with the match text. Space for the
-distribution is reserved before matches are laid out; body placement then never removes a
-shown match or a distinct matching file. Wrappers and trusted notices remain outside this body cap.
+distribution share this same 16,000-character cap with the match text. Space for the
+distribution is reserved before matches are laid out; body placement never removes a shown match or a distinct matching file. Wrappers and trusted notices remain outside this body cap.
 
 Every search begins its returned data with a short trusted completeness status and
 ends with the detailed trusted counters. A complete search says:
@@ -1638,7 +1637,7 @@ and 4 more file(s)
 19 matches in those files
 ```
 
-These are counts, not line numbers. At most 20 files are listed, in descending count then
+Counts, not line numbers. At most 20 files are listed, in descending count then
 ordinal path order; the tail counts both the remaining files and their matches. The listed
 counts and the remainder add up to the observed matches not shown. A path too long to fit is
 included in that remainder. The distribution has its own reservation of at most 2,000 characters,
