@@ -46,7 +46,8 @@ public sealed partial class McpServerProcessTests
 		Assert.Equal(2, Regex.Matches(BatchData(listed), "Lines: 2-2 of 4", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(2)).Count);
 		var combined = await CallAsync(server, "get_file", new()
 		{
-			["path"] = "a.cs", ["paths"] = new[] { "b.cs", "a.cs" },
+			["path"] = "a.cs",
+			["paths"] = new[] { "b.cs", "a.cs" },
 			["requests"] = new[] { new { path = "a.cs", symbol = "Demo.Run" } }
 		});
 		Assert.NotEqual(true, combined.IsError);

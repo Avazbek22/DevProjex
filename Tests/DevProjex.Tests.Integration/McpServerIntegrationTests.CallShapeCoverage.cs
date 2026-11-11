@@ -73,7 +73,9 @@ public sealed partial class McpServerIntegrationTests
 		{
 			var selected = await server.CallAsync("get_file", new Dictionary<string, object?>
 			{
-				["path"] = large, ["start_line"] = 200, ["end_line"] = 201
+				["path"] = large,
+				["start_line"] = 200,
+				["end_line"] = 201
 			});
 			Assert.DoesNotContain("Structure:", AllText(selected), StringComparison.Ordinal);
 		}
@@ -159,7 +161,8 @@ public sealed partial class McpServerIntegrationTests
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path, live: true);
 		var result = await server.CallAsync("get_file", new Dictionary<string, object?>
 		{
-			["requests"] = new[] { new { path } }, ["path"] = Path.Combine(project, path)
+			["requests"] = new[] { new { path } },
+			["path"] = Path.Combine(project, path)
 		});
 		var text = AllText(result);
 		Assert.NotEqual(true, result.IsError);
@@ -183,7 +186,10 @@ public sealed partial class McpServerIntegrationTests
 			await using var server = await McpTestServer.StartAsync(project, workspace.Path);
 			var result = await server.CallAsync("get_file", new Dictionary<string, object?>
 			{
-				[argument] = value, ["start_line"] = "2", ["end_line"] = "2", ["start_column"] = "2"
+				[argument] = value,
+				["start_line"] = "2",
+				["end_line"] = "2",
+				["start_column"] = "2"
 			});
 			Assert.NotEqual(true, result.IsError);
 			return WithoutFenceNonce(result);
@@ -205,7 +211,9 @@ public sealed partial class McpServerIntegrationTests
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
 		var result = await server.CallAsync("get_file", new Dictionary<string, object?>
 		{
-			[form] = paths, ["start_line"] = 2, ["end_line"] = 3
+			[form] = paths,
+			["start_line"] = 2,
+			["end_line"] = 3
 		});
 		var text = AllText(result);
 		var body = ExtractSpotlightBody(text);
@@ -237,7 +245,9 @@ public sealed partial class McpServerIntegrationTests
 			await using var server = await McpTestServer.StartAsync(project, workspace.Path);
 			var result = await server.CallAsync("search_project", new Dictionary<string, object?>
 			{
-				["pattern"] = pattern, ["symbols"] = symbols, ["context_lines"] = 0
+				["pattern"] = pattern,
+				["symbols"] = symbols,
+				["context_lines"] = 0
 			});
 			Assert.NotEqual(true, result.IsError);
 			return WithoutFenceNonce(result).Replace("\r\n", "\n", StringComparison.Ordinal);
@@ -260,7 +270,9 @@ public sealed partial class McpServerIntegrationTests
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
 		var result = await server.CallAsync("search_project", new Dictionary<string, object?>
 		{
-			["pattern"] = marker, ["context_lines"] = 0, ["max_results"] = 200
+			["pattern"] = marker,
+			["context_lines"] = 0,
+			["max_results"] = 200
 		});
 		var text = AllText(result);
 		var body = ExtractSpotlightBody(text);
@@ -280,7 +292,9 @@ public sealed partial class McpServerIntegrationTests
 		AssertMarkerOnlyInsideUntrustedData(result, marker, "search distribution");
 		var fallback = await server.CallAsync("search_project", new Dictionary<string, object?>
 		{
-			["pattern"] = marker + ".*", ["symbols"] = true, ["max_results"] = 1
+			["pattern"] = marker + ".*",
+			["symbols"] = true,
+			["max_results"] = 1
 		});
 		Assert.NotEqual(true, fallback.IsError);
 		Assert.Contains(McpSearchSymbols.RegularExpressionFallbackNotice, AllText(fallback), StringComparison.Ordinal);
@@ -310,7 +324,9 @@ public sealed partial class McpServerIntegrationTests
 		{
 			var search = await server.CallAsync("search_project", new Dictionary<string, object?>
 			{
-				["pattern"] = "needle", ["context_lines"] = 0, ["max_results"] = maximumResults
+				["pattern"] = "needle",
+				["context_lines"] = 0,
+				["max_results"] = maximumResults
 			});
 			var text = AllText(search);
 			Assert.NotEqual(true, search.IsError);

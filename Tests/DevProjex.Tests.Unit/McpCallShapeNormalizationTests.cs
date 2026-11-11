@@ -40,7 +40,8 @@ public sealed class McpCallShapeNormalizationTests
 		var parsed = Parse(new()
 		{
 			["requests"] = new[] { new { path = "a.cs", ranges = new[] { new { start_line = 2, end_line = 3 } } } },
-			["path"] = new[] { "./a.cs", "b.cs" }, ["paths"] = new[] { "b.cs", "c.cs" }
+			["path"] = new[] { "./a.cs", "b.cs" },
+			["paths"] = new[] { "b.cs", "c.cs" }
 		});
 		Assert.Equal(["a.cs", "b.cs", "c.cs"], parsed.Requests.Select(static item => item.Path));
 		Assert.False(parsed.Requests[0].Ranges[0].IsWholeFile);

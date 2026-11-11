@@ -18,7 +18,10 @@ public sealed partial class McpServerProcessTests
 		await using var server = await ActualMcpProcess.StartAsync(project, workspace.CreateDirectory("data"));
 		var result = await CallAsync(server, "search_project", new()
 		{
-			["pattern"] = marker, ["include_patterns"] = new[] { "*.txt" }, ["context_lines"] = 0, ["max_results"] = 200
+			["pattern"] = marker,
+			["include_patterns"] = new[] { "*.txt" },
+			["context_lines"] = 0,
+			["max_results"] = 200
 		});
 		Assert.NotEqual(true, result.IsError);
 		var text = AllProcessText(result);

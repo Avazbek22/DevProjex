@@ -67,8 +67,10 @@ public sealed class PackageExportConfigurationTests
 		var documents = Documents(); var files = Files(documents); AssertBun(documents, files);
 		documents["tsconfig.build.json"] = JsonSerializer.Serialize(new
 		{
-			extends = "./tsconfig.base.json", compilerOptions = new { rootDir = "src", outDir = "dist/types" },
-			include = new[] { include }, exclude = exclude.Length == 0 ? Array.Empty<string>() : new[] { exclude }
+			extends = "./tsconfig.base.json",
+			compilerOptions = new { rootDir = "src", outDir = "dist/types" },
+			include = new[] { include },
+			exclude = exclude.Length == 0 ? Array.Empty<string>() : new[] { exclude }
 		});
 		Assert.Equal(expected, PackageExportMap.Find(documents, files).Count > 0);
 	}

@@ -313,7 +313,8 @@ internal sealed partial class DevProjexMcpTools
 				? null
 				: string.Join('\n', continuations.Concat(rangeNotices)),
 			deliveredPaths,
-			deliveredRanges) { StructuredPaths = structuredPaths };
+			deliveredRanges)
+		{ StructuredPaths = structuredPaths };
 		// Reconcile status framing against the actual result, without letting diagnostics exceed the cap.
 		if (result.Text.Length > maximumCharacters)
 			return RenderBatchFileReads(requests, transformed, testsLines, continuationContext, profile,

@@ -162,7 +162,8 @@ public sealed class PackageExportConfigurationBoundaryTests
 		using var value = JsonDocument.Parse(json);
 		fixture.SetCandidate(membership: new Dictionary<string, object?>
 		{
-			["include"] = new[] { "Source/**/*" }, [field] = value.RootElement.Clone()
+			["include"] = new[] { "Source/**/*" },
+			[field] = value.RootElement.Clone()
 		});
 		Assert.Empty(fixture.Exports());
 	}
