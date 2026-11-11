@@ -58,8 +58,8 @@ def key_metrics_table(scores, arms, cost_precision=2):
         ('Cost', lambda s: f"${s['cost']:.{cost_precision}f}"),
         ('Time, s (sum)', lambda s: f"{s['duration_ms'] / 1000:.0f}"),
     ]
-    from mechanisms import FOLLOW_UP_COUNTERS
-    rows.extend((name, lambda score, key=name: score[key]) for name in FOLLOW_UP_COUNTERS)
+    from mechanisms import COUNTERS
+    rows.extend((name, lambda score, key=name: score[key]) for name in COUNTERS)
     return table(['Metric'] + [label for _, label in arms],
                  [[name] + [render(scores[arm]) for arm, _ in arms] for name, render in rows])
 

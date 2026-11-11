@@ -224,14 +224,16 @@ class FollowUpMechanismTests(unittest.TestCase):
 
     def test_aggregation_json_text_and_markdown_include_all_counters(self):
         score = benchlib.empty_score()
+        for name in mechanisms.COUNTERS:
+            score[name] = 73
         for index, name in enumerate(mechanisms.FOLLOW_UP_COUNTERS, 1):
             score[name] = index
         total = benchlib.empty_score()
         benchlib.add_scores(total, score)
         self.assertEqual(score, total)
         rendered = report.key_metrics_table({'server': total}, [('server', 'Server')])
-        for name in mechanisms.FOLLOW_UP_COUNTERS:
-            self.assertIn(name, rendered)
+        for name in mechanisms.COUNTERS:
+            self.assertIn(f'| {name} | {total[name]} |', rendered)
             self.assertEqual(total[name], json.loads(json.dumps(total))[name])
         self.assertIn('structure range/whole/search/none 1/2/3/4', benchlib.format_score(score))
 
