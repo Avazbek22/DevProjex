@@ -425,7 +425,8 @@ def format_key_versions(versions):
 
 
 def empty_score():
-    return dict(sessions=0, files=0, files_needed=0, tests=0, tests_needed=0, known_wrong=0, invented=0,
+    from mechanisms import COUNTERS
+    return dict.fromkeys(COUNTERS, 0) | dict(sessions=0, files=0, files_needed=0, tests=0, tests_needed=0, known_wrong=0, invented=0,
                 calls=0, tool_errors=0, context=0, cost=0.0, duration_ms=0, tool_output_chars=0, key_versions={},
                 attribution_sessions=0, missed_never_shown=0, missed_listed=0, missed_content_shown=0,
                 named_never_shown=0, named_listed=0, named_content_shown=0)
@@ -461,8 +462,11 @@ def score_session(summary, task, corpus_root, key_version=None):
     if folder:
         from attribution import attribute
         from transcripts import recorded_calls
-        entries = attribute(recorded_calls(Path(folder) / 'stream.jsonl'), task,
+        calls = recorded_calls(Path(folder) / 'stream.jsonl')
+        entries = attribute(calls, task,
                             summary.get('answer') or '', original_root or corpus_root, version)
+        from mechanisms import count
+        score.update(count(calls))
         score['attribution_sessions'] = 1
         for entry in entries:
             category = ('named_' if entry['named'] else 'missed_') + entry['exposure'].replace('-', '_')
@@ -496,4 +500,5 @@ def format_score(score):
             f"known-wrong {score['known_wrong']} · invented {score['invented']} · calls {score['calls']} · "
             f"ctx {score['context'] / 1e6:.2f}M · ${score['cost']:.2f} · "
             f"misses never/listed/content {score['missed_never_shown']}/{score['missed_listed']}/{score['missed_content_shown']} "
-            f"({score['attribution_sessions']} transcripts)")
+            f"({score['attribution_sessions']} transcripts) · structure large/no-room {score['structure_large']}/{score['structure_no_room']} · "
+            f"read-as {score['read_as_ranges'] + score['read_as_combined'] + score['read_as_folders']} · symbols-as-text {score['symbols_as_text']} · tool-errors {score['tool_errors']}")
