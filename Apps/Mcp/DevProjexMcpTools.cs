@@ -2319,7 +2319,7 @@ internal sealed partial class DevProjexMcpTools(
 			var limit = MaximumPageCharacters;
 			for (var pass = 0; ResponseText(completed).Length > MaximumPageCharacters; pass++)
 			{
-				limit -= ResponseText(completed).Length - MaximumPageCharacters;
+				limit = Math.Min(limit, rendered.Text.Length) - (ResponseText(completed).Length - MaximumPageCharacters);
 				if (pass > 32 || limit < 1) throw new McpToolException(McpErrorCodes.PayloadTruncated,
 					$"{McpErrorCodes.PayloadTruncated}: response metadata exceeds the batch character limit.");
 				rendered = Render(limit);
