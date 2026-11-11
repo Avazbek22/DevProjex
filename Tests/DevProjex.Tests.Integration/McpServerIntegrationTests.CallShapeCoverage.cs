@@ -146,23 +146,37 @@ public sealed partial class McpServerIntegrationTests
 	}
 
 	[Theory]
-	[InlineData(false)]
-	[InlineData(true)]
-	public async Task CombinedUnavailableAliasesKeepOneCanonicalRequest(bool exists)
+	[InlineData(false, false)]
+	[InlineData(true, false)]
+	[InlineData(false, true)]
+	[InlineData(true, true)]
+	public async Task CombinedUnavailableAliasesKeepOneCanonicalRequest(bool exists, bool aliasedRoot)
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
 		WriteProjectFile(project, "visible.ts", "export const visible = 1;");
 		if (exists) WriteProjectFile(project, "hidden.md", "hidden-content-marker");
 		var path = exists ? "hidden.md" : "missing.md";
+		var configuredProject = aliasedRoot ? workspace.CreateDirectory("configured-project") : project;
+		var physicalProject = McpRootRegistry.ResolvePhysicalExistingPath(project, requireDirectory: true);
+		string ResolvePhysical(string requestedPath, bool requireDirectory)
+		{
+			var full = Path.GetFullPath(requestedPath);
+			var relative = Path.GetRelativePath(configuredProject, full);
+			var insideConfigured = !Path.IsPathRooted(relative) && relative != ".." &&
+				!relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal);
+			var mapped = insideConfigured ? Path.GetFullPath(relative, physicalProject) : full;
+			return McpRootRegistry.ResolvePhysicalExistingPath(mapped, requireDirectory);
+		}
 		var store = new ProjectProfileStore(() => Path.Combine(workspace.Path, "app-data"));
-		store.SaveProfile(project, new ProjectSelectionProfile([], [".ts"], [],
+		store.SaveProfile(configuredProject, new ProjectSelectionProfile([], [".ts"], [],
 			ExtensionStates: new Dictionary<string, bool> { [".ts"] = true, [".md"] = false }, SelectedPaths: null));
-		await using var server = await McpTestServer.StartAsync(project, workspace.Path, live: true);
+		await using var server = await McpTestServer.StartAsync(configuredProject, workspace.Path, live: true,
+			rootRegistryFactory: aliasedRoot ? roots => new McpRootRegistry(roots, ResolvePhysical) : null);
 		var result = await server.CallAsync("get_file", new Dictionary<string, object?>
 		{
 			["requests"] = new[] { new { path } },
-			["path"] = Path.Combine(project, path)
+			["path"] = Path.Combine(configuredProject, path)
 		});
 		var text = AllText(result);
 		Assert.NotEqual(true, result.IsError);

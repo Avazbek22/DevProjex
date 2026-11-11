@@ -1566,7 +1566,24 @@ internal sealed class McpProjectService(
 		}
 		catch (McpToolException exception) when (exception.Code == McpErrorCodes.PathNotFound)
 		{
-			return NormalizeRequestedPathToken(plan.SourceRoot, path);
+			var candidate = NormalizeRequestedPathToken(plan.SourceRoot, path);
+			var missingSegments = new Stack<string>();
+			while (Path.GetDirectoryName(candidate) is { } parent)
+			{
+				missingSegments.Push(Path.GetFileName(candidate));
+				try
+				{
+					var resolved = roots.ResolveExistingPath(plan.SourceRoot, parent, requireDirectory: true);
+					foreach (var segment in missingSegments)
+						resolved = Path.Combine(resolved, segment);
+					return Path.TrimEndingDirectorySeparator(PathUtility.Normalize(resolved));
+				}
+				catch (McpToolException parentException) when (parentException.Code == McpErrorCodes.PathNotFound)
+				{
+					candidate = parent;
+				}
+			}
+			throw;
 		}
 	}
 
