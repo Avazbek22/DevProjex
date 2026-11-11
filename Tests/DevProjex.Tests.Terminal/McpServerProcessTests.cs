@@ -28,7 +28,7 @@ public sealed partial class McpServerProcessTests
 	private const string PrivatePath = "/home/alice-smith/DevProjexMcpProcessProbe/project";
 
 	[Fact]
-	public async Task RealProcessListsEveryCatalogToolAndRejectsMissingOrConflictingFileSelectors()
+	public async Task RealProcessListsEveryCatalogToolAndRejectsMissingFileSelectors()
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
@@ -76,7 +76,7 @@ public sealed partial class McpServerProcessTests
 				Assert.IsType<TextContentBlock>(Assert.Single(missing.Content)).Text,
 				StringComparison.Ordinal);
 
-			var conflicting = await client.CallToolAsync(
+			var combined = await client.CallToolAsync(
 				"get_file",
 				new Dictionary<string, object?>
 				{
@@ -89,11 +89,9 @@ public sealed partial class McpServerProcessTests
 				progress: null,
 				options: null,
 				clientPhase.Token);
-			Assert.True(conflicting.IsError);
-			Assert.StartsWith(
-				McpErrorCodes.InvalidArguments,
-				Assert.IsType<TextContentBlock>(Assert.Single(conflicting.Content)).Text,
-				StringComparison.Ordinal);
+			Assert.NotEqual(true, combined.IsError);
+			Assert.Contains("1.1 — ok", AllProcessText(combined), StringComparison.Ordinal);
+			Assert.DoesNotContain("2.1", BatchData(combined), StringComparison.Ordinal);
 		}
 
 		process.StandardInput.Close();
