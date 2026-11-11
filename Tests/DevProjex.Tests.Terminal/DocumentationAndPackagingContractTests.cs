@@ -285,7 +285,10 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("at most 2,000 lines and 50,000 characters", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("`profile` applies the same effective selection", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("### Batch `get_file`", server, StringComparison.Ordinal);
-		Assert.Contains("one to eight records", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("one to sixteen records", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("The complete batch, including wrappers, headers, and notices, is limited to 50,000 characters", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("[Batch read] ok=A · structure=B · partial=C · not-returned=D · unavailable=E.", server, StringComparison.Ordinal);
+		Assert.Contains("Top-level `start_line`, `end_line`, `start_column`, and `symbol` cannot accompany `requests`", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("at most sixteen whole-file, range, or symbol selections", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("`ok` when its original interval is wholly inside the returned coverage, `partial`", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("`--remote-hosts`", server, StringComparison.Ordinal);

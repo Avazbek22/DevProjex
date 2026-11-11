@@ -351,7 +351,9 @@ first line, like any other match. `search` keeps searching the current Preview.
 
 The Terminal Workspace `:grep --symbols` reads a regular expression the same way:
 when every alternative reduces to one plain name, the search runs for those names
-and prints a note naming them; any other regular expression is still refused.
+and prints a note naming them; a regular expression that cannot be reduced to names
+is searched as text instead, with the fixed `[Symbols]` notice. A missing declaration
+name remains an error.
 
 `--max-tokens` and `--rank` on `copy` and `export context` follow
 `devprojex export context`: the budget admits files by estimated content tokens and
@@ -382,6 +384,9 @@ If replacement fails or is canceled after removal, the previous registration is
 restored before the operation completes.
 
 `related` uses the same dependency engine and text renderer as the direct CLI.
+A folder seed expands to its directly contained selected files in ordinal path
+order, with at most 16 seeds and the fixed `[Read as]` notice. Subfolders are not
+expanded; an empty or wider folder keeps the existing invalid-seed error.
 Depth `1` shows direct relations; larger values walk only resolved edges and emit
 one section per visited file. Ambiguous and unresolved evidence is never followed.
 The same 256-seed limit fails honestly before the panel shows a partial graph.

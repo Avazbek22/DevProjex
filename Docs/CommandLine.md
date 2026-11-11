@@ -724,10 +724,10 @@ enables a timed .NET regular expression; `--symbols` treats the pattern as one o
 more declaration names separated by `|` (each alternative keeps its last word, so
 `class Foo` asks for `Foo`) while retaining the same source evidence and containing-
 declaration lookup, and is the same mode as MCP `search_project` with `symbols: true`.
-A `--symbols` pattern that looks like a regular expression, such as `command\(`,
-is refused before the project is read with `DPX-CLI-SEARCH-PATTERN`
-(exit code 2) and a hint to pass the name or use `--regex`; the rule is the one MCP
-applies to `symbols: true`.
+A `--symbols` pattern that cannot be read as declaration names, such as `command\(`,
+is searched as text with that regular expression instead, with the same fixed
+`[Symbols]` notice as MCP `search_project` with `symbols: true`. A missing declaration
+name remains an error.
 
 `--symbols` reads a regular expression the same way: when every alternative reduces
 to one plain name after declaration keywords and the separators `\s+`, `\s*`, `\s`,
@@ -735,7 +735,8 @@ to one plain name after declaration keywords and the separators `\s+`, `\s*`, `\
 naming them. An alternative that starts or ends with `.*` or `.+` once a leading `^`,
 a trailing `$`, and outer `\b` are removed, such as `def\s+test_.*` or `.*Handler$`,
 asks for every name with that prefix or suffix rather than one name, so the whole
-pattern is refused; any other regular expression is still refused. The Terminal
+pattern is searched as a text regular expression instead. Other regular expressions
+that cannot be reduced to declaration names use the same fallback. The Terminal
 Workspace `:grep --symbols` does the same.
 Selected binary files are counted as skipped rather than searched and do not make
 a search partial unless nothing else was selected. They are not charged to the inspection
@@ -809,7 +810,11 @@ devprojex search TODO https://github.com/owner/repo --max 20 --hide-secrets
 devprojex related <PATH> [--project PROJECT|URL] [options]
 ```
 
-`PATH` is one project-relative seed file inside the effective selection. `--project`
+`PATH` is one project-relative seed file inside the effective selection. A folder
+stands for its directly contained selected files, in ordinal path order, with at
+most 16 seeds. It does not include files in subfolders; an empty or wider folder
+keeps the existing invalid-seed error. The fixed `[Read as]` notice reports the
+expansion. `--project`
 defaults to the current directory and accepts the same local-directory or Git-URL source
 as `analyze`; `--branch` remains URL-only. The seed chooses where the answer starts, while
 the dependency engine indexes the complete effective manifest produced by the selected
