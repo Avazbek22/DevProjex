@@ -35,19 +35,16 @@ internal static class McpTestBlockOutlineExtractor
 			cancellationToken.ThrowIfCancellationRequested();
 			if (tree is null || tree.RootNode.HasError)
 				return [];
+			using var statements = new Query(language, "(expression_statement) @statement");
+			using var cursor = statements.Execute(tree.RootNode);
 			var entries = new List<McpTestBlockOutlineEntry>();
-			var pending = new Stack<Node>();
-			pending.Push(tree.RootNode);
-			while (pending.TryPop(out var node))
+			foreach (var capture in cursor.Captures)
 			{
 				cancellationToken.ThrowIfCancellationRequested();
-				if (node.Type is "comment" or "string")
-					continue;
-				if (node.Type == "expression_statement" && ReadStatement(node, protectedText) is { } entry)
+				if (ReadStatement(capture.Node, protectedText) is { } entry)
 					entries.Add(entry);
-				foreach (var child in node.NamedChildren.Reverse()) pending.Push(child);
 			}
-			return entries;
+			return cursor.IsMatchLimitExceeded ? [] : entries;
 		}
 		catch (Exception exception) when (exception is DllNotFoundException or EntryPointNotFoundException or
 			BadImageFormatException or TypeInitializationException or IOException or UnauthorizedAccessException or
