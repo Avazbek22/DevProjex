@@ -255,6 +255,57 @@ public sealed class McpTestBlockOutlineTests
 		Assert.Equal(outline.Map, Build(source.Replace("\n", "\r\n", StringComparison.Ordinal), declarations)!.Map);
 	}
 
+	[Fact]
+	public void ChangedProtectedTextNeverReusesPreviousTitlesOrRanges()
+	{
+		const string original = "test('original-title-control', () => {});";
+		var first = Assert.Single(Extract(original));
+		Assert.Equal("\"original-title-control\"", first.Title);
+		const string protectedText = "\n\ntest('DEVPROJEX_REDACTED[PRIVATE_DATA]', () => {});";
+		var replaced = Assert.Single(Extract(protectedText));
+		Assert.Equal(3, replaced.StartLine);
+		Assert.Equal("\"DEVPROJEX_REDACTED[PRIVATE_DATA]\"", replaced.Title);
+		Assert.DoesNotContain("original-title-control", replaced.Title, StringComparison.Ordinal);
+		Assert.Equal(replaced, Assert.Single(Extract(protectedText)));
+		Assert.Equal(first, Assert.Single(Extract(original)));
+	}
+
+	[Fact]
+	public void IdenticalProtectedTextKeepsGrammarSpecificResults()
+	{
+		const string source = "const value = <number>1; test('type assertion', () => {});";
+		var first = McpTestBlockOutlineExtractor.Extract("sample.ts", source, TestContext.Current.CancellationToken);
+		Assert.Equal("\"type assertion\"", Assert.Single(first).Title);
+		Assert.Empty(McpTestBlockOutlineExtractor.Extract("sample.tsx", source, TestContext.Current.CancellationToken));
+		Assert.Equal(first, McpTestBlockOutlineExtractor.Extract("other.mts", source, TestContext.Current.CancellationToken));
+	}
+
+	[Fact]
+	public void ExplicitGrammarLocatorsRemainIndependentOfDefaultResults()
+	{
+		const string source = "test('locator isolation control', () => {});";
+		var expected = Assert.Single(Extract(source));
+		var locator = new MissingLocator();
+		Assert.Empty(McpTestBlockOutlineExtractor.Extract("sample.ts", source, TestContext.Current.CancellationToken, locator));
+		Assert.Empty(McpTestBlockOutlineExtractor.Extract("sample.ts", source, TestContext.Current.CancellationToken, locator));
+		Assert.Equal(2, locator.Calls);
+		Assert.Equal(expected, Assert.Single(Extract(source)));
+	}
+
+	[Theory]
+	[InlineData(4096)]
+	[InlineData(4097)]
+	public void LargeStatementSetsStayCompleteAcrossRepeatedReads(int count)
+	{
+		var source = string.Join('\n', Enumerable.Range(1, count).Select(index => $"test('case {index}', () => {{}});"));
+		var first = Extract(source);
+		var repeated = Extract(source);
+		Assert.Equal(count, first.Count);
+		Assert.Equal(count, repeated.Count);
+		Assert.Equal(first, repeated);
+		Assert.Equal(count, first[^1].StartLine);
+	}
+
 	private static IReadOnlyList<McpTestBlockOutlineEntry> Extract(string source) =>
 		McpTestBlockOutlineExtractor.Extract("sample.ts", source, TestContext.Current.CancellationToken);
 

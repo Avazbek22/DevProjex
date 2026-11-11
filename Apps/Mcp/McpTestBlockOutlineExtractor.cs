@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using DevProjex.Infrastructure.Compression;
@@ -10,6 +12,13 @@ internal sealed record McpTestBlockOutlineEntry(
 
 internal static class McpTestBlockOutlineExtractor
 {
+	private const int MaximumCachedResults = 8;
+	private const int MaximumCachedEntries = 4_096;
+	private static readonly object MemoGate = new();
+	private static readonly Dictionary<MemoKey, IReadOnlyList<McpTestBlockOutlineEntry>> Memo = [];
+	private static readonly Queue<MemoKey> MemoOrder = [];
+	private readonly record struct MemoKey(string Grammar, string ProtectedTextHash);
+
 	public static IReadOnlyList<McpTestBlockOutlineEntry> Extract(
 		string relativePath, string protectedText, CancellationToken cancellationToken,
 		IGrammarLibraryLocator? locator = null)
@@ -26,6 +35,14 @@ internal static class McpTestBlockOutlineExtractor
 		if (grammar is null || !ContainsPossibleRoot(protectedText, cancellationToken))
 			return [];
 		var ownsLocator = locator is null;
+		var memoKey = ownsLocator
+			? new MemoKey(grammar, Convert.ToHexString(SHA256.HashData(MemoryMarshal.AsBytes(protectedText.AsSpan()))))
+			: (MemoKey?)null;
+		if (memoKey is { } key && TryReadMemo(key) is { } memoized)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			return memoized;
+		}
 		try
 		{
 			locator ??= CodeCompressionFactory.CreateLocator();
@@ -44,7 +61,10 @@ internal static class McpTestBlockOutlineExtractor
 				if (ReadStatement(capture.Node, protectedText) is { } entry)
 					entries.Add(entry);
 			}
-			return cursor.IsMatchLimitExceeded ? [] : entries;
+			if (cursor.IsMatchLimitExceeded) return [];
+			cancellationToken.ThrowIfCancellationRequested();
+			var result = entries.AsReadOnly();
+			return memoKey is { } completedKey ? Remember(completedKey, result) : result;
 		}
 		catch (Exception exception) when (exception is DllNotFoundException or EntryPointNotFoundException or
 			BadImageFormatException or TypeInitializationException or IOException or UnauthorizedAccessException or
@@ -55,6 +75,27 @@ internal static class McpTestBlockOutlineExtractor
 		finally
 		{
 			if (ownsLocator) (locator as IDisposable)?.Dispose();
+		}
+	}
+
+	private static IReadOnlyList<McpTestBlockOutlineEntry>? TryReadMemo(MemoKey key)
+	{
+		lock (MemoGate)
+			return Memo.GetValueOrDefault(key);
+	}
+
+	private static IReadOnlyList<McpTestBlockOutlineEntry> Remember(
+		MemoKey key, IReadOnlyList<McpTestBlockOutlineEntry> entries)
+	{
+		if (entries.Count > MaximumCachedEntries) return entries;
+		lock (MemoGate)
+		{
+			if (Memo.TryGetValue(key, out var existing)) return existing;
+			if (Memo.Count == MaximumCachedResults)
+				Memo.Remove(MemoOrder.Dequeue());
+			Memo.Add(key, entries);
+			MemoOrder.Enqueue(key);
+			return entries;
 		}
 	}
 
