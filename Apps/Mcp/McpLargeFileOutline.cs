@@ -11,8 +11,8 @@ internal sealed record McpLargeFileOutline(int HeadLines, string Map, int Entrie
 
 /// <summary>
 /// The start and the structure of a long file, returned instead of its whole text when a read
-/// names no range. Structure comes from the protected text being returned: declarations for code,
-/// top-level keys for JSON, headings for Markdown. A file without at least two structure entries
+/// names no range. Structure comes from protected returned text: code declarations and outline-only
+/// JavaScript/TypeScript test blocks, top-level JSON keys, and Markdown headings. A file with fewer than two entries
 /// has no outline and is read whole, as before. A structure of more than 40 entries is listed by its
 /// top level only, each entry with the number of its nested entries, or, when that level holds one
 /// or two entries, by those entries and their direct members; the list stays within 2,500 characters.
@@ -48,7 +48,8 @@ internal static partial class McpLargeFileOutlineBuilder
 		ArgumentNullException.ThrowIfNull(navigation);
 		if (requireLargeFile && !Applies(content))
 			return null;
-		var lines = NormalizeLineEndings(content).Split('\n');
+		var normalized = NormalizeLineEndings(content);
+		var lines = normalized.Split('\n');
 		var extension = Path.GetExtension(relativePath).ToLowerInvariant();
 		var isCode = extension is not (".json" or ".md" or ".mdx" or ".markdown");
 		// One level deeper than listed, so a member shown in place of its type can count its own members.
@@ -56,7 +57,7 @@ internal static partial class McpLargeFileOutlineBuilder
 		{
 			".json" => JsonEntries(lines, cancellationToken),
 			".md" or ".mdx" or ".markdown" => MarkdownEntries(lines, cancellationToken),
-			_ => DeclarationEntries(navigation(), lines.Length)
+			_ => CodeEntries(relativePath, normalized, navigation(), lines.Length, cancellationToken)
 		};
 		counted = WithoutParentNames(counted);
 		var entries = counted.Where(static entry => entry.Depth < MaximumNestingShown).ToArray();
@@ -72,7 +73,8 @@ internal static partial class McpLargeFileOutlineBuilder
 
 	/// <param name="Kind">The declaration kind shown after the name; null for JSON keys and headings.</param>
 	/// <param name="Members">Nested entries, counted only when a large structure is listed compactly.</param>
-	private readonly record struct OutlineEntry(int StartLine, int EndLine, int Depth, string Name, string? Kind, int Members = 0);
+	private readonly record struct OutlineEntry(int StartLine, int EndLine, int Depth, string Name, string? Kind,
+		int Members = 0, int StartIndex = -1, int EndIndex = -1);
 
 	// The top level with member counts; one or two top-level entries are each followed by
 	// their direct members, which then carry their own counts.
@@ -219,9 +221,41 @@ internal static partial class McpLargeFileOutlineBuilder
 				Math.Min(declaration.EndLine, lineCount),
 				depth,
 				declaration.Name,
-				KindLabel(declaration.Kind)));
+				KindLabel(declaration.Kind), StartIndex: declaration.StartIndex, EndIndex: declaration.EndIndex));
 		}
 		return entries;
+	}
+
+	private static IReadOnlyList<OutlineEntry> CodeEntries(string path, string content,
+		IReadOnlyList<NavigationDeclaration> declarations, int lineCount, CancellationToken cancellationToken)
+	{
+		var navigation = DeclarationEntries(declarations, lineCount);
+		var blocks = McpTestBlockOutlineExtractor.Extract(path, content, cancellationToken);
+		if (blocks.Count == 0) return navigation;
+		var combined = navigation.Concat(blocks.Select(static block => new OutlineEntry(
+			block.StartLine, block.EndLine, 0, block.Title, block.Kind, StartIndex: block.StartIndex, EndIndex: block.EndIndex)))
+			.OrderBy(static entry => entry.StartLine)
+			.ThenBy(static entry => entry.StartIndex < 0 ? 0 : entry.StartIndex)
+			.ThenByDescending(static entry => entry.EndLine)
+			.ThenByDescending(static entry => entry.EndIndex).ToArray();
+		var result = new List<OutlineEntry>(combined.Length);
+		var parents = new Stack<OutlineEntry>();
+		foreach (var entry in combined)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			while (parents.TryPeek(out var parent) && !Contains(parent, entry)) parents.Pop();
+			var depth = parents.Count;
+			if (depth <= MaximumNestingShown) result.Add(entry with { Depth = depth });
+			parents.Push(entry);
+		}
+		return result;
+
+		static bool Contains(OutlineEntry outer, OutlineEntry inner) =>
+			outer.StartIndex >= 0 && inner.StartIndex >= 0 && outer.EndIndex >= outer.StartIndex && inner.EndIndex >= inner.StartIndex
+				? outer.StartIndex <= inner.StartIndex && outer.EndIndex >= inner.EndIndex &&
+					(outer.StartIndex < inner.StartIndex || outer.EndIndex > inner.EndIndex)
+				: outer.StartLine <= inner.StartLine && outer.EndLine >= inner.EndLine &&
+					(outer.StartLine < inner.StartLine || outer.EndLine > inner.EndLine);
 	}
 
 	private static string KindLabel(NavigationSymbolKind kind) => kind switch
