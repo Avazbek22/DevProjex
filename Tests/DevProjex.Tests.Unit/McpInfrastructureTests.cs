@@ -487,8 +487,8 @@ public sealed class McpInfrastructureTests
 	[InlineData(true, false, true, null)]
 	[InlineData(false, false, true, null)]
 	[InlineData(false, false, false, "[Next read] Narrow pattern, paths, or include_patterns and rerun the search.")]
-	[InlineData(false, true, true, "[Next read] Call read_pack with the reported pack_id for the remaining retained matches.")]
-	[InlineData(true, true, false, "[Next read] Call read_pack with the reported pack_id for the remaining retained matches.")]
+	[InlineData(false, true, true, null)]
+	[InlineData(true, true, false, null)]
 	public void SearchNextReadKeepsActionableStepsAndLetsTheDeclarationListSpeakForItself(
 		bool complete,
 		bool hasStoredContinuation,

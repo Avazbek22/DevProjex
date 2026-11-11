@@ -39,16 +39,17 @@ public sealed partial class McpServerProcessTests
 	[InlineData("a+b")]
 	[InlineData(@"def\s+(foo|bar)")]
 	[InlineData(@"def\s+test_.*")]
-	public async Task RealProcessKeepsTheExistingRefusalForComplexSymbolPatterns(string pattern)
+	public async Task RealProcessSearchesComplexSymbolPatternsAsText(string pattern)
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
 		workspace.WriteFile("project/File.cs", "public class Example { }");
 		await using var server = await ActualMcpProcess.StartAsync(project, workspace.CreateDirectory("data"));
 		var result = await CallAsync(server, "search_project", new Dictionary<string, object?> { ["pattern"] = pattern, ["symbols"] = true });
-		Assert.True(result.IsError);
-		var message = Regex.Match(AllProcessText(result), @"<untrusted-data-[0-9a-f]+>\n(?<message>[\s\S]*?)\n</untrusted-data-[0-9a-f]+>",
-			RegexOptions.CultureInvariant, TimeSpan.FromSeconds(2)).Groups["message"].Value;
-		Assert.Equal("DPX-MCP-INVALID-ARGUMENTS: symbols=true takes declaration names such as command, class Command or Foo|Bar; this pattern looks like a regular expression. Pass the name, or omit symbols to search text with a regex.", message);
+		Assert.NotEqual(true, result.IsError);
+		Assert.Contains("[Symbols] symbols=true takes declaration names; this pattern is a regular expression, so it was searched as text.", AllProcessText(result), StringComparison.Ordinal);
+		await using var ordinaryServer = await ActualMcpProcess.StartAsync(project, workspace.CreateDirectory("ordinary-data"));
+		var ordinary = await CallAsync(ordinaryServer, "search_project", new() { ["pattern"] = pattern });
+		Assert.Equal(BatchData(ordinary), BatchData(result));
 	}
 }

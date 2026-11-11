@@ -14,6 +14,8 @@ namespace DevProjex.Mcp;
 /// </remarks>
 internal static class McpSearchSymbols
 {
+	internal const string RegularExpressionFallbackNotice = "[Symbols] symbols=true takes declaration names; this pattern is a regular expression, so it was searched as text.";
+
 	internal static bool IsDocumentationPath(string relativePath)
 	{
 		var path = relativePath.Replace('\\', '/');
@@ -58,7 +60,7 @@ internal static class McpSearchSymbols
 
 	/// <summary>
 	/// Tells a regular expression from a declaration-name query, so a regex sent in declaration
-	/// mode is refused instead of answering a confident "no matches". No supported language puts
+	/// mode is searched as text instead of answering a confident "no matches". No supported language puts
 	/// a backslash, '^', '+', ".*" or "(?" in a declaration, and a declared name never holds a
 	/// quantifier, bracket, brace or parenthesis: those may only follow the name as its parameter
 	/// list, type arguments or body, as in "def foo(" or "interface Box&lt;T&gt; {". One trailing
@@ -143,7 +145,7 @@ internal static class McpSearchSymbols
 	/// <summary>
 	/// A wildcard at either end of an alternative, as in "def\s+test_.*" or ".*Handler", asks for
 	/// every name with that prefix or suffix. Reading it as the bare name would turn the query into
-	/// a different one and answer a confident "no matches", so such a pattern stays a refused regex.
+	/// a different one and answer a confident "no matches", so such a pattern stays a text search.
 	/// A wildcard between a keyword and the name, as in "func.*RemoteIP", only skips the signature.
 	/// </summary>
 	private static bool IsOpenEnded(string alternative)
