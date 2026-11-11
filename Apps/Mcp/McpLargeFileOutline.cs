@@ -41,11 +41,12 @@ internal static partial class McpLargeFileOutlineBuilder
 		string relativePath,
 		string content,
 		Func<IReadOnlyList<NavigationDeclaration>> navigation,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		bool requireLargeFile = true)
 	{
 		ArgumentNullException.ThrowIfNull(content);
 		ArgumentNullException.ThrowIfNull(navigation);
-		if (!Applies(content))
+		if (requireLargeFile && !Applies(content))
 			return null;
 		var lines = NormalizeLineEndings(content).Split('\n');
 		var extension = Path.GetExtension(relativePath).ToLowerInvariant();

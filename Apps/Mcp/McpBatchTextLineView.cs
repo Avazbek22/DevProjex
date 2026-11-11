@@ -61,6 +61,7 @@ internal sealed class McpBatchTextLineView
 	}
 
 	public int FullTextScans { get; private set; }
+	public int TotalLines => _totalLines;
 
 	public string? DescribeInvalidRange(McpGetFileRange range)
 	{
