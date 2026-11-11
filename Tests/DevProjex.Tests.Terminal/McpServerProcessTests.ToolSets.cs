@@ -9,15 +9,19 @@ public sealed partial class McpServerProcessTests
 		["list_projects", "get_tree", "read_pack", "search_project", "related_files", "get_file", "get_diff"];
 
 	[Theory]
-	[InlineData("full", 32_329)]
-	[InlineData("reduced", 21_429)]
-	public async Task RealProcessPublishesTheSelectedToolSetWithinItsOwnBudget(string toolSet, int ceiling)
+	[InlineData("full", false, 32_509)]
+	[InlineData("full", true, 35_561)]
+	[InlineData("reduced", false, 21_649)]
+	[InlineData("reduced", true, 23_829)]
+	public async Task RealProcessPublishesTheSelectedToolSetWithinItsOwnBudget(string toolSet, bool delegated, int ceiling)
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
 		workspace.WriteFile("project/App.cs", "internal sealed class App;\n");
-		var (process, client, error, output) = await StartPublishedMcpAsync(
-			workspace, project, ["--tool-set", toolSet]);
+		var arguments = new List<string> { "--tool-set", toolSet };
+		if (delegated)
+			arguments.Add("--allow-agent-exclusions");
+		var (process, client, error, output) = await StartPublishedMcpAsync(workspace, project, arguments);
 		try
 		{
 			var tools = await client.ListToolsAsync(options: null, TestContext.Current.CancellationToken);
@@ -28,6 +32,17 @@ public sealed partial class McpServerProcessTests
 				Assert.InRange(description.Length, 1, 800);
 				Assert.InRange(description.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length, 40, 100);
 			}
+			var file = tools.Single(tool => tool.Name == "get_file");
+			var fileSchema = file.ProtocolTool.InputSchema.GetProperty("properties");
+			Assert.Equal(16, fileSchema.GetProperty("path").GetProperty("oneOf")[1].GetProperty("maxItems").GetInt32());
+			Assert.Equal(16, fileSchema.GetProperty("paths").GetProperty("oneOf")[1].GetProperty("maxItems").GetInt32());
+			Assert.Equal(16, fileSchema.GetProperty("requests").GetProperty("maxItems").GetInt32());
+			Assert.Equal(toolSet == "full" ? 99 : 100,
+				file.Description!.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length);
+			Assert.Equal(toolSet == "full" ? 706 : 705, file.Description.Length);
+			var projects = tools.Single(tool => tool.Name == "list_projects");
+			Assert.Equal(70, projects.Description!.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length);
+			Assert.Equal(467, projects.Description.Length);
 			var size = ReadToolsListResult(output.GetRecordedText()).Length;
 			TestContext.Current.TestOutputHelper!.WriteLine($"{toolSet} catalog characters={size}");
 			Assert.InRange(size, 1, ceiling);

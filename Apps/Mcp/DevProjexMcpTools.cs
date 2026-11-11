@@ -114,7 +114,7 @@ internal sealed partial class DevProjexMcpTools(
 	private McpProjectService Projects => projectService.Value;
 
 	[Description(
-		"Lists local projects, profiles, and baseline filters. Use it to choose a root or inspect policy; use get_tree for structure. Returns indexes, protected names and paths, root types, profiles, and Git/exclusion policy. A local project accepts a unique listed name, #index, or absolute path returned by list_projects; remote URLs require opt-in. No parameters.")]
+		"Lists the configured local roots, saved profiles, and baseline filters. Not needed with one configured root: every tool then works without project. Call it to choose between several roots or to inspect profiles and policy; use get_tree for structure. Returns indexes, protected names and paths, root types, profiles, and Git/exclusion policy. With several roots, project takes a unique listed name, #index, or absolute path; remote URLs require opt-in. No parameters.")]
 	public Task<CallToolResult> ListProjects(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken)
@@ -1968,7 +1968,7 @@ internal sealed partial class DevProjexMcpTools(
 	};
 
 	[Description(
-		"Reads selected text after mandatory secret and configured private-data replacement. Use it after get_tree or search_project; use pack_context for broad multi-file context. Use path for one page or requests for up to eight files and sixteen file/range/symbol selections; forms are exclusive. Send one batched call whenever you want more than one file, range, or known symbol: requests=[{\"path\":\"src/a.ts\",\"symbol\":\"Router.load\"}]. Items report ok, partial, not-returned, or unavailable; overlapping ranges share a 1,000-line/50,000-character cap. Coordinates use returned text; start_column continues a page.")]
+		"Reads project files with secrets and configured private data replaced. Use it after get_tree or search_project; use pack_context for broad multi-file context. path reads one file, optionally with start_line/end_line or symbol; paths reads up to sixteen whole files; requests mixes files, ranges, and symbols: requests=[{\"path\":\"src/a.ts\",\"symbol\":\"Router.load\"}]. A batch returns files whole in the order asked, within 50,000 characters; a large file, or one that no longer fits, returns its structure with line ranges. Items report ok, structure, partial, not-returned, or unavailable. Line numbers refer to returned text.")]
 	public Task<CallToolResult> GetFile(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
