@@ -86,13 +86,16 @@ public sealed partial class McpServerProcessTests
 	[Fact]
 	public async Task RealProcessReservedDistributionKeepsEveryMatchingFileAndTheStoredWindows()
 	{
+		const int firstLinePadding = 495;
+		const int secondLinePadding = 1_050;
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
 		workspace.WriteFile("project/Target.cs", "sealed class Target\n{\n    string Needle() => \"Needle " +
 			new string('y', 1_000) + "\";\n}\n");
+		// Longer paths separate the reserved and original budgets under both newline conventions.
 		for (var index = 0; index < 25; index++)
-			workspace.WriteFile($"project/file{index:D2}.txt", string.Concat(Enumerable.Range(1, 2)
-				.Select(line => $"Needle file-{index:D2}-line-{line} {new string('x', 525)}\n")));
+			workspace.WriteFile($"project/matching/file{index:D2}.txt", string.Concat(Enumerable.Range(1, 2)
+				.Select(line => $"Needle file-{index:D2}-line-{line} {new string('x', line == 1 ? firstLinePadding : secondLinePadding)}\n")));
 		await using var server = await ActualMcpProcess.StartAsync(project, workspace.CreateDirectory("data"));
 
 		var (text, page) = await SearchAndReadAsync(server);
@@ -101,21 +104,21 @@ public sealed partial class McpServerProcessTests
 		var (withoutBodyText, withoutBodyPage) = await SearchAndReadAsync(withoutBody);
 
 		var expectedMatches = new[] { "3:    string Needle() => \"Needle " + new string('y', 1_000) + "\";" }
-			.Concat(Enumerable.Range(0, 25).Select(index => $"1:Needle file-{index:D2}-line-1 {new string('x', 525)}"))
+			.Concat(Enumerable.Range(0, 25).Select(index => $"1:Needle file-{index:D2}-line-1 {new string('x', firstLinePadding)}"))
 			.ToArray();
 		Assert.Equal(expectedMatches, WrittenMatches(text));
 		Assert.Equal(expectedMatches, WrittenMatches(withoutBodyText));
 		for (var index = 0; index < 25; index++)
-			Assert.Contains($"file{index:D2}.txt\n1:Needle ", text, StringComparison.Ordinal);
+			Assert.Contains($"matching/file{index:D2}.txt\n1:Needle ", text, StringComparison.Ordinal);
 		Assert.Contains("[Search observed] matches=51 · matching-files=26", text, StringComparison.Ordinal);
 		Assert.Contains("matches retained=51/51 · matches written=26", text, StringComparison.Ordinal);
 		Assert.Contains("[25 additional observed matches not shown.]", text, StringComparison.Ordinal);
 
 		var expectedDistribution = "Withheld matches by file:\n" + string.Join('\n', Enumerable.Range(0, 20)
-			.Select(index => $"1 file{index:D2}.txt")) + "\nand 5 more file(s)\n5 matches in those files";
+			.Select(index => $"1 matching/file{index:D2}.txt")) + "\nand 5 more file(s)\n5 matches in those files";
 		Assert.Equal(expectedDistribution, Distribution(text));
 		Assert.Equal(expectedDistribution, Distribution(withoutBodyText));
-		var listedCounts = Regex.Matches(Distribution(text), @"(?m)^(\d+) file\d{2}\.txt$",
+		var listedCounts = Regex.Matches(Distribution(text), @"(?m)^(\d+) matching/file\d{2}\.txt$",
 			RegexOptions.CultureInvariant, TimeSpan.FromSeconds(2)).Sum(static match => int.Parse(match.Groups[1].Value));
 		var remainder = Regex.Match(Distribution(text), @"(\d+) matches in those files",
 			RegexOptions.CultureInvariant, TimeSpan.FromSeconds(2));
@@ -126,9 +129,9 @@ public sealed partial class McpServerProcessTests
 		var expectedStored = new StringBuilder();
 		for (var index = 1; index < 25; index++)
 		{
-			expectedStored.Append($"file{index:D2}.txt\n");
+			expectedStored.Append($"matching/file{index:D2}.txt\n");
 			for (var line = 1; line <= 2; line++)
-				expectedStored.Append($"{line}:Needle file-{index:D2}-line-{line} {new string('x', 525)}\n");
+				expectedStored.Append($"{line}:Needle file-{index:D2}-line-{line} {new string('x', line == 1 ? firstLinePadding : secondLinePadding)}\n");
 		}
 		Assert.Equal(expectedStored.ToString(), ExtractSpotlightBody(page));
 		Assert.Equal(expectedStored.ToString(), ExtractSpotlightBody(withoutBodyPage));
@@ -136,6 +139,16 @@ public sealed partial class McpServerProcessTests
 		Assert.DoesNotContain("[Showing lines", page, StringComparison.Ordinal);
 		Assert.DoesNotContain("2:Needle file-00-line-2", text + page, StringComparison.Ordinal);
 		Assert.InRange(ExtractSpotlightBody(text).Length, 1, 16_000);
+		var nextMatch = $"2:Needle file-00-line-2 {new string('x', secondLinePadding)}\n";
+		foreach (var (response, label) in new[] { (text, "body enabled"), (withoutBodyText, "body disabled") })
+		{
+			var body = ExtractSpotlightBody(response);
+			AssertSearchFixtureHasNewlineSlack(body, nextMatch, label + ": reserved distribution");
+			var distributionStart = body.IndexOf("\nWithheld matches by file:", StringComparison.Ordinal);
+			Assert.True(distributionStart >= 0, response);
+			var unreservedWithOneMoreMatch = body[..distributionStart] + nextMatch;
+			AssertSearchFixtureHasNewlineSlack(unreservedWithOneMoreMatch, nextMatch, label + ": original stored-window boundary");
+		}
 
 		static string[] WrittenMatches(string response) => Regex.Matches(ExtractSpotlightBody(response), @"(?m)^\d+:.*$",
 			RegexOptions.CultureInvariant, TimeSpan.FromSeconds(2)).Select(static match => match.Value).ToArray();
@@ -162,6 +175,26 @@ public sealed partial class McpServerProcessTests
 			var read = await CallAsync(process, "read_pack", new Dictionary<string, object?> { ["pack_id"] = stored.Groups[1].Value });
 			Assert.NotEqual(true, read.IsError);
 			return (response, Normalize(AllProcessText(read)));
+		}
+	}
+
+	private static void AssertSearchFixtureHasNewlineSlack(string body, string nextExcludedText, string label)
+	{
+		var normalizedBody = body.Replace("\r\n", "\n", StringComparison.Ordinal);
+		var normalizedNext = nextExcludedText.Replace("\r\n", "\n", StringComparison.Ordinal);
+		var newlineCount = normalizedBody.Count(static character => character == '\n');
+		var nextNewlineCount = normalizedNext.Count(static character => character == '\n');
+		foreach (var width in new[] { 1, 2 })
+		{
+			var characters = normalizedBody.Length + newlineCount * (width - 1);
+			var nextCharacters = normalizedNext.Length + nextNewlineCount * (width - 1);
+			var remaining = 16_000 - characters;
+			var excludedBy = characters + nextCharacters - 16_000;
+			var measurement = $"{label}: newline-width={width}, newlines={newlineCount}, body={characters}, " +
+				$"remaining={remaining}, next={nextCharacters}, excluded-by={excludedBy}.";
+			TestContext.Current.TestOutputHelper?.WriteLine(measurement);
+			Assert.True(remaining >= 100, measurement);
+			Assert.True(excludedBy >= 100, measurement);
 		}
 	}
 }
