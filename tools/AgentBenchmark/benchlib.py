@@ -466,7 +466,7 @@ def score_session(summary, task, corpus_root, key_version=None):
         entries = attribute(calls, task,
                             summary.get('answer') or '', original_root or corpus_root, version)
         from mechanisms import count
-        score.update(count(calls))
+        score.update(count(calls, original_root or corpus_root))
         score['attribution_sessions'] = 1
         for entry in entries:
             category = ('named_' if entry['named'] else 'missed_') + entry['exposure'].replace('-', '_')
@@ -496,9 +496,12 @@ def score_arm(results, tasks_data, arm, task_ids, corpus_roots, key_version=None
 
 
 def format_score(score):
+    follow = ' · '.join(f"{status} range/whole/search/none " + '/'.join(
+        str(score[f'after_{status}_{action}']) for action in ('range', 'whole', 'search', 'none'))
+        for status in ('structure', 'partial', 'not_returned'))
     return (f"keys {format_key_versions(score['key_versions'])} · files {score['files']}/{score['files_needed']} · tests {score['tests']}/{score['tests_needed']} · "
             f"known-wrong {score['known_wrong']} · invented {score['invented']} · calls {score['calls']} · "
             f"ctx {score['context'] / 1e6:.2f}M · ${score['cost']:.2f} · "
             f"misses never/listed/content {score['missed_never_shown']}/{score['missed_listed']}/{score['missed_content_shown']} "
             f"({score['attribution_sessions']} transcripts) · structure large/no-room {score['structure_large']}/{score['structure_no_room']} · "
-            f"read-as {score['read_as_ranges'] + score['read_as_combined'] + score['read_as_folders']} · symbols-as-text {score['symbols_as_text']} · tool-errors {score['tool_errors']}")
+            f"read-as {score['read_as_ranges'] + score['read_as_combined'] + score['read_as_folders']} · symbols-as-text {score['symbols_as_text']} · tool-errors {score['tool_errors']} · after {follow}")

@@ -58,6 +58,8 @@ def key_metrics_table(scores, arms, cost_precision=2):
         ('Cost', lambda s: f"${s['cost']:.{cost_precision}f}"),
         ('Time, s (sum)', lambda s: f"{s['duration_ms'] / 1000:.0f}"),
     ]
+    from mechanisms import FOLLOW_UP_COUNTERS
+    rows.extend((name, lambda score, key=name: score[key]) for name in FOLLOW_UP_COUNTERS)
     return table(['Metric'] + [label for _, label in arms],
                  [[name] + [render(scores[arm]) for arm, _ in arms] for name, render in rows])
 
@@ -75,8 +77,13 @@ def per_task_table(results, tasks_data, arms, task_ids, roots, key_version=None)
                      ' / '.join(f"{s['tests']}/{s['tests_needed']}" for s in scores),
                      ' / '.join(str(s['calls']) for s in scores),
                      ' / '.join(f"{s['context']:,}" for s in scores),
-                     ' / '.join(f"{s['missed_never_shown']},{s['missed_listed']},{s['missed_content_shown']}" for s in scores)])
-    return table(['Task', 'Repo', f'Files {labels}', 'Tests', 'Calls', 'Context', 'Misses never,listed,content'], rows)
+                     ' / '.join(f"{s['missed_never_shown']},{s['missed_listed']},{s['missed_content_shown']}" for s in scores)] + [
+                     ' / '.join(','.join(str(s[f'after_{status}_{action}'])
+                                         for action in ('range', 'whole', 'search', 'none')) for s in scores)
+                     for status in ('structure', 'partial', 'not_returned')])
+    return table(['Task', 'Repo', f'Files {labels}', 'Tests', 'Calls', 'Context', 'Misses never,listed,content',
+                  'After structure: range,whole,search,none', 'After partial: range,whole,search,none',
+                  'After not-returned: range,whole,search,none'], rows)
 
 
 def judge_section(path, labels):
