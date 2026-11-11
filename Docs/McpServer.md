@@ -1797,11 +1797,11 @@ Deterministic process fixtures also cover the last fitting exact-name hit: the p
 placement returned 89 of 101 matching lines and gave the body to `Sample.Configure`;
 the fixed placement returns all 101, keeps `Sample.Needle` selected, and omits its body
 when it cannot fit. A separate 26-file fixture returns 26 files instead of 24, while a
-continuation fixture verifies that every retained matching address is present inline
-or in `read_pack`. Run these checks with:
+continuation fixture pins the stored matching windows, keeps every matching file
+visible, and accounts for each withheld match in its per-file distribution. Run these checks with:
 
 ```powershell
-dotnet test Tests/DevProjex.Tests.Terminal/DevProjex.Tests.Terminal.csproj -c Release -m:1 --filter "FullyQualifiedName~RealProcessPreservesTheExactNameMatchAtTheEndOfTheSearchSlice|FullyQualifiedName~RealProcessKeepsEveryMatchingFileWhenTheBodyWouldNeedItsSpace|FullyQualifiedName~RealProcessPrintsOverlappingDeclarationContextOnlyOnce|FullyQualifiedName~RealProcessBodyPlacementKeepsEveryRetainedMatchInlineOrInTheStoredPack"
+dotnet test Tests/DevProjex.Tests.Terminal/DevProjex.Tests.Terminal.csproj -c Release -m:1 --filter "FullyQualifiedName~RealProcessPreservesTheExactNameMatchAtTheEndOfTheSearchSlice|FullyQualifiedName~RealProcessKeepsEveryMatchingFileWhenTheBodyWouldNeedItsSpace|FullyQualifiedName~RealProcessPrintsOverlappingDeclarationContextOnlyOnce|FullyQualifiedName~RealProcessReservedDistributionKeepsEveryMatchingFileAndTheStoredWindows"
 ```
 
 When declaration reads are the applicable continuation, the list itself is the next
@@ -1809,11 +1809,13 @@ step: no trusted instruction line follows it. When the only listed declaration's
 is already shown whole, `[Declaration body] shown=1/1; no other declarations require a
 read.` states that nothing is left to read.
 
-The list ships on every search that showed a hit, including a search the character
-cap cut, because a cut response is exactly when a caller would otherwise open a whole
-file to find a declaration it was already holding. The `in <Name>` headers are a
+The list uses the remaining body budget, including on a search the character cap
+cut, and is omitted when no row fits. It names declarations already found without
+requiring a whole-file read. The `in <Name>` headers are a
 different thing and keep their rule: they label runs of hits while reading, and a
 capped response drops them so the remaining characters go to matches.
+
+In JavaScript and TypeScript files the structure also lists test blocks. `describe`, `context` and `suite` calls appear as `"title" (describe)`, and `it`, `test` and `specify` calls as `"title" (test)`, including their `.only`, `.skip`, `.each` and similar forms. A block spans its whole statement and nests like a declaration, under the same entry limits. A title longer than 80 characters is cut. Test blocks appear in the structure only: `symbol` and symbol search address declarations, so a block is read by its line range.
 
 ### Reading a declaration by name
 
