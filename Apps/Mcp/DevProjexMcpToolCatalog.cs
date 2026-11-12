@@ -39,7 +39,8 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 			: search.Description?.Replace("1,800", searchBodyCharacters.ToString("N0", System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal);
 		if (toolSet == McpToolSet.Reduced)
 		{
-			_tools = _tools.Where(tool => tool.ProtocolTool.Name is not ("analyze" or "pack_context")).ToArray();
+			_tools = _tools.Where(tool => tool.ProtocolTool.Name is not ("analyze" or "pack_context") &&
+				(tool.ProtocolTool.Name != "list_projects" || publishProject)).ToArray();
 			foreach (var tool in _tools)
 			{
 				tool.ProtocolTool.Description = ReducedDescription(tool.ProtocolTool.Description);

@@ -33,6 +33,8 @@ internal sealed class McpProjectSourceResolver : IDisposable
 			LazyThreadSafetyMode.ExecutionAndPublication);
 	}
 
+	internal int LocalRootCount => _localRoots.Roots.Count;
+
 	public async Task<McpResolvedProjectSource> ResolveAsync(
 		string? project,
 		string? branch,
@@ -53,7 +55,9 @@ internal sealed class McpProjectSourceResolver : IDisposable
 				McpErrorCodes.InvalidArguments,
 				$"{McpErrorCodes.InvalidArguments}: 'project' is written as a path that names a host. " +
 				"Such a form is refused before 'project' is read as a path at all, so that naming one " +
-				"cannot make the server reach it. Call list_projects and use a listed name or path.");
+				"cannot make the server reach it. " + (_localRoots.Roots.Count == 1
+					? "One local root is configured: omit 'project'."
+					: "Call list_projects and use a listed name or path."));
 		}
 
 		if (!LooksLikeRepositoryUrl(project))

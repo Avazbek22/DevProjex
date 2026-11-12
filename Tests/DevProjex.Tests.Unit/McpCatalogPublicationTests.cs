@@ -23,7 +23,7 @@ public sealed class McpCatalogPublicationTests
 		var target = new DevProjexMcpTools(new McpRootRegistry([workspace.Path]), service, packs);
 		var catalog = new DevProjexMcpToolCatalog(target, allowRemote, exclusions, toolSet,
 			live: live, rootCount: rootCount);
-		Assert.Equal(toolSet == McpToolSet.Full ? 9 : 7, catalog.Count);
+		Assert.Equal(toolSet == McpToolSet.Full ? 9 : rootCount > 1 || allowRemote ? 7 : 6, catalog.Count);
 		foreach (var entry in catalog)
 		{
 			var tool = entry.ProtocolTool;

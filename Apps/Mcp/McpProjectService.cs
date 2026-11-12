@@ -319,7 +319,8 @@ internal sealed class McpProjectService(
 			throw new McpToolException(
 				McpErrorCodes.InvalidArguments,
 				$"{McpErrorCodes.InvalidArguments}: project is not a git repository; omit " +
-				$"{constraint} or choose a Git repository returned by list_projects.");
+				$"{constraint}" + (projectSources.LocalRootCount == 1 ? "." :
+					" or choose a Git repository returned by list_projects."));
 		}
 		if (plan.HasErrors)
 		{
