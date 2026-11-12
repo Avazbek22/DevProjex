@@ -83,7 +83,10 @@ public sealed partial class McpServerProcessTests
 	{
 		var start = new System.Diagnostics.ProcessStartInfo("dotnet")
 		{
-			UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true
+			UseShellExecute = false,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			CreateNoWindow = true
 		};
 		foreach (var argument in new[] { PublishedApplicationLocator.FindApplicationAssembly(), "search", pattern, project,
 			"--regex", "--format", "json", "--git-mode", "none", "--exclude", "none", "--language", "en", "--plain", "--progress", "never" })
