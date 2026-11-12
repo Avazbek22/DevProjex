@@ -1,3 +1,5 @@
+using DevProjex.Mcp;
+
 namespace DevProjex.Tests.Integration;
 
 public sealed partial class McpServerIntegrationTests
@@ -193,21 +195,27 @@ public sealed partial class McpServerIntegrationTests
 	}
 
 	[Fact]
-	public async Task SymbolSearchKeepsRefusingAMultilinePattern()
+	public async Task SymbolSearchFallsBackToTextForAMultilineRegularExpression()
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
 		File.WriteAllText(Path.Combine(project, "Service.cs"), "public sealed class Service\n{\n}\n");
-		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
-
-		var result = await server.CallAsync("search_project", new Dictionary<string, object?>
+		async Task<string> SearchAsync(bool symbols)
 		{
-			["pattern"] = "class Service\\n\\{",
-			["symbols"] = true
-		});
-
-		Assert.True(result.IsError);
-		Assert.DoesNotContain(MultilineSearchNotice, AllText(result), StringComparison.Ordinal);
+			await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+			var arguments = new Dictionary<string, object?> { ["pattern"] = "class Service\\n\\{" };
+			if (symbols) arguments["symbols"] = true;
+			var result = await server.CallAsync("search_project", arguments);
+			Assert.NotEqual(true, result.IsError);
+			var text = Normalize(Text(result));
+			AssertMultilineNotices(text, ExtractSpotlightBody(text));
+			return Normalize(WithoutFenceNonce(result));
+		}
+		var text = await SearchAsync(false);
+		var fallback = await SearchAsync(true);
+		Assert.Contains("matches written=1", text, StringComparison.Ordinal);
+		Assert.Contains(McpSearchSymbols.RegularExpressionFallbackNotice, fallback, StringComparison.Ordinal);
+		Assert.Equal(text, fallback.Replace(McpSearchSymbols.RegularExpressionFallbackNotice + "\n", string.Empty, StringComparison.Ordinal));
 	}
 
 	[Theory]

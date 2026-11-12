@@ -274,18 +274,15 @@ public sealed partial class McpServerIntegrationTests
 		Assert.True(nameless.IsError);
 		Assert.Contains(McpErrorCodes.InvalidArguments, AllText(nameless), StringComparison.Ordinal);
 
-		// A regular expression in declaration mode would otherwise answer a confident "no matches".
 		foreach (var regularExpression in new[] { "OrderService\\(", "class\\s+\\w+Service", "(?i)OrderService" })
 		{
-			var refused = await server.CallAsync("search_project", new Dictionary<string, object?>
+			var textSearch = await server.CallAsync("search_project", new Dictionary<string, object?>
 			{
 				["pattern"] = regularExpression,
 				["symbols"] = true
 			});
-			Assert.True(refused.IsError, regularExpression);
-			Assert.Contains(McpErrorCodes.InvalidArguments, AllText(refused), StringComparison.Ordinal);
-			Assert.Contains("looks like a regular expression", AllText(refused), StringComparison.Ordinal);
-			Assert.Contains("omit symbols to search text with a regex", AllText(refused), StringComparison.Ordinal);
+			Assert.NotEqual(true, textSearch.IsError);
+			Assert.Contains(McpSearchSymbols.RegularExpressionFallbackNotice, AllText(textSearch), StringComparison.Ordinal);
 		}
 		var parameterList = Text(await server.CallAsync("search_project", new Dictionary<string, object?>
 		{
@@ -348,7 +345,7 @@ public sealed partial class McpServerIntegrationTests
 			text, StringComparison.Ordinal);
 		Assert.Contains("File: Empty.txt", text, StringComparison.Ordinal);
 		Assert.Contains("Lines: 0-0 of 0", text, StringComparison.Ordinal);
-		Assert.Contains("[Batch read] ok=1 · partial=0 · not-returned=1 · unavailable=1.",
+		Assert.Contains("[Batch read] ok=1 · structure=0 · partial=0 · not-returned=1 · unavailable=1.",
 			text, StringComparison.Ordinal);
 	}
 
@@ -388,7 +385,7 @@ public sealed partial class McpServerIntegrationTests
 
 		Assert.Contains("[Search boundary] partial", Text(result), StringComparison.Ordinal);
 		Assert.Contains("limits=response-characters", Text(result), StringComparison.Ordinal);
-		Assert.Contains(
+		Assert.DoesNotContain(
 			"[Next read] Call read_pack with the reported pack_id for the remaining retained matches.",
 			Text(result),
 			StringComparison.Ordinal);

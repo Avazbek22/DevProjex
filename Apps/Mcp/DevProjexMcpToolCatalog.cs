@@ -456,7 +456,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{CompactMaxFileBytesProperty}},
 	    "context_lines": { "description": "Context lines per match; overlapping windows merge.", "oneOf": [ { "type": "integer", "minimum": 0, "maximum": 20 }, { "type": "string", "pattern": "^[0-9]+$" } ] },
 	    "ignore_case": { "description": "Enables case-insensitive matching; accepts a boolean or its string form.", "default": true, "oneOf": [ { "type": "boolean" }, { "type": "string", "enum": ["true", "false"] } ] },
-	    "symbols": { "description": "Match declarations of the name in pattern (Foo, class Foo, Foo|Bar), not uses.", "default": false, "oneOf": [ { "type": "boolean" }, { "type": "string", "enum": ["true", "false"] } ] },
+	    "symbols": { "description": "Match declarations of the name in pattern (Foo, class Foo, Foo|Bar), not uses; a regular expression is searched as text instead.", "default": false, "oneOf": [ { "type": "boolean" }, { "type": "string", "enum": ["true", "false"] } ] },
 	    "max_results": { "description": "Limits displayed match lines while scanning continues; the boundary reports encountered, retained, and written counts.", "oneOf": [ { "type": "integer", "minimum": 1, "maximum": 200 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] }
 	  },
 	  "required": ["pattern"],
@@ -472,24 +472,24 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{CompactBranchProperty}},
 	    {{CompactProfileProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
 	    "path": {
-	      "description": "Single-file form, or an array of up to eight whole files. Exactly one of path, paths, or requests is required. Names an existing selected file; Markdown escapes from the default get_tree format are accepted, while format=text supplies literal names.",
+	      "description": "One file, or an array of up to sixteen whole files. Give path, paths, or requests; path and paths may accompany requests and add whole-file reads. Names an existing selected file; Markdown escapes from the default get_tree format are accepted, while format=text supplies literal names.",
 	      "oneOf": [
 	        { "type": "string", "minLength": 1 },
-	        { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "string", "minLength": 1, "maxLength": 4096 } }
+	        { "type": "array", "minItems": 1, "maxItems": 16, "items": { "type": "string", "minLength": 1, "maxLength": 4096 } }
 	      ]
 	    },
 	    "paths": {
-	      "description": "Several file paths read in one call, like requests without ranges.",
+	      "description": "Up to sixteen files read whole in one call; with start_line and end_line, the same lines are read from each file.",
 	      "oneOf": [
 	        { "type": "string", "minLength": 1, "maxLength": 4096 },
-	        { "type": "array", "minItems": 1, "maxItems": 8, "items": { "type": "string", "minLength": 1, "maxLength": 4096 } }
+	        { "type": "array", "minItems": 1, "maxItems": 16, "items": { "type": "string", "minLength": 1, "maxLength": 4096 } }
 	      ]
 	    },
 	    "requests": {
 	      "type": "array",
 	      "minItems": 1,
-	      "maxItems": 8,
-	      "description": "Batch form. Exactly one of requests, path, or paths is required. Reads up to eight files and sixteen selections; a path reads the whole file, while ranges or symbol narrow it. Single-file ranges cannot accompany requests.",
+	      "maxItems": 16,
+	      "description": "Batch form: up to sixteen files and sixteen selections; a path reads the whole file, while ranges or symbol narrow it. start_line, end_line, and start_column cannot accompany requests.",
 	      "items": {
 	        "type": "object",
 	        "properties": {
@@ -531,7 +531,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{CompactProjectProperty}},
 	    {{CompactBranchProperty}},
 	    "path": {
-	      "description": "Seed file, or up to 16 seed files, within the effective selection.",
+	      "description": "Seed file, or up to 16 seed files, within the effective selection; a folder stands for the files directly inside it.",
 	      "oneOf": [
 	        { "type": "string", "minLength": 1, "maxLength": 4096 },
 	        { "type": "array", "minItems": 1, "maxItems": 16, "items": { "type": "string", "minLength": 1, "maxLength": 4096 } }

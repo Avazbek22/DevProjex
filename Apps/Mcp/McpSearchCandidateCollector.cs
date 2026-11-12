@@ -160,7 +160,8 @@ internal sealed record McpSearchCandidate(
 	string StableText,
 	int StorageCharacters,
 	McpSearchDeclarationPreview? DeclarationPreview = null,
-	IReadOnlyList<McpSearchProtectedLine>? ProtectedLines = null);
+	IReadOnlyList<McpSearchProtectedLine>? ProtectedLines = null,
+	McpSearchObservedFile? ObservedFile = null);
 
 internal readonly record struct McpSearchProtectedLine(int LineNumber, int ReplacementCount);
 

@@ -19,10 +19,58 @@ internal sealed partial class DevProjexMcpTools
 					documents[McpProjectService.ToRelative(plan.SourceRoot, file.Path)] = file.Content;
 				return ValueTask.CompletedTask;
 			}, cancellationToken).ConfigureAwait(false);
+		var available = plan.IncludedFiles.ToDictionary(path => McpProjectService.ToRelative(plan.SourceRoot, path),
+			StringComparer.Ordinal);
+		var packageDirectories = documents.Keys.Where(static path => Path.GetFileName(path) is "package.json" or "jsr.json" or "deno.json")
+			.Select(static path => Path.GetDirectoryName(path) ?? "").ToHashSet(StringComparer.Ordinal);
+		var roots = documents.Keys.Where(path => Path.GetFileName(path) == "tsconfig.json" &&
+			packageDirectories.Contains(Path.GetDirectoryName(path) ?? "")).ToHashSet(StringComparer.Ordinal);
+		var availableConfigurations = available.Keys.Where(static path => path.EndsWith(".json", StringComparison.OrdinalIgnoreCase)).ToArray();
+		var pending = roots.Select(static path => (Path: path, InheritanceDepth: 0)).ToArray();
+		var attempted = candidates.Select(path => McpProjectService.ToRelative(plan.SourceRoot, path)).ToHashSet(StringComparer.Ordinal);
+		var expanded = new Dictionary<string, int>(StringComparer.Ordinal);
+		while (pending.Length > 0)
+		{
+			var requested = new List<(string Path, int InheritanceDepth)>();
+			foreach (var current in pending)
+			{
+				if (expanded.TryGetValue(current.Path, out var previousDepth) && previousDepth <= current.InheritanceDepth)
+					continue;
+				expanded[current.Path] = current.InheritanceDepth;
+				if (current.InheritanceDepth < 4)
+					requested.AddRange(PackageExportMap.ConfigurationDependencies(current.Path, documents[current.Path],
+						references: false, projectRoot: plan.SourceRoot).Select(path => (path, current.InheritanceDepth + 1)));
+				if (current.InheritanceDepth == 0 && roots.Contains(current.Path))
+					requested.AddRange(PackageExportMap.ConfigurationDependencies(current.Path, documents[current.Path],
+						references: true, projectRoot: plan.SourceRoot, includeInheritance: false).Select(static path => (path, 0)));
+			}
+			var next = requested.Select(item =>
+				ProjectTreePathIdentity.TryResolveAvailableName(availableConfigurations, item.Path, out var resolved)
+					? (Path: resolved, item.InheritanceDepth) : (Path: (string?)null, item.InheritanceDepth))
+				.Where(static item => item.Path is not null)
+				.GroupBy(static item => item.Path!, StringComparer.Ordinal)
+				.Select(static group => (Path: group.Key, InheritanceDepth: group.Min(static item => item.InheritanceDepth)))
+				.Where(item => !expanded.TryGetValue(item.Path, out var previousDepth) || previousDepth > item.InheritanceDepth)
+				.OrderBy(static item => item.Path, StringComparer.Ordinal).ToArray();
+			// Sixteen referenced candidates and four inheritance links bound new reads to 84 per package root.
+			var missing = next.Where(item => attempted.Add(item.Path)).Select(static item => item.Path).ToArray();
+			if (missing.Length > 0)
+			{
+				await using var configurations = await Projects.ConsumeSearchTextAsync(plan with { IncludedFiles = missing.Select(path => available[path]).ToArray() },
+					(file, _) =>
+					{
+						if (file.ReplacementRanges.Count == 0)
+							documents[McpProjectService.ToRelative(plan.SourceRoot, file.Path)] = file.Content;
+						return ValueTask.CompletedTask;
+					}, cancellationToken).ConfigureAwait(false);
+			}
+			pending = next.Where(item => documents.ContainsKey(item.Path)).ToArray();
+		}
+
 		var exports = PackageExportMap.Find(documents, plan.IncludedFiles
 			.Select(path => McpProjectService.ToRelative(plan.SourceRoot, path))
 			.Where(path => McpToolResults.ProtectMetadataString(path, McpProjectService.IsPrivateDataHidden(plan)) == path)
-			.ToHashSet(StringComparer.Ordinal));
+			.ToHashSet(StringComparer.Ordinal), plan.SourceRoot);
 		return exports.Where(item =>
 		{
 			var metadata = string.Join('\n', item.Manifest, item.Key, item.Target);

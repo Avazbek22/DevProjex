@@ -77,9 +77,12 @@ public sealed partial class McpServerProcessTests
 		})));
 
 		Assert.Contains(
-			"[Next read] Call read_pack with the reported pack_id for the remaining retained matches.",
+			"retained match windows only, not complete source files. Call read_pack with this pack_id.",
 			text,
 			StringComparison.Ordinal);
+		Assert.Contains("[Search stored] pack_id=", text, StringComparison.Ordinal);
+		Assert.Equal(1, text.Split("Call read_pack", StringSplitOptions.None).Length - 1);
+		Assert.DoesNotContain("[Next read]", text, StringComparison.Ordinal);
 		Assert.DoesNotContain(RemovedBatchReadInstruction, text, StringComparison.Ordinal);
 		Assert.DoesNotContain(RemovedSymbolCounters, text, StringComparison.Ordinal);
 	}

@@ -14,7 +14,8 @@ internal sealed record McpGetFileRange(
 	int RangeIndex,
 	int StartLine,
 	int EndLine,
-	bool IsWholeFile = false)
+	bool IsWholeFile = false,
+	bool EndLineWasSpecified = true)
 {
 	public McpGetFileRangeDeliveryStatus ClassifyDelivery(McpTextPage page)
 	{
@@ -49,9 +50,10 @@ internal sealed record McpGetFileRequest(
 	IReadOnlyList<McpGetFileRange> Ranges,
 	string? Symbol = null);
 
-internal sealed record McpGetFileRequestSet(bool IsBatch, IReadOnlyList<McpGetFileRequest> Requests)
+internal sealed record McpGetFileRequestSet(bool IsBatch, IReadOnlyList<McpGetFileRequest> Requests,
+	string? ReadAsNotice = null, int CombinedPathStartIndex = 0)
 {
-	public const int MaximumFiles = 8;
+	public const int MaximumFiles = 16;
 	public const int MaximumRanges = 16;
 
 	// Agents that want several ranges guess a list in start_line or invent start_range; both
@@ -67,7 +69,126 @@ internal sealed record McpGetFileRequestSet(bool IsBatch, IReadOnlyList<McpGetFi
 			? SeveralRangesHint
 			: null;
 
-	public static McpGetFileRequestSet Parse(McpJsonArguments arguments)
+	public static McpGetFileRequestSet Parse(McpJsonArguments arguments, bool deferCombinedPathValidation = false)
+	{
+		if (arguments.Contains("requests"))
+		{
+			if (new[] { "start_line", "end_line", "start_column", "symbol" }.Any(arguments.Contains))
+				throw Invalid("start_line, end_line, start_column, and symbol cannot accompany requests");
+			arguments.TryGetElement("requests", out var value);
+			var parsed = ParseCore(Create(new Dictionary<string, JsonElement> { ["requests"] = value }));
+			var requests = parsed.Requests.ToList();
+			var seen = requests.Select(static item => RequestedIdentity(item.Path))
+				.ToHashSet(ProjectTreePathIdentity.CanonicalComparer);
+			var added = 0;
+			foreach (var path in ReadPaths(arguments))
+			{
+				if (!seen.Add(RequestedIdentity(path)))
+					continue;
+				var index = requests.Count + 1;
+				requests.Add(new(index, path, [new(index, 1, 1, int.MaxValue, IsWholeFile: true)]));
+				added++;
+			}
+			if (!deferCombinedPathValidation && (requests.Count > MaximumFiles || requests.Sum(static item => item.Ranges.Count) > MaximumRanges))
+				throw Invalid($"the call must contain at most {MaximumFiles} files and {MaximumRanges} file selections");
+			return new(true, requests, added == 0 ? null :
+				$"[Read as] path and requests were combined; {added} file(s) from path are read whole.",
+				CombinedPathStartIndex: added == 0 ? 0 : parsed.Requests.Count);
+		}
+		if (!arguments.Contains("paths") && (!arguments.TryGetElement("path", out var pathValue) ||
+			pathValue.ValueKind != JsonValueKind.Array))
+			return ParseCore(arguments);
+		var paths = ReadPaths(arguments).GroupBy(RequestedIdentity, ProjectTreePathIdentity.CanonicalComparer).Select(static group => group.First()).ToArray();
+		if (paths.Length is < 1 or > MaximumFiles)
+			throw Invalid($"'paths' must be an array with 1 to {MaximumFiles} entries");
+		if (paths.Length == 1)
+		{
+			var values = new Dictionary<string, JsonElement> { ["path"] = JsonSerializer.SerializeToElement(paths[0]) };
+			foreach (var name in new[] { "start_line", "end_line", "start_column", "symbol" })
+				if (arguments.TryGetElement(name, out var field)) values[name] = field;
+			return ParseCore(Create(values));
+		}
+		if (paths.Length > 1 && (arguments.Contains("start_column") || arguments.Contains("symbol")))
+			throw Invalid("start_column and symbol are valid only with a single 'path'");
+		RejectSeveralLineNumbers(arguments, "start_line");
+		RejectSeveralLineNumbers(arguments, "end_line");
+		var start = arguments.OptionalInteger("start_line", 1, int.MaxValue) ?? 1;
+		var end = arguments.OptionalInteger("end_line", 1, int.MaxValue) ?? int.MaxValue;
+		var ranged = arguments.Contains("start_line") || arguments.Contains("end_line");
+		if (start > end)
+			throw Invalid("start_line must not exceed end_line");
+		return new(paths.Length > 1, paths.Select((path, index) => new McpGetFileRequest(index + 1, path,
+			[new(index + 1, 1, start, end, IsWholeFile: !ranged, EndLineWasSpecified: !ranged || arguments.Contains("end_line"))], arguments.OptionalString("symbol"))).ToArray(),
+			paths.Length > 1 && ranged ? $"[Read as] start_line and end_line were applied to each of the {paths.Length} files." : null);
+	}
+
+	public McpGetFileRequestSet ResolveCombinedPaths(Func<string, string> identity)
+	{
+		if (CombinedPathStartIndex == 0)
+			return this;
+		var requests = Requests.Take(CombinedPathStartIndex).ToList();
+		var seen = requests.Select(item => identity(item.Path)).ToHashSet(ProjectTreePathIdentity.CanonicalComparer);
+		foreach (var item in Requests.Skip(CombinedPathStartIndex))
+		{
+			if (!seen.Add(identity(item.Path)))
+				continue;
+			var index = requests.Count + 1;
+			requests.Add(item with { Index = index, Ranges = item.Ranges.Select(range => range with { RequestIndex = index }).ToArray() });
+		}
+		if (requests.Count > MaximumFiles || requests.Sum(static item => item.Ranges.Count) > MaximumRanges)
+			throw Invalid($"the call must contain at most {MaximumFiles} files and {MaximumRanges} file selections");
+		var added = requests.Count - CombinedPathStartIndex;
+		return this with
+		{
+			Requests = requests,
+			ReadAsNotice = added == 0 ? null : $"[Read as] path and requests were combined; {added} file(s) from path are read whole.",
+			CombinedPathStartIndex = 0
+		};
+	}
+
+	private static McpJsonArguments Create(Dictionary<string, JsonElement> values) =>
+		new(values, values.Keys.ToHashSet(StringComparer.Ordinal));
+
+	private static string RequestedIdentity(string path)
+	{
+		try
+		{
+			return Path.IsPathRooted(path) ? Path.GetFullPath(path) : ProjectSelectionPath.NormalizeRelative(path);
+		}
+		catch (Exception exception) when (exception is ArgumentException or ProjectContextValidationException)
+		{
+			return path;
+		}
+	}
+
+	private static IEnumerable<string> ReadPaths(McpJsonArguments arguments)
+	{
+		foreach (var name in new[] { "path", "paths" })
+		{
+			if (!arguments.TryGetElement(name, out var element))
+				continue;
+			var values = element.ValueKind switch
+			{
+				JsonValueKind.Array => element.EnumerateArray().ToArray(),
+				JsonValueKind.String => [element],
+				_ => throw Invalid($"'{name}' must be a string or an array of strings")
+			};
+			if (values.Length is < 1 or > MaximumFiles)
+				throw Invalid($"'{name}' must be an array with 1 to {MaximumFiles} entries");
+			for (var index = 0; index < values.Length; index++)
+			{
+				var value = values[index];
+				if (value.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(value.GetString()))
+					throw Invalid($"{name}[{index}] must be a non-whitespace string");
+				var path = value.GetString()!;
+				if (McpUnicodeLength.ExceedsScalarValueCount(path, McpProjectService.MaximumRequestedPathLength))
+					throw Invalid($"{name}[{index}] must contain at most {McpProjectService.MaximumRequestedPathLength} characters");
+				yield return path;
+			}
+		}
+	}
+
+	private static McpGetFileRequestSet ParseCore(McpJsonArguments arguments)
 	{
 		var hasPath = arguments.Contains("path");
 		var hasPaths = arguments.Contains("paths");

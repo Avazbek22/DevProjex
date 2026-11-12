@@ -408,6 +408,8 @@ public sealed partial class McpServerProcessTests
 	[Fact]
 	public async Task RealProcessSpendsNoResponseCharactersOnNamingWhenTheSearchCapAlreadyFired()
 	{
+		const int ownerPadding = 1_200;
+		const int matchPadding = 1_920;
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("wide-symbol-project");
 		for (var file = 0; file < 40; file++)
@@ -415,6 +417,7 @@ public sealed partial class McpServerProcessTests
 			var lines = new StringBuilder();
 			lines.Append("namespace P;\n\npublic sealed class Wide");
 			lines.Append(file.ToString("D2", CultureInfo.InvariantCulture));
+			lines.Append(new string('A', ownerPadding));
 			lines.Append("\n{\n");
 			for (var member = 0; member < 20; member++)
 			{
@@ -422,7 +425,7 @@ public sealed partial class McpServerProcessTests
 				lines.Append("\tpublic string Needle");
 				lines.Append(member.ToString("D2", CultureInfo.InvariantCulture));
 				lines.Append("() => \"");
-				lines.Append(new string('p', 280));
+				lines.Append(new string('p', matchPadding));
 				lines.Append("\";\n");
 			}
 
@@ -442,7 +445,8 @@ public sealed partial class McpServerProcessTests
 			new Dictionary<string, object?>
 			{
 				["pattern"] = "public string Needle",
-				["context_lines"] = 3,
+				// Keep all 800 candidates within the retained-text bound; only output placement is capped.
+				["context_lines"] = 0,
 				["max_results"] = 200
 			})));
 
@@ -453,6 +457,41 @@ public sealed partial class McpServerProcessTests
 		// The selector list still ships on a cut response: that is exactly when a caller would
 		// otherwise open a whole file to find a declaration it is already holding.
 		Assert.Contains("Declarations found (path, symbol, lines):", wide, StringComparison.Ordinal);
+		var body = ExtractSpotlightBody(wide);
+		var expectedMatches = Enumerable.Range(0, 7)
+			.Select(_ => $"5:\tpublic string Needle00() => \"{new string('p', matchPadding)}\";").ToArray();
+		var actualMatches = Regex.Matches(body, @"(?m)^\d+:.*$", RegexOptions.CultureInvariant,
+			TimeSpan.FromSeconds(2)).Select(static match => match.Value).ToArray();
+		Assert.Equal(expectedMatches, actualMatches);
+		for (var file = 0; file < 7; file++)
+			Assert.Contains($"src/Wide{file:D2}.cs\n", body, StringComparison.Ordinal);
+		Assert.Contains("matches retained=800/800 · matches written=7", wide, StringComparison.Ordinal);
+		var distribution = "Withheld matches by file:\n" + string.Join('\n', Enumerable.Range(7, 20)
+			.Select(file => $"20 src/Wide{file:D2}.cs")) + "\nand 20 more file(s)\n393 matches in those files";
+		var actualDistribution = body[body.IndexOf("Withheld matches by file:", StringComparison.Ordinal)..].TrimEnd('\n');
+		Assert.Equal(distribution, actualDistribution);
+		var listedCounts = Regex.Matches(actualDistribution, @"(?m)^(\d+) src/Wide\d{2}\.cs$", RegexOptions.CultureInvariant,
+			TimeSpan.FromSeconds(2)).Sum(static match => int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture));
+		var remainder = Regex.Match(actualDistribution, @"(\d+) matches in those files", RegexOptions.CultureInvariant,
+			TimeSpan.FromSeconds(2));
+		Assert.True(remainder.Success, wide);
+		Assert.Equal(800, actualMatches.Length + listedCounts + int.Parse(remainder.Groups[1].Value, CultureInfo.InvariantCulture));
+		var owner = $"Wide00{new string('A', ownerPadding)}";
+		var selector = $"src/Wide00.cs P.{owner}.Needle00 5-5\n";
+		Assert.Contains("Declarations found (path, symbol, lines):\n" + selector, body, StringComparison.Ordinal);
+		Assert.Single(Regex.Matches(body, @"(?m)^src/Wide\d{2}\.cs P\.Wide", RegexOptions.CultureInvariant,
+			TimeSpan.FromSeconds(2)));
+		Assert.DoesNotContain("Best declaration body", body, StringComparison.Ordinal);
+		var nextSelector = $"src/Wide01.cs P.Wide01{new string('A', ownerPadding)}.Needle00 5-5\n";
+		AssertSearchFixtureHasNewlineSlack(body, nextSelector, "wide search: next declaration selector");
+		var declarationStart = body.IndexOf("\nDeclarations found (path, symbol, lines):", StringComparison.Ordinal);
+		var distributionStart = body.IndexOf("\nWithheld matches by file:", StringComparison.Ordinal);
+		Assert.True(declarationStart >= 0 && distributionStart > declarationStart, wide);
+		var matchesBeforeSelectors = body[..declarationStart] + body[distributionStart..];
+		var nextSameFileMatch = $"6:\tpublic string Needle01() => \"{new string('p', matchPadding)}\";\n";
+		AssertSearchFixtureHasNewlineSlack(matchesBeforeSelectors, nextSameFileMatch, "wide search: next same-file match before selectors");
+		var nextFile = $"src/Wide07.cs\n5:\tpublic string Needle00() => \"{new string('p', matchPadding)}\";\n";
+		AssertSearchFixtureHasNewlineSlack(body, nextFile, "wide search: next matching file");
 		Assert.DoesNotContain("[Symbols] annotated=", wide, StringComparison.Ordinal);
 		Assert.True(wide.Length <= 18_000, $"Capped search returned {wide.Length} characters.");
 	}

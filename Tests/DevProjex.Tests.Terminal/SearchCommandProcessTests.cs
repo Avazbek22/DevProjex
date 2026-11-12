@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.RegularExpressions;
 using DevProjex.Infrastructure.ProjectProfiles;
+using DevProjex.Mcp;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -205,7 +206,7 @@ public sealed class SearchCommandProcessTests
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = CreateProject(workspace);
-		var dataRoot = workspace.CreateDirectory("data");
+		var dataRoot = workspace.CreateDirectory("data-" + Guid.NewGuid().ToString("N"));
 		var markedSecret = new MarkedSecretProfileEntry("001122334455", "token", 12);
 		var localProfile = new ProjectSelectionProfile(
 			SelectedRootFolders: [],
@@ -283,21 +284,34 @@ public sealed class SearchCommandProcessTests
 	[Theory]
 	[InlineData("Run\\(")]
 	[InlineData("Ru.*")]
-	public void SymbolModeRefusesARegularExpressionWithAHintInsteadOfReportingNoMatches(string pattern)
+	public void SymbolModeSearchesARegularExpressionAsTextWithoutChangingItsPayload(string pattern)
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = CreateProject(workspace);
 
-		var refused = Run(workspace, project, pattern, "--symbols");
+		foreach (var format in new[] { "text", "json", "markdown" })
+		{
+			var ordinary = Run(workspace, project, pattern, "--regex", "--format", format);
+			var fallback = Run(workspace, project, pattern, "--symbols", "--format", format);
+			Assert.Equal(0, fallback.ExitCode);
+			Assert.Equal(ordinary.StandardOutput, fallback.StandardOutput);
+			Assert.Contains(McpSearchSymbols.RegularExpressionFallbackNotice, fallback.StandardError, StringComparison.Ordinal);
+			Assert.DoesNotContain(McpSearchSymbols.RegularExpressionFallbackNotice, fallback.StandardOutput, StringComparison.Ordinal);
+		}
 		var named = Run(workspace, project, "string Run(", "--symbols", "--format", "json");
-
-		Assert.Equal(CommandLineExitCodes.UsageError, refused.ExitCode);
-		Assert.Empty(refused.StandardOutput);
-		Assert.Contains("DPX-CLI-SEARCH-PATTERN", refused.StandardError, StringComparison.Ordinal);
-		Assert.Contains("looks like a regular expression", refused.StandardError, StringComparison.Ordinal);
-		Assert.Contains("use --regex instead of --symbols", refused.StandardError, StringComparison.Ordinal);
 		Assert.Equal(0, named.ExitCode);
 		Assert.Single(JsonDocument.Parse(named.StandardOutput).RootElement.GetProperty("matches").EnumerateArray());
+	}
+
+	[Fact]
+	public void NamelessSymbolQueryKeepsTheSearchFailure()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = CreateProject(workspace);
+		var result = Run(workspace, project, " | ", "--symbols");
+		Assert.Equal(CommandLineExitCodes.UsageError, result.ExitCode);
+		Assert.Contains("DPX-CLI-SEARCH-PATTERN", result.StandardError, StringComparison.Ordinal);
+		Assert.Empty(result.StandardOutput);
 	}
 
 	[Fact]
@@ -593,7 +607,7 @@ public sealed class SearchCommandProcessTests
 		{
 			start.ArgumentList.Add(argument);
 		}
-		start.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = workspace.CreateDirectory("data");
+		start.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = workspace.CreateDirectory("data-" + Guid.NewGuid().ToString("N"));
 		return TerminalTestProcess.Run(start, TimeSpan.FromMinutes(1));
 	}
 }

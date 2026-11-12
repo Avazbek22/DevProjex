@@ -272,9 +272,19 @@ observed source text, including numbered search windows and partial reads. Reque
 are not evidence of delivery. Each required path records its first showing call/tool and first
 content call/tool through `attribution.attribute`; named paths receive the same classification.
 Sessions lacking transcripts are counted separately, not classified as never shown.
+A `get_file` section with `Status: structure` and numeric `Lines: A-B` counts as
+`content-shown` for its returned start only; `Lines: none` counts as `listed`, not a content read.
 Repomix snippets without an observed file boundary cannot be attributed to a source file;
 unlabelled code is not guessed from its contents. The categories measure observable delivery,
 not whether the final explanation is correct or whether a whole file was read.
+
+Mechanism counters distinguish structure sections caused by a large file from sections caused
+by lack of room, and distinguish a returned start from declarations only. They also count the
+trusted `[Read as]` lines for shared ranges, combined forms, and folder seeds, the `[Symbols]`
+text-search fallback, and tool errors. Project content cannot contribute trusted notice counts.
+Structure counts describe returned sections, not a claim that their complete source was delivered.
+
+Follow-up counters record what the agent did next with a file that a whole-file `get_file` call returned as `structure`, returned as `partial`, or did not return. Only the first later call that names the file counts: a read with a range, symbol or column is `range`, another whole-file read is `whole`, a search naming the file is `search`, and no later call is `none`. They describe behaviour after a delivery form, not whether the answer needed the file.
 
 Replay needs no client sign-in and makes no model call:
 

@@ -25,17 +25,17 @@ public sealed partial class McpServerIntegrationTests
 		var pathArray = await ReadAsync("path", paths);
 		var pathsArray = await ReadAsync("paths", paths);
 		var pathsString = await ReadAsync("paths", "src/a.ts");
-		var singleRequest = await ReadAsync("requests", new[] { new { path = "src/a.ts" } });
+		var scalar = await ReadAsync("path", "src/a.ts");
 
 		Assert.NotEqual(true, requests.IsError);
 		Assert.Contains("export const b = 2;", Text(requests), StringComparison.Ordinal);
 		Assert.Equal(WithoutFenceNonce(requests), WithoutFenceNonce(pathArray));
 		Assert.Equal(WithoutFenceNonce(requests), WithoutFenceNonce(pathsArray));
-		Assert.Equal(WithoutFenceNonce(singleRequest), WithoutFenceNonce(pathsString));
+		Assert.Equal(WithoutFenceNonce(scalar), WithoutFenceNonce(pathsString));
 	}
 
 	[Fact]
-	public async Task GetFilePathListsKeepTheBatchLimitAndExclusiveForms()
+	public async Task GetFilePathListsKeepTheBatchLimitAndMergeForms()
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
@@ -44,7 +44,7 @@ public sealed partial class McpServerIntegrationTests
 
 		var tooMany = await server.CallAsync("get_file", new Dictionary<string, object?>
 		{
-			["path"] = Enumerable.Range(0, 9).Select(static index => $"File{index}.cs").ToArray()
+			["path"] = Enumerable.Range(0, 17).Select(static index => $"File{index}.cs").ToArray()
 		});
 		var combined = await server.CallAsync("get_file", new Dictionary<string, object?>
 		{
@@ -53,9 +53,10 @@ public sealed partial class McpServerIntegrationTests
 		});
 
 		Assert.True(tooMany.IsError);
-		Assert.Contains("'path' must be an array with 1 to 8 entries.", Text(tooMany), StringComparison.Ordinal);
-		Assert.True(combined.IsError);
-		Assert.Contains("'path', 'paths' and 'requests' cannot be combined.", Text(combined), StringComparison.Ordinal);
+		Assert.Contains("'path' must be an array with 1 to 16 entries.", Text(tooMany), StringComparison.Ordinal);
+		Assert.NotEqual(true, combined.IsError);
+		Assert.Contains("1.1 — ok", Text(combined), StringComparison.Ordinal);
+		Assert.Single(Regex.Matches(Text(combined), "File: a\\.cs").Cast<Match>());
 	}
 
 	private static string WithoutFenceNonce(CallToolResult result) =>

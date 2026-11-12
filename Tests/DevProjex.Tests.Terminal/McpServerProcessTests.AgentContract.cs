@@ -34,9 +34,9 @@ public sealed partial class McpServerProcessTests
 		// Forty matches were all found and kept; only max_results held the written answer to one.
 		const string boundary =
 			"[Search boundary] partial output: every selected file was searched; 1 of 40 matches are " +
-			"written here and the rest are stored for read_pack.";
-		const string nextRead =
-			"[Next read] Call read_pack with the reported pack_id for the remaining retained matches.";
+			"written here; the rest are counted per file under \"Withheld matches by file\".";
+		const string nextRead = "Call read_pack with this pack_id.";
+		Assert.Contains(boundary, text, StringComparison.Ordinal);
 		Assert.True(
 			text.IndexOf(boundary, StringComparison.Ordinal) <
 			text.IndexOf("<untrusted-data-", StringComparison.Ordinal),
@@ -46,6 +46,7 @@ public sealed partial class McpServerProcessTests
 			text,
 			StringComparison.Ordinal);
 		Assert.Single(Regex.Matches(text, Regex.Escape(nextRead)).Cast<Match>());
+		Assert.DoesNotContain("[Next read]", text, StringComparison.Ordinal);
 		Assert.DoesNotContain("read_pack pages those files whole", text, StringComparison.Ordinal);
 		Assert.DoesNotContain("read the other", text, StringComparison.Ordinal);
 	}

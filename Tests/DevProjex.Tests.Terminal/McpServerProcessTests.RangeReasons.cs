@@ -53,7 +53,7 @@ public sealed partial class McpServerProcessTests
 		Assert.DoesNotContain("hidden content", text, StringComparison.Ordinal);
 		Assert.DoesNotContain(Secret, text, StringComparison.Ordinal);
 		Assert.Contains("[redacted]", text, StringComparison.Ordinal);
-		Assert.Contains("[Batch read] ok=1 · partial=0 · not-returned=3 · unavailable=1.", text, StringComparison.Ordinal);
+		Assert.Contains("[Batch read] ok=1 · structure=0 · partial=0 · not-returned=3 · unavailable=1.", text, StringComparison.Ordinal);
 		Assert.Contains("[Range clamped] requests=1.1; end_line exceeded the file; returned through line 35.", text, StringComparison.Ordinal);
 		foreach (var block in batch.Content.OfType<TextContentBlock>())
 		{

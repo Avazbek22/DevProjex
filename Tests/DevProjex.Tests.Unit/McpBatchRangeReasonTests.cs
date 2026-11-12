@@ -16,7 +16,7 @@ public sealed class McpBatchRangeReasonTests
 	{
 		var result = Render(content, new McpGetFileRange(1, 1, start, end));
 		Assert.Equal($"Requests:\n1.1 — not-returned — Source.txt: requested lines {start}-{end}; {boundary}", result.Text);
-		Assert.Equal("[Batch read] ok=0 · partial=0 · not-returned=1 · unavailable=0.", result.Summary);
+		Assert.Equal("[Batch read] ok=0 · structure=0 · partial=0 · not-returned=1 · unavailable=0.", result.Summary);
 		Assert.Empty(result.DeliveredPaths);
 		Assert.Empty(result.DeliveredRanges);
 	}
@@ -29,7 +29,7 @@ public sealed class McpBatchRangeReasonTests
 		Assert.Contains("1.1 — ok\n1.2 — not-returned — Source.txt: requested lines 8-12; valid lines 1-3", result.Text);
 		Assert.Contains("1.3 — not-returned — Source.txt: requested lines 30-40; valid lines 1-3", result.Text);
 		Assert.Contains("Requests: 1.1\nStatus: ok\nLines: 1-3 of 3\none\ntwo\nthree", result.Text);
-		Assert.Equal("[Batch read] ok=1 · partial=0 · not-returned=2 · unavailable=0.", result.Summary);
+		Assert.Equal("[Batch read] ok=1 · structure=0 · partial=0 · not-returned=2 · unavailable=0.", result.Summary);
 		Assert.Equal(["Source.txt"], result.DeliveredPaths);
 	}
 
@@ -58,7 +58,7 @@ public sealed class McpBatchRangeReasonTests
 	{
 		var result = Render("", new(1, 1, 1, int.MaxValue, IsWholeFile: true), new(1, 2, 1, 1));
 		Assert.Contains("1.1 — ok\n1.2 — not-returned — Source.txt: requested lines 1-1; file is empty", result.Text);
-		Assert.Equal("[Batch read] ok=1 · partial=0 · not-returned=1 · unavailable=0.", result.Summary);
+		Assert.Equal("[Batch read] ok=1 · structure=0 · partial=0 · not-returned=1 · unavailable=0.", result.Summary);
 		Assert.Empty(result.DeliveredRanges);
 	}
 
@@ -67,7 +67,7 @@ public sealed class McpBatchRangeReasonTests
 	{
 		var result = Render("one\ntwo", new(1, 1, 1, 2), new(1, 2, 2, 3));
 		Assert.Equal("Requests:\n1.1 — ok\n1.2 — ok\n\nFile: Source.txt\nRequests: 1.1, 1.2\nStatus: ok\nLines: 1-2 of 2\none\ntwo", result.Text);
-		Assert.Equal("[Batch read] ok=2 · partial=0 · not-returned=0 · unavailable=0.", result.Summary);
+		Assert.Equal("[Batch read] ok=2 · structure=0 · partial=0 · not-returned=0 · unavailable=0.", result.Summary);
 		Assert.Equal("[Range clamped] requests=1.2; end_line exceeded the file; returned through line 2.", result.Continuations);
 	}
 

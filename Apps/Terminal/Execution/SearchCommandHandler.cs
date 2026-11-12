@@ -22,9 +22,7 @@ public sealed class SearchCommandHandler(
 	private const int MaximumStoredCharacters = 2_000_000;
 	private const int MaximumDeclarationsReported = 20;
 	private const long MaximumInspectedBytes = 64L * 1024 * 1024;
-	private const string SymbolsRegularExpressionMessage =
-		"--symbols takes declaration names such as command, class Command or Foo|Bar; " +
-		"this pattern looks like a regular expression.";
+
 	private static readonly JsonSerializerOptions JsonOptions = new()
 	{
 		WriteIndented = true,
@@ -36,16 +34,9 @@ public sealed class SearchCommandHandler(
 		CancellationToken cancellationToken)
 	{
 		IReadOnlyList<string>? namesReadFromPattern = null;
-		if (request.Mode == SearchMode.Symbols && McpSearchSymbols.LooksLikeRegularExpression(request.Pattern))
-		{
-			if (!McpSearchSymbols.TryReadDeclarationNames(request.Pattern, out namesReadFromPattern))
-			{
-				throw new SearchCommandException(
-					"DPX-CLI-SEARCH-PATTERN",
-					SymbolsRegularExpressionMessage,
-					hint: "Pass the name, or use --regex instead of --symbols to search text with a regular expression.");
-			}
-		}
+		var fallback = IsRegexFallback(request);
+		if (!fallback && request.Mode == SearchMode.Symbols && McpSearchSymbols.LooksLikeRegularExpression(request.Pattern))
+			_ = McpSearchSymbols.TryReadDeclarationNames(request.Pattern, out namesReadFromPattern);
 
 		var status = new StatusRenderer(environment, request.Output);
 		var plan = await status.RunAsync(
@@ -78,6 +69,8 @@ public sealed class SearchCommandHandler(
 				exception);
 		}
 
+		if (fallback)
+			environment.Error.WriteLine(McpSearchSymbols.RegularExpressionFallbackNotice);
 		if (namesReadFromPattern is not null)
 		{
 			var note = services.Localization.Format("Terminal.Search.SymbolsReadAsNames", string.Join(", ", namesReadFromPattern));
@@ -141,6 +134,9 @@ public sealed class SearchCommandHandler(
 		long maximumInspectedBytes,
 		CancellationToken cancellationToken)
 	{
+		var symbolsReadAsText = IsRegexFallback(request);
+		if (symbolsReadAsText)
+			request = request with { Mode = SearchMode.Regex };
 		var regexPattern = ToRegexPattern(request.Pattern, request.Mode, out var declarationNames, out var namesReadFromPattern);
 		// A pattern that can only mean to cross a line break is matched against whole files, as in
 		// MCP search_project; --symbols patterns are declaration names and never take this path.
@@ -416,7 +412,7 @@ public sealed class SearchCommandHandler(
 				rendered.Output.ToString().TrimEnd(),
 				matchingFiles,
 				namesReadFromPattern ? declarationNames : null,
-				multiline);
+				multiline, symbolsReadAsText);
 		}
 
 		var maximumBudget = MaximumContentCharacters;
@@ -459,6 +455,10 @@ public sealed class SearchCommandHandler(
 				: new SecretRedactionContext(plan.SourceRoot, services.SecretRedactionSession, redactionFeatures));
 	}
 
+	private static bool IsRegexFallback(SearchCommandRequest request) => request.Mode == SearchMode.Symbols &&
+		McpSearchSymbols.LooksLikeRegularExpression(request.Pattern) &&
+		!McpSearchSymbols.TryReadDeclarationNames(request.Pattern, out _);
+
 	private static string ToRegexPattern(
 		string pattern,
 		SearchMode mode,
@@ -472,7 +472,7 @@ public sealed class SearchCommandHandler(
 			if (McpSearchSymbols.LooksLikeRegularExpression(pattern))
 			{
 				if (!McpSearchSymbols.TryReadDeclarationNames(pattern, out declarationNames))
-					throw new McpToolException(McpErrorCodes.InvalidPattern, $"{McpErrorCodes.InvalidPattern}: {SymbolsRegularExpressionMessage}");
+					return pattern;
 				namesReadFromPattern = true;
 			}
 			else
@@ -855,7 +855,8 @@ public sealed class SearchCommandHandler(
 		string Body,
 		int MatchingFiles,
 		IReadOnlyList<string>? NamesReadFromPattern = null,
-		bool MultilinePattern = false);
+		bool MultilinePattern = false,
+		bool SymbolsReadAsText = false);
 
 	internal sealed record SearchMatch(string Path, int Line, string Text, string? Declaration);
 

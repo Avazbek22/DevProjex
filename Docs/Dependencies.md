@@ -630,9 +630,33 @@ Opt-in dependency diagnostics count canonical path normalization, manifest sorti
 construction, gated fact clones, resolver candidate probes, and cache hits. No project text is recorded,
 and when measurement is inactive hot resolver loops do not call the counter path.
 
+## Package publication hints
+
+MCP whole-file reads can name the `package.json`, `jsr.json`, or `deno.json` export that publishes
+a JavaScript/TypeScript source, and `related_files` can list that manifest as a dependent. These
+publication hints do not add edges to the dependency index or the ranking graph.
+
+A compiled target requires an unambiguous visible `.ts`, `.mts`, or `.cts` source and no existing
+output file. The package's `tsconfig.json` and one level of at most 16 `references` are candidates;
+a reference names a JSON file or a folder's `tsconfig.json`. Each candidate must explicitly own
+`rootDir` and `outDir`, relative to itself and without template variables. A readable relative
+`extends` chain of at most four links is allowed, with no cycle, package or array form. All
+configurations remain inside the effective project selection and pass the protected text pipeline
+without replacements. An `outFile`, `declarationDir`, or `noEmit` other than `false` anywhere in
+the chain prevents that candidate's mapping.
+
+Membership uses the candidate's own `files`, `include`, and `exclude`, not inherited lists.
+Exact files and unambiguous `*`, `?`, and `**/` patterns are supported; a folder name means its
+subtree. Without an explicit `files` or `include`, an extending candidate is not inferred.
+Candidate mappings are combined, but outputs reached from different sources are omitted.
+These rules are separate from the import-resolution inheritance rules above.
+
 ## User-facing results
 
-`devprojex related PATH` and MCP `related_files` show dependencies, dependents, or both. Every row
+`devprojex related PATH` and MCP `related_files` show dependencies, dependents, or both. A folder
+seed stands for its directly contained files in the effective selection, in ordinal path order,
+with at most 16 seeds after expansion. Empty folders and expansions beyond the limit keep their
+existing refusal. Every row
 contains a portable relative path, aggregated evidence reasons, resolution status, estimated tokens,
 and a cross-scope marker when applicable. Ambiguous references remain one group with their candidate
 list. Text rows write reference sites that share the same reason text as one `at lines ...` entry;

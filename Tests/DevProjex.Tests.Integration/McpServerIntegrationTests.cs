@@ -2622,7 +2622,7 @@ public sealed partial class McpServerIntegrationTests
 			tools.Single(static tool => tool.Name == "search_project").ProtocolTool.Description,
 			StringComparison.Ordinal);
 		Assert.Contains(
-			"mandatory secret and configured private-data replacement",
+			"secrets and configured private data replaced",
 			tools.Single(static tool => tool.Name == "get_file").ProtocolTool.Description,
 			StringComparison.Ordinal);
 		Assert.DoesNotContain(
@@ -2692,11 +2692,11 @@ public sealed partial class McpServerIntegrationTests
 		Assert.False(getFileSchema.TryGetProperty("oneOf", out _));
 		Assert.False(getFileSchema.TryGetProperty("not", out _));
 		Assert.Contains(
-			"Exactly one of path, paths, or requests is required",
+			"path and paths may accompany requests and add whole-file reads",
 			getFileSchema.GetProperty("properties").GetProperty("path").GetProperty("description").GetString(),
 			StringComparison.Ordinal);
 		Assert.Contains(
-			"Exactly one of requests, path, or paths is required",
+			"up to sixteen files and sixteen selections",
 			batchRequests.GetProperty("description").GetString(),
 			StringComparison.Ordinal);
 		var searchBoolean = tools.Single(static tool => tool.Name == "search_project")
@@ -2837,9 +2837,8 @@ public sealed partial class McpServerIntegrationTests
 		var getFile = tools.Single(static tool => tool.Name == "get_file").ProtocolTool.Description!;
 		var instructions = server.Client.ServerInstructions!;
 
-		// The route states when one request should replace several independent reads.
 		Assert.Contains(
-			"whenever you want more than one file, range, or known symbol",
+			"A batch returns files whole in the order asked, within 50,000 characters;",
 			getFile,
 			StringComparison.Ordinal);
 		Assert.Contains(
@@ -4176,7 +4175,7 @@ public sealed partial class McpServerIntegrationTests
 		var text = Text(result);
 		Assert.True(text.Length <= 55_000, $"Search response was {text.Length} characters.");
 		Assert.Contains("\n[1 additional observed matches not shown", text.Replace("\r\n", "\n", StringComparison.Ordinal));
-		Assert.Contains(
+		Assert.DoesNotContain(
 			"[Next read] Call read_pack with the reported pack_id for the remaining retained matches.",
 			text,
 			StringComparison.Ordinal);
@@ -7322,7 +7321,7 @@ public sealed partial class McpServerIntegrationTests
 		Assert.Contains("Requests: 1.1, 2.1", text, StringComparison.Ordinal);
 		// Only 2.1 asked for lines past the end of the file; 1.1 ended inside it.
 		Assert.Contains("[Range clamped] requests=2.1;", text, StringComparison.Ordinal);
-		Assert.Contains("[Batch read] ok=3 · partial=0 · not-returned=0 · unavailable=0.", text,
+		Assert.Contains("[Batch read] ok=3 · structure=0 · partial=0 · not-returned=0 · unavailable=0.", text,
 			StringComparison.Ordinal);
 		Assert.Equal(2, diagnostics.FullFileReads);
 		Assert.Equal(0, diagnostics.PreparedFilesMaterialized);
@@ -7358,7 +7357,7 @@ public sealed partial class McpServerIntegrationTests
 			"[Range clamped] requests=2.1; end_line exceeded the file; returned through line 4.",
 			text,
 			StringComparison.Ordinal);
-		Assert.Contains("[Batch read] ok=2 · partial=0 · not-returned=1 · unavailable=0.", text,
+		Assert.Contains("[Batch read] ok=2 · structure=0 · partial=0 · not-returned=1 · unavailable=0.", text,
 			StringComparison.Ordinal);
 	}
 
@@ -7392,7 +7391,7 @@ public sealed partial class McpServerIntegrationTests
 		Assert.NotEqual(true, result.IsError);
 		Assert.Contains("available-marker", text, StringComparison.Ordinal);
 		Assert.Contains("2.1 — unavailable — DPX-MCP-PATH-NOT-FOUND", text, StringComparison.Ordinal);
-		Assert.Contains("[Batch read] ok=1 · partial=0 · not-returned=0 · unavailable=1.", text,
+		Assert.Contains("[Batch read] ok=1 · structure=0 · partial=0 · not-returned=0 · unavailable=1.", text,
 			StringComparison.Ordinal);
 	}
 
@@ -7845,7 +7844,8 @@ public sealed partial class McpServerIntegrationTests
 		Assert.NotEqual(true, result.IsError);
 		var body = ExtractSpotlightBody(text);
 		Assert.True(body.Length <= 50_000, body.Length.ToString(System.Globalization.CultureInfo.InvariantCulture));
-		Assert.True(body.Count(static character => character == '\n') + 1 <= 1_000);
+		Assert.True(text.Length <= 50_000, text.Length.ToString(System.Globalization.CultureInfo.InvariantCulture));
+		Assert.True(body.Count(static character => character == '\n') + 1 > 1_000);
 		foreach (var request in Enumerable.Range(1, 4))
 			Assert.Matches($@"{request}\.1 — (ok|partial|not-returned|unavailable)", text);
 		Assert.Contains("partial=", text, StringComparison.Ordinal);
@@ -7853,7 +7853,6 @@ public sealed partial class McpServerIntegrationTests
 	}
 
 	[Theory]
-	[InlineData("both")]
 	[InlineData("missing-path")]
 	[InlineData("too-many-requests")]
 	[InlineData("too-many-ranges")]
@@ -7869,7 +7868,7 @@ public sealed partial class McpServerIntegrationTests
 			["requests"] = shape switch
 			{
 				"missing-path" => new object[] { new { ranges = new[] { new { start_line = 1, end_line = 1 } } } },
-				"too-many-requests" => Enumerable.Range(0, 9)
+				"too-many-requests" => Enumerable.Range(0, 17)
 					.Select(static _ => (object)new { path = "A.txt", ranges = new[] { new { start_line = 1, end_line = 1 } } })
 					.ToArray(),
 				"too-many-ranges" => new object[]

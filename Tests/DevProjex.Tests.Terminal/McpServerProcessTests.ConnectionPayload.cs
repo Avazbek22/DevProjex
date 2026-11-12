@@ -9,13 +9,11 @@ public sealed partial class McpServerProcessTests
 	// recorded measurement, not the measurement itself: a ceiling with a few characters to spare is
 	// a tripwire for the next honest addition rather than a budget.
 	//
-	// Recorded on 2026-11-07 from the wire JSON the client received: tools/list result 31,598 on a
-	// default server and 34,650 when per-call exclusions are enabled, after the shared get_diff
-	// selection parameters added 670 characters to the default catalog. The 31,870 ceiling leaves 272
-	// characters for the next intentional catalog change while the exact mode difference below
-	// isolates the optional exclusion parameter. The get_file path array and paths alias added 459
-	// characters (32,057 measured), and the ceiling moved by exactly that amount.
-	private const int ToolsListResultCeiling = 32_329;
+	// Recorded on 2026-11-11 from the wire JSON: 32,237 characters for the full catalog and
+	// 35,289 with per-call exclusions. Both grew by 275 characters for the batch schema and
+	// descriptions. The ceiling leaves 272 characters while the exact difference below isolates
+	// the optional exclusion parameter.
+	private const int ToolsListResultCeiling = 32_509;
 	private const int ToolsListResultFloor = 30_600;
 	private const int ExclusionsParameterCost = 3_052;
 	private const int InstructionsCeiling = 1_200;
@@ -37,6 +35,8 @@ public sealed partial class McpServerProcessTests
 			$"tools/list result: default={defaultPayload} characters; delegated={delegationPayload} characters; " +
 			$"instructions={instructions.Length} characters.");
 		Assert.Equal(ExclusionsParameterCost, delegationPayload - defaultPayload);
+		Assert.InRange(delegationPayload, ToolsListResultFloor + ExclusionsParameterCost,
+			ToolsListResultCeiling + ExclusionsParameterCost);
 		Assert.Equal(instructions, delegationInstructions);
 	}
 

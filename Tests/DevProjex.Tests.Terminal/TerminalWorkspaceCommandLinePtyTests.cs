@@ -106,6 +106,48 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 	}
 
 	[Fact(Timeout = 120_000)]
+	public async Task GrepSymbolRegularExpressionPublishesTextMatchesAndItsInterpretation()
+	{
+		using var project = new TemporaryDirectory();
+		project.WriteFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />\n");
+		project.WriteFile("App.cs", "public sealed class App { string Text = \"needle value\"; }\n");
+		await using var terminal = await StartAsync(project.Path, columns: 200, rows: 50);
+		await terminal.WaitForStableScreenAsync("PROJECT TREE", cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync(":grep --symbols needle.*value\r", TestContext.Current.CancellationToken);
+		var result = await terminal.WaitForScreenAsync("searched as text.", timeout: TimeSpan.FromSeconds(45),
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains("App.cs:1", result, StringComparison.Ordinal);
+		Assert.Contains("needle value", result, StringComparison.Ordinal);
+		Assert.DoesNotContain("DPX-TUI-GREP-PATTERN", result, StringComparison.Ordinal);
+		Assert.False(terminal.HasExited);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await QuitAsync(terminal);
+	}
+
+	[Fact(Timeout = 120_000)]
+	public async Task RelatedFolderCommandPublishesDirectSeedsAndItsInterpretation()
+	{
+		using var project = new TemporaryDirectory();
+		project.WriteFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />\n");
+		project.WriteFile("Parts/A.cs", "public sealed class A { public Target Value { get; } }\n");
+		project.WriteFile("Parts/Z.cs", "public sealed class Z { public Target Value { get; } }\n");
+		project.WriteFile("Parts/Nested/NotASeed.cs", "public sealed class NotASeed {}\n");
+		project.WriteFile("Target.cs", "public sealed class Target {}\n");
+		await using var terminal = await StartAsync(project.Path, columns: 200, rows: 50);
+		await terminal.WaitForStableScreenAsync("PROJECT TREE", cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync(":related Parts --direction dependencies\r", TestContext.Current.CancellationToken);
+		var result = await terminal.WaitForScreenAsync("2 file(s) directly inside", timeout: TimeSpan.FromSeconds(45),
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains("Seed: Parts/A.cs", result, StringComparison.Ordinal);
+		Assert.Contains("Seed: Parts/Z.cs", result, StringComparison.Ordinal);
+		Assert.Contains("Target.cs", result, StringComparison.Ordinal);
+		Assert.DoesNotContain("Seed: Parts/Nested/NotASeed.cs", result, StringComparison.Ordinal);
+		Assert.False(terminal.HasExited);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await QuitAsync(terminal);
+	}
+
+	[Fact(Timeout = 120_000)]
 	public async Task RelatedCommandPublishesDependencyOutputInTheCommandPanel()
 	{
 		using var project = new TemporaryDirectory();

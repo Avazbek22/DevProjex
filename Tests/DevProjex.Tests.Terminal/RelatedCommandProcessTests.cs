@@ -6,6 +6,49 @@ namespace DevProjex.Tests.Terminal;
 
 public sealed class RelatedCommandProcessTests
 {
+	[Theory]
+	[InlineData("Parts")]
+	[InlineData("./Parts/")]
+	public void FolderSeedsUseOnlyDirectSelectedFilesAndPreserveJson(string folder)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />\n");
+		workspace.WriteFile("project/Parts/Z.cs", "public sealed class Z { public Target Value { get; } }\n");
+		workspace.WriteFile("project/Parts/a.cs", "public sealed class A { public Target Value { get; } }\n");
+		workspace.WriteFile("project/Parts/nested/NotASeed.cs", "public sealed class NotASeed {}\n");
+		workspace.WriteFile("project/Parts/ignored.md", "not a source seed\n");
+		workspace.WriteFile("project/Target.cs", "public sealed class Target {}\n");
+		var result = Run(workspace, "related", folder, "--project", project, "--direction", "dependencies",
+			"--format", "json", "--extension", ".cs", "--extension", ".csproj", "--git-mode", "none", "--exclude", "none");
+		Assert.True(result.ExitCode == 0, result.StandardError + result.StandardOutput);
+		Assert.Contains(RelatedQueryRunner.FormatFolderNotice(2), result.StandardError, StringComparison.Ordinal);
+		Assert.DoesNotContain("[Read as]", result.StandardOutput, StringComparison.Ordinal);
+		using var document = JsonDocument.Parse(result.StandardOutput);
+		var seeds = document.RootElement.GetProperty("seeds").EnumerateArray().ToArray();
+		Assert.Equal(new[] { "Parts/Z.cs", "Parts/a.cs" }, seeds.Select(seed => seed.GetProperty("seed").GetString()));
+		Assert.All(seeds, seed => Assert.Contains(seed.GetProperty("dependencies").EnumerateArray(),
+			dependency => dependency.GetProperty("path").GetString() == "Target.cs"));
+	}
+
+	[Theory]
+	[InlineData(0)]
+	[InlineData(17)]
+	public void FolderSeedsKeepTheExistingSelectionRefusalWhenExpansionIsUnavailable(int files)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.CreateDirectory("project/Parts");
+		workspace.WriteFile("project/Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />\n");
+		for (var index = 0; index < files; index++)
+			workspace.WriteFile($"project/Parts/File{index:D2}.cs", $"public sealed class File{index:D2} {{ }}\n");
+		var result = Run(workspace, "related", "Parts", "--project", project, "--format", "json", "--git-mode", "none", "--exclude", "none");
+		Assert.NotEqual(0, result.ExitCode);
+		Assert.Contains("DPX-SELECTION-PATH-MISSING", result.StandardError, StringComparison.Ordinal);
+		Assert.DoesNotContain("[Read as]", result.StandardError, StringComparison.Ordinal);
+		Assert.Empty(result.StandardOutput);
+	}
+
 	[Fact]
 	public void DepthTraversesOnlyResolvedEdgesAndOnePreservesTheExistingShape()
 	{
@@ -932,7 +975,7 @@ public sealed class RelatedCommandProcessTests
 		startInfo.ArgumentList.Add("--plain");
 		startInfo.ArgumentList.Add("--progress");
 		startInfo.ArgumentList.Add("never");
-		startInfo.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = workspace.CreateDirectory("data");
+		startInfo.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = workspace.CreateDirectory("data-" + Guid.NewGuid().ToString("N"));
 		return TerminalTestProcess.Run(startInfo, TimeSpan.FromMinutes(1));
 	}
 
