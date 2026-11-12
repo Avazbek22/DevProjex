@@ -334,7 +334,8 @@ internal static class McpSearchSymbols
 	public static McpSearchSymbolResult Resolve(
 		IReadOnlyList<McpSearchHit> hits,
 		IReadOnlyDictionary<string, IReadOnlyList<NavigationDeclaration>> navigationByFile,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		IReadOnlyDictionary<string, McpNavigationDeclarationIndex>? declarationIndexes = null)
 	{
 		ArgumentNullException.ThrowIfNull(hits);
 		ArgumentNullException.ThrowIfNull(navigationByFile);
@@ -354,6 +355,7 @@ internal static class McpSearchSymbols
 		}
 
 		var spansByFile = new Dictionary<string, List<DeclarationSpan>>(StringComparer.Ordinal);
+		var indexes = new Dictionary<string, McpNavigationDeclarationIndex>(StringComparer.Ordinal);
 		foreach (var file in files)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
@@ -369,7 +371,11 @@ internal static class McpSearchSymbols
 				.ToList();
 
 			if (spans.Count > 0)
+			{
 				spansByFile[file.RelativePath] = spans;
+				indexes[file.RelativePath] = declarationIndexes is not null && declarationIndexes.TryGetValue(file.RelativePath, out var index)
+					? index : new McpNavigationDeclarationIndex(fileDeclarations);
+			}
 		}
 
 		var names = new Dictionary<McpSearchHitKey, string>();
@@ -383,16 +389,9 @@ internal static class McpSearchSymbols
 			if (!spansByFile.TryGetValue(hit.RelativePath, out var spans))
 				continue;
 
-			// The innermost declaration is the narrowest one that still contains the line.
-			DeclarationSpan? best = null;
-			foreach (var span in spans)
-			{
-				if (hit.Line < span.Start || hit.Line > span.End)
-					continue;
-				if (best is null || span.End - span.Start < best.End - best.Start ||
-					span.End - span.Start == best.End - best.Start && span.CharacterLength < best.CharacterLength)
-					best = span;
-			}
+			var located = indexes[hit.RelativePath].Find(hit.Line);
+			var best = located is null ? null : new DeclarationSpan(
+				located.StartLine, located.EndLine, located.Name, located.EndIndex - located.StartIndex);
 
 			if (best is null || string.IsNullOrEmpty(best.Name))
 				continue;
@@ -461,9 +460,7 @@ internal static class McpSearchSymbols
 		if (declarations.Count == 0)
 			return null;
 
-		if (!regex.HasDeclarationBodyLiteralTerms)
-			return FindPreview(candidates, declarations[0]);
-
+		var hasLiteralTerms = regex.HasDeclarationBodyLiteralTerms;
 		var declarationSet = declarations.ToHashSet();
 		var previews = new Dictionary<McpSearchDeclaration, McpSearchDeclarationPreview>();
 		var matchedLines = new Dictionary<McpSearchDeclaration, int>();
@@ -472,6 +469,11 @@ internal static class McpSearchSymbols
 		{
 			var preview = candidate.DeclarationPreview;
 			if (preview is null || !declarationSet.Contains(preview.Declaration))
+				continue;
+			var ownLine = candidate.MatchLine >= preview.Declaration.StartLine &&
+				candidate.MatchLine <= preview.Declaration.EndLine;
+			if (!ownLine && (!hasLiteralTerms ||
+				regex.DeclarationBodyNameMatchQuality(preview.Declaration.Name) == McpDeclarationBodyNameMatchQuality.None))
 				continue;
 
 			previews.TryAdd(preview.Declaration, preview);
@@ -487,6 +489,8 @@ internal static class McpSearchSymbols
 		{
 			if (!previews.TryGetValue(declaration, out var preview))
 				continue;
+			if (!hasLiteralTerms)
+				return preview;
 
 			var nameQuality = regex.DeclarationBodyNameMatchQuality(declaration.Name);
 			var lineCount = matchedLines.GetValueOrDefault(declaration);
