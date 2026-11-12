@@ -703,6 +703,7 @@ public sealed class DocumentationAndPackagingContractTests
 			rootPath, "Scripts", "Test-InstalledHeadlessArtifact.ps1"));
 		var mcpSmoke = File.ReadAllText(Path.Combine(
 			rootPath, "Scripts", "smoke-headless-mcp.mjs"));
+		Assert.Contains("'mcp', '--root', root, '--tool-set', 'full'", mcpSmoke, StringComparison.Ordinal);
 		var installation = File.ReadAllText(Path.Combine(rootPath, "Docs", "Installation.md"));
 		Assert.Contains("uses: ./.github/workflows/packages-build.yml", workflow, StringComparison.Ordinal);
 		Assert.Contains("Test-HeadlessPackages.ps1", buildWorkflow, StringComparison.Ordinal);

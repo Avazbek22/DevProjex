@@ -34,8 +34,14 @@ public sealed partial class McpServerProcessTests
 		})
 		{
 			var shared = tools.Single(tool => tool.Name == neighbour).ProtocolTool.InputSchema
-				.GetProperty("properties").GetProperty(argument);
-			Assert.Equal(shared.GetRawText(), properties.GetProperty(argument).GetRawText());
+				.GetProperty("properties");
+			if (toolSet == "full")
+				Assert.Equal(shared.GetProperty(argument).GetRawText(), properties.GetProperty(argument).GetRawText());
+			else
+			{
+				Assert.False(shared.TryGetProperty(argument, out _));
+				Assert.False(properties.TryGetProperty(argument, out _));
+			}
 		}
 		Assert.Equal(delegated, properties.TryGetProperty("exclusions", out var exclusions));
 		if (delegated)
