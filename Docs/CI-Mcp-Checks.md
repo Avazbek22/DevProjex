@@ -36,17 +36,23 @@ must not acquire name-query guidance.
 ## Connection payload
 
 `RealProcessKeepsTheConnectionPayloadInsideItsBudget` measures the delivered JSON `tools/list`
-result, not a fresh serialization. Default mode remains between 30,600 and 31,870 characters;
-enabling per-call exclusions adds exactly 3,052. Instructions remain between 900 and 1,200
-characters. The test prints actual sizes into its result log. These are wire-character limits,
-not API usage or tokenizer measurements; no model call is involved.
+result, not a fresh serialization. With one local root the result stays between 26,641 and
+27,391 characters. Three differences are pinned exactly: a second local root adds 1,407 by
+publishing `project`, `--allow-remote` adds 2,030 by publishing `project` and `branch`, and
+per-call exclusions add 2,961. Instructions remain between 900 and 1,200 characters. The test
+prints actual sizes into its result log. These are wire-character limits, not API usage or
+tokenizer measurements; no model call is involved.
 
-Measured by the process check on this baseline: default result 31,598 characters, delegated result
-34,650, instructions within the 900-1,200 range. The shared `get_diff` selection parameters added
-670 characters to the default catalog, and a delegation server now publishes the exclusion
-parameter on seven tools, so the default ceiling moved to 31,870 to keep a deliberate headroom:
-272 characters remain for the next intentional catalog change. The exact delegation difference is
-pinned to the single added parameter rather than a shifting total.
+Measured by the process check on 2026-11-12: one local root 27,141 characters, two local roots
+28,548, one root with `--allow-remote` 29,171, one root with per-call exclusions 30,102. The day
+before, the catalog did not depend on the number of local roots and measured 32,400. Publishing
+`project` and `branch` only where they apply, and leaving the string lengths, array sizes and
+patterns the server checks itself to that check, took 5,259 characters out of the one-root
+catalog. The ceiling leaves 250 characters for the next intentional catalog change.
+
+`RealProcessPublishesTheSelectedToolSetWithinItsOwnBudget` holds each tool set with one local
+root under its own ceiling, 250 characters above the measured size: full 27,391, full with
+per-call exclusions 30,352, reduced 18,244, reduced with per-call exclusions 20,359.
 
 ## Repeated service notices
 

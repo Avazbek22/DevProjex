@@ -255,10 +255,10 @@ Desktop and Terminal remove records whose process
 identity no longer matches or whose heartbeat is older than 15 seconds; a
 healthy server updates every 5 seconds and removes its record on normal exit.
 
-The process measurement on Windows x64 gives 28,058 characters for the
-full `tools/list` result and 17,206 for reduced. These correspond to roughly
-7,015 and 4,302 tokens using the character/4 estimate, not model usage. Process
-budgets are 28,300 and 17,500 characters respectively.
+The process measurement on Windows x64 with one local root gives 27,141 characters for the
+full `tools/list` result and 17,994 for reduced. These correspond to roughly
+6,785 and 4,499 tokens using the character/4 estimate, not model usage. Process
+budgets are 27,391 and 18,244 characters respectively.
 
 Repeat `--root` to expose more than one project. When no explicit root is given,
 DevProjex uses `DEVPROJEX_ROOT`, then `CLAUDE_PROJECT_DIR`, then the current
@@ -653,26 +653,44 @@ can ignore it without changing any route or result.
 ### MCP catalog size
 
 Before a client asks anything about a project, it receives the tool schemas and server
-instructions. The measurements below describe data sent to the client on 2026-11-07: the
+instructions. The measurements below describe data sent to the client on 2026-11-12: the
 official C# client, as the connection-payload process test records it. How much model context
 that data uses depends on the client and how it loads tools:
 
 | Payload | Characters |
 |---|---:|
-| `tools/list` C# client wire result, default server | 31,598 |
-| `tools/list` C# client wire result with per-call exclusions | 34,650 |
-| `instructions` | 1,197 |
+| `tools/list` C# client wire result, one local root | 27,141 |
+| `tools/list` C# client wire result, two local roots | 28,548 |
+| `tools/list` C# client wire result, one local root with `--allow-remote` | 29,171 |
+| `tools/list` C# client wire result, one local root with per-call exclusions | 30,102 |
+| `instructions`, one local root | 1,197 |
 
-Removing the two output schemas reduced the default catalog from 42,370 characters at the
-base revision to 32,516 before the named batch-read selector and discovery hints were added.
-Concise descriptions brought it below 28,000 characters without changing schema types,
-accepted values, bounds, or tool behavior; later additions such as the `search_project`
-`symbols` parameter brought the default catalog to 28,058, and the `get_diff` tool adds 3,540
-characters to reach 31,598. `pack_context` is the largest single
-tool at 5,824 characters, including 4,877 characters of input schema. The `exclusions`
-parameter costs a flat 3,052 characters, 436 on each of the seven tools that take it. A process
-test holds the default `tools/list` result and the instructions under ceilings with deliberate
-headroom, and pins the exclusion parameter's cost as an exact difference, so a new parameter or
+The catalog publishes the parameters a caller can use under the server's startup configuration.
+`project` is published, and the descriptions of the tools that take it end with the sentence
+that explains it, only when the server has several local roots or was started with
+`--allow-remote`: with one local root there is nothing to choose. `branch` is published only
+with `--allow-remote`, because it applies to remote Git sources alone. A parameter that is not
+published is still accepted, with the same validation and the same errors, so a caller that
+sends it keeps working. The roots and `--allow-remote` are fixed at startup, and so is the
+catalog.
+
+Input schemas publish types, accepted values, numeric ranges and defaults. A string length, an
+array size or a regular-expression pattern that the server checks itself is not published: the
+server enforces it as before and rejects a violation with the same error. Three keywords remain.
+`git_scope` keeps the pattern `^diff:`, which keeps its two string forms distinct for a
+validating client. `profile` keeps `minLength` 1 and the scalar `symbol` of `get_file` keeps
+`maxLength` 512, because the schema is the only place that states them: the server reads an
+empty `profile` as an omitted one and does not check the length of a scalar `symbol`.
+
+Removing the two output schemas reduced the default catalog from 42,370 characters at the base
+revision to 32,516, and concise descriptions brought it below 28,000. Later parameters and the
+`get_diff` tool raised it to 32,400 by 2026-11-11. On 2026-11-12 the two rules above brought the
+one-root catalog to 27,141. `pack_context` is the largest single tool at 4,972 characters,
+including 4,106 characters of input schema. A second local root adds 1,407 characters by
+publishing `project` and its sentence on seven tools, `--allow-remote` adds 2,030, and the
+`exclusions` parameter costs a flat 2,961, 423 on each of the seven tools that take it. A
+process test holds the one-root `tools/list` result and the instructions under ceilings with
+deliberate headroom, and pins those three costs as exact differences, so a new parameter or
 description has to fit a budget rather than grow one silently.
 
 | Tool | Parameters | Result and limits |
@@ -717,8 +735,8 @@ physical containment check. The entries name literal files or directories, so
 `*`, `?`, `{`, and `[` have no glob meaning in `paths`. The selection is narrowed
 before intersection with patterns, Git scope, and `max_file_bytes`; a missing entry
 adds the count-only `DPX-SELECTION-PATH-MISSING` warning while valid entries continue,
-and an empty intersection remains empty. Regex, glob, and `git_scope` schema lengths use the
-same Unicode scalar-value semantics at runtime. (enforced by the server and not published in the schema)
+and an empty intersection remains empty. Regex, glob, and `git_scope` length limits, which the server enforces and the schema does not
+publish, use the same Unicode scalar-value semantics.
 
 ### `related_files`
 
