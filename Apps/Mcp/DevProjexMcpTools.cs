@@ -1119,6 +1119,7 @@ internal sealed partial class DevProjexMcpTools(
 				MaximumStoredSearchMatches,
 				MaximumStoredSearchCharacters);
 			var navigationByFile = new Dictionary<string, IReadOnlyList<NavigationDeclaration>>(StringComparer.Ordinal);
+			var declarationIndexes = new Dictionary<string, McpNavigationDeclarationIndex>(StringComparer.Ordinal);
 			var declarationsNotIndexed = 0;
 			var declarationsNotIndexedPaths = new List<string>(8);
 			await using var searched = await Projects.ConsumeSearchTextAsync(
@@ -1144,7 +1145,8 @@ internal sealed partial class DevProjexMcpTools(
 							relative,
 							file.Content,
 							token);
-						navigationIndex ??= new McpNavigationDeclarationIndex(navigation);
+						navigationIndex ??= new McpNavigationDeclarationIndex(navigation, comments: declarationsOnly ? null :
+							McpDeclarationComments.Capture(relative, file.Content, navigation, token));
 						if (searchBodyCharacters > 0)
 							declarationPreviews ??= new McpSearchDeclarationPreviewCache(
 								relative,
@@ -1222,9 +1224,15 @@ internal sealed partial class DevProjexMcpTools(
 						McpSearchExecutionHooks.AfterScan?.Invoke(relative);
 						var annotatedFiles = candidates.SelectFilesForAnnotation(McpSearchSymbols.MaximumAnnotatedFiles);
 						foreach (var stale in navigationByFile.Keys.Where(path => !annotatedFiles.Contains(path)).ToArray())
+						{
 							navigationByFile.Remove(stale);
+							declarationIndexes.Remove(stale);
+						}
 						if (navigation is not null && annotatedFiles.Contains(relative))
+						{
 							navigationByFile[relative] = navigation;
+							if (navigationIndex is not null) declarationIndexes[relative] = navigationIndex;
+						}
 					}
 
 					return ValueTask.CompletedTask;
@@ -1254,7 +1262,7 @@ internal sealed partial class DevProjexMcpTools(
 			{
 				var slice = RenderSearchGroupsWithDocumentationLast(ordered, maximumResults, cap - coverageAppendix.Length);
 				slice.Output.Append(coverageAppendix);
-				var found = McpSearchSymbols.Resolve(slice.WrittenHits, navigationByFile, cancellationToken);
+				var found = McpSearchSymbols.Resolve(slice.WrittenHits, navigationByFile, cancellationToken, declarationIndexes);
 				var preview = McpSearchSymbols.SelectDeclarationBodyPreview(candidateSnapshot, found.Declarations, regex);
 				var planned = PlanSearchDeclarationBody(slice, found.Declarations, preview, declarationReadContext, found.DeclarationRanges, cap);
 				slice = planned.Rendered;
@@ -3939,7 +3947,8 @@ internal sealed partial class DevProjexMcpTools(
 		McpSearchObservedFile? observedFile = null)
 	{
 		priorityState ??= new McpSearchFilePriorityState();
-		declarationIndex ??= new McpNavigationDeclarationIndex(declarations, declarationVisited);
+		declarationIndex ??= new McpNavigationDeclarationIndex(declarations, declarationVisited,
+			McpDeclarationComments.Capture(relativePath, content, declarations, CancellationToken.None));
 		foreach (var match in matches)
 		{
 			foreach (var matchLine in match.MatchLineNumbers)

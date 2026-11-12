@@ -167,6 +167,7 @@ public sealed class SearchCommandHandler(
 
 		var candidates = new McpSearchCandidateCollector(MaximumStoredMatches, MaximumStoredCharacters);
 		var navigationByFile = new Dictionary<string, IReadOnlyList<NavigationDeclaration>>(StringComparer.Ordinal);
+		var declarationIndexes = new Dictionary<string, McpNavigationDeclarationIndex>(StringComparer.Ordinal);
 		var totalMatches = 0;
 		var inspectedSources = 0;
 		var matchingFiles = 0;
@@ -178,6 +179,7 @@ public sealed class SearchCommandHandler(
 			var relative = PathUtility.GetPortableRelativePath(plan.SourceRoot, file.Path);
 			IReadOnlyList<NavigationDeclaration>? navigation = null;
 			McpSearchDeclarationPreviewCache? declarationPreviews = null;
+			McpNavigationDeclarationIndex? navigationIndex = null;
 			var priorityState = new McpSearchFilePriorityState();
 			void AcceptMatch(McpSearchMatchContext match)
 			{
@@ -186,6 +188,8 @@ public sealed class SearchCommandHandler(
 					relative,
 					file.Content,
 					token);
+				navigationIndex ??= new McpNavigationDeclarationIndex(navigation, comments: request.Mode == SearchMode.Symbols ? null :
+					McpDeclarationComments.Capture(relative, file.Content, navigation, token));
 				if (request.SearchBodyCharacters > 0)
 				{
 					declarationPreviews ??= new McpSearchDeclarationPreviewCache(
@@ -206,7 +210,8 @@ public sealed class SearchCommandHandler(
 					ContextLines,
 					explicitScope: plan.Selection.SelectedPaths is { Count: > 0 },
 					priorityState,
-					declarationPreviews);
+					declarationPreviews,
+					navigationIndex);
 			}
 
 			int effectiveMatches;
@@ -260,9 +265,13 @@ public sealed class SearchCommandHandler(
 							 .Where(path => !annotatedFiles.Contains(path)).ToArray())
 				{
 					navigationByFile.Remove(stale);
+					declarationIndexes.Remove(stale);
 				}
 				if (navigation is not null && annotatedFiles.Contains(relative))
+				{
 					navigationByFile[relative] = navigation;
+					if (navigationIndex is not null) declarationIndexes[relative] = navigationIndex;
+				}
 			}
 			return ValueTask.CompletedTask;
 		}
@@ -326,7 +335,8 @@ public sealed class SearchCommandHandler(
 			var symbols = McpSearchSymbols.Resolve(
 				rendered.WrittenHits,
 				navigationByFile,
-				cancellationToken);
+				cancellationToken,
+				declarationIndexes);
 			var preview = request.SearchBodyCharacters == 0
 				? null
 				: McpSearchSymbols.SelectDeclarationBodyPreview(

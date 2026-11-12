@@ -71,11 +71,11 @@ public sealed partial class McpServerProcessTests
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("merged-project");
-		// The doc comment above the type matches, and so does a member inside it. With context the
-		// two merge into one group whose first hit belongs to no declaration.
+		// A blank line separates the comment from the type. Context still merges it with a member's
+		// match, but the first hit belongs to no declaration.
 		workspace.WriteFile(
 			"merged-project/src/Doc.cs",
-			"namespace P;\n\n/// <summary>marker above the type</summary>\npublic sealed class Doc\n{\n\tpublic int Marker() => 1;\n}\n");
+			"namespace P;\n\n/// <summary>marker above the type</summary>\n\npublic sealed class Doc\n{\n\tpublic int Marker() => 1;\n}\n");
 		await using var server = await ActualMcpProcess.StartAsync(
 			project,
 			workspace.CreateDirectory("data"));
@@ -85,7 +85,7 @@ public sealed partial class McpServerProcessTests
 			"search_project",
 			new Dictionary<string, object?> { ["pattern"] = "marker|Marker", ["context_lines"] = 3 })));
 
-		// The comment on line 3 is outside the type declared on line 4, so the type's header must
+		// The comment on line 3 is outside the type declared on line 5, so the type's header must
 		// not sit above it and claim it.
 		var header = text.IndexOf("in P.Doc\n", StringComparison.Ordinal);
 		var comment = text.IndexOf("3:/// <summary>marker above the type", StringComparison.Ordinal);
