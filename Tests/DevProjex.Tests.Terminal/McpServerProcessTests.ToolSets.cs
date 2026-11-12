@@ -103,7 +103,10 @@ public sealed partial class McpServerProcessTests
 			.Select(static properties => properties.GetProperty("profile").GetProperty("description").GetString())
 			.ToArray();
 
-		Assert.NotEmpty(descriptions);
+		if (toolSet == "full")
+			Assert.NotEmpty(descriptions);
+		else
+			Assert.Empty(descriptions);
 		foreach (var description in descriptions)
 		{
 			Assert.NotNull(description);
