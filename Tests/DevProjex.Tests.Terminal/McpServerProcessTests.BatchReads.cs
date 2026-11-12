@@ -314,7 +314,7 @@ public sealed partial class McpServerProcessTests
 		StartPublishedMcpAsync(
 			TemporaryDirectory workspace,
 			string project,
-			IReadOnlyList<string> additionalArguments)
+			IReadOnlyList<string> additionalArguments, bool useDefaultToolSet = false)
 	{
 		var start = new ProcessStartInfo("dotnet")
 		{
@@ -329,6 +329,12 @@ public sealed partial class McpServerProcessTests
 		start.ArgumentList.Add("mcp");
 		start.ArgumentList.Add("--root");
 		start.ArgumentList.Add(project);
+		if (!useDefaultToolSet && !additionalArguments.Contains("--tool-set", StringComparer.Ordinal) &&
+			!additionalArguments.Any(static argument => argument.StartsWith("--tool-set=", StringComparison.Ordinal)))
+		{
+			start.ArgumentList.Add("--tool-set");
+			start.ArgumentList.Add("full");
+		}
 		foreach (var argument in additionalArguments)
 			start.ArgumentList.Add(argument);
 		start.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = workspace.CreateDirectory("data");

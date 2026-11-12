@@ -44,6 +44,8 @@ public sealed partial class McpServerProcessTests
 		};
 		startInfo.ArgumentList.Add(PublishedApplicationLocator.FindApplicationAssembly());
 		startInfo.ArgumentList.Add("mcp");
+		startInfo.ArgumentList.Add("--tool-set");
+		startInfo.ArgumentList.Add("full");
 		startInfo.ArgumentList.Add("--root");
 		startInfo.ArgumentList.Add(project);
 		startInfo.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = workspace.CreateDirectory("data");
@@ -120,6 +122,8 @@ public sealed partial class McpServerProcessTests
 		};
 		startInfo.ArgumentList.Add(PublishedApplicationLocator.FindApplicationAssembly());
 		startInfo.ArgumentList.Add("mcp");
+		startInfo.ArgumentList.Add("--tool-set");
+		startInfo.ArgumentList.Add("full");
 		startInfo.ArgumentList.Add("--root");
 		startInfo.ArgumentList.Add(project);
 		startInfo.ArgumentList.Add("--git-mode");
@@ -161,6 +165,8 @@ public sealed partial class McpServerProcessTests
 		};
 		startInfo.ArgumentList.Add(PublishedApplicationLocator.FindApplicationAssembly());
 		startInfo.ArgumentList.Add("mcp");
+		startInfo.ArgumentList.Add("--tool-set");
+		startInfo.ArgumentList.Add("full");
 		startInfo.ArgumentList.Add("--root");
 		startInfo.ArgumentList.Add(project);
 		if (agentExclusions)
@@ -235,6 +241,8 @@ public sealed partial class McpServerProcessTests
 		};
 		startInfo.ArgumentList.Add(PublishedApplicationLocator.FindApplicationAssembly());
 		startInfo.ArgumentList.Add("mcp");
+		startInfo.ArgumentList.Add("--tool-set");
+		startInfo.ArgumentList.Add("full");
 		startInfo.ArgumentList.Add("--root");
 		startInfo.ArgumentList.Add(project);
 		foreach (var exclusion in exclusions)
@@ -317,6 +325,8 @@ public sealed partial class McpServerProcessTests
 		};
 		startInfo.ArgumentList.Add(PublishedApplicationLocator.FindApplicationAssembly());
 		startInfo.ArgumentList.Add("mcp");
+		startInfo.ArgumentList.Add("--tool-set");
+		startInfo.ArgumentList.Add("full");
 		startInfo.ArgumentList.Add("--root");
 		startInfo.ArgumentList.Add(project);
 		startInfo.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = workspace.CreateDirectory("data");
@@ -510,6 +520,8 @@ public sealed partial class McpServerProcessTests
 		};
 		startInfo.ArgumentList.Add(PublishedApplicationLocator.FindApplicationAssembly());
 		startInfo.ArgumentList.Add("mcp");
+		startInfo.ArgumentList.Add("--tool-set");
+		startInfo.ArgumentList.Add("full");
 		startInfo.ArgumentList.Add("--root");
 		startInfo.ArgumentList.Add(project);
 		if (unrestricted)
@@ -591,6 +603,8 @@ public sealed partial class McpServerProcessTests
 		};
 		startInfo.ArgumentList.Add(PublishedApplicationLocator.FindApplicationAssembly());
 		startInfo.ArgumentList.Add("mcp");
+		startInfo.ArgumentList.Add("--tool-set");
+		startInfo.ArgumentList.Add("full");
 		startInfo.ArgumentList.Add("--root");
 		startInfo.ArgumentList.Add(project);
 		startInfo.ArgumentList.Add("--unrestricted");
@@ -679,6 +693,8 @@ public sealed partial class McpServerProcessTests
 		};
 		startInfo.ArgumentList.Add(application);
 		startInfo.ArgumentList.Add("mcp");
+		startInfo.ArgumentList.Add("--tool-set");
+		startInfo.ArgumentList.Add("full");
 		startInfo.ArgumentList.Add("--root");
 		startInfo.ArgumentList.Add(project);
 		if (hidePrivateData)
@@ -839,6 +855,8 @@ public sealed partial class McpServerProcessTests
 		startInfo.ArgumentList.Add(application);
 		startInfo.ArgumentList.Add(TerminalTransportPolicyProtocol.TerminalCommandArgument);
 		startInfo.ArgumentList.Add("mcp");
+		startInfo.ArgumentList.Add("--tool-set");
+		startInfo.ArgumentList.Add("full");
 		startInfo.ArgumentList.Add("--root");
 		startInfo.ArgumentList.Add(root);
 		startInfo.ArgumentList.Add("--allow-remote");
@@ -917,6 +935,8 @@ public sealed partial class McpServerProcessTests
 			WorkingDirectory = project
 		};
 		startInfo.ArgumentList.Add("mcp");
+		startInfo.ArgumentList.Add("--tool-set");
+		startInfo.ArgumentList.Add("full");
 		startInfo.ArgumentList.Add("--root");
 		startInfo.ArgumentList.Add(project);
 		startInfo.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = workspace.CreateDirectory("data");
@@ -1280,6 +1300,8 @@ public sealed partial class McpServerProcessTests
 		};
 		startInfo.ArgumentList.Add(application);
 		startInfo.ArgumentList.Add("mcp");
+		startInfo.ArgumentList.Add("--tool-set");
+		startInfo.ArgumentList.Add("full");
 		startInfo.ArgumentList.Add("--root");
 		startInfo.ArgumentList.Add(project);
 		startInfo.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = workspace.CreateDirectory("data");

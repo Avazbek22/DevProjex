@@ -9,6 +9,19 @@ namespace DevProjex.Tests.Terminal;
 public sealed class CliV1ParserRegressionTests
 {
 	[Theory]
+	[InlineData("mcp", "reduced")]
+	[InlineData("mcp|--tool-set|full", "full")]
+	[InlineData("mcp|--tool-set|reduced", "reduced")]
+	public void McpCatalogDefaultsToReducedAndKeepsBothExplicitChoices(string invocation, string expected)
+	{
+		var root = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();
+		var option = ResolveCommand(root, ["mcp"]).Options.Single(static option => option.Name == "--tool-set");
+		var parsed = root.Parse(invocation.Split('|'));
+		Assert.Empty(parsed.Errors);
+		Assert.Equal(expected, ReadCanonicalToken(Assert.IsType<OptionResult>(parsed.GetResult(option)), option));
+	}
+
+	[Theory]
 	[InlineData("analyze|.|--hide-secrets|on|--no-strip-comments")]
 	[InlineData("analyze|.|-p|standard|-r|src|-e|.cs|-s|src/a.cs|-x|smart-ignore")]
 	[InlineData("tree|https://github.com/owner/repo|-b|main|--force|-o|tree.txt")]

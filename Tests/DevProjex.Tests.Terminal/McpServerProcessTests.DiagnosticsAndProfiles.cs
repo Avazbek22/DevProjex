@@ -638,7 +638,8 @@ public sealed partial class McpServerProcessTests
 			bool allowFileGitTransport = false,
 			IReadOnlyDictionary<string, string>? environment = null,
 			Implementation? clientInfo = null,
-			string? executable = null)
+			string? executable = null,
+			bool useDefaultToolSet = false)
 		{
 			var startInfo = new ProcessStartInfo(executable ?? "dotnet")
 			{
@@ -662,6 +663,12 @@ public sealed partial class McpServerProcessTests
 			startInfo.ArgumentList.Add("mcp");
 			startInfo.ArgumentList.Add("--root");
 			startInfo.ArgumentList.Add(project);
+			if (!useDefaultToolSet && !(arguments ?? []).Contains("--tool-set", StringComparer.Ordinal) &&
+				!(arguments ?? []).Any(static argument => argument.StartsWith("--tool-set=", StringComparison.Ordinal)))
+			{
+				startInfo.ArgumentList.Add("--tool-set");
+				startInfo.ArgumentList.Add("full");
+			}
 			foreach (var argument in arguments ?? [])
 				startInfo.ArgumentList.Add(argument);
 			startInfo.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = dataRoot;
