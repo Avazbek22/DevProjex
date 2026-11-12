@@ -33,8 +33,8 @@ Related documents:
 | [2026-11-07](2026-11-07.md) | #488 and #491 for narrowed views; check before release; v5.2.2 against master and Repomix on fourteen tasks |
 | [2026-11-08](2026-11-08.md) | #502, #503 and #505 measured; #507 and #508 closed; keys and judge corrected; #509 to #513 measured |
 | [2026-11-09](2026-11-09.md) | #516 and #518 kept, #519 closed; blind run on rich and FluentValidation; #517 and #520 |
-| [2026-11-10](2026-11-10.md) | `get_tree` depth from the requested path (#533) and the `Exported by:` line (#534) measured and kept; new ranking baseline |
-| [2026-11-12](2026-11-12.md) | Batch reads that return structure (#545), measured twice with Codex CLI; a first difference in named files did not repeat |
+| [2026-11-10](2026-11-10.md) | `get_tree` depth from the requested path (#533) and the `Exported by:` line (#534) measured and kept; new ranking baseline; first Codex CLI series on the 5.2 release, v5.2.2 and Repomix 1.19.0; keys checked, missed paths classified, `list_projects` made optional (#544) |
+| [2026-11-12](2026-11-12.md) | Batch reads that return structure (#545), measured twice with Codex CLI; a lighter catalog (#546) and comment hits with structure members (#547), measured without a model and in one series of three builds; the same build measured twice; all eighteen tasks with Claude Haiku on the 5.2 release, v5.2.2 and Repomix 1.19.0 |
 
 ## How the days connect
 
@@ -63,21 +63,31 @@ Related documents:
 11. **Fixes from the analysis, measured** (10 November). The tree depth and package manifest
     fixes removed empty subtrees and found the manifest in every session, without adding reads;
     the first series run from `tools/AgentBenchmark`.
-
-12. **A difference measured twice** (12 November). Batch reads that return structure removed
+12. **A second client** (10 November). The stand gained Codex CLI arms. On the same tasks Codex
+    makes fewer than half of the calls Claude Haiku makes. Its first series placed v5.2.2 ahead
+    of the 5.2 release in named files and far ahead of Repomix in calls and context. Most
+    required paths that an answer missed had been shown by the server.
+13. **A difference measured twice** (12 November). Batch reads that return structure removed
     repeated requests and most tool errors. The first series also showed fewer named files; ten
     new sessions per task, judged against thresholds set beforehand, did not.
+14. **The same build measured twice** (12 November). A lighter catalog and member lists were
+    checked on recorded calls first, then in one series of three builds. Two thresholds were
+    crossed by less than the difference between two runs of one build.
+15. **Three sides with Claude** (12 November). All eighteen tasks on the 5.2 release, v5.2.2 and
+    Repomix 1.19.0, with the judge. Haiku asks for one file per call, so the batch changes
+    measured with Codex hardly appear, and most answers ask for the places that use a name.
 
 ## How the sessions were run
 
 - **Stand.** [tools/AgentBenchmark](../../tools/AgentBenchmark/README.md) reproduces the November
   series from a checkout: pinned clones, host builds, runner, key metrics, judge and report.
 - **Client.** Headless Claude Code (`claude -p`) with `--strict-mcp-config` and no built-in file
-  tools, so the agent can only use the MCP server under test. The series of 12 November ran on
-  Codex CLI under the stand's isolation profile, with the same restriction.
+  tools, so the agent can only use the MCP server under test. The Codex series of 10 and 12
+  November ran on Codex CLI under the stand's isolation profile, with the same restriction.
 - **Model.** Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) for every session and every judge
   call, with two exceptions: the four-server run of 10 September used a larger Claude model, and
-  the Codex series of 12 November used `gpt-6-luna` at low reasoning effort, without a judge.
+  the Codex series of 10 and 12 November used `gpt-6-luna` at low reasoning effort, without a
+  judge. Their costs are calculated from published API prices for the recorded tokens.
 - **Anonymity.** Each server is registered under a neutral name (`server_b`, `server_m` and so on).
   The agent does not know which product it is using. The judge sees the answers as `Answer A`
   and `Answer B`, with product and tool names removed.
@@ -106,9 +116,15 @@ Related documents:
 - **Judge tables** have four columns: pairs won by the first build, pairs won by the second, ties,
   and order-dependent pairs. The judge reads every pair twice with the answers swapped; a pair
   counts as won only when both readings agree, otherwise it is order-dependent.
-- **Sample size.** Two or three sessions per task and build. On identical code the judge has
-  split 6 to 1 over 12 pairs, and one build on one task has varied by a factor of two in tokens.
-  A difference smaller than that is not a result.
+- **Missed paths** (from 10 November): for a required path that an answer did not name, whether
+  the server never showed it, listed it, or showed its content.
+- **Fixed part of a request** (12 November): the context of a session fitted as a fixed part for
+  each model request plus the tool output read again by later requests. It estimates what the
+  system prompt and the tool catalog cost on every call.
+- **Sample size.** Two or three sessions per task and build, unless a file says otherwise. On
+  identical code the judge has split 6 to 1 over 12 pairs, one build on one task has varied by a
+  factor of two in tokens, and ten sessions per task have differed by 18 calls in one task and
+  by 20 of 230 in total. A difference smaller than that is not a result.
 
 ## Rules established by these runs
 
@@ -131,3 +147,11 @@ Related documents:
    150 required files against 147 over five sessions per task. Ten new sessions per task, with
    thresholds fixed before the run, gave 121 of 130 against 119. Decide on the new sessions
    only; numbers pooled with the first run repeat the difference that prompted the second.
+7. **Measure the same build twice before choosing a threshold.** On 2026-11-12 two series of ten
+   sessions per task on one build differed by 18 calls in one task and by 20 in total. A
+   threshold of 10 calls per task was crossed by spread alone.
+8. **Measure a change with the client it is for.** Codex CLI sends several files in one
+   `get_file` call and makes about six calls per session; Claude Haiku asks for one file per call
+   and makes about seventeen. A catalog 5,259 characters shorter gave about 400 tokens per
+   request with Codex; with Claude the fixed part of a turn was 1,675 tokens larger for a tool
+   list 8,701 characters longer.
