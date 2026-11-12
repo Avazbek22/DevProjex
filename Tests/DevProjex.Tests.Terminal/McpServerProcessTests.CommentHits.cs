@@ -79,6 +79,27 @@ public sealed partial class McpServerProcessTests
 		Assert.DoesNotContain("return 123", body, StringComparison.Ordinal);
 	}
 
+	[Fact]
+	public async Task RealProcessHeadsAMergedGroupWithItsLeadingDeclarationComment()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("adjacent-comment-project");
+		workspace.WriteFile("adjacent-comment-project/Doc.cs",
+			"namespace P;\n\n/// <summary>marker above the type</summary>\npublic sealed class Doc\n{\n\tpublic int Marker() => 1;\n}\n");
+		await using var server = await ActualMcpProcess.StartAsync(project, workspace.CreateDirectory("data"));
+		var result = await CallAsync(server, "search_project", new() { ["pattern"] = "marker|Marker", ["context_lines"] = 3 });
+		Assert.NotEqual(true, result.IsError);
+		var text = Normalize(AllProcessText(result));
+		var header = text.IndexOf("in P.Doc\n", StringComparison.Ordinal);
+		var comment = text.IndexOf("3:/// <summary>marker above the type", StringComparison.Ordinal);
+		Assert.True(header >= 0 && comment > header, text);
+		Assert.Contains("Doc.cs P.Doc 4-7", text, StringComparison.Ordinal);
+		Assert.Contains("Doc.cs P.Doc.Marker 6-6", text, StringComparison.Ordinal);
+		var body = ExtractBestDeclarationBody(text);
+		Assert.Contains("public int Marker()", body, StringComparison.Ordinal);
+		Assert.DoesNotContain("summary", body, StringComparison.Ordinal);
+	}
+
 	private static TerminalTestProcessResult RunCommentSearch(TemporaryDirectory workspace, string project, string pattern)
 	{
 		var start = new System.Diagnostics.ProcessStartInfo("dotnet")
