@@ -141,6 +141,8 @@ Live context uses `--live`; **Standard** connects the same server but does not f
 
 Nine read-only tools cover the whole workflow: `list_projects`, `get_tree`, `analyze`, `search_project`, `related_files`, `get_file`, `get_diff`, `pack_context`, and `read_pack`.
 
+By default the server publishes the tools an agent reaches for in everyday work, `get_tree`, `search_project`, `get_file`, `related_files`, `get_diff` and `read_pack`, so the tool list costs the model less on every request. Start it with `--tool-set full` to publish `analyze` and `pack_context` as well.
+
 * `search_project` finds text or declarations by name, and `get_file` reads an exact line range, one declaration, or up to sixteen files in one call. A large file comes back as its start and a structure with line ranges, so the agent reads only the part it needs.
 * `related_files` answers "what does this file actually use, and who uses it" from real imports, for one file, several seeds, or the files in a folder, so following a thread never widens the selection.
 * `get_diff` reviews a change: staged files, current changes, or a ref-to-ref diff as unified hunks, largest changes first, with secrets masked in both versions, so the agent reads only the lines that changed.
