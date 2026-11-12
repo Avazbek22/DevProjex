@@ -37,9 +37,9 @@ public sealed partial class McpServerProcessTests
 			Assert.Equal(16, fileSchema.GetProperty("path").GetProperty("oneOf")[1].GetProperty("maxItems").GetInt32());
 			Assert.Equal(16, fileSchema.GetProperty("paths").GetProperty("oneOf")[1].GetProperty("maxItems").GetInt32());
 			Assert.Equal(16, fileSchema.GetProperty("requests").GetProperty("maxItems").GetInt32());
-			Assert.Equal(toolSet == "full" ? 99 : 100,
+			Assert.Equal(toolSet == "full" ? 86 : 87,
 				file.Description!.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length);
-			Assert.Equal(toolSet == "full" ? 706 : 705, file.Description.Length);
+			Assert.Equal(toolSet == "full" ? 623 : 622, file.Description.Length);
 			var projects = tools.Single(tool => tool.Name == "list_projects");
 			Assert.Equal(70, projects.Description!.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length);
 			Assert.Equal(467, projects.Description.Length);

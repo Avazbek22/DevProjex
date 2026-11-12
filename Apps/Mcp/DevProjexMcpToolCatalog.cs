@@ -14,20 +14,22 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	public DevProjexMcpToolCatalog(DevProjexMcpTools target, bool allowRemote, bool agentExclusions = false,
 		McpToolSet toolSet = McpToolSet.Full,
 		int searchBodyCharacters = DevProjexMcpTools.MaximumSearchDeclarationBodyCharacters,
-		bool live = false)
+		bool live = false, int rootCount = 1)
 	{
 		ArgumentNullException.ThrowIfNull(target);
+		var publishProject = rootCount > 1 || allowRemote;
+		var addressProperties = AddressProperties(publishProject, allowRemote);
 		_tools =
 		[
 			Create(target, nameof(DevProjexMcpTools.ListProjects), "list_projects", "List projects", ListProjectsInput, ListProjectsOutput),
-			Create(target, nameof(DevProjexMcpTools.GetTree), "get_tree", "Get project tree", GetTreeInput(agentExclusions), openWorld: allowRemote),
-			Create(target, nameof(DevProjexMcpTools.Analyze), "analyze", "Analyze project", AnalyzeInput(agentExclusions), AnalyzeOutput, openWorld: allowRemote),
-			Create(target, nameof(DevProjexMcpTools.PackContext), "pack_context", "Pack project context", PackContextInput(agentExclusions), largeResult: true, idempotent: false, openWorld: allowRemote),
+			Create(target, nameof(DevProjexMcpTools.GetTree), "get_tree", "Get project tree", GetTreeInput(agentExclusions, addressProperties), openWorld: allowRemote, publishProject: publishProject),
+			Create(target, nameof(DevProjexMcpTools.Analyze), "analyze", "Analyze project", AnalyzeInput(agentExclusions, addressProperties), AnalyzeOutput, openWorld: allowRemote, publishProject: publishProject),
+			Create(target, nameof(DevProjexMcpTools.PackContext), "pack_context", "Pack project context", PackContextInput(agentExclusions, addressProperties), largeResult: true, idempotent: false, openWorld: allowRemote, publishProject: publishProject),
 			Create(target, nameof(DevProjexMcpTools.ReadPack), "read_pack", "Read context pack", ReadPackInput, largeResult: true),
-			Create(target, nameof(DevProjexMcpTools.SearchProject), "search_project", "Search project", SearchInput(agentExclusions), openWorld: allowRemote),
-			Create(target, nameof(DevProjexMcpTools.RelatedFiles), "related_files", "Find related files", RelatedFilesInput(agentExclusions), largeResult: true, idempotent: false, openWorld: allowRemote),
-			Create(target, nameof(DevProjexMcpTools.GetFile), "get_file", "Get project file", GetFileInput(agentExclusions), openWorld: allowRemote),
-			Create(target, nameof(DevProjexMcpTools.GetDiff), "get_diff", "Get project diff", GetDiffInput(agentExclusions), openWorld: allowRemote)
+			Create(target, nameof(DevProjexMcpTools.SearchProject), "search_project", "Search project", SearchInput(agentExclusions, addressProperties), openWorld: allowRemote, publishProject: publishProject),
+			Create(target, nameof(DevProjexMcpTools.RelatedFiles), "related_files", "Find related files", RelatedFilesInput(agentExclusions, addressProperties), largeResult: true, idempotent: false, openWorld: allowRemote, publishProject: publishProject),
+			Create(target, nameof(DevProjexMcpTools.GetFile), "get_file", "Get project file", GetFileInput(agentExclusions, addressProperties), openWorld: allowRemote, publishProject: publishProject),
+			Create(target, nameof(DevProjexMcpTools.GetDiff), "get_diff", "Get project diff", GetDiffInput(agentExclusions, addressProperties), openWorld: allowRemote, publishProject: publishProject)
 		];
 		var search = _tools.Single(tool => tool.ProtocolTool.Name == "search_project").ProtocolTool;
 		search.Description = searchBodyCharacters == 0
@@ -92,14 +94,15 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 		string? outputSchema = null,
 		bool largeResult = false,
 		bool idempotent = true,
-		bool openWorld = false)
+		bool openWorld = false,
+		bool publishProject = true)
 	{
 		var method = typeof(DevProjexMcpTools).GetMethod(
 			methodName,
 			BindingFlags.Instance | BindingFlags.Public) ??
 					 throw new MissingMethodException(typeof(DevProjexMcpTools).FullName, methodName);
 		var description = method.GetCustomAttribute<System.ComponentModel.DescriptionAttribute>()?.Description;
-		if (name is "get_tree" or "analyze" or "pack_context" or "search_project" or "related_files" or "get_file" or "get_diff")
+		if (publishProject && name is ("get_tree" or "analyze" or "pack_context" or "search_project" or "related_files" or "get_file" or "get_diff"))
 			description += ProjectAddressDescription;
 		var options = new McpServerToolCreateOptions
 		{
@@ -189,6 +192,10 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	  "description": "Selects the tree representation; markdown is the compact default."
 	}
 	""";
+
+	private static string AddressProperties(bool publishProject, bool publishBranch) =>
+		(publishProject ? CompactProjectProperty + "," + Environment.NewLine : string.Empty) +
+		(publishBranch ? CompactBranchProperty + "," + Environment.NewLine : string.Empty);
 
 	private const string CompactProjectProperty = """
 	"project": {
@@ -355,13 +362,11 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 
 	private static readonly string ListProjectsInput = EmptyInput;
 
-	private static string GetTreeInput(bool agentExclusions) => $$"""
+	private static string GetTreeInput(bool agentExclusions, string addressProperties) => $$"""
 	{
 	  "type": "object",
 	  "properties": {
-	    {{CompactProjectProperty}},
-	    {{CompactBranchProperty}},
-	    {{CompactPathsProperty}},
+	    {{addressProperties}}	    {{CompactPathsProperty}},
 	    {{CompactIncludeProperty}},
 	    {{CompactExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
 	    {{CompactTrackedOnlyProperty}},
@@ -377,13 +382,11 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	}
 	""";
 
-	private static string AnalyzeInput(bool agentExclusions) => $$"""
+	private static string AnalyzeInput(bool agentExclusions, string addressProperties) => $$"""
 	{
 	  "type": "object",
 	  "properties": {
-	    {{CompactProjectProperty}},
-	    {{CompactBranchProperty}},
-	    {{CompactPathsProperty}},
+	    {{addressProperties}}	    {{CompactPathsProperty}},
 	    {{CompactIncludeProperty}},
 	    {{CompactExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
 	    {{CompactProfileProperty}},
@@ -401,13 +404,11 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	}
 	""";
 
-	private static string PackContextInput(bool agentExclusions) => $$"""
+	private static string PackContextInput(bool agentExclusions, string addressProperties) => $$"""
 	{
 	  "type": "object",
 	  "properties": {
-	    {{CompactProjectProperty}},
-	    {{CompactBranchProperty}},
-	    {{CompactPathsProperty}},
+	    {{addressProperties}}	    {{CompactPathsProperty}},
 	    {{CompactIncludeProperty}},
 	    {{CompactExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
 	    {{CompactProfileProperty}},
@@ -441,13 +442,11 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	}
 	""";
 
-	private static string SearchInput(bool agentExclusions) => $$"""
+	private static string SearchInput(bool agentExclusions, string addressProperties) => $$"""
 	{
 	  "type": "object",
 	  "properties": {
-	    {{CompactProjectProperty}},
-	    {{CompactBranchProperty}},
-	    "pattern": { "type": "string", "minLength": 1, "maxLength": 4096, "description": "Required .NET regex with a 2-second timeout over redacted file content, never paths; use get_tree include_patterns for names. Text inserted by redaction never matches." },
+	    {{addressProperties}}	    "pattern": { "type": "string", "minLength": 1, "maxLength": 4096, "description": "Required .NET regex with a 2-second timeout over redacted file content, never paths; use get_tree include_patterns for names. Text inserted by redaction never matches." },
 	    {{CompactPathsProperty}},
 	    {{CompactIncludeProperty}},
 	    {{CompactExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
@@ -464,13 +463,11 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	}
 	""";
 
-	private static string GetFileInput(bool agentExclusions) => $$"""
+	private static string GetFileInput(bool agentExclusions, string addressProperties) => $$"""
 	{
 	  "type": "object",
 	  "properties": {
-	    {{CompactProjectProperty}},
-	    {{CompactBranchProperty}},
-	    {{CompactProfileProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
+	    {{addressProperties}}	    {{CompactProfileProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
 	    "path": {
 	      "description": "One file, or an array of up to sixteen whole files. Give path, paths, or requests; path and paths may accompany requests and add whole-file reads. Names an existing selected file; Markdown escapes from the default get_tree format are accepted, while format=text supplies literal names.",
 	      "oneOf": [
@@ -524,13 +521,11 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	}
 	""";
 
-	private static string RelatedFilesInput(bool agentExclusions) => $$"""
+	private static string RelatedFilesInput(bool agentExclusions, string addressProperties) => $$"""
 	{
 	  "type": "object",
 	  "properties": {
-	    {{CompactProjectProperty}},
-	    {{CompactBranchProperty}},
-	    "path": {
+	    {{addressProperties}}	    "path": {
 	      "description": "Seed file, or up to 16 seed files, within the effective selection; a folder stands for the files directly inside it.",
 	      "oneOf": [
 	        { "type": "string", "minLength": 1, "maxLength": 4096 },
@@ -550,13 +545,11 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	}
 	""";
 
-	private static string GetDiffInput(bool agentExclusions) => $$"""
+	private static string GetDiffInput(bool agentExclusions, string addressProperties) => $$"""
 	{
 	  "type": "object",
 	  "properties": {
-	    {{CompactProjectProperty}},
-	    {{CompactBranchProperty}},
-	    {{CompactProfileProperty}},
+	    {{addressProperties}}	    {{CompactProfileProperty}},
 	    "git_scope": {
 	      "description": "Chooses the comparison: changes is HEAD to the working tree including untracked files, staged is HEAD to the index, and diff:<ref>..<ref> compares two commits.",
 	      "default": "changes",

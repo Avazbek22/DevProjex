@@ -2654,7 +2654,7 @@ public sealed partial class McpServerIntegrationTests
 		{
 			var schema = tool.ProtocolTool.InputSchema;
 			Assert.Equal(
-				expectedParameters[tool.Name],
+				expectedParameters[tool.Name].Where(static name => name is not ("project" or "branch")),
 				schema.GetProperty("properties").EnumerateObject().Select(static property => property.Name));
 			var required = schema.TryGetProperty("required", out var requiredElement)
 				? requiredElement.EnumerateArray().Select(static item => item.GetString()).ToArray()
@@ -8042,6 +8042,12 @@ public sealed partial class McpServerIntegrationTests
 		foreach (var tool in tools.Where(static tool => tool.Name is
 			"get_tree" or "analyze" or "pack_context" or "search_project" or "related_files" or "get_file" or "get_diff"))
 		{
+			if (!allowRemote)
+			{
+				Assert.DoesNotContain("Project:", tool.ProtocolTool.Description, StringComparison.Ordinal);
+				Assert.False(tool.ProtocolTool.InputSchema.GetProperty("properties").TryGetProperty("project", out _));
+				continue;
+			}
 			Assert.Contains("omit for one local root", tool.ProtocolTool.Description,
 				StringComparison.Ordinal);
 			Assert.Contains("unique name", tool.ProtocolTool.Description, StringComparison.Ordinal);
