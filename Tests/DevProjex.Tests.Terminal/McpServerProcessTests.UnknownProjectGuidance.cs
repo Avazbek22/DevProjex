@@ -14,7 +14,7 @@ public sealed partial class McpServerProcessTests
 	public async Task RealProcessUnknownProjectExplainsHowToAddressTheConfiguredRoots(bool multipleRoots, string spelling)
 	{
 		const string marker = "Zq9UnknownProjectMarker";
-		const string singleProjectHint = " This server serves one project; omit project or pass \"#0\".";
+		const string singleProjectHint = "DPX-MCP-UNKNOWN-PROJECT: 'project' does not name the configured root. One local root is configured: omit 'project'.";
 		using var workspace = new TemporaryDirectory();
 		var first = workspace.CreateDirectory("first-project");
 		var second = workspace.CreateDirectory("second-project");
@@ -36,14 +36,17 @@ public sealed partial class McpServerProcessTests
 		var text = AllProcessText(response);
 		Assert.StartsWith("DPX-MCP-UNKNOWN-PROJECT:", text, StringComparison.Ordinal);
 		Assert.DoesNotContain(marker, text, StringComparison.Ordinal);
-		Assert.Single(Regex.Matches(text, "Call list_projects", RegexOptions.None, TimeSpan.FromSeconds(2)));
 		if (multipleRoots)
 		{
-			Assert.DoesNotContain(singleProjectHint, text, StringComparison.Ordinal);
+			Assert.Single(Regex.Matches(text, "Call list_projects", RegexOptions.None, TimeSpan.FromSeconds(2)));
+			Assert.Equal("DPX-MCP-UNKNOWN-PROJECT: project is not an allowed root name, path, or index. Call list_projects and use a listed project index: #1, #2.", SpotlightBody(Normalize(text)).TrimEnd());
 			Assert.Contains("Call list_projects and use a listed project index:", text, StringComparison.Ordinal);
 		}
 		else
-			Assert.EndsWith(singleProjectHint, SpotlightBody(Normalize(text)).TrimEnd(), StringComparison.Ordinal);
+		{
+			Assert.DoesNotContain("list_projects", text, StringComparison.Ordinal);
+			Assert.Equal(singleProjectHint, SpotlightBody(Normalize(text)).TrimEnd());
+		}
 
 		var valid = await CallAsync(server, "get_tree", new Dictionary<string, object?>
 		{

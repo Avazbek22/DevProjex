@@ -113,7 +113,9 @@ public sealed class McpRootRegistry
 				$"{McpErrorCodes.InvalidArguments}: 'project' is written as a path that names a host. " +
 				"Such a form is refused before 'project' is resolved against the allowed roots, so that " +
 				"naming one cannot make the server reach it. " +
-				$"Call list_projects and use a listed project index: {FormatRoots()}.");
+				(_roots.Count == 1
+					? "One local root is configured: omit 'project'."
+					: $"Call list_projects and use a listed project index: {FormatRoots()}."));
 		}
 
 		string physical;
@@ -402,9 +404,10 @@ public sealed class McpRootRegistry
 	private McpToolException UnknownProject() =>
 		new(
 			McpErrorCodes.UnknownProject,
-			$"{McpErrorCodes.UnknownProject}: project is not an allowed root name, path, or index. " +
-			$"Call list_projects and use a listed project index: {FormatRoots()}." +
-			(_roots.Count == 1 ? " This server serves one project; omit project or pass \"#0\"." : string.Empty));
+			_roots.Count == 1
+				? "DPX-MCP-UNKNOWN-PROJECT: 'project' does not name the configured root. One local root is configured: omit 'project'."
+				: $"{McpErrorCodes.UnknownProject}: project is not an allowed root name, path, or index. " +
+				  $"Call list_projects and use a listed project index: {FormatRoots()}.");
 
 	private McpToolException RootViolation(string path) =>
 		new(
