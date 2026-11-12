@@ -172,6 +172,9 @@ def main():
     from transcripts import recorded_calls, recorded_root
     folder = Path(args.session)
     summary = json.loads((folder / 'summary.json').read_text(encoding='utf-8'))
+    if summary.get('kind') == 'builtin':
+        print('Built-in arm: path attribution is skipped.')
+        return
     tasks = benchlib.load_tasks(args.tasks_file)
     task = next(task for task in tasks['tasks'] if task['id'] == summary['task'])
     version = args.key_version if args.key_version is not None else summary.get('keyVersion', 1)

@@ -139,7 +139,7 @@ def rewrite_arguments(value, original, current, ids=None):
     return value
 
 
-def replay_session(folder, command, corpus, output, append_root=True):
+def replay_session(folder, command, corpus, output, append_root=True, server_args=()):
     original = recorded_root(folder)
     if not original:
         raise ValueError('The recorded prompt does not identify a corpus')
@@ -148,7 +148,7 @@ def replay_session(folder, command, corpus, output, append_root=True):
     data_root.mkdir(parents=True)
     client, rows, ids = None, [], {}
     try:
-        client = StdioClient([*command, *(['mcp', '--root', str(corpus)] if append_root else [])], corpus, data_root)
+        client = StdioClient([*command, *(['mcp', '--root', str(corpus)] if append_root else []), *server_args], corpus, data_root)
         (output / 'initialize.json').write_text(json.dumps(client.initialization, indent=1), encoding='utf-8')
         (output / 'tools.json').write_text(json.dumps(client.request('tools/list', {}), indent=1), encoding='utf-8')
         for call in recorded_calls(Path(folder) / 'stream.jsonl'):
@@ -204,15 +204,24 @@ def main():
     parser.add_argument('--corpus', required=True)
     parser.add_argument('--host', required=True)
     parser.add_argument('--other-host')
+    parser.add_argument('--host-arg', action='append', default=[])
+    parser.add_argument('--other-host-arg', action='append', default=[])
     parser.add_argument('--recorded', action='store_true', help='compare the host to the original recorded text')
     parser.add_argument('--output', required=True)
     args = parser.parse_args()
+    from transcripts import builtin_session
+    if builtin_session(args.session):
+        print('Built-in arm: replay is skipped.')
+        return
     output = Path(args.output)
-    left = replay_session(args.session, [args.host], args.corpus, output / 'first')
+    output.mkdir(parents=True, exist_ok=True)
+    (output / 'manifest.json').write_text(json.dumps({'host': args.host, 'hostArgs': args.host_arg,
+        'otherHost': args.other_host or args.host, 'otherHostArgs': args.other_host_arg}, indent=1), encoding='utf-8')
+    left = replay_session(args.session, [args.host], args.corpus, output / 'first', server_args=args.host_arg)
     if args.recorded:
         right, left = left, recorded_calls(Path(args.session) / 'stream.jsonl')
     else:
-        right = replay_session(args.session, [args.other_host or args.host], args.corpus, output / 'second')
+        right = replay_session(args.session, [args.other_host or args.host], args.corpus, output / 'second', server_args=args.other_host_arg)
     comparison = compare_calls(left, right, [recorded_root(args.session), args.corpus,
                                            output / 'first/state', output / 'second/state'])
     (output / 'comparison.json').write_text(json.dumps(comparison, indent=1), encoding='utf-8')

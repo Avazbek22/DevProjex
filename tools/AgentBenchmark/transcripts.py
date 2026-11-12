@@ -18,7 +18,7 @@ def text_content(value):
     return ''
 
 
-def recorded_calls(path):
+def recorded_calls(path, include_builtin=False):
     """Keep invocation order, join Claude results by ID, and admit completed Codex items once."""
     calls, pending, completed, codex_calls = [], {}, set(), {}
     with Path(path).open(encoding='utf-8') as source:
@@ -45,9 +45,12 @@ def recorded_calls(path):
                                       or (item.get('result') or {}).get('isError')))
             if event.get('type') == 'assistant':
                 for block in event.get('message', {}).get('content', []):
-                    if block.get('type') != 'tool_use' or not block.get('name', '').startswith('mcp__'):
+                    if block.get('type') != 'tool_use' or not (include_builtin or block.get('name', '').startswith('mcp__')):
                         continue
-                    _, server, tool = block['name'].split('__', 2)
+                    if block['name'].startswith('mcp__'):
+                        _, server, tool = block['name'].split('__', 2)
+                    else:
+                        server, tool = None, block['name']
                     call = dict(sequence=len(calls) + 1, id=block['id'], server=server, tool=tool,
                                 arguments=block.get('input', {}), text='', result=None, is_error=False)
                     calls.append(call)
@@ -70,3 +73,24 @@ def recorded_root(folder):
     match = re.search(r'local checkout at this absolute path:\s*\n([^\r\n]+)',
                       prompt.read_text(encoding='utf-8'))
     return match.group(1).strip() if match else None
+
+
+def builtin_session(folder):
+    path = Path(folder) / 'summary.json'
+    return path.is_file() and json.loads(path.read_text(encoding='utf-8')).get('kind') == 'builtin'
+
+
+def first_request_context(path):
+    with Path(path).open(encoding='utf-8') as source:
+        for line in source:
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if event.get('type') == 'assistant':
+                usage = event.get('message', {}).get('usage')
+                if usage is None:
+                    return None
+                return sum(usage.get(key, 0) for key in
+                           ('input_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens'))
+    return None

@@ -18,6 +18,7 @@
     "cacheCreation": 40,
     "costUsd": 0.011,
     "model": "claude-haiku-4-5-20251001",
+    "firstRequestContextTokens": null,
     "totalContextTokens": 178
   },
   "toolCalls": [
