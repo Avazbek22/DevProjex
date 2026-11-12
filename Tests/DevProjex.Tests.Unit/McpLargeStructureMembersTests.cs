@@ -60,6 +60,21 @@ public sealed class McpLargeStructureMembersTests
 	}
 
 	[Fact]
+	public void AParentWhoseFirstMemberCannotFitKeepsOnlyItsCount()
+	{
+		var declarations = Parents([200, 100, 80], 15)
+			.Select(declaration => declaration.Owner == "Root1"
+				? declaration with { Name = declaration.Name + new string('x', 2_400) } : declaration).ToArray();
+		var map = Build(declarations);
+		var expected = new StringBuilder("1-200 Root0 (type, 15 members)\n");
+		for (var member = 0; member < 15; member++)
+			expected.Append($"  {member + 2}-{member + 2} M{member} (method)\n");
+		expected.Append("201-300 Root1 (type, 15 members)\n301-380 Root2 (type, 15 members)\n");
+		Assert.Equal(expected.ToString(), map);
+		Assert.DoesNotContain("more)", map, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void ATruncatedTopLevelNeverGetsMembers()
 	{
 		var map = Build(Parents(Enumerable.Repeat(60, 90).ToArray(), 1));

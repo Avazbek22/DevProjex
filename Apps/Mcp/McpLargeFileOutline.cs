@@ -139,7 +139,7 @@ internal static partial class McpLargeFileOutlineBuilder
 				expansion.Append(child);
 				count++;
 			}
-			if (count < children.Length)
+			if (count > 0 && count < children.Length)
 			{
 				var tail = MemberTail(children.Length - count);
 				if (characters + expansion.Length + tail.Length <= MaximumMapCharacters)
