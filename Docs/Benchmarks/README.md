@@ -35,6 +35,8 @@ Related documents:
 | [2026-11-09](2026-11-09.md) | #516 and #518 kept, #519 closed; blind run on rich and FluentValidation; #517 and #520 |
 | [2026-11-10](2026-11-10.md) | `get_tree` depth from the requested path (#533) and the `Exported by:` line (#534) measured and kept; new ranking baseline |
 
+| [2026-11-12](2026-11-12.md) | Batch reads that return structure (#545), measured twice with Codex CLI; a first difference in named files did not repeat |
+
 ## How the days connect
 
 1. **Measure without a model first** (29 August, 7 September). The token estimate and the ranking
@@ -63,14 +65,20 @@ Related documents:
     fixes removed empty subtrees and found the manifest in every session, without adding reads;
     the first series run from `tools/AgentBenchmark`.
 
+12. **A difference measured twice** (12 November). Batch reads that return structure removed
+    repeated requests and most tool errors. The first series also showed fewer named files; ten
+    new sessions per task, judged against thresholds set beforehand, did not.
+
 ## How the sessions were run
 
 - **Stand.** [tools/AgentBenchmark](../../tools/AgentBenchmark/README.md) reproduces the November
   series from a checkout: pinned clones, host builds, runner, key metrics, judge and report.
 - **Client.** Headless Claude Code (`claude -p`) with `--strict-mcp-config` and no built-in file
-  tools, so the agent can only use the MCP server under test.
+  tools, so the agent can only use the MCP server under test. The series of 12 November ran on
+  Codex CLI under the stand's isolation profile, with the same restriction.
 - **Model.** Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) for every session and every judge
-  call, except the four-server run of 10 September, which used a larger Claude model.
+  call, with two exceptions: the four-server run of 10 September used a larger Claude model, and
+  the Codex series of 12 November used `gpt-6-luna` at low reasoning effort, without a judge.
 - **Anonymity.** Each server is registered under a neutral name (`server_b`, `server_m` and so on).
   The agent does not know which product it is using. The judge sees the answers as `Answer A`
   and `Answer B`, with product and tool names removed.
@@ -120,3 +128,7 @@ Related documents:
 5. **Check the measuring tools first.** Keys, judge rules and scoring scripts were wrong several
    times (2026-09-29, 2026-11-08). Every surprising result in this log was checked against the
    code before a decision was taken.
+6. **Repeat a surprising difference before acting on it.** On 2026-11-12 one build named 139 of
+   150 required files against 147 over five sessions per task. Ten new sessions per task, with
+   thresholds fixed before the run, gave 121 of 130 against 119. Decide on the new sessions
+   only; numbers pooled with the first run repeat the difference that prompted the second.
