@@ -141,8 +141,8 @@ Live context uses `--live`; **Standard** connects the same server but does not f
 
 Nine read-only tools cover the whole workflow: `list_projects`, `get_tree`, `analyze`, `search_project`, `related_files`, `get_file`, `get_diff`, `pack_context`, and `read_pack`.
 
-* `search_project` finds text or declarations by name; a regular expression supplied with `symbols` is searched as text when it cannot reduce to declaration names. Its withheld-match counts stay visible per file. `get_file` reads an exact range or declaration, or up to sixteen files in a 50,000-character batch: large files keep their start and structure, and files that no longer fit keep their structure when available. Whole-file reads also name the package manifests that export an entry point when the source mapping is unambiguous.
-* `related_files` answers "what does this file actually use, and who uses it" from real imports, for up to sixteen seed files. A folder stands for the selected files directly inside it, without recursing.
+* `search_project` finds text or declarations by name, and `get_file` reads an exact line range, one declaration, or up to sixteen files in one call. A large file comes back as its start and a structure with line ranges, so the agent reads only the part it needs.
+* `related_files` answers "what does this file actually use, and who uses it" from real imports, for one file, several seeds, or the files in a folder, so following a thread never widens the selection.
 * `get_diff` reviews a change: staged files, current changes, or a ref-to-ref diff as unified hunks, largest changes first, with secrets masked in both versions, so the agent reads only the lines that changed.
 * `pack_context` packs a selection under `max_tokens`: files are admitted in a deterministic order while they fit, the rest are reported as skipped, and `top_files` shows where the tokens go.
 * `pack_context` and `related_files` store an oversized result as a session pack; `read_pack` reads it back in line ranges instead of flooding the agent's context. Long operations report standard MCP progress notifications.

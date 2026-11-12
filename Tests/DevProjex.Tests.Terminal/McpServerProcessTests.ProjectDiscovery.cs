@@ -15,17 +15,22 @@ public sealed partial class McpServerProcessTests
 		await using var server = await ActualMcpProcess.StartAsync(project,
 			workspace.CreateDirectory("data"), reduced ? ["--tool-set", "reduced"] : []);
 		var tools = await server.Client.ListToolsAsync(options: null, TestContext.Current.CancellationToken);
-		foreach (var tool in tools.Where(static tool => tool.Name is
-			"get_tree" or "analyze" or "pack_context" or "search_project" or "related_files" or "get_file" or "get_diff"))
+		foreach (var tool in tools)
 		{
-			Assert.Contains("omit for one local root", tool.ProtocolTool.Description, StringComparison.Ordinal);
+			Assert.DoesNotContain("Project:", tool.ProtocolTool.Description, StringComparison.Ordinal);
 			Assert.InRange(tool.ProtocolTool.Description!.Length, 1, 800);
 			Assert.InRange(tool.ProtocolTool.Description.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length, 40, 100);
-			var schema = tool.ProtocolTool.InputSchema;
-			Assert.Contains("Omit for one local root", schema.GetProperty("properties").GetProperty("project")
-				.GetProperty("description").GetString(), StringComparison.Ordinal);
-			if (schema.TryGetProperty("required", out var required))
-				Assert.DoesNotContain(required.EnumerateArray(), static parameter => parameter.GetString() == "project");
+			var properties = tool.ProtocolTool.InputSchema.GetProperty("properties");
+			Assert.False(properties.TryGetProperty("project", out _));
+			Assert.False(properties.TryGetProperty("branch", out _));
+		}
+		foreach (var alias in new[] { project, "project", "#1", "#0" })
+		{
+			var explicitResult = await server.Client.CallToolAsync("get_file",
+				new Dictionary<string, object?> { ["path"] = "Anchor.txt", ["project"] = alias },
+				progress: null, options: null, TestContext.Current.CancellationToken);
+			Assert.NotEqual(true, explicitResult.IsError);
+			Assert.Contains("discovery-free-marker", string.Join('\n', explicitResult.Content.OfType<TextContentBlock>().Select(static block => block.Text)), StringComparison.Ordinal);
 		}
 		var result = await server.Client.CallToolAsync("get_file", new Dictionary<string, object?> { ["path"] = "Anchor.txt" },
 			progress: null, options: null, TestContext.Current.CancellationToken);

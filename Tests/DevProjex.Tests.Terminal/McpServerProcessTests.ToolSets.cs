@@ -9,10 +9,10 @@ public sealed partial class McpServerProcessTests
 		["list_projects", "get_tree", "read_pack", "search_project", "related_files", "get_file", "get_diff"];
 
 	[Theory]
-	[InlineData("full", false, 32_509)]
-	[InlineData("full", true, 35_561)]
-	[InlineData("reduced", false, 21_649)]
-	[InlineData("reduced", true, 23_829)]
+	[InlineData("full", false, 27_391)]
+	[InlineData("full", true, 30_352)]
+	[InlineData("reduced", false, 18_244)]
+	[InlineData("reduced", true, 20_359)]
 	public async Task RealProcessPublishesTheSelectedToolSetWithinItsOwnBudget(string toolSet, bool delegated, int ceiling)
 	{
 		using var workspace = new TemporaryDirectory();
@@ -34,12 +34,12 @@ public sealed partial class McpServerProcessTests
 			}
 			var file = tools.Single(tool => tool.Name == "get_file");
 			var fileSchema = file.ProtocolTool.InputSchema.GetProperty("properties");
-			Assert.Equal(16, fileSchema.GetProperty("path").GetProperty("oneOf")[1].GetProperty("maxItems").GetInt32());
-			Assert.Equal(16, fileSchema.GetProperty("paths").GetProperty("oneOf")[1].GetProperty("maxItems").GetInt32());
-			Assert.Equal(16, fileSchema.GetProperty("requests").GetProperty("maxItems").GetInt32());
-			Assert.Equal(toolSet == "full" ? 99 : 100,
+			Assert.False(fileSchema.GetProperty("path").GetProperty("oneOf")[1].TryGetProperty("maxItems", out _));
+			Assert.False(fileSchema.GetProperty("paths").GetProperty("oneOf")[1].TryGetProperty("maxItems", out _));
+			Assert.False(fileSchema.GetProperty("requests").TryGetProperty("maxItems", out _));
+			Assert.Equal(toolSet == "full" ? 86 : 87,
 				file.Description!.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length);
-			Assert.Equal(toolSet == "full" ? 706 : 705, file.Description.Length);
+			Assert.Equal(toolSet == "full" ? 623 : 622, file.Description.Length);
 			var projects = tools.Single(tool => tool.Name == "list_projects");
 			Assert.Equal(70, projects.Description!.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length);
 			Assert.Equal(467, projects.Description.Length);

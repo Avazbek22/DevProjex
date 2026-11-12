@@ -242,7 +242,8 @@ public static class McpServerHost
 			agentExclusions,
 			toolSet,
 			searchBodyCharacters,
-			live);
+			live,
+			rootCount: rootRegistry.Roots.Count);
 
 		await using var idleMemory = new McpIdleMemoryPolicy(idleMemoryOptions ?? new());
 		var builder = Host.CreateApplicationBuilder([]);
