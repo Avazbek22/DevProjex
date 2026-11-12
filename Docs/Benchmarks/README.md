@@ -118,9 +118,10 @@ Related documents:
   counts as won only when both readings agree, otherwise it is order-dependent.
 - **Missed paths** (from 10 November): for a required path that an answer did not name, whether
   the server never showed it, listed it, or showed its content.
-- **Fixed part of a request** (12 November): the context of a session fitted as a fixed part for
-  each model request plus the tool output read again by later requests. It estimates what the
-  system prompt and the tool catalog cost on every call.
+- **Fixed part of a request** (12 November): what the system prompt, the tool catalog and the
+  task cost on every model request. For Claude Code it is read from the first request of a
+  session. Codex CLI reports usage for a whole session, so there it is fitted per tool call,
+  together with the tool output read again by later calls.
 - **Sample size.** Two or three sessions per task and build, unless a file says otherwise. On
   identical code the judge has split 6 to 1 over 12 pairs, one build on one task has varied by a
   factor of two in tokens, and ten sessions per task have differed by 18 calls in one task and
@@ -152,6 +153,6 @@ Related documents:
    threshold of 10 calls per task was crossed by spread alone.
 8. **Measure a change with the client it is for.** Codex CLI sends several files in one
    `get_file` call and makes about six calls per session; Claude Haiku asks for one file per call
-   and makes about seventeen. A catalog 5,259 characters shorter gave about 400 tokens per
-   request with Codex; with Claude the fixed part of a turn was 1,675 tokens larger for a tool
+   and makes about seventeen. A catalog 5,259 characters shorter gave about 400 tokens per call
+   with Codex; with Claude the first request of a session was 3,766 tokens larger for a tool
    list 8,701 characters longer.
