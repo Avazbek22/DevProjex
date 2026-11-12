@@ -32,6 +32,7 @@ internal sealed class McpDeclarationComments
 					continue;
 				}
 				if (hash || !text.EndsWith("*/", StringComparison.Ordinal)) break;
+				if (text.Contains("/*", StringComparison.Ordinal) && !text.StartsWith("/*", StringComparison.Ordinal)) break;
 				var opening = line;
 				while (opening >= limit && !lines[opening].AsSpan().TrimStart().StartsWith("/*", StringComparison.Ordinal))
 				{

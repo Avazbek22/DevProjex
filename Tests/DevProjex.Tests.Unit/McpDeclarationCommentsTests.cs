@@ -72,6 +72,38 @@ public sealed class McpDeclarationCommentsTests
 	}
 
 	[Fact]
+	public void ATrailingCommentDoesNotJoinEarlierCommentsAndCodeIntoALeadingBlock()
+	{
+		const string content = "/* header */\nfirst();\nfoo(); /* note */\nfunction run() {}\n";
+		NavigationDeclaration[] declarations = [Declaration("run", 4, 4)];
+		foreach (var newline in new[] { "\n", "\r\n" })
+		{
+			var index = Index("sample.ts", content.Replace("\n", newline, StringComparison.Ordinal), declarations);
+			foreach (var line in Enumerable.Range(1, 3))
+			{
+				Assert.Null(index.Find(line));
+				Assert.Empty(Resolve("sample.ts", declarations, index, line).Names);
+			}
+			Assert.Same(declarations[0], index.Find(4));
+		}
+	}
+
+	[Theory]
+	[InlineData("/*")]
+	[InlineData("/**")]
+	public void GenuineMultilineBlocksStillNameTheFollowingDeclaration(string opening)
+	{
+		var content = opening + " header\n * needle\n */\nfunction run() {}\n";
+		NavigationDeclaration[] declarations = [Declaration("run", 4, 4)];
+		var index = Index("sample.ts", content, declarations);
+		foreach (var line in Enumerable.Range(1, 3))
+		{
+			Assert.Same(declarations[0], index.Find(line));
+			Assert.Equal("run", Resolve("sample.ts", declarations, index, line).Names[new("sample.ts", line)]);
+		}
+	}
+
+	[Fact]
 	public void APreviousUnrelatedDeclarationKeepsItsOwnLine()
 	{
 		NavigationDeclaration[] declarations = [Declaration("previous", 1, 3), Declaration("next", 4, 6)];
