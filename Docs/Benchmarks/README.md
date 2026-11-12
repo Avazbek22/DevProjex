@@ -34,7 +34,6 @@ Related documents:
 | [2026-11-08](2026-11-08.md) | #502, #503 and #505 measured; #507 and #508 closed; keys and judge corrected; #509 to #513 measured |
 | [2026-11-09](2026-11-09.md) | #516 and #518 kept, #519 closed; blind run on rich and FluentValidation; #517 and #520 |
 | [2026-11-10](2026-11-10.md) | `get_tree` depth from the requested path (#533) and the `Exported by:` line (#534) measured and kept; new ranking baseline |
-
 | [2026-11-12](2026-11-12.md) | Batch reads that return structure (#545), measured twice with Codex CLI; a first difference in named files did not repeat |
 
 ## How the days connect

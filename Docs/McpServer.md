@@ -718,7 +718,7 @@ physical containment check. The entries name literal files or directories, so
 before intersection with patterns, Git scope, and `max_file_bytes`; a missing entry
 adds the count-only `DPX-SELECTION-PATH-MISSING` warning while valid entries continue,
 and an empty intersection remains empty. Regex, glob, and `git_scope` schema lengths use the
-same Unicode scalar-value semantics at runtime.
+same Unicode scalar-value semantics at runtime. (enforced by the server and not published in the schema)
 
 ### `related_files`
 
