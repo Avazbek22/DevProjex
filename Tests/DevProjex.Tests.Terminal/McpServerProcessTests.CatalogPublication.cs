@@ -33,7 +33,7 @@ public sealed partial class McpServerProcessTests
 				progress: null, options: null, TestContext.Current.CancellationToken);
 			Assert.True(missing.IsError);
 			Assert.Equal("DPX-MCP-UNKNOWN-PROJECT: 'project' is required because multiple roots are available. Call list_projects and use a listed project index: #1, #2.",
-				string.Join('\n', missing.Content.OfType<TextContentBlock>().Select(static block => block.Text)));
+				ExtractSpotlightBody(string.Join('\n', missing.Content.OfType<TextContentBlock>().Select(static block => block.Text))));
 			var selected = await server.Client.CallToolAsync("get_file",
 				new Dictionary<string, object?> { ["path"] = "Anchor.txt", ["project"] = "#2" },
 				progress: null, options: null, TestContext.Current.CancellationToken);
@@ -45,6 +45,6 @@ public sealed partial class McpServerProcessTests
 			progress: null, options: null, TestContext.Current.CancellationToken);
 		Assert.True(branch.IsError);
 		Assert.Equal("DPX-MCP-INVALID-ARGUMENTS: 'branch' is valid only when 'project' is a Git URL. To compare a local project with a commit, call get_diff with git_scope \"changes\", \"staged\" or \"diff:<A>..<B>\".",
-			string.Join('\n', branch.Content.OfType<TextContentBlock>().Select(static block => block.Text)));
+			ExtractSpotlightBody(string.Join('\n', branch.Content.OfType<TextContentBlock>().Select(static block => block.Text))));
 	}
 }

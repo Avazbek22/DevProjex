@@ -2201,9 +2201,7 @@ public sealed partial class McpServerIntegrationTests
 			Assert.Equal(
 				["smart-ignore", "empty-folders", "empty-files", "hidden-folders", "hidden-files", "dot-folders", "dot-files", "extensionless-files"],
 				published.GetProperty("items").GetProperty("enum").EnumerateArray().Select(static item => item.GetString()));
-			Assert.Equal(
-				ProjectSelectionTokens.Exclusions.Count,
-				published.GetProperty("maxItems").GetInt32());
+			Assert.False(published.TryGetProperty("maxItems", out _));
 			Assert.False(published.TryGetProperty("uniqueItems", out _));
 			var propertyNames = schema.GetProperty("properties").EnumerateObject().Select(static property => property.Name).ToArray();
 			var globAnchor = Array.IndexOf(propertyNames, "exclude_patterns");
@@ -2654,7 +2652,7 @@ public sealed partial class McpServerIntegrationTests
 		{
 			var schema = tool.ProtocolTool.InputSchema;
 			Assert.Equal(
-				expectedParameters[tool.Name].Where(static name => name is not ("project" or "branch")),
+				expectedParameters[tool.Name].Where(name => allowRemote || name is not ("project" or "branch")),
 				schema.GetProperty("properties").EnumerateObject().Select(static property => property.Name));
 			var required = schema.TryGetProperty("required", out var requiredElement)
 				? requiredElement.EnumerateArray().Select(static item => item.GetString()).ToArray()
@@ -2669,26 +2667,19 @@ public sealed partial class McpServerIntegrationTests
 		{
 			var paths = tools.Single(tool => tool.Name == toolName)
 				.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("paths");
-			// One path may be written as one string, so the bounds live on the array branch and
-			// the single-value branch carries the same per-item length.
+			// Both published forms retain their types; bounds are checked by the server.
 			var branches = paths.GetProperty("oneOf").EnumerateArray().ToArray();
 			var scalarBranch = branches.Single(branch => branch.GetProperty("type").GetString() == "string");
 			var arrayBranch = branches.Single(branch => branch.GetProperty("type").GetString() == "array");
-			Assert.Equal(McpProjectService.MaximumRequestedPaths, arrayBranch.GetProperty("maxItems").GetInt32());
-			Assert.Equal(
-				McpProjectService.MaximumRequestedPathLength,
-				arrayBranch.GetProperty("items").GetProperty("maxLength").GetInt32());
-			Assert.Equal(
-				McpProjectService.MaximumRequestedPathLength,
-				scalarBranch.GetProperty("maxLength").GetInt32());
+			Assert.False(arrayBranch.TryGetProperty("maxItems", out _));
+			Assert.False(arrayBranch.GetProperty("items").TryGetProperty("maxLength", out _));
+			Assert.False(scalarBranch.TryGetProperty("maxLength", out _));
 			Assert.Contains("literal paths", paths.GetProperty("description").GetString(), StringComparison.Ordinal);
 		}
 		var getFileSchema = tools.Single(static tool => tool.Name == "get_file").ProtocolTool.InputSchema;
 		var batchRequests = getFileSchema.GetProperty("properties").GetProperty("requests");
-		Assert.Equal(McpGetFileRequestSet.MaximumFiles, batchRequests.GetProperty("maxItems").GetInt32());
-		Assert.Equal(
-			McpGetFileRequestSet.MaximumRanges,
-			batchRequests.GetProperty("items").GetProperty("properties").GetProperty("ranges").GetProperty("maxItems").GetInt32());
+		Assert.False(batchRequests.TryGetProperty("maxItems", out _));
+		Assert.False(batchRequests.GetProperty("items").GetProperty("properties").GetProperty("ranges").TryGetProperty("maxItems", out _));
 		Assert.False(getFileSchema.TryGetProperty("oneOf", out _));
 		Assert.False(getFileSchema.TryGetProperty("not", out _));
 		Assert.Contains(
@@ -2704,7 +2695,7 @@ public sealed partial class McpServerIntegrationTests
 		Assert.Equal(2, searchBoolean.GetProperty("oneOf").GetArrayLength());
 		var searchPattern = tools.Single(static tool => tool.Name == "search_project")
 			.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("pattern");
-		Assert.Equal(4096, searchPattern.GetProperty("maxLength").GetInt32());
+		Assert.False(searchPattern.TryGetProperty("maxLength", out _));
 		Assert.Contains(
 			"Text inserted by redaction never matches",
 			searchPattern.GetProperty("description").GetString(),
@@ -2738,9 +2729,7 @@ public sealed partial class McpServerIntegrationTests
 		{
 			var publishedGitScope = tools.Single(tool => tool.Name == toolName)
 				.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("git_scope");
-			Assert.Equal(
-				GitScopeSelection.MaximumTokenLength,
-				publishedGitScope.GetProperty("maxLength").GetInt32());
+			Assert.False(publishedGitScope.TryGetProperty("maxLength", out _));
 		}
 		var gitScope = tools.Single(static tool => tool.Name == "get_tree")
 			.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("git_scope");
@@ -2749,14 +2738,13 @@ public sealed partial class McpServerIntegrationTests
 		var diffPattern = gitScope.GetProperty("oneOf")[1].GetProperty("pattern").GetString();
 		Assert.NotNull(diffPattern);
 		Assert.Matches(diffPattern, "diff:main..feature");
-		Assert.DoesNotMatch(diffPattern, "diff:main...feature");
-		Assert.DoesNotMatch(diffPattern, "diff:main..feature..later");
+		Assert.Matches(diffPattern, "diff:main...feature");
+		Assert.Matches(diffPattern, "diff:main..feature..later");
 		var maximumTokens = tools.Single(static tool => tool.Name == "pack_context")
 			.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("max_tokens");
 		Assert.Equal(2, maximumTokens.GetProperty("oneOf").GetArrayLength());
 		Assert.Equal(1, maximumTokens.GetProperty("oneOf")[0].GetProperty("minimum").GetInt32());
-		const string positiveNumericStringPattern = "^0*[1-9][0-9]*$";
-		Assert.Equal(positiveNumericStringPattern, maximumTokens.GetProperty("oneOf")[1].GetProperty("pattern").GetString());
+		Assert.False(maximumTokens.GetProperty("oneOf")[1].TryGetProperty("pattern", out _));
 		var packProperties = tools.Single(static tool => tool.Name == "pack_context")
 			.ProtocolTool.InputSchema.GetProperty("properties");
 		Assert.False(string.IsNullOrWhiteSpace(packProperties.GetProperty("view").GetProperty("description").GetString()));
@@ -2790,10 +2778,7 @@ public sealed partial class McpServerIntegrationTests
 		{
 			var property = tools.Single(tool => tool.Name == toolName)
 				.ProtocolTool.InputSchema.GetProperty("properties").GetProperty(propertyName);
-			var pattern = property.GetProperty("oneOf")[1].GetProperty("pattern").GetString();
-			Assert.Equal(positiveNumericStringPattern, pattern);
-			Assert.Matches(pattern!, "0002");
-			Assert.DoesNotMatch(pattern!, "0000");
+			Assert.False(property.GetProperty("oneOf")[1].TryGetProperty("pattern", out _));
 		}
 		foreach (var name in new[] { "get_tree", "analyze", "pack_context", "search_project", "related_files" })
 		{
@@ -2808,18 +2793,17 @@ public sealed partial class McpServerIntegrationTests
 				maximumFileBytes.GetProperty("oneOf")[0].GetProperty("minimum").GetInt64());
 			foreach (var propertyName in new[] { "include_patterns", "exclude_patterns" })
 			{
-				// One pattern may be written as one string, so the count bound lives on the
-				// array branch while both branches carry the same per-pattern length.
+				// The server checks pattern counts and lengths for both published forms.
 				var patterns = properties.GetProperty(propertyName);
 				var branches = patterns.GetProperty("oneOf").EnumerateArray().ToArray();
 				var scalar = branches.Single(branch => branch.GetProperty("type").GetString() == "string");
 				var array = branches.Single(branch => branch.GetProperty("type").GetString() == "array");
-				Assert.Equal(256, array.GetProperty("maxItems").GetInt32());
+				Assert.False(array.TryGetProperty("maxItems", out _));
 				var items = array.GetProperty("items");
-				Assert.Equal(1, items.GetProperty("minLength").GetInt32());
-				Assert.Equal(512, items.GetProperty("maxLength").GetInt32());
-				Assert.Equal(1, scalar.GetProperty("minLength").GetInt32());
-				Assert.Equal(512, scalar.GetProperty("maxLength").GetInt32());
+				Assert.False(items.TryGetProperty("minLength", out _));
+				Assert.False(items.TryGetProperty("maxLength", out _));
+				Assert.False(scalar.TryGetProperty("minLength", out _));
+				Assert.False(scalar.TryGetProperty("maxLength", out _));
 			}
 		}
 	}

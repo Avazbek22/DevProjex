@@ -169,7 +169,6 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 		,
 		    "exclusions": {
 		      "type": "array",
-		      "maxItems": {{ProjectSelectionTokens.Exclusions.Count}},
 		      "items": { "type": "string", "enum": [{{tokens}}] },
 		      "description": "{{StandardExclusionsDescription}} Tokens ignore case and reject duplicates; hidden-* uses platform attributes, while Unix dot names use dot-*."
 		    }
@@ -180,7 +179,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	"top_files": {
 	  "description": "Returns this many largest text files by estimated tokens.",
 	  "default": 10,
-	  "oneOf": [ { "type": "integer", "minimum": 1, "maximum": 1000 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ]
+	  "oneOf": [ { "type": "integer", "minimum": 1, "maximum": 1000 }, { "type": "string" } ]
 	}
 	""";
 
@@ -207,7 +206,6 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	private const string CompactBranchProperty = """
 	"branch": {
 	  "type": "string",
-	  "minLength": 1,
 	  "description": "Remote Git branch; invalid for local projects."
 	}
 	""";
@@ -216,8 +214,8 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	"include_patterns": {
 	  "description": "Narrows with project-relative '/' globs: '*' and '?' stay in one segment, '**/' spans depths, and '{a,b}' alternates; matching is case-sensitive, while '!' and '[...]' are rejected.",
 	  "oneOf": [
-	    { "type": "string", "minLength": 1, "maxLength": 512 },
-	    { "type": "array", "maxItems": 256, "items": { "type": "string", "minLength": 1, "maxLength": 512 } }
+	    { "type": "string" },
+	    { "type": "array", "items": { "type": "string" } }
 	  ]
 	}
 	""";
@@ -226,8 +224,8 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	"exclude_patterns": {
 	  "description": "Removes paths with the same project-relative glob syntax as include_patterns.",
 	  "oneOf": [
-	    { "type": "string", "minLength": 1, "maxLength": 512 },
-	    { "type": "array", "maxItems": 256, "items": { "type": "string", "minLength": 1, "maxLength": 512 } }
+	    { "type": "string" },
+	    { "type": "array", "items": { "type": "string" } }
 	  ]
 	}
 	""";
@@ -236,8 +234,8 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	"paths": {
 	  "description": "Narrows selection to literal paths for existing project-relative files or directories; glob characters are ordinary.",
 	  "oneOf": [
-	    { "type": "string", "minLength": 1, "maxLength": 4096 },
-	    { "type": "array", "maxItems": 256, "items": { "type": "string", "minLength": 1, "maxLength": 4096 } }
+	    { "type": "string" },
+	    { "type": "array", "items": { "type": "string" } }
 	  ]
 	}
 	""";
@@ -274,15 +272,12 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	private const string CompactDetailByPatternProperty = """
 	"detail_by_pattern": {
 	  "type": "array",
-	  "maxItems": 16,
 	  "items": {
 	    "type": "object",
 	    "properties": {
 	      "patterns": {
 	        "type": "array",
-	        "minItems": 1,
-	        "maxItems": 32,
-	        "items": { "type": "string", "minLength": 1, "maxLength": 512 },
+	        "items": { "type": "string" },
 	        "description": "Uses the include_patterns glob syntax."
 	      },
 	      "detail": { "type": "string", "enum": ["full", "compact", "signatures"] }
@@ -305,7 +300,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	private const string CompactMaximumTokensProperty = """
 	"max_tokens": {
 	  "description": "Sets greedy content admission; document structure and its report are outside this heuristic token budget.",
-	  "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ]
+	  "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string" } ]
 	}
 	""";
 
@@ -321,8 +316,8 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	"focus": {
 	  "description": "Seeds focus-v1 order from 1..16 selected paths; requires rank=importance and never widens selection.",
 	  "oneOf": [
-	    { "type": "string", "minLength": 1, "maxLength": 4096 },
-	    { "type": "array", "minItems": 1, "maxItems": 16, "items": { "type": "string", "minLength": 1, "maxLength": 4096 } }
+	    { "type": "string" },
+	    { "type": "array", "items": { "type": "string" } }
 	  ]
 	}
 	""";
@@ -330,10 +325,9 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	private const string CompactGitScopeProperty = """
 	"git_scope": {
 	  "description": "Narrows to staged, changed (including untracked files), or diff:<ref>..<ref> paths; content stays from the current working tree.",
-	  "maxLength": 4096,
 	  "oneOf": [
 	    { "type": "string", "enum": ["staged", "changes"] },
-	    { "type": "string", "pattern": "^diff:(?!.*\\.\\.\\.)(?!.*\\.\\..*\\.\\.)[^\\s-]\\S*\\.\\.[^\\s-]\\S*$" }
+	    { "type": "string", "pattern": "^diff:" }
 	  ]
 	}
 	""";
@@ -341,7 +335,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	private const string CompactMaxFileBytesProperty = """
 	"max_file_bytes": {
 	  "description": "Excludes selected files larger than this byte count; accepts an integer or numeric string.",
-	  "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ]
+	  "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string" } ]
 	}
 	""";
 
@@ -351,7 +345,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	  "description": "Adds resolved neighbours of seed files without widening filters or Git scope; stops at {{McpRelatedExpansion.MaximumExpandedFiles}} files and reports the limit.",
 	  "type": "object",
 	  "properties": {
-	    "seeds": { "type": "array", "minItems": 1, "maxItems": {{McpRelatedExpansion.MaximumSeeds}}, "items": { "type": "string" }, "description": "Selected project-relative seed files; directories and globs are invalid." },
+	    "seeds": { "type": "array", "items": { "type": "string" }, "description": "Selected project-relative seed files; directories and globs are invalid." },
 	    "hops": { "type": "integer", "minimum": {{McpRelatedExpansion.MinimumHops}}, "maximum": {{McpRelatedExpansion.MaximumHops}}, "default": {{McpRelatedExpansion.MinimumHops}}, "description": "Number of edges to follow from each seed." },
 	    "direction": { "type": "string", "enum": ["dependencies", "dependents", "both"], "default": "both", "description": "Traversal direction, matching related_files." }
 	  },
@@ -374,7 +368,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{CompactMaxFileBytesProperty}},
 	    "max_depth": {
 	      "description": "Limits levels below each requested paths entry, or below the project root when paths is omitted; omit it for the deepest complete tree that fits.",
-	      "oneOf": [ { "type": "integer", "minimum": 0, "maximum": 1000 }, { "type": "string", "pattern": "^[0-9]+$" } ]
+	      "oneOf": [ { "type": "integer", "minimum": 0, "maximum": 1000 }, { "type": "string" } ]
 	    },
 	    {{TreeFormatProperty}}
 	  },
@@ -432,10 +426,10 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	{
 	  "type": "object",
 	  "properties": {
-	    "pack_id": { "type": "string", "minLength": 1, "description": "Session id returned by pack_context, search_project, or related_files." },
-	    "start_line": { "description": "First 1-based returned-text line; accepts integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
-	    "end_line": { "description": "Last inclusive 1-based returned-text line; accepts integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
-	    "start_column": { "description": "First 1-based Unicode character on start_line; use a returned continuation value.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] }
+	    "pack_id": { "type": "string", "description": "Session id returned by pack_context, search_project, or related_files." },
+	    "start_line": { "description": "First 1-based returned-text line; accepts integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string" } ] },
+	    "end_line": { "description": "Last inclusive 1-based returned-text line; accepts integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string" } ] },
+	    "start_column": { "description": "First 1-based Unicode character on start_line; use a returned continuation value.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string" } ] }
 	  },
 	  "required": ["pack_id"],
 	  "additionalProperties": false
@@ -446,17 +440,17 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	{
 	  "type": "object",
 	  "properties": {
-	    {{addressProperties}}	    "pattern": { "type": "string", "minLength": 1, "maxLength": 4096, "description": "Required .NET regex with a 2-second timeout over redacted file content, never paths; use get_tree include_patterns for names. Text inserted by redaction never matches." },
+	    {{addressProperties}}	    "pattern": { "type": "string", "description": "Required .NET regex with a 2-second timeout over redacted file content, never paths; use get_tree include_patterns for names. Text inserted by redaction never matches." },
 	    {{CompactPathsProperty}},
 	    {{CompactIncludeProperty}},
 	    {{CompactExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
 	    {{CompactTrackedOnlyProperty}},
 	    {{CompactGitScopeProperty}},
 	    {{CompactMaxFileBytesProperty}},
-	    "context_lines": { "description": "Context lines per match; overlapping windows merge.", "oneOf": [ { "type": "integer", "minimum": 0, "maximum": 20 }, { "type": "string", "pattern": "^[0-9]+$" } ] },
+	    "context_lines": { "description": "Context lines per match; overlapping windows merge.", "oneOf": [ { "type": "integer", "minimum": 0, "maximum": 20 }, { "type": "string" } ] },
 	    "ignore_case": { "description": "Enables case-insensitive matching; accepts a boolean or its string form.", "default": true, "oneOf": [ { "type": "boolean" }, { "type": "string", "enum": ["true", "false"] } ] },
 	    "symbols": { "description": "Match declarations of the name in pattern (Foo, class Foo, Foo|Bar), not uses; a regular expression is searched as text instead.", "default": false, "oneOf": [ { "type": "boolean" }, { "type": "string", "enum": ["true", "false"] } ] },
-	    "max_results": { "description": "Limits displayed match lines while scanning continues; the boundary reports encountered, retained, and written counts.", "oneOf": [ { "type": "integer", "minimum": 1, "maximum": 200 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] }
+	    "max_results": { "description": "Limits displayed match lines while scanning continues; the boundary reports encountered, retained, and written counts.", "oneOf": [ { "type": "integer", "minimum": 1, "maximum": 200 }, { "type": "string" } ] }
 	  },
 	  "required": ["pattern"],
 	  "additionalProperties": false
@@ -471,51 +465,47 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    "path": {
 	      "description": "One file, or an array of up to sixteen whole files. Give path, paths, or requests; path and paths may accompany requests and add whole-file reads. Names an existing selected file; Markdown escapes from the default get_tree format are accepted, while format=text supplies literal names.",
 	      "oneOf": [
-	        { "type": "string", "minLength": 1 },
-	        { "type": "array", "minItems": 1, "maxItems": 16, "items": { "type": "string", "minLength": 1, "maxLength": 4096 } }
+	        { "type": "string" },
+	        { "type": "array", "items": { "type": "string" } }
 	      ]
 	    },
 	    "paths": {
 	      "description": "Up to sixteen files read whole in one call; with start_line and end_line, the same lines are read from each file.",
 	      "oneOf": [
-	        { "type": "string", "minLength": 1, "maxLength": 4096 },
-	        { "type": "array", "minItems": 1, "maxItems": 16, "items": { "type": "string", "minLength": 1, "maxLength": 4096 } }
+	        { "type": "string" },
+	        { "type": "array", "items": { "type": "string" } }
 	      ]
 	    },
 	    "requests": {
 	      "type": "array",
-	      "minItems": 1,
-	      "maxItems": 16,
 	      "description": "Batch form: up to sixteen files and sixteen selections; a path reads the whole file, while ranges or symbol narrow it. start_line, end_line, and start_column cannot accompany requests.",
 	      "items": {
 	        "type": "object",
 	        "properties": {
-	          "path": { "type": "string", "minLength": 1, "maxLength": 4096, "description": "Existing selected project file." },
+	          "path": { "type": "string", "description": "Existing selected project file." },
 	          "ranges": {
 	            "type": "array",
-	            "minItems": 1,
-	            "maxItems": 16,
 	            "description": "Inclusive transformed-text line ranges for this file.",
 	            "items": {
 	              "type": "object",
 	              "properties": {
-	                "start_line": { "description": "First 1-based transformed-text line.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
-	                "end_line": { "description": "Last inclusive 1-based transformed-text line.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] }
+	                "start_line": { "description": "First 1-based transformed-text line.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string" } ] },
+	                "end_line": { "description": "Last inclusive 1-based transformed-text line.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string" } ] }
 	              },
 	              "required": ["start_line", "end_line"],
 	              "additionalProperties": false
 	            }
 	          },
-	          "symbol": { "type": "string", "minLength": 1, "maxLength": 512, "description": "Reads this named declaration instead of ranges; the two forms cannot combine." }
+	          "symbol": { "type": "string", "description": "Reads this named declaration instead of ranges; the two forms cannot combine." }
 	        },
 	        "required": ["path"],
 	        "additionalProperties": false
 	      }
 	    },
-	    "start_line": { "description": "First 1-based returned-text line; accepts integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
-	    "end_line": { "description": "Last inclusive 1-based returned-text line; accepts integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
-	    "start_column": { "description": "First 1-based Unicode character on start_line; use a returned continuation value.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^0*[1-9][0-9]*$" } ] },
-	    "symbol": { "type": "string", "minLength": 1, "maxLength": 512, "description": "Reads a qualified, or file-unique simple, declaration with path instead of a range; search_project supplies names. Cannot combine with line or column fields; missing, unavailable, or non-unique declarations return DPX-MCP-INVALID-ARGUMENTS." }
+	    "start_line": { "description": "First 1-based returned-text line; accepts integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string" } ] },
+	    "end_line": { "description": "Last inclusive 1-based returned-text line; accepts integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string" } ] },
+	    "start_column": { "description": "First 1-based Unicode character on start_line; use a returned continuation value.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string" } ] },
+	    "symbol": { "type": "string", "maxLength": 512, "description": "Reads a qualified, or file-unique simple, declaration with path instead of a range; search_project supplies names. Cannot combine with line or column fields; missing, unavailable, or non-unique declarations return DPX-MCP-INVALID-ARGUMENTS." }
 	  },
 	  "additionalProperties": false
 	}
@@ -528,8 +518,8 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{addressProperties}}	    "path": {
 	      "description": "Seed file, or up to 16 seed files, within the effective selection; a folder stands for the files directly inside it.",
 	      "oneOf": [
-	        { "type": "string", "minLength": 1, "maxLength": 4096 },
-	        { "type": "array", "minItems": 1, "maxItems": 16, "items": { "type": "string", "minLength": 1, "maxLength": 4096 } }
+	        { "type": "string" },
+	        { "type": "array", "items": { "type": "string" } }
 	      ]
 	    },
 	    "direction": { "type": "string", "enum": ["dependencies", "dependents", "both"], "default": "both", "description": "Chooses outward dependencies, inward dependents, or both." },
@@ -553,10 +543,9 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    "git_scope": {
 	      "description": "Chooses the comparison: changes is HEAD to the working tree including untracked files, staged is HEAD to the index, and diff:<ref>..<ref> compares two commits.",
 	      "default": "changes",
-	      "maxLength": 4096,
 	      "oneOf": [
 	        { "type": "string", "enum": ["changes", "staged"] },
-	        { "type": "string", "pattern": "^diff:(?!.*\\.\\.\\.)(?!.*\\.\\..*\\.\\.)[^\\s-]\\S*\\.\\.[^\\s-]\\S*$" }
+	        { "type": "string", "pattern": "^diff:" }
 	      ]
 	    },
 	    {{CompactPathsProperty}},
@@ -564,7 +553,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{CompactExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
 	    {{CompactTrackedOnlyProperty}},
 	    {{CompactMaxFileBytesProperty}},
-	    "context_lines": { "description": "Unchanged lines around each change; hunks whose context touches merge.", "default": 3, "oneOf": [ { "type": "integer", "minimum": 0, "maximum": 20 }, { "type": "string", "pattern": "^[0-9]+$" } ] }
+	    "context_lines": { "description": "Unchanged lines around each change; hunks whose context touches merge.", "default": 3, "oneOf": [ { "type": "integer", "minimum": 0, "maximum": 20 }, { "type": "string" } ] }
 	  },
 	  "additionalProperties": false
 	}

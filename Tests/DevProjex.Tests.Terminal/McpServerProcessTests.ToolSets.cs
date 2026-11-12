@@ -34,9 +34,9 @@ public sealed partial class McpServerProcessTests
 			}
 			var file = tools.Single(tool => tool.Name == "get_file");
 			var fileSchema = file.ProtocolTool.InputSchema.GetProperty("properties");
-			Assert.Equal(16, fileSchema.GetProperty("path").GetProperty("oneOf")[1].GetProperty("maxItems").GetInt32());
-			Assert.Equal(16, fileSchema.GetProperty("paths").GetProperty("oneOf")[1].GetProperty("maxItems").GetInt32());
-			Assert.Equal(16, fileSchema.GetProperty("requests").GetProperty("maxItems").GetInt32());
+			Assert.False(fileSchema.GetProperty("path").GetProperty("oneOf")[1].TryGetProperty("maxItems", out _));
+			Assert.False(fileSchema.GetProperty("paths").GetProperty("oneOf")[1].TryGetProperty("maxItems", out _));
+			Assert.False(fileSchema.GetProperty("requests").TryGetProperty("maxItems", out _));
 			Assert.Equal(toolSet == "full" ? 86 : 87,
 				file.Description!.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length);
 			Assert.Equal(toolSet == "full" ? 623 : 622, file.Description.Length);

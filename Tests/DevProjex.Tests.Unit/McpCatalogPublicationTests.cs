@@ -45,7 +45,43 @@ public sealed class McpCatalogPublicationTests
 			Assert.Equal(addressed && exclusions, properties.TryGetProperty("exclusions", out _));
 			Assert.InRange(tool.Description.Length, 1, 800);
 			Assert.InRange(tool.Description.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length, 40, 100);
+			CheckInputSchema(tool.InputSchema, tool.Name, string.Empty);
 		}
 		Assert.False(service.IsValueCreated);
+	}
+
+	private static void CheckInputSchema(JsonElement schema, string tool, string path)
+	{
+		if (schema.ValueKind == JsonValueKind.Object)
+		{
+			foreach (var property in schema.EnumerateObject())
+			{
+				if (property.Name is "minLength" or "maxLength" or "minItems" or "maxItems")
+				{
+					var retained = property.Name == "minLength" && path == "/properties/profile" ||
+						property.Name == "maxLength" && tool == "get_file" && path == "/properties/symbol";
+					Assert.True(retained, $"Unexpected published bound: {tool}{path}/{property.Name}");
+					Assert.Equal(property.Name == "minLength" ? 1 : 512, property.Value.GetInt32());
+				}
+				if (property.Name == "pattern" && property.Value.ValueKind == JsonValueKind.String)
+				{
+					Assert.Equal("/properties/git_scope/oneOf/1", path);
+					Assert.Equal("^diff:", property.Value.GetString());
+				}
+				if (property.Name == "oneOf")
+				{
+					var types = property.Value.EnumerateArray().Select(static branch => branch.GetProperty("type").GetString()).ToArray();
+					if (path != "/properties/git_scope")
+						Assert.Equal(types.Length, types.Distinct(StringComparer.Ordinal).Count());
+				}
+				CheckInputSchema(property.Value, tool, path + "/" + property.Name);
+			}
+		}
+		else if (schema.ValueKind == JsonValueKind.Array)
+		{
+			var index = 0;
+			foreach (var item in schema.EnumerateArray())
+				CheckInputSchema(item, tool, path + "/" + index++);
+		}
 	}
 }
