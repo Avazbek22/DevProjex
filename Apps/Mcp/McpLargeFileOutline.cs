@@ -13,9 +13,10 @@ internal sealed record McpLargeFileOutline(int HeadLines, string Map, int Entrie
 /// The start and the structure of a long file, returned instead of its whole text when a read
 /// names no range. Structure comes from protected returned text: code declarations and outline-only
 /// JavaScript/TypeScript test blocks, top-level JSON keys, and Markdown headings. A file with fewer than two entries
-/// has no outline and is read whole, as before. A structure of more than 40 entries is listed by its
-/// top level only, each entry with the number of its nested entries, or, when that level holds one
-/// or two entries, by those entries and their direct members; the list stays within 2,500 characters.
+/// has no outline and is read whole, as before. A structure of more than 40 entries is listed by its top level, each entry with the number of its
+/// nested entries. One or two top-level entries are followed by their direct members; with more, the
+/// entries of at least 60 lines are, largest first, while the list has room. The list stays within
+/// 2,500 characters.
 /// </summary>
 internal static partial class McpLargeFileOutlineBuilder
 {
@@ -30,6 +31,7 @@ internal static partial class McpLargeFileOutlineBuilder
 	private const int MaximumFullEntries = 40;
 	private const int MaximumMapCharacters = 2_500;
 	private const int MaximumTopLevelExpanded = 2;
+	private const int MinimumExpandedLines = 60;
 
 	internal static string NormalizeLineEndings(string content) =>
 		content.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
@@ -63,7 +65,9 @@ internal static partial class McpLargeFileOutlineBuilder
 		var entries = counted.Where(static entry => entry.Depth < MaximumNestingShown).ToArray();
 		if (entries.Length < 2)
 			return null;
-		var map = FormatMap(entries.Length > MaximumFullEntries ? CompactEntries(counted) : entries, cancellationToken);
+		var map = entries.Length > MaximumFullEntries
+			? FormatCompactMap(counted, cancellationToken)
+			: FormatMap(entries, cancellationToken);
 		// Code keeps its whole preamble, imports included, when it ends early enough.
 		var head = isCode && entries[0].StartLine > 1
 			? HeadLineCount(lines, Math.Min(entries[0].StartLine - 1, MaximumCodeHeadLines), MaximumCodeHeadCharacters)
@@ -98,6 +102,67 @@ internal static partial class McpLargeFileOutlineBuilder
 	}
 
 	private static readonly string[] MemberSeparators = [".", "::", "#"];
+
+	private static string FormatCompactMap(IReadOnlyList<OutlineEntry> entries, CancellationToken cancellationToken)
+	{
+		var parents = WithMemberCounts(entries, 0);
+		if (parents.Count <= MaximumTopLevelExpanded)
+			return FormatMap(CompactEntries(entries), cancellationToken);
+		var top = parents.Select(static parent => parent.Entry).ToArray();
+		var baseline = FormatMap(top, cancellationToken);
+		if (parents.Count > MaximumEntries || baseline != string.Concat(top.Select(FormatEntry)))
+			return baseline;
+
+		var members = WithMemberCounts(entries, 1);
+		var expansions = new Dictionary<int, string>();
+		var characters = baseline.Length;
+		var written = top.Length;
+		foreach (var parent in parents.Where(static parent => parent.Entry.Members > 0 &&
+				 parent.Entry.EndLine - parent.Entry.StartLine + 1 >= MinimumExpandedLines)
+			.OrderByDescending(static parent => parent.Entry.EndLine - parent.Entry.StartLine)
+			.ThenBy(static parent => parent.Entry.StartLine))
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var next = parents.Where(other => other.Index > parent.Index).Select(static other => other.Index)
+				.DefaultIfEmpty(int.MaxValue).First();
+			var children = members.Where(member => member.Index > parent.Index && member.Index < next)
+				.Select(static member => FormatEntry(member.Entry)).ToArray();
+			var expansion = new StringBuilder();
+			var count = 0;
+			foreach (var child in children)
+			{
+				var remaining = children.Length - count - 1;
+				var reserved = remaining > 0 ? MemberTail(remaining).Length : 0;
+				if (written + count >= MaximumEntries ||
+					characters + expansion.Length + child.Length + reserved > MaximumMapCharacters)
+					break;
+				expansion.Append(child);
+				count++;
+			}
+			if (count < children.Length)
+			{
+				var tail = MemberTail(children.Length - count);
+				if (characters + expansion.Length + tail.Length <= MaximumMapCharacters)
+					expansion.Append(tail);
+			}
+			expansions[parent.Index] = expansion.ToString();
+			characters += expansion.Length;
+			written += count;
+			if (count < children.Length)
+				break;
+		}
+		var result = new StringBuilder(characters);
+		foreach (var parent in parents)
+		{
+			result.Append(FormatEntry(parent.Entry));
+			if (expansions.TryGetValue(parent.Index, out var expansion))
+				result.Append(expansion);
+		}
+		return result.ToString();
+	}
+
+	private static string MemberTail(int remaining) =>
+		"  (+" + remaining.ToString(CultureInfo.InvariantCulture) + " more)\n";
 
 	// A nested entry drops the name of the entry it sits in when it repeats it: "Client.send" under "Client" reads "send".
 	private static IReadOnlyList<OutlineEntry> WithoutParentNames(IReadOnlyList<OutlineEntry> entries)
