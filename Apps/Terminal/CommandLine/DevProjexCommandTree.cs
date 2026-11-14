@@ -79,6 +79,7 @@ public sealed class DevProjexCommandTree
 		root.Subcommands.Add(BuildAnalyzeCommand());
 		root.Subcommands.Add(BuildSearchCommand());
 		root.Subcommands.Add(BuildRelatedCommand());
+		root.Subcommands.Add(BuildDiffCommand());
 		root.Subcommands.Add(BuildTreeCommand());
 		root.Subcommands.Add(BuildExportCommand());
 		root.Subcommands.Add(BuildProfileCommand());
@@ -133,7 +134,7 @@ public sealed class DevProjexCommandTree
 		var toolSet = CliChoiceSymbols.Option(
 			"--tool-set",
 			L("Terminal.Option.McpToolSet"),
-			McpToolSet.Full,
+			McpToolSet.Reduced,
 			CliChoiceSets.McpToolSet,
 			_localization);
 		var exclude = CreateMcpExcludeOption();
@@ -323,6 +324,7 @@ public sealed class DevProjexCommandTree
 		outputPath.CompletionSources.Add(context => FileSystemCompletionSource.Complete(
 			context,
 			FileSystemCompletionKind.FilesAndDirectories));
+		AddExactOutputPathValidator(outputPath);
 		command.Arguments.Add(project);
 		command.Options.Add(session);
 		command.Options.Add(last);
@@ -1173,6 +1175,12 @@ public sealed class DevProjexCommandTree
 						services,
 						selectedPaths,
 						cancellationToken).ConfigureAwait(false);
+					var projectSpec = await selection.ResolveWithoutNarrowingAsync(
+						parseResult,
+						resolvedSource.ProjectPath,
+						services,
+						selectedPaths,
+						cancellationToken).ConfigureAwait(false);
 					return await new RelatedCommandHandler(services, environment).ExecuteAsync(
 						new RelatedCommandRequest(
 							resolvedSource.ProjectPath,
@@ -1193,6 +1201,110 @@ public sealed class DevProjexCommandTree
 							selection.GetMaxFileBytes(parseResult),
 							resolvedSource.RepositorySourceUrl,
 							parseResult.GetValue(depth),
+							parseResult.GetValue(outputPath),
+							projectSpec),
+						cancellationToken).ConfigureAwait(false);
+				},
+				_localization,
+				forceReplacementAvailable: false).ConfigureAwait(false);
+		});
+		return command;
+	}
+
+	private Command BuildDiffCommand()
+	{
+		var command = new Command("diff", L("Terminal.Command.Diff"));
+		CliExamplesRegistry.Set(
+			command,
+			"devprojex diff",
+			"devprojex diff --git-mode staged --context 1",
+			"devprojex diff --git-mode diff:main..HEAD --format json -o -");
+		var project = new Option<string?>("--project")
+		{
+			Description = L("Terminal.Option.DiffProject"),
+			HelpName = "PROJECT",
+			DefaultValueFactory = _ => Directory.GetCurrentDirectory()
+		};
+		project.CompletionSources.Add(context => FileSystemCompletionSource.Complete(
+			context,
+			FileSystemCompletionKind.Directories));
+		CliHelpMetadataRegistry.SuppressParserDefault(project);
+		var contextLines = new Option<int>("--context")
+		{
+			Description = L("Terminal.Option.DiffContext"),
+			HelpName = "N",
+			DefaultValueFactory = _ => DiffQueryRunner.DefaultContextLines
+		};
+		var format = CliChoiceSymbols.Option(
+			"--format",
+			L("Terminal.Option.Format"),
+			CliTextJsonFormat.Text,
+			CliChoiceSets.TextJson,
+			_localization);
+		format.Aliases.Add("-f");
+		var outputPath = OutputPathOption();
+		var branch = BranchOption();
+		var selection = new SelectionOptions(
+			_localization,
+			environment,
+			includeCodeTransformations: false,
+			includeMaxFileBytes: true,
+			gitModeCapability: GitModeOptionCapability.Momentary);
+		command.Options.Add(project);
+		command.Options.Add(contextLines);
+		command.Options.Add(format);
+		command.Options.Add(outputPath);
+		command.Options.Add(branch);
+		selection.AddTo(command);
+		_output.AddProgressTo(command);
+		command.Validators.Add(result =>
+		{
+			if (CliParseValue.TryGet(result, contextLines, out var value) &&
+				value is < 0 or > DiffQueryRunner.MaximumContextLines)
+			{
+				result.AddError(LocalizedParseError.Create(L("Terminal.Validation.DiffContext")));
+			}
+		});
+		command.SetAction(async (parseResult, cancellationToken) =>
+		{
+			var output = _output.Get(parseResult);
+			return await CommandExecution.RunAsync(
+				environment,
+				output,
+				async () =>
+				{
+					using var serviceScope = CreateServiceScope(parseResult);
+					var services = serviceScope.Services;
+					var projectSource = parseResult.GetValue(project) ?? Directory.GetCurrentDirectory();
+					await using var resolvedSource = await new TerminalProjectSourceResolver(
+							services,
+							environment,
+							output)
+						.ResolveAsync(projectSource, parseResult.GetValue(branch), cancellationToken)
+						.ConfigureAwait(false);
+					var selectedPaths = await selection.ReadSelectedPathsAsync(parseResult, cancellationToken)
+						.ConfigureAwait(false);
+					var spec = await selection.ResolveAsync(
+						parseResult,
+						resolvedSource.ProjectPath,
+						services,
+						selectedPaths,
+						cancellationToken).ConfigureAwait(false);
+					// Without --git-mode the command reviews uncommitted changes, whatever Git mode
+					// the profile keeps for other commands.
+					if (parseResult.GetResult(selection.GitMode) is null)
+						spec = spec with { GitMode = GitFilteringMode.Changes, GitDiffRange = null };
+					return await new DiffCommandHandler(services, environment).ExecuteAsync(
+						new DiffCommandRequest(
+							resolvedSource.ProjectPath,
+							spec,
+							parseResult.GetValue(contextLines),
+							parseResult.GetValue(format) == CliTextJsonFormat.Json
+								? AnalysisOutputFormat.Json
+								: AnalysisOutputFormat.Text,
+							output,
+							selection.GetMaxFileBytes(parseResult),
+							resolvedSource.RepositorySourceUrl,
 							parseResult.GetValue(outputPath)),
 						cancellationToken).ConfigureAwait(false);
 				},
@@ -1497,12 +1609,18 @@ public sealed class DevProjexCommandTree
 			if (outputKind == ProjectCopyExportFormat.Zip &&
 				CliParseValue.TryGet(result, outputPath, out var destination) &&
 				destination is not null &&
-				destination != "-" &&
-				!destination.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+				destination != "-")
 			{
-				result.AddError(LocalizedParseError.Create(
-					"DPX-CLI-ZIP-EXTENSION-REQUIRED",
-					L("Terminal.Error.ZipExtensionRequired")));
+				if (DescribeExactOutputPathProblem(destination) is { } problem)
+				{
+					result.AddError(problem);
+				}
+				else if (!destination.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+				{
+					result.AddError(LocalizedParseError.Create(
+						"DPX-CLI-ZIP-EXTENSION-REQUIRED",
+						L("Terminal.Error.ZipExtensionRequired")));
+				}
 			}
 		});
 		command.SetAction(async (parseResult, cancellationToken) =>
@@ -1785,6 +1903,7 @@ public sealed class DevProjexCommandTree
 		output.CompletionSources.Add(context => FileSystemCompletionSource.Complete(
 			context,
 			FileSystemCompletionKind.FilesAndDirectories));
+		AddExactOutputPathValidator(output);
 		var force = new Option<bool>("--force") { Description = L("Terminal.Option.ForceProfile") };
 		var dryRun = new Option<bool>("--dry-run", "-n") { Description = L("Terminal.Option.DryRun") };
 		command.Arguments.Add(project);
@@ -2882,8 +3001,9 @@ public sealed class DevProjexCommandTree
 		return argument;
 	}
 
-	private Option<string?> OutputPathOption() =>
-		new("--output", "-o")
+	private Option<string?> OutputPathOption()
+	{
+		var option = new Option<string?>("--output", "-o")
 		{
 			Description = L("Terminal.Option.Output"),
 			HelpName = "PATH|-",
@@ -2895,6 +3015,34 @@ public sealed class DevProjexCommandTree
 					FileSystemCompletionKind.FilesAndDirectories)
 			}
 		};
+		AddExactOutputPathValidator(option);
+		return option;
+	}
+
+	private void AddExactOutputPathValidator(Option option) =>
+		option.Validators.Add(result =>
+		{
+			if (result.Implicit || result.Tokens.Count != 1)
+				return;
+			if (DescribeExactOutputPathProblem(result.Tokens[0].Value) is { } problem)
+				result.AddError(problem);
+		});
+
+	private string? DescribeExactOutputPathProblem(string path)
+	{
+		var message = ExactOutputPathSyntax.Check(path) switch
+		{
+			ExactOutputPathProblem.None => null,
+			ExactOutputPathProblem.Empty => L("Terminal.Error.OutputPathEmpty"),
+			ExactOutputPathProblem.TrailingSeparator => L("Terminal.Error.OutputPathTrailingSeparator"),
+			ExactOutputPathProblem.InvalidSyntax => _localization.Format("Terminal.Error.OutputPathInvalid", path),
+			ExactOutputPathProblem.DeviceName => _localization.Format("Terminal.Error.OutputPathDevice", path),
+			var problem => throw new ArgumentOutOfRangeException(nameof(path), problem, null)
+		};
+		return message is null
+			? null
+			: LocalizedParseError.Create("DPX-CLI-INVALID-VALUE", message);
+	}
 
 	private Option<string?> OptionalOutputPath() =>
 		new("--output", "-o")

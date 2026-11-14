@@ -270,7 +270,9 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		if (_preview is null)
 			return InvalidCommandExecution();
-		var query = command.Text?.Trim() ?? string.Empty;
+		// The parser already trims unquoted free text and preserves a quoted
+		// argument's inner edge spaces, so the text is used exactly as parsed.
+		var query = command.Text ?? string.Empty;
 		if (query.Length > 0 && !PreviewTextDocumentSearch.CanSearch(query))
 		{
 			return TerminalWorkspaceCommandExecutionResult.Failure(
@@ -302,7 +304,8 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		if (_state is null || _tree is null)
 			return InvalidCommandExecution();
-		var query = command.Text?.Trim() ?? string.Empty;
+		// See ExecuteSearchCommand: the parser already applies the right trimming.
+		var query = command.Text ?? string.Empty;
 		_searchQuery = query.Length == 0 ? null : query;
 		var selectedPath = CaptureCurrentTreePath();
 		_state.ApplyTreeFilter(query);
@@ -388,6 +391,10 @@ internal sealed partial class TerminalWorkspaceSession
 		};
 		var depth = command.Depth ?? RelatedQueryRunner.MinimumDepth;
 		var state = _state;
+		var persistentGitMode = _preferredGitMode;
+		// Taken here, on the UI thread, so a filter toggled while this command runs in the
+		// background cannot change what the relation query answers.
+		var relationSnapshot = TerminalWorkspaceController.CaptureRelationSnapshot(state);
 		TrackActiveOperation(RunOperationAsync(
 			L("Terminal.Tui.Command.Related.Title"),
 			async token =>
@@ -400,16 +407,18 @@ internal sealed partial class TerminalWorkspaceSession
 						"DPX-TUI-RELATED-SELECTION-FAILED",
 						planDiagnostics);
 				}
-				var seed = RelatedQueryRunner.ResolveSeed(plan, command.Target);
+				var seedSelection = RelatedQueryRunner.ResolveSeedSelection(plan, command.Target);
 				DependencyRelatedResult related;
+				DependencyOutsideSelectionResult? outside;
 				try
 				{
-					related = await RelatedQueryRunner.FindAsync(
-							_services.DependencyFactsEngine,
+					(related, outside) = await _controller.FindRelatedAsync(
+							relationSnapshot,
 							plan,
-							seed,
+							seedSelection.Files,
 							direction,
 							depth,
+							persistentGitMode,
 							token)
 						.ConfigureAwait(false);
 				}
@@ -422,6 +431,8 @@ internal sealed partial class TerminalWorkspaceSession
 							exception.MaximumSeeds));
 				}
 				using var writer = new StringWriter(CultureInfo.CurrentCulture);
+				if (seedSelection.ExpandedFolder)
+					await writer.WriteLineAsync(RelatedQueryRunner.FormatFolderNotice(seedSelection.Files.Count)).ConfigureAwait(false);
 				if (planDiagnostics.Length > 0)
 				{
 					await writer.WriteLineAsync(planDiagnostics).ConfigureAwait(false);
@@ -436,6 +447,7 @@ internal sealed partial class TerminalWorkspaceSession
 				await RelatedOutputRenderer.WriteAsync(
 						writer,
 						related,
+						outside,
 						direction,
 						AnalysisOutputFormat.Text,
 						_services.Localization,

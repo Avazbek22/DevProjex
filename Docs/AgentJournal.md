@@ -105,3 +105,5 @@ new trace.
 
 Standard-mode sessions remain visible in Journal, but they do not add the Live
 context suffix to the main window title and do not drive Agent activity.
+
+A call that was cancelled, for example because the client closed the connection, is recorded with the outcome `cancelled`.

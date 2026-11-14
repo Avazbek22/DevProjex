@@ -5,7 +5,7 @@ using System.Runtime.CompilerServices;
 
 namespace DevProjex.Tests.Unit;
 
-public sealed class McpLiveContextStateTests
+public sealed partial class McpLiveContextStateTests
 {
 	[Fact]
 	public void ProfileChangeIncrementsRevisionAndReportsFrontierOnce()
@@ -504,7 +504,7 @@ public sealed class McpLiveContextStateTests
 			_ = state.ReadProfile(temporary.Path);
 			var response = Text(state.AppendNotices(McpToolResults.TextSuccess("changed")));
 			Assert.Contains(
-				"[Live context] changed since revision 1: selection settings changed",
+				"[Live context] changed since revision 1: window filters changed",
 				response,
 				StringComparison.Ordinal);
 		}
@@ -650,7 +650,7 @@ public sealed class McpLiveContextStateTests
 	[InlineData((int)McpLiveFocusUse.Search, "were not searched")]
 	[InlineData((int)McpLiveFocusUse.Analysis, "were not measured")]
 	[InlineData((int)McpLiveFocusUse.Pack, "were not packed")]
-	[InlineData((int)McpLiveFocusUse.Related, "were not traced")]
+	[InlineData((int)McpLiveFocusUse.Related, "were checked only for links to the seeds")]
 	public void FocusNoticeReportsOnlyCountsWithTheVerbOfTheTool(int useValue, string verb)
 	{
 		using var temporary = new TemporaryDirectory();

@@ -23,10 +23,7 @@ foreach ($image in @($receipt.images | Sort-Object platform)) {
     $archivePath = Join-Path $root ([string]$image.archive)
     & docker load -i $archivePath
     if ($LASTEXITCODE -ne 0) { throw "Could not load tested image archive '$($image.archive)'." }
-    $actualId = (& docker image inspect --format '{{.Id}}' ([string]$image.localTag)).Trim()
-    if ($LASTEXITCODE -ne 0 -or $actualId -cne [string]$image.imageId) {
-        throw "Loaded image '$($image.localTag)' differs from the tested image ID."
-    }
+    Assert-ContainerLoadedImage ([string]$image.localTag) ([string]$image.configDigest)
     $suffix = if ([string]$image.platform -ceq 'linux/amd64') { 'amd64' } else { 'arm64' }
     $publishedTag = "$ImageName`:$Version-$suffix"
     & docker tag ([string]$image.localTag) $publishedTag

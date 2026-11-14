@@ -60,7 +60,8 @@ public sealed record RelatedCommandRequest(
 	long? MaxFileBytes = null,
 	string? RepositorySourceUrl = null,
 	int Depth = 1,
-	string? OutputPath = null);
+	string? OutputPath = null,
+	ProjectSelectionSpec? ProjectSelection = null);
 
 public sealed record TreeCommandRequest(
 	string ProjectPath,
@@ -96,3 +97,13 @@ public sealed record ExportProjectCommandRequest(
 	bool DryRun,
 	TerminalOutputOptions Output,
 	string? RepositorySourceUrl = null);
+
+public sealed record DiffCommandRequest(
+	string ProjectPath,
+	ProjectSelectionSpec Selection,
+	int ContextLines,
+	AnalysisOutputFormat Format,
+	TerminalOutputOptions Output,
+	long? MaxFileBytes = null,
+	string? RepositorySourceUrl = null,
+	string? OutputPath = null);

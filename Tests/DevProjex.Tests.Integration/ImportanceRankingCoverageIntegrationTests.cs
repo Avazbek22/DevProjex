@@ -259,6 +259,64 @@ public sealed class ImportanceRankingCoverageIntegrationTests
 		Assert.Equal(0, report.Entries.Single(entry => entry.Path == "Node.cs").Dependencies);
 	}
 
+	[Fact]
+	public async Task ModuleOnlyPythonImportsStayOutOfTheGraphAndTheResolvedFraction()
+	{
+		using var fixture = new TemporaryDirectory();
+		var manifest = new[]
+		{
+			fixture.CreateFile("pyproject.toml", "[project]\nname = \"fixture\""),
+			fixture.CreateFile("pkg/__init__.py", string.Empty),
+			fixture.CreateFile("pkg/_config.py", "class Timeout: pass\nDEFAULT = Timeout()"),
+			fixture.CreateFile("pkg/_api.py", "from ._config import DEFAULT"),
+			fixture.CreateFile("pkg/_client.py", "from ._config import Timeout")
+		};
+		using var engine = CreateEngine();
+		var ranking = new ImportanceRankingService(engine, new UnavailableHistoryReader());
+
+		var index = await engine.IndexAsync(
+			fixture.Path,
+			manifest,
+			cancellationToken: TestContext.Current.CancellationToken);
+		var report = await ranking.RankAsync(
+			fixture.Path,
+			manifest,
+			TestContext.Current.CancellationToken);
+
+		Assert.Contains(index.Edges, edge => edge.Source == "pkg/_api.py" && edge.ModuleOnly &&
+			edge.Status == ResolutionStatus.Resolved && edge.Target == "pkg/_config.py");
+		// The same figures the unresolved module-constant import produced before it gained a target.
+		Assert.Equal(1, report.ResolvedInternalReferences);
+		Assert.Equal(2, report.InternalReferenceCandidates);
+		Assert.Equal(1, report.UniqueResolvedFilePairs);
+		Assert.Equal(2, report.FilesWithResolvedEdges);
+		Assert.Equal(0, report.Entries.Single(entry => entry.Path == "pkg/_api.py").Dependencies);
+		Assert.Equal(1, report.Entries.Single(entry => entry.Path == "pkg/_config.py").Dependents);
+	}
+
+	[Fact]
+	public async Task HiddenPathAliasConfigurationDoesNotResolveImportsItIsNotPartOfTheRankedCandidates()
+	{
+		using var fixture = new TemporaryDirectory();
+		// tsconfig.json exists on disk (as a gitignored or excluded file would) but is never passed
+		// as one of the files RankAsync is asked to rank.
+		fixture.CreateFile("tsconfig.json", "{\"compilerOptions\":{\"paths\":{\"@lib/*\":[\"./lib/*\"]}}}");
+		var util = fixture.CreateFile("lib/util.ts", "export const util = 1;\n");
+		var main = fixture.CreateFile("app/main.ts", "import { util } from '@lib/util';\n");
+		using var engine = CreateEngine();
+		var ranking = new ImportanceRankingService(engine, new UnavailableHistoryReader());
+
+		var report = await ranking.RankAsync(
+			fixture.Path,
+			[util, main],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(0, report.ResolvedInternalReferences);
+		Assert.Equal(
+			0,
+			report.Entries.Single(entry => entry.Path == "app/main.ts").Dependencies);
+	}
+
 	private static DependencyFactsEngine CreateEngine() => new(
 		new TreeSitterDependencyFactExtractor(),
 		new FileDependencyConfigurationProvider());

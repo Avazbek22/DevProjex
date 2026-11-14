@@ -593,7 +593,7 @@ Durum çubuğundaki X düğmesi (iptal):
 * iptal desteği olmayan işlemlerde durum çubuğundaki göstergeyi durdurur, ancak işlemin kendisi arka planda tamamlanabilir.
 
 ## 19) MCP ve yapay zekâ aracıları
-DevProjex yerel, salt okunur bir MCP sunucusu içerir. Claude Code, Codex, Cursor ve VS Code gibi yapay zekâ aracıları projeyi bu sunucu üzerinden okur: gizli bilgi maskeleme her zaman açıktır ve aracı proje dosyalarını değiştiremez. Sunucu sekiz araç sunar: `list_projects`, `get_tree`, `analyze`, `search_project`, `related_files`, `get_file`, `pack_context` ve `read_pack`.
+DevProjex yerel, salt okunur bir MCP sunucusu içerir. Claude Code, Codex, Cursor ve VS Code gibi yapay zekâ aracıları projeyi bu sunucu üzerinden okur: gizli bilgi maskeleme her zaman açıktır ve aracı proje dosyalarını değiştiremez. Sunucu dokuz araç sunar: `list_projects`, `get_tree`, `analyze`, `search_project`, `related_files`, `get_file`, `get_diff`, `pack_context` ve `read_pack`.
 
 ### 19.1 İstemci bağlama
 MCP menüsü şunları içerir:

@@ -593,7 +593,7 @@ X button (cancel) in the status bar:
 * for operations without cancellation support, it stops status-bar indication, while the operation itself may still finish in background.
 
 ## 19) MCP and AI agents
-DevProjex includes a local read-only MCP server. AI agents such as Claude Code, Codex, Cursor, and VS Code read the project through it: secret masking is always on, and the agent cannot change project files. The server provides eight tools: `list_projects`, `get_tree`, `analyze`, `search_project`, `related_files`, `get_file`, `pack_context`, and `read_pack`.
+DevProjex includes a local read-only MCP server. AI agents such as Claude Code, Codex, Cursor, and VS Code read the project through it: secret masking is always on, and the agent cannot change project files. The server provides nine tools: `list_projects`, `get_tree`, `analyze`, `search_project`, `related_files`, `get_file`, `get_diff`, `pack_context`, and `read_pack`.
 
 ### 19.1 Connecting a client
 The MCP menu contains:

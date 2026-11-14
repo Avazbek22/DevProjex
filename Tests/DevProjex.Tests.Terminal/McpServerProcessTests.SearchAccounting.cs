@@ -218,15 +218,13 @@ public sealed partial class McpServerProcessTests
 		var opening = Regex.Match(
 			wideText,
 			@"^\[Search boundary\] partial output: every selected file was searched; (\d+) of (\d+) matches are " +
-			@"written here and the rest are stored for read_pack\.");
+			"written here; the rest are counted per file under \"Withheld matches by file\"\\.");
 		Assert.True(opening.Success, wideText);
 		Assert.Equal(800, int.Parse(opening.Groups[2].Value));
 		Assert.Contains("[Search truncated]", wideText, StringComparison.Ordinal);
-		Assert.Contains(
-			"[Next read] Call read_pack with the reported pack_id for the remaining retained matches.",
-			wideText,
-			StringComparison.Ordinal);
-		Assert.Single(Regex.Matches(wideText, @"\[Next read\]"));
+		Assert.Contains("Withheld matches by file:", wideText, StringComparison.Ordinal);
+		Assert.Single(Regex.Matches(wideText, Regex.Escape("Call read_pack with this pack_id.")));
+		Assert.DoesNotContain("[Next read]", wideText, StringComparison.Ordinal);
 		// 40 files carry 20 matching lines each, and the counters stay exact under the cap.
 		Assert.Contains("[Search observed] matches=800 · matching-files=40 within inspected sources", wideText, StringComparison.Ordinal);
 		// Matches are grouped under their path, so a shown match is a numbered line; the paths

@@ -155,6 +155,8 @@ public sealed class DocumentationAndPackagingContractTests
 			"[Live context] changed since revision 14: +2 folders, -1 file",
 			"[Live context] changed since revision 14: +7 folders, -2 files · 5 names shown, 4 more",
 			"[Live context] changed since revision 14: selection settings changed",
+			"[Live context] changed since revision 2: window filters changed (2 files no longer readable, 5 now readable) · -4 folders, +all",
+			"[Live context] changed since revision 2: window filters changed (2 files no longer readable)",
 			"[Live context] changed since revision 14: -all, +2 folders",
 			"[Live context] changed since revision 14: -1 folder, +all",
 			"[Live context] no window selection saved for this root; using server defaults.",
@@ -171,6 +173,9 @@ public sealed class DocumentationAndPackagingContractTests
 			Assert.Contains(outputContract, server, StringComparison.Ordinal);
 		Assert.Contains("Live context root 1 name:", server, StringComparison.Ordinal);
 		Assert.Contains("Live context changed paths since revision 14:", server, StringComparison.Ordinal);
+		Assert.Contains("Window filters changed since revision 2:", server, StringComparison.Ordinal);
+		Assert.Contains("inside an untrusted block", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("[Window filters]", server, StringComparison.Ordinal);
 		Assert.Contains("remain inside the same randomized untrusted-data boundary", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("including an error result", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("once a plan has been built at that revision", normalizedServer, StringComparison.Ordinal);
@@ -280,7 +285,10 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("at most 2,000 lines and 50,000 characters", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("`profile` applies the same effective selection", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("### Batch `get_file`", server, StringComparison.Ordinal);
-		Assert.Contains("one to eight records", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("one to sixteen records", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("The complete batch, including wrappers, headers, and notices, is limited to 50,000 characters", normalizedServer, StringComparison.Ordinal);
+		Assert.Contains("[Batch read] ok=A · structure=B · partial=C · not-returned=D · unavailable=E.", server, StringComparison.Ordinal);
+		Assert.Contains("Top-level `start_line`, `end_line`, `start_column`, and `symbol` cannot accompany `requests`", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("at most sixteen whole-file, range, or symbol selections", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("`ok` when its original interval is wholly inside the returned coverage, `partial`", normalizedServer, StringComparison.Ordinal);
 		Assert.Contains("`--remote-hosts`", server, StringComparison.Ordinal);
@@ -320,11 +328,11 @@ public sealed class DocumentationAndPackagingContractTests
 		var normalized = Regex.Replace(server, @"\s+", " ");
 
 		Assert.Contains(
-			"`max_depth` counts levels below the project root",
+			"`max_depth` counts levels below each requested `paths` entry",
 			normalized,
 			StringComparison.Ordinal);
 		Assert.Contains(
-			"`paths` narrows the selection but never re-roots the tree",
+			"Overlapping requests use the union of their depth windows",
 			normalized,
 			StringComparison.Ordinal);
 		Assert.Contains(
@@ -348,15 +356,15 @@ public sealed class DocumentationAndPackagingContractTests
 			StringComparison.Ordinal);
 		Assert.Contains("Placement is all or nothing", normalized, StringComparison.Ordinal);
 		Assert.DoesNotContain("Enclosing declarations:", server, StringComparison.Ordinal);
-		Assert.Contains(
-			"[Symbols] annotated=N · files-without-declarations=K.",
-			server,
-			StringComparison.Ordinal);
+		Assert.DoesNotContain("[Symbols] annotated=", server, StringComparison.Ordinal);
+		Assert.Contains("Naming adds no trusted line of its own.", normalized, StringComparison.Ordinal);
 		Assert.Contains("There is no parameter for it", normalized, StringComparison.Ordinal);
 		Assert.Contains("### Reading a declaration by name", server, StringComparison.Ordinal);
 		Assert.Contains("### The search result carries the selector", server, StringComparison.Ordinal);
 		Assert.Contains("Declarations found (path, symbol, lines):", server, StringComparison.Ordinal);
-		Assert.Contains("[Next read] Read only declarations needed for the task", server, StringComparison.Ordinal);
+		Assert.DoesNotContain("batch known selections in one get_file call", server, StringComparison.Ordinal);
+		Assert.Contains("that list is the continuation and no `[Next read]` line repeats it", normalized,
+			StringComparison.Ordinal);
 		Assert.Contains("Best declaration body (1 of 3):", server, StringComparison.Ordinal);
 		Assert.Contains("Exact ordinal equality with the full printed name or its last segment", normalized,
 			StringComparison.Ordinal);
@@ -695,6 +703,7 @@ public sealed class DocumentationAndPackagingContractTests
 			rootPath, "Scripts", "Test-InstalledHeadlessArtifact.ps1"));
 		var mcpSmoke = File.ReadAllText(Path.Combine(
 			rootPath, "Scripts", "smoke-headless-mcp.mjs"));
+		Assert.Contains("'mcp', '--root', root, '--tool-set', 'full'", mcpSmoke, StringComparison.Ordinal);
 		var installation = File.ReadAllText(Path.Combine(rootPath, "Docs", "Installation.md"));
 		Assert.Contains("uses: ./.github/workflows/packages-build.yml", workflow, StringComparison.Ordinal);
 		Assert.Contains("Test-HeadlessPackages.ps1", buildWorkflow, StringComparison.Ordinal);
@@ -1050,6 +1059,31 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("latest", releaseProcess, StringComparison.Ordinal);
 		Assert.Contains("exact registry", releaseProcess, StringComparison.Ordinal);
 		Assert.Contains("Two independent producers cannot atomically update one checksum manifest", releaseProcess, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void ContainerArtifactChangesTriggerBothPackagingEventsAndShareLoadedIdentityChecks()
+	{
+		var rootPath = FindRepositoryRoot();
+		var workflow = File.ReadAllText(Path.Combine(rootPath, ".github", "workflows", "publish-container.yml"));
+		foreach (var eventName in new[] { "push", "pull_request" })
+		{
+			var eventBlock = Regex.Match(workflow, $@"(?ms)^  {eventName}:\r?\n.*?(?=^  \w+:)");
+			Assert.True(eventBlock.Success, $"Missing {eventName} configuration.");
+			Assert.Contains("'Scripts/Test-ContainerImageArtifacts.ps1'", eventBlock.Value, StringComparison.Ordinal);
+			Assert.Contains("'Scripts/ContainerPublishing.ps1'", eventBlock.Value, StringComparison.Ordinal);
+			Assert.Contains("'Scripts/ci/Test-ContainerPromotionPolicy.ps1'", eventBlock.Value, StringComparison.Ordinal);
+		}
+
+		var validator = File.ReadAllText(Path.Combine(rootPath, "Scripts", "Test-ContainerImageArtifacts.ps1"));
+		var publisher = File.ReadAllText(Path.Combine(rootPath, "Scripts", "Publish-HeadlessContainer.ps1"));
+		var builder = File.ReadAllText(Path.Combine(rootPath, ".github", "workflows", "container-build.yml"));
+		Assert.Contains("Assert-ContainerLoadedImage", validator, StringComparison.Ordinal);
+		Assert.Contains("Assert-ContainerLoadedImage", publisher, StringComparison.Ordinal);
+		Assert.DoesNotContain("{{.Id}}", validator + publisher, StringComparison.Ordinal);
+		Assert.Contains("Get-FileHash -LiteralPath $archivePath -Algorithm SHA256", validator, StringComparison.Ordinal);
+		Assert.Contains("schemaVersion = 2", builder, StringComparison.Ordinal);
+		Assert.Equal(2, Regex.Matches(builder, "configDigest = Get-ContainerArchiveConfigDigest").Count);
 	}
 
 	[Fact]

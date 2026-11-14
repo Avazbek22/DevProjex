@@ -80,7 +80,7 @@ Works with any language, repository, or project structure.
 * **[Git modes](#how-smart-ignore-works-):** `.gitignore`, tracked files, staged files, all current changes, or a ref-to-ref diff.
 
 **AI agents**
-* **[Read-only MCP server](#mcp-server-):** eight tools for any MCP client, on the same engine as the desktop app.
+* **[Read-only MCP server](#mcp-server-):** nine tools for any MCP client, on the same engine as the desktop app.
 * **[Live Context](#live-context-your-checkboxes-become-the-agents-focus):** tick files in the desktop app and the agent works with that selection on its very next call.
 * **[Agent journal](#agent-journal-a-receipt-for-every-session):** a receipt for every session with calls, delivered paths, tokens, and masked values, never file bodies.
 * **[Hard boundaries](#security-boundaries):** root jail, untrusted-data markers, and an agent that can only narrow what it sees.
@@ -137,12 +137,15 @@ Open the project in the desktop app and connect through **MCP → Live context**
 
 Live context uses `--live`; **Standard** connects the same server but does not follow the window selection.
 
-### Eight read-only tools
+### Nine read-only tools
 
-Eight read-only tools cover the whole workflow: `list_projects`, `get_tree`, `analyze`, `search_project`, `related_files`, `get_file`, `pack_context`, and `read_pack`.
+Nine read-only tools cover the whole workflow: `list_projects`, `get_tree`, `analyze`, `search_project`, `related_files`, `get_file`, `get_diff`, `pack_context`, and `read_pack`.
 
-* `search_project` finds text or declarations by name, and `get_file` reads an exact line range or one declaration instead of a whole file.
-* `related_files` answers "what does this file actually use, and who uses it" from real imports, for one file or a handful of seeds, so following a thread never widens the selection.
+By default the server publishes the tools an agent reaches for in everyday work, `get_tree`, `search_project`, `get_file`, `related_files`, `get_diff` and `read_pack`, so the tool list costs the model less on every request. Start it with `--tool-set full` to publish `analyze` and `pack_context` as well.
+
+* `search_project` finds text or declarations by name, and `get_file` reads an exact line range, one declaration, or up to sixteen files in one call. A large file comes back as its start and a structure with line ranges, so the agent reads only the part it needs.
+* `related_files` answers "what does this file actually use, and who uses it" from real imports, for one file, several seeds, or the files in a folder, so following a thread never widens the selection.
+* `get_diff` reviews a change: staged files, current changes, or a ref-to-ref diff as unified hunks, largest changes first, with secrets masked in both versions, so the agent reads only the lines that changed.
 * `pack_context` packs a selection under `max_tokens`: files are admitted in a deterministic order while they fit, the rest are reported as skipped, and `top_files` shows where the tokens go.
 * `pack_context` and `related_files` store an oversized result as a session pack; `read_pack` reads it back in line ranges instead of flooding the agent's context. Long operations report standard MCP progress notifications.
 * Trees default to compact Markdown, content declares the root once and uses relative paths, and every tree ends with a line naming the active filters, so the agent knows what it did not see. `git_scope` narrows any tool to staged files, current changes, or a ref-to-ref diff; `profile` switches between built-in defaults, your saved desktop selections, or a portable profile file.

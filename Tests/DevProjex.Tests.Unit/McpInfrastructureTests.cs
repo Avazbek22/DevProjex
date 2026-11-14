@@ -12,6 +12,20 @@ namespace DevProjex.Tests.Unit;
 public sealed class McpInfrastructureTests
 {
 	[Fact]
+	public void SearchDeclarationsCoverageListsAtMostEightEscapedPathsWithinTheBodyBudget()
+	{
+		var paths = Enumerable.Range(0, 10).Select(index => $"folder\nfile-{index}.ts").ToArray();
+		var output = DevProjexMcpTools.FormatDeclarationsNotIndexed(paths);
+
+		Assert.Equal(8, output.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries).Length);
+		Assert.DoesNotContain("folder\nfile", output, StringComparison.Ordinal);
+		Assert.Contains("file-7.ts", output, StringComparison.Ordinal);
+		Assert.DoesNotContain("file-8.ts", output, StringComparison.Ordinal);
+		Assert.Empty(DevProjexMcpTools.FormatDeclarationsNotIndexed([]));
+		Assert.Empty(DevProjexMcpTools.FormatDeclarationsNotIndexed([new string('a', 16_000)]));
+	}
+
+	[Fact]
 	public void NoFactsTrustedNoticeAllowsOnlyFixedEngineReasons()
 	{
 		var reasons = new[]
@@ -355,6 +369,68 @@ public sealed class McpInfrastructureTests
 		Assert.False(McpSearchSymbols.LooksLikeRegularExpression(pattern));
 	}
 
+	[Theory]
+	[InlineData(@"interface\s+ToNumberStrategy", "ToNumberStrategy")]
+	[InlineData("func.*RemoteIP|func.*isTrustedProxy", "RemoteIP,isTrustedProxy")]
+	[InlineData(@"^class\s+Foo\b$", "Foo")]
+	[InlineData(@"export\s+function\s+serveStatic", "serveStatic")]
+	[InlineData("Foo|class Foo", "Foo")]
+	[InlineData(@"interface\s+函數²_𐐀", "函數²_𐐀")]
+	[InlineData(@"class\s*Foo", "Foo")]
+	[InlineData(@"record\s+Foo", "Foo")]
+	[InlineData(@"public\s+class\s+Foo", "Foo")]
+	[InlineData(@"pub\s+fn\s+handle", "handle")]
+	[InlineData(@"protected\s+readonly\s+record\s+Item", "Item")]
+	[InlineData(@"public\s+static\s+async\s+Task", "Task")]
+	[InlineData(@"func.+Bar|\bFoo\b", "Bar,Foo")]
+	public void SimpleRegularExpressionsReadExactlyOneNamePerAlternative(string pattern, string expected)
+	{
+		Assert.True(McpSearchSymbols.TryReadDeclarationNames(pattern, out var names));
+		Assert.Equal(expected.Split(','), names);
+	}
+
+	[Theory]
+	[InlineData("func Test.*ClientIP")]
+	[InlineData(@"class\s+\w+Service")]
+	[InlineData("Foo.Bar")]
+	[InlineData("(?i)foo")]
+	[InlineData("a+b")]
+	[InlineData(@"def\s+(foo|bar)")]
+	[InlineData("Foo|")]
+	[InlineData("|Foo")]
+	[InlineData("Foo||Bar")]
+	[InlineData("class")]
+	[InlineData("CLASS Foo")]
+	[InlineData(@"proecord\s+Foo")]
+	[InlineData("")]
+	[InlineData(" ")]
+	[InlineData(@"def\s+test_.*")]
+	[InlineData(@"func\s+Test.*")]
+	[InlineData(".*Handler$")]
+	[InlineData("^get.+")]
+	[InlineData(@"class\s+Foo|bar.*")]
+	[InlineData(@"\bFoo.*\b")]
+	public void ComplexRegularExpressionsNeverBecomePartialDeclarationNameQueries(string pattern)
+	{
+		Assert.False(McpSearchSymbols.TryReadDeclarationNames(pattern, out var names));
+		Assert.Empty(names);
+	}
+
+	[Fact]
+	public void EveryDeclarationKeywordIsDiscardedWhenReadingARegularExpression()
+	{
+		const string keywords = "abstract async class const data def default enum export extern final fn fun func function " +
+			"impl interface internal let module namespace object override partial private protected pub public readonly record " +
+			"sealed static struct trait type typedef union val var virtual";
+		var words = keywords.Split(' ');
+		Assert.Equal(40, words.Length);
+		foreach (var keyword in words)
+		{
+			Assert.True(McpSearchSymbols.TryReadDeclarationNames(keyword + @"\s+Name", out var names), keyword);
+			Assert.Equal(["Name"], names);
+		}
+	}
+
 	[Fact]
 	public void BodyTruncationNoticeNamesTheExactUnshownLines()
 	{
@@ -404,6 +480,63 @@ public sealed class McpInfrastructureTests
 		Assert.Equal(expected, boundary.OnlyOutputCapped);
 		// The narrower wording never applies to a complete search.
 		Assert.False(boundary.OnlyOutputCapped && boundary.IsComplete);
+	}
+
+	[Theory]
+	[InlineData(true, false, false, null)]
+	[InlineData(true, false, true, null)]
+	[InlineData(false, false, true, null)]
+	[InlineData(false, false, false, "[Next read] Narrow pattern, paths, or include_patterns and rerun the search.")]
+	[InlineData(false, true, true, null)]
+	[InlineData(true, true, false, null)]
+	public void SearchNextReadKeepsActionableStepsAndLetsTheDeclarationListSpeakForItself(
+		bool complete,
+		bool hasStoredContinuation,
+		bool declarationsToRead,
+		string? expected)
+	{
+		var boundary = new McpSearchBoundary(
+			EligibleSources: 4,
+			InspectedSources: complete ? 4 : 2,
+			EncounteredMatches: 6,
+			RetainedMatches: 6,
+			WrittenMatches: 6,
+			NamedDeclarationFiles: 1,
+			InspectionByteLimitReached: !complete,
+			RetainedMatchLimitReached: false,
+			AnnotationFileLimitReached: false,
+			ResponseCharacterLimitReached: false,
+			RequestResultLimitReached: false,
+			RetainedCharacterLimitReached: false,
+			StoredCharacterLimitReached: false,
+			UnscannableSources: 0);
+
+		var nextRead = DevProjexMcpTools.FormatSearchNextRead(boundary, hasStoredContinuation, declarationsToRead);
+
+		Assert.Equal(complete, boundary.IsComplete);
+		Assert.Equal(expected, nextRead);
+	}
+
+	[Fact]
+	public void SearchNamingStopsAtTheAnnotatedFileBoundWithoutCountingTheRest()
+	{
+		var navigation = new Dictionary<string, IReadOnlyList<NavigationDeclaration>>(StringComparer.Ordinal);
+		var hits = new List<McpSearchHit>();
+		for (var index = 0; index <= McpSearchSymbols.MaximumAnnotatedFiles; index++)
+		{
+			var path = $"src/File{index}.cs";
+			navigation[path] = [new NavigationDeclaration($"Type{index}", NavigationSymbolKind.Type, null, 1, 5, "fingerprint")];
+			hits.Add(new McpSearchHit(path, "/repo/" + path, 2));
+			hits.Add(new McpSearchHit(path, "/repo/" + path, 3));
+		}
+
+		var result = McpSearchSymbols.Resolve(hits, navigation, TestContext.Current.CancellationToken);
+
+		Assert.Equal(McpSearchSymbols.MaximumAnnotatedFiles * 2, result.AnnotatedHits);
+		Assert.Equal(McpSearchSymbols.MaximumAnnotatedFiles, result.Declarations.Count);
+		Assert.DoesNotContain(
+			result.Declarations,
+			declaration => declaration.RelativePath == $"src/File{McpSearchSymbols.MaximumAnnotatedFiles}.cs");
 	}
 
 	[Fact]
@@ -2511,6 +2644,119 @@ public sealed class McpInfrastructureTests
 		Assert.Equal(1000, page.EndLine);
 		Assert.InRange(allocatedBytes, 0, 2 * 1024 * 1024);
 	}
+
+	[Theory]
+	[InlineData("^tests/client/", true)]
+	[InlineData("src/.*/", true)]
+	[InlineData("tests/(client|server)/", false)]
+	[InlineData("prefix tests/client/", false)]
+	[InlineData("tests/.+", false)]
+	[InlineData(@"src/.*App.*\.cs$", true)]
+	[InlineData("thing.verylongextension", true)]
+	[InlineData("имя.данные", true)]
+	[InlineData("ordinaryAbsent", false)]
+	[InlineData("^$", false)]
+	public void SearchPathPatternHintsRecognizeOnlyTheSpecifiedShapes(string pattern, bool expected)
+	{
+		Assert.Equal(expected, DevProjexMcpTools.LooksLikeANameSearch(pattern));
+	}
+
+	[Theory]
+	[InlineData(@"def a\nfoo", true)]
+	[InlineData("def a\nfoo", true)]
+	[InlineData(@"line\r", true)]
+	[InlineData(@"a[\s\S]*b", true)]
+	[InlineData(@"a[\S\s]*b", true)]
+	[InlineData(@"a[\w\W]*b", true)]
+	[InlineData(@"a[\W\w]*b", true)]
+	[InlineData(@"a[\d\D]*b", true)]
+	[InlineData(@"a[\D\d]*b", true)]
+	[InlineData("(?s)a.*b", true)]
+	[InlineData("(?is)a.*b", true)]
+	[InlineData("(?s:a.*b)", true)]
+	[InlineData("(?i-s)a.*b", false)]
+	[InlineData(@"\\n", false)]
+	[InlineData(@"a\s+b", false)]
+	[InlineData("(?i)a.*b", false)]
+	[InlineData("(?<s>a)", false)]
+	[InlineData("ordinaryAbsent", false)]
+	[InlineData("", false)]
+	public void SearchSwitchesToMultilineMatchingOnlyForLineBreakPatterns(string pattern, bool expected)
+	{
+		Assert.Equal(expected, McpSearchRegex.RequiresMultilineMatching(pattern));
+	}
+
+	[Theory]
+	[InlineData(@"a\r\nb", true)]
+	[InlineData("a\r\nb", true)]
+	[InlineData(@"a\r?\nb", true)]
+	[InlineData(@"a\nb", false)]
+	[InlineData(@"a\\r", false)]
+	[InlineData(@"(?s)a.*b", false)]
+	public void MultilineSearchKeepsCarriageReturnsOnlyForAPatternThatNamesOne(string pattern, bool expected)
+	{
+		Assert.Equal(expected, McpSearchRegex.NamesCarriageReturn(pattern));
+	}
+
+	[Theory]
+	[InlineData("readme.md", true)]
+	[InlineData("readme.MDX", true)]
+	[InlineData("guide.rst", true)]
+	[InlineData("notes.txt", true)]
+	[InlineData("manual.adoc", true)]
+	[InlineData("docs/example.cs", true)]
+	[InlineData("nested/doc/example.py", true)]
+	[InlineData("nested/DOCS/example.log", true)]
+	[InlineData(@"nested\doc\example.log", true)]
+	[InlineData("src/example.cs", false)]
+	[InlineData("readme.md.cs", false)]
+	[InlineData("documentation/example.cs", false)]
+	[InlineData("mydocs/example.log", false)]
+	[InlineData("docs", false)]
+	[InlineData("docs.cs", false)]
+	public void SearchDocumentationClassificationIsIndependentOfTheHostPlatform(string path, bool expected)
+	{
+		Assert.Equal(expected, McpSearchSymbols.IsDocumentationPath(path));
+	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public void SearchDocumentationOrderingPreservesEachGroupAndEveryLineOffset(bool includeHeading)
+	{
+		var groups = new[]
+		{
+			SearchDocumentationGroup("docs/first.cs", 1), SearchDocumentationGroup("z.log", 1),
+			SearchDocumentationGroup("a.md", 1), SearchDocumentationGroup("y.log", 1)
+		};
+
+		var original = DevProjexMcpTools.RenderSearchGroups(groups, 50, 1_000);
+		var rendered = DevProjexMcpTools.RenderSearchGroupsWithDocumentationLast(groups, 50, 1_000, includeHeading);
+
+		Assert.Equal(groups.Select(group => group.RelativePath), original.WrittenHits.Select(hit => hit.RelativePath));
+		Assert.Equal(new[] { "z.log", "y.log", "docs/first.cs", "a.md" }, rendered.WrittenHits.Select(hit => hit.RelativePath));
+		Assert.Equal(includeHeading, rendered.Output.ToString().Contains("Matches in documentation files:", StringComparison.Ordinal));
+		Assert.All(rendered.RenderedLines, line => Assert.StartsWith("1:needle", rendered.Output.ToString()[line.Offset..], StringComparison.Ordinal));
+	}
+
+	[Fact]
+	public void SearchDocumentationCannotDisplaceCodeFromTheResponseBudget()
+	{
+		var code = SearchDocumentationGroup("code.log", 8);
+		var documentation = SearchDocumentationGroup("readme.md", 8);
+		var expected = DevProjexMcpTools.RenderSearchGroups([code], 50, 180);
+
+		var rendered = DevProjexMcpTools.RenderSearchGroupsWithDocumentationLast([documentation, code], 50, 180);
+
+		Assert.Equal(expected.WrittenHits.Count, rendered.WrittenHits.Count(hit => hit.RelativePath == "code.log"));
+		Assert.InRange(rendered.Output.Length, 1, 180);
+		Assert.True(rendered.Truncated);
+		Assert.DoesNotContain("Matches in documentation files:", rendered.Output.ToString(), StringComparison.Ordinal);
+	}
+
+	private static McpSearchRenderedGroup SearchDocumentationGroup(string path, int count) =>
+		new(path, path, Enumerable.Range(1, count).ToArray(), Enumerable.Range(1, count)
+			.Select(line => new McpSearchGroupLine(line, true, $"{line}:needle " + new string('x', 20))).ToArray());
 
 	[Fact]
 	public void SearchScannerKeepsOnlyBoundedMatchContext()

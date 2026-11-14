@@ -593,7 +593,7 @@ Botão X (cancelar) na barra de status:
 * em operações sem suporte a cancelamento, interrompe a indicação na barra de status, embora a própria operação ainda possa terminar em segundo plano.
 
 ## 19) MCP e agentes de IA
-O DevProjex inclui um servidor MCP local somente leitura. Agentes de IA como o Claude Code, o Codex, o Cursor e o VS Code leem o projeto por meio dele: a ocultação de segredos está sempre ativa, e o agente não pode alterar os arquivos do projeto. O servidor oferece oito ferramentas: `list_projects`, `get_tree`, `analyze`, `search_project`, `related_files`, `get_file`, `pack_context` e `read_pack`.
+O DevProjex inclui um servidor MCP local somente leitura. Agentes de IA como o Claude Code, o Codex, o Cursor e o VS Code leem o projeto por meio dele: a ocultação de segredos está sempre ativa, e o agente não pode alterar os arquivos do projeto. O servidor oferece nove ferramentas: `list_projects`, `get_tree`, `analyze`, `search_project`, `related_files`, `get_file`, `get_diff`, `pack_context` e `read_pack`.
 
 ### 19.1 Conectar um cliente
 O menu MCP contém:

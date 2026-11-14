@@ -44,6 +44,81 @@ public sealed class ImportanceRankingManifestIdentityTests
 		}
 	}
 
+	[Theory]
+	[InlineData(8)]
+	[InlineData(508)]
+	[InlineData(509)]
+	[InlineData(513)]
+	public async Task SourceVersionCapture_KeepsSerialBytesAndPathOrder(int count)
+	{
+		using var workspace = new TemporaryDirectory();
+		var paths = Enumerable.Range(0, count)
+			.Select(index => workspace.CreateFile($"project/group{index % 7}/file{index:D4}.txt",
+				index % 3 == 0 ? string.Empty : $"value-{index}-é-値\n"))
+			.ToList();
+		paths.Add(paths[0]);
+		paths.Add(Path.Combine(workspace.Path, "project", "missing.txt"));
+		paths.Add(Path.GetDirectoryName(paths[0])!);
+		var expected = new Dictionary<string, RankingSourceVersion>(PathComparer.Default);
+		foreach (var path in paths)
+			expected[Path.GetFullPath(path)] = await RankingSourceVersion.CaptureAsync(
+				path, TestContext.Current.CancellationToken);
+
+		var actual = await CaptureVersionsAsync(paths, TestContext.Current.CancellationToken);
+
+		Assert.Equal(System.Text.Json.JsonSerializer.Serialize(expected),
+			System.Text.Json.JsonSerializer.Serialize(actual));
+		Assert.Equal(expected.Keys, actual.Keys);
+	}
+
+	[Theory]
+	[InlineData(8)]
+	[InlineData(513)]
+	public async Task SourceVersionCapture_ObservesCancellationForEveryManifestSize(int count)
+	{
+		using var workspace = new TemporaryDirectory();
+		var path = workspace.CreateFile("source.cs", "public class Source { }");
+		using var cancellation = new CancellationTokenSource();
+		cancellation.Cancel();
+
+		await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+			CaptureVersionsAsync(Enumerable.Repeat(path, count).ToArray(), cancellation.Token));
+	}
+
+	private static Task<IReadOnlyDictionary<string, RankingSourceVersion>> CaptureVersionsAsync(
+		IReadOnlyList<string> paths, CancellationToken cancellationToken) =>
+		(Task<IReadOnlyDictionary<string, RankingSourceVersion>>)typeof(ImportanceRankingService)
+			.GetMethod("CaptureVersionsAsync", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!
+			.Invoke(null, [paths, cancellationToken])!;
+
+	[Fact]
+	public async Task LargeRanking_ReusesTheSnapshotAndDetectsSameStampReplacement()
+	{
+		using var workspace = new TemporaryDirectory();
+		var root = workspace.CreateFolder("project");
+		var project = workspace.CreateFile("project/Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var alpha = workspace.CreateFile("project/Alpha.cs", "public class Alpha { }");
+		var bravo = workspace.CreateFile("project/Bravo.cs", "public class Bravo { }");
+		var source = workspace.CreateFile("project/Use.cs", "public class Use { Alpha Value; }");
+		var candidates = new[] { project, alpha, bravo, source }.Concat(Enumerable.Range(0, 510)
+			.Select(index => workspace.CreateFile($"project/notes/{index:D4}.txt", $"note {index}"))).ToArray();
+		using var engine = new DependencyFactsEngine(
+			new TreeSitterDependencyFactExtractor(), new FileDependencyConfigurationProvider());
+		var ranking = new ImportanceRankingService(engine, new UnavailableHistoryReader());
+
+		var first = await ranking.RankAsync(root, candidates, TestContext.Current.CancellationToken);
+		var repeated = await ranking.RankAsync(root, candidates, TestContext.Current.CancellationToken);
+		ReplaceWithSameFileStampOrSkip(source, "public class Use { Bravo Value; }");
+		var replaced = await ranking.RankAsync(root, candidates, TestContext.Current.CancellationToken);
+
+		Assert.NotNull(repeated.DependencyMetrics);
+		Assert.True(repeated.DependencyMetrics.ResolutionCacheHit);
+		Assert.Equal(1, Entry(first, "Alpha.cs").Dependents);
+		Assert.Equal(0, Entry(first, "Bravo.cs").Dependents);
+		Assert.Equal(0, Entry(replaced, "Alpha.cs").Dependents);
+		Assert.Equal(1, Entry(replaced, "Bravo.cs").Dependents);
+	}
+
 	[Fact]
 	public async Task UnchangedSecondRankingRequestHitsResolutionCache()
 	{

@@ -13,7 +13,10 @@ internal sealed class McpSearchRegex
 	private readonly Regex _regex;
 	private readonly IReadOnlyList<DeclarationBodyLiteralTerm> declarationBodyLiteralTerms;
 
-	public McpSearchRegex(string pattern, bool ignoreCase, TimeSpan? timeout = null)
+	private static readonly string[] LineBreakCoveringClasses =
+		[@"[\s\S]", @"[\S\s]", @"[\w\W]", @"[\W\w]", @"[\d\D]", @"[\D\d]"];
+
+	public McpSearchRegex(string pattern, bool ignoreCase, TimeSpan? timeout = null, bool multiline = false)
 	{
 		ArgumentNullException.ThrowIfNull(pattern);
 		if (McpUnicodeLength.ExceedsScalarValueCount(pattern, MaximumPatternLength))
@@ -26,7 +29,9 @@ internal sealed class McpSearchRegex
 		{
 			_regex = new Regex(
 				pattern,
-				RegexOptions.CultureInvariant | (ignoreCase ? RegexOptions.IgnoreCase : RegexOptions.None),
+				RegexOptions.CultureInvariant |
+				(ignoreCase ? RegexOptions.IgnoreCase : RegexOptions.None) |
+				(multiline ? RegexOptions.Multiline : RegexOptions.None),
 				timeout ?? DefaultTimeout);
 			declarationBodyLiteralTerms = ExtractDeclarationBodyLiteralTerms(pattern);
 		}
@@ -36,6 +41,83 @@ internal sealed class McpSearchRegex
 				McpErrorCodes.InvalidPattern,
 				$"{McpErrorCodes.InvalidPattern}: pattern is not a valid .NET regular expression ({exception.Message}).");
 		}
+	}
+
+	/// <summary>
+	/// Whether the pattern can only be meant to cross a line break: an escaped or literal line
+	/// break, a character class that covers one, or the inline single-line option. Any other
+	/// pattern keeps per-line matching.
+	/// </summary>
+	public static bool RequiresMultilineMatching(string pattern)
+	{
+		ArgumentNullException.ThrowIfNull(pattern);
+		if (pattern.AsSpan().IndexOfAny('\n', '\r') >= 0)
+			return true;
+		foreach (var characterClass in LineBreakCoveringClasses)
+		{
+			if (pattern.Contains(characterClass, StringComparison.Ordinal))
+				return true;
+		}
+		for (var index = 0; index < pattern.Length; index++)
+		{
+			if (pattern[index] == '\\')
+			{
+				if (index + 1 < pattern.Length && pattern[index + 1] is 'n' or 'r')
+					return true;
+				index++;
+				continue;
+			}
+			if (pattern[index] == '(' && EnablesSingleLineOption(pattern, index))
+				return true;
+		}
+		return false;
+	}
+
+	/// <summary>
+	/// Whether the pattern names a carriage return itself, escaped or literal; such a pattern is
+	/// matched against the text with its original line breaks.
+	/// </summary>
+	public static bool NamesCarriageReturn(string pattern)
+	{
+		ArgumentNullException.ThrowIfNull(pattern);
+		if (pattern.Contains('\r'))
+			return true;
+		for (var index = 0; index < pattern.Length - 1; index++)
+		{
+			if (pattern[index] != '\\')
+				continue;
+			if (pattern[index + 1] == 'r')
+				return true;
+			index++;
+		}
+		return false;
+	}
+
+	private static bool EnablesSingleLineOption(string pattern, int groupStart)
+	{
+		if (groupStart + 1 >= pattern.Length || pattern[groupStart + 1] != '?')
+			return false;
+		var enables = true;
+		var singleLine = false;
+		for (var cursor = groupStart + 2; cursor < pattern.Length; cursor++)
+		{
+			switch (pattern[cursor])
+			{
+				case 's':
+					singleLine |= enables;
+					break;
+				case '-':
+					enables = false;
+					break;
+				case 'i' or 'm' or 'n' or 'x':
+					break;
+				case ':' or ')':
+					return singleLine;
+				default:
+					return false;
+			}
+		}
+		return false;
 	}
 
 	public bool HasDeclarationBodyLiteralTerms => declarationBodyLiteralTerms.Count > 0;
@@ -151,29 +233,16 @@ internal sealed class McpSearchRegex
 			foreach (var match in _regex.EnumerateMatches(input.AsSpan(start, length)))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
-				var absoluteStart = checked(start + match.Index);
-				var absoluteEnd = checked(absoluteStart + match.Length);
-				while (protectedRangeIndex < protectedRanges.Count)
+				if (!OverlapsProtectedText(
+						checked(start + match.Index),
+						match.Length,
+						protectedRanges,
+						ref protectedRangeIndex,
+						ref protectedRangeComparisons,
+						cancellationToken))
 				{
-					protectedRangeComparisons++;
-					if ((protectedRangeComparisons & 0xFF) == 0)
-						cancellationToken.ThrowIfCancellationRequested();
-					if (protectedRanges[protectedRangeIndex].End > absoluteStart)
-						break;
-					protectedRangeIndex++;
-				}
-
-				var overlapsProtectedText = false;
-				if (protectedRangeIndex < protectedRanges.Count)
-				{
-					protectedRangeComparisons++;
-					var range = protectedRanges[protectedRangeIndex];
-					overlapsProtectedText = match.Length == 0
-						? absoluteStart >= range.Start && absoluteStart < range.End
-						: absoluteStart < range.End && absoluteEnd > range.Start;
-				}
-				if (!overlapsProtectedText)
 					return true;
+				}
 			}
 			return false;
 		}
@@ -181,6 +250,77 @@ internal sealed class McpSearchRegex
 		{
 			throw InvalidPatternTimeout();
 		}
+	}
+
+	/// <summary>
+	/// Reports every match in the whole input that does not touch protected text, in order, by
+	/// absolute offset and length. Protected text decides a match exactly as it does per line.
+	/// </summary>
+	public long ForEachUnprotectedMatch(
+		string input,
+		IReadOnlyList<TransformedTextRange> protectedRanges,
+		Action<int, int> consume,
+		CancellationToken cancellationToken,
+		Func<int, int>? toSourceOffset = null)
+	{
+		ArgumentNullException.ThrowIfNull(input);
+		ArgumentNullException.ThrowIfNull(protectedRanges);
+		ArgumentNullException.ThrowIfNull(consume);
+		var protectedRangeIndex = 0;
+		long protectedRangeComparisons = 0;
+		try
+		{
+			foreach (var match in _regex.EnumerateMatches(input))
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				// Offsets are checked and reported in the source text the protected ranges describe.
+				var start = toSourceOffset?.Invoke(match.Index) ?? match.Index;
+				var end = toSourceOffset?.Invoke(match.Index + match.Length) ?? match.Index + match.Length;
+				if (!OverlapsProtectedText(
+						start,
+						end - start,
+						protectedRanges,
+						ref protectedRangeIndex,
+						ref protectedRangeComparisons,
+						cancellationToken))
+				{
+					consume(start, end - start);
+				}
+			}
+			return protectedRangeComparisons;
+		}
+		catch (RegexMatchTimeoutException)
+		{
+			throw InvalidPatternTimeout();
+		}
+	}
+
+	private static bool OverlapsProtectedText(
+		int absoluteStart,
+		int length,
+		IReadOnlyList<TransformedTextRange> protectedRanges,
+		ref int protectedRangeIndex,
+		ref long protectedRangeComparisons,
+		CancellationToken cancellationToken)
+	{
+		var absoluteEnd = checked(absoluteStart + length);
+		while (protectedRangeIndex < protectedRanges.Count)
+		{
+			protectedRangeComparisons++;
+			if ((protectedRangeComparisons & 0xFF) == 0)
+				cancellationToken.ThrowIfCancellationRequested();
+			if (protectedRanges[protectedRangeIndex].End > absoluteStart)
+				break;
+			protectedRangeIndex++;
+		}
+
+		if (protectedRangeIndex >= protectedRanges.Count)
+			return false;
+		protectedRangeComparisons++;
+		var range = protectedRanges[protectedRangeIndex];
+		return length == 0
+			? absoluteStart >= range.Start && absoluteStart < range.End
+			: absoluteStart < range.End && absoluteEnd > range.Start;
 	}
 
 	private bool IsMatch(ReadOnlySpan<char> input)

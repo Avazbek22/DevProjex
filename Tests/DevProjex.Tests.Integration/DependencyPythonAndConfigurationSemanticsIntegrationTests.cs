@@ -27,6 +27,65 @@ public sealed class DependencyPythonAndConfigurationSemanticsIntegrationTests
 	}
 
 	[Fact]
+	public async Task PythonWithoutConfiguration_ResolvesRelativeImportsAndKeepsStandardLibraryExternal()
+	{
+		using var fixture = new TemporaryDirectory();
+		var package = fixture.CreateFile("pkg/__init__.py", string.Empty);
+		var first = fixture.CreateFile("pkg/a.py", "from .b import Value\nimport json\nimport b");
+		var second = fixture.CreateFile("pkg/b.py", "class Value: pass");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[package, first, second],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains(result.Edges, edge => edge.Source == "pkg/a.py" && edge.Reference == ".b" &&
+			edge.Status == ResolutionStatus.Resolved && edge.Target == "pkg/b.py");
+		Assert.Contains(result.Edges, edge => edge.Source == "pkg/a.py" && edge.Reference == "json" &&
+			edge.Status == ResolutionStatus.External);
+		// A regular package has no implicit relative imports in Python 3.
+		Assert.Contains(result.Edges, edge => edge.Source == "pkg/a.py" && edge.Reference == "b" &&
+			edge.Status == ResolutionStatus.Unresolved && edge.Target is null);
+	}
+
+	[Fact]
+	public async Task PythonScriptDirectory_ResolvesAnUncontestedSiblingOnly()
+	{
+		using var fixture = new TemporaryDirectory();
+		var script = fixture.CreateFile("scripts/run.py", """
+			import helper
+			from helper import tool
+			import json
+			import shared
+			""");
+		var helper = fixture.CreateFile("scripts/helper.py", "def tool(): pass");
+		var shadow = fixture.CreateFile("scripts/json.py", "VALUE = 1");
+		var localShared = fixture.CreateFile("scripts/shared.py", "VALUE = 1");
+		var rootShared = fixture.CreateFile("shared.py", "VALUE = 2");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[script, helper, shadow, localShared, rootShared],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var sibling = Assert.Single(result.Edges, edge => edge.Source == "scripts/run.py" &&
+			edge.Reference == "helper");
+		Assert.Equal(ResolutionStatus.Resolved, sibling.Status);
+		Assert.Equal("scripts/helper.py", sibling.Target);
+		Assert.Equal(["script-directory import"], sibling.Reasons);
+		// Both the module import and the name import reach the sibling.
+		Assert.Equal(2, sibling.Evidence.Count);
+		Assert.Contains(result.Edges, edge => edge.Source == "scripts/run.py" &&
+			edge.Reference == "json" && edge.Status == ResolutionStatus.External);
+		var contested = Assert.Single(result.Edges, edge => edge.Source == "scripts/run.py" &&
+			edge.Reference == "shared");
+		Assert.Equal(ResolutionStatus.Ambiguous, contested.Status);
+		Assert.Equal(["scripts/shared.py", "shared.py"], contested.Candidates);
+	}
+
+	[Fact]
 	public async Task ReExportDoesNotTreatAnOrdinaryModuleAsAPackage()
 	{
 		using var fixture = new TemporaryDirectory();
@@ -408,6 +467,51 @@ public sealed class DependencyPythonAndConfigurationSemanticsIntegrationTests
 	}
 
 	[Fact]
+	public async Task ABareAnnotationWithADefaultInsideItsBracketsIsNeverReadAsAnAssignment()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("pyproject.toml", "[project]\nname = \"fixture\"");
+		// "x" has no value at all: the "=" belongs to Field's own default keyword argument, nested
+		// inside Annotated[...]'s brackets, not to a top-level assignment on this statement.
+		var module = fixture.CreateFile(
+			"module.py",
+			"from typing import Annotated\nx: Annotated[int, Field(default=1)]\nclass Item: pass");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, module],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var moduleFacts = Assert.Single(result.Files, item => item.Path == "module.py");
+		Assert.DoesNotContain("$python-assignment:x", moduleFacts.Aliases.Keys);
+	}
+
+	[Fact]
+	public async Task AnAnnotatedDynamicAllIsTreatedTheSameAsThePlainForm()
+	{
+		using var fixture = new TemporaryDirectory();
+		var config = fixture.CreateFile("pyproject.toml", "[project]\nname = \"fixture\"");
+		var module = fixture.CreateFile(
+			"module.py",
+			"__all__: list[str] = build_names()\nclass Item: pass");
+		var source = fixture.CreateFile("consumer.py", "from module import *");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[config, module, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var moduleFacts = Assert.Single(result.Files, item => item.Path == "module.py");
+		Assert.True(moduleFacts.Aliases.ContainsKey("$dynamic-all"),
+			string.Join(", ", moduleFacts.Aliases.Keys));
+		var edge = Assert.Single(result.Edges, item => item.Source == "consumer.py");
+		Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
+		Assert.Equal("dynamic __all__ is an unsupported mechanism", Assert.Single(edge.Reasons));
+	}
+
+	[Fact]
 	public async Task ModuleAssignmentsHaveAnExplicitResolutionLimitation()
 	{
 		using var fixture = new TemporaryDirectory();
@@ -423,8 +527,10 @@ public sealed class DependencyPythonAndConfigurationSemanticsIntegrationTests
 
 		var edge = Assert.Single(result.Edges, item => item.Source == "consumer.py");
 		Assert.Equal(2, edge.Evidence.Count);
-		Assert.Equal(ResolutionStatus.Unresolved, edge.Status);
-		Assert.Equal("Python module assignment bindings are not indexed", Assert.Single(edge.Reasons));
+		Assert.Equal(ResolutionStatus.Resolved, edge.Status);
+		Assert.Equal("settings.py", edge.Target);
+		Assert.True(edge.ModuleOnly);
+		Assert.Equal(["imported name not indexed", "one module target"], edge.Reasons);
 	}
 
 	[Fact]
@@ -495,10 +601,29 @@ public sealed class DependencyPythonAndConfigurationSemanticsIntegrationTests
 	}
 
 	[Fact]
-	public async Task FilteredOwningConfigurationHasAnExplicitMissingReason()
+	public async Task FilteredOwningConfigurationStillOwnsTheSelectedFiles()
 	{
 		using var fixture = new TemporaryDirectory();
 		fixture.CreateFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />");
+		var target = fixture.CreateFile("Target.cs", "namespace Models; public sealed class Item { }");
+		var source = fixture.CreateFile("Consumer.cs", "using Models; public sealed class Consumer { Item Value; }");
+		using var engine = CreateEngine();
+
+		var result = await engine.IndexAsync(
+			fixture.Path,
+			[target, source],
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var edge = Assert.Single(result.Edges, item => item.Source == "Consumer.cs");
+		Assert.Equal(ResolutionStatus.Resolved, edge.Status);
+		Assert.Equal("Target.cs", edge.Target);
+		Assert.DoesNotContain(result.Files, file => file.Path == "Fixture.csproj");
+	}
+
+	[Fact]
+	public async Task WithoutAnOwningProjectOnDisk_CSharpReferencesKeepAnExplicitMissingReason()
+	{
+		using var fixture = new TemporaryDirectory();
 		var target = fixture.CreateFile("Target.cs", "namespace Models; public sealed class Item { }");
 		var source = fixture.CreateFile("Consumer.cs", "using Models; public sealed class Consumer { Item Value; }");
 		using var engine = CreateEngine();

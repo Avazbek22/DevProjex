@@ -81,7 +81,11 @@ public sealed record AgentJournalCall(
 	long SecretsMasked,
 	long PrivateDataMasked,
 	IReadOnlyList<string> Notices,
-	string? ErrorCode);
+	string? ErrorCode)
+{
+	[System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+	public string? Outcome { get; init; }
+}
 
 public sealed record AgentJournalDeliveredPath(
 	string Path,

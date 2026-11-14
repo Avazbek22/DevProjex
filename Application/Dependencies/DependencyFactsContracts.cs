@@ -42,6 +42,11 @@ public sealed record DependencyResolverConfiguration(
 	public IReadOnlyList<DependencyConfigurationDiagnostic> ConfigurationDiagnostics { get; init; } = [];
 	public bool CanCache { get; init; } = true;
 	public IReadOnlyList<string> AbsentControlFiles { get; init; } = [];
+	/// <summary>
+	/// Control files read from outside the manifest and the directories searched for them, stamped
+	/// before they were read, so a cached snapshot can notice an edit or a newly created file.
+	/// </summary>
+	public IReadOnlyList<DependencyControlPathStamp> ObservedControlPaths { get; init; } = [];
 
 	public DependencyScopeDescriptor? FindScope(string scopeId) =>
 		Scopes.FirstOrDefault(scope => string.Equals(scope.ScopeId, scopeId, StringComparison.Ordinal));
@@ -93,6 +98,37 @@ public enum DependencyConfigurationState
 	UnsupportedSemantics
 }
 
+public readonly record struct DependencyControlPathStamp(
+	string Path,
+	bool IsDirectory,
+	long Length,
+	long LastWriteTimeUtcTicks,
+	long CreationTimeUtcTicks)
+{
+	public static DependencyControlPathStamp? TryCapture(string path, bool isDirectory)
+	{
+		try
+		{
+			FileSystemInfo info = isDirectory ? new DirectoryInfo(path) : new FileInfo(path);
+			if (!info.Exists)
+				return null;
+			return new DependencyControlPathStamp(
+				path,
+				isDirectory,
+				info is FileInfo file ? file.Length : 0,
+				info.LastWriteTimeUtc.Ticks,
+				info.CreationTimeUtc.Ticks);
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+			System.Security.SecurityException or ArgumentException or NotSupportedException)
+		{
+			return null;
+		}
+	}
+
+	public bool IsCurrent() => TryCapture(Path, IsDirectory) == this;
+}
+
 public sealed record DependencyConfigurationDiagnostic(
 	string Path,
 	DependencyConfigurationState State,
@@ -136,6 +172,13 @@ public interface IDependencyFactExtractor : IDisposable
 		return Extract(source, limits);
 	}
 
+	/// <summary>
+	/// The language and owning scope <see cref="PrepareAsync"/> would give <paramref name="fullPath"/>,
+	/// decided from the path and the configuration alone, without reading the file.
+	/// </summary>
+	(LanguageId LanguageId, string ScopeId) DescribePath(string fullPath, DependencyResolverConfiguration configuration) =>
+		throw new NotSupportedException();
+
 	int ParseCount { get; }
 	int CompiledQuerySetCount { get; }
 }
@@ -155,6 +198,17 @@ public interface IDependencyConfigurationProvider
 		string sourceRoot,
 		IReadOnlyList<string> manifestFiles,
 		CancellationToken cancellationToken);
+
+	/// <param name="readableProjectFiles">
+	/// Absolute paths of the files the caller may read. A control file outside the manifest is
+	/// read only when it is one of them; null applies no such bound.
+	/// </param>
+	Task<DependencyResolverConfiguration> ReadAsync(
+		string sourceRoot,
+		IReadOnlyList<string> manifestFiles,
+		IReadOnlySet<string>? readableProjectFiles,
+		CancellationToken cancellationToken) =>
+		ReadAsync(sourceRoot, manifestFiles, cancellationToken);
 }
 
 public sealed record DependencyFactsLimits(

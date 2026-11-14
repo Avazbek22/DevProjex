@@ -274,18 +274,15 @@ public sealed partial class McpServerIntegrationTests
 		Assert.True(nameless.IsError);
 		Assert.Contains(McpErrorCodes.InvalidArguments, AllText(nameless), StringComparison.Ordinal);
 
-		// A regular expression in declaration mode would otherwise answer a confident "no matches".
-		foreach (var regularExpression in new[] { "OrderService\\(", "\\bOrderService\\b", "class\\s+OrderService" })
+		foreach (var regularExpression in new[] { "OrderService\\(", "class\\s+\\w+Service", "(?i)OrderService" })
 		{
-			var refused = await server.CallAsync("search_project", new Dictionary<string, object?>
+			var textSearch = await server.CallAsync("search_project", new Dictionary<string, object?>
 			{
 				["pattern"] = regularExpression,
 				["symbols"] = true
 			});
-			Assert.True(refused.IsError, regularExpression);
-			Assert.Contains(McpErrorCodes.InvalidArguments, AllText(refused), StringComparison.Ordinal);
-			Assert.Contains("looks like a regular expression", AllText(refused), StringComparison.Ordinal);
-			Assert.Contains("omit symbols to search text with a regex", AllText(refused), StringComparison.Ordinal);
+			Assert.NotEqual(true, textSearch.IsError);
+			Assert.Contains(McpSearchSymbols.RegularExpressionFallbackNotice, AllText(textSearch), StringComparison.Ordinal);
 		}
 		var parameterList = Text(await server.CallAsync("search_project", new Dictionary<string, object?>
 		{
@@ -295,6 +292,31 @@ public sealed partial class McpServerIntegrationTests
 		}));
 		Assert.Contains("OrderService.cs", parameterList, StringComparison.Ordinal);
 		Assert.Contains("matches retained=1/1", parameterList, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData(@"\bOrderService\b")]
+	[InlineData(@"class\s+OrderService")]
+	public async Task SymbolsSearchReadsSimpleRegularExpressionsWithoutMatchingUses(string pattern)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "OrderService.cs"), "namespace Shop; public sealed class OrderService { }\n");
+		File.WriteAllText(Path.Combine(project, "Checkout.cs"), "namespace Shop; public class Checkout { OrderService orders; }\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+		var result = await server.CallAsync("search_project", new Dictionary<string, object?>
+		{
+			["pattern"] = pattern,
+			["symbols"] = true,
+			["context_lines"] = 0
+		});
+		Assert.NotEqual(true, result.IsError);
+		var text = Text(result);
+		Assert.Contains("OrderService.cs", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("Checkout.cs", text, StringComparison.Ordinal);
+		Assert.Contains("matches retained=1/1", text, StringComparison.Ordinal);
+		Assert.Contains("[Symbols] the regular expression was read as 1 declaration name(s); they are listed at the top of the results.", text, StringComparison.Ordinal);
+		Assert.Contains("Pattern read as declaration names: OrderService", text, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -323,7 +345,7 @@ public sealed partial class McpServerIntegrationTests
 			text, StringComparison.Ordinal);
 		Assert.Contains("File: Empty.txt", text, StringComparison.Ordinal);
 		Assert.Contains("Lines: 0-0 of 0", text, StringComparison.Ordinal);
-		Assert.Contains("[Batch read] ok=1 · partial=0 · not-returned=1 · unavailable=1.",
+		Assert.Contains("[Batch read] ok=1 · structure=0 · partial=0 · not-returned=1 · unavailable=1.",
 			text, StringComparison.Ordinal);
 	}
 
@@ -363,7 +385,7 @@ public sealed partial class McpServerIntegrationTests
 
 		Assert.Contains("[Search boundary] partial", Text(result), StringComparison.Ordinal);
 		Assert.Contains("limits=response-characters", Text(result), StringComparison.Ordinal);
-		Assert.Contains(
+		Assert.DoesNotContain(
 			"[Next read] Call read_pack with the reported pack_id for the remaining retained matches.",
 			Text(result),
 			StringComparison.Ordinal);
@@ -509,5 +531,31 @@ public sealed partial class McpServerIntegrationTests
 
 		McpSearchOutputAssertions.ContainsMatch(text, "Unicode.txt", 2, "λ needle evidence");
 		Assert.Contains("sources inspected=1/1 · matches retained=1/1 · matches written=1", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task SearchWithListedDeclarationsEndsWithoutAReadInstructionOrNamingCounters()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(
+			Path.Combine(project, "Service.cs"),
+			"namespace P;\npublic sealed class Service\n{\n\tpublic int Probe() => 1;\n}\n" +
+			"public sealed class Client\n{\n\tpublic int Call(Service service) => service.Probe();\n}\n");
+		File.WriteAllText(Path.Combine(project, "notes.md"), "Probe is documented here.\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync("search_project", new Dictionary<string, object?>
+		{
+			["pattern"] = "Probe",
+			["context_lines"] = 0
+		});
+		var text = Text(result);
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.Contains("Declarations found (path, symbol, lines):", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("batch known selections in one get_file call", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("[Symbols] annotated=", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("[Next read]", text, StringComparison.Ordinal);
 	}
 }

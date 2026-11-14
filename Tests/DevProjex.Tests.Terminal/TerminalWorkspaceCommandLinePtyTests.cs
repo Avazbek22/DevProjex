@@ -106,6 +106,48 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 	}
 
 	[Fact(Timeout = 120_000)]
+	public async Task GrepSymbolRegularExpressionPublishesTextMatchesAndItsInterpretation()
+	{
+		using var project = new TemporaryDirectory();
+		project.WriteFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />\n");
+		project.WriteFile("App.cs", "public sealed class App { string Text = \"needle value\"; }\n");
+		await using var terminal = await StartAsync(project.Path, columns: 200, rows: 50);
+		await terminal.WaitForStableScreenAsync("PROJECT TREE", cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync(":grep --symbols needle.*value\r", TestContext.Current.CancellationToken);
+		var result = await terminal.WaitForScreenAsync("searched as text.", timeout: TimeSpan.FromSeconds(45),
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains("App.cs:1", result, StringComparison.Ordinal);
+		Assert.Contains("needle value", result, StringComparison.Ordinal);
+		Assert.DoesNotContain("DPX-TUI-GREP-PATTERN", result, StringComparison.Ordinal);
+		Assert.False(terminal.HasExited);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await QuitAsync(terminal);
+	}
+
+	[Fact(Timeout = 120_000)]
+	public async Task RelatedFolderCommandPublishesDirectSeedsAndItsInterpretation()
+	{
+		using var project = new TemporaryDirectory();
+		project.WriteFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />\n");
+		project.WriteFile("Parts/A.cs", "public sealed class A { public Target Value { get; } }\n");
+		project.WriteFile("Parts/Z.cs", "public sealed class Z { public Target Value { get; } }\n");
+		project.WriteFile("Parts/Nested/NotASeed.cs", "public sealed class NotASeed {}\n");
+		project.WriteFile("Target.cs", "public sealed class Target {}\n");
+		await using var terminal = await StartAsync(project.Path, columns: 200, rows: 50);
+		await terminal.WaitForStableScreenAsync("PROJECT TREE", cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync(":related Parts --direction dependencies\r", TestContext.Current.CancellationToken);
+		var result = await terminal.WaitForScreenAsync("2 file(s) directly inside", timeout: TimeSpan.FromSeconds(45),
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains("Seed: Parts/A.cs", result, StringComparison.Ordinal);
+		Assert.Contains("Seed: Parts/Z.cs", result, StringComparison.Ordinal);
+		Assert.Contains("Target.cs", result, StringComparison.Ordinal);
+		Assert.DoesNotContain("Seed: Parts/Nested/NotASeed.cs", result, StringComparison.Ordinal);
+		Assert.False(terminal.HasExited);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await QuitAsync(terminal);
+	}
+
+	[Fact(Timeout = 120_000)]
 	public async Task RelatedCommandPublishesDependencyOutputInTheCommandPanel()
 	{
 		using var project = new TemporaryDirectory();
@@ -127,6 +169,172 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 
 		Assert.Contains("Target.cs", result, StringComparison.Ordinal);
 		Assert.Contains("[Resolution]", result, StringComparison.Ordinal);
+		Assert.DoesNotContain("outside the selection", result, StringComparison.Ordinal);
+		Assert.False(terminal.HasExited);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await QuitAsync(terminal);
+	}
+
+	[Fact(Timeout = 120_000)]
+	public async Task DiffCommandPublishesTheChangedLinesInTheCommandPanel()
+	{
+		using var repository = new GitModeRepository();
+		repository.Write("App.cs", "public sealed class App { int Before; }\n");
+		repository.Commit();
+		repository.Write("App.cs", "public sealed class App { int After; }\n");
+		await using var terminal = await StartAsync(repository.Root, columns: 160, rows: 40);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.SendAsync(":diff\r", TestContext.Current.CancellationToken);
+		var result = await terminal.WaitForScreenAsync(
+			"Changed files: 1",
+			timeout: TimeSpan.FromSeconds(45),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains("-public sealed class App { int Before; }", result, StringComparison.Ordinal);
+		Assert.Contains("+public sealed class App { int After; }", result, StringComparison.Ordinal);
+		Assert.False(terminal.HasExited);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await QuitAsync(terminal);
+	}
+
+	[Fact(Timeout = 120_000)]
+	public async Task DiffCommandReplacesAnActiveMomentaryScopeInsteadOfIntersectingWithIt()
+	{
+		// "set git diff:HEAD..HEAD" narrows the live workspace plan to an empty file set (a range
+		// with nothing in it). If "diff changes" then applied its own scope on top of that
+		// narrowed plan instead of lifting it first, New.txt's real uncommitted change would be
+		// intersected away and the command would wrongly report no changes.
+		using var repository = new GitModeRepository();
+		repository.Write("Old.txt", "old\n");
+		repository.Commit();
+		await using var terminal = await StartAsync(repository.Root, columns: 160, rows: 40);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await ExecuteAsync(terminal, "set git diff:HEAD..HEAD", "✓ diff:HEAD..HEAD");
+
+		repository.Write("New.txt", "new\n");
+		await terminal.OpenCommandLineAsync(TestContext.Current.CancellationToken);
+		await terminal.SendAsync("diff changes\r", TestContext.Current.CancellationToken);
+		var result = await terminal.WaitForScreenAsync(
+			"Changed files: 1",
+			timeout: TimeSpan.FromSeconds(45),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains("New.txt", result, StringComparison.Ordinal);
+		Assert.DoesNotContain("No changes", result, StringComparison.Ordinal);
+		Assert.False(terminal.HasExited);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await QuitAsync(terminal);
+	}
+
+	[Fact(Timeout = 120_000)]
+	public async Task DiffCommandAcceptsAContextOption()
+	{
+		using var repository = new GitModeRepository();
+		repository.Write(
+			"Numbers.txt",
+			string.Join('\n', Enumerable.Range(1, 11).Select(static line => $"{line}")) + "\n");
+		repository.Commit();
+		repository.Write(
+			"Numbers.txt",
+			string.Join('\n', Enumerable.Range(1, 11).Select(static line => line == 6 ? "SIX" : $"{line}")) + "\n");
+		await using var terminal = await StartAsync(repository.Root, columns: 160, rows: 40);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.OpenCommandLineAsync(TestContext.Current.CancellationToken);
+		await terminal.SendAsync("diff changes --context 0\r", TestContext.Current.CancellationToken);
+		var result = await terminal.WaitForScreenAsync(
+			"Changed files: 1",
+			timeout: TimeSpan.FromSeconds(45),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains("@@ -6 +6 @@", result, StringComparison.Ordinal);
+		Assert.DoesNotContain(" 5\n", result, StringComparison.Ordinal);
+		Assert.False(terminal.HasExited);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await QuitAsync(terminal);
+	}
+
+	[Fact(Timeout = 120_000)]
+	public async Task RelatedCommandListsReadableFilesOutsideTheCheckedFocus()
+	{
+		using var workspace = new TemporaryDirectory();
+		var projectPath = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/App.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />\n");
+		workspace.WriteFile("project/Models/User.cs", "namespace App.Models; public sealed class User { }\n");
+		workspace.WriteFile("project/Services/Store.cs",
+			"using App.Models; namespace App.Services; public sealed class Store { User Value; }\n");
+		workspace.WriteFile("project/Tests/StoreTests.cs",
+			"using App.Services; namespace App.Tests; public sealed class StoreTests { Store Subject; }\n");
+		var profile = workspace.WriteFile(
+			"focus-profile.json",
+			"""
+			{
+			  "schemaVersion": 1,
+			  "selection": {
+			    "roots": null,
+			    "extensions": null,
+			    "selectedPaths": ["Services/Store.cs"],
+			    "gitMode": "none",
+			    "exclusions": []
+			  }
+			}
+			""");
+		await using var terminal = await StartAsync(projectPath, columns: 200, rows: 50, profile: profile);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.SendAsync(
+			":related Services/Store.cs --direction both\r",
+			TestContext.Current.CancellationToken);
+		var result = await terminal.WaitForScreenAsync(
+			"outside-selection=2",
+			timeout: TimeSpan.FromSeconds(60),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains("Dependencies outside the selection", result, StringComparison.Ordinal);
+		Assert.Contains("Models/User.cs", result, StringComparison.Ordinal);
+		Assert.Contains("Dependents outside the selection", result, StringComparison.Ordinal);
+		Assert.Contains("Tests/StoreTests.cs", result, StringComparison.Ordinal);
+		Assert.False(terminal.HasExited);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await QuitAsync(terminal);
+	}
+
+	[Fact(Timeout = 120_000)]
+	public async Task RelatedCommandCompactsRepeatedEvidenceSites()
+	{
+		using var project = new TemporaryDirectory();
+		project.WriteFile("Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />\n");
+		project.WriteFile("Box.cs", "public sealed class Box {}\n");
+		project.WriteFile("Consumer.cs",
+			"public sealed class Consumer\n{\n" +
+			string.Concat(Enumerable.Range(1, 7).Select(static index => $"\tBox Value{index};\n")) +
+			"}\n");
+		await using var terminal = await StartAsync(project.Path, columns: 200, rows: 40);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.SendAsync(
+			":related Consumer.cs --direction dependencies\r",
+			TestContext.Current.CancellationToken);
+		var result = await terminal.WaitForScreenAsync(
+			"[Resolution]",
+			timeout: TimeSpan.FromSeconds(45),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		// The result dialog wraps a long row, so only its start is matched; the whole row is pinned
+		// by the command-line test, which shares this renderer.
+		Assert.Contains("type reference Box at lines 3, 4", result, StringComparison.Ordinal);
+		Assert.DoesNotContain("type reference Box at line ", result, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
 		await QuitAsync(terminal);
@@ -1297,14 +1505,15 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 		IReadOnlyDictionary<string, string>? environment = null,
 		bool plain = false,
 		string? language = "en",
-		Action<string>? initializeDataRoot = null)
+		Action<string>? initializeDataRoot = null,
+		string profile = "standard")
 	{
 		var arguments = new List<string>
 		{
 			"tui",
 			projectPath,
 			"--profile",
-			"standard",
+			profile,
 			"--screen",
 			"inline",
 			"--no-mouse"

@@ -8,9 +8,15 @@ internal readonly record struct McpTextLineRange(
 internal sealed record McpSearchMatchContext(
 	IReadOnlyList<int> MatchLineNumbers,
 	IReadOnlyList<McpTextLineRange> Lines,
-	bool StartsNewGroup)
+	bool StartsNewGroup,
+	int SpanEndLineNumber = 0)
 {
 	public int MatchLineNumber => MatchLineNumbers[0];
+
+	/// <summary>
+	/// Whether one match runs from <see cref="MatchLineNumber"/> to <see cref="SpanEndLineNumber"/>.
+	/// </summary>
+	public bool SpansLines => SpanEndLineNumber > MatchLineNumber;
 }
 
 internal sealed record McpSearchTextScanResult(
@@ -93,7 +99,8 @@ internal static class McpSearchTextScanner
 			for (var index = active.Count - 1; index >= 0; index--)
 			{
 				var pending = active[index];
-				pending.Lines.Add(line);
+				if (line.Offset < content.Length)
+					pending.Lines.Add(line);
 				pending.RemainingContextLines--;
 				if (pending.RemainingContextLines == 0)
 				{
@@ -149,6 +156,138 @@ internal static class McpSearchTextScanner
 			consume(pending.ToContext());
 
 		return new McpSearchStreamResult(totalMatches, protectedRangeComparisons);
+	}
+
+	/// <summary>
+	/// Matches the pattern against the whole text, so one match may cross line breaks. Each match
+	/// is reported once, at its first line, with the lines it covers and the usual context around
+	/// them. Matches that start on the same line are one match, as they would be per line.
+	/// </summary>
+	public static McpSearchStreamResult ScanEachMultiline(
+		string content,
+		McpSearchRegex regex,
+		int contextLines,
+		IReadOnlyList<TransformedTextRange> protectedRanges,
+		Action<McpSearchMatchContext> consume,
+		CancellationToken cancellationToken,
+		bool preserveCarriageReturns = false)
+	{
+		ArgumentNullException.ThrowIfNull(content);
+		ArgumentNullException.ThrowIfNull(regex);
+		ArgumentNullException.ThrowIfNull(protectedRanges);
+		ArgumentNullException.ThrowIfNull(consume);
+		ArgumentOutOfRangeException.ThrowIfNegative(contextLines);
+		cancellationToken.ThrowIfCancellationRequested();
+		if (content.Length == 0)
+			return new McpSearchStreamResult(0, 0);
+
+		var lines = SplitLines(content, cancellationToken);
+		var totalMatches = 0;
+		var pendingStart = 0;
+		var pendingEnd = 0;
+
+		void Flush()
+		{
+			totalMatches++;
+			var first = Math.Max(1, pendingStart - contextLines);
+			var contextEnd = lines.Count > 0 && lines[^1].Offset == content.Length
+				? lines.Count - 1 : lines.Count;
+			var last = Math.Min(Math.Max(contextEnd, pendingEnd), pendingEnd + contextLines);
+			var covered = new McpTextLineRange[last - first + 1];
+			for (var number = first; number <= last; number++)
+				covered[number - first] = lines[number - 1];
+			consume(new McpSearchMatchContext([pendingStart], covered, false, pendingEnd));
+		}
+
+		// CRLF is matched as "\n" so a pattern written with \n and $ works on either line ending;
+		// a pattern that names \r itself sees the text as it is.
+		var collapsedBreaks = preserveCarriageReturns ? null : CollapsedLineBreaks(content);
+		var searchText = collapsedBreaks is { Count: > 0 }
+			? content.Replace("\r\n", "\n", StringComparison.Ordinal)
+			: content;
+		Func<int, int>? toSourceOffset = collapsedBreaks is { Count: > 0 }
+			? offset => ToSourceOffset(collapsedBreaks, offset)
+			: null;
+		var protectedRangeComparisons = regex.ForEachUnprotectedMatch(
+			searchText,
+			protectedRanges,
+			(offset, length) =>
+			{
+				var startLine = LineNumberAt(lines, offset);
+				var endLine = length == 0 ? startLine : LineNumberAt(lines, offset + length - 1);
+				if (pendingStart == startLine)
+				{
+					pendingEnd = Math.Max(pendingEnd, endLine);
+					return;
+				}
+				if (pendingStart > 0)
+					Flush();
+				pendingStart = startLine;
+				pendingEnd = endLine;
+			},
+			cancellationToken,
+			toSourceOffset);
+		if (pendingStart > 0)
+			Flush();
+
+		return new McpSearchStreamResult(totalMatches, protectedRangeComparisons);
+	}
+
+	private static List<McpTextLineRange> SplitLines(string content, CancellationToken cancellationToken)
+	{
+		var lines = new List<McpTextLineRange>();
+		var lineStart = 0;
+		for (var index = 0; index < content.Length; index++)
+		{
+			if ((index & 0xFFF) == 0)
+				cancellationToken.ThrowIfCancellationRequested();
+			if (content[index] is not ('\r' or '\n'))
+				continue;
+
+			lines.Add(new McpTextLineRange(lines.Count + 1, lineStart, index - lineStart));
+			if (content[index] == '\r' && index + 1 < content.Length && content[index + 1] == '\n')
+				index++;
+			lineStart = index + 1;
+		}
+		lines.Add(new McpTextLineRange(lines.Count + 1, lineStart, content.Length - lineStart));
+		return lines;
+	}
+
+	// Positions, in the collapsed text, of each "\n" that stands for a source "\r\n".
+	private static List<int> CollapsedLineBreaks(string content)
+	{
+		var positions = new List<int>();
+		var index = content.IndexOf("\r\n", StringComparison.Ordinal);
+		while (index >= 0)
+		{
+			positions.Add(index - positions.Count);
+			index = content.IndexOf("\r\n", index + 2, StringComparison.Ordinal);
+		}
+		return positions;
+	}
+
+	// Every collapsed break before the offset gave up one source character.
+	private static int ToSourceOffset(List<int> collapsedBreaks, int offset)
+	{
+		var found = collapsedBreaks.BinarySearch(offset);
+		var before = found >= 0 ? found : ~found;
+		return offset + before;
+	}
+
+	// A line owns its terminator, so a match that ends on a line break ends on that line.
+	private static int LineNumberAt(List<McpTextLineRange> lines, int offset)
+	{
+		var low = 0;
+		var high = lines.Count - 1;
+		while (low < high)
+		{
+			var middle = (low + high + 1) / 2;
+			if (lines[middle].Offset <= offset)
+				low = middle;
+			else
+				high = middle - 1;
+		}
+		return lines[low].LineNumber;
 	}
 
 	private static IReadOnlyList<McpSearchMatchContext> MergeContexts(IReadOnlyList<McpSearchMatchContext> matches)

@@ -271,11 +271,17 @@ CI. Two independent producers cannot atomically update one checksum manifest.
 
 `.github/workflows/publish-container.yml` builds amd64 and arm64 from the root
 `Dockerfile` once in its read-only build job. It records each tested archive hash,
-image ID, source SHA, and version, then pushes those saved images without rebuilding
+config digest, source SHA, and version, then pushes those saved images without rebuilding
 only for `release: published`. Pull requests and manual runs build, validate, and
 smoke without pushing. The SDK stage cross-publishes linux-arm64 on the x64 runner;
 `BUILDPLATFORM` keeps the compiler native, and the final multi-architecture image
 contains the prebuilt output without a target-architecture build step.
+
+The schema-2 image receipt binds each archive's SHA-256 to the SHA-256 of its
+`manifest.json` config entry. After loading, validation saves the tagged image
+again and checks the config bytes, including its ordered root-filesystem layer
+digests. This check is shared by native smoke and publication: it does not depend
+on whether Docker's image store reports a config, manifest, or index as `.Id`.
 
 The container channel meets the same connection contract:
 

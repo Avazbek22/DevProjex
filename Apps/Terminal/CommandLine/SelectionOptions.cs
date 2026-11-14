@@ -6,7 +6,8 @@ internal enum GitModeOptionCapability
 {
 	All,
 	Desktop,
-	Persistent
+	Persistent,
+	Momentary
 }
 
 internal sealed class SelectionOptions
@@ -205,11 +206,43 @@ internal sealed class SelectionOptions
 			cancellationToken).ConfigureAwait(false);
 	}
 
-	public async Task<ProjectSelectionSpec> ResolveAsync(
+	public Task<ProjectSelectionSpec> ResolveAsync(
 		ParseResult parseResult,
 		string projectPath,
 		Execution.TerminalServices services,
 		IReadOnlyCollection<string>? selectedPaths,
+		CancellationToken cancellationToken) =>
+		ResolveCoreAsync(parseResult, projectPath, services, selectedPaths, liftNarrowing: false, cancellationToken);
+
+	/// <summary>
+	/// The same selection without this call's narrowing: roots, extensions, selected paths, and a
+	/// momentary Git mode are lifted, while the profile, exclusions, a persistent Git mode, and
+	/// protection stay. Returns null when the call narrows nothing.
+	/// </summary>
+	public async Task<ProjectSelectionSpec?> ResolveWithoutNarrowingAsync(
+		ParseResult parseResult,
+		string projectPath,
+		Execution.TerminalServices services,
+		IReadOnlyCollection<string>? selectedPaths,
+		CancellationToken cancellationToken)
+	{
+		var gitMode = parseResult.GetResult(GitMode) is null ? null : parseResult.GetValue(GitMode)?.Mode;
+		var narrows = GetExplicitValues(parseResult, Roots) is not null ||
+					  GetExplicitValues(parseResult, Extensions) is not null ||
+					  selectedPaths is not null ||
+					  gitMode is { } mode && GitScopeSelection.IsMomentary(mode);
+		return narrows
+			? await ResolveCoreAsync(parseResult, projectPath, services, selectedPaths, liftNarrowing: true, cancellationToken)
+				.ConfigureAwait(false)
+			: null;
+	}
+
+	private async Task<ProjectSelectionSpec> ResolveCoreAsync(
+		ParseResult parseResult,
+		string projectPath,
+		Execution.TerminalServices services,
+		IReadOnlyCollection<string>? selectedPaths,
+		bool liftNarrowing,
 		CancellationToken cancellationToken)
 	{
 		var profileValue = parseResult.GetValue(Profile);
@@ -218,6 +251,12 @@ internal sealed class SelectionOptions
 			? null
 			: parseResult.GetValue(GitMode);
 		GitFilteringMode? gitMode = parsedGitMode?.Mode;
+		var diffRange = parsedGitMode?.DiffRange;
+		if (liftNarrowing && gitMode is { } requestedMode && GitScopeSelection.IsMomentary(requestedMode))
+		{
+			gitMode = null;
+			diffRange = null;
+		}
 		var exclusions = parseResult.GetResult(Exclusions) is null
 			? null
 			: ParseExclusions(parseResult.GetValue(Exclusions) ?? []);
@@ -238,11 +277,11 @@ internal sealed class SelectionOptions
 			: null;
 		SelectedPathExistenceValidator.Validate(projectPath, selectedPaths);
 		var overrides = new ProjectSelectionSpec(
-			Roots: GetExplicitValues(parseResult, Roots),
-			Extensions: GetExplicitValues(parseResult, Extensions),
-			SelectedPaths: selectedPaths,
+			Roots: liftNarrowing ? null : GetExplicitValues(parseResult, Roots),
+			Extensions: liftNarrowing ? null : GetExplicitValues(parseResult, Extensions),
+			SelectedPaths: liftNarrowing ? null : selectedPaths,
 			GitMode: gitMode,
-			GitDiffRange: parsedGitMode?.DiffRange,
+			GitDiffRange: diffRange,
 			Exclusions: exclusions,
 			HideSecrets: hideSecrets,
 			HidePrivateData: hidePrivateData,
@@ -343,10 +382,16 @@ internal sealed class SelectionOptions
 		LocalizationService localization,
 		GitModeOptionCapability capability)
 	{
-		var fixedTokens = capability == GitModeOptionCapability.Persistent
-			? CliChoiceSets.PersistentGitMode.Tokens
-			: CliChoiceSets.GitMode.Tokens;
-		var advertisesDiff = capability == GitModeOptionCapability.All;
+		var fixedTokens = capability switch
+		{
+			GitModeOptionCapability.Persistent => CliChoiceSets.PersistentGitMode.Tokens,
+			GitModeOptionCapability.Momentary => CliChoiceSets.GitMode.Tokens
+				.Where(static token => GitScopeSelection.TryParse(token, out var mode, out _) &&
+									   GitScopeSelection.IsMomentary(mode))
+				.ToArray(),
+			_ => CliChoiceSets.GitMode.Tokens
+		};
+		var advertisesDiff = capability is GitModeOptionCapability.All or GitModeOptionCapability.Momentary;
 		var advertisedTokens = advertisesDiff
 			? fixedTokens.Concat(["diff:<ref>..<ref>"]).ToArray()
 			: fixedTokens.ToArray();
@@ -370,7 +415,8 @@ internal sealed class SelectionOptions
 				if (result.Tokens.Count == 1)
 				{
 					var token = result.Tokens[0].Value;
-					if (GitScopeSelection.TryParse(token, out var mode, out var diffRange))
+					if (GitScopeSelection.TryParse(token, out var mode, out var diffRange) &&
+						(capability != GitModeOptionCapability.Momentary || GitScopeSelection.IsMomentary(mode)))
 					{
 						return new CliGitModeValue(mode, diffRange);
 					}

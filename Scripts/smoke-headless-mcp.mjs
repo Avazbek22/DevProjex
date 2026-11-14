@@ -26,7 +26,7 @@ if (!fixtureReady) {
 
 const child = spawn(
   command,
-  [...prefixArguments, 'mcp', '--root', root, ...(live ? ['--live'] : [])],
+  [...prefixArguments, 'mcp', '--root', root, '--tool-set', 'full', ...(live ? ['--live'] : [])],
   {
     shell: false,
     windowsHide: true,

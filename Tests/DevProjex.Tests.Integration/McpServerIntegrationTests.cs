@@ -31,7 +31,8 @@ public sealed partial class McpServerIntegrationTests
 		"read_pack",
 		"search_project",
 		"related_files",
-		"get_file"
+		"get_file",
+		"get_diff"
 	];
 
 	[Theory]
@@ -74,6 +75,8 @@ public sealed partial class McpServerIntegrationTests
 			var file = await server.CallAsync("get_file", new Dictionary<string, object?> { ["path"] = "Outside.cs" });
 			Assert.NotEqual(true, file.IsError);
 			Assert.Equal(live, AllText(file).Contains("returned outside the current focus", StringComparison.Ordinal));
+			// Not a Git repository: the diff fails, and a failed call is journaled like any other.
+			Assert.True((await server.CallAsync("get_diff")).IsError);
 		}
 
 		using var journal = new AgentJournalStore(
@@ -84,7 +87,7 @@ public sealed partial class McpServerIntegrationTests
 
 		Assert.Equal(live ? AgentJournalMode.Live : AgentJournalMode.Standard, session.Mode);
 		Assert.Equal(ExpectedTools, calls.Select(static call => call.Tool));
-		Assert.Equal(8, session.Totals.Calls);
+		Assert.Equal(9, session.Totals.Calls);
 		Assert.True(session.Totals.ResultCharacters > 0);
 		Assert.True(session.Totals.EstimatedTokens > 0);
 		Assert.DoesNotContain(calls, call => call.Tool == "pack_context" && call.DeliveredPaths.Count > 0);
@@ -105,6 +108,53 @@ public sealed partial class McpServerIntegrationTests
 			call.DeliveredPaths.Count + call.AdditionalDeliveredPaths,
 			call.FilesDelivered));
 		Assert.Equal(calls.Sum(static call => (long)call.FilesDelivered), session.Totals.FilesDelivered);
+	}
+
+	[Fact]
+	public async Task EveryToolComposesOnlyLineFeedTextBlocks()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var source = Path.Combine(project, "src");
+		Directory.CreateDirectory(source);
+		File.WriteAllText(Path.Combine(source, "Program.cs"), "class Program { Model Value = new(); }\r\n");
+		File.WriteAllText(Path.Combine(source, "Model.cs"), "class Model { }\r\n");
+		File.WriteAllText(Path.Combine(source, "Large.txt"), new string('x', 60_000));
+		File.WriteAllText(Path.Combine(project, "Outside.cs"), $"class Outside {{ string Token = \"{Secret}\"; }}\r\n");
+		InitializeCommittedRepository(project);
+		File.WriteAllText(Path.Combine(source, "Program.cs"), "class Program { Model Value = new(); int Added; }\r\n");
+
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var results = new List<(string Tool, CallToolResult Result)>
+		{
+			("list_projects", await server.CallAsync("list_projects")),
+			("get_tree", await server.CallAsync("get_tree", new Dictionary<string, object?> { ["format"] = "text" })),
+			("analyze", await server.CallAsync("analyze")),
+			("search_project", await server.CallAsync("search_project", new Dictionary<string, object?> { ["pattern"] = "Model" })),
+			("related_files", await server.CallAsync("related_files", new Dictionary<string, object?> { ["path"] = "src/Program.cs" })),
+			("get_file", await server.CallAsync("get_file", new Dictionary<string, object?> { ["path"] = "Outside.cs" })),
+			("get_diff", await server.CallAsync("get_diff")),
+		};
+
+		var pack = await server.CallAsync("pack_context");
+		results.Add(("pack_context", pack));
+		Assert.NotEqual(true, pack.IsError);
+		var packId = Regex.Match(AllText(pack), "'(?<id>[a-f0-9]{48})'").Groups["id"].Value;
+		Assert.NotEmpty(packId);
+		results.Add((
+			"read_pack",
+			await server.CallAsync("read_pack", new Dictionary<string, object?> { ["pack_id"] = packId })));
+
+		foreach (var (tool, result) in results)
+		{
+			Assert.NotEqual(true, result.IsError);
+			foreach (var block in result.Content.OfType<TextContentBlock>())
+				Assert.DoesNotContain("\r\n", block.Text, StringComparison.Ordinal);
+		}
+		Assert.Equal(
+			ExpectedTools.OrderBy(static tool => tool, StringComparer.Ordinal),
+			results.Select(static entry => entry.Tool).OrderBy(static tool => tool, StringComparer.Ordinal));
 	}
 
 	[Fact]
@@ -364,8 +414,8 @@ public sealed partial class McpServerIntegrationTests
 		Assert.Matches(
 			@"revision 1 · 0 files in the saved selection · saved \d{4}-\d{2}-\d{2} · root 2 of 2",
 			secondTree);
-		Assert.Contains("Live context root 1 name:" + Environment.NewLine + "first", firstTree, StringComparison.Ordinal);
-		Assert.Contains("Live context root 2 name:" + Environment.NewLine + "second", secondTree, StringComparison.Ordinal);
+		Assert.Contains("Live context root 1 name:\nfirst", firstTree, StringComparison.Ordinal);
+		Assert.Contains("Live context root 2 name:\nsecond", secondTree, StringComparison.Ordinal);
 		Assert.Contains("the saved selection has no checked files", secondTree, StringComparison.Ordinal);
 	}
 
@@ -2137,7 +2187,7 @@ public sealed partial class McpServerIntegrationTests
 			options: null,
 			TestContext.Current.CancellationToken);
 
-		string[] delegated = ["get_tree", "analyze", "pack_context", "search_project", "related_files", "get_file"];
+		string[] delegated = ["get_tree", "analyze", "pack_context", "search_project", "related_files", "get_file", "get_diff"];
 		foreach (var tool in tools)
 		{
 			var schema = tool.ProtocolTool.InputSchema;
@@ -2151,9 +2201,7 @@ public sealed partial class McpServerIntegrationTests
 			Assert.Equal(
 				["smart-ignore", "empty-folders", "empty-files", "hidden-folders", "hidden-files", "dot-folders", "dot-files", "extensionless-files"],
 				published.GetProperty("items").GetProperty("enum").EnumerateArray().Select(static item => item.GetString()));
-			Assert.Equal(
-				ProjectSelectionTokens.Exclusions.Count,
-				published.GetProperty("maxItems").GetInt32());
+			Assert.False(published.TryGetProperty("maxItems", out _));
 			Assert.False(published.TryGetProperty("uniqueItems", out _));
 			var propertyNames = schema.GetProperty("properties").EnumerateObject().Select(static property => property.Name).ToArray();
 			var globAnchor = Array.IndexOf(propertyNames, "exclude_patterns");
@@ -2506,7 +2554,8 @@ public sealed partial class McpServerIntegrationTests
 			"pack_context",
 			"search_project",
 			"related_files",
-			"get_file"
+			"get_file",
+			"get_diff"
 		};
 		var searchHints = new Dictionary<string, string>(StringComparer.Ordinal)
 		{
@@ -2517,7 +2566,8 @@ public sealed partial class McpServerIntegrationTests
 			["read_pack"] = "continue reading a stored project result",
 			["search_project"] = "search file contents with a regular expression",
 			["related_files"] = "trace static dependencies around known files",
-			["get_file"] = "read project files by path, range, or symbol"
+			["get_file"] = "read project files by path, range, or symbol",
+			["get_diff"] = "review changed lines of staged, uncommitted, or ref-to-ref changes"
 		};
 		Assert.All(tools, tool =>
 		{
@@ -2570,7 +2620,7 @@ public sealed partial class McpServerIntegrationTests
 			tools.Single(static tool => tool.Name == "search_project").ProtocolTool.Description,
 			StringComparison.Ordinal);
 		Assert.Contains(
-			"mandatory secret and configured private-data replacement",
+			"secrets and configured private data replaced",
 			tools.Single(static tool => tool.Name == "get_file").ProtocolTool.Description,
 			StringComparison.Ordinal);
 		Assert.DoesNotContain(
@@ -2595,13 +2645,14 @@ public sealed partial class McpServerIntegrationTests
 			["read_pack"] = ["pack_id", "start_line", "end_line", "start_column"],
 			["search_project"] = ["project", "branch", "pattern", "paths", "include_patterns", "exclude_patterns", "tracked_only", "git_scope", "max_file_bytes", "context_lines", "ignore_case", "symbols", "max_results"],
 			["related_files"] = ["project", "branch", "path", "direction", "include_patterns", "exclude_patterns", "profile", "tracked_only", "git_scope", "max_file_bytes"],
-			["get_file"] = ["project", "branch", "profile", "path", "requests", "start_line", "end_line", "start_column", "symbol"]
+			["get_file"] = ["project", "branch", "profile", "path", "paths", "requests", "start_line", "end_line", "start_column", "symbol"],
+			["get_diff"] = ["project", "branch", "profile", "git_scope", "paths", "include_patterns", "exclude_patterns", "tracked_only", "max_file_bytes", "context_lines"]
 		};
 		foreach (var tool in tools)
 		{
 			var schema = tool.ProtocolTool.InputSchema;
 			Assert.Equal(
-				expectedParameters[tool.Name],
+				expectedParameters[tool.Name].Where(name => allowRemote || name is not ("project" or "branch")),
 				schema.GetProperty("properties").EnumerateObject().Select(static property => property.Name));
 			var required = schema.TryGetProperty("required", out var requiredElement)
 				? requiredElement.EnumerateArray().Select(static item => item.GetString()).ToArray()
@@ -2616,34 +2667,27 @@ public sealed partial class McpServerIntegrationTests
 		{
 			var paths = tools.Single(tool => tool.Name == toolName)
 				.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("paths");
-			// One path may be written as one string, so the bounds live on the array branch and
-			// the single-value branch carries the same per-item length.
+			// Both published forms retain their types; bounds are checked by the server.
 			var branches = paths.GetProperty("oneOf").EnumerateArray().ToArray();
 			var scalarBranch = branches.Single(branch => branch.GetProperty("type").GetString() == "string");
 			var arrayBranch = branches.Single(branch => branch.GetProperty("type").GetString() == "array");
-			Assert.Equal(McpProjectService.MaximumRequestedPaths, arrayBranch.GetProperty("maxItems").GetInt32());
-			Assert.Equal(
-				McpProjectService.MaximumRequestedPathLength,
-				arrayBranch.GetProperty("items").GetProperty("maxLength").GetInt32());
-			Assert.Equal(
-				McpProjectService.MaximumRequestedPathLength,
-				scalarBranch.GetProperty("maxLength").GetInt32());
+			Assert.False(arrayBranch.TryGetProperty("maxItems", out _));
+			Assert.False(arrayBranch.GetProperty("items").TryGetProperty("maxLength", out _));
+			Assert.False(scalarBranch.TryGetProperty("maxLength", out _));
 			Assert.Contains("literal paths", paths.GetProperty("description").GetString(), StringComparison.Ordinal);
 		}
 		var getFileSchema = tools.Single(static tool => tool.Name == "get_file").ProtocolTool.InputSchema;
 		var batchRequests = getFileSchema.GetProperty("properties").GetProperty("requests");
-		Assert.Equal(McpGetFileRequestSet.MaximumFiles, batchRequests.GetProperty("maxItems").GetInt32());
-		Assert.Equal(
-			McpGetFileRequestSet.MaximumRanges,
-			batchRequests.GetProperty("items").GetProperty("properties").GetProperty("ranges").GetProperty("maxItems").GetInt32());
+		Assert.False(batchRequests.TryGetProperty("maxItems", out _));
+		Assert.False(batchRequests.GetProperty("items").GetProperty("properties").GetProperty("ranges").TryGetProperty("maxItems", out _));
 		Assert.False(getFileSchema.TryGetProperty("oneOf", out _));
 		Assert.False(getFileSchema.TryGetProperty("not", out _));
 		Assert.Contains(
-			"Exactly one of path or requests is required",
+			"path and paths may accompany requests and add whole-file reads",
 			getFileSchema.GetProperty("properties").GetProperty("path").GetProperty("description").GetString(),
 			StringComparison.Ordinal);
 		Assert.Contains(
-			"Exactly one of requests or path is required",
+			"up to sixteen files and sixteen selections",
 			batchRequests.GetProperty("description").GetString(),
 			StringComparison.Ordinal);
 		var searchBoolean = tools.Single(static tool => tool.Name == "search_project")
@@ -2651,7 +2695,7 @@ public sealed partial class McpServerIntegrationTests
 		Assert.Equal(2, searchBoolean.GetProperty("oneOf").GetArrayLength());
 		var searchPattern = tools.Single(static tool => tool.Name == "search_project")
 			.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("pattern");
-		Assert.Equal(4096, searchPattern.GetProperty("maxLength").GetInt32());
+		Assert.False(searchPattern.TryGetProperty("maxLength", out _));
 		Assert.Contains(
 			"Text inserted by redaction never matches",
 			searchPattern.GetProperty("description").GetString(),
@@ -2685,9 +2729,7 @@ public sealed partial class McpServerIntegrationTests
 		{
 			var publishedGitScope = tools.Single(tool => tool.Name == toolName)
 				.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("git_scope");
-			Assert.Equal(
-				GitScopeSelection.MaximumTokenLength,
-				publishedGitScope.GetProperty("maxLength").GetInt32());
+			Assert.False(publishedGitScope.TryGetProperty("maxLength", out _));
 		}
 		var gitScope = tools.Single(static tool => tool.Name == "get_tree")
 			.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("git_scope");
@@ -2696,14 +2738,13 @@ public sealed partial class McpServerIntegrationTests
 		var diffPattern = gitScope.GetProperty("oneOf")[1].GetProperty("pattern").GetString();
 		Assert.NotNull(diffPattern);
 		Assert.Matches(diffPattern, "diff:main..feature");
-		Assert.DoesNotMatch(diffPattern, "diff:main...feature");
-		Assert.DoesNotMatch(diffPattern, "diff:main..feature..later");
+		Assert.Matches(diffPattern, "diff:main...feature");
+		Assert.Matches(diffPattern, "diff:main..feature..later");
 		var maximumTokens = tools.Single(static tool => tool.Name == "pack_context")
 			.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("max_tokens");
 		Assert.Equal(2, maximumTokens.GetProperty("oneOf").GetArrayLength());
 		Assert.Equal(1, maximumTokens.GetProperty("oneOf")[0].GetProperty("minimum").GetInt32());
-		const string positiveNumericStringPattern = "^0*[1-9][0-9]*$";
-		Assert.Equal(positiveNumericStringPattern, maximumTokens.GetProperty("oneOf")[1].GetProperty("pattern").GetString());
+		Assert.False(maximumTokens.GetProperty("oneOf")[1].TryGetProperty("pattern", out _));
 		var packProperties = tools.Single(static tool => tool.Name == "pack_context")
 			.ProtocolTool.InputSchema.GetProperty("properties");
 		Assert.False(string.IsNullOrWhiteSpace(packProperties.GetProperty("view").GetProperty("description").GetString()));
@@ -2737,10 +2778,7 @@ public sealed partial class McpServerIntegrationTests
 		{
 			var property = tools.Single(tool => tool.Name == toolName)
 				.ProtocolTool.InputSchema.GetProperty("properties").GetProperty(propertyName);
-			var pattern = property.GetProperty("oneOf")[1].GetProperty("pattern").GetString();
-			Assert.Equal(positiveNumericStringPattern, pattern);
-			Assert.Matches(pattern!, "0002");
-			Assert.DoesNotMatch(pattern!, "0000");
+			Assert.False(property.GetProperty("oneOf")[1].TryGetProperty("pattern", out _));
 		}
 		foreach (var name in new[] { "get_tree", "analyze", "pack_context", "search_project", "related_files" })
 		{
@@ -2755,18 +2793,17 @@ public sealed partial class McpServerIntegrationTests
 				maximumFileBytes.GetProperty("oneOf")[0].GetProperty("minimum").GetInt64());
 			foreach (var propertyName in new[] { "include_patterns", "exclude_patterns" })
 			{
-				// One pattern may be written as one string, so the count bound lives on the
-				// array branch while both branches carry the same per-pattern length.
+				// The server checks pattern counts and lengths for both published forms.
 				var patterns = properties.GetProperty(propertyName);
 				var branches = patterns.GetProperty("oneOf").EnumerateArray().ToArray();
 				var scalar = branches.Single(branch => branch.GetProperty("type").GetString() == "string");
 				var array = branches.Single(branch => branch.GetProperty("type").GetString() == "array");
-				Assert.Equal(256, array.GetProperty("maxItems").GetInt32());
+				Assert.False(array.TryGetProperty("maxItems", out _));
 				var items = array.GetProperty("items");
-				Assert.Equal(1, items.GetProperty("minLength").GetInt32());
-				Assert.Equal(512, items.GetProperty("maxLength").GetInt32());
-				Assert.Equal(1, scalar.GetProperty("minLength").GetInt32());
-				Assert.Equal(512, scalar.GetProperty("maxLength").GetInt32());
+				Assert.False(items.TryGetProperty("minLength", out _));
+				Assert.False(items.TryGetProperty("maxLength", out _));
+				Assert.False(scalar.TryGetProperty("minLength", out _));
+				Assert.False(scalar.TryGetProperty("maxLength", out _));
 			}
 		}
 	}
@@ -2784,9 +2821,8 @@ public sealed partial class McpServerIntegrationTests
 		var getFile = tools.Single(static tool => tool.Name == "get_file").ProtocolTool.Description!;
 		var instructions = server.Client.ServerInstructions!;
 
-		// The route states when one request should replace several independent reads.
 		Assert.Contains(
-			"whenever you want more than one file, range, or known symbol",
+			"A batch returns files whole in the order asked, within 50,000 characters;",
 			getFile,
 			StringComparison.Ordinal);
 		Assert.Contains(
@@ -2824,7 +2860,7 @@ public sealed partial class McpServerIntegrationTests
 			StringComparison.Ordinal);
 		Assert.Contains("matches file content, never paths", search, StringComparison.Ordinal);
 		Assert.Contains("get_tree include_patterns", search, StringComparison.Ordinal);
-		Assert.Contains("counts levels below the project root", tree, StringComparison.Ordinal);
+		Assert.Contains("counts levels below each paths entry", tree, StringComparison.Ordinal);
 		Assert.Contains("below the project root", depth, StringComparison.Ordinal);
 		Assert.Contains("paths", depth, StringComparison.Ordinal);
 	}
@@ -3243,27 +3279,30 @@ public sealed partial class McpServerIntegrationTests
 			});
 
 		Assert.NotEqual(true, hidden.IsError);
-		AssertTrustedTrailerOutsideSpotlight(
-			hidden,
-			"[Tree depth] max_depth counts from the project root; 1 requested path(s) sit at depth 3 " +
-			"or deeper, so nothing under them is shown. Omit max_depth, or pass 5 to show two levels " +
-			"below them.");
+		Assert.Contains("App.java", AllText(hidden), StringComparison.Ordinal);
+		Assert.DoesNotContain("[Tree depth]", AllText(hidden), StringComparison.Ordinal);
 		var hiddenText = AllText(hidden);
 		var hiddenTrustedTail = hiddenText[(hiddenText.LastIndexOf("</untrusted-data-", StringComparison.Ordinal) + 1)..];
 		Assert.DoesNotContain("src/main/java", hiddenTrustedTail, StringComparison.Ordinal);
 
+		// Each requested directory starts its own depth window.
 		Assert.NotEqual(true, notHidden.IsError);
 		Assert.DoesNotContain("[Tree depth]", AllText(notHidden), StringComparison.Ordinal);
+		var complete = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["paths"] = new[] { "src/main/java" },
+				["max_depth"] = 6
+			});
+		Assert.NotEqual(true, complete.IsError);
+		Assert.DoesNotContain("[Tree depth]", AllText(complete), StringComparison.Ordinal);
 
 		Assert.NotEqual(true, noMaxDepth.IsError);
 		Assert.DoesNotContain("[Tree depth]", AllText(noMaxDepth), StringComparison.Ordinal);
 
 		Assert.NotEqual(true, scalarPath.IsError);
-		AssertTrustedTrailerOutsideSpotlight(
-			scalarPath,
-			"[Tree depth] max_depth counts from the project root; 1 requested path(s) sit at depth 3 " +
-			"or deeper, so nothing under them is shown. Omit max_depth, or pass 5 to show two levels " +
-			"below them.");
+		Assert.DoesNotContain("[Tree depth]", AllText(scalarPath), StringComparison.Ordinal);
 
 		// A file has nothing under it: the trailer names the depth that shows the file itself.
 		var hiddenFile = await server.CallAsync(
@@ -3289,20 +3328,71 @@ public sealed partial class McpServerIntegrationTests
 			});
 
 		Assert.NotEqual(true, hiddenFile.IsError);
-		AssertTrustedTrailerOutsideSpotlight(
-			hiddenFile,
-			"[Tree depth] max_depth counts from the project root; 1 requested file(s) sit at depth 6 " +
-			"or deeper, so they are not shown. Omit max_depth, or pass 6 to show them.");
+		Assert.DoesNotContain("[Tree depth]", AllText(hiddenFile), StringComparison.Ordinal);
 		Assert.DoesNotContain("levels below", AllText(hiddenFile), StringComparison.Ordinal);
 		Assert.NotEqual(true, shownFile.IsError);
 		Assert.Contains("App.java", ExtractSpotlightBody(Text(shownFile)), StringComparison.Ordinal);
 		Assert.DoesNotContain("[Tree depth]", AllText(shownFile), StringComparison.Ordinal);
 		Assert.NotEqual(true, fileAndDirectory.IsError);
-		AssertTrustedTrailerOutsideSpotlight(
-			fileAndDirectory,
-			"[Tree depth] max_depth counts from the project root; 2 requested path(s) sit at depth 3 " +
-			"or deeper, so nothing under them is shown. Omit max_depth, or pass 6 to show two levels " +
-			"below them.");
+		Assert.DoesNotContain("[Tree depth]", AllText(fileAndDirectory), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task GetTreeRequestedAsTheProjectRootStillCountsCollapsedFoldersUnderIt()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.CreateDirectory("project/a");
+		File.WriteAllText(Path.Combine(project, "a", "b.txt"), string.Empty);
+		File.WriteAllText(Path.Combine(project, "c.txt"), string.Empty);
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		// The root named as "." sits at depth 0, the same as its absolute path would; a folder
+		// under it one level deeper than max_depth still collapses, instead of the root's own
+		// "." spelling escaping the empty-relative-path match that finds collapsed folders.
+		var depthOne = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["paths"] = new[] { "." }, ["max_depth"] = 1 });
+		var depthTwo = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["paths"] = new[] { "." }, ["max_depth"] = 2 });
+
+		Assert.NotEqual(true, depthOne.IsError);
+		Assert.DoesNotContain("[Tree depth]", AllText(depthOne), StringComparison.Ordinal);
+
+		// Nothing in this two-level project reaches past depth 2, so there is nothing left to collapse.
+		Assert.NotEqual(true, depthTwo.IsError);
+		Assert.DoesNotContain("[Tree depth]", AllText(depthTwo), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task GetTreeOmitsTheCollapsedFoldersHintWhenTheTreeItselfWasTruncated()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var wide = workspace.CreateDirectory("project/wide");
+		for (var file = 0; file < 2_100; file++)
+			File.WriteAllText(Path.Combine(wide, $"{file:D4}.txt"), string.Empty);
+		var narrow = workspace.CreateDirectory("project/narrow");
+		var deep = workspace.CreateDirectory("project/narrow/deep");
+		File.WriteAllText(Path.Combine(deep, "leaf.txt"), string.Empty);
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		// At max_depth 2, "wide" renders every one of its 2,100 files (depth 2, not hidden) and
+		// overruns the line limit, while "narrow/deep" would otherwise be a collapsed folder. A
+		// truncated render cannot say which folders past the cut actually collapsed, so the hint
+		// must not claim one did.
+		var truncated = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["paths"] = new[] { "wide", "narrow" },
+				["max_depth"] = 2
+			});
+
+		Assert.NotEqual(true, truncated.IsError);
+		Assert.Contains("[Tree truncated", AllText(truncated), StringComparison.Ordinal);
+		Assert.DoesNotContain("[Tree depth]", AllText(truncated), StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -4069,7 +4159,7 @@ public sealed partial class McpServerIntegrationTests
 		var text = Text(result);
 		Assert.True(text.Length <= 55_000, $"Search response was {text.Length} characters.");
 		Assert.Contains("\n[1 additional observed matches not shown", text.Replace("\r\n", "\n", StringComparison.Ordinal));
-		Assert.Contains(
+		Assert.DoesNotContain(
 			"[Next read] Call read_pack with the reported pack_id for the remaining retained matches.",
 			text,
 			StringComparison.Ordinal);
@@ -6407,8 +6497,11 @@ public sealed partial class McpServerIntegrationTests
 		McpSearchOutputAssertions.ContainsMatch(Text(search), "Selected.cs", 1);
 		Assert.DoesNotContain("Untouched.cs:", Text(search), StringComparison.Ordinal);
 		Assert.True(missingRef.IsError);
-		Assert.Contains(McpErrorCodes.ProjectUnavailable, Text(missingRef), StringComparison.Ordinal);
-		Assert.Contains(GitScopeFilter.UnavailableDiagnosticCode, Text(missingRef), StringComparison.Ordinal);
+		Assert.Contains(
+			$"{McpErrorCodes.InvalidArguments}: git_scope names a revision this repository does not have. " +
+			"Check the refs, or use git_scope",
+			Text(missingRef),
+			StringComparison.Ordinal);
 		Assert.Null(missingRef.StructuredContent);
 	}
 
@@ -7212,7 +7305,7 @@ public sealed partial class McpServerIntegrationTests
 		Assert.Contains("Requests: 1.1, 2.1", text, StringComparison.Ordinal);
 		// Only 2.1 asked for lines past the end of the file; 1.1 ended inside it.
 		Assert.Contains("[Range clamped] requests=2.1;", text, StringComparison.Ordinal);
-		Assert.Contains("[Batch read] ok=3 · partial=0 · not-returned=0 · unavailable=0.", text,
+		Assert.Contains("[Batch read] ok=3 · structure=0 · partial=0 · not-returned=0 · unavailable=0.", text,
 			StringComparison.Ordinal);
 		Assert.Equal(2, diagnostics.FullFileReads);
 		Assert.Equal(0, diagnostics.PreparedFilesMaterialized);
@@ -7248,7 +7341,7 @@ public sealed partial class McpServerIntegrationTests
 			"[Range clamped] requests=2.1; end_line exceeded the file; returned through line 4.",
 			text,
 			StringComparison.Ordinal);
-		Assert.Contains("[Batch read] ok=2 · partial=0 · not-returned=1 · unavailable=0.", text,
+		Assert.Contains("[Batch read] ok=2 · structure=0 · partial=0 · not-returned=1 · unavailable=0.", text,
 			StringComparison.Ordinal);
 	}
 
@@ -7282,7 +7375,7 @@ public sealed partial class McpServerIntegrationTests
 		Assert.NotEqual(true, result.IsError);
 		Assert.Contains("available-marker", text, StringComparison.Ordinal);
 		Assert.Contains("2.1 — unavailable — DPX-MCP-PATH-NOT-FOUND", text, StringComparison.Ordinal);
-		Assert.Contains("[Batch read] ok=1 · partial=0 · not-returned=0 · unavailable=1.", text,
+		Assert.Contains("[Batch read] ok=1 · structure=0 · partial=0 · not-returned=0 · unavailable=1.", text,
 			StringComparison.Ordinal);
 	}
 
@@ -7735,7 +7828,8 @@ public sealed partial class McpServerIntegrationTests
 		Assert.NotEqual(true, result.IsError);
 		var body = ExtractSpotlightBody(text);
 		Assert.True(body.Length <= 50_000, body.Length.ToString(System.Globalization.CultureInfo.InvariantCulture));
-		Assert.True(body.Count(static character => character == '\n') + 1 <= 1_000);
+		Assert.True(text.Length <= 50_000, text.Length.ToString(System.Globalization.CultureInfo.InvariantCulture));
+		Assert.True(body.Count(static character => character == '\n') + 1 > 1_000);
 		foreach (var request in Enumerable.Range(1, 4))
 			Assert.Matches($@"{request}\.1 — (ok|partial|not-returned|unavailable)", text);
 		Assert.Contains("partial=", text, StringComparison.Ordinal);
@@ -7743,7 +7837,6 @@ public sealed partial class McpServerIntegrationTests
 	}
 
 	[Theory]
-	[InlineData("both")]
 	[InlineData("missing-path")]
 	[InlineData("too-many-requests")]
 	[InlineData("too-many-ranges")]
@@ -7759,7 +7852,7 @@ public sealed partial class McpServerIntegrationTests
 			["requests"] = shape switch
 			{
 				"missing-path" => new object[] { new { ranges = new[] { new { start_line = 1, end_line = 1 } } } },
-				"too-many-requests" => Enumerable.Range(0, 9)
+				"too-many-requests" => Enumerable.Range(0, 17)
 					.Select(static _ => (object)new { path = "A.txt", ranges = new[] { new { start_line = 1, end_line = 1 } } })
 					.ToArray(),
 				"too-many-ranges" => new object[]
@@ -7931,15 +8024,22 @@ public sealed partial class McpServerIntegrationTests
 			tools.Single(static tool => tool.Name == "list_projects").ProtocolTool.Description,
 			StringComparison.Ordinal);
 		foreach (var tool in tools.Where(static tool => tool.Name is
-			"get_tree" or "analyze" or "pack_context" or "search_project" or "related_files" or "get_file"))
+			"get_tree" or "analyze" or "pack_context" or "search_project" or "related_files" or "get_file" or "get_diff"))
 		{
-			Assert.Contains("absolute path returned by list_projects", tool.ProtocolTool.Description,
+			if (!allowRemote)
+			{
+				Assert.DoesNotContain("Project:", tool.ProtocolTool.Description, StringComparison.Ordinal);
+				Assert.False(tool.ProtocolTool.InputSchema.GetProperty("properties").TryGetProperty("project", out _));
+				continue;
+			}
+			Assert.Contains("omit for one local root", tool.ProtocolTool.Description,
 				StringComparison.Ordinal);
-			Assert.Contains("unique listed name", tool.ProtocolTool.Description, StringComparison.Ordinal);
+			Assert.Contains("unique name", tool.ProtocolTool.Description, StringComparison.Ordinal);
 			var address = tool.ProtocolTool.InputSchema.GetProperty("properties")
 				.GetProperty("project").GetProperty("description").GetString();
-			Assert.Contains("absolute path returned by list_projects", address, StringComparison.Ordinal);
-			Assert.Contains("unique listed name", address, StringComparison.Ordinal);
+			Assert.Contains("Omit for one local root", address, StringComparison.Ordinal);
+			Assert.Contains("absolute path", address, StringComparison.Ordinal);
+			Assert.Contains("unique name", address, StringComparison.Ordinal);
 			Assert.Contains("#index", address, StringComparison.Ordinal);
 		}
 	}
@@ -8403,7 +8503,8 @@ public sealed partial class McpServerIntegrationTests
 			("get_file", await server.CallAsync("get_file", new Dictionary<string, object?>(remote)
 			{
 				["path"] = "Main.cs"
-			}), true)
+			}), true),
+			("get_diff", await server.CallAsync("get_diff", remote), true)
 		};
 		var stored = results.Single(static item => item.Name == "pack_context").Result;
 		if (Text(stored).Contains("Pack stored as '", StringComparison.Ordinal))
@@ -9395,7 +9496,7 @@ public sealed partial class McpServerIntegrationTests
 		Assert.True(result.Succeeded);
 	}
 
-	private sealed class McpTestServer : IAsyncDisposable
+	internal sealed class McpTestServer : IAsyncDisposable
 	{
 		private readonly Pipe _clientToServer;
 		private readonly Pipe _serverToClient;
@@ -9420,6 +9521,8 @@ public sealed partial class McpServerIntegrationTests
 		}
 
 		public McpClient Client { get; }
+		internal Task Completion => _serverTask;
+		internal ValueTask CompleteInputAsync(Exception? exception = null) => _clientToServer.Writer.CompleteAsync(exception);
 
 		public static async Task<McpTestServer> StartAsync(
 			string project,
@@ -9435,7 +9538,9 @@ public sealed partial class McpServerIntegrationTests
 			IReadOnlySet<string>? remoteHosts = null,
 			bool live = false,
 			Implementation? clientInfo = null,
-			Func<IReadOnlyList<string>, McpRootRegistry>? rootRegistryFactory = null)
+			Func<IReadOnlyList<string>, McpRootRegistry>? rootRegistryFactory = null,
+			McpIdleMemoryOptions? idleMemoryOptions = null,
+			Action<McpServices>? configureServices = null)
 		{
 			return await StartAsync(
 				[project],
@@ -9451,7 +9556,8 @@ public sealed partial class McpServerIntegrationTests
 				remoteHosts,
 				live,
 				clientInfo,
-				rootRegistryFactory);
+				rootRegistryFactory,
+				idleMemoryOptions, configureServices);
 		}
 
 		public static async Task<McpTestServer> StartAsync(
@@ -9468,7 +9574,9 @@ public sealed partial class McpServerIntegrationTests
 			IReadOnlySet<string>? remoteHosts = null,
 			bool live = false,
 			Implementation? clientInfo = null,
-			Func<IReadOnlyList<string>, McpRootRegistry>? rootRegistryFactory = null)
+			Func<IReadOnlyList<string>, McpRootRegistry>? rootRegistryFactory = null,
+			McpIdleMemoryOptions? idleMemoryOptions = null,
+			Action<McpServices>? configureServices = null)
 		{
 			var clientToServer = new Pipe();
 			var serverToClient = new Pipe();
@@ -9480,15 +9588,17 @@ public sealed partial class McpServerIntegrationTests
 				TestContext.Current.CancellationToken,
 				() => Path.Combine(sandbox, "app-data"),
 				Path.Combine(sandbox, "temp"),
-				servicesCreated is null && dependencyFactsEngine is null
+				servicesCreated is null && dependencyFactsEngine is null && configureServices is null
 					? null
 					: roots =>
 					{
 						servicesCreated?.Invoke();
-						return McpServices.Create(
+						var created = McpServices.Create(
 							roots,
 							() => Path.Combine(sandbox, "app-data"),
 							dependencyFactsEngine);
+						configureServices?.Invoke(created);
+						return created;
 					},
 				allowRemote,
 				remoteServicesFactory,
@@ -9497,7 +9607,8 @@ public sealed partial class McpServerIntegrationTests
 				agentExclusions,
 				remoteHosts,
 				live: live,
-				rootRegistryFactory: rootRegistryFactory);
+				rootRegistryFactory: rootRegistryFactory,
+				idleMemoryOptions: idleMemoryOptions);
 			var recordingInput = new RecordingWriteStream(clientToServer.Writer.AsStream());
 			var recordingOutput = new RecordingReadStream(serverToClient.Reader.AsStream());
 			var transport = new StreamClientTransport(

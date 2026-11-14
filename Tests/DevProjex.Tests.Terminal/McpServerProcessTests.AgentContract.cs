@@ -34,9 +34,9 @@ public sealed partial class McpServerProcessTests
 		// Forty matches were all found and kept; only max_results held the written answer to one.
 		const string boundary =
 			"[Search boundary] partial output: every selected file was searched; 1 of 40 matches are " +
-			"written here and the rest are stored for read_pack.";
-		const string nextRead =
-			"[Next read] Call read_pack with the reported pack_id for the remaining retained matches.";
+			"written here; the rest are counted per file under \"Withheld matches by file\".";
+		const string nextRead = "Call read_pack with this pack_id.";
+		Assert.Contains(boundary, text, StringComparison.Ordinal);
 		Assert.True(
 			text.IndexOf(boundary, StringComparison.Ordinal) <
 			text.IndexOf("<untrusted-data-", StringComparison.Ordinal),
@@ -46,12 +46,13 @@ public sealed partial class McpServerProcessTests
 			text,
 			StringComparison.Ordinal);
 		Assert.Single(Regex.Matches(text, Regex.Escape(nextRead)).Cast<Match>());
+		Assert.DoesNotContain("[Next read]", text, StringComparison.Ordinal);
 		Assert.DoesNotContain("read_pack pages those files whole", text, StringComparison.Ordinal);
 		Assert.DoesNotContain("read the other", text, StringComparison.Ordinal);
 	}
 
 	[Fact]
-	public async Task RealProcessSearchPointsOnlyAtNeededKnownDeclarationsWhenNothingIsStored()
+	public async Task RealProcessSearchListsKnownDeclarationsWithoutAReadInstructionWhenNothingIsStored()
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
@@ -73,10 +74,8 @@ public sealed partial class McpServerProcessTests
 			})));
 
 		Assert.Contains("[Declaration body] shown=1/2 · other declarations=1.", text, StringComparison.Ordinal);
-		Assert.Contains(
-			"[Next read] Read only declarations needed for the task; batch known selections in one get_file call.",
-			text,
-			StringComparison.Ordinal);
+		Assert.DoesNotContain("batch known selections", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("[Next read]", text, StringComparison.Ordinal);
 		Assert.DoesNotContain("[Read declarations]", text, StringComparison.Ordinal);
 		Assert.DoesNotContain("in full", text, StringComparison.Ordinal);
 	}

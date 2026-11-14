@@ -2,6 +2,23 @@ namespace DevProjex.Tests.Unit;
 
 public sealed class LocalizationPreviewSearchKeysTests
 {
+	[Fact]
+	public void SymbolPatternReadingIsLocalizedInEveryCatalogWithOneNamesPlaceholder()
+	{
+		var files = Directory.GetFiles(Path.Combine(FindRepositoryRoot(), "Assets", "Localization"), "*.json");
+		Assert.Equal(20, files.Length);
+		foreach (var file in files)
+		{
+			using var document = JsonDocument.Parse(File.ReadAllText(file));
+			var value = document.RootElement.GetProperty("Terminal.Search.SymbolsReadAsNames").GetString();
+			Assert.False(string.IsNullOrWhiteSpace(value));
+			Assert.Contains("{0}", value, StringComparison.Ordinal);
+			Assert.DoesNotContain("{1}", value, StringComparison.Ordinal);
+			if (Path.GetFileName(file) != "en.json")
+				Assert.NotEqual("--symbols read the pattern as declaration names: {0}", value);
+		}
+	}
+
 	private static readonly string[] RequiredKeys =
 	[
 		"Preview.Search.Tooltip",

@@ -1,3 +1,4 @@
+using DevProjex.Application.Diff;
 using DevProjex.Infrastructure.Secrets;
 
 namespace DevProjex.Mcp;
@@ -15,7 +16,8 @@ internal sealed class McpServices : IDisposable
 		SecretRedactionSession redactionSession,
 		CodeCompressionSession compressionSession,
 		DependencyFactsEngine dependencyFactsEngine,
-		SecretRedactionOutputPreparer outputPreparer)
+		SecretRedactionOutputPreparer outputPreparer,
+		ProjectDiffService diffService)
 	{
 		Planner = planner;
 		DocumentService = documentService;
@@ -28,6 +30,7 @@ internal sealed class McpServices : IDisposable
 		CompressionSession = compressionSession;
 		DependencyFactsEngine = dependencyFactsEngine;
 		OutputPreparer = outputPreparer;
+		DiffService = diffService;
 	}
 
 	public ProjectContextPlanner Planner { get; }
@@ -41,6 +44,7 @@ internal sealed class McpServices : IDisposable
 	public CodeCompressionSession CompressionSession { get; }
 	public DependencyFactsEngine DependencyFactsEngine { get; }
 	public SecretRedactionOutputPreparer OutputPreparer { get; }
+	public ProjectDiffService DiffService { get; }
 
 	public static McpServices Create(
 		McpRootRegistry roots,
@@ -84,7 +88,7 @@ internal sealed class McpServices : IDisposable
 		try
 		{
 			redactionSession = SecretRedactionSession.CreateWithPrivateData(
-				new SmartSecretsDetector(new GitleaksSecretDetector(), smartIgnore),
+				new SmartSecretsDetector(McpSecretDetectors.Create(), smartIgnore),
 				new PrivateDataDetector(),
 				profileStore,
 				persistentIdentity);
@@ -156,7 +160,8 @@ internal sealed class McpServices : IDisposable
 				redactionSession,
 				compressionSession,
 				resolvedDependencyFactsEngine,
-				new SecretRedactionOutputPreparer(contentAnalyzer, preparedContentAnalyzer));
+				new SecretRedactionOutputPreparer(contentAnalyzer, preparedContentAnalyzer),
+				new ProjectDiffService(new GitFileVersionReader()));
 		}
 		catch
 		{

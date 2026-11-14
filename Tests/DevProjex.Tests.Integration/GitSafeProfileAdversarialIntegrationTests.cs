@@ -103,6 +103,45 @@ public sealed class GitSafeProfileAdversarialIntegrationTests
 	}
 
 	[Fact]
+	public async Task FileVersionReadsNeverRunRepositoryFiltersOrConverters()
+	{
+		using var fixture = await HostileGitFixture.CreateAsync(TestContext.Current.CancellationToken);
+		fixture.RunGit("config", "core.fsmonitor", fixture.CreateMarkerCommand("fsmonitor"));
+		fixture.RunGit("config", "filter.hostile.clean", fixture.CreateMarkerCommand("clean"));
+		fixture.RunGit("config", "filter.hostile.smudge", fixture.CreateMarkerCommand("smudge"));
+		fixture.RunGit("config", "filter.hostile.process", fixture.CreateMarkerCommand("process"));
+		fixture.RunGit("config", "diff.external", fixture.CreateMarkerCommand("diff-external"));
+		fixture.RunGit("config", "diff.hostile.textconv", fixture.CreateMarkerCommand("textconv"));
+		fixture.RunGit("config", "core.pager", fixture.CreateMarkerCommand("pager"));
+		fixture.RunGit("config", "alias.cat-file", "!" + fixture.CreateMarkerCommand("alias-cat-file"));
+		fixture.RunGit("config", "alias.ls-tree", "!" + fixture.CreateMarkerCommand("alias-ls-tree"));
+		var tracked = Path.Combine(fixture.RepositoryPath, "tracked.txt");
+		var staged = Path.Combine(fixture.RepositoryPath, "staged.txt");
+		var reader = new GitFileVersionReader();
+
+		var changes = await reader.ReadAsync(
+			new DevProjex.Application.Diff.GitFileVersionRequest(
+				fixture.RepositoryPath, GitFilteringMode.Changes, null, [tracked, staged]),
+			TestContext.Current.CancellationToken);
+		var index = await reader.ReadAsync(
+			new DevProjex.Application.Diff.GitFileVersionRequest(
+				fixture.RepositoryPath, GitFilteringMode.Staged, null, [tracked, staged]),
+			TestContext.Current.CancellationToken);
+		var range = await reader.ReadAsync(
+			new DevProjex.Application.Diff.GitFileVersionRequest(
+				fixture.RepositoryPath, GitFilteringMode.Diff, "HEAD~1..HEAD", [tracked]),
+			TestContext.Current.CancellationToken);
+
+		Assert.True(changes.IsAvailable, changes.FailureReason);
+		Assert.True(index.IsAvailable, index.FailureReason);
+		Assert.True(range.IsAvailable, range.FailureReason);
+		Assert.Equal("two\n", Encoding.UTF8.GetString(changes.Files[tracked].Old!.Content!));
+		Assert.Equal("staged\n", Encoding.UTF8.GetString(index.Files[staged].New!.Content!));
+		Assert.Equal("one\n", Encoding.UTF8.GetString(range.Files[tracked].Old!.Content!));
+		Assert.Empty(Directory.EnumerateFiles(fixture.MarkersDirectory));
+	}
+
+	[Fact]
 	public async Task ManagedCheckoutAndWorktreeUseEmptyHooksAndFilterOverrides()
 	{
 		using var fixture = await HostileGitFixture.CreateAsync(TestContext.Current.CancellationToken);

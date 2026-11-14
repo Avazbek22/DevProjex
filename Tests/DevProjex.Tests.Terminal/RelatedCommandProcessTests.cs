@@ -6,6 +6,49 @@ namespace DevProjex.Tests.Terminal;
 
 public sealed class RelatedCommandProcessTests
 {
+	[Theory]
+	[InlineData("Parts")]
+	[InlineData("./Parts/")]
+	public void FolderSeedsUseOnlyDirectSelectedFilesAndPreserveJson(string folder)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />\n");
+		workspace.WriteFile("project/Parts/Z.cs", "public sealed class Z { public Target Value { get; } }\n");
+		workspace.WriteFile("project/Parts/a.cs", "public sealed class A { public Target Value { get; } }\n");
+		workspace.WriteFile("project/Parts/nested/NotASeed.cs", "public sealed class NotASeed {}\n");
+		workspace.WriteFile("project/Parts/ignored.md", "not a source seed\n");
+		workspace.WriteFile("project/Target.cs", "public sealed class Target {}\n");
+		var result = Run(workspace, "related", folder, "--project", project, "--direction", "dependencies",
+			"--format", "json", "--extension", ".cs", "--extension", ".csproj", "--git-mode", "none", "--exclude", "none");
+		Assert.True(result.ExitCode == 0, result.StandardError + result.StandardOutput);
+		Assert.Contains(RelatedQueryRunner.FormatFolderNotice(2), result.StandardError, StringComparison.Ordinal);
+		Assert.DoesNotContain("[Read as]", result.StandardOutput, StringComparison.Ordinal);
+		using var document = JsonDocument.Parse(result.StandardOutput);
+		var seeds = document.RootElement.GetProperty("seeds").EnumerateArray().ToArray();
+		Assert.Equal(new[] { "Parts/Z.cs", "Parts/a.cs" }, seeds.Select(seed => seed.GetProperty("seed").GetString()));
+		Assert.All(seeds, seed => Assert.Contains(seed.GetProperty("dependencies").EnumerateArray(),
+			dependency => dependency.GetProperty("path").GetString() == "Target.cs"));
+	}
+
+	[Theory]
+	[InlineData(0)]
+	[InlineData(17)]
+	public void FolderSeedsKeepTheExistingSelectionRefusalWhenExpansionIsUnavailable(int files)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.CreateDirectory("project/Parts");
+		workspace.WriteFile("project/Fixture.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />\n");
+		for (var index = 0; index < files; index++)
+			workspace.WriteFile($"project/Parts/File{index:D2}.cs", $"public sealed class File{index:D2} {{ }}\n");
+		var result = Run(workspace, "related", "Parts", "--project", project, "--format", "json", "--git-mode", "none", "--exclude", "none");
+		Assert.NotEqual(0, result.ExitCode);
+		Assert.Contains("DPX-SELECTION-PATH-MISSING", result.StandardError, StringComparison.Ordinal);
+		Assert.DoesNotContain("[Read as]", result.StandardError, StringComparison.Ordinal);
+		Assert.Empty(result.StandardOutput);
+	}
+
 	[Fact]
 	public void DepthTraversesOnlyResolvedEdgesAndOnePreservesTheExistingShape()
 	{
@@ -681,6 +724,240 @@ public sealed class RelatedCommandProcessTests
 		Assert.Contains("impl.py", localModel.StandardOutput, StringComparison.Ordinal);
 	}
 
+	[Fact]
+	public void NarrowedSelectionResolvesPythonImportsLikeTheWholeProject()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/pyproject.toml", "[project]\nname = \"demo\"\ndependencies = [\"colorama\"]\n");
+		workspace.WriteFile("project/src/demo/__init__.py", "");
+		workspace.WriteFile("project/src/demo/core.py", "class Command: pass\n");
+		workspace.WriteFile("project/src/demo/decorators.py",
+			"import colorama\nfrom .core import Command\nfrom demo.core import Command as Alias\n");
+		string[] arguments =
+		[
+			"related", "src/demo/decorators.py", "--project", project, "--direction", "dependencies",
+			"--format", "json", "--git-mode", "none", "--exclude", "none"
+		];
+
+		var whole = Run(workspace, arguments);
+		var narrowed = Run(workspace, [.. arguments, "--select", "src"]);
+		var filtered = Run(workspace, [.. arguments, "--extension", ".py"]);
+
+		Assert.Equal(0, whole.ExitCode);
+		Assert.Equal(0, narrowed.ExitCode);
+		Assert.Equal(0, filtered.ExitCode);
+		foreach (var result in new[] { whole, narrowed, filtered })
+		{
+			using var document = JsonDocument.Parse(result.StandardOutput);
+			var dependencies = Assert.Single(document.RootElement.GetProperty("seeds").EnumerateArray())
+				.GetProperty("dependencies").EnumerateArray()
+				.Select(static item => item.GetProperty("path").GetString() ?? string.Empty)
+				.ToArray();
+			Assert.Equal(["src/demo/core.py"], dependencies);
+			Assert.DoesNotContain("pyproject.toml", result.StandardOutput, StringComparison.Ordinal);
+		}
+	}
+
+	[Fact]
+	public void NarrowedSelectionListsRelatedFilesOutsideItInTextAndJson()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/App.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />\n");
+		workspace.WriteFile("project/Models/User.cs", "namespace App.Models; public sealed class User { }\n");
+		workspace.WriteFile("project/Services/Store.cs",
+			"using App.Models; namespace App.Services; public sealed class Store { User Value; }\n");
+		workspace.WriteFile("project/Tests/StoreTests.cs",
+			"using App.Services; namespace App.Tests; public sealed class StoreTests { Store Subject; }\n");
+		string[] arguments =
+		[
+			"related", "Services/Store.cs", "--project", project, "--git-mode", "none", "--exclude", "none"
+		];
+
+		var text = Run(workspace, [.. arguments, "--select", "Services", "--format", "text"]);
+		var json = Run(workspace, [.. arguments, "--select", "Services", "--format", "json"]);
+		var whole = Run(workspace, [.. arguments, "--format", "json"]);
+
+		Assert.Equal(0, text.ExitCode);
+		Assert.Contains("Dependencies outside the selection:", text.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("Models/User.cs — ", text.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("Dependents outside the selection:", text.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("Tests/StoreTests.cs — ", text.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("[Resolution] resolved=0 · ambiguous=0 · unresolved=0 · external=0 · outside-selection=2",
+			text.StandardOutput, StringComparison.Ordinal);
+
+		Assert.Equal(0, json.ExitCode);
+		using (var document = JsonDocument.Parse(json.StandardOutput))
+		{
+			var outside = Assert.Single(document.RootElement.GetProperty("outsideSelection").EnumerateArray());
+			Assert.Equal("Services/Store.cs", outside.GetProperty("seed").GetString());
+			Assert.Equal("Models/User.cs",
+				Assert.Single(outside.GetProperty("dependencies").EnumerateArray()).GetProperty("path").GetString());
+			Assert.Equal(1, outside.GetProperty("dependencyCount").GetInt32());
+			Assert.Equal("Tests/StoreTests.cs",
+				Assert.Single(outside.GetProperty("dependents").EnumerateArray()).GetProperty("path").GetString());
+			Assert.Equal(1, outside.GetProperty("dependentCount").GetInt32());
+			var resolution = document.RootElement.GetProperty("resolution");
+			Assert.Equal(2, resolution.GetProperty("outsideSelection").GetInt32());
+			Assert.Equal(0, resolution.GetProperty("unresolved").GetInt32());
+		}
+
+		// Without narrowing nothing lies outside the selection and the document keeps its shape.
+		Assert.Equal(0, whole.ExitCode);
+		using (var document = JsonDocument.Parse(whole.StandardOutput))
+		{
+			Assert.False(document.RootElement.TryGetProperty("outsideSelection", out _));
+			Assert.False(document.RootElement.GetProperty("resolution").TryGetProperty("outsideSelection", out _));
+		}
+	}
+
+	[Fact]
+	public void NarrowedSelectionAnswersFromTheProjectAndOnlyPlacesEachFile()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		NarrowedRelationFixtures.WriteGlobalUsingLibrary(workspace, "project");
+		string[] arguments =
+		[
+			"related", NarrowedRelationFixtures.LibrarySeed, "--project", project, "--git-mode", "none", "--exclude", "none"
+		];
+
+		var text = Run(workspace, [.. arguments, "--select", NarrowedRelationFixtures.LibraryFolder, "--format", "text"]);
+		var json = Run(workspace, [.. arguments, "--select", NarrowedRelationFixtures.LibraryFolder, "--format", "json"]);
+		var whole = Run(workspace, [.. arguments, "--format", "json"]);
+
+		Assert.Equal(0, text.ExitCode);
+		Assert.Equal(
+			NarrowedRelationFixtures.LibraryDependenciesInside,
+			NarrowedRelationFixtures.SectionPaths(text.StandardOutput, "Dependencies"));
+		Assert.Equal(["Events/LogEvent.cs"],
+			NarrowedRelationFixtures.SectionPaths(text.StandardOutput, "Dependencies outside the selection"));
+		Assert.Equal(["Configuration.cs"],
+			NarrowedRelationFixtures.SectionPaths(text.StandardOutput, "Dependents outside the selection"));
+		Assert.Contains("[Resolution] resolved=3 · ambiguous=0 · unresolved=0 · external=0 · outside-selection=2",
+			text.StandardOutput, StringComparison.Ordinal);
+
+		Assert.Equal(0, json.ExitCode);
+		Assert.Equal(0, whole.ExitCode);
+		using var narrowedDocument = JsonDocument.Parse(json.StandardOutput);
+		using var wholeDocument = JsonDocument.Parse(whole.StandardOutput);
+		AssertNarrowedJsonMatchesWhole(narrowedDocument.RootElement, wholeDocument.RootElement);
+		Assert.Equal(NarrowedRelationFixtures.LibraryDependenciesInside, SeedPaths(narrowedDocument.RootElement, "dependencies"));
+		Assert.Equal(4, narrowedDocument.RootElement.GetProperty("searchScope").GetProperty("files").GetInt32());
+	}
+
+	[Fact]
+	public void NarrowedSelectionNamesThePackageFileInsteadOfANamespace()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		NarrowedRelationFixtures.WritePackageImportingItself(workspace, "project");
+		string[] arguments =
+		[
+			"related", NarrowedRelationFixtures.PackageSeed, "--project", project, "--git-mode", "none", "--exclude", "none"
+		];
+
+		var text = Run(workspace, [.. arguments, "--select", NarrowedRelationFixtures.PackageFolder, "--format", "text"]);
+		var json = Run(workspace, [.. arguments, "--select", NarrowedRelationFixtures.PackageFolder, "--format", "json"]);
+		var whole = Run(workspace, [.. arguments, "--format", "json"]);
+
+		Assert.Equal(0, text.ExitCode);
+		Assert.DoesNotContain("namespace:pkg", text.StandardOutput, StringComparison.Ordinal);
+		Assert.Equal(["pkg/_transports/base.py"], NarrowedRelationFixtures.SectionPaths(text.StandardOutput, "Dependencies"));
+		Assert.Equal(["pkg/__init__.py", "pkg/_config.py"],
+			NarrowedRelationFixtures.SectionPaths(text.StandardOutput, "Dependencies outside the selection"));
+		Assert.Equal(["pkg/_client.py"],
+			NarrowedRelationFixtures.SectionPaths(text.StandardOutput, "Dependents outside the selection"));
+
+		Assert.Equal(0, json.ExitCode);
+		Assert.Equal(0, whole.ExitCode);
+		using var narrowedDocument = JsonDocument.Parse(json.StandardOutput);
+		using var wholeDocument = JsonDocument.Parse(whole.StandardOutput);
+		AssertNarrowedJsonMatchesWhole(narrowedDocument.RootElement, wholeDocument.RootElement);
+		Assert.DoesNotContain("namespace:pkg", json.StandardOutput, StringComparison.Ordinal);
+	}
+
+	// Narrowing decides only where a related file is listed: the seed's sections and the outside
+	// sections together hold what the whole project relates, and the counts add up to its own.
+	private static void AssertNarrowedJsonMatchesWhole(JsonElement narrowed, JsonElement whole)
+	{
+		var outside = narrowed.GetProperty("outsideSelection").EnumerateArray().SingleOrDefault();
+		foreach (var relation in new[] { "dependencies", "dependents" })
+		{
+			var outsidePaths = outside.ValueKind == JsonValueKind.Undefined
+				? []
+				: outside.GetProperty(relation).EnumerateArray()
+					.Select(static item => item.GetProperty("path").GetString()!)
+					.ToArray();
+			Assert.Equal(
+				SeedPaths(whole, relation),
+				SeedPaths(narrowed, relation).Concat(outsidePaths).Order(StringComparer.Ordinal));
+		}
+		var narrowedResolution = narrowed.GetProperty("resolution");
+		var wholeResolution = whole.GetProperty("resolution");
+		Assert.Equal(
+			wholeResolution.GetProperty("resolved").GetInt32(),
+			narrowedResolution.GetProperty("resolved").GetInt32() +
+			narrowedResolution.GetProperty("outsideSelection").GetInt32());
+		foreach (var status in new[] { "ambiguous", "unresolved", "external" })
+			Assert.Equal(wholeResolution.GetProperty(status).GetInt32(), narrowedResolution.GetProperty(status).GetInt32());
+		Assert.False(wholeResolution.TryGetProperty("outsideSelection", out _));
+	}
+
+	private static string[] SeedPaths(JsonElement document, string relation) =>
+		Assert.Single(document.GetProperty("seeds").EnumerateArray())
+			.GetProperty(relation).EnumerateArray()
+			.Select(static item => item.GetProperty("path").GetString()!)
+			.ToArray();
+
+	[Fact]
+	public void RepeatedEvidenceSitesAreCompactedInTextAndListedOneByOneInJson()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/App.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\" />\n");
+		workspace.WriteFile("project/Models/User.cs", "namespace App.Models; public sealed class User { }\n");
+		workspace.WriteFile("project/Services/Store.cs",
+			"using App.Models;\nnamespace App.Services;\npublic sealed class Store\n{\n" +
+			string.Concat(Enumerable.Range(1, 7).Select(static index => $"\tUser Value{index};\n")) +
+			"}\n");
+		string[] arguments =
+		[
+			"related", "Services/Store.cs", "--project", project, "--direction", "dependencies",
+			"--git-mode", "none", "--exclude", "none"
+		];
+
+		var text = Run(workspace, [.. arguments, "--format", "text"]);
+		var json = Run(workspace, [.. arguments, "--format", "json"]);
+
+		Assert.True(text.ExitCode == 0, text.StandardError + text.StandardOutput);
+		Assert.Contains(
+			"Models/User.cs — one visible declaration identity · " +
+			"type reference User at lines 5, 6, 7, 8, 9 (+2 more) — resolved — ",
+			text.StandardOutput,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain("type reference User at line ", text.StandardOutput, StringComparison.Ordinal);
+
+		Assert.Equal(0, json.ExitCode);
+		using var document = JsonDocument.Parse(json.StandardOutput);
+		var dependency = Assert.Single(Assert.Single(document.RootElement.GetProperty("seeds").EnumerateArray())
+			.GetProperty("dependencies").EnumerateArray());
+		Assert.Equal("Models/User.cs", dependency.GetProperty("path").GetString());
+		Assert.Equal(
+			[
+				"one visible declaration identity",
+				"type reference User at line 10",
+				"type reference User at line 11",
+				"type reference User at line 5",
+				"type reference User at line 6",
+				"type reference User at line 7",
+				"type reference User at line 8",
+				"type reference User at line 9"
+			],
+			dependency.GetProperty("reasons").EnumerateArray().Select(static reason => reason.GetString()));
+	}
+
 	private static TerminalTestProcessResult Run(TemporaryDirectory workspace, params string[] arguments)
 	{
 		var startInfo = new ProcessStartInfo("dotnet")
@@ -698,7 +975,7 @@ public sealed class RelatedCommandProcessTests
 		startInfo.ArgumentList.Add("--plain");
 		startInfo.ArgumentList.Add("--progress");
 		startInfo.ArgumentList.Add("never");
-		startInfo.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = workspace.CreateDirectory("data");
+		startInfo.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = workspace.CreateDirectory("data-" + Guid.NewGuid().ToString("N"));
 		return TerminalTestProcess.Run(startInfo, TimeSpan.FromMinutes(1));
 	}
 

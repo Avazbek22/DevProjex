@@ -19,6 +19,7 @@ internal enum TerminalWorkspaceCommandVerb
 	Copy,
 	Analyze,
 	Related,
+	Diff,
 	Reveal,
 	Branch,
 	Update,
@@ -73,6 +74,7 @@ internal enum TerminalWorkspaceCommandGrammar
 	Profile,
 	McpConnection,
 	Related,
+	Diff,
 	Grep,
 	ProjectPath,
 	Language,
@@ -95,7 +97,8 @@ internal sealed record TerminalWorkspaceCommand(
 	SearchMode SearchMode = SearchMode.Text,
 	int? MaximumResults = null,
 	long? MaximumEstimatedTokens = null,
-	ProjectContextRank? Rank = null);
+	ProjectContextRank? Rank = null,
+	int? ContextLines = null);
 
 internal enum TerminalWorkspaceMcpAction
 {
@@ -349,6 +352,15 @@ internal static class TerminalWorkspaceCommandCatalog
 			"diagnostics",
 			"diagnostics",
 			static (session, command) => session.ExecuteDiagnosticsCommand(command)),
+		// Catalog order is completion order: diff follows diagnostics, so ':di' + Tab keeps completing
+		// the command it completed before diff existed.
+		Define(
+			TerminalWorkspaceCommandVerb.Diff,
+			TerminalWorkspaceCommandGrammar.Diff,
+			"diff",
+			"diff [changes|staged|diff:<ref>..<ref>] [--context N]",
+			"diff staged",
+			static (session, command) => session.ExecuteDiffCommand(command)),
 		Define(
 			TerminalWorkspaceCommandVerb.Help,
 			TerminalWorkspaceCommandGrammar.Help,

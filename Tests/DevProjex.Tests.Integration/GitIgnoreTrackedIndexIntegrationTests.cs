@@ -2,7 +2,7 @@ using DevProjex.Application.Context;
 
 namespace DevProjex.Tests.Integration;
 
-public sealed class GitIgnoreTrackedIndexIntegrationTests
+public sealed partial class GitIgnoreTrackedIndexIntegrationTests
 {
 	[Fact]
 	public void InvalidRepositoryMetadataDoesNotProduceAuthoritativeComparisonSemantics()
@@ -517,7 +517,7 @@ public sealed class GitIgnoreTrackedIndexIntegrationTests
 	}
 
 	[Fact]
-	public async Task StagedFileRemovedFromWorkingTreeIsReportedAsDeleted()
+	public async Task StagedFileRemovedFromWorkingTreeIsCountedAsAbsentNotDeleted()
 	{
 		EnsureGitAvailable();
 		using var temp = new TemporaryDirectory();
@@ -532,10 +532,21 @@ public sealed class GitIgnoreTrackedIndexIntegrationTests
 			GitFilteringMode.Staged,
 			diffRange: null,
 			TestContext.Current.CancellationToken);
+		var changes = await new GitScopePathProvider().ResolveAsync(
+			repositoryRoot,
+			GitFilteringMode.Changes,
+			diffRange: null,
+			TestContext.Current.CancellationToken);
 
 		Assert.True(result.IsAvailable, result.FailureReason);
 		Assert.Empty(result.IncludedPaths);
-		Assert.Equal(1, result.DeletedPathCount);
+		Assert.Equal(0, result.DeletedPathCount);
+		Assert.Equal(PathUtility.Normalize(filePath), Assert.Single(result.NotInWorkingTreePaths), PathComparer.Default);
+		// HEAD never had the file and the working tree lacks it, so nothing changed.
+		Assert.True(changes.IsAvailable, changes.FailureReason);
+		Assert.Empty(changes.IncludedPaths);
+		Assert.Equal(0, changes.DeletedPathCount);
+		Assert.Empty(changes.NotInWorkingTreePaths);
 	}
 
 	[Fact]

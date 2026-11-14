@@ -1,12 +1,72 @@
 using System.Diagnostics;
 using System.Text.RegularExpressions;
 using DevProjex.Infrastructure.ProjectProfiles;
+using DevProjex.Mcp;
 
 namespace DevProjex.Tests.Terminal;
 
 public sealed class SearchCommandProcessTests
 {
 	private const int MaximumOutputCharacters = 16_000;
+
+	[Fact]
+	public void TextSearchListsDocumentationLastAndKeepsJsonMatchOrderAndValues()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("search-order");
+		workspace.WriteFile("search-order/a.md", "orderingNeedle\n");
+		workspace.WriteFile("search-order/z.log", "orderingNeedle\n");
+
+		var text = Run(workspace, project, "orderingNeedle", "--format", "text");
+		var json = Run(workspace, project, "orderingNeedle", "--format", "json");
+
+		Assert.Equal(0, text.ExitCode);
+		Assert.Equal(0, json.ExitCode);
+		Assert.True(text.StandardOutput.IndexOf("z.log", StringComparison.Ordinal) <
+			text.StandardOutput.IndexOf("a.md", StringComparison.Ordinal), text.StandardOutput);
+		Assert.DoesNotContain("Matches in documentation files:", text.StandardOutput, StringComparison.Ordinal);
+		using var document = JsonDocument.Parse(json.StandardOutput);
+		var root = document.RootElement;
+		Assert.Equal(1, root.GetProperty("schemaVersion").GetInt32());
+		Assert.Equal("devprojex-search-results", root.GetProperty("kind").GetString());
+		Assert.Equal("orderingNeedle", root.GetProperty("query").GetProperty("pattern").GetString());
+		Assert.Equal("text", root.GetProperty("query").GetProperty("mode").GetString());
+		var matches = root.GetProperty("matches").EnumerateArray().ToArray();
+		Assert.Equal(new[] { "a.md", "z.log" }, matches.Select(match => match.GetProperty("path").GetString()));
+		Assert.All(matches, match =>
+		{
+			Assert.Equal(1, match.GetProperty("line").GetInt32());
+			Assert.Equal("orderingNeedle", match.GetProperty("text").GetString());
+			Assert.Equal(JsonValueKind.Null, match.GetProperty("declaration").ValueKind);
+		});
+		Assert.Empty(root.GetProperty("declarations").EnumerateArray());
+		var boundary = root.GetProperty("searchBoundary");
+		Assert.True(boundary.GetProperty("complete").GetBoolean());
+		foreach (var count in new[] { "eligibleSources", "inspectedSources", "encounteredMatches", "retainedMatches", "writtenMatches" })
+			Assert.Equal(2, boundary.GetProperty(count).GetInt32());
+		Assert.Equal(0, boundary.GetProperty("omittedMatches").GetInt32());
+		Assert.Empty(boundary.GetProperty("limits").EnumerateArray());
+	}
+
+	[Fact]
+	public void SymbolRegularExpressionReadsNamesWithAStderrHintAndPreservesJsonShape()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = CreateProject(workspace);
+		var plain = Run(workspace, project, "Run", "--symbols", "--format", "json");
+		var read = Run(workspace, project, @"func\s+Run", "--symbols", "--format", "json");
+		Assert.True(read.ExitCode == 0, read.StandardError);
+		Assert.Contains("hint: --symbols read the pattern as declaration names: Run", read.StandardError, StringComparison.Ordinal);
+		using var plainJson = JsonDocument.Parse(plain.StandardOutput);
+		using var readJson = JsonDocument.Parse(read.StandardOutput);
+		Assert.Equal(plainJson.RootElement.EnumerateObject().Select(property => property.Name),
+			readJson.RootElement.EnumerateObject().Select(property => property.Name));
+		Assert.Equal(plainJson.RootElement.GetProperty("matches").GetRawText(), readJson.RootElement.GetProperty("matches").GetRawText());
+		Assert.DoesNotContain("read the pattern", read.StandardOutput, StringComparison.Ordinal);
+		var text = Run(workspace, project, "func.*Run", "--symbols", "--format", "text");
+		Assert.True(text.ExitCode == 0, text.StandardError);
+		Assert.Contains("src/App.cs", text.StandardOutput, StringComparison.Ordinal);
+	}
 
 	[Fact]
 	public void TextJsonAndMarkdownDescribeTheSameMatches()
@@ -146,7 +206,7 @@ public sealed class SearchCommandProcessTests
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = CreateProject(workspace);
-		var dataRoot = workspace.CreateDirectory("data");
+		var dataRoot = workspace.CreateDirectory("data-" + Guid.NewGuid().ToString("N"));
 		var markedSecret = new MarkedSecretProfileEntry("001122334455", "token", 12);
 		var localProfile = new ProjectSelectionProfile(
 			SelectedRootFolders: [],
@@ -221,22 +281,37 @@ public sealed class SearchCommandProcessTests
 		Assert.Empty(result.StandardOutput);
 	}
 
-	[Fact]
-	public void SymbolModeRefusesARegularExpressionWithAHintInsteadOfReportingNoMatches()
+	[Theory]
+	[InlineData("Run\\(")]
+	[InlineData("Ru.*")]
+	public void SymbolModeSearchesARegularExpressionAsTextWithoutChangingItsPayload(string pattern)
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = CreateProject(workspace);
 
-		var refused = Run(workspace, project, "Run\\(", "--symbols");
+		foreach (var format in new[] { "text", "json", "markdown" })
+		{
+			var ordinary = Run(workspace, project, pattern, "--regex", "--format", format);
+			var fallback = Run(workspace, project, pattern, "--symbols", "--format", format);
+			Assert.Equal(0, fallback.ExitCode);
+			Assert.Equal(ordinary.StandardOutput, fallback.StandardOutput);
+			Assert.Contains(McpSearchSymbols.RegularExpressionFallbackNotice, fallback.StandardError, StringComparison.Ordinal);
+			Assert.DoesNotContain(McpSearchSymbols.RegularExpressionFallbackNotice, fallback.StandardOutput, StringComparison.Ordinal);
+		}
 		var named = Run(workspace, project, "string Run(", "--symbols", "--format", "json");
-
-		Assert.Equal(CommandLineExitCodes.UsageError, refused.ExitCode);
-		Assert.Empty(refused.StandardOutput);
-		Assert.Contains("DPX-CLI-SEARCH-PATTERN", refused.StandardError, StringComparison.Ordinal);
-		Assert.Contains("looks like a regular expression", refused.StandardError, StringComparison.Ordinal);
-		Assert.Contains("use --regex instead of --symbols", refused.StandardError, StringComparison.Ordinal);
 		Assert.Equal(0, named.ExitCode);
 		Assert.Single(JsonDocument.Parse(named.StandardOutput).RootElement.GetProperty("matches").EnumerateArray());
+	}
+
+	[Fact]
+	public void NamelessSymbolQueryKeepsTheSearchFailure()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = CreateProject(workspace);
+		var result = Run(workspace, project, " | ", "--symbols");
+		Assert.Equal(CommandLineExitCodes.UsageError, result.ExitCode);
+		Assert.Contains("DPX-CLI-SEARCH-PATTERN", result.StandardError, StringComparison.Ordinal);
+		Assert.Empty(result.StandardOutput);
 	}
 
 	[Fact]
@@ -532,7 +607,7 @@ public sealed class SearchCommandProcessTests
 		{
 			start.ArgumentList.Add(argument);
 		}
-		start.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = workspace.CreateDirectory("data");
+		start.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = workspace.CreateDirectory("data-" + Guid.NewGuid().ToString("N"));
 		return TerminalTestProcess.Run(start, TimeSpan.FromMinutes(1));
 	}
 }

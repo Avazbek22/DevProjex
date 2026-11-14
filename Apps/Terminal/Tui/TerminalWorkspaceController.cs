@@ -28,6 +28,16 @@ internal sealed record TerminalStructuralRefreshResult(
 	int PlanBuildCount,
 	long? ExpectedRevision);
 
+/// <summary>
+/// A frozen copy of the parts of <see cref="TerminalWorkspaceState"/> a relation query reads, taken
+/// before the query starts so a filter toggled on the UI thread while it runs cannot change its answer.
+/// </summary>
+internal sealed record TerminalRelationStateSnapshot(
+	ProjectContextPlan Plan,
+	ProjectSelectionSpec Selection,
+	IReadOnlyDictionary<string, bool> ExtensionOptionStates,
+	IReadOnlyDictionary<string, bool> PathOptionStates);
+
 public sealed class TerminalWorkspaceController(
 	TerminalServices services,
 	ITerminalEnvironment environment)
@@ -671,6 +681,133 @@ public sealed class TerminalWorkspaceController(
 				state.Plan,
 				state.BuildSelectedRelativePaths(),
 				cancellationToken);
+
+	/// <summary>
+	/// Freezes the parts of <paramref name="state"/> a relation query reads. Call this on the UI
+	/// thread before starting the query, so a filter toggled while it runs in the background cannot
+	/// change its answer.
+	/// </summary>
+	internal static TerminalRelationStateSnapshot CaptureRelationSnapshot(TerminalWorkspaceState state)
+	{
+		ArgumentNullException.ThrowIfNull(state);
+		return new TerminalRelationStateSnapshot(
+			state.Plan,
+			state.BuildSelection(),
+			new Dictionary<string, bool>(state.ExtensionOptionStates, StringComparer.OrdinalIgnoreCase),
+			ClonePathOptionStates(state.PathOptionStates));
+	}
+
+	/// <summary>
+	/// The workspace without its attention: the checked items and a momentary Git scope are lifted,
+	/// while roots, extensions, ignores, exclusions, and the persistent Git mode stay, as the saved
+	/// window filters do for a live MCP session. Returns null when that adds no file to
+	/// <paramref name="current"/>.
+	/// </summary>
+	public Task<ProjectContextPlan?> BuildRelationProjectPlanAsync(
+		TerminalWorkspaceState state,
+		ProjectContextPlan current,
+		GitFilteringMode persistentGitMode,
+		CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(state);
+		return BuildRelationProjectPlanAsync(
+			CaptureRelationSnapshot(state), current, persistentGitMode, cancellationToken);
+	}
+
+	private async Task<ProjectContextPlan?> BuildRelationProjectPlanAsync(
+		TerminalRelationStateSnapshot snapshot,
+		ProjectContextPlan current,
+		GitFilteringMode persistentGitMode,
+		CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(current);
+		if (!GitScopeSelection.IsPersistent(persistentGitMode))
+			throw new ArgumentOutOfRangeException(nameof(persistentGitMode), persistentGitMode, null);
+		var baseline = snapshot.Plan;
+		if (GitScopeSelection.IsMomentary(baseline.Selection.GitMode ?? GitFilteringMode.None))
+		{
+			// The panel's file types and path options carry over exactly as a settings change would.
+			var lifted = await BuildSettingsPlanAsync(
+					baseline,
+					snapshot.Selection with
+					{
+						SelectedPaths = null,
+						GitMode = persistentGitMode,
+						GitDiffRange = null
+					},
+					snapshot.ExtensionOptionStates,
+					new HashSet<string>(StringComparer.Ordinal),
+					snapshot.PathOptionStates,
+					selectedPathFrontier: null,
+					persistentGitMode,
+					cancellationToken)
+				.ConfigureAwait(false);
+			baseline = lifted.Plan;
+		}
+		if (baseline.HasErrors)
+			return null;
+		var project = await services.ContextPlanner
+			.ReprojectSelectionAsync(baseline, selectedPaths: null, cancellationToken)
+			.ConfigureAwait(false);
+		var selected = current.IncludedFiles.ToHashSet(PathComparer.Default);
+		return project.IncludedFiles.Any(path => !selected.Contains(path)) ? project : null;
+	}
+
+	/// <summary>
+	/// Relates <paramref name="seed"/> within <paramref name="current"/>. When the workspace narrows
+	/// that plan, the relation project answers for the seed's relations and <c>Outside</c> carries
+	/// that answer; the selection only places each file. <paramref name="snapshot"/> must be captured
+	/// with <see cref="CaptureRelationSnapshot"/> on the UI thread before the caller starts this
+	/// query, so a concurrent filter change on the live workspace cannot change its answer mid-flight.
+	/// </summary>
+	internal Task<(DependencyRelatedResult Related, DependencyOutsideSelectionResult? Outside)> FindRelatedAsync(
+		TerminalRelationStateSnapshot snapshot,
+		ProjectContextPlan current,
+		string seed,
+		DependencyDirection direction,
+		int depth,
+		GitFilteringMode persistentGitMode,
+		CancellationToken cancellationToken) =>
+		FindRelatedAsync(snapshot, current, RelatedQueryRunner.ResolveSeeds(current, seed), direction, depth,
+			persistentGitMode, cancellationToken);
+
+	internal async Task<(DependencyRelatedResult Related, DependencyOutsideSelectionResult? Outside)> FindRelatedAsync(
+		TerminalRelationStateSnapshot snapshot,
+		ProjectContextPlan current,
+		IReadOnlyList<string> seeds,
+		DependencyDirection direction,
+		int depth,
+		GitFilteringMode persistentGitMode,
+		CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(snapshot);
+		ArgumentNullException.ThrowIfNull(current);
+		// The readable project bounds the configuration the selection may be resolved with.
+		var project = await BuildRelationProjectPlanAsync(snapshot, current, persistentGitMode, cancellationToken)
+			.ConfigureAwait(false);
+		var related = await RelatedQueryRunner.FindAsync(
+				services.DependencyFactsEngine,
+				current,
+				seeds,
+				direction,
+				depth,
+				(project ?? current).IncludedFiles,
+				cancellationToken)
+			.ConfigureAwait(false);
+		if (project is null || !DependencyFactsEngine.CanRelateOutsideSelection(related))
+			return (related, null);
+		var outside = await services.DependencyFactsEngine
+			.FindOutsideSelectionAsync(
+				current.SourceRoot,
+				related,
+				project.IncludedFiles,
+				seeds,
+				direction,
+				depth,
+				cancellationToken: cancellationToken)
+			.ConfigureAwait(false);
+		return (related, outside);
+	}
 
 	private Task<ProjectContextPlan> BuildContextExportPlanAsync(
 		TerminalWorkspaceState state,

@@ -71,6 +71,7 @@ devprojex
 ├── analyze
 ├── search
 ├── related
+├── diff
 ├── tree
 ├── export
 │   ├── context, ctx
@@ -118,11 +119,12 @@ defaulting to 1,800; `off` disables bodies but keeps declaration ranges and matc
 Invalid values fail before startup. The total search response budget remains
 16,000 characters; catalog descriptions and instructions reflect the chosen limit.
 `--tool-set full|reduced` selects a
-startup-fixed catalog: `full` (default) has all eight tools; `reduced` has
-`list_projects`, `get_tree`, `search_project`, `related_files`, `get_file`, and
-`read_pack`, but not `analyze` or `pack_context`. Instructions match the selected
-set; retained search and dependency pages remain readable. Omitted tools return
-the normal unknown-tool error. Secret redaction is mandatory; private-data
+startup-fixed catalog: `reduced` (default) has `get_tree`, `search_project`, `related_files`,
+`get_file`, `get_diff`, and `read_pack`, adds `list_projects` with several local roots or
+`--allow-remote`, and publishes only the parameters agents use; `full` has all nine tools, with
+`analyze` and `pack_context`, and every parameter. Instructions match the selected
+set; retained search and dependency pages remain readable. A tool that is not published returns
+the normal unknown-tool error; a parameter that is not published is still accepted. Secret redaction is mandatory; private-data
 redaction is enabled only by the server startup flag and cannot be controlled by
 tools. Remote Git URL project arguments are disabled by default; `--allow-remote`
 enables RepoCache-backed clone/acquire for MCP project tools without changing
@@ -255,6 +257,7 @@ request-scoped choice rather than a standalone command.
 | Save profile | direct action | `profile save` | `profile save` | none by design |
 | Search | direct action | `grep` | `search` | `search_project` |
 | Related files | none by design | `related` | `related` | `related_files` |
+| Changed lines | none by design | `diff` | `diff` | `get_diff` |
 | Analyze | direct action | `analyze` | `analyze` | `analyze` |
 | Export context | direct action | `export` | `export context` | `pack_context` |
 | Connect MCP client | MCP menu | `mcp connect` | `mcp connect` | none by design |
@@ -498,7 +501,9 @@ explicit CLI collections remain exact and invocation-only.
 
 Selected paths are relative to the project root. A file selects that file; a
 directory selects its effective subtree. Parent/child overlaps are deduplicated.
-An empty selected-path set means the complete effective tree. Absolute paths,
+Without any path selection the complete effective tree is used. An explicit
+`--select-from` source that lists no paths selects nothing, so an empty
+`git diff --name-only` produces an empty result, never the whole project. Absolute paths,
 `..`, and link-based escapes are rejected.
 
 `--select-from FILE` reads strict UTF-8 source-relative paths, with an optional
@@ -706,6 +711,8 @@ devprojex analyze . --max-file-bytes 1m
 
 ## Search
 
+Text output lists matches in documentation files after code.
+
 ```shell
 devprojex search <PATTERN> [PROJECT|URL] [options]
 ```
@@ -718,10 +725,20 @@ enables a timed .NET regular expression; `--symbols` treats the pattern as one o
 more declaration names separated by `|` (each alternative keeps its last word, so
 `class Foo` asks for `Foo`) while retaining the same source evidence and containing-
 declaration lookup, and is the same mode as MCP `search_project` with `symbols: true`.
-A `--symbols` pattern that looks like a regular expression, such as `command\(` or
-`\bcommand\b`, is refused before the project is read with `DPX-CLI-SEARCH-PATTERN`
-(exit code 2) and a hint to pass the name or use `--regex`; the rule is the one MCP
-applies to `symbols: true`.
+A `--symbols` pattern that cannot be read as declaration names, such as `command\(`,
+is searched as text with that regular expression instead, with the same fixed
+`[Symbols]` notice as MCP `search_project` with `symbols: true`. A missing declaration
+name remains an error.
+
+`--symbols` reads a regular expression the same way: when every alternative reduces
+to one plain name after declaration keywords and the separators `\s+`, `\s*`, `\s`,
+`.*`, `.+`, and `\b` are removed, the search runs for those names and prints a note
+naming them. An alternative that starts or ends with `.*` or `.+` once a leading `^`,
+a trailing `$`, and outer `\b` are removed, such as `def\s+test_.*` or `.*Handler$`,
+asks for every name with that prefix or suffix rather than one name, so the whole
+pattern is searched as a text regular expression instead. Other regular expressions
+that cannot be reduced to declaration names use the same fallback. The Terminal
+Workspace `:grep --symbols` does the same.
 Selected binary files are counted as skipped rather than searched and do not make
 a search partial unless nothing else was selected. They are not charged to the inspection
 budget, and a file that does not fit what remains of it is skipped while later files that
@@ -794,12 +811,34 @@ devprojex search TODO https://github.com/owner/repo --max 20 --hide-secrets
 devprojex related <PATH> [--project PROJECT|URL] [options]
 ```
 
-`PATH` is one project-relative seed file inside the effective selection. `--project`
+`PATH` is one project-relative seed file inside the effective selection. A folder
+stands for its directly contained selected files, in ordinal path order, with at
+most 16 seeds. It does not include files in subfolders; an empty or wider folder
+keeps the existing invalid-seed error. The fixed `[Read as]` notice reports the
+expansion. `--project`
 defaults to the current directory and accepts the same local-directory or Git-URL source
 as `analyze`; `--branch` remains URL-only. The seed chooses where the answer starts, while
 the dependency engine indexes the complete effective manifest produced by the selected
 profile, roots, extensions, paths, Git mode, exclusions, and file-size limit. It never
-returns a candidate outside that manifest.
+returns a candidate outside that manifest, except the readable files a narrowed selection names
+by path as described below. The project configuration that owns the selected files,
+such as `pyproject.toml`, `tsconfig.json`, or a `.csproj`, is still read when `--select` or
+`--extension` leaves it out, so a narrowed view resolves its files as the whole project does.
+When `--select`, `--extension`, `--root`, or a momentary `--git-mode` (`staged`, `changes`,
+`diff:...`) narrows the selection, `related` resolves the seed's relations against the files the
+same profile, exclusions, persistent Git mode, and `--max-file-bytes` allow, because a file the
+narrowing left out can decide what a reference means, such as a C# `global using` or a Python
+package's `__init__.py`. The selection only decides where each related file is listed: a selected
+file stays in the seed's own sections, an ambiguous row stays there only when the candidate it
+names is selected, and resolved relations to the other files follow as
+`Dependencies outside the selection` and `Dependents outside the selection` with the same row
+format, at most 20 per section in path order. Candidate lists and outside rows name files outside
+the selection with evidence; their contents are not returned. `[Resolution]` counts edges as the
+command without narrowing does and reports resolved edges that reach only files outside the
+selection as `· outside-selection=N` instead of in `resolved`, at depth 1; `resolved` plus
+`outside-selection` is therefore what the unnarrowed command resolves at that depth. A larger
+`--depth` walks the same relations, but only into selected files. A command that narrows nothing
+prints what it printed before.
 
 Bash seed files record literal script-relative `source` / `.` connections; computed shell paths
 remain explicitly unresolved and commands found through `PATH` are not dependencies. Scala seeds
@@ -824,8 +863,11 @@ Specific options are:
 Text output contains localized `Dependencies` and `Dependents` sections. Each row has a
 portable relative path, aggregated evidence reasons, resolution status, estimated tokens,
 and a cross-scope marker where applicable; ambiguous references stay grouped with their
-candidate paths. JSON is the deterministic `devprojex-related-files` document described in
-[CLI-Output-Contract.md](CLI-Output-Contract.md). The command has no content-transformation
+candidate paths. Reference sites that share the same reason text are one text entry, such
+as `type reference Response at lines 56, 141, 186, 222, 258 (+4 more)`, while JSON keeps
+every site as its own reason. JSON is the deterministic `devprojex-related-files` document
+described in [CLI-Output-Contract.md](CLI-Output-Contract.md). The command has no
+content-transformation
 flags and does not return source content. `-o` follows the `search` rules: the file is
 written atomically outside the source project, an existing file is never replaced
 (`DPX-EXPORT-DESTINATION-EXISTS`, exit code `4`; there is no `--force`), and success
@@ -841,7 +883,8 @@ When a grammar rejects one construction but independent facts survive, text outp
 `[Dependency partial parse]` with the dropped-construction count and bounded line ranges; JSON uses
 `coverage.partialParseDiagnostics`. No fact from a damaged construction is published.
 `[Resolution] resolved=N · ambiguous=N · unresolved=N · external=N` counts evidence for the requested
-seed and direction. JSON exposes the same additive `resolution` object, so an empty related-file list
+seed and direction: the edges the rows are drawn from, plus the references no row can show. A
+reference from a seed to its own file is neither listed nor counted. JSON exposes the same additive `resolution` object, so an empty related-file list
 can still distinguish unresolved evidence from a complete absence of references.
 
 An unsupported seed language is a successful empty result plus
@@ -857,6 +900,76 @@ Examples:
 devprojex related Application/Services/ProjectAnalysisService.cs
 devprojex related src/main.ts --direction dependencies --format json
 devprojex related tests/test_app.py --project . --select src --select tests
+```
+
+## Diff
+
+```shell
+devprojex diff [--project PROJECT|URL] [--git-mode changes|staged|diff:<ref>..<ref>] [options]
+```
+
+`diff` prints the changed lines of the effective selection as a unified diff. Without
+`--git-mode` it compares uncommitted changes: `HEAD` against the working tree, including untracked
+files. `--git-mode staged` compares `HEAD` with the index, and `--git-mode diff:<ref>..<ref>`
+compares two commits. The persistent modes `none`, `gitignore`, and `tracked` select files rather
+than changes, so `diff` refuses them with `DPX-CLI-INVALID-VALUE`. The files are exactly the ones
+the same profile, roots, extensions, `--select`, exclusions, and `--max-file-bytes` select in that
+Git scope; nothing outside them is read or named.
+
+The old version is always read from Git's object store and the new one from the working file, the
+index, or the second commit. These reads never run a repository filter, textconv, or external diff;
+[Git-Safety.md](Git-Safety.md) lists the exact command forms. In `changes` mode a repository with a
+clean or process filter is refused with `DPX-GIT-UNSAFE-FILTER`, because Git's working comparison
+would need that filter. When the selection hides secrets or private data (`--hide-secrets`,
+`--hide-private-data`, or the profile), both versions are redacted before they are compared, in one
+redaction scope, so an unchanged line holding a secret stays unchanged and no original value is
+printed for either side. Lines are compared without their line endings and a leading byte-order
+mark, so a CRLF working copy of an LF commit shows only its real changes.
+
+Specific options are:
+
+```text
+--project <PROJECT|URL>
+--git-mode <changes|staged|diff:<ref>..<ref>>   default: changes
+--context <0..20>                               default: 3
+-f, --format <text|json>                        default: text
+-o, --output <PATH|->                           default: -
+--branch <NAME>                                 URL source only
+--max-file-bytes <SIZE>
+--hide-secrets, --no-hide-secrets
+--hide-private-data, --no-hide-private-data
+<shared path-selection options>
+<shared output options>
+```
+
+Text output is one `--- a/<path>` / `+++ b/<path>` section per changed file, largest change first,
+with standard `@@ -a,b +c,d @@` hunks and `--context` unchanged lines around each change; hunks
+whose context touches merge. An added or deleted file uses `/dev/null` on its missing side, and a
+last line without a newline is followed by `\ No newline at end of file`. Tabs stay tabs; other
+control characters in a line or path are escaped so each output line is one physical line. Files
+listed without hunks follow under a localized `Not shown:` heading as `path [status, reason]`, with
+`binary`, `too-large` (a version is too large), `change-too-large` (the change is too large to
+compare line by line), or `line-endings-only` as the reason. A localized summary line ends the
+output with the changed, shown, added, and removed counts, followed by the count of deleted files
+that are no longer in the working tree and the count of changed files the working tree does not
+have, such as files added on a branch that is not checked out; their paths are not printed, and a
+`diff:<ref>..<ref>` scope adds a line suggesting to check out the range's newer commit. Because the
+selection lists the working tree, `diff:<ref>..<ref>` shows the files present in it. Every line ends with `\n` on
+every platform. JSON is the deterministic `devprojex-diff` document described in
+[CLI-Output-Contract.md](CLI-Output-Contract.md). `-o` follows the `related` rules: the file is
+written atomically outside the source project, an existing file is never replaced, and success
+prints the absolute path of the written file.
+
+A successful comparison exits `0`, including one with no changes. Git state that cannot be read,
+an unknown revision, or a refused filter is reported through the ordinary selection diagnostics
+with exit code `3`.
+
+Examples:
+
+```shell
+devprojex diff
+devprojex diff --git-mode staged --context 1
+devprojex diff --git-mode diff:main..HEAD --format json -o -
 ```
 
 ## Tree
@@ -1296,3 +1409,7 @@ legacy shapes do not receive a speculative replacement. See
 - [CLI-Profiles.md](CLI-Profiles.md): portable profiles and precedence
 - [Desktop-Control.md](Desktop-Control.md): local IPC
 - [TerminalWorkspace.md](TerminalWorkspace.md): interactive TUI
+
+The tree command has no depth parameter and prints the selected tree in full. MCP
+`get_tree` counts `max_depth` from each requested `paths` entry, or from the project
+root when `paths` is omitted.

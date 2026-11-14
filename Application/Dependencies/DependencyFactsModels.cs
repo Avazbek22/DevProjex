@@ -218,6 +218,14 @@ public sealed record DependencyEdge(
 	bool CrossScope)
 {
 	public IReadOnlyList<string> DeclarationFiles { get; init; } = [];
+
+	/// <summary>
+	/// True when the edge only shows that its source loads the target module, directly or through
+	/// re-exports: the imported name is bound there in a way the index does not record as a
+	/// declaration. The relation is real, but it carries no declaration evidence, so importance
+	/// ranking leaves it out of its graph.
+	/// </summary>
+	public bool ModuleOnly { get; init; }
 }
 
 public sealed record DependencyFactsCoverage(
@@ -317,6 +325,57 @@ public sealed record SeedRelatedFiles(
 public sealed record DependencyRelatedResult(
 	DependencyIndexSnapshot Index,
 	IReadOnlyList<SeedRelatedFiles> Seeds);
+
+/// <summary>
+/// Resolved relations between a seed and project files a narrowed selection left out. Each list
+/// holds at most <see cref="DependencyOutsideSelectionResult.MaximumFilesPerSection"/> files in
+/// path order; the counts report how many exist.
+/// </summary>
+public sealed record SeedOutsideSelection(
+	string Seed,
+	IReadOnlyList<RelatedFile> Dependencies,
+	int DependencyCount,
+	IReadOnlyList<RelatedFile> Dependents,
+	int DependentCount);
+
+/// <summary>
+/// The selected-direction edges of a related call's seeds by status. In a narrowed call,
+/// <see cref="OutsideSelection"/> holds the resolved edges that reach only files outside the
+/// selection, and <see cref="Resolved"/> the rest, so together they are what the call would
+/// resolve without narrowing.
+/// </summary>
+public sealed record DependencyResolutionCounts(
+	int Resolved,
+	int Ambiguous,
+	int Unresolved,
+	int External,
+	int OutsideSelection = 0);
+
+/// <summary>
+/// A narrowed call's seeds related against the readable project. The selection only decides
+/// where each related file is listed: <see cref="Selection"/> keeps the selection's index, so
+/// coverage and scope still describe the selection, while its seed sections hold the project's
+/// relations to files the selection shows; <see cref="Seeds"/> holds the relations to files it
+/// left out.
+/// </summary>
+/// <param name="Index">The readable project's index.</param>
+/// <param name="Resolution">The project's edges counted as an unnarrowed call counts them.</param>
+public sealed record DependencyOutsideSelectionResult(
+	DependencyIndexSnapshot Index,
+	DependencyRelatedResult Selection,
+	IReadOnlyList<SeedOutsideSelection> Seeds,
+	DependencyResolutionCounts Resolution)
+{
+	public const int MaximumFilesPerSection = 20;
+
+	/// <summary>
+	/// How many seeds with facts in the selection the readable project's index could not answer
+	/// completely: the project had no facts for the seed, or a fact or resolution-work limit dropped
+	/// facts that the selection's answer for the seed relies on. Those seeds keep the selection's own
+	/// answer, so no file outside the selection is listed for them.
+	/// </summary>
+	public int SelectionAnsweredSeeds { get; init; }
+}
 
 public sealed class DependencyTraversalLimitException(int maximumSeeds) : Exception(
 	$"The related traversal reached more than {maximumSeeds} files. Reduce the depth or narrow the effective selection.")

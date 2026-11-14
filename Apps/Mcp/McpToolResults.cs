@@ -10,10 +10,10 @@ internal static class McpToolResults
 	private const string MaxResultSizeKey = "anthropic/maxResultSizeChars";
 	private const string RedactedMetadataMarker = "[redacted]";
 	private static readonly Lazy<IReadOnlyList<ISecretDetector>> MetadataDetectors = new(
-		static () => [new GitleaksSecretDetector(), new PrivateDataDetector()],
+		static () => [McpSecretDetectors.Create(), new PrivateDataDetector()],
 		LazyThreadSafetyMode.ExecutionAndPublication);
 	private static readonly Lazy<IReadOnlyList<ISecretDetector>> SecretMetadataDetectors = new(
-		static () => [new GitleaksSecretDetector()],
+		static () => [McpSecretDetectors.Create()],
 		LazyThreadSafetyMode.ExecutionAndPublication);
 	/// <summary>
 	/// JSON an agent reads rather than HTML embeds: a quote costs two characters instead of six and
@@ -134,6 +134,32 @@ internal static class McpToolResults
 		ArgumentNullException.ThrowIfNull(result);
 		foreach (var block in result.Content.OfType<TextContentBlock>())
 			McpSpotlight.EnsureBalanced(block.Text);
+	}
+
+	/// <summary>
+	/// Every text block the server composes uses LF, on every platform, so a response does not
+	/// depend on <see cref="Environment.NewLine"/> and two agents never pay a different token
+	/// cost for the same call. This runs once at the response boundary, after every tool's own
+	/// builder has produced its text, so no individual builder needs to track line endings itself.
+	/// </summary>
+	public static void NormalizeLineEndings(CallToolResult result)
+	{
+		ArgumentNullException.ThrowIfNull(result);
+		foreach (var block in result.Content.OfType<TextContentBlock>())
+			block.Text = NormalizeLineEndings(block.Text);
+	}
+
+	/// <summary>
+	/// Same normalization as <see cref="NormalizeLineEndings(CallToolResult)"/>, for text a builder
+	/// measures before the response boundary. A token or character estimate the server reports
+	/// about its own reply has to be computed on the text that boundary will actually deliver, so a
+	/// CRLF source upstream of that estimate (a shared document writer, a file read back into a
+	/// pack body) cannot be left for the boundary alone to normalize.
+	/// </summary>
+	internal static string NormalizeLineEndings(string text)
+	{
+		ArgumentNullException.ThrowIfNull(text);
+		return text.Contains('\r') ? text.Replace("\r\n", "\n").Replace('\r', '\n') : text;
 	}
 
 	// Secrets are always masked. Private data is masked only when the caller's effective policy

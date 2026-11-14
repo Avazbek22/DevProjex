@@ -33,6 +33,18 @@ dotnet tool install --global devprojex
 
 ## MCP server for AI agents
 
+To generate or register a connection from the NuGet cache, use
+`dnx devprojex mcp connect /absolute/path/to/project --client claude-code`.
+Add `--print` to print the configuration without changing client settings, or
+`--mode live` to follow the saved window selection. Generated cache-based connections
+use `dnx devprojex`, not a version-specific cached binary. The client needs the
+.NET 10 SDK on `PATH`; `dnx` may restore the package after a cache cleanup.
+A global tool or `--tool-path` installation connects through its stable `devprojex`
+shim instead of the version-specific path inside `.store`, so `dotnet tool update`
+does not leave the client pointing at a dangling path. On Windows the shim is a
+batch file, so the command is `cmd` with arguments `/c`, `call`, the shim path,
+`mcp`, `--root`, the project path.
+
 Claude Code:
 
 ```shell
@@ -74,8 +86,8 @@ command = "dnx"
 args = ["devprojex", "mcp", "--root", "/absolute/path/to/project"]
 ```
 
-Eight read-only tools cover the workflow: `list_projects`, `get_tree`, `analyze`,
-`search_project`, `related_files`, `get_file`, `pack_context`, and `read_pack`.
+Nine read-only tools cover the workflow: `list_projects`, `get_tree`, `analyze`,
+`search_project`, `related_files`, `get_file`, `get_diff`, `pack_context`, and `read_pack`.
 
 - Secret redaction is always on in MCP mode and has no off switch.
 - Access is pinned to the startup root; symlink and junction escapes are rejected.

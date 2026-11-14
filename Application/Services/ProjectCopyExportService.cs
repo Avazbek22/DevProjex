@@ -966,7 +966,7 @@ public sealed class ProjectCopyExportService(
 		var canonicalDestination = ResolveCanonicalPath(normalizedDestination);
 		if (IsPathInsideOrdinal(canonicalDestination, canonicalRoot))
 		{
-			throw UnsafeDestination(
+			throw DestinationResolvesInsideSource(
 				$"The destination resolves to the source project or a path inside it: {normalizedDestination}");
 		}
 		EnsureDestinationIdentityOutsideSource(
@@ -1192,7 +1192,7 @@ public sealed class ProjectCopyExportService(
 					    destinationLocation.CanonicalPath,
 					    boundary.Location.CanonicalPath)))
 			{
-				throw UnsafeDestination(
+				throw DestinationResolvesInsideSource(
 					$"The destination resolves to the source project or a path inside it: {requestedDestination}");
 			}
 
@@ -1220,7 +1220,7 @@ public sealed class ProjectCopyExportService(
 					continue;
 				}
 
-				throw UnsafeDestination(
+				throw DestinationResolvesInsideSource(
 					$"The destination resolves to the source project or a path inside it: {requestedDestination}");
 			}
 		}
@@ -1235,7 +1235,7 @@ public sealed class ProjectCopyExportService(
 			if (protectedBoundaries.Any(boundary =>
 				    currentIdentity == boundary.Identity))
 			{
-				throw UnsafeDestination(
+				throw DestinationResolvesInsideSource(
 					$"The destination resolves to the source project or a path inside it: {requestedDestination}");
 			}
 
@@ -1977,6 +1977,12 @@ public sealed class ProjectCopyExportService(
 
 	private static ProjectCopyExportException UnsafeDestination(string message, Exception? innerException = null) =>
 		new(ProjectCopyExportError.UnsafeDestinationPath, message, innerException);
+
+	private static ProjectCopyExportException DestinationResolvesInsideSource(string message) =>
+		new(ProjectCopyExportError.UnsafeDestinationPath, message)
+		{
+			ResolvesInsideSource = true
+		};
 
 	private static ProjectCopyExportException DestinationUnavailable(string message, Exception? innerException = null) =>
 		new(ProjectCopyExportError.DestinationUnavailable, message, innerException);

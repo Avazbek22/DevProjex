@@ -13,11 +13,20 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 	private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(30);
 	private static int _gitAvailability;
 	private readonly IGitPathComparisonSemanticsResolver _pathComparisonSemanticsResolver;
+	private readonly Func<string, CancellationToken, Task<IReadOnlyList<string>>> _readLineEndingSettings;
 
 	public GitScopePathProvider(IGitPathComparisonSemanticsResolver? pathComparisonSemanticsResolver = null)
+		: this(pathComparisonSemanticsResolver, GitLineEndingSettings.ReadAsync)
+	{
+	}
+
+	internal GitScopePathProvider(
+		IGitPathComparisonSemanticsResolver? pathComparisonSemanticsResolver,
+		Func<string, CancellationToken, Task<IReadOnlyList<string>>> readLineEndingSettings)
 	{
 		_pathComparisonSemanticsResolver = pathComparisonSemanticsResolver ??
 		                                   GitConfigPathComparisonSemanticsResolver.Instance;
+		_readLineEndingSettings = readLineEndingSettings ?? throw new ArgumentNullException(nameof(readLineEndingSettings));
 	}
 
 	public Task<GitScopePathResult> ResolveAsync(
@@ -95,6 +104,7 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 
 		var included = new HashSet<string>(StringComparer.Ordinal);
 		var deleted = new HashSet<string>(StringComparer.Ordinal);
+		var notInWorkingTree = new HashSet<string>(StringComparer.Ordinal);
 		var matchers = new List<GitTrackedPathIndex>(resolvedRepositoryRoots.Count);
 		foreach (var repositoryRoot in resolvedRepositoryRoots)
 		{
@@ -116,6 +126,7 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 
 			included.UnionWith(repositoryResult.IncludedPaths);
 			deleted.UnionWith(repositoryResult.DeletedPaths);
+			notInWorkingTree.UnionWith(repositoryResult.NotInWorkingTreePaths);
 			matchers.Add(repositoryResult.PathMatcher!);
 		}
 
@@ -123,7 +134,11 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 			true,
 			included,
 			deleted.Count,
-			PathMatchers: matchers);
+			PathMatchers: matchers)
+		{
+			DeletedPaths = deleted,
+			NotInWorkingTreePaths = notInWorkingTree
+		};
 	}
 
 	private async Task<RepositoryScopeResult> ResolveRepositoryAsync(
@@ -168,6 +183,8 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 				];
 				break;
 			case GitFilteringMode.Changes:
+				var lineEndingSettings = await _readLineEndingSettings(repositoryRoot, cancellationToken)
+					.ConfigureAwait(false);
 				var outputBudget = new GitScopeOutputBudget(MaximumOutputBytes);
 				var stagedTask = RunAsync(
 					repositoryRoot,
@@ -176,7 +193,7 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 					outputBudget);
 				var unstagedTask = RunAsync(
 					repositoryRoot,
-					GitProcessOperation.ReadWorkingChanges(),
+					GitProcessOperation.ReadWorkingChanges(lineEndingSettings),
 					cancellationToken,
 					outputBudget);
 				var untrackedTask = RunAsync(
@@ -217,6 +234,8 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 		var included = new HashSet<string>(StringComparer.Ordinal);
 		var deleted = new HashSet<string>(StringComparer.Ordinal);
 		var unsupportedDirectories = new HashSet<string>(StringComparer.Ordinal);
+		// Paths the old side of the comparison does not have: added files and copy or rename targets.
+		var absentFromOldSide = new HashSet<string>(StringComparer.Ordinal);
 		for (var index = 0; index < outputs.Count; index++)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
@@ -231,30 +250,35 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 				{
 					return RepositoryScopeResult.Unavailable("Git returned an invalid untracked-file list.");
 				}
+				TryAddUntrackedPaths(output.Values, repositoryRoot, normalizedProjectRoot, absentFromOldSide);
 				continue;
 			}
 
+			// In the changes scope only the staged list compares against HEAD, its old side.
 			if (!TryParseNameStatus(
 				output.Values,
 				repositoryRoot,
 				normalizedProjectRoot,
 				included,
 				deleted,
-				unsupportedDirectories))
+				unsupportedDirectories,
+				mode != GitFilteringMode.Changes || index == 0 ? absentFromOldSide : null))
 			{
 				return RepositoryScopeResult.Unavailable("Git returned an invalid name-status result.");
 			}
 		}
 
-		ReconcileWorkingTreePaths(included, deleted, cancellationToken);
+		var notInWorkingTree = new HashSet<string>(StringComparer.Ordinal);
+		ReconcileWorkingTreePaths(mode, included, deleted, notInWorkingTree, absentFromOldSide, cancellationToken);
 		deleted.UnionWith(unsupportedDirectories);
 		var matcher = new GitTrackedPathIndex(
 			repositoryRoot,
 			included.Select(path => PathUtility.GetPortableRelativePath(repositoryRoot, path)),
 			comparisonSemantics);
 		deleted.RemoveWhere(matcher.Contains);
+		notInWorkingTree.RemoveWhere(matcher.Contains);
 
-		return new RepositoryScopeResult(true, included, deleted, matcher);
+		return new RepositoryScopeResult(true, included, deleted, notInWorkingTree, matcher);
 	}
 
 	internal static IReadOnlyList<string> CreateDiffArguments(bool cached, string? diffRange)
@@ -362,11 +386,22 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 		return path;
 	}
 
+	/// <summary>
+	/// Keeps every listed path the working tree can show. A changed file the working tree lacks is
+	/// deleted only when the working tree is the new side of the comparison; the staged and
+	/// ref-to-ref scopes still have it on their new side, so there it is only absent here. In the
+	/// changes scope a path HEAD never had that the working tree lacks is no change at all, such
+	/// as a file that was staged and then removed.
+	/// </summary>
 	private static void ReconcileWorkingTreePaths(
+		GitFilteringMode mode,
 		HashSet<string> included,
 		HashSet<string> deleted,
+		HashSet<string> notInWorkingTree,
+		IReadOnlySet<string> absentFromOldSide,
 		CancellationToken cancellationToken)
 	{
+		var unchanged = new HashSet<string>(StringComparer.Ordinal);
 		foreach (var path in included.ToArray())
 		{
 			cancellationToken.ThrowIfCancellationRequested();
@@ -374,7 +409,12 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 				continue;
 
 			included.Remove(path);
-			deleted.Add(path);
+			if (mode != GitFilteringMode.Changes)
+				notInWorkingTree.Add(path);
+			else if (absentFromOldSide.Contains(path))
+				unchanged.Add(path);
+			else
+				deleted.Add(path);
 		}
 
 		foreach (var path in deleted.ToArray())
@@ -391,15 +431,18 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 		}
 
 		deleted.ExceptWith(included);
+		deleted.ExceptWith(unchanged);
 	}
 
+	/// <param name="absentFromOldSide">Receives the added paths and copy or rename targets, which the old side lacks.</param>
 	internal static bool TryParseNameStatus(
 		IReadOnlyList<string> values,
 		string repositoryRoot,
 		string projectRoot,
 		ISet<string> included,
 		ISet<string> deleted,
-		ISet<string>? unsupportedDirectories = null)
+		ISet<string>? unsupportedDirectories = null,
+		ISet<string>? absentFromOldSide = null)
 	{
 		ArgumentNullException.ThrowIfNull(values);
 		ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
@@ -422,12 +465,16 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 				var destinationPath = values[index++];
 				if (code == 'R')
 					TryAddProjectPath(repositoryRoot, projectRoot, firstPath, deleted);
-				TryAddProjectPath(
-					repositoryRoot,
-					projectRoot,
-					destinationPath,
-					included,
-					rejectDirectories: true);
+				if (TryAddProjectPath(
+					    repositoryRoot,
+					    projectRoot,
+					    destinationPath,
+					    included,
+					    rejectDirectories: true) &&
+				    absentFromOldSide is not null)
+				{
+					TryAddProjectPath(repositoryRoot, projectRoot, destinationPath, absentFromOldSide);
+				}
 				continue;
 			}
 
@@ -445,6 +492,8 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 				firstPath,
 				included,
 				rejectDirectories: true);
+			if (code == 'A' && added && absentFromOldSide is not null)
+				TryAddProjectPath(repositoryRoot, projectRoot, firstPath, absentFromOldSide);
 			if (code == 'T' && !added && unsupportedDirectories is not null)
 			{
 				TryAddProjectPath(
@@ -654,6 +703,7 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 		bool IsAvailable,
 		IReadOnlySet<string> IncludedPaths,
 		IReadOnlySet<string> DeletedPaths,
+		IReadOnlySet<string> NotInWorkingTreePaths,
 		GitTrackedPathIndex? PathMatcher = null,
 		string? FailureReason = null,
 		string? FailureDiagnosticCode = null,
@@ -665,6 +715,7 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 			string? detail = null) =>
 			new(
 				false,
+				new HashSet<string>(StringComparer.Ordinal),
 				new HashSet<string>(StringComparer.Ordinal),
 				new HashSet<string>(StringComparer.Ordinal),
 				FailureReason: reason,

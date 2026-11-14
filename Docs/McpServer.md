@@ -9,13 +9,19 @@ server starts with `--allow-remote`.
 devprojex mcp --root /absolute/path/to/project
 ```
 
-The default `--tool-set full` publishes all eight tools, with unchanged instructions
-and responses. `--tool-set reduced` publishes exactly `list_projects`, `get_tree`,
-`search_project`, `related_files`, `get_file`, and `read_pack`; it omits `analyze`
-and `pack_context`. The set is fixed at startup, not changed during a session.
-Reduced instructions and catalog guidance do not mention omitted tools. Calling an omitted tool returns
-the normal unknown-tool protocol error (`-32602`) naming that tool. `read_pack`
-continues to read retained search and dependency results in either set.
+The default `--tool-set reduced` publishes the tools and parameters an agent uses in ordinary
+work: `get_tree`, `search_project`, `get_file`, `related_files`, `get_diff` and `read_pack`, and
+also `list_projects` when the server has several local roots or was started with
+`--allow-remote`. `--tool-set full` publishes all nine tools, adding `analyze` and
+`pack_context`, and every parameter of every tool. The set is fixed at startup, not changed
+during a session. Reduced instructions and catalog guidance do not mention a tool or a parameter
+that is not published. Calling a tool that is not published returns the normal unknown-tool
+protocol error (`-32602`) naming that tool. A parameter that the reduced set does not publish is
+still accepted, with the same validation and the same errors. `read_pack` continues to read
+retained search and dependency results in either set.
+
+Every text block the server composes itself uses LF line endings on every platform,
+including Windows, so a response does not depend on the host's newline convention.
 
 `--search-body-chars off|N` fixes the search declaration-body limit at startup:
 `N` is an integer from 1 to 16,000 characters, with a default of 1,800;
@@ -47,10 +53,10 @@ the revision that created them until the originating tool rebuilds them. Explici
 to omitting `profile`; portable and standard profile selections fail with
 `DPX-MCP-INVALID-ARGUMENTS` because live mode has one selection source.
 
-Tree, search, pack, analysis, and dependency results stay inside the checked
-selection. When that focus covers fewer files than the effective filters allow,
-each of those responses adds one trusted line with counts only; it never names a
-file:
+Tree, search, pack, analysis, and diff results stay inside the checked
+selection; `related_files` also names readable files outside it by path. When
+that focus covers fewer files than the effective filters allow, each of those
+responses adds one trusted line with counts only; it never names a file:
 
 ```text
 [Live context] focus: 1 of 9 selectable files; 8 outside the focus were not searched; read any of them by name with get_file.
@@ -58,7 +64,9 @@ file:
 
 The verb follows the tool: `are not listed` for `get_tree`, `were not searched`
 for `search_project`, `were not measured` for `analyze`, `were not packed` for
-`pack_context`, and `were not traced` for `related_files`. With one file outside
+`pack_context`, `were not compared` for `get_diff`, and `were checked only for
+links to the seeds` for `related_files`, which names the related ones by path as
+described under [`related_files`](#related_files). With one file outside
 the focus the line ends `1 outside the focus was not searched; read it by name
 with get_file.` The line is omitted when the focus covers every selectable file
 and when no selection is saved.
@@ -137,6 +145,42 @@ the full tree uses `+all`:
 [Live context] changed since revision 14: -1 folder, +all
 ```
 
+Window filters are a separate access boundary from the checked focus. A change
+reports the difference between readable file sets **before** applying that focus:
+
+```text
+[Live context] changed since revision 2: window filters changed (2 files no longer readable, 5 now readable) · -4 folders, +all
+[Live context] changed since revision 2: window filters changed (2 files no longer readable)
+[Live context] changed since revision 2: window filters changed
+
+Window filters changed since revision 2:
+-extension .md
++extension .ts
++exclusion extension .md
++exclusion dot-files
+-git mode none
++git mode gitignore
+```
+
+Only nonzero counts appear. Counts are omitted when either revision has no complete
+readable-file snapshot: no plan was built, access or Git readiness is incomplete,
+the call applies its own Git scope, tracked-only restriction or exclusions, the monitored root
+changed while the plan was built, or the snapshot
+would exceed 100,000 files. The filter change is still reported. Without a focus
+change there is no ` · ` focus suffix. Unreported changes coalesce against the last
+reported revision, independently for each root.
+
+Filter values appear only inside untrusted data blocks: extensions, selected root
+folders (quoted), explicit unchecked extension/folder exclusions, other exclusions,
+and Git mode. Transformations and checked paths are not window
+access filters. Each value is escaped onto one line; at most ten lines are shown,
+followed by `· N more` when needed. `[Effective filters]` adds
+`Saved window filters apply.` when a saved live profile exists, with its values under `[Window filters]`
+inside an untrusted block. Any filter change resends this report instead of
+`[Unchanged] effective filters, protection.`, even when only an undisplayed value
+changed. A file hidden by the window filters retains its existing
+`DPX-MCP-PATH-NOT-FOUND` refusal.
+
 Revision 1 is the first profile read in a server session. It advances whenever
 the saved frontier, extensions, ignores, Git mode, transformations, or saved
 secret marks change. Revisions are maintained independently for each configured
@@ -214,10 +258,10 @@ Desktop and Terminal remove records whose process
 identity no longer matches or whose heartbeat is older than 15 seconds; a
 healthy server updates every 5 seconds and removes its record on normal exit.
 
-The process measurement on Windows x64 gives 28,058 characters for the
-full `tools/list` result and 17,206 for reduced. These correspond to roughly
-7,015 and 4,302 tokens using the character/4 estimate, not model usage. Process
-budgets are 28,300 and 17,500 characters respectively.
+The process measurement on Windows x64 with one local root gives 13,770 characters
+for the default reduced `tools/list` result and 27,141 for full. These correspond to roughly
+3,443 and 6,785 tokens using the character/4 estimate, not model usage. Process
+budgets are 14,020 and 27,391 characters respectively.
 
 Repeat `--root` to expose more than one project. When no explicit root is given,
 DevProjex uses `DEVPROJEX_ROOT`, then `CLAUDE_PROJECT_DIR`, then the current
@@ -313,7 +357,7 @@ devprojex mcp --root /absolute/path/to/project --allow-agent-exclusions
 ```
 
 With the flag, the selection tools `get_tree`, `analyze`, `pack_context`,
-`search_project`, `related_files`, and `get_file` gain an `exclusions` array.
+`search_project`, `related_files`, `get_file`, and `get_diff` gain an `exclusions` array.
 Its effect depends on the server mode. In live mode it contains additional
 exclusions for that call: window and startup filters remain enforced, and an
 empty array keeps them unchanged. In standard mode, without live-profile
@@ -529,8 +573,7 @@ with recording. The 0.036 ms difference was below the baseline spread.
   ids are random, valid only in the current server process, and removed at exit.
   After a server restart, rerun the tool that created the stored result to create
   a new id: `pack_context` for context packs, `search_project` for saved searches,
-  or `related_files` for saved dependency results. `pack_context` is unavailable
-  in the reduced tool set.
+  or `related_files` for saved dependency results. `pack_context` is published only by `--tool-set full`.
   Stale session directories older than 24 hours are scavenged at startup. A
   stored pack is limited to 200 MiB and all packs in one server session are
   limited to 1 GiB. To place a new pack within the session limit, the server evicts
@@ -570,9 +613,9 @@ Every `DPX-MCP-*` code a tool can return in its `isError: true` result.
 | `DPX-MCP-UNKNOWN-PROJECT` | The supplied `project` value does not match a listed project. |
 | `DPX-MCP-PROJECT-UNAVAILABLE` | The project root is temporarily unreadable; retry advised. |
 | `DPX-MCP-PATH-NOT-FOUND` | The requested path does not exist in the effective selection. |
-| `DPX-MCP-INVALID-ARGUMENTS` | Tool arguments are malformed, ambiguous, or mutually exclusive. |
+| `DPX-MCP-INVALID-ARGUMENTS` | Tool arguments are malformed, ambiguous, or mutually exclusive, or a `git_scope` range names a revision the repository does not have. |
 | `DPX-MCP-INVALID-RANGE` | The requested line or column range is invalid or past end of file. |
-| `DPX-MCP-INVALID-PATTERN` | The search pattern is unsupported (for example a character class) or malformed. |
+| `DPX-MCP-INVALID-PATTERN` | A glob uses unsupported syntax, such as a character class, or a regular expression is malformed. |
 | `DPX-MCP-PAYLOAD-TRUNCATED` | The response would exceed the payload limit and was withheld or truncated. |
 | `DPX-MCP-PACK-EXPIRED` | The stored pack or result id was evicted or has expired; rerun the producing tool. |
 | `DPX-MCP-PACK-TOO-LARGE` | The result exceeds the pack size limit; narrow the request. |
@@ -597,7 +640,7 @@ allowlisted to keep documentation and fixtures readable.
 The tool order is stable. Every tool is annotated read-only and non-destructive
 because none modifies the source project. `pack_context` and `related_files` are
 non-idempotent because either may create a stored result with a new session id. Without `--allow-remote`, every tool is
-closed-world; with it, the six tools that accept `project` Git URLs are annotated
+closed-world; with it, the seven tools that accept `project` Git URLs are annotated
 open-world.
 
 Discovery is conditional rather than a mandatory sequence. Use `list_projects` only
@@ -612,26 +655,64 @@ can ignore it without changing any route or result.
 ### MCP catalog size
 
 Before a client asks anything about a project, it receives the tool schemas and server
-instructions. The measurements below describe data sent to the client on 2026-09-30: the
+instructions. The measurements below describe data sent to the client on 2026-11-12: the
 official C# client, as the connection-payload process test records it. How much model context
 that data uses depends on the client and how it loads tools:
 
 | Payload | Characters |
 |---|---:|
-| `tools/list` C# client wire result, default server | 28,058 |
-| `tools/list` C# client wire result with per-call exclusions | 30,674 |
-| `instructions` | 1,175 |
+| `tools/list` C# client wire result, one local root | 13,770 |
+| `tools/list` C# client wire result, two local roots | 15,590 |
+| `tools/list` C# client wire result, one local root with `--allow-remote` | 16,035 |
+| `tools/list` C# client wire result, one local root with per-call exclusions | 15,885 |
+| `tools/list` C# client wire result, one local root, `--tool-set full` | 27,141 |
+| `instructions`, one local root | 966 |
+| `instructions`, one local root, `--tool-set full` | 1,197 |
 
-Removing the two output schemas reduced the default catalog from 42,370 characters at the
-base revision to 32,516 before the named batch-read selector and discovery hints were added.
-Concise descriptions brought it below 28,000 characters without changing schema types,
-accepted values, bounds, or tool behavior; later additions such as the `search_project`
-`symbols` parameter bring the default catalog to 28,058. `pack_context` is the largest single
-tool at 5,824 characters, including 4,877 characters of input schema. The `exclusions`
-parameter costs a flat 2,616 characters, 436 on each of the six tools that take it. A process
-test holds the default `tools/list` result and the instructions under ceilings with deliberate
-headroom, and pins the exclusion parameter's cost as an exact difference, so a new parameter or
-description has to fit a budget rather than grow one silently.
+The catalog publishes the parameters a caller can use under the server's startup configuration.
+`project` is published, and the descriptions of the tools that take it end with the sentence
+that explains it, only when the server has several local roots or was started with
+`--allow-remote`: with one local root there is nothing to choose. `branch` is published only
+with `--allow-remote`, because it applies to remote Git sources alone. A parameter that is not
+published is still accepted, with the same validation and the same errors, so a caller that
+sends it keeps working. The roots, `--allow-remote` and the tool set are fixed at startup, and so
+is the catalog.
+
+The default reduced set publishes less than the full set, because a client sends the catalog to
+the model with every request. It leaves out `analyze` and `pack_context`, publishes
+`list_projects` only when there is more than one project to choose from, and leaves out the
+filters that recorded agent sessions did not use: `tracked_only`, `git_scope` and
+`max_file_bytes` on `get_tree`; `tracked_only` and `git_scope` on `search_project`;
+`exclude_patterns`, `profile`, `tracked_only`, `git_scope` and `max_file_bytes` on
+`related_files`; `profile` on `get_file`; `profile`, `exclude_patterns`, `tracked_only` and
+`max_file_bytes` on `get_diff`. Each of them is still accepted. A parameter that a tool's own
+response tells the caller to use stays published on that tool: `exclude_patterns` on `get_tree`,
+`max_file_bytes` on `search_project`, `paths` and `include_patterns` on `get_diff`, and
+`start_column` on `get_file` and `read_pack`. `--tool-set full` publishes every tool and every
+parameter of the table below.
+
+Input schemas publish types, accepted values, numeric ranges and defaults. A string length, an
+array size or a regular-expression pattern that the server checks itself is not published: the
+server enforces it as before and rejects a violation with the same error. Three keywords remain.
+`git_scope` keeps the pattern `^diff:`, which keeps its two string forms distinct for a
+validating client. `profile` keeps `minLength` 1 and the scalar `symbol` of `get_file` keeps
+`maxLength` 512, because the schema is the only place that states them: the server reads an
+empty `profile` as an omitted one and does not check the length of a scalar `symbol`.
+
+Removing the two output schemas reduced the default catalog from 42,370 characters at the base
+revision to 32,516, and concise descriptions brought it below 28,000. Later parameters and the
+`get_diff` tool raised it to 32,400 by 2026-11-11. On 2026-11-12 publishing `project` and
+`branch` only where they apply, and leaving lengths, sizes and patterns to the server's own
+checks, brought the one-root full catalog to 27,141, where it stays. The same day the
+reduced set became the default and stopped publishing the unused filters: 13,770
+characters with one local root. In the default set a second local root adds 1,820
+characters by publishing `list_projects`, `project` and its sentence, `--allow-remote` adds
+2,265, and the `exclusions` parameter costs 2,115, 423 on each
+of the 5 tools that take it. In the full set `pack_context` is the largest
+single tool at 4,972 characters, including 4,106 characters of input schema. Process tests hold
+the one-root `tools/list` result of each set and the instructions under ceilings with deliberate
+headroom, pin those three costs as exact differences, and pin the full one-root result by its
+hash, so a new parameter or description has to fit a budget rather than grow one silently.
 
 | Tool | Parameters | Result and limits |
 |---|---|---|
@@ -640,12 +721,30 @@ description has to fit a budget rather than grow one silently.
 | `analyze` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `detail_by_pattern?`, `tracked_only?`, `git_scope?`, `top_files?`, `max_file_bytes?`, `max_tokens?`, `rank?`, `focus?` | File, character, and token metrics plus the requested largest files by tokens. `contentMetrics` separates measured transformed bodies from size-based estimates; `documentMetrics` models `pack_context` with `view=content`, `format=text`, relative file headings, and its Root line. Every ranked file carries `estimated`; an uninspected one also carries `uninspected: true`. The `topFiles` array has a 32,000-character aggregate budget; `topFilesTruncated` and `topFilesRemaining` make any omission explicit. With `max_tokens` the result also carries `admission`: which files that budget would admit, from the same greedy pass `pack_context` uses and without producing content. `rank` and `focus` order that admission and are invalid without `max_tokens`. |
 | `pack_context` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `detail_by_pattern?`, `tracked_only?`, `git_scope?`, `max_tokens?`, `rank?`, `focus?`, `max_file_bytes?`, `view?`, `format?`, `expand_related?` | Exact DevProjex context pipeline. `max_tokens` measures the safe transformed selection, applies the ordinary token admission order, and materializes only admitted content without changing the budget report. `rank: "importance"` opts into importance-aware admission and document order; `focus` seeds graph-hop order within it. `detail_by_pattern` overrides `detail` per file. `expand_related` packs its `seeds` together with their statically resolved neighbours, as described in [`pack_context.expand_related`](#pack_contextexpand_related). `full` adds no transformations; transformations enabled by the active profile still apply. Inline through 50,000 characters; otherwise returns a `pack_id` valid until this server process exits. After restart, call `pack_context` again. |
 | `read_pack` | `pack_id`, `start_line?`, `end_line?`, `start_column?` | Pages a stored result from `pack_context`, `search_project`, or `related_files`. Inclusive, 1-based line range; `start_column` continues within `start_line` using 1-based Unicode characters. At most 1,000 lines or 50,000 characters per call. An `end_line` after EOF is clamped and reported. A manual protection-policy change after storage fails with `DPX-MCP-STORED-PROTECTION-CHANGED` and requires rerunning the producing tool. If the current saved policy cannot be verified, `DPX-MCP-STORED-PROTECTION-UNAVAILABLE` fails closed until the selection becomes readable. A selection-only revision change keeps the stored page readable with its existing revision warning. Call the originating tool again after server restart or quota eviction. |
-| `search_project` | `project?`, `branch?`, `pattern`, `paths?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `symbols?`, `max_results?` | `symbols: true` is the declaration-name mode of CLI `search --symbols`: `pattern` names one or more declarations separated by `|`, and each alternative keeps its last word before any parameter list or type arguments, so `class Foo`, `type Foo|interface Foo` and `def foo(` all ask for their names. A qualified name is matched on its last segment and then narrowed to that declaration. Only declarations with those names match, never their uses; a pattern that names nothing is refused with `DPX-MCP-INVALID-ARGUMENTS`, and so is a pattern that looks like a regular expression (a backslash, `^`, `+`, `.*` or `(?` anywhere, or `*`, `?`, brackets, braces or parentheses where a name stands), with a hint to pass the name or omit `symbols` to search text with a regex. Brackets, braces and parentheses after a name stay a declaration tail, as in `def foo(`, one trailing `?` stays part of a name such as Ruby `valid?`, and `$` stays a name character. Otherwise matches over safe transformed text, grouped by file: the relative path stands on its own line, then each line of the group is written as `line:text` for a match and `line-text` for context. Quoted text keeps its tabs as tabs, so it copies back as code; any other control character, U+2028, or U+2029 is escaped as `\uXXXX` so each result line stays one physical line. Line numbers refer to that returned text after replacements. `search_project` matches file content only and never matches paths; use `get_tree` with `include_patterns` to find files by name. A bounded collector keeps stronger evidence from everything inspected instead of preserving arrival order. The returned match text is capped at 16,000 characters. Overlapping or adjacent context windows are merged and distinct groups use `--`. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200. The trusted `[Search boundary]` line distinguishes a complete result from every partial limit and reports inspected sources, encountered and retained matches, written matches, named declaration files, and continuation guidance. Actual text inserted by redaction never matches. |
-| `related_files` | `project?`, `branch?`, `path`, `direction?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `tracked_only?`, `git_scope?`, `max_file_bytes?` | Statically evidenced dependencies and dependents for one seed or up to 16 seeds. `direction` is `dependencies`, `dependents`, or `both` (default). The trusted `[Resolution]` line counts resolved, ambiguous, unresolved, and external edges for the call. Coverage distinguishes recognized supported languages from unsupported files and reports configuration diagnostics. Evidence protection consumes transformed sources one at a time under a cumulative 64 MiB source budget; sources outside that budget are not opened by this pass and their dynamic fragments become bounded generic reasons. Results larger than 50,000 characters use `read_pack`. |
-| `get_file` | `project?`, `branch?`, `profile?`, either `path` with `start_line?`, `end_line?`, `start_column?`, `symbol?`, or `requests` | Redacted text from one effective file or a batch of up to eight file requests and sixteen file selections. Every returned section starts with its path and returned line interval. A batch item with only `path` reads the whole file; `ranges` or `symbol` narrows it. Ranges are inclusive, each physical file is read and redacted once, overlaps merge, and every original range reports `ok`, `partial`, `not-returned`, or `unavailable` from its own returned coverage. Both forms share the 1,000-line/50,000-character limit. Coordinates refer to returned text after replacements. A non-empty file that cannot pass the 16 MiB mandatory-redaction boundary is withheld; the single form returns `DPX-MCP-PAYLOAD-TRUNCATED` and never returns an empty success, while batch output reports the count-only unavailable status. `profile` applies the same effective selection and transformations as `analyze` and `pack_context`. Markdown-escaped names copied from default `get_tree` are accepted (`\_` and other ASCII punctuation); use `format: "text"` to copy unescaped names. A `start_line` or `end_line` that holds several numbers, or an unknown range-like argument such as `start_range`, is refused with a pointer to the `requests` form; a directory `path` is refused with the `get_tree` call that lists it. |
+| `search_project` | `project?`, `branch?`, `pattern`, `paths?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `symbols?`, `max_results?` | `symbols: true` is the declaration-name mode of CLI `search --symbols`: `pattern` names one or more declarations separated by `|`, and each alternative keeps its last word before any parameter list or type arguments, so `class Foo`, `type Foo|interface Foo` and `def foo(` all ask for their names. A qualified name is matched on its last segment and then narrowed to that declaration. Only declarations with those names match, never their uses; a pattern that names nothing is refused with `DPX-MCP-INVALID-ARGUMENTS`. A regular expression that cannot reduce to plain declaration names runs as the same text search without `symbols`, with the trusted notice `[Symbols] symbols=true takes declaration names; this pattern is a regular expression, so it was searched as text.` Brackets, braces and parentheses after a name stay a declaration tail, as in `def foo(`, one trailing `?` stays part of a name such as Ruby `valid?`, and `$` stays a name character. Otherwise matches over safe transformed text, grouped by file: the relative path stands on its own line, then each line of the group is written as `line:text` for a match and `line-text` for context. Quoted text keeps its tabs as tabs, so it copies back as code; any other control character, U+2028, or U+2029 is escaped as `\uXXXX` so each result line stays one physical line. Line numbers refer to that returned text after replacements. `search_project` matches file content only and never matches paths; use `get_tree` with `include_patterns` to find files by name. A bounded collector keeps stronger evidence from everything inspected instead of preserving arrival order. The returned match text is capped at 16,000 characters. Overlapping or adjacent context windows are merged and distinct groups use `--`. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200. The trusted `[Search boundary]` line distinguishes a complete result from every partial limit and reports inspected sources, encountered and retained matches, written matches, named declaration files, and continuation guidance. Actual text inserted by redaction never matches. |
+| `related_files` | `project?`, `branch?`, `path`, `direction?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `tracked_only?`, `git_scope?`, `max_file_bytes?` | Dependencies and usages of one seed or up to 16 seeds after folder expansion: a folder stands for its directly contained files in the effective selection, in ordinal path order. Who uses each file, what it imports, and which tests import it, from statically evidenced imports and references. `direction` is `dependencies`, `dependents`, or `both` (default). The trusted `[Resolution]` line counts resolved, ambiguous, unresolved, and external edges for the call. Coverage distinguishes recognized supported languages from unsupported files and reports configuration diagnostics. Evidence protection consumes transformed sources one at a time under a cumulative 64 MiB source budget; sources outside that budget are not opened by this pass and their dynamic fragments become bounded generic reasons. Results larger than 50,000 characters use `read_pack`. |
+| `get_diff` | `project?`, `branch?`, `profile?`, `git_scope?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `max_file_bytes?`, `context_lines?` | Masked unified diff hunks for the effective selection of a Git scope: `changes` (default), `staged`, or `diff:<ref>..<ref>`. Each changed file is listed largest change first with its status and added/removed counts; hunks carry `context_lines` (0..20, default 3) unchanged lines and merge when their context touches. Both versions pass the same redaction as file content before they are compared. Binary, oversized, line-ending-only files and changes too large to compare line by line are counted, not shown; deleted files outside the working tree and changed files the working tree lacks are counted by number only. At most 50,000 characters; a file that does not fit whole is listed under `Not shown (size limit)` and the result is `partial`. See [`get_diff`](#get_diff). |
+| `get_file` | `project?`, `branch?`, `profile?`, `path?`, `paths?`, `requests?`, `start_line?`, `end_line?`, `start_column?`, `symbol?` | Redacted text from one effective file or a batch of up to sixteen file requests and sixteen file selections. Every returned section starts with its path and returned line interval. A batch item with only `path` reads the whole file; `ranges` or `symbol` narrows it. A `path` array, or `paths` as a string or array, reads files whole by default. One listed file uses the scalar form, including columns and symbols. With several files, top-level `start_line` and `end_line` apply to each; columns and symbols remain scalar-only. The forms can be combined: `requests` come first, followed by whole-file reads from `path` and `paths` not already requested. Top-level coordinates and `symbol` cannot accompany `requests`. After a whole non-test file's full text or large-file start, when space permits, the data block names up to five of its tests in the effective selection as `Tests for this file: a, b`, found by common naming conventions (`name.test.ext`, `name.spec.ext`, `__tests__/name.*`, `test_name.py`, `name_test.go`, `NameTests.cs`, `NameTest.java`) and by test-file dependents when a dependency index for the project is already cached; range and symbol reads never carry the line. Each returned text section of a Python, TypeScript or JavaScript file also ends with `Imports: ../../helper/conninfo → src/helper/conninfo/index.ts · ./gone → unresolved · external: node:path` for the import statements on its returned lines, resolved the way `related_files` resolves them: project files first, ambiguous imports with their candidates, packages and standard modules summarized after them; an import whose reference or target the protection would change is left out, and only the read file and the modules a Python import reaches are parsed. A single read without `start_line`, `end_line`, `start_column` or `symbol` of a file longer than 300 lines and 20,000 characters returns its start and its structure instead of the whole text: for code, the lines before the first declaration (at most 80 lines and 4,000 characters) and a `Structure:` list of declarations and their members with line ranges; for JSON, the first 40 lines and the top-level keys with their ranges; for Markdown, the first 40 lines and the headings outside fenced code with their sections. A nested entry whose name starts with the name of the entry it sits in and `.`, `::` or `#` shows only the rest, such as `6-204 send (function)` under `5-204 Client (type)`. A structure of more than 40 entries lists only its top level (for Markdown, the headings of the highest level), each entry with the number of its nested entries, such as `1061-1651 Progress (type, 27 members)`, `1-33 Part 1 (2 members)` or `335-337 Lonely (type, 1 member)`; an entry without nested entries keeps its plain form. When that top level holds one or two entries, each is followed by its direct members, counted by their own nested entries the same way. With three or more, the top-level entries that span at least 60 lines are followed by their direct members too, the largest entry first, while the list has room; an entry whose members do not all fit shows those that do and closes with an indented `(+N more)`, and an entry reached after the room has run out keeps only its count. Listing members never removes a top-level entry. The list shows at most 80 entries and 2,500 characters, ends with `(+N more)` when entries are left out, comes from the protected text being returned, and is followed by the `Imports:` and `Tests for this file:` lines as usual; the trusted notice `[Large file]` says how to read more. A single read of such a file that names a range or a symbol returns exactly those lines; from the third such read of the same file version in a session, the lines are followed once by the same `Structure:` list, with the trusted notice that it is listed once per file version, unless the session already received the list from a read without a range. A changed file starts the count again. A file without at least two structure entries is read as ordinary whole text. Batches use the same structure builder, reserve space for later items, and show only structure when a whole file no longer fits; see [Batch `get_file`](#batch-get_file). A missing path that names a module rather than a file (`x.ts` or `x.js` for `x/index.ts`, `x.js` for `x.ts`, `pkg/mod` for `pkg/mod.py` or `pkg/mod/__init__.py`) reads the one readable file it names, under the same selection and access checks, and adds the trusted notice `[Path resolved]`; with no readable candidate or several, the original `DPX-MCP-PATH-NOT-FOUND` error is returned unchanged. Ranges are inclusive, each physical file is read and redacted once, overlaps merge, and every original range reports `ok`, `partial`, `not-returned`, or `unavailable` from its own returned coverage; a whole-file item can instead report `structure`. A `not-returned` range past EOF also names its protected, single-line path, requested lines, and valid lines (or an empty file), for example `1.1 — not-returned — src/hono.ts: requested lines 180-235; valid lines 1-35`. Diagnostic paths are bounded to 256 characters with an ellipsis; this space is reserved before content paging. Budget-only `not-returned` entries state `no room left in this response`, with the file line count for whole-file reads. A valid start with an end past EOF is still clamped; nonpositive or reversed coordinates still reject the request before reading. A scalar read keeps the 1,000-line/50,000-character page limit. The complete batch, including wrappers and notices, has a 50,000-character limit and no line limit. Coordinates refer to returned text after replacements. A non-empty file that cannot pass the 16 MiB mandatory-redaction boundary is withheld; the single form returns `DPX-MCP-PAYLOAD-TRUNCATED` and never returns an empty success, while batch output reports the count-only unavailable status. `profile` applies the same effective selection and transformations as `analyze` and `pack_context`. Markdown-escaped names copied from default `get_tree` are accepted (`\_` and other ASCII punctuation); use `format: "text"` to copy unescaped names. A `start_line` or `end_line` that holds several numbers, or an unknown range-like argument such as `start_range`, is refused with a pointer to the `requests` form; a directory `path` is refused with `DPX-MCP-PATH-NOT-FOUND`, and the message names up to 12 of its readable entries in the effective selection, suggests a file to read when the directory holds one (its `index` file, `__init__.py`, or `mod.rs` first), and keeps the `get_tree` call that lists it. |
+
+`requests` may also arrive as a string holding a JSON array, which some clients send;
+it is parsed and validated exactly like an array.
+
+When `symbols=true` receives a regular expression in which every alternative reduces
+to one plain name after declaration keywords and the separators `\s+`, `\s*`, `\s`,
+`.*`, `.+` and `\b` are removed, such as `interface\s+ToNumberStrategy` or
+`func.*RemoteIP|func.*isTrustedProxy`, the search runs for those names. A trusted
+`[Symbols]` line gives their count, and the names themselves appear inside the
+untrusted block. An alternative that starts or ends with `.*` or `.+` once a
+leading `^`, a trailing `$` and outer `\b` are removed, such as `def\s+test_.*`,
+`.*Handler$` or `^get.+`, asks for every name with that prefix or suffix rather
+than one name, so the whole pattern runs as text search instead. Any other regular expression that cannot
+reduce to names takes the same text-search path. A pattern that supplies no name and is not
+a text-search regular expression keeps the existing declared-name error.
+
+With `symbols=true`, `[Declarations not indexed]` lists up to eight affected paths inside the untrusted block, and the trusted `[Symbols coverage]` line counts files without indexed declarations that text search can still read.
 
 On a server started with `--allow-agent-exclusions`, `get_tree`, `analyze`,
-`pack_context`, `search_project`, `related_files`, and `get_file` additionally accept the
+`pack_context`, `search_project`, `related_files`, `get_file`, and `get_diff` additionally accept the
 `exclusions` array parameter described in the startup section, so a file
 revealed by a per-call value stays readable through the same value.
 
@@ -657,8 +756,8 @@ physical containment check. The entries name literal files or directories, so
 `*`, `?`, `{`, and `[` have no glob meaning in `paths`. The selection is narrowed
 before intersection with patterns, Git scope, and `max_file_bytes`; a missing entry
 adds the count-only `DPX-SELECTION-PATH-MISSING` warning while valid entries continue,
-and an empty intersection remains empty. Regex, glob, and `git_scope` schema lengths use the
-same Unicode scalar-value semantics at runtime.
+and an empty intersection remains empty. Regex, glob, and `git_scope` length limits, which the server enforces and the schema does not
+publish, use the same Unicode scalar-value semantics.
 
 ### `related_files`
 
@@ -666,23 +765,56 @@ same Unicode scalar-value semantics at runtime.
 selects the starting point for the answer; it does not promise that only the seed is
 read. The server first builds the complete effective manifest through the same
 baseline, profile, Git scope, exclusion, glob, and file-size pipeline as the other
-selection tools, without narrowing that manifest to the seed paths. Each seed is then
-resolved with the same path checks and case-correction guidance as `get_file`. A seed
+selection tools, without narrowing that manifest to the seed paths. The project
+configuration that owns the selected files, such as `pyproject.toml`, `tsconfig.json`, or a
+`.csproj`, is read only when `include_patterns` and the active profile also leave it readable;
+a configuration file either one restricts never feeds how references resolve, and a read one is
+never returned as a result. A folder seed expands to the files directly inside it that remain in the effective selection,
+sorted by ordinal path. It does not include nested folders' files. The expanded set may contain
+at most 16 files; an empty folder or an expansion beyond that limit keeps the existing directory
+error unchanged. Successful expansion adds the trusted count-only notice
+`[Read as] N folder(s) were replaced by the M file(s) directly inside them as seeds.`
+Each file seed is then resolved with the same path checks and case-correction guidance as `get_file`. A seed
 outside the effective selection returns the existing `DPX-MCP-PATH-NOT-FOUND` error.
+
+**Files outside a narrowed selection.** `include_patterns`, `git_scope`, and a live focus
+narrow what a call works on, not what the agent may read. A narrowed selection cannot see
+the files it left out: a reference into one of them would read as leading nowhere, and some
+of them decide what a reference inside the selection means, such as a C# `global using`, a
+Python package's `__init__.py`, or a second declaration that makes a name ambiguous. When a
+call narrows, the server therefore also indexes the files a named `get_file` could read
+under the same profile and exclusions, still limited by the call's own `exclude_patterns`,
+`tracked_only`, and `max_file_bytes`. Startup exclusions, smart-ignore, the Git mode,
+private-data policy, saved window filters, and the root jail keep every other file out of
+that index, so a file they hide is never opened, never named, and never changes an answer,
+and a reference to it stays unresolved. The seeds' relations are resolved against that
+index; the selection only decides where each related file is listed. A file the selection
+shows stays in the seed's own `Dependencies` or `Dependents` section. An ambiguous row stays
+there only when the candidate it names is shown and is otherwise only counted; its candidate
+list may name readable files outside the selection. Resolved relations to the other files
+follow the seed's own sections as `Dependencies outside the selection` and
+`Dependents outside the selection` in the same row format, at most 20 per section in path
+order; a longer section's title states `(20 of N)`. Their contents are not returned. A seed
+the readable project has no facts for keeps the selection's own answer. The first narrowed
+call for a project indexes the readable project once; later calls reuse that index like any
+other.
 
 The human-readable payload has `Dependencies` and `Dependents` sections according to
 `direction`. Each line contains a project-relative path, one or more evidence reasons
 separated by ` · `, a `resolved` or `ambiguous` status, an estimated token count, and
 an optional `cross-scope` marker. One ambiguous reference is one row with its bounded
 candidate list; when Bash suffix matching exceeds its 32-path cap, the reason states how many
-matches are shown and how many exist. Self-file edges are omitted. For example:
+matches are shown and how many exist. Self-file edges are omitted. Reference sites that share
+the same reason text form one entry, placed where the first of them stands, with its line
+numbers ascending and at most five listed: `type reference Response at lines 56, 141, 186, 222,
+258 (+4 more)`. A single site keeps the `at line N` form. For example:
 
 ```text
 Dependencies:
 Application/Context/ProjectContextPlan.cs — one visible declaration identity in csharp:Apps/Mcp/DevProjex.Mcp.csproj · type reference ProjectContextPlan at line 18 — resolved — 642 tokens — cross-scope
 Models/Alpha/User.cs — multiple visible declaration identities · type reference User at line 27 — ambiguous — 84 tokens — candidates: Models/Alpha/User.cs, Models/Beta/User.cs
 Dependents:
-Apps/Terminal/Execution/AnalyzeCommandHandler.cs — one visible declaration identity in csharp:Apps/Terminal/DevProjex.Terminal.csproj · type reference ProjectContextPlan at line 44 — resolved — 1830 tokens — cross-scope
+Apps/Terminal/Execution/AnalyzeCommandHandler.cs — one visible declaration identity in csharp:Apps/Terminal/DevProjex.Terminal.csproj · type reference ProjectContextPlan at lines 44, 61, 97 — resolved — 1830 tokens — cross-scope
 ```
 
 Project-derived paths and evidence remain inside the random `untrusted-data` block.
@@ -702,13 +834,29 @@ up to eight `[Dependency partial parse] path=... · dropped=N · lines=...` rows
 syntax was discarded. No partial-parse row is added when the manifest has no discarded syntax,
 and the fixed response and stored-result limits still apply. `[Search scope] files=N` and the ordinary
 `[Effective filters]` trailer follow. `[Resolution] resolved=N · ambiguous=M ·
-unresolved=K · external=E` counts the selected-direction edges considered for the call.
+unresolved=K · external=E` counts the selected-direction edges considered for the call:
+the edges the rows are drawn from, plus the references no row can show. A dependent counts for
+every seed it is listed under, as a declaration part or an ambiguous candidate, and a reference
+from a seed to its own file is neither listed nor counted.
 A seed without facts is a successful empty result with
 its path and any nonstandard explanation inside the untrusted block. One of the six fixed
 dependency-engine status constants is stated instead, once and without a path, in the trusted
 line `[No facts] <constant>.`; file extensions and arbitrary project text never enter that line. A
 call with no resolved edges receives trusted `[No related files] in the effective
 selection.`; when unresolved references exist, that same line reports their count.
+In a narrowed call, `[Resolution]` counts the readable project's edges exactly as the same
+call without narrowing does, except that resolved edges reaching only files outside the
+selection are reported as `· outside-selection=N` instead of in `resolved`; `resolved` plus
+`outside-selection` is therefore what the unnarrowed call resolves at depth 1, and
+`ambiguous`, `unresolved`, and `external` match it. `[Facts coverage]` and `[Search scope]`
+still describe the selection. When files outside the selection are listed, the trusted line
+`[Outside selection] relations=N · listed=K; these files are readable but outside this
+call's selection, so they are named with evidence; their contents are not returned; read
+any of them with get_file.` follows `[Resolution]`, and a call that resolves nothing inside
+its selection while such files are listed reports `[No related files] in the effective
+selection; related files outside it are named with evidence, but their contents are not
+returned.` Both lines carry counts only; the paths stay inside the untrusted block. A call
+that narrows nothing keeps the earlier response byte for byte.
 Calls and static member uses are not edges, so an empty section is not evidence that
 nothing uses a file. Whenever a requested `Dependencies` or `Dependents` section of a
 seed with facts is empty, and on every call without resolved edges, the constant
@@ -726,6 +874,124 @@ a source identity change, or a change to an observed control file invalidates th
 affected snapshot. Changing only `related_files` seeds or `direction` does not;
 those are projections over the same immutable index. This is an optimization,
 not a strict filesystem snapshot mode, and no strict cache switch is offered.
+
+### `get_diff`
+
+`get_diff` answers "what changed" with the changed lines only, where `git_scope` on the other tools
+selects the changed files and returns them whole. It reads exactly the files the same call's
+selection holds: `git_scope` (default `changes`), `paths`, `include_patterns`,
+`exclude_patterns`, the server exclusions, `.gitignore`, smart ignore, and a live focus all apply
+as they do for `get_tree`, and no file outside that selection is read or named.
+`profile`, `tracked_only`, `max_file_bytes`, and, when the server lets agents change exclusions, `exclusions` select files exactly as they do for `get_tree` and `pack_context`.
+
+**Where each version comes from.** For `changes` the old version is the blob in `HEAD` and the new
+version is the working file, read through the same guarded read as `get_file`. For `staged` the old
+version is the blob in `HEAD` and the new one the index entry at stage 0. For `diff:<A>..<B>` both
+come from Git objects: each reference is resolved to a commit first and only that commit id reaches
+Git. A branch without commits has no old version, so every file is added. Versions are read with
+the four object reads listed under LocalRead in [Git process safety](Git-Safety.md): no `git show`,
+`textconv`, clean or smudge filter, external diff, or working-tree comparison is involved, so no
+program the repository configures can run. The `changes` scope itself still needs Git's working
+comparison, so it is refused with `DPX-GIT-UNSAFE-FILTER` in a repository with a clean or process
+filter; `staged` and ref-to-ref diffs remain available there.
+
+**Masking happens before the diff.** Both versions pass the secret and private-data redaction that
+`get_file` applies, under the selected file's path, inside one redaction scope for the whole call.
+One value therefore gets one placeholder in either version: an unchanged line that holds a secret
+compares as unchanged and is shown only as context, and a rotated secret shows two different
+placeholders. A value masked in one version is also masked wherever it still appears unmasked in the
+other, because detection runs per text and a hand-marked value or a context-dependent rule can be
+found in one version and missed in the other. No original value of a masked span reaches either side
+of the output. Content transformations of the active profile, such as compression, are not applied:
+the diff compares the redacted text of each version.
+
+**Line endings.** A committed blob is often LF while the working file is CRLF under
+`core.autocrlf`. Lines are split on `\n` and one trailing `\r` is removed from each, and a leading
+byte-order mark is ignored, so such a file shows only its real changes. A file whose versions differ
+only in line endings or a byte-order mark is listed as `line-endings-only` without hunks. A file Git
+reports as changed whose bytes are otherwise identical on both sides, such as a `chmod` that flips
+the executable bit with no content change, is listed as `content-unchanged` instead. A last line
+without a newline is followed by `\ No newline at end of file`, as in Git.
+
+**Limits.** Text classification follows `get_file`: binary content, an unsupported encoding, a
+symbolic link, a submodule, or an unmerged index entry is listed as `binary`; a version over the
+16 MiB redaction limit, over 50,000 lines, or past the 64 MiB of object content one call reads is
+`too-large`. The line diff is Myers' algorithm over whole lines after the common prefix and suffix
+are removed; a change that would need more than 2,000 added and removed lines of search is reported
+as `change-too-large`, a change too large to compare line by line, rather than approximated, while
+a change that shares no line between the versions, such as an added file, needs no search and is
+always shown.
+
+**Deleted and renamed files.** The selection lists files of the working tree, so only those are
+compared. A file the scope deletes that the working tree no longer has is counted as `deleted=N`
+and never named. A file that still exists but is deleted on the new side, such as one removed with
+`git rm --cached`, is in the selection and is shown with `+++ /dev/null`. A file a `staged` or
+`diff:<A>..<B>` scope adds, changes, or renames to that the working tree does not have, such as a
+file added on a branch that is not checked out, is counted as `not-in-working-tree=N`, never named,
+and never reported as deleted; `diff:<A>..<B>` therefore shows the files present in the working
+tree, and checking out the range's newer commit shows the rest. Both counts apply only the
+selection rules a path alone decides: `paths`, `include_patterns`, `exclude_patterns`, selected
+top-level folders and file types; a rule that needs the file itself cannot exclude it. In the
+`changes` scope a file that was staged and then removed is no change against `HEAD` and is not
+counted. A rename from `staged` or `diff:<A>..<B>` is shown against its source only when the source
+path is itself in the selection; otherwise the destination is an added file and the source counts
+as deleted.
+
+**Response shape.** Every project path, hunk, and reference stays inside the untrusted-data block:
+
+```text
+Root: <project>
+Scope: changes
+
+Changed files (largest first):
+httpx/_config.py +2 -2 [modified]
+logo.png [modified, binary]
+
+--- a/httpx/_config.py
++++ b/httpx/_config.py
+@@ -243,6 +243,6 @@
+...
+```
+
+A rename is listed as `[renamed from <path>]` with `--- a/<source>`; an added or deleted file uses
+`/dev/null` on its missing side. Content lines keep their tabs; any other control character, U+2028,
+or U+2029 is escaped as `\uXXXX`, as in `search_project`. Files are ordered by added plus removed
+lines, then by path in ordinal order. The whole response stays within 50,000 characters: a file
+whose hunks do not fit whole is moved, with its counts, to a `Not shown (size limit):` list at the
+end of the block, and later, smaller files still use the remaining room. Files listed without hunks
+for a reason are not in that list; their reasons are counted in the trusted `[Diff] not shown:`
+line.
+
+The first file considered, largest change first, or the only one requested, gets one exception: if
+it still does not fit whole, as many of its hunks as fit are shown instead, in order, and no hunk is
+ever cut. Its list entry gains `, partial`, for example `huge.py +2400 -0 [modified, partial]`, and
+the hunks left out are listed by range under `Not shown (size limit):` as
+`<path> @@ -a,b +c,d @@`, one per line, to read with `get_file`. Every other file that does not fit
+whole is still listed only once, not split.
+
+The trusted lines after the block hold only counts and fixed words:
+
+```text
+[Diff] scope=changes · files=2 · shown=1 · added=2 · removed=2 · complete
+[Diff] not shown: binary=1 · deleted=2 · not-in-working-tree=1
+[Diff] files changed in this range but absent from the working tree are counted, not shown; check out the range's newer commit to review them.
+[Diff] partial · 1 file(s) not shown to stay within 50,000 characters; narrow paths or include_patterns, or lower context_lines.
+[Diff] partial · 3 hunk(s) of a file that does not fit were not shown; their line ranges are listed, read them with get_file.
+[Diff] no changes in the effective selection for this scope.
+```
+
+`scope` is `changes`, `staged`, or `diff`; the references of a range appear only on the `Scope:`
+line inside the block. `shown` counts files whose hunks are in the response, including one shown
+only in part. The `not shown` line lists only its nonzero fields, in this order; the line about
+files absent from the working tree follows it only for a `diff:<A>..<B>` scope with
+`not-in-working-tree` above zero. The file-count `partial` line appears only when a whole file was
+left out for the character limit; the hunk-count `partial` line appears only when a file was shown
+in part, and either or both can appear. The usual `[Effective filters]` and `[Protection]` (or
+`[Unchanged]`) lines follow.
+
+`get_tree`, `analyze`, and `pack_context` called with `git_scope` add the trusted line
+`[Diff] get_diff with the same git_scope returns only the changed lines.` to every such response.
+`branch` remains valid only for a Git URL; its error on a local project points to `get_diff`.
 
 ### `pack_context.expand_related`
 
@@ -776,6 +1042,32 @@ selection and returns `DPX-MCP-PATH-NOT-FOUND`. Without `expand_related` every
 response is byte-identical to a server without it.
 
 ## Result Contract
+
+Whole-file `get_file` reads also name package entry-point declarations in the data
+block, next to the import and test hints: `Exported by: jsr.json "./bun", package.json "./bun"`.
+Manifests and keys are ordered deterministically; at most eight entries and 1,200
+characters of names are shown, followed by a remaining-entry count. Whole-file batch sections that show complete text or a large-file start use the same rule
+when space permits; structure-only, range, and symbol sections omit it.
+Only readable, unmasked `package.json`, `jsr.json`, and `deno.json` exports are used,
+including conditional targets, fallback arrays, and wildcard subpaths. The same
+manifests appear as dependents in `related_files`, with export-key evidence.
+A compiled target is mapped only when its source is unambiguous. Candidates are the package's
+readable `tsconfig.json` and one level of its `references`, at most 16 links: a link names a JSON
+file or a folder's `tsconfig.json`. Each candidate must itself declare `rootDir` and `outDir`,
+relative to its own folder, without template variables. A relative `extends` chain can contain
+at most four links and no cycle; package and array forms are not inferred. Every configuration
+in that chain must remain readable inside the effective project selection, without protection
+replacements, and must declare neither `outFile` nor `declarationDir`, nor `noEmit` other than
+`false`. Missing, unreadable, outside-root, or protected configurations prove no mapping.
+
+Compilation membership comes only from the candidate's own `files`, `include`, and `exclude`.
+`files` names exact paths; patterns support `*`, `?`, and `**/`, and a folder name selects its
+subtree. A source must satisfy an explicit file/include list and avoid exclusions. A candidate
+with `extends` but neither `files` nor `include` is not inferred; without `extends`, the existing
+root-directory rule applies. An unsupported or ambiguous pattern proves no mapping. Candidate
+mappings are combined, but an output reached from different sources is omitted. Compiled source
+mapping remains limited to `.ts`, `.mts`, and `.cts`, and never maps over an existing output file.
+These publication hints do not add import edges to the ranking graph.
 
 `list_projects` and `analyze` return their JSON object only as spotlighted text
 inside `content`; they deliberately omit `structuredContent` and `outputSchema`.
@@ -978,9 +1270,9 @@ does not return every match it encountered, it also reports
 not a claim about sources that were not inspected. A group cut only in its trailing context
 lines withheld no match, so it receives the cap notice without an additional-match
 line. Trusted counts and constants remain outside the untrusted block; no path enters
-them. The selected uniquely addressable declaration body and its selector share this
-same 16,000-character cap with the match text. Matches are chosen once at the full
-cap, and body placement never removes a shown match or a distinct matching file.
+them. The selected uniquely addressable declaration body, its selector, and the withheld-file
+distribution share this same 16,000-character cap with the match text. Space for the
+distribution is reserved before matches are laid out; body placement never removes a shown match or a distinct matching file. Wrappers and trusted notices remain outside this body cap.
 
 Every search begins its returned data with a short trusted completeness status and
 ends with the detailed trusted counters. A complete search says:
@@ -1010,18 +1302,17 @@ below.` before the data, then uses the same detailed counters at the end and nam
 the exact bound or bounds that applied. When every selected file was searched and
 every match was kept, and only the written response stopped at `max_results` or the
 character cap, the opening line says so instead: `[Search boundary] partial output:
-every selected file was searched; W of R matches are written here and the rest are
-stored for read_pack.` (ending after `written here.` when nothing is stored). The
-closing counters and `limits=` stay the same. It emits exactly one primary next step for
-the limiting condition. With a stored continuation that step is `[Next read] Call
-read_pack with the reported pack_id for the remaining retained matches.` When known
-declarations are the needed continuation it is `[Next read] Read only declarations
-needed for the task; batch known selections in one get_file call.` A response with
-nothing left to read carries no `[Next read]` line: a complete search without listed
-declarations, or one whose only listed declaration is shown whole. Consequently, a
-complete zero-match response is evidence that the whole effective selection was
-searched, while a partial zero-match response is only evidence about its inspected
-sources.
+every selected file was searched; W of R matches are written here; the rest are counted
+per file under "Withheld matches by file".` When no matches are withheld, it ends after
+`written here.` The closing counters and `limits=` stay the same. The `[Search stored]`
+line is the only instruction to call `read_pack`; no `[Next read]` line repeats it. When the
+response lists declarations still to read, that list is the continuation and no
+`[Next read]` line repeats it. Without a stored result or declaration continuation, a partial
+search ends with `[Next read] Narrow pattern, paths, or include_patterns and rerun the search.` A response with nothing
+left to read carries no `[Next read]` line, and a complete search never does.
+Consequently, a complete zero-match response is evidence that the whole effective
+selection was searched, while a partial zero-match response is only evidence about
+its inspected sources.
 
 Unavailable compression is reduced optimization, not unsafe output. The affected
 file remains complete, and `analyze`, `pack_context`, and `get_file` append
@@ -1031,7 +1322,7 @@ contains counts only; structured analysis data remains inside its untrusted repr
 Unsupported languages and files rejected by parse or structural safety checks are
 separate unchanged-file outcomes and do not produce this trailer.
 
-All eight tools omit `outputSchema` and `structuredContent` and return the useful
+All nine tools omit `outputSchema` and `structuredContent` and return the useful
 payload in text blocks under `content`. `list_projects` and `analyze` place their
 JSON object inside the standard spotlighted untrusted-data block; the other tools
 return their existing text or document shape there. This
@@ -1039,7 +1330,7 @@ avoids JSON escaping and unnecessary token overhead for trees, source text,
 search context, dependency facts, and packs. Truncation and continuation metadata is appended as
 trusted plain-text trailers outside every project spotlight block, such as
 `[Tree truncated ...]` and `[Showing lines ...]`.
-For `get_file` and `read_pack`, a requested `end_line` past EOF returns every
+For scalar `get_file` and `read_pack`, a requested `end_line` past EOF returns every
 available line and appends
 `[Showing lines A-N of N; end_line B exceeded the file.]`. A `start_line` past
 EOF remains `DPX-MCP-INVALID-RANGE` with the valid `1-N` interval. A syntactically
@@ -1051,19 +1342,10 @@ When the character cap falls inside one long line, the trailer keeps that line a
 adds the next 1-based Unicode column:
 `[Showing lines A-A of N; continue with start_line=A start_column=C.]`.
 
-`max_depth` counts levels below the project root. Depth 0 returns the root alone,
-depth 1 adds its direct children, and a file inside `src/router` first appears at
-depth 3. `paths` narrows the selection but never re-roots the tree, so the depth a
-subtree needs is still counted from the project root, not from the `paths` entry.
-When an explicit `max_depth` already hides one or more requested `paths` entries —
-a directory entry whose own depth reaches `max_depth`, or a file entry deeper than
-`max_depth` — the response appends a `[Tree depth]` trailer stating how many
-entries are hidden, the shallowest depth among them, and a `max_depth` value that
-shows two levels below the deepest one; the trailer carries only counts, never the
-path itself. When every hidden entry is a file, which has nothing below it, the
-trailer instead says those files are not shown and gives the `max_depth` that shows
-them, as in `[Tree depth] max_depth counts from the project root; 1 requested file(s)
-sit at depth 6 or deeper, so they are not shown. Omit max_depth, or pass 6 to show them.`
+`max_depth` counts levels below each requested `paths` entry; without `paths`, it counts
+from the project root. Depth 0 shows each requested entry alone, depth 1 adds its
+children. Ancestors remain visible. Overlapping requests use the union of their
+depth windows, and a requested file remains visible at depth 0.
 The three narrowing parameters compose in a fixed order and never widen each other:
 `paths` and the pattern arrays intersect to form the selection, and `max_depth`
 then prunes the rendering of that selection. Listing one directory therefore needs
@@ -1247,7 +1529,9 @@ Defaults:
 - `search_project.ignore_case`: `true`
 - `search_project.max_results`: `50`
 - `related_files.direction`: `both`
-- `related_files.path`: one string or an array of at most 16 strings
+- `related_files.path`: one string or an array; folders expand to directly contained selected files, at most 16 seeds total
+- `get_file`: at most 16 file requests and 16 selections; a batch has a 50,000-character total limit without a line limit
+- scalar `get_file` and `read_pack`: at most 1,000 lines or 50,000 characters per page
 
 `include_patterns` and `exclude_patterns` are arrays of project-relative globs
 using `/`. Each array accepts at most 256 non-empty patterns, with at most 512
@@ -1291,6 +1575,27 @@ selection that was already empty are all unchanged.
 
 ### Search hits name the declaration that contains them
 
+Documentation matches (`.md`, `.mdx`, `.rst`, `.txt`, `.adoc`, or files below `docs`/`doc`) follow code under `Matches in documentation files:` and are withheld first when the body budget is exhausted.
+An empty search gets a fixed hint for a path-like pattern, because matching covers content rather than file names.
+
+### Multi-line patterns
+
+Matching is per line unless the pattern can only mean to cross a line break: an
+escaped or literal line break (`\n`, `\r`), a class that covers one (`[\s\S]`,
+`[\S\s]`, `[\w\W]`, `[\W\w]`, `[\d\D]`, `[\D\d]`), or the inline `(?s)` option.
+Such a pattern runs against each file's whole protected text, with `^` and `$`
+still anchoring lines, under the same per-file timeout. Line breaks are matched
+as `\n`, so CRLF files behave like LF files, unless the pattern contains `\r`,
+which keeps the original line breaks. One match covering lines
+A–B is one match: every line from A to B is written as a `line:text` match line,
+context lines surround the range as usual, and limits, counts, the
+`[Search boundary]` line and `read_pack` continuation all count it once. A match
+longer than 20 lines shows its first 20 lines followed by one
+`(+N more matched lines)` line. A match that touches redacted text never counts,
+as in per-line matching. The trusted line
+`[Search] multi-line pattern: a match may span lines and counts once at its first line.`
+marks this mode. `symbols: true` is unaffected.
+
 `search_project` names the declaration each shown hit sits inside. There is no
 parameter for it: a hit without the thing that contains it is what made callers
 guess a line range and read twice. The name heads its hits inside the file's own
@@ -1311,6 +1616,18 @@ Both hits in `src/App.cs` sit in the same declaration, so it is written once. Th
 granularity is the index's, which for C# is the enclosing type rather than the
 enclosing member, so two methods of one type share a header.
 
+A comment directly above a declaration belongs to that declaration. A hit in it is headed by
+the declaration's name and lists the declaration under `Declarations found`, the way a hit
+inside the body does. Directly above means the unbroken run of comment lines that ends on the
+line before the declaration starts, with no blank line in between: `//` lines and `/* ... */`
+blocks, or `#` lines in Python and Ruby. The rule moves a hit only from no declaration, or from
+a declaration that contains the one below the comment, such as a class around its documented
+member. The listed line range stays the declaration's own and does not include the comment.
+For the body shown after the list, a hit in a comment counts only when the declaration's name
+matches the pattern: a search for a member by name shows that member, while a declaration
+whose comment merely carries an example is never chosen for it. Declaration-name search with
+`symbols: true` is unchanged.
+
 Location is therefore spelled once in a response: the path heads its block, each
 line carries its number, and no row repeats the two together. A run of hits inside
 one declaration is headed once, so a response that would have listed fifty rows
@@ -1326,11 +1643,12 @@ only to close a run that a name had opened; a file whose hits never sit in a
 declaration carries no header at all.
 
 A declaration name is text this project wrote, so it stays inside the untrusted
-block with the match lines it describes. Only counts leave it, as one trusted
-line: `[Symbols] annotated=N · files-without-declarations=K.`, which
-distinguishes a hit that sits in no declaration from a file that was never
-parsed, plus a `files-past-the-64-file naming limit=` term when a search touched
-more files than the naming bound allows.
+block with the match lines it describes. Naming adds no trusted line of its own.
+A search that touched more files than the 64-file naming bound reports
+`limits=annotation-files` in its `[Search boundary]` line, names that did not fit the
+character cap report `limits=response-characters` with `declaration files named=0`,
+and with `symbols=true` a file that has no declaration index is reported by
+`[Symbols coverage] declarations-not-indexed=N`.
 
 The names come from bounded navigation extraction over files that actually produced
 hits: one parse per matching file as it passes, never one per hit, and never over
@@ -1355,27 +1673,27 @@ render.
 
 ### A withheld search stays in the session
 
-A search that has to withhold retained matches keeps the rest of those matches, so
-the way forward is to page that result rather than to repeat the same scan. A search
-that returns every retained match stores nothing. Its boundary still says explicitly
+A search that withholds retained matches can keep their windows in a session result.
+A search that displays every retained match stores nothing. Its boundary still says explicitly
 whether all eligible sources and all encountered matches were covered.
 
-When matches are withheld the response carries three things beyond what it carried
-before. Inside the untrusted block, after the matches, the distribution of what was
-withheld, because a path is project text:
+Whenever observed matches are not shown, their distribution is present after the matches inside
+the untrusted block, because paths are project text:
 
 ```text
 Withheld matches by file:
-src/router/match.ts 31
-src/router/parse.ts 12
+31 src/router/match.ts
+12 src/router/parse.ts
 and 4 more file(s)
+19 matches in those files
 ```
 
-Counts, not line numbers. One recorded search withheld 861 matches; their numbers
-would be noise, while the per-file counts tell a caller where to look next for a few
-characters per file. At most 20 files are listed and the rest are summarised as a
-count, and the count leads each line so that a path containing spaces, or ending in
-digits, stays unambiguous to read.
+Counts, not line numbers. At most 20 files are listed, in descending count then
+ordinal path order; the tail counts both the remaining files and their matches. The listed
+counts and the remainder add up to the observed matches not shown. A path too long to fit is
+included in that remainder. The distribution has its own reservation of at most 2,000 characters,
+within the 16,000-character search body, so matches, selectors, and declaration bodies cannot
+use its space.
 
 **A cut listing keeps its breadth.** Whichever bound cuts it, `max_results` or the
 character cap, every matched file gets a hit before any file gets a second. Three
@@ -1397,13 +1715,11 @@ rebuild a plan, does not take the project-operation gate, and does not search ag
 The stored result holds retained match windows, not complete source files. Its
 `matches` count describes those retained windows rather than whole-file content;
 use `get_file` when the complete file or a known declaration is needed. The
-distribution beside it counts what each file withheld, which can be smaller.
-
-Both the distribution and the selector list share the response's character budget
-with the matches, and neither is written unless at least one of its rows fits: a
-heading with nothing under it would report a search that found something and then
-show none of it. A trusted line that points at one of those lists is written only
-when the list was.
+distribution counts all observed matches not displayed and can include matches outside those
+stored windows. Reserving the distribution does not expand or change the stored result. A pack
+therefore does not promise either complete files or every match counted by the distribution.
+The selector list uses the remaining body budget and is omitted when no row fits; the
+distribution remains present with its remainder counts even when no path row fits.
 
 ### What a bounded result retains
 
@@ -1491,7 +1807,11 @@ search response budget. Its declaration is selected once from the full displayed
 match slice and is not reconsidered during placement. Complete overlapping context
 lines from that same declaration are printed in the body rather than twice; matching
 lines, context outside the printed body, and other files remain in their original order.
-Only spare space is used beyond that reclaimed context. When space is insufficient,
+Only spare space is used beyond that reclaimed context. A body longer than the limit is
+not shown as a fragment: only its head is printed, meaning the signature lines up to the
+start of the body (plus the first docstring line in Python), at most 400 characters of
+whole lines; where the signature end cannot be found, the head is the first whole lines
+within the same 400 characters. When space is insufficient,
 the body is cut at a complete line or omitted, never at the expense of a shown match.
 A cut body reports exactly how many
 declaration lines remain, names them as a range, as in `[Declaration body truncated: 60 line(s) remain; read lines 30-89 with get_file.]`, and prints the complete `get_file` arguments needed to read it.
@@ -1528,27 +1848,25 @@ Deterministic process fixtures also cover the last fitting exact-name hit: the p
 placement returned 89 of 101 matching lines and gave the body to `Sample.Configure`;
 the fixed placement returns all 101, keeps `Sample.Needle` selected, and omits its body
 when it cannot fit. A separate 26-file fixture returns 26 files instead of 24, while a
-continuation fixture verifies that every retained matching address is present inline
-or in `read_pack`. Run these checks with:
+continuation fixture pins the stored matching windows, keeps every matching file
+visible, and accounts for each withheld match in its per-file distribution. Run these checks with:
 
 ```powershell
-dotnet test Tests/DevProjex.Tests.Terminal/DevProjex.Tests.Terminal.csproj -c Release -m:1 --filter "FullyQualifiedName~RealProcessPreservesTheExactNameMatchAtTheEndOfTheSearchSlice|FullyQualifiedName~RealProcessKeepsEveryMatchingFileWhenTheBodyWouldNeedItsSpace|FullyQualifiedName~RealProcessPrintsOverlappingDeclarationContextOnlyOnce|FullyQualifiedName~RealProcessBodyPlacementKeepsEveryRetainedMatchInlineOrInTheStoredPack"
+dotnet test Tests/DevProjex.Tests.Terminal/DevProjex.Tests.Terminal.csproj -c Release -m:1 --filter "FullyQualifiedName~RealProcessPreservesTheExactNameMatchAtTheEndOfTheSearchSlice|FullyQualifiedName~RealProcessKeepsEveryMatchingFileWhenTheBodyWouldNeedItsSpace|FullyQualifiedName~RealProcessPrintsOverlappingDeclarationContextOnlyOnce|FullyQualifiedName~RealProcessReservedDistributionKeepsEveryMatchingFileAndTheStoredWindows"
 ```
 
-When declaration reads are the applicable continuation, one trusted constant closes it:
+When declaration reads are the applicable continuation, the list itself is the next
+step: no trusted instruction line follows it. When the only listed declaration's body
+is already shown whole, `[Declaration body] shown=1/1; no other declarations require a
+read.` states that nothing is left to read.
 
-```text
-[Next read] Read only declarations needed for the task; batch known selections in one get_file call.
-```
-
-It is left out when the only listed declaration's body is already shown whole, which
-`[Declaration body] shown=1/1; no other declarations require a read.` states instead.
-
-The list ships on every search that showed a hit, including a search the character
-cap cut, because a cut response is exactly when a caller would otherwise open a whole
-file to find a declaration it was already holding. The `in <Name>` headers are a
+The list uses the remaining body budget, including on a search the character cap
+cut, and is omitted when no row fits. It names declarations already found without
+requiring a whole-file read. The `in <Name>` headers are a
 different thing and keep their rule: they label runs of hits while reading, and a
 capped response drops them so the remaining characters go to matches.
+
+In JavaScript and TypeScript files the structure also lists test blocks. `describe`, `context` and `suite` calls appear as `"title" (describe)`, and `it`, `test` and `specify` calls as `"title" (test)`, including their `.only`, `.skip`, `.each` and similar forms. A block spans its whole statement and nests like a declaration, under the same entry limits. A title longer than 80 characters is cut. Test blocks appear in the structure only: `symbol` and symbol search address declarations, so a block is read by its line range.
 
 ### Reading a declaration by name
 
@@ -1579,45 +1897,101 @@ from one version with response lines from another.
 ### Batch `get_file`
 
 Use `requests` when several source excerpts are already known; use `search_project`
-when their locations are not known. Exactly one of `path` or `requests` is required;
-supplying both or neither returns `DPX-MCP-INVALID-ARGUMENTS` before any file is read.
-The batch contains one to eight records. A path-only record reads the whole file;
+when their locations are not known. At least one of `path`, `paths`, or `requests` is required.
+The batch contains one to sixteen records. A path-only record reads the whole file;
 `{"path":"src/App.cs","ranges":[{"start_line":10,"end_line":30}]}` and
 `{"path":"src/App.cs","symbol":"Example.App.Run"}` narrow it. A call contains at most sixteen
-whole-file, range, or symbol selections in total. Each range is inclusive, starts at line
-one, and requires both `start_line` and `end_line`. Unknown properties, empty ranges,
+whole-file, range, or symbol selections in total. Each explicit range is inclusive, starts at
+line one, and requires both `start_line` and `end_line`. Unknown properties, empty ranges,
 combined `ranges` and `symbol`, and invalid indexed records fail before project access with
 `DPX-MCP-INVALID-ARGUMENTS`.
 
+A `path` array or `paths` reads whole files by default. A single listed file behaves exactly
+as scalar `path`, including `start_column` and `symbol`. With several listed files, top-level
+`start_line` and `end_line` apply to each; the defaults are line 1 and EOF. This adds
+`[Read as] start_line and end_line were applied to each of the N files.`
+A column or symbol with several paths remains invalid.
+
+The forms can be combined. Records from `requests` retain their order and selections, followed
+by whole-file reads from `path` and `paths` that are not already requested, under canonical path
+identity. The limits apply to the combined request. When path forms add files to `requests`,
+the response says `[Read as] path and requests were combined; N file(s) from path are read whole.`
+Top-level `start_line`, `end_line`, `start_column`, and `symbol` cannot accompany `requests`.
+
 The server resolves every requested path through the effective selection, then
 reads, transforms, and redacts each distinct physical file exactly once. Overlapping
-or touching ranges for one file become one content section whose header lists the
-served request/range indices. Every requested range receives one explicit status:
-`ok` when its original interval is wholly inside the returned coverage, `partial`
+explicit ranges for one file become one content section whose header lists the
+served request/range indices. Each explicit range reports `ok` when its original interval is wholly inside the returned coverage, `partial`
 when only part intersects that coverage, `not-returned` when none intersects, or
-`unavailable` when mandatory bounded inspection withheld the file. Status is
+`unavailable` when a path, symbol, or mandatory bounded inspection could not supply it. Status is
 computed separately for every original range after overlap merging; one page status
 is never copied onto all merged inputs. Thus a page ending at line 992 reports
 `ok`, `partial`, and `not-returned` respectively for `1-100`, `50-1500`, and
 `1450-1600`. A section header names only the ranges that section serves, so a range
 that starts after the last line is reported only as `not-returned`. The trusted
 `[Range clamped] requests=...; end_line exceeded the file; returned through line N.`
-trailer names only ranges whose explicit `end_line` passed the end of the file while
-the range still returned lines; a path-only whole-file read never reports clamping.
-In live mode a path that disappeared since discovery
-is an unavailable item rather than a failure for the whole batch. An unknown,
-ambiguous, or unsupported `symbol` is likewise reported only on its item, while
-syntactically invalid request records still reject the call before any read; an
-ambiguous item names its candidates' line ranges for a follow-up `ranges` read. An
-unavailable status contains only a count-safe reason.
-The complete batch, including section headers, is limited to 1,000 lines and 50,000
-characters. A partial section reports the next 1-based `start_line` and, when the
-cut is inside that line, its `start_column`. Because batch `requests` do not accept
-columns, an intra-line cut says `[Batch continuation] Continue with scalar get_file
-using the arguments below; start_column is not supported in requests.` and places a
-valid scalar JSON call with `project`, `branch`, `path`, and coordinates inside the
-untrusted block. Ordinary remaining ranges use a valid `requests` array without
-unsupported fields.
+trailer names only ranges whose explicit `end_line` passed EOF while returning lines;
+a path-only whole-file read never reports clamping.
+
+Whole files are placed in request order, with space reserved for the minimum form of later
+items. A file longer than 300 lines and 20,000 characters with at least two structure entries
+uses the same protected-text builder as a scalar read: its start, `Structure:`, and import,
+test, and export hints when they fit. It reports `structure — large file, N lines`.
+Another whole file that cannot fit returns only its structure, without a start, and reports
+`structure — no room left in this response, N lines`. A file without two structure entries
+is read as ordinary whole text; if it cannot fit, it receives at least 20 lines as `partial`,
+or `not-returned` with the no-room reason. Explicit ranges and symbols are never replaced by
+structure. Structure delivery uses the same session tracking as scalar reads.
+
+All values below stay inside the untrusted block:
+
+```text
+Requests:
+1.1 — ok
+2.1 — structure — large file, 1251 lines
+3.1 — structure — no room left in this response, 240 lines
+
+File: src/Big.cs
+Requests: 2.1
+Status: structure
+Lines: 1-34 of 1251
+<first 34 lines>
+Structure:
+<declarations and line ranges>
+
+File: src/d.cs
+Requests: 3.1
+Status: structure
+Lines: none of 240
+Structure:
+<declarations and line ranges>
+```
+
+Every item has a section or a reason in `Requests`. A path that disappeared since discovery
+is an unavailable item rather than a failure for the whole batch. An unknown, ambiguous, or
+unsupported `symbol` is likewise reported only on its item; an ambiguous item names its
+candidates' line ranges. A range past EOF keeps its path, requested interval, and valid line
+boundary or empty-file reason. Budget-only failures say `no room left in this response`.
+
+The complete batch, including wrappers, headers, and notices, is limited to 50,000 characters;
+the 1,000-line limit applies only to scalar reads and `read_pack`. The trusted summary always
+includes `structure`:
+
+```text
+[Batch read] ok=A · structure=B · partial=C · not-returned=D · unavailable=E.
+```
+
+When structure is returned, the trusted notice is:
+
+```text
+[Batch structure] B file(s) are shown as structure instead of text: a large file keeps its start, and a file that did not fit keeps only its declarations. Read the lines you need with requests ranges; a file that did not fit can also be read whole in another call.
+```
+
+A partial section reports the fact `[Batch partial] requests=IDS; returned through line L of N.`
+The former batched continuation JSON is not emitted. An intra-line cut still says
+`[Batch continuation] Continue with scalar get_file using the arguments below; start_column is not supported in requests.`
+and places a valid scalar JSON call with `project`, `branch`, `path`, and coordinates inside
+the untrusted block.
 
 ### Search, then one batched read
 
@@ -1691,7 +2065,7 @@ does not apply to `get_file`, which addresses one already-effective file. Its
 value is echoed in the effective-filter diagnostics of every tool that accepts
 the parameter.
 
-For the six project tools, `project` accepts `#` plus the 1-based `index` from
+For the seven project tools, `project` accepts `#` plus the 1-based `index` from
 `list_projects`, a unique `name` from `list_projects`, or that entry's absolute `path`. Index
 resolution happens before name and path resolution, and remains usable when protected
 metadata masks either string field. An ambiguous or unknown name returns
@@ -1715,16 +2089,20 @@ already enabled by that profile. A non-Git project rejects the option with an
 actionable error instead of returning an empty result.
 
 `git_scope` accepts only the narrowing values `staged`, `changes`, and
-`diff:<ref>..<ref>` on `get_tree`, `analyze`, `pack_context`, and
-`search_project`, and `related_files`. It intersects the server/profile baseline and therefore cannot
+`diff:<ref>..<ref>` on `get_tree`, `analyze`, `pack_context`,
+`search_project`, `related_files`, and `get_diff`. It intersects the server/profile baseline and therefore cannot
 re-enable paths excluded by `tracked_only` or a tracked profile. Staged selects
 paths changed in the index; changes selects staged, unstaged, and non-ignored
 untracked paths; diff selects paths changed between two Git references. These
 scopes use Git only to select paths: every existing file's content comes from the
-current working tree, never from index or reference blobs. The complete value is
+current working tree, never from index or reference blobs; `get_diff` is the one tool that
+reads those blobs, to show the changed lines. The complete value is
 limited to 4,096 characters.
 Deleted paths are omitted with a `DPX-GIT-STATE-DELETED` warning. A non-Git
-project or unavailable/invalid Git state returns an actionable tool error.
+project or unavailable/invalid Git state returns an actionable tool error. A local
+`diff:<ref>..<ref>` that names a revision the repository does not have returns
+`DPX-MCP-INVALID-ARGUMENTS` saying so, and adds that the repository is a shallow clone when it
+is one; other Git state failures keep `DPX-MCP-PROJECT-UNAVAILABLE`.
 
 Profiles use the existing project profile mechanism. `standard` is the desktop
 set of all eight exclusion toggles with `gitignore`, so it is stricter than the
@@ -1814,6 +2192,37 @@ DevProjex runs through `APPIMAGE_EXTRACT_AND_RUN=1` or
 `--appimage-extract-and-run`, generated registrations carry
 `APPIMAGE_EXTRACT_AND_RUN=1` into the MCP server process.
 
+Package launches are another exception: connections created from an npm package use
+`npx -y devprojex mcp --root <project>`, and connections created from a NuGet package
+cache use `dnx devprojex mcp --root <project>`, with `--live` when requested. This
+also applies to `--print`, Terminal Workspace, and generated JSON/TOML fragments.
+On Windows `npx` and `dnx` are batch files, which MCP clients cannot start without a
+shell, so the command is `cmd` with arguments `/c`, `npx`, `-y`, `devprojex`, `mcp`,
+`--root`, the project path (or `/c`, `dnx`, `devprojex`, ...). A project path that
+contains `%`, `&`, or `^` would be rewritten by `cmd`, so such a connection names the
+installed executable instead. Running `mcp connect` again replaces a bare `npx` or `dnx`
+entry for the same project that an earlier version wrote on Windows.
+The client keeps a package launcher instead of a version-specific cached executable,
+so clearing the package cache does not leave a dead binary path in its configuration.
+Node.js/npm or the .NET 10 SDK respectively must remain available on the client's
+`PATH`; the launcher may restore packages and follows that package manager's version
+resolution. Existing equivalent launcher entries are kept, including their explicit
+version pins.
+
+A global dotnet tool and a `--tool-path` install are a further exception: the
+executable DevProjex resolves at startup sits inside `.store` at the apphost for
+the currently installed version, and `dotnet tool update` replaces that version
+and leaves the old path dangling. When the stable shim next to `.store`
+(`devprojex` on Linux/macOS, `devprojex.cmd` on Windows) exists on disk, the
+connection names that shim instead. On Windows the shim is a batch file, so it is
+started the same way as `npx`/`dnx`: `cmd` with arguments `/c`, `call`, the shim
+path, `mcp`, `--root`, the project path (quoting `call` is required because a
+batch file calling another batch file directly would exit the caller). If the
+shim's path contains `%`, `&`, or `^`, or if the shim is missing from disk (for
+example, an older install without one), the connection falls back to the
+`.store` executable path as before. Standalone artifacts (ZIP, AppImage, the
+Store package) keep their existing executable-path behavior.
+
 The Flatpak channel is an exception to the executable-path rule above: its host
 registrations use `flatpak` with arguments `run`, `io.github.Avazbek22.DevProjex`,
 `mcp`, `--root`, the host project path, and optionally `--live`. For example:
@@ -1862,10 +2271,11 @@ A Claude Code or Codex `devprojex` entry that DevProjex did not write is never
 replaced silently:
 
 - An entry that already starts DevProjex for this project and mode through `npx`,
-  `dnx`, or `flatpak run` is left unchanged and reported as connected. A live entry
-  counts only when its launcher shares this installation's selection: `npx` and
-  `dnx` do not share it with the Store or Flatpak app, and `flatpak run` shares it
-  only with the Flatpak app.
+  `dnx`, a dotnet-tool shim (named directly, or through `cmd /c call` on
+  Windows), or `flatpak run` is left unchanged and reported as connected. A live
+  entry counts only when its launcher shares this installation's selection:
+  `npx`, `dnx`, and the shim do not share it with the Store or Flatpak app, and
+  `flatpak run` shares it only with the Flatpak app.
 - Any other entry is shown next to the replacement command, together with the
   arguments the replacement would drop. That covers a launcher for another project,
   mode, or arguments, and a command DevProjex does not recognize. Desktop and

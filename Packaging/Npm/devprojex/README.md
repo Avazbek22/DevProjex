@@ -25,6 +25,13 @@ npx -y devprojex search Configure . --symbols
 
 ## MCP server for AI agents
 
+To generate or register a connection from this package, use
+`npx -y devprojex mcp connect /absolute/path/to/project --client claude-code`.
+Add `--print` to print the configuration without changing client settings, or
+`--mode live` to follow the saved window selection. Generated connections use
+`npx -y devprojex`, not the temporary binary path in npm's cache. The client needs
+Node.js/npm on `PATH`; npm may restore the package after a cache cleanup.
+
 Claude Code:
 
 ```shell
@@ -66,8 +73,8 @@ command = "npx"
 args = ["-y", "devprojex", "mcp", "--root", "/absolute/path/to/project"]
 ```
 
-Eight read-only tools cover the workflow: `list_projects`, `get_tree`, `analyze`,
-`search_project`, `related_files`, `get_file`, `pack_context`, and `read_pack`.
+Nine read-only tools cover the workflow: `list_projects`, `get_tree`, `analyze`,
+`search_project`, `related_files`, `get_file`, `get_diff`, `pack_context`, and `read_pack`.
 
 - Secret redaction is always on in MCP mode and has no off switch.
 - Access is pinned to the startup root; symlink and junction escapes are rejected.

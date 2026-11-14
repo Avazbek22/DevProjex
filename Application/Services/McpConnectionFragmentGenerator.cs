@@ -112,7 +112,10 @@ public static class McpConnectionFragmentGenerator
 		builder.Append("claude mcp add --scope local devprojex");
 		AppendClaudeEnvironment(builder, GetRequiredServerEnvironment());
 		builder.Append(" -- ");
-		builder.Append(FlatpakEnvironment.Current.ExternalLaunchCommand ?? quoteArgument(executablePath));
+		var launch = McpServerLaunchResolver.Resolve(executablePath, projectRoot);
+		builder.Append(launch.PrefixArguments.Count == 0 ? quoteArgument(launch.Command) : launch.Command);
+		foreach (var argument in launch.PrefixArguments)
+			builder.Append(' ').Append(FlatpakEnvironment.QuoteArgument(argument));
 		builder.Append(" mcp --root ");
 		builder.Append(quoteArgument(projectRoot));
 		if (mode == McpConnectionMode.Live)
@@ -125,10 +128,10 @@ public static class McpConnectionFragmentGenerator
 		string executablePath,
 		string projectRoot)
 	{
-		var arguments = BuildArguments(mode, projectRoot);
+		var arguments = BuildServerArguments(mode, projectRoot, executablePath);
 		var builder = new StringBuilder()
 			.Append("[mcp_servers.devprojex]").AppendLine()
-			.Append("command = ").Append(ToTomlString(ResolveServerExecutable(executablePath))).AppendLine()
+			.Append("command = ").Append(ToTomlString(ResolveServerExecutable(executablePath, projectRoot))).AppendLine()
 			.Append("args = [").Append(string.Join(", ", arguments.Select(ToTomlString))).Append(']');
 		var environment = GetRequiredServerEnvironment();
 		if (environment.Count > 0)
@@ -148,8 +151,8 @@ public static class McpConnectionFragmentGenerator
 		var environment = GetRequiredServerEnvironment();
 		var server = new Dictionary<string, object?>(StringComparer.Ordinal)
 		{
-			["command"] = ResolveServerExecutable(executablePath),
-			["args"] = BuildArguments(mode, projectRoot)
+			["command"] = ResolveServerExecutable(executablePath, projectRoot),
+			["args"] = BuildServerArguments(mode, projectRoot, executablePath)
 		};
 		if (environment.Count > 0)
 			server["env"] = environment;
@@ -175,8 +178,8 @@ public static class McpConnectionFragmentGenerator
 		var server = new Dictionary<string, object?>(StringComparer.Ordinal)
 		{
 			["type"] = "stdio",
-			["command"] = ResolveServerExecutable(executablePath),
-			["args"] = BuildArguments(mode, projectRoot)
+			["command"] = ResolveServerExecutable(executablePath, projectRoot),
+			["args"] = BuildServerArguments(mode, projectRoot, executablePath)
 		};
 		if (environment.Count > 0)
 			server["env"] = environment;
@@ -193,14 +196,19 @@ public static class McpConnectionFragmentGenerator
 		});
 	}
 
-	public static string ResolveServerExecutable(string executablePath) =>
-		FlatpakEnvironment.Current.IsActive ? "flatpak" : executablePath;
+	public static string ResolveServerExecutable(string executablePath, string? projectRoot = null) =>
+		McpServerLaunchResolver.Resolve(executablePath, projectRoot).Command;
 
-	public static string[] BuildServerArguments(McpConnectionMode mode, string projectRoot)
+	public static string[] BuildServerArguments(McpConnectionMode mode, string projectRoot) =>
+		BuildServerArguments(mode, projectRoot, executablePath: null);
+
+	public static string[] BuildServerArguments(McpConnectionMode mode, string projectRoot, string? executablePath)
 	{
 		string[] arguments = mode == McpConnectionMode.Live
 			? ["mcp", "--root", projectRoot, "--live"]
 			: ["mcp", "--root", projectRoot];
+		if (executablePath is not null)
+			return [.. McpServerLaunchResolver.Resolve(executablePath, projectRoot).PrefixArguments, .. arguments];
 		return FlatpakEnvironment.Current.IsActive
 			? ["run", FlatpakEnvironment.Current.AppId!, .. arguments]
 			: arguments;
@@ -218,9 +226,6 @@ public static class McpConnectionFragmentGenerator
 				? new[] { "mcp", "--root", request.ProjectRoot, "--live" }
 				: ["mcp", "--root", request.ProjectRoot]).Select(FlatpakEnvironment.QuoteArgument));
 	}
-
-	private static string[] BuildArguments(McpConnectionMode mode, string projectRoot) =>
-		BuildServerArguments(mode, projectRoot);
 
 	private static void AppendClaudeEnvironment(
 		StringBuilder builder,

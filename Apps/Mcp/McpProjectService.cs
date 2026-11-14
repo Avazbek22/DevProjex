@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using DevProjex.Application.Diagnostics;
+using DevProjex.Application.Diff;
 using DevProjex.Application.Ranking;
 
 namespace DevProjex.Mcp;
@@ -25,12 +26,16 @@ internal sealed class McpProjectService(
 	private const int MaximumCachedInventories = 8;
 	private const int MaximumCachedProjections = 16;
 	private const int MaximumRootMonitors = 8;
+	private const int MaximumDirectoryEntriesNamed = 12;
 	private readonly ConcurrentDictionary<McpInventoryCacheKey, CachedInventoryEntry> inventoryCache = [];
 	private readonly ConcurrentDictionary<McpProjectionCacheKey, CachedProjectionPlan> projectionCache = [];
 	private readonly Dictionary<string, RootChangeMonitor> rootMonitors = new(PathComparer.Default);
 	private readonly ConcurrentDictionary<string, byte> provenIgnoredMonitorSubtrees = new(PathComparer.Default);
 	private readonly object rootMonitorSync = new();
 	private readonly ConditionalWeakTable<ProjectContextPlan, PlanMembership> planMembership = new();
+	// A remote ref-to-ref scope is read through the commit range its fetch resolved, which the plan
+	// itself does not carry.
+	private readonly ConditionalWeakTable<ProjectContextPlan, string> resolvedDiffRanges = new();
 	private readonly CancellationTokenSource disposalCancellation = new();
 	private long cacheGeneration;
 	private long planMembershipBuildCount;
@@ -282,7 +287,9 @@ internal sealed class McpProjectService(
 		liveContext?.RecordPlan(
 			projectRoot,
 			plan,
-			rootRevisionBeforePlan == rootRevisionAfterPlan ? rootRevisionAfterPlan : null);
+			rootRevisionBeforePlan == rootRevisionAfterPlan ? rootRevisionAfterPlan : null,
+			captureReadableBoundary: !trackedOnly && parsedScope is null && exclusions is not { Count: > 0 } &&
+				rootRevisionBeforePlan == rootRevisionAfterPlan);
 		if (allowNamedPathsOutsideSelection && liveContext is not null)
 		{
 			var hiddenFiles = new List<string>();
@@ -312,7 +319,8 @@ internal sealed class McpProjectService(
 			throw new McpToolException(
 				McpErrorCodes.InvalidArguments,
 				$"{McpErrorCodes.InvalidArguments}: project is not a git repository; omit " +
-				$"{constraint} or choose a Git repository returned by list_projects.");
+				$"{constraint}" + (projectSources.LocalRootCount == 1 ? "." :
+					" or choose a Git repository returned by list_projects."));
 		}
 		if (plan.HasErrors)
 		{
@@ -350,9 +358,9 @@ internal sealed class McpProjectService(
 			globs,
 			hasSelectionFilters,
 			cancellationToken);
+		string? resolvedDiffRange = null;
 		if (parsedScope is { } scope)
 		{
-			string? resolvedDiffRange = null;
 			if (scope.Mode == GitFilteringMode.Diff && source.Identity?.SourceType == ProjectSourceType.GitClone)
 			{
 				resolvedDiffRange = await projectSources.ResolveRemoteDiffRangeAsync(
@@ -370,12 +378,25 @@ internal sealed class McpProjectService(
 					scope.DiffRange,
 					selectionFrontier?.ProjectionPaths,
 					cancellationToken,
-					resolvedDiffRange)
+					resolvedDiffRange,
+					hasSelectionFilters
+						? path => MatchesRequested(path, requested.Paths, requested.Directories) &&
+							globs.Includes(ToRelative(projectRoot, path))
+						: null)
 				.ConfigureAwait(false);
 			if (plan.HasErrors)
 			{
 				var diagnostic = plan.Diagnostics.First(static item =>
 					item.Severity == ContextDiagnosticSeverity.Error);
+				if (scope.Mode == GitFilteringMode.Diff &&
+					diagnostic.Code == GitScopeFilter.UnavailableDiagnosticCode &&
+					source.Identity?.SourceType != ProjectSourceType.GitClone &&
+					await services.DiffService
+						.ProbeRangeAsync(projectRoot, scope.DiffRange!, cancellationToken)
+						.ConfigureAwait(false) is not GitRevisionAvailability.Unknown and var availability)
+				{
+					throw MissingRevision(availability);
+				}
 				throw new McpToolException(
 					McpErrorCodes.ProjectUnavailable,
 					$"{McpErrorCodes.ProjectUnavailable}: Git state preparation failed " +
@@ -441,6 +462,8 @@ internal sealed class McpProjectService(
 		if (tolerateMissingPaths)
 			final = AddMissingRequestedPathDiagnostics(final, requested);
 		ValidatePlanContainment(roots, projectRoot, final.IncludedFiles, cancellationToken);
+		if (resolvedDiffRange is not null)
+			resolvedDiffRanges.AddOrUpdate(final, resolvedDiffRange);
 		if (allowProjectionReuse)
 		{
 			var projection = new CachedProjectionPlan(
@@ -453,6 +476,119 @@ internal sealed class McpProjectService(
 			}
 		}
 		return final;
+	}
+
+	/// <summary>
+	/// The files a call may relate its seeds to: exactly what <c>get_file</c> could read under the
+	/// same profile and exclusions, further limited by the call's own <c>exclude_patterns</c>,
+	/// <c>tracked_only</c> and <c>max_file_bytes</c>. Only the narrowing of <c>include_patterns</c>,
+	/// <c>git_scope</c> and the live focus is lifted. Returns null when nothing was lifted.
+	/// </summary>
+	public async Task<ProjectContextPlan?> BuildRelationProjectPlanAsync(
+		ProjectContextPlan selection,
+		string? project,
+		string? branch,
+		IReadOnlyList<string>? includePatterns,
+		IReadOnlyList<string>? excludePatterns,
+		string? profile,
+		bool trackedOnly,
+		string? gitScope,
+		long? maximumFileBytes,
+		IReadOnlyList<ProjectExclusion>? exclusions,
+		CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(selection);
+		if (liveContext is null && includePatterns is not { Count: > 0 } && string.IsNullOrEmpty(gitScope))
+			return null;
+
+		var plan = await BuildPlanAsync(
+			project,
+			branch,
+			paths: null,
+			includePatterns: null,
+			excludePatterns,
+			profile,
+			trackedOnly,
+			gitScope: null,
+			maximumFileBytes,
+			cancellationToken,
+			includeOutputMetrics: false,
+			exclusions).ConfigureAwait(false);
+		if (liveContext is not null)
+			plan = await WidenLiveFocusAsync(plan, excludePatterns, maximumFileBytes, cancellationToken)
+				.ConfigureAwait(false);
+		var selected = selection.IncludedFiles.ToHashSet(PathComparer.Default);
+		return plan.IncludedFiles.Any(path => !selected.Contains(path)) ? plan : null;
+	}
+
+	/// <summary>
+	/// Every file a named <c>get_file</c> could read under this profile and these exclusions,
+	/// without any per-call path, pattern or Git narrowing.
+	/// </summary>
+	public async Task<ProjectContextPlan> BuildReadableProjectPlanAsync(
+		string? project,
+		string? branch,
+		string? profile,
+		IReadOnlyList<ProjectExclusion>? exclusions,
+		CancellationToken cancellationToken)
+	{
+		var plan = await BuildPlanAsync(
+			project,
+			branch,
+			paths: null,
+			includePatterns: null,
+			excludePatterns: null,
+			profile,
+			trackedOnly: false,
+			gitScope: null,
+			maximumFileBytes: null,
+			cancellationToken,
+			includeOutputMetrics: false,
+			exclusions).ConfigureAwait(false);
+		return liveContext is null
+			? plan
+			: await WidenLiveFocusAsync(plan, excludePatterns: null, maximumFileBytes: null, cancellationToken)
+				.ConfigureAwait(false);
+	}
+
+	// Live checked nodes are a focus, not an access boundary: a named get_file may read any file the
+	// effective filters keep, so the same set bounds what related files may name.
+	private async Task<ProjectContextPlan> WidenLiveFocusAsync(
+		ProjectContextPlan plan,
+		IReadOnlyList<string>? excludePatterns,
+		long? maximumFileBytes,
+		CancellationToken cancellationToken)
+	{
+		var globs = McpGlobSet.Create(includePatterns: null, excludePatterns);
+		var effectiveFiles = new List<string>();
+		var pending = new Stack<TreeNodeDescriptor>();
+		pending.Push(plan.EffectiveTree);
+		while (pending.TryPop(out var node))
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (!node.IsDirectory)
+			{
+				var relative = ToRelative(plan.SourceRoot, node.FullPath);
+				if (globs.Includes(relative))
+					effectiveFiles.Add(relative);
+				continue;
+			}
+			for (var index = node.Children.Count - 1; index >= 0; index--)
+				pending.Push(node.Children[index]);
+		}
+		if (effectiveFiles.Count <= plan.IncludedFiles.Count)
+			return plan;
+
+		var widened = await services.Planner
+			.ReprojectSelectionAsync(plan, effectiveFiles, cancellationToken)
+			.ConfigureAwait(false);
+		if (maximumFileBytes is not null)
+			widened = RefreshEffectiveFileSizes(widened, cancellationToken);
+		widened = await ProjectFileSizeFilter
+			.ApplyAsync(services.Planner, widened, maximumFileBytes, cancellationToken)
+			.ConfigureAwait(false);
+		ValidatePlanContainment(roots, plan.SourceRoot, widened.IncludedFiles, cancellationToken);
+		return widened;
 	}
 
 	private async Task<ProjectContextPlan> ExpandNamedPathsOutsideSelectionAsync(
@@ -646,9 +782,13 @@ internal sealed class McpProjectService(
 		ObjectDisposedException.ThrowIf(Volatile.Read(ref disposed) != 0, this);
 		return await BuildUncachedAsync(cancellationToken).ConfigureAwait(false);
 
-		Task<ProjectContextPlan> BuildUncachedAsync(CancellationToken buildCancellationToken) => includeOutputMetrics
-			? services.Planner.BuildAsync(request, buildCancellationToken)
-			: services.Planner.BuildStructureAsync(request, buildCancellationToken);
+		async Task<ProjectContextPlan> BuildUncachedAsync(CancellationToken buildCancellationToken)
+		{
+			using var activity = McpMemoryActivity.Enter();
+			return await (includeOutputMetrics
+				? services.Planner.BuildAsync(request, buildCancellationToken)
+				: services.Planner.BuildStructureAsync(request, buildCancellationToken)).ConfigureAwait(false);
+		}
 	}
 
 	private ProjectContextPlan RefreshEffectiveFileSizes(
@@ -1105,14 +1245,8 @@ internal sealed class McpProjectService(
 		McpProjectRootJail roots,
 		string projectRoot,
 		IReadOnlyList<string> includedFiles,
-		CancellationToken cancellationToken)
-	{
-		foreach (var file in includedFiles)
-		{
-			cancellationToken.ThrowIfCancellationRequested();
-			_ = roots.ResolveExistingPath(projectRoot, file);
-		}
-	}
+		CancellationToken cancellationToken) =>
+		roots.EnsureExistingPathsWithin(projectRoot, includedFiles, cancellationToken);
 
 	internal static void ValidatePlanContainment(
 		McpRootRegistry roots,
@@ -1310,6 +1444,63 @@ internal sealed class McpProjectService(
 	public bool IsDecodedAsSearchText(string path, long sizeBytes, bool probeContent) =>
 		services.OutputPreparer.ClassifyBeforeDecoding(path, sizeBytes, probeContent) is null;
 
+	/// <summary>
+	/// Compares the old and new version of every file in a plan built with a momentary Git scope.
+	/// The working side is read through the same root-jailed content analyzer every file read uses,
+	/// and both sides pass the protection that analyzer's reads pass.
+	/// </summary>
+	public async Task<ProjectDiffResult> CompareVersionsAsync(
+		ProjectContextPlan plan,
+		int contextLines,
+		CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(plan);
+		var mode = plan.Selection.GitMode ?? GitFilteringMode.None;
+		if (!GitScopeSelection.IsMomentary(mode))
+			throw new InvalidOperationException("A diff needs a plan built with a momentary Git scope.");
+		var range = mode == GitFilteringMode.Diff
+			? resolvedDiffRanges.TryGetValue(plan, out var resolved) ? resolved : plan.Selection.GitDiffRange
+			: null;
+		var redaction = CreateTransformationContext(plan).Redaction ??
+						throw new InvalidOperationException("MCP text redaction is unavailable.");
+		try
+		{
+			return await services.DiffService.CompareAsync(
+					new ProjectDiffRequest(
+						plan,
+						mode,
+						range,
+						contextLines,
+						redaction,
+						(path, token) => services.ContentAnalyzer.ReadClassifiedAsync(
+							path,
+							SecretRedactionOutputPreparer.MaximumScannableFileBytes,
+							token)),
+					cancellationToken)
+				.ConfigureAwait(false);
+		}
+		catch (ProjectDiffException exception) when (exception.Failure == GitFileVersionFailure.UnknownRevision)
+		{
+			throw MissingRevision(GitRevisionAvailability.Missing);
+		}
+		catch (ProjectDiffException)
+		{
+			throw new McpToolException(
+				McpErrorCodes.ProjectUnavailable,
+				$"{McpErrorCodes.ProjectUnavailable}: committed or staged file versions could not be read from Git. " +
+				"Verify the repository and retry.");
+		}
+	}
+
+	internal static McpToolException MissingRevision(GitRevisionAvailability availability) =>
+		new(
+			McpErrorCodes.InvalidArguments,
+			$"{McpErrorCodes.InvalidArguments}: git_scope names a revision this repository does not have." +
+			(availability == GitRevisionAvailability.MissingInShallowClone
+				? " This is a shallow clone, so older commits may be missing."
+				: string.Empty) +
+			" Check the refs, or use git_scope \"changes\" or \"staged\".");
+
 	public (string Text, SecretRedactionSnapshot Snapshot) RedactSyntheticText(
 		ProjectContextPlan plan,
 		string identityPath,
@@ -1321,7 +1512,8 @@ internal sealed class McpProjectService(
 		ArgumentNullException.ThrowIfNull(content);
 		var redaction = CreateTransformationContext(plan).Redaction ??
 						throw new InvalidOperationException("MCP text redaction is unavailable.");
-		var scope = redaction.BeginOutput([identityPath], cancellationToken);
+		// Synthetic hints share a file identity, but must not replace that file's scan entry.
+		var scope = redaction.BeginOutput([identityPath], cancellationToken, transformIdentity: "mcp-synthetic-metadata-v1");
 		var result = scope.Redact(identityPath, content, cancellationToken);
 		return (result.Text, scope.Complete());
 	}
@@ -1367,6 +1559,35 @@ internal sealed class McpProjectService(
 	public IFileContentAnalyzer CreatePreparedAnalyzer(PreparedSecretRedactionOutput prepared) =>
 		services.OutputPreparer.CreatePreparedAnalyzer(prepared);
 
+	internal string ResolveFileRequestIdentity(ProjectContextPlan plan, string path)
+	{
+		try
+		{
+			return ResolveExistingInputPath(plan.SourceRoot, path);
+		}
+		catch (McpToolException exception) when (exception.Code == McpErrorCodes.PathNotFound)
+		{
+			var candidate = NormalizeRequestedPathToken(plan.SourceRoot, path);
+			var missingSegments = new Stack<string>();
+			while (Path.GetDirectoryName(candidate) is { } parent)
+			{
+				missingSegments.Push(Path.GetFileName(candidate));
+				try
+				{
+					var resolved = roots.ResolveExistingPath(plan.SourceRoot, parent, requireDirectory: true);
+					foreach (var segment in missingSegments)
+						resolved = Path.Combine(resolved, segment);
+					return Path.TrimEndingDirectorySeparator(PathUtility.Normalize(resolved));
+				}
+				catch (McpToolException parentException) when (parentException.Code == McpErrorCodes.PathNotFound)
+				{
+					candidate = parent;
+				}
+			}
+			throw;
+		}
+	}
+
 	public string ResolveFile(ProjectContextPlan plan, string path)
 	{
 		string physical;
@@ -1389,12 +1610,7 @@ internal sealed class McpProjectService(
 		bool isDirectory)
 	{
 		if (isDirectory)
-		{
-			throw new McpToolException(
-				McpErrorCodes.PathNotFound,
-				$"{McpErrorCodes.PathNotFound}: '{requestedPath}' is a directory; provide a file path returned by " +
-				$"get_tree or search_project, or list it with get_tree {{\"paths\":[{JsonSerializer.Serialize(requestedPath, McpToolResults.CompactJsonOptions)}]}}.");
-		}
+			throw CreateDirectoryRequestedException(plan, requestedPath, physicalPath);
 		if (!Membership(plan).Files.Contains(physicalPath))
 		{
 			var caseMismatch = ResolveCaseMismatch(plan, requestedPath);
@@ -1453,24 +1669,52 @@ internal sealed class McpProjectService(
 				.ConfigureAwait(false);
 	}
 
-	public IReadOnlyList<string> ResolveRequestedFiles(
+	public IReadOnlyList<string> ResolveRequestedFiles(ProjectContextPlan plan, IReadOnlyList<string> paths,
+		CancellationToken cancellationToken) => ResolveRequestedFilesCore(plan, paths, cancellationToken, false).Files;
+
+	public McpSeedResolution ResolveRelationSeeds(ProjectContextPlan plan, IReadOnlyList<string> paths,
+		CancellationToken cancellationToken) => ResolveRequestedFilesCore(plan, paths, cancellationToken, true);
+
+	internal sealed record McpSeedResolution(IReadOnlyList<string> Files, int Folders, int FolderFiles);
+
+	private McpSeedResolution ResolveRequestedFilesCore(
 		ProjectContextPlan plan,
 		IReadOnlyList<string> paths,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		bool expandSeedFolders)
 	{
 		var requested = ResolveRequestedPaths(plan.SourceRoot, paths, cancellationToken);
 		ValidateRequestedPathCasing(plan, requested);
-		var resolved = new string[requested.InputTokens.Count];
+		var resolved = new List<string>();
+		var folders = new HashSet<string>(PathComparer.Default);
+		var folderFiles = new HashSet<string>(PathComparer.Default);
 		for (var index = 0; index < requested.InputTokens.Count; index++)
 		{
 			var token = requested.InputTokens[index];
 			var physical = token.ResolvedPath ?? throw token.ResolutionError ?? new McpToolException(
 				McpErrorCodes.PathNotFound,
 				$"{McpErrorCodes.PathNotFound}: file '{token.Value}' was not found.");
-			ValidateResolvedFile(plan, token.Value, physical, token.IsDirectory);
-			resolved[index] = physical;
+			if (expandSeedFolders && token.IsDirectory)
+			{
+				var direct = DependencySeedFolders.DirectFiles(physical, plan.IncludedFiles);
+				if (direct.Count == 0 || resolved.Concat(direct).Distinct(PathComparer.Default).Count() > 16)
+					throw CreateDirectoryRequestedException(plan, token.Value, physical);
+				resolved.AddRange(direct);
+				folders.Add(physical);
+				folderFiles.UnionWith(direct);
+			}
+			else
+			{
+				ValidateResolvedFile(plan, token.Value, physical, token.IsDirectory);
+				resolved.Add(physical);
+				if (expandSeedFolders && resolved.Distinct(PathComparer.Default).Count() > 16)
+				{
+					var directory = requested.InputTokens.First(static item => item.IsDirectory);
+					throw CreateDirectoryRequestedException(plan, directory.Value, directory.ResolvedPath!);
+				}
+			}
 		}
-		return resolved;
+		return new(expandSeedFolders ? resolved.Distinct(PathComparer.Default).ToArray() : resolved.ToArray(), folders.Count, folderFiles.Count);
 	}
 
 	public bool HasLocalProfile(string projectRoot) =>
@@ -1766,6 +2010,103 @@ internal sealed class McpProjectService(
 			$"from the listed path '{McpTextEscaping.EscapeSingleLine(matches[0])}'; paths are case-sensitive on every platform — " +
 			"retry with the listed spelling.");
 	}
+
+	/// <summary>
+	/// A directory read is usually a guess at the file that holds a folder's code, such as an
+	/// import of "./helper" that resolves to its index file. Naming the readable entries lets the
+	/// next call read that file instead of listing the directory first. Only readable files are
+	/// named, so a file the effective filters hide never appears, not even through its folder.
+	/// </summary>
+	/// <remarks>
+	/// Live checked items are a focus, not an access boundary: a named get_file reads any file the
+	/// window filters keep, while get_tree stays inside the focus. A folder outside the focus is
+	/// therefore listed from the filter ceiling, or the only answer would be a listing that cannot
+	/// show it.
+	/// </remarks>
+	private McpToolException CreateDirectoryRequestedException(
+		ProjectContextPlan plan,
+		string requestedPath,
+		string physicalPath)
+	{
+		var listCall = $"get_tree {{\"paths\":[{JsonSerializer.Serialize(requestedPath, McpToolResults.CompactJsonOptions)}]}}";
+		var prefix = Path.TrimEndingDirectorySeparator(physicalPath) + Path.DirectorySeparatorChar;
+		// File name to the member path, so a suggestion keeps the on-disk spelling get_file accepts.
+		var files = new SortedDictionary<string, string>(StringComparer.Ordinal);
+		var folders = new SortedSet<string>(StringComparer.Ordinal);
+		var readableFiles = liveContext is null
+			? Membership(plan).Files
+			: EnumerateEffectiveTreeFiles(plan.EffectiveTree, prefix);
+		foreach (var file in readableFiles)
+		{
+			if (!file.StartsWith(prefix, PathComparer.Comparison))
+				continue;
+
+			var remainder = file[prefix.Length..];
+			var separator = remainder.IndexOfAny([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]);
+			if (separator < 0)
+				files[remainder] = file;
+			else
+				folders.Add(remainder[..separator] + "/");
+		}
+
+		if (files.Count == 0 && folders.Count == 0)
+		{
+			return new McpToolException(
+				McpErrorCodes.PathNotFound,
+				$"{McpErrorCodes.PathNotFound}: '{requestedPath}' is a directory; provide a file path returned by " +
+				$"get_tree or search_project, or list it with {listCall}.");
+		}
+
+		var entries = files.Keys.Concat(folders).Order(StringComparer.Ordinal).ToArray();
+		var shown = string.Join(", ", entries.Take(MaximumDirectoryEntriesNamed));
+		var more = entries.Length > MaximumDirectoryEntriesNamed
+			? $" (+{(entries.Length - MaximumDirectoryEntriesNamed).ToString(System.Globalization.CultureInfo.InvariantCulture)} more)"
+			: string.Empty;
+		var message = $"{McpErrorCodes.PathNotFound}: '{requestedPath}' is a directory; readable entries: {shown}{more}.";
+		if (files.Count == 0)
+		{
+			return new McpToolException(McpErrorCodes.PathNotFound, $"{message} List it with {listCall}.")
+			{
+				NamesReadableEntries = true
+			};
+		}
+
+		var suggested = files.FirstOrDefault(static entry => IsDirectoryEntryFile(entry.Key), files.First()).Value;
+		var suggestedPath = ToRelative(plan.SourceRoot, suggested);
+		return new McpToolException(
+			McpErrorCodes.PathNotFound,
+			$"{message} Read one with get_file {{\"path\":{JsonSerializer.Serialize(suggestedPath, McpToolResults.CompactJsonOptions)}}}, " +
+			$"or list it with {listCall}.")
+		{
+			NamesReadableEntries = true
+		};
+
+		static IEnumerable<string> EnumerateEffectiveTreeFiles(TreeNodeDescriptor effectiveTree, string directoryPrefix)
+		{
+			var pending = new Stack<TreeNodeDescriptor>();
+			pending.Push(effectiveTree);
+			while (pending.TryPop(out var node))
+			{
+				if (!node.IsDirectory)
+				{
+					if (node.FullPath.StartsWith(directoryPrefix, PathComparer.Comparison))
+						yield return node.FullPath;
+					continue;
+				}
+				var nodePrefix = Path.TrimEndingDirectorySeparator(node.FullPath) + Path.DirectorySeparatorChar;
+				if (!directoryPrefix.StartsWith(nodePrefix, PathComparer.Comparison) &&
+					!nodePrefix.StartsWith(directoryPrefix, PathComparer.Comparison))
+					continue;
+				foreach (var child in node.Children)
+					pending.Push(child);
+			}
+		}
+	}
+
+	// The file a language loads when an import names the directory itself.
+	private static bool IsDirectoryEntryFile(string fileName) =>
+		Path.GetFileNameWithoutExtension(fileName) == "index" ||
+		fileName is "__init__.py" or "mod.rs";
 
 	private PlanMembership Membership(ProjectContextPlan plan) =>
 		planMembership.GetValue(plan, CreatePlanMembership);

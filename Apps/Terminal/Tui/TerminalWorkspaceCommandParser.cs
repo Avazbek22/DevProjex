@@ -28,6 +28,7 @@ internal sealed class TerminalWorkspaceCommandParser
 	private static readonly string[] McpLogTargets = ["session", "last", "export", "clear"];
 	private static readonly string[] McpLogFormats = ["markdown", "json"];
 	private static readonly string[] RelatedOptions = ["--direction", "--depth"];
+	private static readonly string[] DiffScopes = ["changes", "staged", "diff:"];
 	private static readonly string[] RelatedDirections = ["dependencies", "dependents", "both"];
 	private static readonly string[] RelatedDepths = Enumerable.Range(1, 10)
 		.Select(static depth => depth.ToString(CultureInfo.InvariantCulture))
@@ -36,6 +37,8 @@ internal sealed class TerminalWorkspaceCommandParser
 	private const string SymbolsOption = "--symbols";
 	private const string MaximumResultsOption = "--max";
 	private const string MaximumTokensOption = "--max-tokens";
+	private const string DiffContextOption = "--context";
+	private static readonly string[] DiffOptions = [DiffContextOption];
 	private const string RankOption = "--rank";
 	private static readonly string[] GrepOptions = [RegexOption, SymbolsOption, MaximumResultsOption];
 	private static readonly string[] ContextBudgetOptions = [MaximumTokensOption, RankOption];
@@ -91,8 +94,11 @@ internal sealed class TerminalWorkspaceCommandParser
 			[TerminalWorkspaceCommandGrammar.Format] = new(
 				static (definition, tokens, _) => ParseFormat(definition, tokens),
 				CompleteFormat),
+			// Parse() handles this grammar directly so it can see the raw input text;
+			// the entry only keeps the grammar registry complete.
 			[TerminalWorkspaceCommandGrammar.Text] = new(
-				static (definition, tokens, _) => ParseText(definition, tokens),
+				static (_, _, _) => throw new InvalidOperationException(
+					"Free text commands are parsed directly by Parse(), not through this dispatch."),
 				NoCompletions),
 			[TerminalWorkspaceCommandGrammar.Export] = new(
 				static (definition, tokens, _) => ParseExport(definition, tokens),
@@ -115,6 +121,9 @@ internal sealed class TerminalWorkspaceCommandParser
 			[TerminalWorkspaceCommandGrammar.Related] = new(
 				static (definition, tokens, _) => ParseRelated(definition, tokens),
 				CompleteRelated),
+			[TerminalWorkspaceCommandGrammar.Diff] = new(
+				static (definition, tokens, _) => ParseDiff(definition, tokens),
+				CompleteDiff),
 			[TerminalWorkspaceCommandGrammar.Grep] = new(
 				static (definition, tokens, _) => ParseGrep(definition, tokens),
 				CompleteGrep),
@@ -188,6 +197,11 @@ internal sealed class TerminalWorkspaceCommandParser
 				verbToken.Value,
 				[]);
 		}
+
+		// Free text (search/filter) keeps the caller's exact spacing, which the generic
+		// token-join dispatch below cannot express, so it is parsed from the raw input directly.
+		if (definition.Grammar == TerminalWorkspaceCommandGrammar.Text)
+			return ParseText(definition, text ?? string.Empty, tokenization.Tokens);
 
 		return GrammarHandlers[definition.Grammar].Parse(definition, tokenization.Tokens, context);
 	}
@@ -481,14 +495,36 @@ internal sealed class TerminalWorkspaceCommandParser
 			Format: format));
 	}
 
+	// Free text keeps whatever the caller typed between its argument tokens (spaces, tabs,
+	// repeated runs) instead of collapsing it to a single space. Each token's own Value is
+	// already dequoted (doubled quotes resolved, inner edge spaces of a quoted token kept),
+	// so only the raw gaps between tokens need to be copied back in from the original text.
 	private static TerminalWorkspaceCommandParseResult ParseText(
 		TerminalWorkspaceCommandDefinition definition,
-		IReadOnlyList<ParsedToken> tokens) =>
-		TerminalWorkspaceCommandParseResult.Success(new TerminalWorkspaceCommand(
+		string text,
+		IReadOnlyList<ParsedToken> tokens)
+	{
+		if (tokens.Count == 1)
+		{
+			return TerminalWorkspaceCommandParseResult.Success(new TerminalWorkspaceCommand(
+				definition,
+				Text: string.Empty));
+		}
+
+		var builder = new StringBuilder(text.Length);
+		builder.Append(tokens[1].Value);
+		for (var index = 2; index < tokens.Count; index++)
+		{
+			var gapStart = tokens[index - 1].End;
+			var gapLength = tokens[index].Start - gapStart;
+			builder.Append(text, gapStart, gapLength);
+			builder.Append(tokens[index].Value);
+		}
+
+		return TerminalWorkspaceCommandParseResult.Success(new TerminalWorkspaceCommand(
 			definition,
-			Text: tokens.Count == 1
-				? string.Empty
-				: string.Join(' ', tokens.Skip(1).Select(static token => token.Value))));
+			Text: builder.ToString()));
+	}
 
 	private static TerminalWorkspaceCommandParseResult ParseExport(
 		TerminalWorkspaceCommandDefinition definition,
@@ -874,6 +910,53 @@ internal sealed class TerminalWorkspaceCommandParser
 			Depth: depth));
 	}
 
+	// The scope defaults to uncommitted changes and is normalized to its canonical token, so the
+	// session receives only a value the Git scope parser has already accepted.
+	private static TerminalWorkspaceCommandParseResult ParseDiff(
+		TerminalWorkspaceCommandDefinition definition,
+		IReadOnlyList<ParsedToken> tokens)
+	{
+		ParsedToken? scopeToken = null;
+		int? contextLines = null;
+		for (var index = 1; index < tokens.Count; index++)
+		{
+			var token = tokens[index];
+			if (string.Equals(token.Value, DiffContextOption, StringComparison.OrdinalIgnoreCase))
+			{
+				if (contextLines is not null)
+					return Unexpected(token);
+				if (index + 1 >= tokens.Count)
+					return Missing(tokens, []);
+				var value = tokens[++index];
+				if (!int.TryParse(value.Value, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed) ||
+					parsed is < 0 or > DiffQueryRunner.MaximumContextLines)
+				{
+					return InvalidOption(value, "Terminal.Validation.DiffContext");
+				}
+				contextLines = parsed;
+				continue;
+			}
+			if (scopeToken is not null)
+				return Unexpected(token);
+			scopeToken = token;
+		}
+
+		var mode = GitFilteringMode.Changes;
+		string? diffRange = null;
+		if (scopeToken is { } requestedScope)
+		{
+			if (!GitScopeSelection.TryParse(requestedScope.Value, out mode, out diffRange) ||
+				!GitScopeSelection.IsMomentary(mode))
+			{
+				return Unknown(requestedScope, DiffScopes);
+			}
+		}
+		return TerminalWorkspaceCommandParseResult.Success(new TerminalWorkspaceCommand(
+			definition,
+			Text: GitScopeSelection.ToToken(mode, diffRange),
+			ContextLines: contextLines));
+	}
+
 	private static TerminalWorkspaceCommandParseResult ParseGrep(
 		TerminalWorkspaceCommandDefinition definition,
 		IReadOnlyList<ParsedToken> tokens)
@@ -1027,6 +1110,28 @@ internal sealed class TerminalWorkspaceCommandParser
 		return argumentIndex == 0
 			? new CompletionCandidateSource(["all", .. paths], ToggleValues)
 			: new CompletionCandidateSource(paths, ToggleValues);
+	}
+
+	private static CompletionCandidateSource CompleteDiff(
+		int argumentIndex,
+		IReadOnlyList<ParsedToken> tokens,
+		string current,
+		TerminalWorkspaceCommandParseContext context,
+		CancellationToken cancellationToken)
+	{
+		if (argumentIndex < 0)
+			return default;
+		var preceding = PrecedingArguments(tokens, argumentIndex);
+		if (preceding.Count > 0 &&
+			string.Equals(preceding[^1].Value, DiffContextOption, StringComparison.OrdinalIgnoreCase))
+		{
+			return default;
+		}
+		if (preceding.Any(token => string.Equals(token.Value, DiffContextOption, StringComparison.OrdinalIgnoreCase)))
+			return default;
+		return preceding.Count == 0
+			? new CompletionCandidateSource([.. DiffScopes, .. DiffOptions])
+			: new CompletionCandidateSource(DiffOptions);
 	}
 
 	private static CompletionCandidateSource CompleteView(

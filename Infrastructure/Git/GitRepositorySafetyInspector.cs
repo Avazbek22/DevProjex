@@ -41,12 +41,21 @@ internal static class GitRepositorySafetyInspector
 				repositoryPath,
 				GitProcessOperation.ReadConfigValue(GitConfigReadKind.PromisorRemotes),
 				cancellationToken).ConfigureAwait(false);
-			if (!TryInterpretQueryResult(promisorResult, out oldGitPromisor))
+			if (InterpretPromisorResult(promisorResult) is not { } isPromisor)
 				return GitRepositorySafetyInspection.Unavailable;
+			oldGitPromisor = isPromisor;
 		}
 
 		return inspection with { OldGitPromisorRepository = oldGitPromisor };
 	}
+
+	/// <summary>
+	/// Whether the fixed promisor query found a partial clone: a <c>remote.&lt;name&gt;.promisor</c>
+	/// key or <c>extensions.partialClone</c>, which Git honors on its own. Null when the query
+	/// could not be read.
+	/// </summary>
+	internal static bool? InterpretPromisorResult(GitInspectionProcessResult? result) =>
+		TryInterpretQueryResult(result, out var hasMatches) ? hasMatches : null;
 
 	internal static GitRepositorySafetyInspection InterpretUnsafeDriverResult(
 		GitInspectionProcessResult? result)
@@ -141,19 +150,17 @@ internal static class GitRepositorySafetyInspector
 		return result.ExitCode == 1 && string.IsNullOrEmpty(result.Output);
 	}
 
-	private static async Task<GitInspectionProcessResult?> RunAsync(
+	internal static async Task<GitInspectionProcessResult?> RunAsync(
 		string repositoryPath,
 		GitProcessOperation operation,
 		CancellationToken cancellationToken)
 	{
 		using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 		deadline.CancelAfter(operation.Deadline);
-		using var process = new Process
-		{
-			StartInfo = GitProcessStartInfoFactory.Create(repositoryPath, operation)
-		};
+		using var process = new Process();
 		try
 		{
+			process.StartInfo = GitProcessStartInfoFactory.Create(repositoryPath, operation);
 			if (!process.Start())
 				return null;
 			process.StandardInput.Close();

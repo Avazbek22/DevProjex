@@ -592,7 +592,7 @@ Micaはプラットフォームのシステム素材を使用し、背景の透�
 * キャンセルに対応していない操作では、ステータスバーの表示だけが止まり、操作自体はバックグラウンドで完了することがあります。
 
 ## 19) MCPとAIエージェント
-DevProjexには、ローカルの読み取り専用MCPサーバーが含まれています。Claude Code、Codex、Cursor、VS CodeなどのAIエージェントは、このサーバーを通じてプロジェクトを読み取ります。シークレットのマスキングは常に有効で、エージェントがプロジェクトのファイルを変更することはできません。サーバーには8つのツールがあります：`list_projects`、`get_tree`、`analyze`、`search_project`、`related_files`、`get_file`、`pack_context`、`read_pack`。
+DevProjexには、ローカルの読み取り専用MCPサーバーが含まれています。Claude Code、Codex、Cursor、VS CodeなどのAIエージェントは、このサーバーを通じてプロジェクトを読み取ります。シークレットのマスキングは常に有効で、エージェントがプロジェクトのファイルを変更することはできません。サーバーには9つのツールがあります：`list_projects`、`get_tree`、`analyze`、`search_project`、`related_files`、`get_file`、`get_diff`、`pack_context`、`read_pack`。
 
 ### 19.1 クライアントの接続
 「MCP」メニューには次の項目があります。

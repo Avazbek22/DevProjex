@@ -1,0 +1,699 @@
+{
+ "series": "fourteen",
+ "description": "Fourteen tasks on eight repositories, first run on 2026-11-07, keys corrected on 2026-11-08 (judge v3); D1 key v2 preserves v1 for historical sessions.",
+ "autocrlf": true,
+ "repos": {
+  "httpx": {
+   "language": "Python",
+   "url": "https://github.com/encode/httpx.git",
+   "tag": "0.28.1",
+   "commit": "26d48e0634e6ee9cdc0533996db289ce4b430177",
+   "files": 125
+  },
+  "hono": {
+   "language": "TypeScript",
+   "url": "https://github.com/honojs/hono.git",
+   "tag": "v4.13.7",
+   "commit": "eebdf7be39abf0a872671835ccce0c4f03ea497a",
+   "files": 486
+  },
+  "serilog": {
+   "language": "C#",
+   "url": "https://github.com/serilog/serilog.git",
+   "tag": "v4.3.0",
+   "commit": "1b461379f4e218a939d5c94897df2a1dbbf90573",
+   "files": 282
+  },
+  "gin": {
+   "language": "Go",
+   "url": "https://github.com/gin-gonic/gin.git",
+   "tag": "v1.12.0",
+   "commit": "73726dc606796a025971fe451f0aa6f1b9b847f6",
+   "files": 130
+  },
+  "gson": {
+   "language": "Java",
+   "url": "https://github.com/google/gson.git",
+   "tag": "gson-parent-2.14.0",
+   "commit": "3ff35d6269894901ab8006258395aafc4b9765cd",
+   "files": 311
+  },
+  "axum": {
+   "language": "Rust",
+   "url": "https://github.com/tokio-rs/axum.git",
+   "tag": "axum-v0.8.9",
+   "commit": "c59208c86fded335cd85e388030ad59347b0e5ae",
+   "files": 490
+  },
+  "httpx-changes": {
+   "language": "Python",
+   "fixture": {
+    "base": "httpx",
+    "kind": "uncommitted-edits",
+    "description": "A copy of a fresh clone, so every file has a new timestamp and the index is stale, plus two uncommitted edits. Never run git status inside it: that refreshes the index.",
+    "edits": [
+     {
+      "path": "httpx/_config.py",
+      "old": "DEFAULT_TIMEOUT_CONFIG = Timeout(timeout=5.0)",
+      "new": "DEFAULT_TIMEOUT_CONFIG = Timeout(timeout=10.0)"
+     },
+     {
+      "path": "httpx/_config.py",
+      "old": "DEFAULT_MAX_REDIRECTS = 20",
+      "new": "DEFAULT_MAX_REDIRECTS = 10"
+     },
+     {
+      "path": "httpx/_api.py",
+      "old": "    follow_redirects: bool = False,",
+      "new": "    follow_redirects: bool = True,"
+     }
+    ]
+   }
+  },
+  "hono-commit": {
+   "language": "TypeScript",
+   "fixture": {
+    "base": "hono",
+    "kind": "commit",
+    "description": "The pinned clone plus one local commit with a fixed author and date.",
+    "commit": {
+     "message": "Send a text content type with HTTPException responses",
+     "author": "Hono Maintainer",
+     "email": "maintainer@example.com",
+     "date": "2026-11-07T12:00:00+00:00",
+     "expectHead": "890e481fb32b3303a021b386691be77ec211bc3a"
+    },
+    "edits": [
+     {
+      "path": "src/http-exception.ts",
+      "old": "    return new Response(this.message, {\n      status: this.status,\n    })",
+      "new": "    return new Response(this.message, {\n      status: this.status,\n      headers: { 'Content-Type': 'text/plain; charset=UTF-8' },\n    })"
+     },
+     {
+      "path": "src/middleware/body-limit/index.ts",
+      "old": "    (() => {\n      const res = new Response(ERROR_MESSAGE, {\n        status: 413,\n      })\n      throw new HTTPException(413, { res })\n    })",
+      "new": "    (() => {\n      throw new HTTPException(413, { message: ERROR_MESSAGE })\n    })"
+     },
+     {
+      "path": "src/http-exception.test.ts",
+      "old": "    expect(await res.text()).toBe('An exception')\n  })\n})",
+      "new": "    expect(await res.text()).toBe('An exception')\n  })\n\n  it('Should send a text content type when no response is given', async () => {\n    const exception = new HTTPException(401, { message: 'Unauthorized' })\n    const res = exception.getResponse()\n    expect(res.headers.get('Content-Type')).toBe('text/plain; charset=UTF-8')\n  })\n})"
+     }
+    ]
+   }
+  }
+ },
+ "tasks": [
+  {
+   "id": "T1",
+   "repo": "httpx",
+   "kind": "bug localization",
+   "text": "A user reports that when the client follows a redirect to a different host, the Authorization header is still sent to the new host in some cases and dropped in others, and they cannot tell which rule applies. Find where the client decides which headers are kept or removed when it follows a redirect, explain the exact rule (same origin, scheme upgrade, host change), and name the files a developer must read or change to adjust that rule, plus the tests that cover it.",
+   "key": {
+    "core": [
+     "httpx/_client.py"
+    ],
+    "supporting": [],
+    "tests": [
+     "tests/client/test_redirects.py",
+     "tests/client/test_headers.py"
+    ],
+    "acceptable": [],
+    "unrelated": [
+     "tests/client/test_properties.py"
+    ],
+    "notes": "Rule lives in BaseClient._redirect_headers in httpx/_client.py (Authorization dropped when origin changes unless it is an http->https upgrade of the same host); the helpers _is_https_redirect, _port_or_default and _same_origin are module-level functions in httpx/_client.py (lines 62-91), not in _utils.py."
+   }
+  },
+  {
+   "id": "T2",
+   "repo": "httpx",
+   "kind": "change impact",
+   "text": "I plan to add a new required constructor parameter to the default HTTP transport classes (both the sync and the async one). List every place in the library and in the test suite that constructs these transports and would break, the documentation that shows construction examples, and say which of them are tests.",
+   "key": {
+    "core": [
+     "httpx/_transports/default.py",
+     "httpx/_client.py"
+    ],
+    "supporting": [
+     "httpx/_transports/base.py",
+     "docs/advanced/transports.md",
+     "docs/advanced/proxies.md",
+     "docs/async.md",
+     "docs/troubleshooting.md"
+    ],
+    "tests": [
+     "tests/client/test_proxies.py"
+    ],
+    "acceptable": [
+     "docs/compatibility.md"
+    ],
+    "unrelated": [
+     "CHANGELOG.md"
+    ],
+    "notes": "Client._init_transport / _init_proxy_transport (sync at ~731/750, async at ~1445/1464) construct HTTPTransport/AsyncHTTPTransport; docstring examples in default.py and base.py; tests construct HTTPTransport(proxy=...) in test_proxies.py."
+   }
+  },
+  {
+   "id": "T3",
+   "repo": "httpx",
+   "kind": "feature orientation",
+   "text": "I want to add client-level default request extensions: a dictionary given to the Client constructor that is merged into every request's extensions the same way default headers, cookies and query params are merged today (per-request values win). Collect the minimal set of files I must read to implement this correctly, including where the existing merging happens, where request extensions are defined and validated, the public documentation to update, and the tests to extend. Explain why each file is needed.",
+   "key": {
+    "core": [
+     "httpx/_client.py",
+     "httpx/_models.py"
+    ],
+    "supporting": [
+     "docs/advanced/extensions.md",
+     "httpx/_types.py"
+    ],
+    "tests": [
+     "tests/client/test_client.py"
+    ],
+    "acceptable": [
+     "docs/advanced/clients.md",
+     "tests/client/test_async_client.py",
+     "tests/client/test_headers.py"
+    ],
+    "unrelated": [],
+    "notes": "build_request merges extensions with timeout (lines ~353-388); _merge_headers/_merge_cookies/_merge_queryparams pattern (~391-440); Request.extensions in _models.py; RequestExtensions type in _types.py; extensions docs in docs/advanced/extensions.md; build_request tests in tests/client/test_client.py."
+   }
+  },
+  {
+   "id": "T4",
+   "repo": "hono",
+   "kind": "bug localization",
+   "text": "Path parameters that contain percent-encoded characters sometimes reach the handler decoded and sometimes not, and an invalid percent sequence used to throw. Explain exactly where and when the framework decodes the request path and the path parameters, what happens with an invalid sequence today, and name the files involved and the tests that pin this behavior.",
+   "key": {
+    "core": [
+     "src/request.ts",
+     "src/utils/url.ts"
+    ],
+    "supporting": [
+     "src/hono-base.ts"
+    ],
+    "tests": [
+     "src/request.test.ts",
+     "src/utils/url.test.ts",
+     "src/hono.test.ts"
+    ],
+    "acceptable": [],
+    "unrelated": [
+     "src/context.test.ts",
+     "src/router/trie-router/node.ts",
+     "src/utils/cookie.test.ts"
+    ],
+    "notes": "HonoRequest.param() decodes lazily via tryDecodeURIComponent; getPath/_decodeURI in utils/url.ts decode the path with tryDecode falling back on invalid sequences; hono-base.ts wires getPath (strict / getPathNoStrict)."
+   }
+  },
+  {
+   "id": "T5",
+   "repo": "hono",
+   "kind": "change impact",
+   "text": "I am going to change the signature of the JSON response helper on the request context (the method handlers call to return JSON) so that it takes an options object instead of positional status and headers. List what would break: the type definitions that encode its return type for typed clients, the built-in middleware that calls it, and the tests that assert its behavior. Group your answer into implementation, types, middleware, and tests.",
+   "key": {
+    "core": [
+     "src/context.ts",
+     "src/types.ts"
+    ],
+    "supporting": [
+     "src/client/types.ts"
+    ],
+    "tests": [
+     "src/context.test.ts",
+     "src/types.test.ts",
+     "runtime-tests/lambda/index.test.ts",
+     "src/client/client.test.ts",
+     "src/client/utils.test.ts",
+     "src/middleware/combine/index.test.ts",
+     "src/middleware/jwk/index.test.ts",
+     "src/middleware/jwt/index.test.ts",
+     "src/validator/validator.test.ts",
+     "src/middleware/method-not-allowed/index.test.ts"
+    ],
+    "acceptable": [
+     "src/middleware/bearer-auth/index.ts",
+     "src/middleware/cors/index.ts",
+     "src/middleware/method-not-allowed/index.ts",
+     "src/hono.test.ts"
+    ],
+    "unrelated": [
+     "src/client/types.test.ts"
+    ],
+    "notes": "Context.json and JSONRespond/JSONRespondReturn are defined in context.ts, with TypedResponse and response inference in types.ts and client/types.ts. No built-in middleware implementation calls c.json: bearer-auth, cors and method-not-allowed contain documentation examples. context.test.ts and types.test.ts directly test the helper and its types. Positional status callers also occur in runtime-tests/lambda/index.test.ts, client/client.test.ts, client/utils.test.ts, middleware/combine/index.test.ts, middleware/jwk/index.test.ts, middleware/jwt/index.test.ts, validator/validator.test.ts, and method-not-allowed/index.test.ts; these calls must use the new options form. hono.test.ts already demonstrates a ResponseOrInit options object and is an acceptable control, not a positional caller. client/types.test.ts exercises typed-client behavior but does not itself use positional c.json status arguments. Existing notes that labelled the positional callers unrelated were incorrect."
+   },
+   "previousKeys": {
+    "1": {
+     "core": [
+      "src/context.ts",
+      "src/types.ts"
+     ],
+     "supporting": [
+      "src/client/types.ts"
+     ],
+     "tests": [
+      "src/context.test.ts",
+      "src/types.test.ts"
+     ],
+     "acceptable": [
+      "src/middleware/bearer-auth/index.ts",
+      "src/middleware/cors/index.ts",
+      "src/middleware/method-not-allowed/index.test.ts",
+      "src/middleware/method-not-allowed/index.ts"
+     ],
+     "unrelated": [
+      "runtime-tests/lambda/index.test.ts",
+      "src/client/client.test.ts",
+      "src/client/types.test.ts",
+      "src/client/utils.test.ts",
+      "src/hono.test.ts",
+      "src/middleware/combine/index.test.ts",
+      "src/middleware/jwk/index.test.ts",
+      "src/middleware/jwt/index.test.ts",
+      "src/validator/validator.test.ts"
+     ],
+     "notes": "Context.json: JSONRespond (context.ts ~725); TypedResponse/MergeTypedResponse in types.ts; client inference in client/types.ts; no built-in middleware calls c.json in its implementation: bearer-auth and cors mention it only in doc-comment examples, and method-not-allowed only in a doc example with positional status and headers; tests: context.test.ts and the json() type tests in types.test.ts."
+    }
+   },
+   "keyVersion": 2
+  },
+  {
+   "id": "T6",
+   "repo": "hono",
+   "kind": "feature orientation",
+   "text": "I need to write a new built-in middleware that rejects requests whose Content-Type is not in an allow list, following this project's conventions exactly. Tell me which existing middleware to copy as a template (a small one with options), which files register a middleware for distribution so users can import it from the package, and which test file conventions to follow. List the files with one reason each.",
+   "key": {
+    "core": [
+     "package.json",
+     "jsr.json"
+    ],
+    "supporting": [],
+    "tests": [],
+    "acceptable": [
+     "src/middleware/method-not-allowed/index.ts",
+     "src/middleware/body-limit/index.ts",
+     "src/middleware/powered-by/index.ts",
+     "src/middleware/method-not-allowed/index.test.ts",
+     "src/middleware/body-limit/index.test.ts",
+     "src/middleware/powered-by/index.test.ts",
+     "src/middleware/ip-restriction/index.ts",
+     "src/middleware/ip-restriction/index.test.ts",
+     "src/middleware/method-override/index.ts",
+     "src/middleware/method-override/index.test.ts"
+    ],
+    "unrelated": [],
+    "notes": "Distribution requires package.json exports and jsr.json exports. A single small middleware with options and its colocated index.test.ts is a valid template; three different templates are not jointly required. Examples include powered-by (PoweredByOptions and poweredBy), body-limit (BodyLimitOptions and bodyLimit), method-not-allowed (MethodNotAllowedOptions), ip-restriction, and method-override. Their files and tests are acceptable alternatives, not separate mandatory paths. This path-only key measures the two mandatory distribution manifests; it does not measure whether the chosen template or its test explanation is suitable. src/index.ts does not centrally register all middleware."
+   },
+   "previousKeys": {
+    "1": {
+     "core": [
+      "package.json",
+      "jsr.json"
+     ],
+     "supporting": [
+      "src/middleware/method-not-allowed/index.ts",
+      "src/middleware/body-limit/index.ts",
+      "src/middleware/powered-by/index.ts"
+     ],
+     "tests": [
+      "src/middleware/method-not-allowed/index.test.ts",
+      "src/middleware/body-limit/index.test.ts",
+      "src/middleware/powered-by/index.test.ts"
+     ],
+     "acceptable": [],
+     "unrelated": [],
+     "notes": "Any small existing middleware pair counts as the template (index.ts + index.test.ts in src/middleware/<name>/); registration = package.json exports and jsr.json exports (the last added middleware touched exactly those four files)."
+    }
+   },
+   "keyVersion": 2
+  },
+  {
+   "id": "T7",
+   "repo": "serilog",
+   "kind": "bug localization",
+   "text": "A user reports that a per-source minimum level override behaves inconsistently: an override configured for one namespace sometimes applies to a logger in a deeper namespace and sometimes does not, and they cannot work out the rule. Find where the effective minimum level for a source context is resolved, explain the exact matching rule including how a longer context is shortened and what counts as a boundary, say what happens when no override matches, and name the files a developer must read or change to adjust that rule, plus the tests that cover it.",
+   "key": {
+    "core": [
+     "src/Serilog/Core/LevelOverrideMap.cs",
+     "src/Serilog/Core/Logger.cs"
+    ],
+    "supporting": [
+     "src/Serilog/LoggerConfiguration.cs",
+     "src/Serilog/Configuration/LoggerMinimumLevelConfiguration.cs"
+    ],
+    "tests": [
+     "test/Serilog.Tests/Core/LevelOverrideMapTests.cs",
+     "test/Serilog.Tests/Core/ChildLoggerTests.cs",
+     "test/Serilog.Tests/Configuration/LoggerConfigurationTests.cs"
+    ],
+    "acceptable": [],
+    "unrelated": [
+     "test/Serilog.PerformanceTests/SourceContextMatchBenchmark.cs"
+    ],
+    "notes": "LevelOverrideMap.GetEffectiveLevel iterates override keys ordered descending by key. It compares the unchanged source context with each key using OrdinalIgnoreCase StartsWith, requiring either an exact length or a dot immediately after the key. It does not repeatedly shorten the context; the question's wording must not be interpreted as evidence of a shortening loop. Descending key order gives more specific matching prefixes priority. If none matches, it returns the default minimum level and default level switch. Logger.ForContext consults the map when a SourceContext property is assigned. LoggerConfiguration builds the map, LoggerMinimumLevelConfiguration collects overrides; LevelOverrideMapTests, ChildLoggerTests and LoggerConfigurationTests cover matching, inheritance and configuration."
+   },
+   "previousKeys": {
+    "1": {
+     "core": [
+      "src/Serilog/Core/LevelOverrideMap.cs",
+      "src/Serilog/Core/Logger.cs"
+     ],
+     "supporting": [
+      "src/Serilog/LoggerConfiguration.cs",
+      "src/Serilog/Configuration/LoggerMinimumLevelConfiguration.cs"
+     ],
+     "tests": [
+      "test/Serilog.Tests/Core/LevelOverrideMapTests.cs",
+      "test/Serilog.Tests/Core/ChildLoggerTests.cs",
+      "test/Serilog.Tests/Configuration/LoggerConfigurationTests.cs"
+     ],
+     "acceptable": [],
+     "unrelated": [
+      "test/Serilog.PerformanceTests/SourceContextMatchBenchmark.cs"
+     ],
+     "notes": "GetEffectiveLevel walks the overrides ordered descending by key and shortens the context at dot boundaries; falls back to the default minimum level or the default level switch. Logger consults the map per source context."
+    }
+   },
+   "keyVersion": 2
+  },
+  {
+   "id": "T8",
+   "repo": "serilog",
+   "kind": "change impact",
+   "text": "I am going to change the signature of the enrichment interface that adds properties to a log event: the method that enriches an event will take an extra required argument. List every place in the library and in the test suite that implements this interface or calls that method and would therefore break, including the ones that wrap or aggregate other implementations, name the configuration surface that accepts implementations of it, and say which of the places you list are tests.",
+   "key": {
+    "core": [
+     "src/Serilog/Core/ILogEventEnricher.cs",
+     "src/Serilog/Core/Logger.cs"
+    ],
+    "supporting": [
+     "src/Serilog/Core/Enrichers/PropertyEnricher.cs",
+     "src/Serilog/Core/Enrichers/FixedPropertyEnricher.cs",
+     "src/Serilog/Core/Enrichers/ConditionalEnricher.cs",
+     "src/Serilog/Core/Enrichers/SafeAggregateEnricher.cs",
+     "src/Serilog/Core/Enrichers/EmptyEnricher.cs",
+     "src/Serilog/Context/LogContextEnricher.cs",
+     "src/Serilog/Configuration/LoggerEnrichmentConfiguration.cs",
+     "src/Serilog/Context/LogContext.cs"
+    ],
+    "tests": [
+     "test/Serilog.Tests/Support/DelegatingEnricher.cs",
+     "test/Serilog.Tests/Support/CollectingEnricher.cs",
+     "test/TestDummies/DummyThreadIdEnricher.cs"
+    ],
+    "acceptable": [
+     "test/Serilog.Tests/Core/LoggerTests.cs",
+     "test/Serilog.Tests/Context/LogContextTests.cs"
+    ],
+    "unrelated": [
+     "src/Serilog/Context/EnricherStack.cs",
+     "src/Serilog/Core/Pipeline/SilentLogger.cs",
+     "src/Serilog/ILogger.cs",
+     "src/Serilog/Log.cs",
+     "src/Serilog/LoggerConfiguration.cs",
+     "src/Serilog/Settings/KeyValuePairs/SurrogateConfigurationMethods.cs",
+     "test/Serilog.PerformanceTests/AllocationsBenchmark.cs",
+     "test/Serilog.PerformanceTests/LogContextEnrichmentBenchmark.cs",
+     "test/Serilog.Tests/Configuration/LoggerConfigurationTests.cs",
+     "test/Serilog.Tests/Configuration/LoggerSinkConfigurationTests.cs",
+     "test/Serilog.Tests/Core/LoggerExtensionsTests.cs",
+     "test/Serilog.Tests/MethodOverloadConventionTests.cs",
+     "test/Serilog.Tests/Settings/CallableConfigurationMethodFinderTests.cs",
+     "test/Serilog.Tests/Settings/KeyValuePairSettingsTests.cs",
+     "test/Serilog.Tests/Support/DisposableLogger.cs",
+     "test/TestDummies/DummyLoggerConfigurationExtensions.cs"
+    ],
+    "notes": "Enrich(LogEvent, ILogEventPropertyFactory) is declared by ILogEventEnricher and implemented in the five Core/Enrichers classes, LogContextEnricher, Support/CollectingEnricher, Support/DelegatingEnricher and TestDummies/DummyThreadIdEnricher. Logger, ConditionalEnricher, SafeAggregateEnricher, LogContext and LogContextEnricher directly call Enrich. LoggerEnrichmentConfiguration.With accepts enrichers. LoggerTests and LogContextTests are useful regression tests but do not declare or directly call the changed Enrich method; they remain compilable when implementations accept an additional argument. In particular, DelegatingEnricher owns an independent two-argument Action delegate whose constructor contract need not change with the interface. Those two integration test files are acceptable context, not mandatory signature edits."
+   },
+   "previousKeys": {
+    "1": {
+     "core": [
+      "src/Serilog/Core/ILogEventEnricher.cs",
+      "src/Serilog/Core/Logger.cs"
+     ],
+     "supporting": [
+      "src/Serilog/Core/Enrichers/PropertyEnricher.cs",
+      "src/Serilog/Core/Enrichers/FixedPropertyEnricher.cs",
+      "src/Serilog/Core/Enrichers/ConditionalEnricher.cs",
+      "src/Serilog/Core/Enrichers/SafeAggregateEnricher.cs",
+      "src/Serilog/Core/Enrichers/EmptyEnricher.cs",
+      "src/Serilog/Context/LogContextEnricher.cs",
+      "src/Serilog/Configuration/LoggerEnrichmentConfiguration.cs",
+      "src/Serilog/Context/LogContext.cs"
+     ],
+     "tests": [
+      "test/Serilog.Tests/Core/LoggerTests.cs",
+      "test/Serilog.Tests/Context/LogContextTests.cs",
+      "test/Serilog.Tests/Support/DelegatingEnricher.cs",
+      "test/Serilog.Tests/Support/CollectingEnricher.cs",
+      "test/TestDummies/DummyThreadIdEnricher.cs"
+     ],
+     "acceptable": [],
+     "unrelated": [
+      "src/Serilog/Context/EnricherStack.cs",
+      "src/Serilog/Core/Pipeline/SilentLogger.cs",
+      "src/Serilog/ILogger.cs",
+      "src/Serilog/Log.cs",
+      "src/Serilog/LoggerConfiguration.cs",
+      "src/Serilog/Settings/KeyValuePairs/SurrogateConfigurationMethods.cs",
+      "test/Serilog.PerformanceTests/AllocationsBenchmark.cs",
+      "test/Serilog.PerformanceTests/LogContextEnrichmentBenchmark.cs",
+      "test/Serilog.Tests/Configuration/LoggerConfigurationTests.cs",
+      "test/Serilog.Tests/Configuration/LoggerSinkConfigurationTests.cs",
+      "test/Serilog.Tests/Core/LoggerExtensionsTests.cs",
+      "test/Serilog.Tests/MethodOverloadConventionTests.cs",
+      "test/Serilog.Tests/Settings/CallableConfigurationMethodFinderTests.cs",
+      "test/Serilog.Tests/Settings/KeyValuePairSettingsTests.cs",
+      "test/Serilog.Tests/Support/DisposableLogger.cs",
+      "test/TestDummies/DummyLoggerConfigurationExtensions.cs"
+     ],
+     "notes": "Enrich(LogEvent, ILogEventPropertyFactory) is implemented by the enrichers under Core/Enrichers, by LogContextEnricher, and aggregated by SafeAggregateEnricher; LoggerEnrichmentConfiguration is the configuration surface; Logger calls it on every event. LogContext walks the enricher stack and calls Enrich; the test suite implements the interface in Support/CollectingEnricher, Support/DelegatingEnricher and TestDummies/DummyThreadIdEnricher."
+    }
+   },
+   "keyVersion": 2
+  },
+  {
+   "id": "G1",
+   "repo": "gin",
+   "kind": "bug localization",
+   "text": "Behind our load balancer, the client IP that our web service logs is sometimes whatever the caller put in X-Forwarded-For, and sometimes the load balancer's own address. Find where this framework decides which address to report as the client IP, explain the exact rule (which headers it looks at and in what order, how it walks a multi-address header, which proxies it trusts out of the box, and when it falls back to the socket address), and name the files a developer must read or change to adjust that rule, plus the tests that cover it.",
+   "key": {
+    "core": [
+     "context.go",
+     "gin.go"
+    ],
+    "supporting": [
+     "context_appengine.go"
+    ],
+    "tests": [
+     "context_test.go",
+     "gin_test.go"
+    ],
+    "acceptable": [],
+    "unrelated": [
+     "gin_integration_test.go"
+    ],
+    "notes": "Context.ClientIP (context.go:975): 1) Engine.TrustedPlatform header wins if set and present (constants PlatformGoogleAppEngine/Cloudflare/FlyIO in gin.go:80-87; defaultPlatform is set to App Engine only by the context_appengine.go build tag); 2) legacy AppEngine flag; 3) a unix-socket listener is always trusted, otherwise the remote IP from RemoteAddr (RemoteIP, context.go:1027) must pass Engine.isTrustedProxy (gin.go:469); 4) if trusted && ForwardedByClientIP && RemoteIPHeaders != nil, walk RemoteIPHeaders in order (default [X-Forwarded-For, X-Real-IP], gin.go:215); validateHeader (gin.go:482) splits on commas and walks right-to-left, returning the first IP that is not a trusted proxy (or the leftmost), stopping at an unparsable entry (then the next header is tried); 5) otherwise the remote IP. Default trustedCIDRs = defaultTrustedCIDRs = 0.0.0.0/0 and ::/0 (gin.go:39), i.e. every proxy is trusted until SetTrustedProxies (gin.go:451) narrows it, which is why X-Forwarded-For is spoofable. Tests: context_test.go (TestContextClientIP, ...WithMultipleHeaders/SingleHeader, TestRemoteIPFail), gin_test.go (SetTrustedProxies cases ~800)."
+   }
+  },
+  {
+   "id": "J1",
+   "repo": "gson",
+   "kind": "dependency impact",
+   "text": "We're thinking about changing the signature of `readNumber`, the single method of the `ToNumberStrategy` interface, so that it also receives the declared target type. Before I agree, I need the exact blast radius: which files in this repository would have to be edited to keep everything compiling, main code and tests alike? List every one of them and say for each whether it is the declaration, an implementation, or a call site. Also tell me which built-in implementations exist and which strategy is the default for `Object` values versus `Number` values, and name any files that mention the interface but would NOT need an edit.",
+   "key": {
+    "core": [
+     "gson/src/main/java/com/google/gson/ToNumberStrategy.java",
+     "gson/src/main/java/com/google/gson/ToNumberPolicy.java",
+     "gson/src/main/java/com/google/gson/internal/bind/ObjectTypeAdapter.java",
+     "gson/src/main/java/com/google/gson/internal/bind/NumberTypeAdapter.java"
+    ],
+    "supporting": [
+     "gson/src/main/java/com/google/gson/GsonBuilder.java"
+    ],
+    "tests": [
+     "gson/src/test/java/com/google/gson/ToNumberPolicyTest.java",
+     "gson/src/test/java/com/google/gson/functional/ToNumberPolicyFunctionalTest.java",
+     "gson/src/test/java/com/google/gson/functional/NumberLimitsTest.java"
+    ],
+    "acceptable": [],
+    "unrelated": [
+     "Troubleshooting.md",
+     "gson/src/main/java/com/google/gson/Gson.java",
+     "gson/src/test/java/com/google/gson/GsonTest.java"
+    ],
+    "notes": "Exactly seven files must change (repo-wide git grep for ToNumberStrategy/readNumber). Declaration: ToNumberStrategy.java:69 `Number readNumber(JsonReader in)`. Implementations: ToNumberPolicy.java, an enum implementing it with four constants overriding readNumber (DOUBLE :42, LAZILY_PARSED_NUMBER :53, LONG_OR_DOUBLE :69, BIG_DECIMAL :103); a test anonymous `new ToNumberStrategy()` in functional/ToNumberPolicyFunctionalTest.java:124. Call sites: internal/bind/ObjectTypeAdapter.java:96, internal/bind/NumberTypeAdapter.java:71; tests calling readNumber: ToNumberPolicyTest.java, functional/NumberLimitsTest.java:119-139. Defaults (GsonBuilder.java:105-107): Object -> ToNumberPolicy.DOUBLE, Number -> ToNumberPolicy.LAZILY_PARSED_NUMBER. Mention it but need no edit: Gson.java (fields), GsonBuilder.java (fields, setters, factory wiring :932/:953), GsonTest.java (assigns policies), Troubleshooting.md (doc link)."
+   }
+  },
+  {
+   "id": "R1",
+   "repo": "axum",
+   "kind": "change impact",
+   "text": "We want the JSON body extractor to also accept requests sent with `Content-Type: text/json`. Before anyone changes code, list everything this touches: every place in this repository that implements the \"is this a JSON content type\" check (I suspect there is more than one copy), exactly what the check accepts today, which rejection a request with a wrong content type gets (type name, HTTP status and body text), what the optional form of the extractor does when the Content-Type header is absent, the tests that currently assert `text/json` is rejected, and the docs that describe the behaviour. Group the answer into implementation, rejection, tests and docs.",
+   "key": {
+    "core": [
+     "axum/src/json.rs",
+     "axum-extra/src/extract/json_deserializer.rs"
+    ],
+    "supporting": [
+     "axum/src/extract/rejection.rs",
+     "axum/src/docs/extract.md"
+    ],
+    "tests": [],
+    "acceptable": [],
+    "unrelated": [],
+    "notes": "Two copies of `fn json_content_type`: axum/src/json.rs:138 (used by Json FromRequest :107 and OptionalFromRequest :126) and axum-extra/src/extract/json_deserializer.rs:185 (JsonDeserializer :94). Rule: header present, valid UTF-8, parses as a mime, type == application and (subtype == json or suffix == json), so application/json, with charset parameters, and application/*+json are accepted; text/json is rejected. Rejection MissingJsonContentType: 415 UNSUPPORTED_MEDIA_TYPE, body \"Expected request with `Content-Type: application/json`\" (axum/src/extract/rejection.rs:30-39; axum-extra has its own copy at json_deserializer.rs:162-168). Option<Json<T>>: no Content-Type -> Ok(None); present but not JSON -> MissingJsonContentType. Tests are inline: json.rs json_content_types (:282, asserts !text/json at :301) and json_deserializer.rs (:340, :363). Docs: axum/src/docs/extract.md (JsonRejection examples), doc comments json.rs:18 and json_deserializer.rs:19; CHANGELOG mentions."
+   }
+  },
+  {
+   "id": "N1",
+   "repo": "httpx-changes",
+   "kind": "uncommitted change review",
+   "text": "I have uncommitted changes in this working tree that I am about to commit. Tell me exactly which files I changed and what each change does to the library's behaviour, which other modules use the changed values and therefore change behaviour too, and which test files I should run before committing.",
+   "key": {
+    "core": [
+     "httpx/_config.py",
+     "httpx/_api.py"
+    ],
+    "supporting": [
+     "httpx/_client.py"
+    ],
+    "tests": [
+     "tests/client/test_redirects.py"
+    ],
+    "acceptable": [
+     "tests/test_api.py",
+     "tests/test_config.py"
+    ],
+    "unrelated": [
+     "httpx/__init__.py",
+     "httpx/_transports/default.py",
+     "tests/client/test_async_client.py",
+     "tests/client/test_client.py",
+     "tests/client/test_event_hooks.py",
+     "tests/client/test_properties.py",
+     "tests/test_exceptions.py",
+     "tests/test_main.py",
+     "tests/test_timeouts.py",
+     "tests/test_utils.py"
+    ],
+    "notes": "Only two files are modified. httpx/_config.py: DEFAULT_TIMEOUT_CONFIG changed from Timeout(timeout=5.0) to Timeout(timeout=10.0), so every default timeout (connect, read, write, pool) doubles, and DEFAULT_MAX_REDIRECTS changed from 20 to 10, so TooManyRedirects is raised after 10 hops. httpx/_api.py: the top-level request() function now defaults follow_redirects=True (was False); get(), post() and the other helpers keep False, so httpx.request() and httpx.get() now differ. DEFAULT_TIMEOUT_CONFIG is used by httpx/_api.py (request/stream defaults) and httpx/_client.py (client timeout defaults); DEFAULT_MAX_REDIRECTS is used by httpx/_client.py (max_redirects default). Tests: tests/client/test_redirects.py exercises redirect limits; no existing test reads DEFAULT_TIMEOUT_CONFIG or the request() follow_redirects default, so tests/test_config.py and tests/test_api.py are reasonable to run but do not cover the changed defaults."
+   }
+  },
+  {
+   "id": "N2",
+   "repo": "hono",
+   "kind": "one-folder contract",
+   "text": "Treat only src/adapter/bun/ as in scope for editing. Before refactoring this adapter I need its contract with the rest of the framework: list every file outside src/adapter/bun/ that the adapter's non-test source files import, what each one provides to the adapter, and where the adapter is exposed to package consumers. Also name the adapter's own test files. Keep every search, tree and dependency query restricted to src/adapter/bun/ with the tools' path or include filters, and name a file outside that folder only when a tool result points to it.",
+   "key": {
+    "core": [
+     "src/helper/websocket/index.ts",
+     "src/helper/ssg/index.ts",
+     "src/helper/conninfo/index.ts",
+     "src/middleware/serve-static/index.ts",
+     "src/context.ts",
+     "src/types.ts"
+    ],
+    "supporting": [
+     "src/index.ts",
+     "package.json",
+     "jsr.json"
+    ],
+    "tests": [
+     "src/adapter/bun/conninfo.test.ts",
+     "src/adapter/bun/server.test.ts",
+     "src/adapter/bun/websocket.test.ts"
+    ],
+    "acceptable": [
+     "runtime-tests/bun/index.test.tsx",
+     "src/adapter/bun/index.ts"
+    ],
+    "unrelated": [
+     "src/adapter/bun/server.ts",
+     "src/helper/conninfo/types.ts",
+     "src/helper/ssg/ssg.ts"
+    ],
+    "notes": "Imports from outside the folder: ../../helper/websocket (createWSMessageEvent, defineWebSocketHelper, WSContext, UpgradeWebSocket, WSEvents, WSMessageReceive types), ../../helper/ssg (toSSG and the FileSystemModule / ToSSGAdaptorInterface types), ../../helper/conninfo (GetConnInfo and AddressType types), ../../middleware/serve-static (the base serveStatic and ServeStaticOptions), ../../context (Context class), ../../types (Env, MiddlewareHandler) and ../.. (Context type through src/index.ts); node:path and node:fs/promises are runtime built-ins. Exposed to consumers through package.json exports ./bun (dist/adapter/bun) and jsr.json \"./bun\": \"./src/adapter/bun/index.ts\". Tests: conninfo.test.ts, server.test.ts, websocket.test.ts in src/adapter/bun/."
+   }
+  },
+  {
+   "id": "D1",
+   "repo": "hono-commit",
+   "kind": "commit review",
+   "text": "Review the most recent commit in this repository before it is released. List every file it changed and what each change does to the framework's behaviour, which other parts of the codebase are affected by the change and how, and which existing test files cover the changed behaviour and should be run.",
+   "key": {
+    "core": [
+     "src/http-exception.ts",
+     "src/middleware/body-limit/index.ts"
+    ],
+    "supporting": [
+     "src/hono-base.ts",
+     "src/validator/validator.ts",
+     "src/adapter/cloudflare-pages/handler.ts",
+     "src/request.ts",
+     "src/middleware/timeout/index.ts",
+     "src/helper/proxy/index.ts"
+    ],
+    "tests": [
+     "src/http-exception.test.ts",
+     "src/middleware/body-limit/index.test.ts",
+     "src/hono.test.ts",
+     "src/validator/validator.test.ts",
+     "src/middleware/timeout/index.test.ts",
+     "src/request.test.ts",
+     "src/helper/proxy/index.test.ts"
+    ],
+    "acceptable": [
+     "src/middleware/jwt/index.test.ts",
+     "src/middleware/jwk/index.test.ts",
+     "src/middleware/jwt/jwt.ts",
+     "src/middleware/jwk/jwk.ts",
+     "src/adapter/cloudflare-pages/handler.test.ts",
+     "src/middleware/basic-auth/index.test.ts",
+     "src/middleware/bearer-auth/index.test.ts",
+     "src/middleware/csrf/index.test.ts"
+    ],
+    "unrelated": [
+     "src/adapter/aws-lambda/handler.test.ts",
+     "src/adapter/lambda-edge/handler.test.ts"
+    ],
+    "notes": "The fixture changes three files. HTTPException.getResponse() explicitly sets the exact Content-Type value text/plain; charset=UTF-8 only in its fallback without res. A Fetch Response with a string body already synthesizes a text content type (commonly text/plain;charset=UTF-8); the fixture makes the value explicit, including its formatting, rather than introducing a universally absent header. Its supplied-res branch still copies the supplied headers and returns before the changed fallback. The default body-limit onError now constructs HTTPException(413, { message: 'Payload Too Large' }) instead of passing its own Response; custom onError and the request-stream processing are unchanged. hono-base.ts uses structural getResponse dispatch. validator.ts, request.ts, the timeout default, and the proxy helper construct exceptions without res; cloudflare-pages/handler.ts calls getResponse() for HTTPException, so its behavior depends on whether res was supplied. The required tests cover the changed fallback, default body-limit, or those message-only producers and their integration; only the added http-exception.test.ts assertion pins the exact new header. JWT/JWK attach res: unauthorizedResponse(...), so their existing cases do not prove the changed fallback; their files and tests are acceptable context, not required or known-wrong. Other supplied-response tests are acceptable controls, not evidence of changed fallback behavior. The AWS Lambda and Lambda Edge body-limit tests explicitly configure custom onError, bypassing the changed default; those tests remain unrelated to this change."
+   },
+   "keyVersion": 2,
+   "previousKeys": {
+    "1": {
+     "core": [
+      "src/http-exception.ts",
+      "src/middleware/body-limit/index.ts"
+     ],
+     "supporting": [
+      "src/hono-base.ts",
+      "src/validator/validator.ts",
+      "src/adapter/cloudflare-pages/handler.ts"
+     ],
+     "tests": [
+      "src/http-exception.test.ts",
+      "src/middleware/body-limit/index.test.ts",
+      "src/hono.test.ts",
+      "src/validator/validator.test.ts",
+      "src/middleware/jwt/index.test.ts",
+      "src/middleware/jwk/index.test.ts",
+      "src/middleware/timeout/index.test.ts"
+     ],
+     "acceptable": [],
+     "unrelated": [
+      "src/adapter/aws-lambda/handler.test.ts",
+      "src/adapter/cloudflare-pages/handler.test.ts",
+      "src/adapter/lambda-edge/handler.test.ts",
+      "src/middleware/basic-auth/index.test.ts",
+      "src/middleware/bearer-auth/index.test.ts",
+      "src/middleware/csrf/index.test.ts",
+      "src/request.test.ts"
+     ],
+     "notes": "The last commit changes three files. src/http-exception.ts: getResponse() now adds Content-Type: text/plain; charset=UTF-8 when the exception carries no res, so every HTTPException thrown with only a message gets that header. src/middleware/body-limit/index.ts: the default onError now throws HTTPException(413, { message: 'Payload Too Large' }) instead of building its own Response, so the default 413 now carries the text content type; a custom onError is unchanged. src/http-exception.test.ts: a new test for the header. Affected: the default error handler in src/hono-base.ts returns err.getResponse(), so every message-only HTTPException in an app changes, including validator 400s (src/validator/validator.ts), src/request.ts, the jwt/jwk middlewares, the timeout default and the proxy helper; middlewares that pass their own res (basic-auth, bearer-auth, csrf, and ip-restriction) are unchanged, as is src/adapter/cloudflare-pages/handler.ts beyond the same getResponse() call. src/adapter/cloudflare-pages/handler.ts calls getResponse() directly. Tests: src/http-exception.test.ts and src/middleware/body-limit/index.test.ts; src/hono.test.ts, src/validator/validator.test.ts and the jwt, jwk and timeout middleware tests exercise message-only exceptions through the default handler."
+    }
+   }
+  }
+ ]
+}

@@ -36,16 +36,25 @@ must not acquire name-query guidance.
 ## Connection payload
 
 `RealProcessKeepsTheConnectionPayloadInsideItsBudget` measures the delivered JSON `tools/list`
-result, not a fresh serialization. Default mode remains between 27,700 and 28,300 characters;
-enabling per-call exclusions adds exactly 2,616. Instructions remain between 900 and 1,200
-characters. The test prints actual sizes into its result log. These are wire-character limits,
-not API usage or tokenizer measurements; no model call is involved.
+result of the default reduced set, not a fresh serialization. With one local root the result
+stays between 13,270 and 14,020 characters. Three differences are pinned
+exactly: a second local root adds 1,820 by publishing `list_projects` and `project`,
+`--allow-remote` adds 2,265 by publishing `list_projects`, `project` and `branch`, and
+per-call exclusions add 2,115. Instructions remain between 900 and 1,200 characters.
+The test prints actual sizes into its result log. These are wire-character limits, not API usage
+or tokenizer measurements; no model call is involved.
 
-Measured by the process check on this baseline: default result 28,058 characters, delegated result
-30,674, instructions 1,175. The `search_project` `symbols` parameter added 237 characters, so the
-default ceiling moved from 27,900 to 28,300 to keep a deliberate headroom: 242 characters
-remain for the default result and 25 for the instructions. The exact delegation difference is
-unchanged.
+Measured by the process check on 2026-11-12: one local root 13,770 characters,
+two local roots 15,590, one root with `--allow-remote` 16,035, one root
+with per-call exclusions 15,885. The full set with one local root measures 27,141,
+unchanged since 2026-11-12. The ceiling leaves 250 characters for the next intentional catalog
+change.
+
+`RealProcessPublishesTheSelectedToolSetWithinItsOwnBudget` holds each tool set with one local
+root under its own ceiling, 250 characters above the measured size: full 27,391, full with
+per-call exclusions 30,352, reduced 14,020, reduced with per-call exclusions
+16,135. `RealProcessPublishesTheFullToolSetUnchanged` pins the SHA-256 of
+the full one-root result, so the full catalog cannot change by accident.
 
 ## Repeated service notices
 

@@ -1,0 +1,6 @@
+{"type":"thread.started","thread_id":"fixture-thread"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_0","type":"mcp_tool_call","server":"server_probe","tool":"confirm","arguments":{},"result":null,"error":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_0","type":"mcp_tool_call","server":"server_probe","tool":"confirm","arguments":{},"result":{"content":[{"type":"text","text":"MCP_PROBE_OK"}],"structured_content":null},"error":null,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"NO_DIRECT_ACCESS\n\nMCP marker: `MCP_PROBE_OK`"}}
+{"type":"turn.completed","usage":{"input_tokens":13032,"cached_input_tokens":6272,"cache_write_input_tokens":0,"output_tokens":35,"reasoning_output_tokens":0}}

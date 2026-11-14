@@ -236,7 +236,10 @@ schemas, help, completion hints, results, and errors are localized. Resolution i
 strict: only a complete token executes. Tab accepts or cycles completion, while an
 invalid token reports its position and up to three similar candidates. Arguments
 containing whitespace can use single or double quotes; path completion inserts
-and preserves the required quotes automatically.
+and preserves the required quotes automatically. To put the quote character
+itself inside a quoted argument, double it: `"a""b"` is `a"b`. Free text after
+`:search` and `:filter` keeps its inner spaces; quote it to keep leading or
+trailing spaces.
 Welcome exposes the focused subset `open`, `recent`, `language`, `help`, and `quit`;
 `help` without a verb lists only these, and any other workspace command reports
 that it needs an open project.
@@ -266,6 +269,7 @@ inline ghost suffix as soon as a token can be completed:
 | `copy [tree\|content\|tree-content] [text\|markdown\|json\|xml] [--max-tokens <N>] [--rank importance]` | copy an exact context document without changing the current view or format; a format can be given without a view |
 | `analyze` | analyze the current context |
 | `related <path> [--direction <dependencies\|dependents\|both>] [--depth <1..10>]` | show dependency relations in the output panel using the current workspace selection |
+| `diff [changes\|staged\|diff:<ref>..<ref>] [--context <0..20>]` | show the changed lines of the current workspace selection in the output panel, as the direct CLI `diff` prints them; the default is `changes` and three context lines |
 | `reveal <path>` | reveal a project path in Project Tree like `R`: expand its folders, move the cursor to it, and focus the tree |
 | `branch [name]` | switch the cloned repository branch, or open branch selection |
 | `update` | get updates for the cloned repository |
@@ -320,6 +324,7 @@ Examples:
 :copy content markdown
 :copy json --max-tokens 8000
 :related src/App.cs --direction dependencies --depth 2
+:diff staged
 :reveal src/App.cs
 :mcp codex standard
 :mcp connect codex standard
@@ -337,10 +342,18 @@ Examples:
 `grep` runs the same search as `devprojex search` over the files of the current
 workspace selection: the same text, `--regex`, and `--symbols` matching (the two modes
 are mutually exclusive), the same declaration names, the same secret and private-data
-redaction, and the same default limit of 50 matches. The search runs in the background
-and can be cancelled; its results open in the output panel with project-relative paths,
-line numbers, and the enclosing declaration when one is known. `search` keeps searching
-the current Preview.
+redaction, the same multi-line matching rule for a pattern that can only mean to cross
+a line break (see `Docs/CLI-Output-Contract.md`), and the same default limit of 50
+matches. The search runs in the background and can be cancelled; its results open in
+the output panel with project-relative paths, line numbers, and the enclosing
+declaration when one is known. A match spanning several lines is reported once, at its
+first line, like any other match. `search` keeps searching the current Preview.
+
+The Terminal Workspace `:grep --symbols` reads a regular expression the same way:
+when every alternative reduces to one plain name, the search runs for those names
+and prints a note naming them; a regular expression that cannot be reduced to names
+is searched as text instead, with the fixed `[Symbols]` notice. A missing declaration
+name remains an error.
 
 `--max-tokens` and `--rank` on `copy` and `export context` follow
 `devprojex export context`: the budget admits files by estimated content tokens and
@@ -371,9 +384,39 @@ If replacement fails or is canceled after removal, the previous registration is
 restored before the operation completes.
 
 `related` uses the same dependency engine and text renderer as the direct CLI.
+A folder seed expands to its directly contained selected files in ordinal path
+order, with at most 16 seeds and the fixed `[Read as]` notice. Subfolders are not
+expanded; an empty or wider folder keeps the existing invalid-seed error.
 Depth `1` shows direct relations; larger values walk only resolved edges and emit
 one section per visited file. Ambiguous and unresolved evidence is never followed.
 The same 256-seed limit fails honestly before the panel shows a partial graph.
+Checked items are a focus, not a boundary, so when they or a momentary Git scope (`staged`,
+`changes`, `diff:...`) narrow the workspace, `related` resolves the seed's relations against the
+files the workspace could show without that narrowing: the same roots, file types, ignores,
+exclusions, and persistent Git mode. The narrowing only decides where each related file is
+listed: files it keeps stay in the seed's own sections, and resolved relations to the rest appear
+as `Dependencies outside the selection` and `Dependents outside the selection` after them, at most
+20 per section. `[Resolution]` counts edges as the workspace without that narrowing does and
+reports resolved edges that reach only files outside the selection as `· outside-selection=N`
+instead of in `resolved`, at depth 1; `resolved` plus `outside-selection` is therefore what the
+unnarrowed workspace resolves at that depth, and a larger depth walks only into files the
+narrowing keeps. A fully checked workspace without a momentary scope prints what it printed
+before.
+
+`diff [scope] [--context N]` compares the current workspace selection in the requested Git
+scope: `changes` (default) compares `HEAD` with the working tree, `staged` compares `HEAD` with
+the index, and `diff:<ref>..<ref>` compares two commits. `--context` sets the number of unchanged
+lines around each change, from 0 to 20, as it does for the direct CLI; without it, three lines are
+shown. The requested scope replaces any momentary Git scope (`staged`, `changes`, `diff:...`)
+already active for the workspace rather than narrowing it further: if one is active, it is lifted
+back to the persistent Git mode first, exactly as a `related` lookup lifts it, so the two scopes
+are never intersected. Checked items, file types, path filters, exclusions, and protection carry
+over unchanged, so the comparison never shows a file those would hide. Old versions come from
+Git's object store without running a repository filter or converter. When Hide Secrets or Hide
+Private Data is on, both versions are redacted before they are compared. The output panel shows
+the same unified diff, `Not shown:` list, and summary line as the direct CLI. The panel keeps at
+most 50,000 characters of that output, cut at a line break; past that limit a trailing line
+reports how many characters were left out, and the direct CLI `diff` command shows the rest.
 
 Left/Right, Home/End, Backspace, and Delete edit the line. Esc cancels it,
 Enter executes it, and Up/Down traverses command history. The newest 50 commands
@@ -615,6 +658,7 @@ when a desktop-control or startup check fails there.
 | `DPX-TUI-GREP-PATTERN` | The entered search pattern is invalid. |
 | `DPX-TUI-GREP-SELECTION-FAILED` | Applying the search result to the selection failed. |
 | `DPX-TUI-RELATED-SELECTION-FAILED` | Applying a related-files result to the selection failed. |
+| `DPX-TUI-DIFF-SELECTION-FAILED` | The workspace selection for a `diff` command could not be prepared in the requested Git scope. |
 | `DPX-TUI-PREVIEW-FAILED` | The file preview could not be rendered. |
 | `DPX-TUI-PREVIEW-SEARCH-FAILED` | Searching within the open preview failed. |
 | `DPX-TUI-PROFILE-SAVE-FAILED` | Saving the current selection as a portable profile failed. |
@@ -628,3 +672,7 @@ when a desktop-control or startup check fails there.
 | `DPX-TUI-CLIPBOARD-PAYLOAD-TOO-LARGE` | The content is too large to copy to the clipboard. |
 | `DPX-TUI-SETTINGS-REFRESH-FAILED` | Reloading Workspace settings after a change failed. |
 | `DPX-TUI-OPERATION-FAILED` | A Workspace operation failed without a more specific code. |
+
+The tree command has no depth parameter and prints the selected tree in full. MCP
+`get_tree` counts `max_depth` from each requested `paths` entry, or from the project
+root when `paths` is omitted.

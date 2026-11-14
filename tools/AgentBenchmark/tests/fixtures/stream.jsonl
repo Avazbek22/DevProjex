@@ -1,0 +1,8 @@
+not json, a stderr line that leaked
+{"type": "system", "subtype": "init", "model": "claude-haiku-4-5-20251001"}
+{"type": "assistant", "message": {"content": [{"type": "text", "text": "Looking at the tree."}, {"type": "tool_use", "id": "t1", "name": "mcp__server_b__get_tree", "input": {"path": "src"}}]}}
+{"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "t1", "content": [{"type": "text", "text": "src/a.py\nsrc/b.py"}]}]}}
+{"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "t2", "name": "mcp__server_b__get_file", "input": {"path": "src/missing.py"}}]}}
+{"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "t2", "content": "not found", "is_error": true}]}}
+{"type": "assistant", "message": {"content": [{"type": "text", "text": "## Answer\nDraft."}]}}
+{"type": "result", "subtype": "success", "is_error": false, "duration_ms": 1234, "num_turns": 3, "result": "## Answer\nIt is in src/a.py.\n\n## Experience\nTrust score 4.", "modelUsage": {"claude-haiku-4-5-20251001": {"inputTokens": 10, "outputTokens": 120, "cacheReadInputTokens": 300, "cacheCreationInputTokens": 40, "costUSD": 0.01}, "claude-small": {"inputTokens": 5, "outputTokens": 3, "cacheReadInputTokens": 0, "cacheCreationInputTokens": 0, "costUSD": 0.001}}}
