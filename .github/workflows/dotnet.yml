@@ -193,6 +193,9 @@ jobs:
 
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v6
+        env:
+          # The SDK copy that ships in the runner image fails GenerateBundle for single-file publish; install a fresh one.
+          DOTNET_INSTALL_DIR: ${{ runner.os == 'Linux' && format('{0}/dotnet', runner.temp) || env.DOTNET_INSTALL_DIR }}
         with:
           dotnet-version: 10.0.x
 
