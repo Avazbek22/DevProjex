@@ -152,7 +152,7 @@ export function builtinIsolation(calls, tools, root) {
   for (const [index, call] of calls.entries()) {
     if (!tools.includes(call.name)) violations.push({ call: index + 1, reason: 'unlisted-tool', tool: call.name });
     for (const [key, value] of Object.entries(call.input ?? {})) {
-      if (typeof value !== 'string' || !(['file_path', 'path'].includes(key) || key === 'pattern' && (posix.isAbsolute(value) || win32.isAbsolute(value)))) continue;
+      if (typeof value !== 'string' || !(['file_path', 'path'].includes(key) || key === 'pattern' && call.name === 'Glob' && (posix.isAbsolute(value) || win32.isAbsolute(value)))) continue;
       const foreignAbsolute = (posix.isAbsolute(value) || win32.isAbsolute(value)) && !paths.isAbsolute(value);
       const relative = paths.relative(paths.resolve(root), paths.resolve(root, value));
       if (foreignAbsolute || relative === '..' || relative.startsWith(`..${paths.sep}`) || paths.isAbsolute(relative))
@@ -160,6 +160,12 @@ export function builtinIsolation(calls, tools, root) {
     }
   }
   return { status: violations.length ? 'violated' : 'passed', violations };
+}
+
+export function corpusProvenanceFailed(summary) {
+  return summary.kind === 'builtin'
+    ? summary.provenance.violations.some((violation) => violation.call === undefined)
+    : summary.provenance.status !== 'passed';
 }
 
 export function renderPrompt(template, repoPath, armName, taskText) {

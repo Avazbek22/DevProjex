@@ -120,7 +120,7 @@ def check_builtin(calls, root, tools):
         for key, value in call['arguments'].items():
             if not isinstance(value, str):
                 continue
-            if key in ('file_path', 'path') or key == 'pattern' and benchlib._absolute_answer_path(value.replace('\\', '/')):
+            if key in ('file_path', 'path') or key == 'pattern' and call['tool'] == 'Glob' and benchlib._absolute_answer_path(value.replace('\\', '/')):
                 if relative_to_root(value, root) is None:
                     violations.append({'call': call['sequence'], 'reason': 'outside-corpus', 'argument': key})
     return {'status': 'violated' if violations else 'passed', 'violations': violations}

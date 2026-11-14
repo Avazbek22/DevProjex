@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import {
   DEFAULT_MODEL, armFingerprint, buildMcpConfig, countWorktreeFiles, dataRoot, fingerprintMismatch,
   isTransientFailure, parseArgs, quoteForCmd, renderPrompt, resolveArm, summarize, usedArms, validateArms,
-  armAgent, armModel, agentSeries, effectivePrompt, claudeArguments, builtinIsolation,
+  armAgent, armModel, agentSeries, effectivePrompt, claudeArguments, builtinIsolation, corpusProvenanceFailed,
 } from '../session.mjs';
 import { CODEX_MODEL, CODEX_PRICING, budgetStop, codexArguments, codexConfiguration, codexPricing, executeCodex,
   restrictedCatalog, saveCodexSummary, summarizeCodex } from '../codex.mjs';
@@ -363,10 +363,29 @@ test('built-in isolation rejects foreign tools and paths on both path platforms'
   const call = (name, input) => ({ name, input });
   for (const [root, outside, inside] of [['/clone', '/other/x', '/clone/x'], ['C:/clone', 'D:/other/x', 'c:/clone/x']]) {
     assert.equal(builtinIsolation([call('Read', { file_path: inside }), call('Glob', { pattern: '**/*.ts' })], ['Read', 'Glob'], root).status, 'passed');
-    for (const input of [{ file_path: outside }, { path: '../outside' }, { pattern: outside }])
+    for (const input of [{ file_path: outside }, { path: '../outside' }])
       assert.equal(builtinIsolation([call('Read', input)], ['Read'], root).status, 'violated');
+    assert.equal(builtinIsolation([call('Glob', { pattern: outside })], ['Glob'], root).status, 'violated');
+    for (const name of ['Grep', 'Read']) {
+      for (const pattern of [String.raw`\.param\(|param.*test`, String.raw`\.IsValidAsync\(`])
+        assert.equal(builtinIsolation([call(name, { pattern })], [name], root).status, 'passed');
+    }
     assert.equal(builtinIsolation([call('Bash', {})], ['Read'], root).status, 'violated');
   }
+});
+
+test('only a changed corpus stops a built-in series, while server provenance failures still stop', () => {
+  for (const reason of ['outside-corpus', 'unlisted-tool']) {
+    const isolation = { status: 'violated', violations: [{ call: 1, reason }] };
+    assert.equal(corpusProvenanceFailed({ kind: 'builtin', eligibleForMetrics: false,
+      isolation, provenance: isolation }), false);
+  }
+  assert.equal(corpusProvenanceFailed({ kind: 'builtin', eligibleForMetrics: false,
+    provenance: { status: 'violated', violations: [{ reason: 'clone file count changed' }] } }), true);
+  assert.equal(corpusProvenanceFailed({ kind: 'devprojex',
+    provenance: { status: 'violated', violations: [{ call: 1, reason: 'foreign-project' }] } }), true);
+  for (const kind of ['builtin', 'devprojex'])
+    assert.equal(corpusProvenanceFailed({ kind, provenance: { status: 'passed', violations: [] } }), false);
 });
 
 test('Claude first request uses the first assistant usage including caches, never a later usage', () => {

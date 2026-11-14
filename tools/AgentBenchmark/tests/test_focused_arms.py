@@ -71,10 +71,15 @@ class FocusedArmTests(unittest.TestCase):
         for root, inside, outside in [('/clone', '/clone/a.ts', '/other/a.ts'),
                                       ('C:/clone', 'c:/clone/a.ts', 'D:/clone/a.ts')]:
             for key in ('file_path', 'path', 'pattern'):
-                call = {'sequence': 1, 'tool': 'Read', 'arguments': {key: inside}, 'is_error': True}
-                self.assertEqual('passed', check_builtin([call], root, ['Read'])['status'])
+                tool = 'Glob' if key == 'pattern' else 'Read'
+                call = {'sequence': 1, 'tool': tool, 'arguments': {key: inside}, 'is_error': True}
+                self.assertEqual('passed', check_builtin([call], root, [tool])['status'])
                 call['arguments'][key] = outside
-                self.assertEqual('violated', check_builtin([call], root, ['Read'])['status'])
+                self.assertEqual('violated', check_builtin([call], root, [tool])['status'])
+            for tool in ('Grep', 'Read'):
+                for pattern in (r'\.param\(|param.*test', r'\.IsValidAsync\('):
+                    call = {'sequence': 1, 'tool': tool, 'arguments': {'pattern': pattern}, 'is_error': True}
+                    self.assertEqual('passed', check_builtin([call], root, [tool])['status'])
             self.assertEqual('violated', check_builtin([{'sequence': 1, 'tool': 'Bash', 'arguments': {}}], root, ['Read'])['status'])
             self.assertEqual('violated', check_builtin([{'sequence': 1, 'tool': 'Grep', 'arguments': {'path': '../outside'}}], root, ['Grep'])['status'])
         self.assertFalse(benchlib.eligible_run({'eligibleForMetrics': False}))

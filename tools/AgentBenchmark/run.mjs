@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import {
   armFingerprint, verifyCorpus, buildMcpConfig, dataRoot, fingerprintMismatch, isTransientFailure, listOption,
   parseArgs, quoteForCmd, renderPrompt, resolveArm, summarize, usedArms, validateArms,
-  armAgent, armModel, agentSeries, effectivePrompt, claudeArguments, builtinIsolation,
+  armAgent, armModel, agentSeries, effectivePrompt, claudeArguments, builtinIsolation, corpusProvenanceFailed,
 } from './session.mjs';
 import { budgetStop, codexLauncher, codexPricing, executeCodex, summarizeCodex } from './codex.mjs';
 import { sessionProvenance } from './provenance.mjs';
@@ -244,7 +244,7 @@ await Promise.all(Array.from({ length: Math.min(options.parallel, queue.length) 
     const summary = await runJob(queue.shift());
     spent += summary.usage.costUsd;
     finished++;
-    const reason = summary.provenance.status !== 'passed' ? 'Corpus provenance failed' :
+    const reason = corpusProvenanceFailed(summary) ? 'Corpus provenance failed' :
       agent === 'codex' ? budgetStop(summary, spent, options['budget-usd'], finished === 1, jobs.length) : null;
     if (reason) {
       console.error(`${reason}: $${spent.toFixed(4)} recorded; do not start the remaining sessions`);
