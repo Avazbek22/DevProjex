@@ -9,15 +9,15 @@ public sealed partial class McpServerProcessTests
 	// recorded measurement, not the measurement itself: a ceiling with a few characters to spare is
 	// a tripwire for the next honest addition rather than a budget.
 	//
-	// Recorded on 2026-11-12 from the wire JSON with one local root: 27,141 characters.
+	// Recorded on 2026-11-12 from the wire JSON with one local root: 13,770 characters.
 	// Three additions are pinned as exact differences, so a growing parameter is reported by
 	// name: a second local root publishes project, --allow-remote publishes project and branch,
 	// and --allow-agent-exclusions publishes exclusions. The ceiling leaves 250 characters.
-	private const int ToolsListResultCeiling = 27_391;
-	private const int ToolsListResultFloor = 26_641;
-	private const int ExclusionsParameterCost = 2_961;
-	private const int ProjectParameterCost = 1_407;
-	private const int RemoteParameterCost = 2_030;
+	private const int ToolsListResultCeiling = 14_020;
+	private const int ToolsListResultFloor = 13_270;
+	private const int ExclusionsParameterCost = 2_115;
+	private const int ProjectParameterCost = 1_820;
+	private const int RemoteParameterCost = 2_265;
 	private const int InstructionsCeiling = 1_200;
 	private const int InstructionsFloor = 900;
 
@@ -28,7 +28,7 @@ public sealed partial class McpServerProcessTests
 		Assert.InRange(defaultPayload, ToolsListResultFloor, ToolsListResultCeiling);
 		Assert.InRange(instructions.Length, InstructionsFloor, InstructionsCeiling);
 
-		// A delegation server publishes the exclusion parameter on seven tools and pays for nothing
+		// A delegation server publishes the exclusion parameter on five tools and pays for nothing
 		// else, so the whole difference is that parameter. Pinning it exactly reports a growing
 		// parameter by name instead of waiting for a total to cross a line.
 		var (delegationPayload, delegationInstructions) =
@@ -46,7 +46,7 @@ public sealed partial class McpServerProcessTests
 		Assert.Equal(ProjectParameterCost, multiplePayload - defaultPayload);
 		Assert.Equal(RemoteParameterCost, remotePayload - defaultPayload);
 		Assert.InRange(multipleInstructions.Length, InstructionsFloor, InstructionsCeiling);
-		Assert.Equal(instructions, remoteInstructions);
+		Assert.Contains("list_projects", remoteInstructions, StringComparison.Ordinal);
 		TestContext.Current.TestOutputHelper?.WriteLine(
 			$"tools/list result: two roots={multiplePayload}; remote={remotePayload}.");
 	}
@@ -60,21 +60,17 @@ public sealed partial class McpServerProcessTests
 		if (secondRoot)
 			additionalArguments = additionalArguments.Concat(["--root", workspace.CreateDirectory("second")]).ToArray();
 		var (process, client, errorTask, output) =
-			await StartPublishedMcpAsync(workspace, project, additionalArguments);
+			await StartPublishedMcpAsync(workspace, project, additionalArguments, useDefaultToolSet: true);
 		string instructions;
 		int payload;
 		try
 		{
 			instructions = Assert.IsType<string>(client.ServerInstructions);
 			var tools = await client.ListToolsAsync(options: null, TestContext.Current.CancellationToken);
-			Assert.Equal(ExpectedTools, tools.Select(static tool => tool.Name));
+			Assert.Equal(secondRoot || additionalArguments.Contains("--allow-remote", StringComparer.Ordinal)
+				? new[] { "list_projects" }.Concat(ReducedTools) : ReducedTools, tools.Select(static tool => tool.Name));
 			var delivered = ReadToolsListResult(output.GetRecordedText());
 			payload = delivered.Length;
-			using var document = JsonDocument.Parse(delivered);
-			var pack = document.RootElement.GetProperty("tools").EnumerateArray()
-				.Single(static tool => tool.GetProperty("name").GetString() == "pack_context");
-			TestContext.Current.TestOutputHelper?.WriteLine(
-				$"PACK_TOTAL={pack.GetRawText().Length}; PACK_SCHEMA={pack.GetProperty("inputSchema").GetRawText().Length}.");
 		}
 		finally
 		{

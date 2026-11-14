@@ -119,11 +119,12 @@ defaulting to 1,800; `off` disables bodies but keeps declaration ranges and matc
 Invalid values fail before startup. The total search response budget remains
 16,000 characters; catalog descriptions and instructions reflect the chosen limit.
 `--tool-set full|reduced` selects a
-startup-fixed catalog: `full` (default) has all nine tools; `reduced` has
-`list_projects`, `get_tree`, `search_project`, `related_files`, `get_file`,
-`get_diff`, and `read_pack`, but not `analyze` or `pack_context`. Instructions match the selected
-set; retained search and dependency pages remain readable. Omitted tools return
-the normal unknown-tool error. Secret redaction is mandatory; private-data
+startup-fixed catalog: `reduced` (default) has `get_tree`, `search_project`, `related_files`,
+`get_file`, `get_diff`, and `read_pack`, adds `list_projects` with several local roots or
+`--allow-remote`, and publishes only the parameters agents use; `full` has all nine tools, with
+`analyze` and `pack_context`, and every parameter. Instructions match the selected
+set; retained search and dependency pages remain readable. A tool that is not published returns
+the normal unknown-tool error; a parameter that is not published is still accepted. Secret redaction is mandatory; private-data
 redaction is enabled only by the server startup flag and cannot be controlled by
 tools. Remote Git URL project arguments are disabled by default; `--allow-remote`
 enables RepoCache-backed clone/acquire for MCP project tools without changing

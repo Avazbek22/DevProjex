@@ -19,17 +19,18 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 		ArgumentNullException.ThrowIfNull(target);
 		var publishProject = rootCount > 1 || allowRemote;
 		var addressProperties = AddressProperties(publishProject, allowRemote);
+		var reduced = toolSet == McpToolSet.Reduced;
 		_tools =
 		[
 			Create(target, nameof(DevProjexMcpTools.ListProjects), "list_projects", "List projects", ListProjectsInput, ListProjectsOutput),
-			Create(target, nameof(DevProjexMcpTools.GetTree), "get_tree", "Get project tree", GetTreeInput(agentExclusions, addressProperties), openWorld: allowRemote, publishProject: publishProject),
+			Create(target, nameof(DevProjexMcpTools.GetTree), "get_tree", "Get project tree", GetTreeInput(agentExclusions, addressProperties, reduced), openWorld: allowRemote, publishProject: publishProject),
 			Create(target, nameof(DevProjexMcpTools.Analyze), "analyze", "Analyze project", AnalyzeInput(agentExclusions, addressProperties), AnalyzeOutput, openWorld: allowRemote, publishProject: publishProject),
 			Create(target, nameof(DevProjexMcpTools.PackContext), "pack_context", "Pack project context", PackContextInput(agentExclusions, addressProperties), largeResult: true, idempotent: false, openWorld: allowRemote, publishProject: publishProject),
 			Create(target, nameof(DevProjexMcpTools.ReadPack), "read_pack", "Read context pack", ReadPackInput, largeResult: true),
-			Create(target, nameof(DevProjexMcpTools.SearchProject), "search_project", "Search project", SearchInput(agentExclusions, addressProperties), openWorld: allowRemote, publishProject: publishProject),
-			Create(target, nameof(DevProjexMcpTools.RelatedFiles), "related_files", "Find related files", RelatedFilesInput(agentExclusions, addressProperties), largeResult: true, idempotent: false, openWorld: allowRemote, publishProject: publishProject),
-			Create(target, nameof(DevProjexMcpTools.GetFile), "get_file", "Get project file", GetFileInput(agentExclusions, addressProperties), openWorld: allowRemote, publishProject: publishProject),
-			Create(target, nameof(DevProjexMcpTools.GetDiff), "get_diff", "Get project diff", GetDiffInput(agentExclusions, addressProperties), openWorld: allowRemote, publishProject: publishProject)
+			Create(target, nameof(DevProjexMcpTools.SearchProject), "search_project", "Search project", SearchInput(agentExclusions, addressProperties, reduced), openWorld: allowRemote, publishProject: publishProject),
+			Create(target, nameof(DevProjexMcpTools.RelatedFiles), "related_files", "Find related files", RelatedFilesInput(agentExclusions, addressProperties, reduced), largeResult: true, idempotent: false, openWorld: allowRemote, publishProject: publishProject),
+			Create(target, nameof(DevProjexMcpTools.GetFile), "get_file", "Get project file", GetFileInput(agentExclusions, addressProperties, reduced), openWorld: allowRemote, publishProject: publishProject),
+			Create(target, nameof(DevProjexMcpTools.GetDiff), "get_diff", "Get project diff", GetDiffInput(agentExclusions, addressProperties, reduced), openWorld: allowRemote, publishProject: publishProject)
 		];
 		var search = _tools.Single(tool => tool.ProtocolTool.Name == "search_project").ProtocolTool;
 		search.Description = searchBodyCharacters == 0
@@ -38,7 +39,8 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 			: search.Description?.Replace("1,800", searchBodyCharacters.ToString("N0", System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal);
 		if (toolSet == McpToolSet.Reduced)
 		{
-			_tools = _tools.Where(tool => tool.ProtocolTool.Name is not ("analyze" or "pack_context")).ToArray();
+			_tools = _tools.Where(tool => tool.ProtocolTool.Name is not ("analyze" or "pack_context") &&
+				(tool.ProtocolTool.Name != "list_projects" || publishProject)).ToArray();
 			foreach (var tool in _tools)
 			{
 				tool.ProtocolTool.Description = ReducedDescription(tool.ProtocolTool.Description);
@@ -68,7 +70,14 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 			"use search_project for evidence or related_files for dependencies when none is valid.", StringComparison.Ordinal)
 		.Replace("use pack_context instead when no valid stored result exists.",
 			"use search_project for evidence or related_files for dependencies when no valid stored result exists.", StringComparison.Ordinal)
-		.Replace("use pack_context for broad multi-file context.", "use batched requests for several known files.", StringComparison.Ordinal);
+		.Replace("use pack_context for broad multi-file context.", "use batched requests for several known files.", StringComparison.Ordinal)
+		.Replace("git_scope and filters only narrow.", "filters only narrow.", StringComparison.Ordinal)
+		.Replace("Key parameters: pattern, paths, context_lines, ignore_case, max_results=1..200, git_scope, include_patterns, exclude_patterns, and max_file_bytes.",
+			"Key parameters: pattern, paths, context_lines, ignore_case, max_results=1..200, include_patterns, exclude_patterns, and max_file_bytes.", StringComparison.Ordinal)
+		.Replace("Key parameters: path, direction=dependencies|dependents|both, include_patterns, exclude_patterns, git_scope, profile, and max_file_bytes.",
+			"Key parameters: path, direction=dependencies|dependents|both, and include_patterns.", StringComparison.Ordinal)
+		.Replace("Key parameters: git_scope=changes|staged|diff:A..B (default changes), paths, include_patterns, exclude_patterns, context_lines=0..20.",
+			"Key parameters: git_scope=changes|staged|diff:A..B (default changes), paths, include_patterns, context_lines=0..20.", StringComparison.Ordinal);
 
 	public int Count => _tools.Count;
 	public McpServerTool this[int index] => _tools[index];
@@ -356,16 +365,16 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 
 	private static readonly string ListProjectsInput = EmptyInput;
 
-	private static string GetTreeInput(bool agentExclusions, string addressProperties) => $$"""
+	private static string GetTreeInput(bool agentExclusions, string addressProperties, bool reduced) => $$"""
 	{
 	  "type": "object",
 	  "properties": {
 	    {{addressProperties}}	    {{CompactPathsProperty}},
 	    {{CompactIncludeProperty}},
 	    {{CompactExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
-	    {{CompactTrackedOnlyProperty}},
-	    {{CompactGitScopeProperty}},
-	    {{CompactMaxFileBytesProperty}},
+	    {{(reduced ? "" : CompactTrackedOnlyProperty + ",")}}
+	    {{(reduced ? "" : CompactGitScopeProperty + ",")}}
+	    {{(reduced ? "" : CompactMaxFileBytesProperty + ",")}}
 	    "max_depth": {
 	      "description": "Limits levels below each requested paths entry, or below the project root when paths is omitted; omit it for the deepest complete tree that fits.",
 	      "oneOf": [ { "type": "integer", "minimum": 0, "maximum": 1000 }, { "type": "string" } ]
@@ -436,7 +445,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	}
 	""";
 
-	private static string SearchInput(bool agentExclusions, string addressProperties) => $$"""
+	private static string SearchInput(bool agentExclusions, string addressProperties, bool reduced) => $$"""
 	{
 	  "type": "object",
 	  "properties": {
@@ -444,8 +453,8 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{CompactPathsProperty}},
 	    {{CompactIncludeProperty}},
 	    {{CompactExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
-	    {{CompactTrackedOnlyProperty}},
-	    {{CompactGitScopeProperty}},
+	    {{(reduced ? "" : CompactTrackedOnlyProperty + ",")}}
+	    {{(reduced ? "" : CompactGitScopeProperty + ",")}}
 	    {{CompactMaxFileBytesProperty}},
 	    "context_lines": { "description": "Context lines per match; overlapping windows merge.", "oneOf": [ { "type": "integer", "minimum": 0, "maximum": 20 }, { "type": "string" } ] },
 	    "ignore_case": { "description": "Enables case-insensitive matching; accepts a boolean or its string form.", "default": true, "oneOf": [ { "type": "boolean" }, { "type": "string", "enum": ["true", "false"] } ] },
@@ -457,11 +466,18 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	}
 	""";
 
-	private static string GetFileInput(bool agentExclusions, string addressProperties) => $$"""
+	private static string ProfileAndExclusionsProperties(bool reduced, bool agentExclusions)
+	{
+		if (!reduced)
+			return CompactProfileProperty + (agentExclusions ? ExclusionsPropertyFragment() : "") + ",";
+		return agentExclusions ? ExclusionsPropertyFragment().TrimStart().TrimStart(',') + "," : string.Empty;
+	}
+
+	private static string GetFileInput(bool agentExclusions, string addressProperties, bool reduced) => $$"""
 	{
 	  "type": "object",
 	  "properties": {
-	    {{addressProperties}}	    {{CompactProfileProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
+	    {{addressProperties}}	    {{ProfileAndExclusionsProperties(reduced, agentExclusions)}}
 	    "path": {
 	      "description": "One file, or an array of up to sixteen whole files. Give path, paths, or requests; path and paths may accompany requests and add whole-file reads. Names an existing selected file; Markdown escapes from the default get_tree format are accepted, while format=text supplies literal names.",
 	      "oneOf": [
@@ -511,7 +527,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	}
 	""";
 
-	private static string RelatedFilesInput(bool agentExclusions, string addressProperties) => $$"""
+	private static string RelatedFilesInput(bool agentExclusions, string addressProperties, bool reduced) => $$"""
 	{
 	  "type": "object",
 	  "properties": {
@@ -523,23 +539,22 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	      ]
 	    },
 	    "direction": { "type": "string", "enum": ["dependencies", "dependents", "both"], "default": "both", "description": "Chooses outward dependencies, inward dependents, or both." },
-	    {{CompactIncludeProperty}},
-	    {{CompactExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
-	    {{CompactProfileProperty}},
-	    {{CompactTrackedOnlyProperty}},
-	    {{CompactGitScopeProperty}},
-	    {{CompactMaxFileBytesProperty}}
+	    {{CompactIncludeProperty}}{{(reduced ? (agentExclusions ? ExclusionsPropertyFragment() : "") : "," + CompactExcludeProperty + (agentExclusions ? ExclusionsPropertyFragment() : "") + ",")}}
+	    {{(reduced ? "" : CompactProfileProperty + ",")}}
+	    {{(reduced ? "" : CompactTrackedOnlyProperty + ",")}}
+	    {{(reduced ? "" : CompactGitScopeProperty + ",")}}
+	    {{(reduced ? "" : CompactMaxFileBytesProperty)}}
 	  },
 	  "required": ["path"],
 	  "additionalProperties": false
 	}
 	""";
 
-	private static string GetDiffInput(bool agentExclusions, string addressProperties) => $$"""
+	private static string GetDiffInput(bool agentExclusions, string addressProperties, bool reduced) => $$"""
 	{
 	  "type": "object",
 	  "properties": {
-	    {{addressProperties}}	    {{CompactProfileProperty}},
+	    {{addressProperties}}	    {{(reduced ? "" : CompactProfileProperty + ",")}}
 	    "git_scope": {
 	      "description": "Chooses the comparison: changes is HEAD to the working tree including untracked files, staged is HEAD to the index, and diff:<ref>..<ref> compares two commits.",
 	      "default": "changes",
@@ -549,10 +564,9 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	      ]
 	    },
 	    {{CompactPathsProperty}},
-	    {{CompactIncludeProperty}},
-	    {{CompactExcludeProperty}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
-	    {{CompactTrackedOnlyProperty}},
-	    {{CompactMaxFileBytesProperty}},
+	    {{CompactIncludeProperty}}{{(reduced ? "" : "," + CompactExcludeProperty)}}{{(agentExclusions ? ExclusionsPropertyFragment() : "")}},
+	    {{(reduced ? "" : CompactTrackedOnlyProperty + ",")}}
+	    {{(reduced ? "" : CompactMaxFileBytesProperty + ",")}}
 	    "context_lines": { "description": "Unchanged lines around each change; hunks whose context touches merge.", "default": 3, "oneOf": [ { "type": "integer", "minimum": 0, "maximum": 20 }, { "type": "string" } ] }
 	  },
 	  "additionalProperties": false

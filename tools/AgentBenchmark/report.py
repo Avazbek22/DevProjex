@@ -40,7 +40,7 @@ def table(header, rows):
     return '\n'.join(lines)
 
 
-def key_metrics_table(scores, arms, cost_precision=2):
+def key_metrics_table(scores, arms, cost_precision=2, first_request=True):
     rows = [
         ('Key versions', lambda s: benchlib.format_key_versions(s['key_versions'])),
         ('Sessions', lambda s: s['sessions']),
@@ -58,6 +58,10 @@ def key_metrics_table(scores, arms, cost_precision=2):
         ('Cost', lambda s: f"${s['cost']:.{cost_precision}f}"),
         ('Time, s (sum)', lambda s: f"{s['duration_ms'] / 1000:.0f}"),
     ]
+    if first_request:
+        rows.append(('First request', lambda score:
+                     f"{statistics.median(score['first_request_context_tokens']):,}"
+                     if score.get('first_request_context_tokens') else '—'))
     from mechanisms import COUNTERS
     rows.extend((name, lambda score, key=name: score[key]) for name in COUNTERS)
     return table(['Metric'] + [label for _, label in arms],
@@ -165,7 +169,7 @@ def build_report(work, tasks_data, arms, task_ids, skip_invented, agent='claude'
         f"# Series {results.name}: {', '.join(label for _, label in arms)}", '',
         f"{len(task_ids)} tasks. Context tokens are every input token the model processed, cached input included.",
         '', '## Run configuration', '', run_configuration(results, arms),
-        '', '## Key metrics', '', key_metrics_table(scores, arms, 6 if agent == 'codex' else 2), '',
+        '', '## Key metrics', '', key_metrics_table(scores, arms, 6 if agent == 'codex' else 2, agent == 'claude'), '',
         'Agent self-trust scores: ' + ' / '.join(' '.join(str(t) for t in trusts[arm] if t) or '-' for arm, _ in arms),
         '', '## Per task', '', per_task_table(results, tasks_data, arms, task_ids, roots, key_version),
     ]

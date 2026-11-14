@@ -112,8 +112,23 @@ def check_provenance(calls, root, server, manifest=None):
     return {'status': 'violated' if violations else 'passed', 'violations': violations}
 
 
+def check_builtin(calls, root, tools):
+    violations = []
+    for call in calls:
+        if call['tool'] not in tools:
+            violations.append({'call': call['sequence'], 'reason': 'unlisted-tool'})
+        for key, value in call['arguments'].items():
+            if not isinstance(value, str):
+                continue
+            if key in ('file_path', 'path') or key == 'pattern' and call['tool'] == 'Glob' and benchlib._absolute_answer_path(value.replace('\\', '/')):
+                if relative_to_root(value, root) is None:
+                    violations.append({'call': call['sequence'], 'reason': 'outside-corpus', 'argument': key})
+    return {'status': 'violated' if violations else 'passed', 'violations': violations}
+
+
 def inspect_session(folder, root=None, server=None, manifest=None):
     folder = Path(folder)
+    summary = json.loads((folder / 'summary.json').read_text(encoding='utf-8')) if (folder / 'summary.json').is_file() else {}
     if server is None:
         summary = json.loads((folder / 'summary.json').read_text(encoding='utf-8'))
         server = summary['server']
@@ -121,6 +136,8 @@ def inspect_session(folder, root=None, server=None, manifest=None):
     if not root:
         return {'status': 'unverified', 'violations': [{'reason': 'missing-corpus-root'}]}
     try:
+        if summary.get('kind') == 'builtin':
+            return check_builtin(recorded_calls(folder / 'stream.jsonl', include_builtin=True), root, summary['builtin'])
         return check_provenance(recorded_calls(folder / 'stream.jsonl'), root, server, manifest)
     except (OSError, ValueError, KeyError):
         return {'status': 'unverified', 'violations': [{'reason': 'invalid-or-missing-transcript'}]}

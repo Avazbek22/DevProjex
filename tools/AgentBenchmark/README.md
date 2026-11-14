@@ -96,6 +96,15 @@ Commands run from `tools/AgentBenchmark`.
      "server_l": { "product": "Repomix 1.18.1", "repomix": "1.18.1" } }
    ```
 
+   An arm of a DevProjex host may add `"args": ["--tool-set", "full"]`: extra arguments for the
+   server process, recorded with the arm and compared on `--resume`. Two arms can then run one
+   host under two startup configurations. An arm without a server,
+   `{ "product": "Claude Code built-in tools", "builtin": ["Read", "Grep", "Glob"] }`, runs
+   Claude Code with only those built-in tools from the clone as its working directory; the prompt
+   names the tools in place of a server, and a read outside the clone excludes the session from
+   the metrics. The judge compares only the answers of a pair that includes such an arm, and the
+   path-evidence and replay tools leave it out.
+
 4. **Check the plan for free**, then run:
    ```
    node run.mjs --tasks-file tasks/fourteen.json --arms-file my-arms.json --dry-run
@@ -257,6 +266,9 @@ fixture and a fake CLI, and never need an installed Codex or a model call.
 - **Cost, time**: as the client reported them; Codex cost is the recorded API-rate estimate above.
 - **Judge tables**: wins of each arm, ties and order-dependent pairs per criterion, then mean 1-5
   scores and the claims the judge flagged.
+- **First request**: for Claude sessions, the context of the first model request of a session:
+  the system prompt, the tool catalog and the task. It is what every later request of that
+  session carries again; the report prints its median per arm.
 
 Relative paths keep the historical suffix matching. Absolute paths are converted to relative
 paths only inside the prepared corpus root, including Windows drive paths in Markdown links;
@@ -292,7 +304,10 @@ Replay needs no client sign-in and makes no model call:
 python replay.py --session <run-folder> --corpus <prepared-clone> --host <devprojex> --output <new-folder>
 python replay.py --session <run-folder> --corpus <prepared-clone> --host <before> --other-host <after> --output <new-folder>
 python replay.py --session <run-folder> --corpus <prepared-clone> --host <devprojex> --recorded --output <new-folder>
+python replay.py --session <run-folder> --corpus <prepared-clone> --host <devprojex> --other-host <devprojex> --other-host-arg=--tool-set --other-host-arg=full --output <new-folder>
 ```
+
+`--host-arg` and `--other-host-arg` each add one argument to the server command of their host and may be repeated. A value that starts with dashes is written in the `=` form, as above. Both lists are saved in `manifest.json` of the output folder.
 
 The default compares two fresh server sessions of the same host. The corpus must be pinned and
 prepared first; use a new output folder. Calls retain their order and arguments; absolute corpus

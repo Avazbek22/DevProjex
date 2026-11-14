@@ -9,13 +9,16 @@ server starts with `--allow-remote`.
 devprojex mcp --root /absolute/path/to/project
 ```
 
-The default `--tool-set full` publishes all nine tools, with unchanged instructions
-and responses. `--tool-set reduced` publishes exactly `list_projects`, `get_tree`,
-`search_project`, `related_files`, `get_file`, `get_diff`, and `read_pack`; it omits `analyze`
-and `pack_context`. The set is fixed at startup, not changed during a session.
-Reduced instructions and catalog guidance do not mention omitted tools. Calling an omitted tool returns
-the normal unknown-tool protocol error (`-32602`) naming that tool. `read_pack`
-continues to read retained search and dependency results in either set.
+The default `--tool-set reduced` publishes the tools and parameters an agent uses in ordinary
+work: `get_tree`, `search_project`, `get_file`, `related_files`, `get_diff` and `read_pack`, and
+also `list_projects` when the server has several local roots or was started with
+`--allow-remote`. `--tool-set full` publishes all nine tools, adding `analyze` and
+`pack_context`, and every parameter of every tool. The set is fixed at startup, not changed
+during a session. Reduced instructions and catalog guidance do not mention a tool or a parameter
+that is not published. Calling a tool that is not published returns the normal unknown-tool
+protocol error (`-32602`) naming that tool. A parameter that the reduced set does not publish is
+still accepted, with the same validation and the same errors. `read_pack` continues to read
+retained search and dependency results in either set.
 
 Every text block the server composes itself uses LF line endings on every platform,
 including Windows, so a response does not depend on the host's newline convention.
@@ -255,10 +258,10 @@ Desktop and Terminal remove records whose process
 identity no longer matches or whose heartbeat is older than 15 seconds; a
 healthy server updates every 5 seconds and removes its record on normal exit.
 
-The process measurement on Windows x64 with one local root gives 27,141 characters for the
-full `tools/list` result and 17,994 for reduced. These correspond to roughly
-6,785 and 4,499 tokens using the character/4 estimate, not model usage. Process
-budgets are 27,391 and 18,244 characters respectively.
+The process measurement on Windows x64 with one local root gives 13,770 characters
+for the default reduced `tools/list` result and 27,141 for full. These correspond to roughly
+3,443 and 6,785 tokens using the character/4 estimate, not model usage. Process
+budgets are 14,020 and 27,391 characters respectively.
 
 Repeat `--root` to expose more than one project. When no explicit root is given,
 DevProjex uses `DEVPROJEX_ROOT`, then `CLAUDE_PROJECT_DIR`, then the current
@@ -570,8 +573,7 @@ with recording. The 0.036 ms difference was below the baseline spread.
   ids are random, valid only in the current server process, and removed at exit.
   After a server restart, rerun the tool that created the stored result to create
   a new id: `pack_context` for context packs, `search_project` for saved searches,
-  or `related_files` for saved dependency results. `pack_context` is unavailable
-  in the reduced tool set.
+  or `related_files` for saved dependency results. `pack_context` is published only by `--tool-set full`.
   Stale session directories older than 24 hours are scavenged at startup. A
   stored pack is limited to 200 MiB and all packs in one server session are
   limited to 1 GiB. To place a new pack within the session limit, the server evicts
@@ -659,11 +661,13 @@ that data uses depends on the client and how it loads tools:
 
 | Payload | Characters |
 |---|---:|
-| `tools/list` C# client wire result, one local root | 27,141 |
-| `tools/list` C# client wire result, two local roots | 28,548 |
-| `tools/list` C# client wire result, one local root with `--allow-remote` | 29,171 |
-| `tools/list` C# client wire result, one local root with per-call exclusions | 30,102 |
-| `instructions`, one local root | 1,197 |
+| `tools/list` C# client wire result, one local root | 13,770 |
+| `tools/list` C# client wire result, two local roots | 15,590 |
+| `tools/list` C# client wire result, one local root with `--allow-remote` | 16,035 |
+| `tools/list` C# client wire result, one local root with per-call exclusions | 15,885 |
+| `tools/list` C# client wire result, one local root, `--tool-set full` | 27,141 |
+| `instructions`, one local root | 966 |
+| `instructions`, one local root, `--tool-set full` | 1,197 |
 
 The catalog publishes the parameters a caller can use under the server's startup configuration.
 `project` is published, and the descriptions of the tools that take it end with the sentence
@@ -671,8 +675,21 @@ that explains it, only when the server has several local roots or was started wi
 `--allow-remote`: with one local root there is nothing to choose. `branch` is published only
 with `--allow-remote`, because it applies to remote Git sources alone. A parameter that is not
 published is still accepted, with the same validation and the same errors, so a caller that
-sends it keeps working. The roots and `--allow-remote` are fixed at startup, and so is the
-catalog.
+sends it keeps working. The roots, `--allow-remote` and the tool set are fixed at startup, and so
+is the catalog.
+
+The default reduced set publishes less than the full set, because a client sends the catalog to
+the model with every request. It leaves out `analyze` and `pack_context`, publishes
+`list_projects` only when there is more than one project to choose from, and leaves out the
+filters that recorded agent sessions did not use: `tracked_only`, `git_scope` and
+`max_file_bytes` on `get_tree`; `tracked_only` and `git_scope` on `search_project`;
+`exclude_patterns`, `profile`, `tracked_only`, `git_scope` and `max_file_bytes` on
+`related_files`; `profile` on `get_file`; `profile`, `exclude_patterns`, `tracked_only` and
+`max_file_bytes` on `get_diff`. Each of them is still accepted. A parameter that a tool's own
+response tells the caller to use stays published on that tool: `exclude_patterns` on `get_tree`,
+`max_file_bytes` on `search_project`, `paths` and `include_patterns` on `get_diff`, and
+`start_column` on `get_file` and `read_pack`. `--tool-set full` publishes every tool and every
+parameter of the table below.
 
 Input schemas publish types, accepted values, numeric ranges and defaults. A string length, an
 array size or a regular-expression pattern that the server checks itself is not published: the
@@ -684,14 +701,18 @@ empty `profile` as an omitted one and does not check the length of a scalar `sym
 
 Removing the two output schemas reduced the default catalog from 42,370 characters at the base
 revision to 32,516, and concise descriptions brought it below 28,000. Later parameters and the
-`get_diff` tool raised it to 32,400 by 2026-11-11. On 2026-11-12 the two rules above brought the
-one-root catalog to 27,141. `pack_context` is the largest single tool at 4,972 characters,
-including 4,106 characters of input schema. A second local root adds 1,407 characters by
-publishing `project` and its sentence on seven tools, `--allow-remote` adds 2,030, and the
-`exclusions` parameter costs a flat 2,961, 423 on each of the seven tools that take it. A
-process test holds the one-root `tools/list` result and the instructions under ceilings with
-deliberate headroom, and pins those three costs as exact differences, so a new parameter or
-description has to fit a budget rather than grow one silently.
+`get_diff` tool raised it to 32,400 by 2026-11-11. On 2026-11-12 publishing `project` and
+`branch` only where they apply, and leaving lengths, sizes and patterns to the server's own
+checks, brought the one-root full catalog to 27,141, where it stays. The same day the
+reduced set became the default and stopped publishing the unused filters: 13,770
+characters with one local root. In the default set a second local root adds 1,820
+characters by publishing `list_projects`, `project` and its sentence, `--allow-remote` adds
+2,265, and the `exclusions` parameter costs 2,115, 423 on each
+of the 5 tools that take it. In the full set `pack_context` is the largest
+single tool at 4,972 characters, including 4,106 characters of input schema. Process tests hold
+the one-root `tools/list` result of each set and the instructions under ceilings with deliberate
+headroom, pin those three costs as exact differences, and pin the full one-root result by its
+hash, so a new parameter or description has to fit a budget rather than grow one silently.
 
 | Tool | Parameters | Result and limits |
 |---|---|---|

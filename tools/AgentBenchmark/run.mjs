@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import {
   armFingerprint, verifyCorpus, buildMcpConfig, dataRoot, fingerprintMismatch, isTransientFailure, listOption,
   parseArgs, quoteForCmd, renderPrompt, resolveArm, summarize, usedArms, validateArms,
-  armAgent, armModel, agentSeries,
+  armAgent, armModel, agentSeries, effectivePrompt, claudeArguments, builtinIsolation, corpusProvenanceFailed,
 } from './session.mjs';
 import { budgetStop, codexLauncher, codexPricing, executeCodex, summarizeCodex } from './codex.mjs';
 import { sessionProvenance } from './provenance.mjs';
@@ -121,7 +121,7 @@ function prepareJob(job) {
   const dataPath = dataRoot(work, series, job.server, job.task.repo);
   const config = buildMcpConfig(job.server, resolved[job.server], repoPath, dataPath);
   const configPath = join(results, 'cfg', `${job.server}-${job.task.repo}.json`);
-  return { repoPath, dataPath, config, configPath, prompt: renderPrompt(promptTemplate, repoPath, job.server, job.task.text) };
+  return { repoPath, dataPath, config, configPath, builtin: resolved[job.server].builtin, prompt: renderPrompt(effectivePrompt(promptTemplate, resolved[job.server]), repoPath, job.server, job.task.text) };
 }
 
 if (options['dry-run']) {
@@ -145,9 +145,7 @@ for (const name of selectedArms) {
 }
 
 function claudeArgs(plan, model) {
-  const args = ['-p', '--mcp-config', plan.configPath, '--strict-mcp-config', '--tools', '',
-    '--allowedTools', `mcp__${plan.server}__*`, '--max-turns', String(options['max-turns']), '--no-session-persistence',
-    '--output-format', 'stream-json', '--verbose', '--model', model];
+  const args = claudeArguments(plan, model, options['max-turns']);
   return process.platform === 'win32' ? args.map(quoteForCmd) : args;
 }
 
@@ -179,7 +177,14 @@ function runJob(job) {
       writeFileSync(join(job.out, 'stream.jsonl'), stdout);
       writeFileSync(join(job.out, 'stderr.txt'), stderr);
       const summary = summarize(job, stdout, code, Date.now() - started);
-      summary.provenance = sessionProvenance(job.out, plan.repoPath, join(work, 'corpora', `${job.task.repo}.stand.json`), job.server);
+      if (plan.builtin) {
+        summary.kind = 'builtin';
+        summary.builtin = plan.builtin;
+        summary.isolation = builtinIsolation(summary.toolCalls, plan.builtin, plan.repoPath);
+        const corpusProblem = verifyCorpus(work, job.task.repo);
+        summary.provenance = corpusProblem ? { status: 'violated', violations: [{ reason: corpusProblem }] } : summary.isolation;
+        summary.eligibleForMetrics = summary.provenance.status === 'passed';
+      } else summary.provenance = sessionProvenance(job.out, plan.repoPath, join(work, 'corpora', `${job.task.repo}.stand.json`), job.server);
       const name = isTransientFailure(summary) ? `failed-${Date.now()}.json` : 'summary.json';
       writeFileSync(join(job.out, name), JSON.stringify(summary, null, 2));
       console.log(`${job.id}: exit=${code} turns=${summary.numTurns} calls=${summary.toolCalls.length} `
@@ -239,7 +244,7 @@ await Promise.all(Array.from({ length: Math.min(options.parallel, queue.length) 
     const summary = await runJob(queue.shift());
     spent += summary.usage.costUsd;
     finished++;
-    const reason = summary.provenance.status !== 'passed' ? 'Corpus provenance failed' :
+    const reason = corpusProvenanceFailed(summary) ? 'Corpus provenance failed' :
       agent === 'codex' ? budgetStop(summary, spent, options['budget-usd'], finished === 1, jobs.length) : null;
     if (reason) {
       console.error(`${reason}: $${spent.toFixed(4)} recorded; do not start the remaining sessions`);

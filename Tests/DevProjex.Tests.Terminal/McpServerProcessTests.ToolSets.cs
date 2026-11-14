@@ -6,13 +6,13 @@ namespace DevProjex.Tests.Terminal;
 public sealed partial class McpServerProcessTests
 {
 	private static readonly string[] ReducedTools =
-		["list_projects", "get_tree", "read_pack", "search_project", "related_files", "get_file", "get_diff"];
+		["get_tree", "read_pack", "search_project", "related_files", "get_file", "get_diff"];
 
 	[Theory]
 	[InlineData("full", false, 27_391)]
 	[InlineData("full", true, 30_352)]
-	[InlineData("reduced", false, 18_244)]
-	[InlineData("reduced", true, 20_359)]
+	[InlineData("reduced", false, 14_020)]
+	[InlineData("reduced", true, 16_135)]
 	public async Task RealProcessPublishesTheSelectedToolSetWithinItsOwnBudget(string toolSet, bool delegated, int ceiling)
 	{
 		using var workspace = new TemporaryDirectory();
@@ -40,9 +40,26 @@ public sealed partial class McpServerProcessTests
 			Assert.Equal(toolSet == "full" ? 86 : 87,
 				file.Description!.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length);
 			Assert.Equal(toolSet == "full" ? 623 : 622, file.Description.Length);
-			var projects = tools.Single(tool => tool.Name == "list_projects");
-			Assert.Equal(70, projects.Description!.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length);
-			Assert.Equal(467, projects.Description.Length);
+			if (toolSet == "full")
+			{
+				var projects = tools.Single(tool => tool.Name == "list_projects");
+				Assert.Equal(70, projects.Description!.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length);
+				Assert.Equal(467, projects.Description.Length);
+			}
+			else
+			{
+				var words = new Dictionary<string, int>
+				{
+					["get_tree"] = 57,
+					["read_pack"] = 62,
+					["search_project"] = 83,
+					["related_files"] = 83,
+					["get_file"] = 87,
+					["get_diff"] = 65
+				};
+				foreach (var tool in tools)
+					Assert.Equal(words[tool.Name], tool.Description!.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length);
+			}
 			var size = ReadToolsListResult(output.GetRecordedText()).Length;
 			TestContext.Current.TestOutputHelper!.WriteLine($"{toolSet} catalog characters={size}");
 			Assert.InRange(size, 1, ceiling);
@@ -54,13 +71,13 @@ public sealed partial class McpServerProcessTests
 				Assert.DoesNotContain("pack_context", instructions, StringComparison.Ordinal);
 				foreach (var tool in tools)
 				{
-					foreach (var hidden in new[] { "analyze", "pack_context" })
+					foreach (var hidden in new[] { "analyze", "pack_context", "list_projects" })
 					{
 						Assert.DoesNotContain(hidden, tool.Description ?? string.Empty, StringComparison.Ordinal);
 						Assert.DoesNotContain(hidden, tool.ProtocolTool.InputSchema.GetRawText(), StringComparison.Ordinal);
 					}
 				}
-				foreach (var hidden in new[] { "analyze", "pack_context" })
+				foreach (var hidden in new[] { "analyze", "pack_context", "list_projects" })
 				{
 					var exception = await Assert.ThrowsAsync<McpProtocolException>(() => client.CallToolAsync(
 						hidden, new Dictionary<string, object?>(), progress: null, options: null,
@@ -103,7 +120,10 @@ public sealed partial class McpServerProcessTests
 			.Select(static properties => properties.GetProperty("profile").GetProperty("description").GetString())
 			.ToArray();
 
-		Assert.NotEmpty(descriptions);
+		if (toolSet == "full")
+			Assert.NotEmpty(descriptions);
+		else
+			Assert.Empty(descriptions);
 		foreach (var description in descriptions)
 		{
 			Assert.NotNull(description);

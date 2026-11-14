@@ -51,7 +51,7 @@ public static class McpServerHost
 
 	internal static string BuildInstructions(int rootCount, McpToolSet toolSet = McpToolSet.Full,
 		int searchBodyCharacters = DevProjexMcpTools.MaximumSearchDeclarationBodyCharacters,
-		bool live = false)
+		bool live = false, bool allowRemote = false)
 	{
 		ValidateToolSet(toolSet);
 		ValidateSearchBodyCharacters(searchBodyCharacters);
@@ -66,6 +66,12 @@ public static class McpServerHost
 				"Use related_files for dependencies, get_diff for changes, and read_pack for stored search or dependency pages. ", StringComparison.Ordinal)
 			.Replace("Inline pack_context: 50,000 characters; larger packs are stored. ", string.Empty,
 				StringComparison.Ordinal);
+		if (toolSet == McpToolSet.Reduced && rootCount == 1 && !allowRemote)
+		{
+			prefix = "One local root is configured: omit project and use project-relative paths. ";
+			common = common.Replace("list_projects reports startup defaults, not live-profile settings. ",
+				string.Empty, StringComparison.Ordinal);
+		}
 		var body = searchBodyCharacters == 0 ? string.Empty :
 			$" One search declaration body: up to {searchBodyCharacters.ToString("N0", CultureInfo.InvariantCulture)} characters.";
 		var liveContext = live
@@ -261,7 +267,8 @@ public static class McpServerHost
 					rootRegistry.Roots.Count,
 					toolSet,
 					searchBodyCharacters,
-					live);
+					live,
+					allowRemote);
 			})
 			.WithStreamServerTransport(input, output)
 			.WithTools<DevProjexMcpToolCatalog>(catalog);

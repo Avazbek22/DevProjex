@@ -266,7 +266,7 @@ def run_dir_name(task, arm, repeat):
 
 
 def eligible_run(summary):
-    if summary.get('provenance', {}).get('status', 'passed') != 'passed':
+    if summary.get('eligibleForMetrics') is False or summary.get('provenance', {}).get('status', 'passed') != 'passed':
         return False
     return summary.get('agent', 'claude') != 'codex' or (
         summary.get('eligibleForMetrics') is True and summary.get('isolation', {}).get('status') == 'passed'
@@ -429,7 +429,16 @@ def empty_score():
     return dict.fromkeys(COUNTERS, 0) | dict(sessions=0, files=0, files_needed=0, tests=0, tests_needed=0, known_wrong=0, invented=0,
                 calls=0, tool_errors=0, context=0, cost=0.0, duration_ms=0, tool_output_chars=0, key_versions={},
                 attribution_sessions=0, missed_never_shown=0, missed_listed=0, missed_content_shown=0,
-                named_never_shown=0, named_listed=0, named_content_shown=0)
+                named_never_shown=0, named_listed=0, named_content_shown=0, first_request_context_tokens=[])
+
+
+_builtin_notices = set()
+
+
+def notice_builtin_skip(arm):
+    if arm not in _builtin_notices:
+        print(f'{arm}: built-in arm; path attribution, mechanisms and replay are skipped.', file=sys.stderr)
+        _builtin_notices.add(arm)
 
 
 def score_session(summary, task, corpus_root, key_version=None):
@@ -459,7 +468,16 @@ def score_session(summary, task, corpus_root, key_version=None):
         context=context_tokens(summary['usage']), cost=summary['usage']['costUsd'],
         duration_ms=summary.get('durationMs') or 0, tool_output_chars=summary.get('toolResponseChars', 0),
     )
-    if folder:
+    if summary.get('agent', 'claude') == 'claude':
+        first = summary['usage'].get('firstRequestContextTokens')
+        if 'firstRequestContextTokens' not in summary['usage'] and folder:
+            from transcripts import first_request_context
+            first = first_request_context(Path(folder) / 'stream.jsonl')
+        if first is not None:
+            score['first_request_context_tokens'] = [first]
+    if folder and summary.get('kind') == 'builtin':
+        notice_builtin_skip(summary.get('server', 'builtin'))
+    if folder and summary.get('kind') != 'builtin':
         from attribution import attribute
         from transcripts import recorded_calls
         calls = recorded_calls(Path(folder) / 'stream.jsonl')

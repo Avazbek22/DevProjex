@@ -20,6 +20,7 @@ from concurrent.futures import ThreadPoolExecutor
 import benchlib
 
 SCRUB = [
+    (r'(?-i:\bGrep\b)', 'search_tool'), (r'(?-i:\bGlob\b)', 'tree_tool'),
     (r'grep_repomix_output', 'grep_tool'), (r'read_repomix_output', 'lines_tool'),
     (r'pack_codebase', 'pack_tool'), (r'attach_packed_output', 'attach_tool'),
     (r'pack_remote_repository', 'remote_tool'), (r'generate_skill', 'skill_tool'),
@@ -99,6 +100,7 @@ def split_answer(summary):
     answer = summary.get('answer') or ''
     cut = answer.find('## Experience')
     return {
+        'kind': summary.get('kind'),
         'answer': scrub((answer[:cut] if cut >= 0 else answer).strip()),
         'experience': scrub(answer[cut:].strip()) if cut >= 0 else '(none)',
         'calls': len(summary['toolCalls']),
@@ -228,6 +230,9 @@ def main():
         pairs = collect_pairs(results, tasks, task_ids, args.ours, args.theirs)
         if not pairs:
             raise benchlib.BenchmarkError(f'no session pairs of {args.ours} and {args.theirs} in {results}')
+        builtin_pair = any(summary.get('kind') == 'builtin' for _, _, ours, theirs in pairs for summary in (ours, theirs))
+        if builtin_pair:
+            args.answers_only = True
         ask = make_asker(args.model)
     except benchlib.BenchmarkError as error:
         print(f'error: {error}', file=sys.stderr)
@@ -243,7 +248,7 @@ def main():
     with ThreadPoolExecutor(max_workers=max(1, args.parallel)) as pool:
         judged = list(pool.map(run_pair, pairs))
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    document = {'ours': args.ours, 'theirs': args.theirs, 'model': args.model, 'answersOnly': args.answers_only,
+    document = {'ours': args.ours, 'theirs': args.theirs, 'model': args.model, 'answersOnly': args.answers_only, 'builtinAnswersOnly': builtin_pair,
                 'results': [row for row, _ in judged], 'costUsd': sum(cost for _, cost in judged)}
     out_path.write_text(json.dumps(document, indent=1, ensure_ascii=False), encoding='utf-8')
     print(f'judge cost ${document["costUsd"]:.3f}, written to {out_path}')

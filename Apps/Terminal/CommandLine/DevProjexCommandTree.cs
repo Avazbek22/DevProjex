@@ -134,7 +134,7 @@ public sealed class DevProjexCommandTree
 		var toolSet = CliChoiceSymbols.Option(
 			"--tool-set",
 			L("Terminal.Option.McpToolSet"),
-			McpToolSet.Full,
+			McpToolSet.Reduced,
 			CliChoiceSets.McpToolSet,
 			_localization);
 		var exclude = CreateMcpExcludeOption();

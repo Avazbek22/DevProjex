@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import {
   DEFAULT_MODEL, armFingerprint, buildMcpConfig, countWorktreeFiles, dataRoot, fingerprintMismatch,
   isTransientFailure, parseArgs, quoteForCmd, renderPrompt, resolveArm, summarize, usedArms, validateArms,
-  armAgent, armModel, agentSeries,
+  armAgent, armModel, agentSeries, effectivePrompt, claudeArguments, builtinIsolation, corpusProvenanceFailed,
 } from '../session.mjs';
 import { CODEX_MODEL, CODEX_PRICING, budgetStop, codexArguments, codexConfiguration, codexPricing, executeCodex,
   restrictedCatalog, saveCodexSummary, summarizeCodex } from '../codex.mjs';
@@ -26,7 +26,7 @@ test('the default model is Haiku 4.5', () => {
   assert.equal(DEFAULT_MODEL, 'claude-haiku-4-5-20251001');
 });
 
-test('Claude summary bytes and arm records match the unchanged base', () => {
+test('Claude summary adds first-request usage and preserves arm records', () => {
   const stream = readFileSync(join(HERE, 'fixtures', 'stream.jsonl'), 'utf8');
   assert.equal(JSON.stringify(summarize(job, stream, 0, 5000), null, 2) + '\n', readFileSync(join(HERE, 'fixtures', 'claude-summary.json'), 'utf8').replaceAll('\r\n', '\n'));
   const resolved = { kind: 'devprojex', product: 'v5.2.2', host: 'v522', commit: 'a'.repeat(40) };
@@ -311,4 +311,89 @@ test('the runner checks corpus provenance and fails closed without changing raw 
     rmSync(join(folder, 'stream.jsonl'));
     assert.equal(sessionProvenance(folder, '/corpus', join(folder, 'manifest.json')).status, 'unverified');
   } finally { rmSync(folder, { recursive: true, force: true }); }
+});
+
+
+test('server arguments are validated, configured and fingerprinted with legacy resume compatibility', () => {
+  assert.deepEqual(validateArms({ server_x: { product: 'build', host: 'x', args: ['--tool-set', 'full'] } }), []);
+  for (const args of [['--root'], ['--root=/other'], ['-r'], ['-r=/other'], [''], [null], 'full'])
+    assert.ok(validateArms({ server_x: { product: 'build', host: 'x', args } }).length);
+  const resolved = { kind: 'devprojex', product: 'build', host: 'x', commit: 'sha', executable: 'binary', args: ['--tool-set', 'full'] };
+  assert.deepEqual(buildMcpConfig('server_x', resolved, '/clone', '/state').mcpServers.server_x.args,
+    ['mcp', '--root', '/clone', '--tool-set', 'full']);
+  const old = armFingerprint({ ...resolved, args: undefined }, 'model', 40, 'prompt');
+  assert.deepEqual(fingerprintMismatch(old, armFingerprint({ ...resolved, args: [] }, 'model', 40, 'prompt')), []);
+  assert.deepEqual(fingerprintMismatch({ ...old, args: [] }, old), []);
+  assert.deepEqual(fingerprintMismatch(old, armFingerprint(resolved, 'model', 40, 'prompt')), ['args']);
+  assert.deepEqual(fingerprintMismatch(armFingerprint(resolved, 'model', 40, 'prompt'), old), ['args']);
+});
+
+test('built-in arms accept only the approved tools and Claude and build an empty MCP configuration', () => {
+  const arm = { product: 'File tools', builtin: ['Read', 'Grep', 'Glob'] };
+  assert.deepEqual(validateArms({ server_x: arm }), []);
+  for (const bad of [[], ['Read', 'Read'], ['Bash'], 'Read'])
+    assert.ok(validateArms({ server_x: { ...arm, builtin: bad } }).length);
+  for (const extra of [{ host: 'x' }, { repomix: '1' }, { agent: 'codex' }, { args: ['--live'] }])
+    assert.ok(validateArms({ server_x: { ...arm, ...extra } }).length);
+  const resolved = resolveArm('/does-not-exist', 'server_x', arm);
+  assert.deepEqual(buildMcpConfig('server_x', resolved, '/clone', '/state'), { mcpServers: {} });
+  const args = claudeArguments({ server: 'server_x', configPath: 'cfg.json', builtin: arm.builtin }, 'model', 40);
+  assert.equal(args[args.indexOf('--tools') + 1], 'Read,Grep,Glob');
+  assert.equal(args.includes('--allowedTools'), false);
+  assert.ok(args.includes('--strict-mcp-config'));
+  const mcp = claudeArguments({ server: 'server_x', configPath: 'cfg.json' }, 'model', 40);
+  assert.equal(mcp[mcp.indexOf('--tools') + 1], '');
+  assert.equal(mcp[mcp.indexOf('--allowedTools') + 1], 'mcp__server_x__*');
+});
+
+test('built-in prompt replaces exactly three lines and records its effective template', () => {
+  const template = readFileSync(join(TOOL_DIR, 'prompt.txt'), 'utf8');
+  const resolved = { kind: 'builtin', product: 'File tools', builtin: ['Read', 'Grep', 'Glob'] };
+  const prompt = effectivePrompt(template, resolved);
+  const original = template.split('\n');
+  assert.equal(prompt.split('\n').filter((line, index) => line !== original[index]).length, 3);
+  assert.match(prompt, /ONLY through your built-in file tools Read, Grep and Glob/);
+  assert.match(prompt, /<REPO_PATH>/);
+  assert.match(prompt, /<TASK_TEXT>/);
+  assert.equal(armFingerprint(resolved, 'model', 40, template).prompt, prompt);
+  assert.deepEqual(armFingerprint(resolved, 'model', 40, template).builtin, resolved.builtin);
+});
+
+test('built-in isolation rejects foreign tools and paths on both path platforms', () => {
+  const call = (name, input) => ({ name, input });
+  for (const [root, outside, inside] of [['/clone', '/other/x', '/clone/x'], ['C:/clone', 'D:/other/x', 'c:/clone/x']]) {
+    assert.equal(builtinIsolation([call('Read', { file_path: inside }), call('Glob', { pattern: '**/*.ts' })], ['Read', 'Glob'], root).status, 'passed');
+    for (const input of [{ file_path: outside }, { path: '../outside' }])
+      assert.equal(builtinIsolation([call('Read', input)], ['Read'], root).status, 'violated');
+    assert.equal(builtinIsolation([call('Glob', { pattern: outside })], ['Glob'], root).status, 'violated');
+    for (const name of ['Grep', 'Read']) {
+      for (const pattern of [String.raw`\.param\(|param.*test`, String.raw`\.IsValidAsync\(`])
+        assert.equal(builtinIsolation([call(name, { pattern })], [name], root).status, 'passed');
+    }
+    assert.equal(builtinIsolation([call('Bash', {})], ['Read'], root).status, 'violated');
+  }
+});
+
+test('only a changed corpus stops a built-in series, while server provenance failures still stop', () => {
+  for (const reason of ['outside-corpus', 'unlisted-tool']) {
+    const isolation = { status: 'violated', violations: [{ call: 1, reason }] };
+    assert.equal(corpusProvenanceFailed({ kind: 'builtin', eligibleForMetrics: false,
+      isolation, provenance: isolation }), false);
+  }
+  assert.equal(corpusProvenanceFailed({ kind: 'builtin', eligibleForMetrics: false,
+    provenance: { status: 'violated', violations: [{ reason: 'clone file count changed' }] } }), true);
+  assert.equal(corpusProvenanceFailed({ kind: 'devprojex',
+    provenance: { status: 'violated', violations: [{ call: 1, reason: 'foreign-project' }] } }), true);
+  for (const kind of ['builtin', 'devprojex'])
+    assert.equal(corpusProvenanceFailed({ kind, provenance: { status: 'passed', violations: [] } }), false);
+});
+
+test('Claude first request uses the first assistant usage including caches, never a later usage', () => {
+  const event = (usage) => ({ type: 'assistant', message: { content: [], ...(usage ? { usage } : {}) } });
+  const stream = [event({ input_tokens: 2, cache_read_input_tokens: 3, cache_creation_input_tokens: 4 }), event({ input_tokens: 100 })].map(JSON.stringify).join('\n');
+  assert.equal(summarize(job, stream, 0, 1).usage.firstRequestContextTokens, 9);
+  assert.equal(summarize(job, JSON.stringify(event()), 0, 1).usage.firstRequestContextTokens, null);
+  assert.equal(summarize(job, '', 0, 1).usage.firstRequestContextTokens, null);
+  const codex = summarizeCodex(job, '', 1, 0, CODEX_PRICING);
+  assert.equal('firstRequestContextTokens' in codex.usage, false);
 });

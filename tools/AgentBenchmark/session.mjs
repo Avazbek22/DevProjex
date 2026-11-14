@@ -2,7 +2,7 @@
 // Nothing here starts a process, so tests can cover it without the claude CLI.
 import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, posix, win32 } from 'node:path';
 import { CODEX_MODEL } from './codex.mjs';
 
 export const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
@@ -80,7 +80,13 @@ export function validateArms(arms) {
   for (const [name, arm] of Object.entries(arms)) {
     if (!ARM_NAME.test(name)) errors.push(`${name}: arm names must look like server_b, so the agent and the judge cannot tell the product`);
     if (!arm?.product) errors.push(`${name}: product is missing`);
-    if (Boolean(arm?.host) === Boolean(arm?.repomix)) errors.push(`${name}: set exactly one of host or repomix`);
+    if ([arm?.host, arm?.repomix, arm?.builtin].filter(Boolean).length !== 1) errors.push(`${name}: set exactly one of host, repomix or builtin`);
+    if (arm?.builtin && (armAgent(arm) !== 'claude' || !Array.isArray(arm.builtin) || !arm.builtin.length
+      || arm.builtin.some((tool) => !['Read', 'Grep', 'Glob'].includes(tool)) || new Set(arm.builtin).size !== arm.builtin.length))
+      errors.push(`${name}: builtin needs distinct Read, Grep or Glob tools and the claude agent`);
+    if (arm?.args !== undefined && (!arm.host || !Array.isArray(arm.args)
+      || arm.args.some((arg) => typeof arg !== 'string' || !arg.trim() || /^(?:--root|-r)(?:=|$)/.test(arg))))
+      errors.push(`${name}: args needs nonempty server arguments without --root`);
     if (arm && !['claude', 'codex'].includes(armAgent(arm))) errors.push(`${name}: agent must be claude or codex`);
   }
   return errors;
@@ -88,13 +94,14 @@ export function validateArms(arms) {
 
 // Resolves an arm to the command it starts; throws when the host or Repomix is not installed.
 export function resolveArm(work, name, arm) {
+  if (arm.builtin) return { kind: 'builtin', product: arm.product, builtin: [...arm.builtin] };
   if (arm.host) {
     const recordPath = join(work, 'hosts', arm.host, 'host.json');
     if (!existsSync(recordPath)) throw new Error(`${name}: host ${arm.host} is not built; run build_hosts.py`);
     const record = JSON.parse(readFileSync(recordPath, 'utf8'));
     const executable = join(work, 'hosts', arm.host, record.executable);
     if (!existsSync(executable)) throw new Error(`${name}: ${executable} is missing; build the host again`);
-    return { kind: 'devprojex', product: arm.product, host: arm.host, commit: record.commit, executable };
+    return { kind: 'devprojex', product: arm.product, host: arm.host, commit: record.commit, executable, ...(arm.args?.length ? { args: [...arm.args] } : {}) };
   }
   const script = join(work, 'repomix', arm.repomix, 'node_modules', 'repomix', 'bin', 'repomix.cjs');
   if (!existsSync(script)) throw new Error(`${name}: Repomix ${arm.repomix} is not installed; run build_hosts.py --repomix ${arm.repomix}`);
@@ -107,6 +114,7 @@ export function dataRoot(work, series, armName, repo) {
 }
 
 export function buildMcpConfig(armName, resolved, repoPath, dataPath) {
+  if (resolved.kind === 'builtin') return { mcpServers: {} };
   if (resolved.kind === 'repomix') {
     return { mcpServers: { [armName]: { command: 'node', args: [resolved.executable, '--mcp'] } } };
   }
@@ -114,11 +122,50 @@ export function buildMcpConfig(armName, resolved, repoPath, dataPath) {
     mcpServers: {
       [armName]: {
         command: resolved.executable,
-        args: ['mcp', '--root', repoPath],
+        args: ['mcp', '--root', repoPath, ...(resolved.args ?? [])],
         env: { DEVPROJEX_INTERNAL_DATA_ROOT: dataPath },
       },
     },
   };
+}
+
+export function effectivePrompt(template, resolved) {
+  if (resolved.kind !== 'builtin') return template;
+  return template
+    .replace(/^It is available ONLY through the MCP server named.*$/m,
+      'It is available ONLY through your built-in file tools Read, Grep and Glob. You have no shell, no web and no other tools. Use only those tools.')
+    .replace('Answer honestly about the MCP server you just used, as if reviewing a tool for a colleague:',
+      'Answer honestly about the file tools you just used, as if reviewing a tool for a colleague:')
+    .replace(/^- Trust score 1-5 for the results this server gave you.*$/m,
+      '- Trust score 1-5 for the results these tools gave you, with one sentence why.');
+}
+
+export function claudeArguments(plan, model, maxTurns) {
+  return ['-p', '--mcp-config', plan.configPath, '--strict-mcp-config', '--tools', (plan.builtin ?? []).join(','),
+    ...(plan.builtin ? [] : ['--allowedTools', `mcp__${plan.server}__*`]),
+    '--max-turns', String(maxTurns), '--no-session-persistence', '--output-format', 'stream-json', '--verbose', '--model', model];
+}
+
+export function builtinIsolation(calls, tools, root) {
+  const violations = [];
+  const paths = /^[A-Za-z]:[\\/]|^\\\\/.test(root) ? win32 : posix;
+  for (const [index, call] of calls.entries()) {
+    if (!tools.includes(call.name)) violations.push({ call: index + 1, reason: 'unlisted-tool', tool: call.name });
+    for (const [key, value] of Object.entries(call.input ?? {})) {
+      if (typeof value !== 'string' || !(['file_path', 'path'].includes(key) || key === 'pattern' && call.name === 'Glob' && (posix.isAbsolute(value) || win32.isAbsolute(value)))) continue;
+      const foreignAbsolute = (posix.isAbsolute(value) || win32.isAbsolute(value)) && !paths.isAbsolute(value);
+      const relative = paths.relative(paths.resolve(root), paths.resolve(root, value));
+      if (foreignAbsolute || relative === '..' || relative.startsWith(`..${paths.sep}`) || paths.isAbsolute(relative))
+        violations.push({ call: index + 1, reason: 'outside-corpus', argument: key });
+    }
+  }
+  return { status: violations.length ? 'violated' : 'passed', violations };
+}
+
+export function corpusProvenanceFailed(summary) {
+  return summary.kind === 'builtin'
+    ? summary.provenance.violations.some((violation) => violation.call === undefined)
+    : summary.provenance.status !== 'passed';
 }
 
 export function renderPrompt(template, repoPath, armName, taskText) {
@@ -129,7 +176,8 @@ export function renderPrompt(template, repoPath, armName, taskText) {
 export function armFingerprint(resolved, model, maxTurns, promptTemplate) {
   return {
     product: resolved.product, kind: resolved.kind, host: resolved.host ?? null, commit: resolved.commit ?? null,
-    repomix: resolved.version ?? null, model, maxTurns: String(maxTurns), prompt: promptTemplate,
+    repomix: resolved.version ?? null, model, maxTurns: String(maxTurns), prompt: effectivePrompt(promptTemplate, resolved),
+    ...(resolved.args?.length ? { args: resolved.args } : {}), ...(resolved.builtin ? { builtin: resolved.builtin } : {}),
   };
 }
 
@@ -154,7 +202,7 @@ export function usedArms(resultsDir, armNames) {
 }
 
 export function fingerprintMismatch(recorded, current) {
-  return Object.keys(current).filter((key) => JSON.stringify(recorded?.[key]) !== JSON.stringify(current[key]));
+  return [...new Set([...Object.keys(current), ...(recorded?.args?.length ? ['args'] : [])])].filter((key) => JSON.stringify(key === 'args' ? recorded?.[key] ?? [] : recorded?.[key]) !== JSON.stringify(key === 'args' ? current[key] ?? [] : current[key]));
 }
 
 export function summarize(job, stdout, exitCode, wallMs) {
@@ -163,9 +211,16 @@ export function summarize(job, stdout, exitCode, wallMs) {
   const pendingById = new Map();
   let result = null;
   let finalText = '';
+  let firstRequestContextTokens = null;
+  let firstAssistant = true;
   for (const line of lines) {
     let event;
     try { event = JSON.parse(line); } catch { continue; }
+    if (event.type === 'assistant' && firstAssistant) {
+      firstAssistant = false;
+      const u = event.message?.usage;
+      if (u) firstRequestContextTokens = (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0);
+    }
     if (event.type === 'assistant' && event.message?.content) {
       for (const block of event.message.content) {
         if (block.type === 'tool_use') {
@@ -190,7 +245,7 @@ export function summarize(job, stdout, exitCode, wallMs) {
       result = event;
     }
   }
-  const usage = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, costUsd: 0, model: '' };
+  const usage = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0, costUsd: 0, model: '', firstRequestContextTokens };
   for (const [model, u] of Object.entries(result?.modelUsage ?? {})) {
     usage.input += u.inputTokens ?? 0;
     usage.output += u.outputTokens ?? 0;
