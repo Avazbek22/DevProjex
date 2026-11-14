@@ -304,7 +304,10 @@ Replay needs no client sign-in and makes no model call:
 python replay.py --session <run-folder> --corpus <prepared-clone> --host <devprojex> --output <new-folder>
 python replay.py --session <run-folder> --corpus <prepared-clone> --host <before> --other-host <after> --output <new-folder>
 python replay.py --session <run-folder> --corpus <prepared-clone> --host <devprojex> --recorded --output <new-folder>
+python replay.py --session <run-folder> --corpus <prepared-clone> --host <devprojex> --other-host <devprojex> --other-host-arg=--tool-set --other-host-arg=full --output <new-folder>
 ```
+
+`--host-arg` and `--other-host-arg` each add one argument to the server command of their host and may be repeated. A value that starts with dashes is written in the `=` form, as above. Both lists are saved in `manifest.json` of the output folder.
 
 The default compares two fresh server sessions of the same host. The corpus must be pinned and
 prepared first; use a new output folder. Calls retain their order and arguments; absolute corpus

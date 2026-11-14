@@ -703,7 +703,7 @@ Removing the two output schemas reduced the default catalog from 42,370 characte
 revision to 32,516, and concise descriptions brought it below 28,000. Later parameters and the
 `get_diff` tool raised it to 32,400 by 2026-11-11. On 2026-11-12 publishing `project` and
 `branch` only where they apply, and leaving lengths, sizes and patterns to the server's own
-checks, brought the one-root full catalog to 27,141, where it stays. On 2026-11-12 the
+checks, brought the one-root full catalog to 27,141, where it stays. The same day the
 reduced set became the default and stopped publishing the unused filters: 13,770
 characters with one local root. In the default set a second local root adds 1,820
 characters by publishing `list_projects`, `project` and its sentence, `--allow-remote` adds
