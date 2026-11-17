@@ -27,8 +27,22 @@
     <!-- The SDK prepends DotnetTool to the outer package; RID packages stay DotnetToolRidPackage. -->
     <PackageType>McpServer</PackageType>
     <Authors>Avazbek Olimov</Authors>
-    <Description>Turn a folder or repository into focused context for AI from the CLI, TUI, or MCP server.</Description>
-    <PackageTags>mcp;mcp-server;model-context-protocol;ai;ai-agents;llm;context;code-context;codebase-context;code-to-prompt;secret-redaction;cli;tui;dotnet-tool</PackageTags>
+    <Description>Turn any folder or Git repository into token-efficient codebase context for AI coding agents, with secrets always masked. A Repomix alternative: up to 40% fewer tokens. MCP server, CLI, and TUI with Live Context and an agent journal.</Description>
+    <!-- nuget.org shows about the first 210 characters on a search card and searches the whole text.
+         The paragraphs start at column 0 because the element text is packed as written. -->
+    <PackageDescription>$(Description)
+
+DevProjex gives the model less, and better. It finds instead of dumping: search by text, regex, or declaration name, then read one declaration or a line range, not the whole file. It knows how your files connect: related files come from real imports, so the agent sees what a file uses, who uses it, and which tests import it. It shrinks the rest: code compression keeps signatures and drops bodies, Git diffs carry only the changed lines, and context packs fit a token budget. In our 18-task benchmark, agents used 28.8% and 40.9% fewer context tokens than with Repomix 1.19 across two runs.
+
+Live Context puts you in the loop: tick files in the Terminal Workspace or the desktop app and they become the agent's focus on its very next call, with no restart and no new prompt. The agent journal keeps a receipt for every session: calls, delivered files, tokens, and masked values, never file bodies.
+
+Detected secrets are masked before anything reaches the model. In the MCP server that has no off switch; credential detection is based on Gitleaks rules, access is jailed to the project root, and file contents are marked as untrusted data against prompt injection.
+
+The Model Context Protocol (MCP) server works over stdio with Claude Code, Codex, Cursor, VS Code, Claude Desktop, Windsurf, Google Antigravity, and any other MCP client. The CLI and Terminal Workspace pack source code into a prompt for ChatGPT, Claude, or any LLM chat: pick files in a tree, see the token count, and export Markdown, JSON, XML, or plain text, or a clean project copy as a folder or ZIP. In CI, fail the build when secrets would reach the prompt.
+
+Self-contained for Windows, Linux, and macOS on x64 and arm64. Run it with dnx devprojex or install it with dotnet tool install --global devprojex. Local, no telemetry.</PackageDescription>
+    <!-- nuget.org lists only the first ten tags on a search card; the single words after them serve search. -->
+    <PackageTags>mcp-server;ai-agents;codebase-context;token-optimization;secret-redaction;live-context;agent-journal;repomix-alternative;claude-code;cursor;codex;mcp;model-context-protocol;modelcontextprotocol;server;stdio;ai;llm;agents;agent;coding-agent;context;codebase;code;repository;repo;search;code-search;dependencies;git;diff;filesystem;prompt;secrets;redaction;security;tokens;journal;cli;tui;terminal;dotnet;dotnet-tool;dnx;claude;vscode;windsurf;chatgpt;context-engineering;llm-context;code-to-prompt</PackageTags>
     <PackageReleaseNotes>https://github.com/Avazbek22/DevProjex/releases/tag/v$(DevProjexVersion)</PackageReleaseNotes>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/Avazbek22/DevProjex</PackageProjectUrl>
@@ -37,6 +51,13 @@
     <PackageIcon>icon.png</PackageIcon>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+  </PropertyGroup>
+
+  <!-- A RID package is installed through the devprojex package. Its own listing points there and
+       carries no tags, so the six of them stay out of tag search next to the package to install. -->
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' != ''">
+    <PackageDescription>Platform-specific ($(RuntimeIdentifier)) part of the devprojex .NET tool. Install devprojex instead.</PackageDescription>
+    <PackageTags></PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

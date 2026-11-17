@@ -1,7 +1,7 @@
 {
   "name": "@devprojex/cli-__PLATFORM__",
   "version": "__VERSION__",
-  "description": "DevProjex headless binary for __PLATFORM__.",
+  "description": "Platform binary (__PLATFORM__) for the devprojex package. Install devprojex instead of this package.",
   "author": "Avazbek Olimov",
   "license": "Apache-2.0",
   "repository": {
