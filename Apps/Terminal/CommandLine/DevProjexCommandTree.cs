@@ -1937,6 +1937,7 @@ public sealed class DevProjexCommandTree
 			"devprojex profile import ../devprojex-profile.json .",
 			"devprojex profile import ../devprojex-profile.json . --apply");
 		var file = RequiredArgument("FILE");
+		file.Description = L("Terminal.Argument.ProfileImportFile");
 		var project = ProjectArgument();
 		var apply = new Option<bool>("--apply") { Description = L("Terminal.Option.ApplyProfile") };
 		command.Arguments.Add(file);
@@ -1960,6 +1961,7 @@ public sealed class DevProjexCommandTree
 			command,
 			"devprojex profile validate ../devprojex-profile.json");
 		var file = RequiredArgument("FILE");
+		file.Description = L("Terminal.Argument.ProfileValidateFile");
 		var format = CliChoiceSymbols.Option(
 			"--format",
 			L("Terminal.Option.Format"),
@@ -2136,6 +2138,7 @@ public sealed class DevProjexCommandTree
 			"VIEW",
 			CliChoiceSets.DesktopView,
 			_localization);
+		view.Description = L("Terminal.Argument.UiPreviewView");
 		setView.Arguments.Add(view);
 		AddDesktopAction(
 			setView,
@@ -2160,6 +2163,7 @@ public sealed class DevProjexCommandTree
 			"FORMAT",
 			CliChoiceSets.TreeFormat,
 			_localization);
+		format.Description = L("Terminal.Argument.UiTreeFormat");
 		setFormat.Arguments.Add(format);
 		AddDesktopAction(
 			setFormat,
@@ -2182,6 +2186,7 @@ public sealed class DevProjexCommandTree
 			set,
 			"devprojex ui filter set Program --project .");
 		var query = RequiredArgument("QUERY");
+		query.Description = L("Terminal.Argument.UiFilterQuery");
 		set.Arguments.Add(query);
 		AddDesktopAction(set, "filter.set", result => new { query = result.GetValue(query) });
 		command.Subcommands.Add(set);
@@ -2208,6 +2213,7 @@ public sealed class DevProjexCommandTree
 			set,
 			"devprojex ui search set TODO --project .");
 		var query = RequiredArgument("QUERY");
+		query.Description = L("Terminal.Argument.UiSearchQuery");
 		set.Arguments.Add(query);
 		AddDesktopAction(set, "search.set", result => new { query = result.GetValue(query) });
 		command.Subcommands.Add(set);
@@ -2660,6 +2666,7 @@ public sealed class DevProjexCommandTree
 			"SHELL",
 			CliChoiceSets.CompletionShell,
 			_localization);
+		shell.Description = L("Terminal.Argument.CompletionShell");
 		command.Arguments.Add(shell);
 		command.SetAction(parseResult =>
 		{

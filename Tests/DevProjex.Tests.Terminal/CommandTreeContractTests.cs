@@ -1,4 +1,5 @@
 using System.CommandLine;
+using DevProjex.Infrastructure.ResourceStore;
 using DevProjex.Terminal.DesktopControl;
 
 namespace DevProjex.Tests.Terminal;
@@ -436,6 +437,33 @@ public sealed class CommandTreeContractTests
 			foreach (var child in command.Subcommands)
 				stack.Push(child);
 		}
+	}
+
+	[Fact]
+	public void EveryVisibleArgumentOfAPublicCommandHasADescriptionInEveryLanguage()
+	{
+		var missing = new List<string>();
+		foreach (var language in Enum.GetValues<AppLanguage>())
+		{
+			var localization = new LocalizationService(new JsonLocalizationCatalog(), language);
+			var root = new DevProjexCommandTree(
+					new TestTerminalEnvironment(),
+					localization: localization)
+				.Build();
+			foreach (var path in EnumeratePublicCommandPaths(root))
+			{
+				var command = path.Aggregate<string, Command>(
+					root,
+					static (parent, name) => parent.Subcommands.Single(child => child.Name == name));
+				missing.AddRange(command.Arguments
+					.Where(static argument => !argument.Hidden && string.IsNullOrWhiteSpace(argument.Description))
+					.Select(argument => $"{language}: devprojex {string.Join(' ', path)} {argument.Name}"));
+			}
+		}
+
+		Assert.True(
+			missing.Count == 0,
+			$"Arguments without a description:{Environment.NewLine}{string.Join(Environment.NewLine, missing)}");
 	}
 
 	[Fact]
