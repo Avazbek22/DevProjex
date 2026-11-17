@@ -5,6 +5,18 @@ namespace DevProjex.Tests.Unit;
 public sealed class McpMarkdownStructureTests
 {
 	[Theory]
+	[InlineData("    ```")]
+	[InlineData("\t~~~")]
+	[InlineData("```language`text")]
+	public void InvalidFenceOpeningsDoNotHideFollowingHeadings(string opening)
+	{
+		var source = string.Join('\n', "# Before", opening, "# Visible", "# After");
+		var outline = Assert.IsType<McpLargeFileOutline>(McpLargeFileOutlineBuilder.Build("sample.md", source,
+			static () => [], TestContext.Current.CancellationToken, requireLargeFile: false));
+		Assert.Equal("1-2 Before\n3-3 Visible\n4-4 After\n", outline.Map);
+	}
+
+	[Theory]
 	[InlineData(0)]
 	[InlineData(1)]
 	[InlineData(2)]
