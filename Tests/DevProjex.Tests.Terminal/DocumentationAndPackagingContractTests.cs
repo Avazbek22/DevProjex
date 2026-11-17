@@ -790,6 +790,66 @@ public sealed class DocumentationAndPackagingContractTests
 	}
 
 	[Fact]
+	public void PackageListingTextsFitRegistryLimitsAndPlatformPackagesPointToDevprojex()
+	{
+		// Registry listings are frozen with every published version, so their limits and
+		// cross-references are checked before a release rather than after it.
+		var rootPath = FindRepositoryRoot();
+		using var launcher = JsonDocument.Parse(File.ReadAllText(Path.Combine(
+			rootPath, "Packaging", "Npm", "devprojex", "package.json.template")));
+		var npmDescription = launcher.RootElement.GetProperty("description").GetString()!;
+		// The npm registry cuts a description at 255 characters.
+		Assert.InRange(npmDescription.Length, 1, 255);
+		var npmKeywords = launcher.RootElement.GetProperty("keywords").EnumerateArray()
+			.Select(static keyword => keyword.GetString()!)
+			.ToArray();
+		Assert.Equal(npmKeywords.Length, npmKeywords.Distinct(StringComparer.Ordinal).Count());
+
+		using var platform = JsonDocument.Parse(File.ReadAllText(Path.Combine(
+			rootPath, "Packaging", "Npm", "platform", "package.json.template")));
+		Assert.Contains(
+			"Install devprojex instead of this package.",
+			platform.RootElement.GetProperty("description").GetString(),
+			StringComparison.Ordinal);
+		Assert.False(platform.RootElement.TryGetProperty("keywords", out _));
+
+		var host = XDocument.Load(Path.Combine(rootPath, "Apps", "TerminalHost", "DevProjex.TerminalHost.csproj"));
+		var listing = host.Root!.Elements("PropertyGroup").Single(static group => group.Element("PackageId") is not null);
+		var nugetLead = listing.Element("Description")!.Value;
+		var nugetDescription = listing.Element("PackageDescription")!.Value
+			.Replace("$(Description)", nugetLead, StringComparison.Ordinal)
+			.ReplaceLineEndings("\n");
+		// npm and NuGet open with the same sentences, and nuget.org accepts 4000 characters.
+		Assert.Equal(npmDescription, nugetLead);
+		Assert.StartsWith(nugetLead + "\n\n", nugetDescription, StringComparison.Ordinal);
+		Assert.InRange(nugetDescription.Length, 1, 4000);
+		var nugetTags = listing.Element("PackageTags")!.Value.Split(';');
+		Assert.Equal(nugetTags.Length, nugetTags.Distinct(StringComparer.Ordinal).Count());
+		Assert.InRange(string.Join(' ', nugetTags).Length, 1, 4000);
+		// nuget.org lists only the first ten tags on a search card.
+		Assert.Equal(
+			[
+				"mcp-server", "ai-agents", "codebase-context", "token-optimization", "secret-redaction",
+				"live-context", "agent-journal", "repomix-alternative", "claude-code", "cursor"
+			],
+			nugetTags.Take(10));
+		// nuget.org matches every query word except the last against a whole tag.
+		foreach (var word in new[] { "mcp", "ai", "llm", "context", "codebase", "code", "repository", "search", "git" })
+			Assert.Contains(word, nugetTags);
+
+		var ridListing = host.Root.Elements("PropertyGroup")
+			.Single(static group => group.Attribute("Condition")?.Value == "'$(RuntimeIdentifier)' != ''");
+		Assert.Contains(
+			"Install devprojex instead.",
+			ridListing.Element("PackageDescription")!.Value,
+			StringComparison.Ordinal);
+		Assert.Equal(string.Empty, ridListing.Element("PackageTags")!.Value);
+
+		using var server = JsonDocument.Parse(File.ReadAllText(Path.Combine(rootPath, "server.json")));
+		Assert.InRange(server.RootElement.GetProperty("title").GetString()!.Length, 1, 100);
+	}
+
+	[Fact]
 	public void PackageReadmesAndRegistryArgumentsParseAgainstTheProductionCommandTree()
 	{
 		var rootPath = FindRepositoryRoot();
