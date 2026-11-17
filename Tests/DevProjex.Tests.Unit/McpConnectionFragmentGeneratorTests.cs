@@ -169,7 +169,7 @@ public sealed class McpConnectionFragmentGeneratorTests
 	public async Task Generate_ClaudeCodeWindowsFragmentRunsInWindowsPowerShell51()
 	{
 		if (!OperatingSystem.IsWindows())
-			return;
+			Assert.Skip("Windows PowerShell 5.1 is available only on Windows.");
 
 		const string executable = @"C:\Program Files\DevProjex\DevProjex.exe";
 		const string root = @"C:\Projects\My Project";
