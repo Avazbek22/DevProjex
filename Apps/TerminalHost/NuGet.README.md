@@ -1,6 +1,29 @@
-# DevProjex
+# DevProjex: codebase context for AI coding agents
 
-**Turn a folder or repository into clean, AI-ready context, and see exactly what you're sending.**
+**Turn any folder or Git repository into token-efficient codebase context for Claude Code,
+Codex, Cursor, and other AI coding agents.**
+
+Your agent reads `.env` as easily as `README.md`, and burns tokens opening whole files to find
+one function. DevProjex fixes both.
+
+- **Finds instead of dumping.** Search by text, regex, or declaration name, then read one
+  declaration or a line range, not the whole file.
+- **Knows how your files connect.** `related_files` follows real imports: what a file uses,
+  who uses it, and which tests import it.
+- **Shrinks what is left.** Code compression keeps signatures and drops bodies, so pure code
+  gets about 3× smaller; Git diffs carry only the changed lines.
+- **Keeps secrets in.** Detected credentials are masked before anything reaches the model, and
+  in MCP mode there is no switch to turn that off.
+- **Live Context.** Tick files in the Terminal Workspace or the desktop app, and they become
+  the agent's focus on its very next call. No restart, no new prompt.
+- **Agent journal.** A receipt for every session: calls, delivered files, tokens, and masked
+  values. Never file bodies.
+
+**Measured, not promised:** in our 18-task benchmark (12 Nov 2026, Claude Haiku 4.5 in Claude
+Code), agents used up to 40% fewer context tokens through DevProjex than through Repomix 1.19:
+28.8% and 40.9% across two runs. In the 28.8% run they also named 78 of 84 required files
+against 66. Raw numbers:
+[Docs/Benchmarks](https://github.com/Avazbek22/DevProjex/blob/master/Docs/Benchmarks/README.md).
 
 This .NET tool runs the DevProjex CLI, the interactive Terminal Workspace, and a read-only
 MCP server for AI agents. NuGet delivers one self-contained package for your platform, so
@@ -86,8 +109,9 @@ command = "dnx"
 args = ["devprojex", "mcp", "--root", "/absolute/path/to/project"]
 ```
 
-Nine read-only tools cover the workflow: `list_projects`, `get_tree`, `analyze`,
-`search_project`, `related_files`, `get_file`, `get_diff`, `pack_context`, and `read_pack`.
+Six read-only tools are published by default: `get_tree`, `search_project`, `get_file`,
+`related_files`, `get_diff`, and `read_pack`. Start the server with `--tool-set full` for all
+nine, adding `list_projects`, `analyze`, and `pack_context`.
 
 - Secret redaction is always on in MCP mode and has no off switch.
 - Access is pinned to the startup root; symlink and junction escapes are rejected.

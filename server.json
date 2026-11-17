@@ -1,8 +1,8 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.Avazbek22/devprojex",
-  "title": "DevProjex",
-  "description": "Read-only MCP server that turns a folder or repository into redacted, token-efficient context.",
+  "title": "DevProjex: Codebase Context for AI Agents",
+  "description": "Codebase context for AI agents: up to 40% fewer tokens than Repomix. Secrets masked. Live Context.",
   "version": "5.2.1",
   "websiteUrl": "https://github.com/Avazbek22/DevProjex",
   "repository": {

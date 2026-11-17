@@ -51,6 +51,8 @@ DevProjex works differently: visual, precise, and local-first.
 
 The numbers, with their caveats. In the final blind series against Repomix (11 tasks, 8 repositories, 6 languages, 22 sessions per side, Claude Haiku 4.5 as the agent and as the judge), DevProjex used 973,020 tokens against 1,174,907, and the judge trusted the DevProjex answer in 17 pairs of 22 against 3. With seven planted credentials, neither tool leaked a value, but the code around them stayed readable through DevProjex in 7 files of 7 against 1 of 7. The tasks were written by the author, Repomix needs fewer tool calls, and it wins broad "how does X work" questions. The whole series, with the agents' and the judge's verdicts verbatim, is in [Docs/Benchmark-History.md](Docs/Benchmark-History.md).
 
+In the two 18-task runs of 12 November 2026 against Repomix 1.19.0 (Claude Haiku 4.5 in Claude Code), agents used 28.8% and 40.9% fewer context tokens through DevProjex; in the 28.8% run they also named 78 of 84 required files against 66. Both runs are in [Docs/Benchmarks](Docs/Benchmarks/README.md).
+
 ### Use it for
 
 * **AI assistants:** clean input for ChatGPT, Claude, DeepSeek, Qwen, Kimi.
