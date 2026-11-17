@@ -452,6 +452,6 @@ internal static partial class McpLargeFileOutlineBuilder
 	[GeneratedRegex("^\\s*\"(?<key>[^\"\\\\]{1,120})\"\\s*:", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
 	private static partial Regex JsonKeyRegex();
 
-	[GeneratedRegex("^(?<level>#{1,6})\\s+(?<title>\\S.{0,160})", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
+	[GeneratedRegex("^ {0,3}(?<level>#{1,6})\\s+(?<title>\\S.{0,160})", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
 	private static partial Regex MarkdownHeadingRegex();
 }

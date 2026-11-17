@@ -3,16 +3,19 @@ namespace DevProjex.Tests.Terminal;
 public sealed partial class McpServerProcessTests
 {
 	[Theory]
-	[InlineData(false)]
-	[InlineData(true)]
-	public async Task RealProcessMarkdownStructuresKeepHeadingsInsideTheirMatchingFence(bool full)
+	[InlineData(false, 0)]
+	[InlineData(true, 0)]
+	[InlineData(false, 3)]
+	[InlineData(true, 3)]
+	public async Task RealProcessMarkdownStructuresKeepHeadingsInsideTheirMatchingFence(bool full, int indentation)
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
-		var lines = new List<string> { "# Before", "````text", "```", "# Hidden", "~~~", "# Also hidden", "~~~" };
+		var indent = new string(' ', indentation);
+		var lines = new List<string> { indent + "# Before", "````text", "```", "# Hidden", "~~~", "# Also hidden", "~~~" };
 		lines.AddRange(Enumerable.Repeat(new string('x', 90), 320));
 		lines.Add("````");
-		lines.Add("# After");
+		lines.Add(indent + "# After");
 		var afterLine = lines.Count;
 		lines.Add("last line");
 		workspace.WriteFile("project/guide µ.md", string.Join("\r\n", lines));
