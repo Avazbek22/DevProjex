@@ -1481,7 +1481,7 @@ internal sealed class TerminalWorkspaceCommandParser
 			foreach (var path in Directory.EnumerateFileSystemEntries(directory))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
-				if (!Path.GetFileName(path).StartsWith(prefix, StringComparison.CurrentCultureIgnoreCase))
+				if (!Path.GetFileName(path).StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
 					continue;
 				if (outsideWorkingDirectoryOnly && PathUtility.IsPathInside(path, baseDirectory))
 					continue;
@@ -1519,12 +1519,12 @@ internal sealed class TerminalWorkspaceCommandParser
 				cancellationToken.ThrowIfCancellationRequested();
 				var name = Path.GetFileNameWithoutExtension(path);
 				if (string.IsNullOrWhiteSpace(name) ||
-					!name.StartsWith(current, StringComparison.CurrentCultureIgnoreCase))
+					!name.StartsWith(current, StringComparison.OrdinalIgnoreCase))
 					continue;
 				AddBoundedCompletionCandidate(
 					names,
 					name,
-					StringComparer.CurrentCultureIgnoreCase);
+					StringComparer.OrdinalIgnoreCase);
 			}
 			return names;
 		}

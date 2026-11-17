@@ -1,7 +1,35 @@
+using System.Globalization;
+
 namespace DevProjex.Tests.Terminal;
 
 public sealed class TerminalPathPickerModelTests
 {
+	[Fact]
+	public void PathCompletionIgnoresCaseIndependentlyOfTheCurrentCulture()
+	{
+		using var workspace = new TemporaryDirectory();
+		var index = workspace.CreateDirectory("Index");
+		var model = new TerminalPathPickerModel(
+			TerminalPathPickerMode.Directory,
+			workspace.Path);
+		var originalCulture = CultureInfo.CurrentCulture;
+		try
+		{
+			// Turkish casing maps 'i' to dotted 'İ', so culture-aware matching misses "Index".
+			CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("tr-TR");
+
+			var completed = model.CompleteInputPath("i");
+
+			Assert.True(
+				PathComparer.Default.Equals(Path.TrimEndingDirectorySeparator(completed), index),
+				completed);
+		}
+		finally
+		{
+			CultureInfo.CurrentCulture = originalCulture;
+		}
+	}
+
 	[Fact]
 	public void DirectoryPickerShowsFoldersOnlyAndSelectsCurrentFolder()
 	{

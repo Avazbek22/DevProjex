@@ -1,3 +1,4 @@
+using System.Globalization;
 using DevProjex.Application.Ranking;
 using Terminal.Gui.Input;
 
@@ -670,6 +671,34 @@ public sealed class TerminalWorkspaceCommandParserTests
 		Assert.Equal(
 			"profile load \"Team Settings\"",
 			Assert.Single(profile.Candidates, static item => item.Token == "Team Settings").CompletedText);
+	}
+
+	[Fact]
+	public void PathAndProfileCompletionIgnoresCaseIndependentlyOfTheCurrentCulture()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.CreateDirectory("Index");
+		workspace.WriteFile("Item Settings.json", "{}");
+		var context = new TerminalWorkspaceCommandParseContext(
+			[".cs"],
+			WorkingDirectory: workspace.Path,
+			ProfileDirectory: workspace.Path);
+		var originalCulture = CultureInfo.CurrentCulture;
+		try
+		{
+			// Turkish casing maps 'i' to dotted 'İ', so culture-aware matching misses "Index".
+			CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("tr-TR");
+
+			var select = _parser.GetCompletion("select i", 8, context);
+			var profile = _parser.GetCompletion("profile load i", 14, context);
+
+			Assert.Contains(select.Candidates, static item => item.Token == "Index");
+			Assert.Contains(profile.Candidates, static item => item.Token == "Item Settings");
+		}
+		finally
+		{
+			CultureInfo.CurrentCulture = originalCulture;
+		}
 	}
 
 	[Fact]

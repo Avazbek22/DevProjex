@@ -214,7 +214,7 @@ internal sealed class TerminalPathPickerModel
 			if (directory is null || !Directory.Exists(directory))
 				return input;
 			var matches = Directory.EnumerateFileSystemEntries(directory)
-				.Where(path => Path.GetFileName(path).StartsWith(prefix, StringComparison.CurrentCultureIgnoreCase))
+				.Where(path => Path.GetFileName(path).StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
 				.Where(path => Directory.Exists(path) || IsVisibleFile(path))
 				.Take(100)
 				.ToArray();
