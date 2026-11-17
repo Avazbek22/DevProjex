@@ -1149,7 +1149,7 @@
   "Terminal.Argument.ProjectSource": "Project directory or Git repository URL. Defaults to the current directory.",
   "Terminal.Argument.HelpCommand": "Command path to describe.",
   "Terminal.Argument.RepositoryUrl": "Git repository URL.",
-  "Terminal.Argument.CompletionShell": "Shell to generate the completion script for: bash, zsh, fish or powershell.",
+  "Terminal.Argument.CompletionShell": "Shell to generate the completion script for: bash, zsh, fish, or powershell.",
   "Terminal.Argument.ProfileImportFile": "Profile file to import.",
   "Terminal.Argument.ProfileValidateFile": "Profile file to check.",
   "Terminal.Argument.UiPreviewView": "Preview view to switch to: tree, content, or tree-content.",
