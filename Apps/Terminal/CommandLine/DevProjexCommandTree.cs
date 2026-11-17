@@ -69,7 +69,7 @@ public sealed class DevProjexCommandTree
 		var root = new DevProjexRootCommand(L("Terminal.Command.Root"));
 		var defaultVersionOption = root.Options.OfType<VersionOption>().Single();
 		root.Options.Remove(defaultVersionOption);
-		root.Options.Add(new VersionOption("--version", "-v"));
+		root.Options.Add(CreateVersionOption());
 		_language.Recursive = true;
 		root.Options.Add(_language);
 		_output.AddGlobalsTo(root);
@@ -98,6 +98,31 @@ public sealed class DevProjexCommandTree
 			"devprojex export context . -o ../devprojex-context.md");
 		return root;
 	}
+
+	private VersionOption CreateVersionOption()
+	{
+		var version = new VersionOption("--version", "-v");
+		// The built-in check refuses every other token. --plain, --color, and --language only
+		// shape presentation, so they may accompany --version; commands and other input still fail.
+		version.Validators.Clear();
+		version.Validators.Add(result =>
+		{
+			if (result.Parent is CommandResult parent &&
+				parent.Children.Any(child => !IsVersionCompanion(child)))
+			{
+				result.AddError("--version cannot be combined with other arguments.");
+			}
+		});
+		return version;
+	}
+
+	private bool IsVersionCompanion(SymbolResult result) =>
+		result is OptionResult option &&
+		(option.Implicit ||
+		 option.Option is VersionOption ||
+		 option.Option == _language ||
+		 option.Option == _output.Plain ||
+		 option.Option == _output.Color);
 
 	private Command BuildMcpCommand()
 	{
