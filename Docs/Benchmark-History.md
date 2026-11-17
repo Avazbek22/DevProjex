@@ -114,13 +114,13 @@ Repomix 1.17.0, then 1.18.0.*
 | Godot (14,261 files, 327 MB) | 62,445 | 8,269 | 1,037.6 MiB | 3,478.0 MiB |
 
 The content pipeline was rebuilt after that measurement. On the same pinned inputs the
-reviewed medians became 1,092 ms for Flask and 10,391 ms for Godot export, 3.25 times faster
+cold medians became 1,092 ms for Flask and 10,391 ms for Godot export, 3.25 times faster
 on Godot and short of the 4 times that was the target; peak memory on Godot did not improve,
 because the peak is detector and runtime churn rather than retained text. The two tools
 select different file sets, so these are not identical-workload rankings; the exact commands
 are in [Benchmarks.md](Benchmarks.md).
 
-**The first agent run.** A Claude subagent that did not know which server was which answered
+**The first agent run.** A Claude agent that did not know which server was which answered
 four questions about Flask and the Repomix repository, with at most 14 calls per run.
 
 - 22 calls and about 22,300 tokens against 21 calls and about 37,300 (estimated as characters
@@ -422,8 +422,8 @@ DevProjex tool errors were an invented `start_range` argument, a bad `start_line
 
 **Five languages** (`1ed69509`, Repomix 1.18.1): jsoup 1.23.2 (Java, change impact), click
 8.5.0 (Python, bug localization), fmt 12.2.0 (C++, precise fact), MediatR 14.2.0 (C#,
-dependency impact), chi 5.3.2 (Go, feature orientation); tasks written by five separate
-agents; two repeats. Totals: 534,000 tokens and 253 calls against 573,000 and 268; required
+dependency impact), chi 5.3.2 (Go, feature orientation); tasks written separately for
+each repository; two repeats. Totals: 534,000 tokens and 253 calls against 573,000 and 268; required
 paths missed 2 of 38 against 5 of 38; all key paths missed 10 of 58 against 17 of 58. The judge
 in this run scored five dimensions on the answers and three on the agents' scrubbed experience
 notes:
@@ -521,7 +521,7 @@ its own pack.
 
 ## What changed, in one table
 
-| Finding | Change | Measured effect |
+| Observation | Change | Measured effect |
 |---|---|---|
 | Claude Code dropped `get_file` over a `not` in its schema (10 Sep) | #342: portable schema subset, contract test | hono 55,600 to 49,300 tokens; complaint gone |
 | Redactor rewrote `password=auth[1]` in plain code (10 Sep) | #342: connection-string region parser | complaint gone; trust scores from all 4s to two 5s and six 4s |
@@ -564,8 +564,8 @@ its own pack.
   pairs is reported with every tally. It rewarded verifiable `file:line` references, which
   penalised Repomix answers that cite positions inside the packed file; token, call and file
   counts do not depend on it. Its own errors are listed above.
-- **Tasks.** Written by the author of DevProjex, and for the five-language set by five separate
-  agents, with keys taken from merged pull requests or verified by `git grep`. The same set
+- **Tasks.** Written by the author of DevProjex, and for the five-language set separately for
+  each repository, with keys taken from merged pull requests or verified by `git grep`. The same set
   that exposed a defect was used to confirm its fix, which makes this a development benchmark
   and not an independent one. Repositories were pinned by tag or commit.
 - **Sample sizes.** One to three repeats per cell; the largest series is 22 sessions per side.

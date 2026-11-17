@@ -35,6 +35,7 @@ Related documents:
 | [2026-11-09](2026-11-09.md) | #516 and #518 kept, #519 closed; blind run on rich and FluentValidation; #517 and #520 |
 | [2026-11-10](2026-11-10.md) | `get_tree` depth from the requested path (#533) and the `Exported by:` line (#534) measured and kept; new ranking baseline; first Codex CLI series on the 5.2 release, v5.2.2 and Repomix 1.19.0; keys checked, missed paths classified, `list_projects` made optional (#544) |
 | [2026-11-12](2026-11-12.md) | Batch reads that return structure (#545), measured twice with Codex CLI; a lighter catalog (#546) and comment hits with structure members (#547), measured without a model and in one series of three builds; the same build measured twice; all eighteen tasks with Claude Haiku on the 5.2 release, v5.2.2 and Repomix 1.19.0 |
+| [2026-11-14](2026-11-14.md) | The tools and parameters agents use, counted over 965 recorded sessions; the reduced tool set as the default (#550); four sides with Claude Haiku on 12 November: `1f90ac4b`, the 5.2 release, Repomix 1.19.0 and the client's built-in tools; the same code on .NET 10 and .NET 11 |
 
 ## How the days connect
 
@@ -76,6 +77,15 @@ Related documents:
 15. **Three sides with Claude** (12 November). All eighteen tasks on the 5.2 release, v5.2.2 and
     Repomix 1.19.0, with the judge. Haiku asks for one file per call, so the batch changes
     measured with Codex hardly appear, and most answers ask for the places that use a name.
+16. **Publish what agents use** (12 to 14 November). Over 965 recorded sessions three tools and
+    five filters were hardly ever called, so the reduced tool set became the default and the
+    first request of a session lost 3,505 tokens. Four sides with Claude followed: `1f90ac4b`
+    named the most required files and used the fewest context tokens, 28.8% fewer than
+    Repomix and 9.4% fewer than the 5.2 release, short of the bar of 50% and 25% set for the
+    run. The client's own file tools needed more calls and left two tasks unanswered.
+17. **A runtime measured before a decision** (14 November). The same code on .NET 10 and
+    .NET 11: a little less processor time, no less memory, a larger executable and a slower
+    interface search. The move was not made.
 
 ## How the sessions were run
 
@@ -84,6 +94,8 @@ Related documents:
 - **Client.** Headless Claude Code (`claude -p`) with `--strict-mcp-config` and no built-in file
   tools, so the agent can only use the MCP server under test. The Codex series of 10 and 12
   November ran on Codex CLI under the stand's isolation profile, with the same restriction.
+  One side of the run of 12 November is the exception by design: Claude Code with only its
+  `Read`, `Grep` and `Glob` tools and no MCP server.
 - **Model.** Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) for every session and every judge
   call, with two exceptions: the four-server run of 10 September used a larger Claude model, and
   the Codex series of 10 and 12 November used `gpt-6-luna` at low reasoning effort, without a
@@ -122,10 +134,14 @@ Related documents:
   task cost on every model request. For Claude Code it is read from the first request of a
   session. Codex CLI reports usage for a whole session, so there it is fitted per tool call,
   together with the tool output read again by later calls.
+- **Model requests** (from 12 November): the model responses of a session. One response can
+  carry several tool calls, so this number is lower than the number of calls.
 - **Sample size.** Two or three sessions per task and build, unless a file says otherwise. On
   identical code the judge has split 6 to 1 over 12 pairs, one build on one task has varied by a
   factor of two in tokens, and ten sessions per task have differed by 18 calls in one task and
-  by 20 of 230 in total. A difference smaller than that is not a result.
+  by 20 of 230 in total. With one session per task, one build measured twice in a day has
+  differed by 60 calls of 434 and by 2.32 of 14.78 million context tokens. A difference smaller
+  than that is not a result.
 
 ## Rules established by these runs
 
@@ -156,3 +172,9 @@ Related documents:
    and makes about seventeen. A catalog 5,259 characters shorter gave about 400 tokens per call
    with Codex; with Claude the first request of a session was 3,766 tokens larger for a tool
    list 8,701 characters longer.
+9. **A saving per request is not a saving per run.** On 2026-11-12 the default catalog made
+   every request 3,505 tokens lighter, and its 18 sessions made 328 requests where those of `059f95af` had
+   made 296; the total did not fall. Read the request and the run separately.
+10. **Set a percentage bar against a measured spread.** The same two builds, run twice in one
+    day with one session per task, moved by 5.0% and by 15.7% in context tokens. A bar closer
+    than that cannot be read from one session per task.
