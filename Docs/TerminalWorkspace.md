@@ -119,8 +119,8 @@ The workspace adapts to terminal size:
 
 | Width | Layout |
 |---:|---|
-| 150 columns or wider | Tree, Preview, and Parameters |
-| 120-149 columns | Tree and Preview; Parameters opens as a focused pane |
+| 150 columns or wider, at least 28 rows | Tree, Preview, and Parameters |
+| 120-149 columns, or 150 columns or wider below 28 rows | Tree and Preview; Parameters opens as a focused pane |
 | 80-119 columns | tabbed single-pane workspace |
 | 60-79 columns | compact single-pane workspace |
 | below 60 columns, or below 20 rows | resize guidance |

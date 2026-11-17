@@ -7,7 +7,7 @@ internal static class CliInputIntegrityGuard
 	// System.CommandLine splits an option token at the first of these characters.
 	private static readonly char[] InlineValueDelimiters = ['=', ':'];
 
-	// System.CommandLine 2.0.10 drops an empty inline value and can bind the next argv token.
+	// System.CommandLine 2.0.11 drops an empty inline value and can bind the next argv token.
 	// This guard validates only that lexical boundary; command and option resolution stay model-owned.
 	public static bool TryFindError(
 		IReadOnlyList<string> arguments,
