@@ -15,7 +15,10 @@ public sealed partial class McpServerProcessTests
 		var servers = new[] { compact, full };
 		var slices = await Task.WhenAll(servers.Select(server => CallAsync(server, "get_file", new()
 		{
-			["path"] = "mixed µ.txt", ["start_line"] = 2, ["end_line"] = 2, ["start_column"] = 2
+			["path"] = "mixed µ.txt",
+			["start_line"] = 2,
+			["end_line"] = 2,
+			["start_column"] = 2
 		}).AsTask()));
 		foreach (var result in slices)
 		{
