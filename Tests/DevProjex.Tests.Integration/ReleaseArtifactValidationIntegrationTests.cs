@@ -696,6 +696,7 @@ public sealed class ReleaseArtifactValidationIntegrationTests
 	{
 		var scripts = Directory.CreateDirectory(Path.Combine(root, "Scripts")).FullName;
 		File.Copy(Path.Combine(RepoRoot.Value, "Directory.Build.targets"), Path.Combine(root, "Directory.Build.targets"));
+		File.Copy(Path.Combine(RepoRoot.Value, "global.json"), Path.Combine(root, "global.json"));
 		File.Copy(Path.Combine(RepoRoot.Value, "Scripts", "Write-PublishPayloadReceipt.ps1"), Path.Combine(scripts, "Write-PublishPayloadReceipt.ps1"));
 		File.Copy(Path.Combine(RepoRoot.Value, "Scripts", "ReleasePayloadInspection.cs"), Path.Combine(scripts, "ReleasePayloadInspection.cs"));
 		CreateFixtureProject(root, "Assets", "Fixture.Assets.NewContent.txt");
@@ -728,14 +729,21 @@ public sealed class ReleaseArtifactValidationIntegrationTests
 	private static ProcessResult RunPowerShell(string scriptPath, IReadOnlyList<string> arguments) =>
 		RunProcess("pwsh", RepoRoot.Value, ["-NoLogo", "-NoProfile", "-File", scriptPath, .. arguments]);
 
+	// The test host inherits the MSBuild paths of the SDK that runs the tests; a child dotnet that
+	// selects another SDK would load that SDK's tasks against its own MSBuild (dotnet/sdk#55772).
 	private static ProcessResult RunDotNet(string workingDirectory, IReadOnlyList<string> arguments) =>
-		RunProcess("dotnet", workingDirectory, arguments);
+		RunProcess("dotnet", workingDirectory, arguments, ["MSBuildExtensionsPath", "MSBuildSDKsPath"]);
 
-	private static ProcessResult RunProcess(string fileName, string workingDirectory, IReadOnlyList<string> arguments)
+	private static ProcessResult RunProcess(
+		string fileName,
+		string workingDirectory,
+		IReadOnlyList<string> arguments,
+		IReadOnlyList<string>? removedEnvironmentVariables = null)
 	{
 		var startInfo = new ProcessStartInfo { FileName = fileName, WorkingDirectory = workingDirectory,
 			RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
 		foreach (var argument in arguments) startInfo.ArgumentList.Add(argument);
+		foreach (var name in removedEnvironmentVariables ?? []) startInfo.Environment.Remove(name);
 		using var process = Process.Start(startInfo) ?? throw new InvalidOperationException($"Could not start {fileName}.");
 		var output = process.StandardOutput.ReadToEnd();
 		var error = process.StandardError.ReadToEnd();
