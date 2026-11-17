@@ -342,6 +342,8 @@ internal sealed class TerminalWorkspaceCommandParser
 		TerminalWorkspaceCommandDefinition definition,
 		IReadOnlyList<ParsedToken> tokens)
 	{
+		if (tokens.Count == 2 && !Contains(SetTargets, tokens[1].Value))
+			return Unknown(tokens[1], SetTargets);
 		if (tokens.Count < 3)
 		{
 			var candidates = tokens.Count == 1
@@ -397,6 +399,8 @@ internal sealed class TerminalWorkspaceCommandParser
 		TerminalWorkspaceCommandDefinition definition,
 		IReadOnlyList<ParsedToken> tokens)
 	{
+		if (tokens.Count == 2 && !Contains(AggregateTargets, tokens[1].Value))
+			return Unknown(tokens[1], AggregateTargets);
 		if (tokens.Count < 3)
 			return Missing(tokens, tokens.Count == 1 ? AggregateTargets : ToggleValues);
 		if (tokens.Count > 3)
