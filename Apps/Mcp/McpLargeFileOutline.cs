@@ -403,7 +403,7 @@ internal static partial class McpLargeFileOutlineBuilder
 						fenceCharacter = fence[0];
 						fenceLength = length;
 					}
-					else if (fence[0] == fenceCharacter && length >= fenceLength && fence[length..].Trim().IsEmpty)
+					else if (fence[0] == fenceCharacter && length >= fenceLength && fence[length..].IndexOfAnyExcept(' ', '\t') < 0)
 						fenceCharacter = '\0';
 					continue;
 				}

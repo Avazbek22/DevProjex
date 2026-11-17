@@ -12,7 +12,7 @@ public sealed partial class McpServerProcessTests
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
 		var indent = new string(' ', indentation);
-		var lines = new List<string> { indent + "# Before", "````text", "```", "# Hidden", "~~~", "# Also hidden", "~~~" };
+		var lines = new List<string> { indent + "# Before", "````text", "```", "# Hidden", "~~~", "# Also hidden", "~~~", "````\u00A0", "# Still hidden" };
 		lines.AddRange(Enumerable.Repeat(new string('x', 90), 320));
 		lines.Add("````");
 		lines.Add(indent + "# After");

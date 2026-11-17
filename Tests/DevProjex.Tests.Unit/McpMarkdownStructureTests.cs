@@ -37,6 +37,8 @@ public sealed class McpMarkdownStructureTests
 	[InlineData("~~~~text", "~~~", "~~~~")]
 	[InlineData("```text", "```still code", "```")]
 	[InlineData("~~~text", "~~~still code", "~~~")]
+	[InlineData("```text", "```\u00A0", "```")]
+	[InlineData("~~~text", "~~~\u2003", "~~~")]
 	public void OnlyAMatchingFenceCanExposeTheFollowingHeading(string opening, string inside, string closing)
 	{
 		foreach (var ending in new[] { "\n", "\r\n", "\r" })
