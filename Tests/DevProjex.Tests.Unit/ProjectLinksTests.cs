@@ -61,7 +61,7 @@ public sealed class ProjectLinksTests
 	{
 		var segments = path.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 		return segments.Contains("bin", StringComparer.OrdinalIgnoreCase) ||
-		       segments.Contains("obj", StringComparer.OrdinalIgnoreCase);
+			   segments.Contains("obj", StringComparer.OrdinalIgnoreCase);
 	}
 
 	private static string FindRepositoryRoot()
