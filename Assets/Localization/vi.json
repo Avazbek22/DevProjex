@@ -807,7 +807,7 @@
   "Terminal.Error.DesktopTimeout": "Yêu cầu tới Desktop đã hết thời gian chờ.",
   "Terminal.Error.DesktopProtocolMismatch": "Phiên Desktop dùng giao thức điều khiển không tương thích.",
   "Terminal.Error.DesktopPayloadTooLarge": "Thông điệp điều khiển Desktop vượt quá giới hạn kích thước an toàn.",
-  "Terminal.Error.DesktopNotIncluded": "Bản phân phối này không có ứng dụng Desktop; hãy cài DevProjex Desktop từ https://github.com/Avazbek22/DevProjex/blob/v5.2/Docs/Installation.md.",
+  "Terminal.Error.DesktopNotIncluded": "Bản phân phối này không có ứng dụng Desktop; hãy cài DevProjex Desktop từ {0}.",
   "Terminal.Error.DesktopRequestFailed": "Không thể hoàn tất yêu cầu tới Desktop.",
   "Terminal.Error.CommandInvalid": "Yêu cầu lệnh không hợp lệ.",
   "Terminal.Hint.DidYouMean": "gợi ý: Có phải ý bạn là '{0}'?",

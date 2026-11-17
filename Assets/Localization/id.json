@@ -807,7 +807,7 @@
   "Terminal.Error.DesktopTimeout": "Permintaan ke Desktop melewati batas waktu.",
   "Terminal.Error.DesktopProtocolMismatch": "Instans Desktop menggunakan protokol kontrol yang tidak kompatibel.",
   "Terminal.Error.DesktopPayloadTooLarge": "Pesan kontrol Desktop melebihi batas ukuran aman.",
-  "Terminal.Error.DesktopNotIncluded": "Distribusi ini tidak memiliki aplikasi Desktop; instal DevProjex Desktop dari https://github.com/Avazbek22/DevProjex/blob/v5.2/Docs/Installation.md.",
+  "Terminal.Error.DesktopNotIncluded": "Distribusi ini tidak memiliki aplikasi Desktop; instal DevProjex Desktop dari {0}.",
   "Terminal.Error.DesktopRequestFailed": "Permintaan ke Desktop tidak dapat diselesaikan.",
   "Terminal.Error.CommandInvalid": "Permintaan perintah tidak valid.",
   "Terminal.Hint.DidYouMean": "petunjuk: Maksud Anda '{0}'?",

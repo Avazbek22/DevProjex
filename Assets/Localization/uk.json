@@ -807,7 +807,7 @@
   "Terminal.Error.DesktopTimeout": "Час очікування запиту до Desktop минув.",
   "Terminal.Error.DesktopProtocolMismatch": "Екземпляр Desktop використовує несумісний протокол керування.",
   "Terminal.Error.DesktopPayloadTooLarge": "Повідомлення для керування Desktop перевищує безпечний розмір.",
-  "Terminal.Error.DesktopNotIncluded": "Цей дистрибутив не містить застосунку Desktop; установіть DevProjex Desktop за інструкцією https://github.com/Avazbek22/DevProjex/blob/v5.2/Docs/Installation.md.",
+  "Terminal.Error.DesktopNotIncluded": "Цей дистрибутив не містить застосунку Desktop; установіть DevProjex Desktop за інструкцією {0}.",
   "Terminal.Error.DesktopRequestFailed": "Не вдалося виконати запит до Desktop.",
   "Terminal.Error.CommandInvalid": "Запит команди недійсний.",
   "Terminal.Hint.DidYouMean": "підказка: можливо, ви мали на увазі «{0}»?",

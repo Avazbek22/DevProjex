@@ -807,7 +807,7 @@
   "Terminal.Error.DesktopTimeout": "傳送給桌面版的請求已逾時。",
   "Terminal.Error.DesktopProtocolMismatch": "桌面版執行個體使用不相容的控制協定。",
   "Terminal.Error.DesktopPayloadTooLarge": "桌面版控制訊息超出安全大小限制。",
-  "Terminal.Error.DesktopNotIncluded": "此發行版不包含桌面版應用程式；請從 https://github.com/Avazbek22/DevProjex/blob/v5.2/Docs/Installation.md 安裝 DevProjex Desktop。",
+  "Terminal.Error.DesktopNotIncluded": "此發行版不包含桌面版應用程式；請從 {0} 安裝 DevProjex Desktop。",
   "Terminal.Error.DesktopRequestFailed": "無法完成傳送給桌面版的請求。",
   "Terminal.Error.CommandInvalid": "命令請求無效。",
   "Terminal.Hint.DidYouMean": "提示：您的意思是「{0}」嗎？",

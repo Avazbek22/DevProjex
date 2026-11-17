@@ -807,7 +807,7 @@
   "Terminal.Error.DesktopTimeout": "Upłynął limit czasu żądania do DevProjex Desktop.",
   "Terminal.Error.DesktopProtocolMismatch": "Instancja Desktop używa niezgodnego protokołu sterowania.",
   "Terminal.Error.DesktopPayloadTooLarge": "Komunikat sterujący Desktop przekracza bezpieczny limit rozmiaru.",
-  "Terminal.Error.DesktopNotIncluded": "Ta dystrybucja nie zawiera aplikacji desktopowej; zainstaluj DevProjex Desktop zgodnie z https://github.com/Avazbek22/DevProjex/blob/v5.2/Docs/Installation.md.",
+  "Terminal.Error.DesktopNotIncluded": "Ta dystrybucja nie zawiera aplikacji desktopowej; zainstaluj DevProjex Desktop zgodnie z {0}.",
   "Terminal.Error.DesktopRequestFailed": "Nie można zrealizować żądania do DevProjex Desktop.",
   "Terminal.Error.CommandInvalid": "Żądanie polecenia jest nieprawidłowe.",
   "Terminal.Hint.DidYouMean": "wskazówka: czy chodziło o „{0}”?",

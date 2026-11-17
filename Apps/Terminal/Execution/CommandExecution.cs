@@ -206,7 +206,9 @@ internal static class CommandExecution
 		"DPX-DESKTOP-TIMEOUT" => localization["Terminal.Error.DesktopTimeout"],
 		"DPX-DESKTOP-PROTOCOL-MISMATCH" => localization["Terminal.Error.DesktopProtocolMismatch"],
 		"DPX-DESKTOP-PAYLOAD-TOO-LARGE" => localization["Terminal.Error.DesktopPayloadTooLarge"],
-		"DPX-DESKTOP-NOT-INCLUDED" => localization["Terminal.Error.DesktopNotIncluded"],
+		"DPX-DESKTOP-NOT-INCLUDED" => localization.Format(
+			"Terminal.Error.DesktopNotIncluded",
+			DevProjex.Application.ProjectLinks.InstallationDocumentationUrl),
 		ProjectContextGitReadiness.UnavailableDiagnosticCode =>
 			localization["Terminal.Diagnostic.TrackedIndexUnavailable"],
 		GitScopeFilter.UnavailableDiagnosticCode =>
