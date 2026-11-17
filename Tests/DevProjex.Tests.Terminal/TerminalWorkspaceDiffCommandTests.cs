@@ -68,6 +68,44 @@ public sealed class TerminalWorkspaceDiffCommandTests
 		Assert.Equal(["--context"], completion.Candidates.Select(static candidate => candidate.Token));
 	}
 
+	[Fact]
+	public void DiffAfterTheContextValueStillOffersTheScopesThatParse()
+	{
+		const string text = "diff --context 3 ";
+
+		var completion = _parser.GetCompletion(text, text.Length, Context);
+
+		Assert.Equal(
+			["changes", "staged", "diff:"],
+			completion.Candidates.Select(static candidate => candidate.Token));
+		foreach (var scope in new[] { "changes", "staged", "diff:main..feature" })
+			Assert.True(_parser.Parse(text + scope, Context).IsSuccess, scope);
+	}
+
+	[Fact]
+	public void DiffCompletesAPartialScopeTypedAfterTheContextOption()
+	{
+		const string text = "diff --context 3 st";
+
+		var full = _parser.GetCompletion(text, text.Length, Context);
+		var ghost = _parser.GetGhostCompletion(text, text.Length, Context);
+
+		Assert.Equal(["staged"], full.Candidates.Select(static candidate => candidate.Token));
+		Assert.Equal("aged", full.GhostSuffix);
+		Assert.Equal(full.GhostSuffix, ghost.GhostSuffix);
+	}
+
+	[Theory]
+	[InlineData("diff --context ")]
+	[InlineData("diff staged --context 3 ")]
+	[InlineData("diff --context 3 staged ")]
+	public void DiffOffersNoCandidatesForTheContextValueOrAfterACompleteCommand(string text)
+	{
+		var completion = _parser.GetCompletion(text, text.Length, Context);
+
+		Assert.Empty(completion.Candidates);
+	}
+
 	[Theory]
 	[InlineData("diff --context 0", "changes", 0)]
 	[InlineData("diff --context 20", "changes", 20)]

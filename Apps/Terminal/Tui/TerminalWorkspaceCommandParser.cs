@@ -1132,17 +1132,30 @@ internal sealed class TerminalWorkspaceCommandParser
 	{
 		if (argumentIndex < 0)
 			return default;
+		// Mirrors ParseDiff: the scope and "--context N" may appear once each, in either order.
 		var preceding = PrecedingArguments(tokens, argumentIndex);
-		if (preceding.Count > 0 &&
-			string.Equals(preceding[^1].Value, DiffContextOption, StringComparison.OrdinalIgnoreCase))
+		var hasScope = false;
+		var hasContext = false;
+		for (var index = 0; index < preceding.Count; index++)
 		{
-			return default;
+			if (string.Equals(preceding[index].Value, DiffContextOption, StringComparison.OrdinalIgnoreCase))
+			{
+				if (index == preceding.Count - 1)
+					return default;
+				hasContext = true;
+				index++;
+				continue;
+			}
+			hasScope = true;
 		}
-		if (preceding.Any(token => string.Equals(token.Value, DiffContextOption, StringComparison.OrdinalIgnoreCase)))
-			return default;
-		return preceding.Count == 0
-			? new CompletionCandidateSource([.. DiffScopes, .. DiffOptions])
-			: new CompletionCandidateSource(DiffOptions);
+
+		return (hasScope, hasContext) switch
+		{
+			(false, false) => new CompletionCandidateSource([.. DiffScopes, .. DiffOptions]),
+			(false, true) => new CompletionCandidateSource(DiffScopes),
+			(true, false) => new CompletionCandidateSource(DiffOptions),
+			_ => default
+		};
 	}
 
 	private static CompletionCandidateSource CompleteView(
