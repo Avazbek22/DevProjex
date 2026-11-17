@@ -196,16 +196,16 @@ dotnet tool install --global devprojex
 
 Release automation prepares one headless archive for each supported RID. Choose
 `DevProjex-headless.v<version>.<rid>.zip` on Windows or
-`DevProjex-headless.v<version>.<rid>.tar.gz` on Linux and macOS. For the v5.2 release:
+`DevProjex-headless.v<version>.<rid>.tar.gz` on Linux and macOS. For the v5.2.5 release:
 
 ```powershell
 $destination = Join-Path $PWD 'devprojex-headless'
-Expand-Archive DevProjex-headless.v5.2.win-x64.zip -DestinationPath $destination
+Expand-Archive DevProjex-headless.v5.2.5.win-x64.zip -DestinationPath $destination
 & (Join-Path $destination 'devprojex.exe') --version
 ```
 
 ```bash
-tar xzf DevProjex-headless.v5.2.linux-x64.tar.gz
+tar xzf DevProjex-headless.v5.2.5.linux-x64.tar.gz
 ./devprojex --version
 ```
 
@@ -232,7 +232,7 @@ docker run --rm --read-only --tmpfs /tmp \
 ```
 
 Use an explicit version tag for reproducible automation, for example
-`ghcr.io/avazbek22/devprojex:5.2`. The untagged examples use Docker's `latest`
+`ghcr.io/avazbek22/devprojex:5.2.5`. The untagged examples use Docker's `latest`
 tag only after a release workflow has published it. Alpine and other musl hosts
 are not supported.
 
