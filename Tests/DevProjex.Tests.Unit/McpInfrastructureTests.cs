@@ -698,19 +698,18 @@ public sealed class McpInfrastructureTests
 		var project = workspace.CreateFolder("project");
 		var outside = workspace.CreateFolder("outside");
 		var link = Path.Combine(project, "escape");
+		CreateDirectoryAliasOrSkip(link, outside);
 		try
 		{
-			Directory.CreateSymbolicLink(link, outside);
+			var registry = new McpRootRegistry([project]);
+			var exception = Assert.Throws<McpToolException>(() =>
+				registry.ResolveExistingPath(project, "escape"));
+			Assert.Equal(McpErrorCodes.RootViolation, exception.Code);
 		}
-		catch (Exception creationException) when (creationException is UnauthorizedAccessException or IOException or PlatformNotSupportedException)
+		finally
 		{
-			return;
+			Directory.Delete(link);
 		}
-
-		var registry = new McpRootRegistry([project]);
-		var exception = Assert.Throws<McpToolException>(() =>
-			registry.ResolveExistingPath(project, "escape"));
-		Assert.Equal(McpErrorCodes.RootViolation, exception.Code);
 	}
 
 	[Theory]

@@ -451,7 +451,7 @@ public sealed partial class McpLiveContextStateTests
 		catch (Exception exception) when (
 			exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
 		{
-			return;
+			Assert.Skip($"Directory symbolic links are unavailable: {exception.GetType().Name}.");
 		}
 
 		try

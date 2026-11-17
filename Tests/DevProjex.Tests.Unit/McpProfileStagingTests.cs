@@ -10,7 +10,7 @@ public sealed class McpProfileStagingTests
 	public void ProfileStagingUsesOwnerOnlyDirectoryPermissionsOnUnix()
 	{
 		if (OperatingSystem.IsWindows())
-			return;
+			Assert.Skip("Unix file modes do not apply on Windows.");
 		using var temporary = new TemporaryDirectory();
 
 		var staging = McpServices.CreatePrivateProfileStagingDirectory(temporary.Path);
@@ -24,7 +24,7 @@ public sealed class McpProfileStagingTests
 	public void ProfileStagingUsesOwnerOnlyFilePermissionsOnUnix()
 	{
 		if (OperatingSystem.IsWindows())
-			return;
+			Assert.Skip("Unix file modes do not apply on Windows.");
 		using var temporary = new TemporaryDirectory();
 		var staging = McpServices.CreatePrivateProfileStagingDirectory(temporary.Path);
 		var path = Path.Combine(staging, "profile.json");
