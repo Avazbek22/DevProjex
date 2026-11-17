@@ -63,7 +63,7 @@ public sealed class McpConnectionServiceTests
 	public async Task ProcessRunner_ExecutesWindowsCommandShimFromQuotedPath()
 	{
 		if (!OperatingSystem.IsWindows())
-			return;
+			Assert.Skip("Windows command shims run only on Windows.");
 
 		using var temp = new TemporaryDirectory();
 		var shimDirectory = Path.Combine(temp.Path, "client tools Юникод");
@@ -1576,7 +1576,7 @@ public sealed class McpConnectionServiceTests
 		}
 		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
 		{
-			return;
+			Assert.Skip($"File symbolic links are unavailable: {exception.GetType().Name}.");
 		}
 		var service = CreateService(new McpClientExecutableLocator(), new RecordingProcessRunner());
 
@@ -1608,7 +1608,7 @@ public sealed class McpConnectionServiceTests
 		}
 		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
 		{
-			return;
+			Assert.Skip($"File symbolic links are unavailable: {exception.GetType().Name}.");
 		}
 		var linkTarget = new FileInfo(targetPath).LinkTarget;
 		var service = CreateService(new McpClientExecutableLocator(), new RecordingProcessRunner());

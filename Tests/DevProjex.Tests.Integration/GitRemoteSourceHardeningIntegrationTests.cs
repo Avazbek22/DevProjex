@@ -2,7 +2,7 @@ using System.Diagnostics;
 
 namespace DevProjex.Tests.Integration;
 
-[Collection(GitNetworkTestCollection.Name)]
+[Collection(GitProcessEnvironmentTestCollection.Name)]
 public sealed class GitRemoteSourceHardeningIntegrationTests
 {
 	[Theory]

@@ -1,5 +1,9 @@
 namespace DevProjex.Tests.Integration;
 
+/// <summary>
+/// Runs alone because its tests change process-wide variables (Git, proxy and certificate settings)
+/// that Git processes and HTTP clients started by tests in other collections would read.
+/// </summary>
 [CollectionDefinition(Name, DisableParallelization = true)]
 public sealed class GitProcessEnvironmentTestCollection
 {

@@ -304,7 +304,7 @@ public sealed class McpClientLaunchServiceTests
 	public async Task Open_EditorUrlRoundTripsUncProjectRoot()
 	{
 		if (!OperatingSystem.IsWindows())
-			return;
+			Assert.Skip("UNC project roots exist only on Windows.");
 
 		const string projectRoot = @"\\server\share\project # Пример";
 		var setup = CreateService(TerminalCommandHostPlatform.Windows, availableCommands: []);
@@ -404,7 +404,7 @@ public sealed class McpClientLaunchServiceTests
 		string commandName)
 	{
 		if (!OperatingSystem.IsWindows())
-			return;
+			Assert.Skip("The real cmd.exe dispatcher exists only on Windows.");
 
 		using var project = new TemporaryDirectory();
 		var projectRoot = project.CreateFolder("project 100% ! caret ^ Пример");
@@ -687,7 +687,7 @@ public sealed class McpClientLaunchServiceTests
 	public async Task ProcessRunner_WindowsRawCommandPreservesQuotedUnicodePaths()
 	{
 		if (!OperatingSystem.IsWindows())
-			return;
+			Assert.Skip("The real cmd.exe dispatcher exists only on Windows.");
 
 		using var project = new TemporaryDirectory();
 		var projectRoot = project.CreateFolder("cmd 100% Пример");
@@ -726,7 +726,7 @@ public sealed class McpClientLaunchServiceTests
 	public async Task ProcessRunner_WindowsReportsNonZeroDispatcherExitAndStderr()
 	{
 		if (!OperatingSystem.IsWindows())
-			return;
+			Assert.Skip("The real cmd.exe dispatcher exists only on Windows.");
 
 		using var project = new TemporaryDirectory();
 		var scriptPath = project.CreateFile(
