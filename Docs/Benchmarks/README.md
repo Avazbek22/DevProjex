@@ -35,7 +35,7 @@ Related documents:
 | [2026-11-09](2026-11-09.md) | #516 and #518 kept, #519 closed; blind run on rich and FluentValidation; #517 and #520 |
 | [2026-11-10](2026-11-10.md) | `get_tree` depth from the requested path (#533) and the `Exported by:` line (#534) measured and kept; new ranking baseline; first Codex CLI series on the 5.2 release, v5.2.2 and Repomix 1.19.0; keys checked, missed paths classified, `list_projects` made optional (#544) |
 | [2026-11-12](2026-11-12.md) | Batch reads that return structure (#545), measured twice with Codex CLI; a lighter catalog (#546) and comment hits with structure members (#547), measured without a model and in one series of three builds; the same build measured twice; all eighteen tasks with Claude Haiku on the 5.2 release, v5.2.2 and Repomix 1.19.0 |
-| [2026-11-14](2026-11-14.md) | The tools and parameters agents use, counted over 965 recorded sessions; the reduced tool set as the default (#550); four sides with Claude Haiku on 12 November: the current branch, the 5.2 release, Repomix 1.19.0 and the client's built-in tools; the same code on .NET 10 and .NET 11 |
+| [2026-11-14](2026-11-14.md) | The tools and parameters agents use, counted over 965 recorded sessions; the reduced tool set as the default (#550); four sides with Claude Haiku on 12 November: `1f90ac4b`, the 5.2 release, Repomix 1.19.0 and the client's built-in tools; the same code on .NET 10 and .NET 11 |
 
 ## How the days connect
 
@@ -79,8 +79,8 @@ Related documents:
     measured with Codex hardly appear, and most answers ask for the places that use a name.
 16. **Publish what agents use** (12 to 14 November). Over 965 recorded sessions three tools and
     five filters were hardly ever called, so the reduced tool set became the default and the
-    first request of a session lost 3,505 tokens. Four sides with Claude followed: the current
-    branch named the most required files and used the fewest context tokens, 28.8% fewer than
+    first request of a session lost 3,505 tokens. Four sides with Claude followed: `1f90ac4b`
+    named the most required files and used the fewest context tokens, 28.8% fewer than
     Repomix and 9.4% fewer than the 5.2 release, short of the bar of 50% and 25% set for the
     run. The client's own file tools needed more calls and left two tasks unanswered.
 17. **A runtime measured before a decision** (14 November). The same code on .NET 10 and
@@ -173,7 +173,7 @@ Related documents:
    with Codex; with Claude the first request of a session was 3,766 tokens larger for a tool
    list 8,701 characters longer.
 9. **A saving per request is not a saving per run.** On 2026-11-12 the default catalog made
-   every request 3,505 tokens lighter, and the run made 328 requests where the morning run had
+   every request 3,505 tokens lighter, and its 18 sessions made 328 requests where those of `059f95af` had
    made 296; the total did not fall. Read the request and the run separately.
 10. **Set a percentage bar against a measured spread.** The same two builds, run twice in one
     day with one session per task, moved by 5.0% and by 15.7% in context tokens. A bar closer
