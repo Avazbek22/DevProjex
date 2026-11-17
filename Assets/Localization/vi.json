@@ -761,7 +761,7 @@
   "Terminal.Validation.ForceRequiresFileOutput": "--force cần đích là tệp và không dùng được với đầu ra chuẩn.",
   "Terminal.Validation.PlainColorConflict": "--plain không thể kết hợp với --color always.",
   "Terminal.Validation.FilterSearchConflict": "--filter và --search không thể kết hợp được.",
-  "Terminal.Validation.Timeout": "--timeout phải là khoảng thời gian dương, chẳng hạn như 10 giây, 2 phút hoặc 00:00:10.",
+  "Terminal.Validation.Timeout": "--timeout phải là khoảng thời gian dương, chẳng hạn như 10s, 2m hoặc 00:00:10.",
   "Terminal.Validation.ExcludeNone": "--exclude không thể kết hợp với một loại trừ khác.",
   "Terminal.Validation.UnrestrictedConflict": "--unrestricted không thể kết hợp với --exclude hoặc --git-mode.",
   "Terminal.Validation.UnknownExclusion": "Loại trừ không xác định: {0}.",

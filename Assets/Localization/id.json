@@ -761,7 +761,7 @@
   "Terminal.Validation.ForceRequiresFileOutput": "--force memerlukan tujuan file dan tidak dapat digunakan dengan stdout.",
   "Terminal.Validation.PlainColorConflict": "--plain tidak dapat digabungkan dengan --color always.",
   "Terminal.Validation.FilterSearchConflict": "--filter dan --search tidak dapat digabungkan.",
-  "Terminal.Validation.Timeout": "--timeout harus berdurasi positif seperti 10 detik, 2 menit, atau 00:00:10.",
+  "Terminal.Validation.Timeout": "--timeout harus berdurasi positif seperti 10s, 2m, atau 00:00:10.",
   "Terminal.Validation.ExcludeNone": "--exclude none tidak dapat digabungkan dengan pengecualian lainnya.",
   "Terminal.Validation.UnrestrictedConflict": "--unrestricted tidak dapat digabungkan dengan --exclude atau --git-mode.",
   "Terminal.Validation.UnknownExclusion": "Pengecualian tidak diketahui: {0}.",
