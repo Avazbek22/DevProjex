@@ -34,6 +34,14 @@ jobs:
     container:
       image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-26.08
       options: --privileged
+      # The image preinstalls the SDK in the system installation, and flatpak-builder updates it
+      # in place whenever Flathub has a newer commit. On the container's overlay root that update
+      # renames directories from the image layer, which hosts without overlay redirect_dir support
+      # reject with EXDEV ("Invalid cross-device link"). An anonymous volume starts as a copy of
+      # the image content on the runner's own filesystem, so the update never crosses a layer.
+      # Copying that content adds about 15 seconds to container start.
+      volumes:
+        - /var/lib/flatpak
     strategy:
       fail-fast: false
       matrix:

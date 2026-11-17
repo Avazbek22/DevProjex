@@ -45,6 +45,17 @@ public sealed class FlatpakDeliveryContractTests
 	}
 
 	[Fact]
+	public void SystemFlatpakInstallationLivesOnAVolumeOutsideTheImageOverlay()
+	{
+		var workflow = File.ReadAllText(Path.Combine(Root(), ".github/workflows/flatpak-build.yml")).ReplaceLineEndings("\n");
+		var container = workflow.Split("container:", StringSplitOptions.None)[1].Split("strategy:", StringSplitOptions.None)[0];
+
+		// flatpak-builder updates the image's preinstalled SDK in place; on the overlay root that fails with EXDEV.
+		Assert.Contains("volumes:\n        - /var/lib/flatpak\n", container, StringComparison.Ordinal);
+		Assert.Contains("options: --privileged", container, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void ContainerOwnsTheCheckoutAndHomeBeforeGitOrSandboxedDotnetRun()
 	{
 		var workflow = File.ReadAllText(Path.Combine(Root(), ".github/workflows/flatpak-build.yml"));
