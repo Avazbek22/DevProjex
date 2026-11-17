@@ -728,11 +728,12 @@ public sealed class McpInfrastructureTests
 		try
 		{
 			var registry = new McpRootRegistry([project]);
+			var root = registry.ResolveProject(project);
 
 			var exception = Assert.Throws<McpToolException>(() =>
-				registry.ResolveExistingPath(project, path, requireDirectory));
+				registry.ResolveExistingPath(root, path, requireDirectory));
 			var batchException = Assert.Throws<McpToolException>(() =>
-				registry.EnsureExistingPathsWithin(project, [path], TestContext.Current.CancellationToken));
+				registry.EnsureExistingPathsWithin(root, [path], TestContext.Current.CancellationToken));
 
 			Assert.Equal(McpErrorCodes.RootViolation, exception.Code);
 			Assert.Equal(McpErrorCodes.RootViolation, batchException.Code);
@@ -758,16 +759,23 @@ public sealed class McpInfrastructureTests
 		{
 			Directory.Delete(outside);
 			var registry = new McpRootRegistry([project]);
+			var root = registry.ResolveProject(project);
 
 			var exception = Assert.Throws<McpToolException>(() =>
-				registry.ResolveExistingPath(project, path));
+				registry.ResolveExistingPath(root, path));
 
 			Assert.Equal(McpErrorCodes.RootViolation, exception.Code);
 		}
 		finally
 		{
 			if (new DirectoryInfo(link).LinkTarget is not null)
-				Directory.Delete(link);
+			{
+				// Unix removes a link whose target is gone only as a file; a junction stays a directory.
+				if (OperatingSystem.IsWindows())
+					Directory.Delete(link);
+				else
+					File.Delete(link);
+			}
 		}
 	}
 
@@ -778,9 +786,10 @@ public sealed class McpInfrastructureTests
 		var project = workspace.CreateFolder("project");
 		Directory.CreateDirectory(Path.Combine(project, "src"));
 		var registry = new McpRootRegistry([project]);
+		var root = registry.ResolveProject(project);
 
 		var exception = Assert.Throws<McpToolException>(() =>
-			registry.ResolveExistingPath(project, "src/missing/deeper.txt"));
+			registry.ResolveExistingPath(root, "src/missing/deeper.txt"));
 
 		Assert.Equal(McpErrorCodes.PathNotFound, exception.Code);
 	}
