@@ -597,7 +597,7 @@
   "Terminal.Option.SearchBodyCharacters": "En iyi bildirim gövdesini 1..16000 karakterle sınırlayın veya off kullanın.",
   "Terminal.Option.McpLive": "DevProjex pencere seçimini canlı temel olarak kullanın.",
   "Terminal.Option.McpRemoteHosts": "--allow-remote etkin olduğunda yalnızca virgülle ayrılmış bu uzak Git sunucularına izin verin.",
-  "Terminal.Option.McpToolSet": "Tam araç kataloğunu veya analyze ve pack_context olmadan reduced kataloğunu yayımlayın.",
+  "Terminal.Option.McpToolSet": "Tam araç kataloğunu veya analyze ve pack_context olmadan reduced kataloğunu yayımlayın; reduced, list_projects aracını yalnızca birden çok kök veya --allow-remote ile içerir.",
   "Terminal.Option.McpSearchBodyCharacters": "Arama bildirim gövdesini 1..16000 karakterle sınırlayın veya off kullanın.",
   "Terminal.Validation.SearchModeConflict": "--regex ve --symbols birlikte kullanılamaz.",
   "Terminal.Validation.SearchMaximumResults": "--max 1 ile 200 arasında olmalıdır.",

@@ -82,7 +82,7 @@ Works with any language, repository, or project structure.
 * **[Git modes](#how-smart-ignore-works-):** `.gitignore`, tracked files, staged files, all current changes, or a ref-to-ref diff.
 
 **AI agents**
-* **[Read-only MCP server](#mcp-server-):** nine tools for any MCP client, on the same engine as the desktop app.
+* **[Read-only MCP server](#mcp-server-):** six tools by default and all nine with `--tool-set full`, for any MCP client, on the same engine as the desktop app.
 * **[Live Context](#live-context-your-checkboxes-become-the-agents-focus):** tick files in the desktop app and the agent works with that selection on its very next call.
 * **[Agent journal](#agent-journal-a-receipt-for-every-session):** a receipt for every session with calls, delivered paths, tokens, and masked values, never file bodies.
 * **[Hard boundaries](#security-boundaries):** root jail, untrusted-data markers, and an agent that can only narrow what it sees.
@@ -150,7 +150,7 @@ By default the server publishes the tools an agent reaches for in everyday work,
 * `get_diff` reviews a change: staged files, current changes, or a ref-to-ref diff as unified hunks, largest changes first, with secrets masked in both versions, so the agent reads only the lines that changed.
 * `pack_context` packs a selection under `max_tokens`: files are admitted in a deterministic order while they fit, the rest are reported as skipped, and `top_files` shows where the tokens go.
 * `pack_context` and `related_files` store an oversized result as a session pack; `read_pack` reads it back in line ranges instead of flooding the agent's context. Long operations report standard MCP progress notifications.
-* Trees default to compact Markdown, content declares the root once and uses relative paths, and every tree ends with a line naming the active filters, so the agent knows what it did not see. `git_scope` narrows any tool to staged files, current changes, or a ref-to-ref diff; `profile` switches between built-in defaults, your saved desktop selections, or a portable profile file.
+* Trees default to compact Markdown, content declares the root once and uses relative paths, and every tree ends with a line naming the active filters, so the agent knows what it did not see. `git_scope` narrows a call to staged files, current changes, or a ref-to-ref diff; `profile` switches between built-in defaults, your saved desktop selections, or a portable profile file. The default set publishes `git_scope` only on `get_diff` and does not publish `profile`; both are still accepted where a tool takes them, and `--tool-set full` publishes every parameter.
 
 ### Agent journal: a receipt for every session
 

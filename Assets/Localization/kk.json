@@ -585,7 +585,7 @@
   "Terminal.Option.SearchBodyCharacters": "Ең жақсы жарияланым денесін 1..16000 таңбамен шектейді немесе off арқылы өшіреді.",
   "Terminal.Option.McpLive": "DevProjex терезесіндегі таңдауды тікелей негіз ретінде қолданады.",
   "Terminal.Option.McpRemoteHosts": "--allow-remote қосылғанда үтірмен бөлінген осы қашықтағы Git хосттарына ғана рұқсат береді.",
-  "Terminal.Option.McpToolSet": "Толық құралдар каталогын немесе analyze және pack_context жоқ reduced каталогын жариялайды.",
+  "Terminal.Option.McpToolSet": "Толық құралдар каталогын немесе analyze және pack_context жоқ reduced каталогын жариялайды; reduced бірнеше түбір болғанда немесе --allow-remote берілгенде ғана list_projects қамтиды.",
   "Terminal.Option.McpSearchBodyCharacters": "Іздеу жарияланымының денесін 1..16000 таңбамен шектейді немесе off арқылы өшіреді.",
   "Terminal.Validation.SearchModeConflict": "--regex және --symbols бірге қолданылмайды.",
   "Terminal.Validation.SearchMaximumResults": "--max 1 мен 200 арасында болуы керек.",

@@ -579,7 +579,7 @@
     "Terminal.Option.SearchBodyCharacters": "Limita o corpo da melhor declaração a 1..16000 caracteres ou usa off.",
     "Terminal.Option.McpLive": "Usa a seleção da janela do DevProjex como base ativa.",
     "Terminal.Option.McpRemoteHosts": "Permite apenas estes anfitriões Git remotos separados por vírgulas quando --allow-remote estiver ativado.",
-    "Terminal.Option.McpToolSet": "Publica o catálogo completo de ferramentas ou reduced sem analyze e pack_context.",
+    "Terminal.Option.McpToolSet": "Publica o catálogo completo de ferramentas ou reduced sem analyze e pack_context; reduced inclui list_projects apenas com várias raízes ou com --allow-remote.",
     "Terminal.Option.McpSearchBodyCharacters": "Limita o corpo da declaração da pesquisa a 1..16000 caracteres ou usa off.",
     "Terminal.Validation.SearchModeConflict": "--regex e --symbols não podem ser usados em conjunto.",
     "Terminal.Validation.SearchMaximumResults": "--max tem de estar entre 1 e 200.",

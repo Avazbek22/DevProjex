@@ -597,7 +597,7 @@
   "Terminal.Option.SearchBodyCharacters": "最も一致した宣言の本体を 1～16000文字に制限します。off で無効にします。",
   "Terminal.Option.McpLive": "DevProjexウィンドウの選択をライブの基準として使用します。",
   "Terminal.Option.McpRemoteHosts": "--allow-remote が有効なときに許可するリモートGitホスト（カンマ区切り）。",
-  "Terminal.Option.McpToolSet": "ツールカタログ全体（full）、または analyze と pack_context を除いたもの（reduced）を公開します。",
+  "Terminal.Option.McpToolSet": "ツールカタログ全体（full）、または analyze と pack_context を除いたもの（reduced）を公開します。reduced では、ルートが複数ある場合か --allow-remote 指定時のみ list_projects を含みます。",
   "Terminal.Option.McpSearchBodyCharacters": "検索結果の宣言本体を 1～16000文字に制限します。off で無効にします。",
   "Terminal.Validation.SearchModeConflict": "--regex と --symbols は同時に使用できません。",
   "Terminal.Validation.SearchMaximumResults": "--max は 1 から 200 の範囲で指定してください。",

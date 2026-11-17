@@ -597,7 +597,7 @@
   "Terminal.Option.SearchBodyCharacters": "將最佳宣告本文限制為 1..16000 個字元，或用 off 關閉。",
   "Terminal.Option.McpLive": "將 DevProjex 視窗選取項目用作即時基準。",
   "Terminal.Option.McpRemoteHosts": "啟用 --allow-remote 時，只允許這些以逗號分隔的遠端 Git 主機。",
-  "Terminal.Option.McpToolSet": "發佈完整工具目錄，或發佈不含 analyze 與 pack_context 的 reduced 目錄。",
+  "Terminal.Option.McpToolSet": "發佈完整工具目錄，或發佈不含 analyze 與 pack_context 的 reduced 目錄；reduced 僅在有多個根目錄或使用 --allow-remote 時包含 list_projects。",
   "Terminal.Option.McpSearchBodyCharacters": "將搜尋宣告本文限制為 1..16000 個字元，或用 off 關閉。",
   "Terminal.Validation.SearchModeConflict": "--regex 與 --symbols 不能一起使用。",
   "Terminal.Validation.SearchMaximumResults": "--max 必須介於 1 和 200 之間。",

@@ -597,7 +597,7 @@
   "Terminal.Option.SearchBodyCharacters": "Giới hạn phần thân khai báo tốt nhất ở 1..16000 ký tự hoặc dùng off.",
   "Terminal.Option.McpLive": "Dùng lựa chọn trong cửa sổ DevProjex làm đường cơ sở trực tiếp.",
   "Terminal.Option.McpRemoteHosts": "Chỉ cho phép các máy chủ Git từ xa phân tách bằng dấu phẩy này khi bật --allow-remote.",
-  "Terminal.Option.McpToolSet": "Công bố danh mục công cụ đầy đủ hoặc reduced không có analyze và pack_context.",
+  "Terminal.Option.McpToolSet": "Công bố danh mục công cụ đầy đủ hoặc reduced không có analyze và pack_context; reduced chỉ có list_projects khi có nhiều gốc dự án hoặc dùng --allow-remote.",
   "Terminal.Option.McpSearchBodyCharacters": "Giới hạn phần thân khai báo tìm kiếm ở 1..16000 ký tự hoặc dùng off.",
   "Terminal.Validation.SearchModeConflict": "Không thể dùng --regex cùng với --symbols.",
   "Terminal.Validation.SearchMaximumResults": "--max phải nằm trong khoảng từ 1 đến 200.",

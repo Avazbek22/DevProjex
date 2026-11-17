@@ -585,7 +585,7 @@
   "Terminal.Option.SearchBodyCharacters": "Тани беҳтарин эъломияро ба 1..16000 аломат маҳдуд мекунад ё бо off хомӯш мекунад.",
   "Terminal.Option.McpLive": "Интихоби равзанаи DevProjex-ро ҳамчун заминаи зинда истифода мебарад.",
   "Terminal.Option.McpRemoteHosts": "Ҳангоми фаъол будани --allow-remote танҳо ба ин хостҳои дурдасти Git, ки бо вергул ҷудо шудаанд, иҷозат медиҳад.",
-  "Terminal.Option.McpToolSet": "Феҳристи пурраи абзорҳо ё reduced-ро бе analyze ва pack_context нашр мекунад.",
+  "Terminal.Option.McpToolSet": "Феҳристи пурраи абзорҳо ё reduced-ро бе analyze ва pack_context нашр мекунад; reduced list_projects-ро танҳо ҳангоми якчанд реша ё бо --allow-remote дар бар мегирад.",
   "Terminal.Option.McpSearchBodyCharacters": "Тани эъломияи ҷустуҷӯро ба 1..16000 аломат маҳдуд мекунад ё бо off хомӯш мекунад.",
   "Terminal.Validation.SearchModeConflict": "--regex ва --symbols якҷоя истифода намешаванд.",
   "Terminal.Validation.SearchMaximumResults": "--max бояд аз 1 то 200 бошад.",

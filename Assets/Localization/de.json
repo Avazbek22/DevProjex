@@ -603,7 +603,7 @@
   "Terminal.Option.SearchBodyCharacters": "Den Text der besten Deklaration auf 1..16000 Zeichen begrenzen oder mit off deaktivieren.",
   "Terminal.Option.McpLive": "Die Auswahl im DevProjex-Fenster als Live-Basis verwenden.",
   "Terminal.Option.McpRemoteHosts": "Bei aktiviertem --allow-remote nur diese kommagetrennten entfernten Git-Hosts zulassen.",
-  "Terminal.Option.McpToolSet": "Den vollständigen Werkzeugkatalog oder reduced ohne analyze und pack_context veröffentlichen.",
+  "Terminal.Option.McpToolSet": "Den vollständigen Werkzeugkatalog oder reduced ohne analyze und pack_context veröffentlichen; reduced enthält list_projects nur bei mehreren Wurzeln oder mit --allow-remote.",
   "Terminal.Option.McpSearchBodyCharacters": "Den Deklarationstext der Suche auf 1..16000 Zeichen begrenzen oder mit off deaktivieren.",
   "Terminal.Validation.SearchModeConflict": "--regex und --symbols können nicht zusammen verwendet werden.",
   "Terminal.Validation.SearchMaximumResults": "--max muss zwischen 1 und 200 liegen.",

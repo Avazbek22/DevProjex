@@ -585,7 +585,7 @@
   "Terminal.Option.SearchBodyCharacters": "Eng yaxshi deklaratsiya tanasini 1..16000 belgigacha cheklaydi yoki off bilan o‘chiradi.",
   "Terminal.Option.McpLive": "DevProjex oynasidagi tanlovni jonli asos sifatida ishlatadi.",
   "Terminal.Option.McpRemoteHosts": "--allow-remote yoqilganda faqat vergul bilan ajratilgan ushbu masofaviy Git xostlariga ruxsat beradi.",
-  "Terminal.Option.McpToolSet": "To‘liq vositalar katalogini yoki analyze va pack_context bo‘lmagan reduced katalogini e’lon qiladi.",
+  "Terminal.Option.McpToolSet": "To‘liq vositalar katalogini yoki analyze va pack_context bo‘lmagan reduced katalogini e’lon qiladi; reduced list_projects’ni faqat bir nechta ildiz bo‘lganda yoki --allow-remote bilan o‘z ichiga oladi.",
   "Terminal.Option.McpSearchBodyCharacters": "Qidiruv deklaratsiyasi tanasini 1..16000 belgigacha cheklaydi yoki off bilan o‘chiradi.",
   "Terminal.Validation.SearchModeConflict": "--regex va --symbols birga ishlatilmaydi.",
   "Terminal.Validation.SearchMaximumResults": "--max 1 dan 200 gacha bo‘lishi kerak.",

@@ -597,7 +597,7 @@
   "Terminal.Option.SearchBodyCharacters": "가장 적합한 선언 본문을 1..16000자로 제한하거나 off로 끕니다.",
   "Terminal.Option.McpLive": "DevProjex 창의 선택을 라이브 기준으로 사용합니다.",
   "Terminal.Option.McpRemoteHosts": "--allow-remote가 활성화된 경우 쉼표로 구분한 원격 Git 호스트만 허용합니다.",
-  "Terminal.Option.McpToolSet": "전체 도구 카탈로그를 게시하거나, analyze와 pack_context를 뺀 reduced 카탈로그를 게시합니다.",
+  "Terminal.Option.McpToolSet": "전체 도구 카탈로그를 게시하거나, analyze와 pack_context를 뺀 reduced 카탈로그를 게시합니다. reduced에는 루트가 여러 개이거나 --allow-remote를 지정한 경우에만 list_projects가 포함됩니다.",
   "Terminal.Option.McpSearchBodyCharacters": "검색 선언 본문을 1..16000자로 제한하거나 off로 끕니다.",
   "Terminal.Validation.SearchModeConflict": "--regex와 --symbols는 함께 사용할 수 없습니다.",
   "Terminal.Validation.SearchMaximumResults": "--max는 1에서 200 사이여야 합니다.",
