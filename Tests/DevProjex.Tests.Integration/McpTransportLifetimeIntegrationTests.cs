@@ -72,6 +72,9 @@ public sealed class McpTransportLifetimeIntegrationTests
 			appDataPathProvider: () => Path.Combine(directory.Path, "data"),
 			tempRoot: Path.Combine(directory.Path, "temp"))
 			.WaitAsync(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken);
+		var registry = Assert.Single(Directory.EnumerateDirectories(Path.Combine(directory.Path, "temp"),
+			"mcp", SearchOption.AllDirectories));
+		Assert.Empty(Directory.EnumerateFileSystemEntries(registry));
 	}
 
 	private sealed class FailedInput : MemoryStream

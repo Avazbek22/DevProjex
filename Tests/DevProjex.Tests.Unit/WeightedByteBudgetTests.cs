@@ -84,10 +84,12 @@ public sealed class WeightedByteBudgetTests
 
 		lease.Dispose();
 		lease.Dispose();
+		AssertDiagnostics(budget, availableBytes: 10, issuedBytes: 0, pendingWaiters: 0);
 
 		using var completeCapacity = await budget.AcquireAsync(
 			10,
 			TestContext.Current.CancellationToken);
+		AssertDiagnostics(budget, availableBytes: 0, issuedBytes: 10, pendingWaiters: 0);
 	}
 
 	[Fact]
@@ -222,6 +224,7 @@ public sealed class WeightedByteBudgetTests
 			using var capacityCheck = await budget.AcquireAsync(
 				1,
 				TestContext.Current.CancellationToken);
+			AssertDiagnostics(budget, availableBytes: 0, issuedBytes: 1, pendingWaiters: 0);
 		}
 	}
 
