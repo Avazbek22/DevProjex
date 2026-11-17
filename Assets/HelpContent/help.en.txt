@@ -539,7 +539,7 @@ Effects are mutually exclusive. Clicking the selected effect again disables it a
 
 Available settings:
 * Background transparency — available for Transparency and Blur.
-* Top panel contrast — adjusts the main panel containing Preview, Search, Filter, and tree-format commands.
+* Top bar contrast — adjusts the main panel containing Preview, Search, Filter, and tree-format commands.
 * Menu transparency — applies equally to the main menu and its submenus.
 * Border visibility — adjusts how strongly interface borders are shown.
 
