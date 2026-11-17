@@ -8,7 +8,7 @@ using DevProjex.Mcp;
 
 namespace DevProjex.Tests.Integration;
 
-[Collection(GitNetworkTestCollection.Name)]
+[Collection(GitProcessEnvironmentTestCollection.Name)]
 public sealed class McpRemoteHostRedirectIntegrationTests
 {
 	[Fact]

@@ -9,7 +9,7 @@ using System.Text;
 
 namespace DevProjex.Tests.Integration;
 
-[Collection(GitNetworkTestCollection.Name)]
+[Collection(GitProcessEnvironmentTestCollection.Name)]
 public sealed class GitPrivateHttpsAuthenticationIntegrationTests
 {
 	[Fact]
