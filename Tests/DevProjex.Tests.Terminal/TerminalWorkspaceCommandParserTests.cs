@@ -143,6 +143,17 @@ public sealed class TerminalWorkspaceCommandParserTests
 	}
 
 	[Fact]
+	public void Parse_TypeWithoutKnownExtensionsKeepsReportingTheMissingValue()
+	{
+		var result = _parser.Parse("type .xyz");
+
+		Assert.False(result.IsSuccess);
+		Assert.Equal(TerminalWorkspaceCommandErrorCode.MissingArgument, result.Error!.Code);
+		Assert.Equal("type .xyz".Length, result.Error.Position);
+		Assert.Equal(["on", "off"], result.Error.Candidates);
+	}
+
+	[Fact]
 	public void Parse_TypeDeduplicatesExtensionsWithProjectTokenSemantics()
 	{
 		var result = _parser.Parse("type .CS .cs .md off", Context);
@@ -1213,6 +1224,8 @@ public sealed class TerminalWorkspaceCommandParserTests
 		["all unknown on", TerminalWorkspaceCommandErrorCode.UnknownToken, 4, "content"],
 		["all unknown", TerminalWorkspaceCommandErrorCode.UnknownToken, 4, "content"],
 		["type .cs", TerminalWorkspaceCommandErrorCode.MissingArgument, 8, "on"],
+		["type .CS", TerminalWorkspaceCommandErrorCode.MissingArgument, 8, "on"],
+		["type .xyz", TerminalWorkspaceCommandErrorCode.UnknownToken, 5, ".cs"],
 		["select src maybe", TerminalWorkspaceCommandErrorCode.InvalidValue, 11, "on"],
 		["select all src on", TerminalWorkspaceCommandErrorCode.UnexpectedArgument, 11, (string?)null],
 		["view contents", TerminalWorkspaceCommandErrorCode.UnknownToken, 5, "content"],

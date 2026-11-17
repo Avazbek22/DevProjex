@@ -421,6 +421,13 @@ internal sealed class TerminalWorkspaceCommandParser
 		IReadOnlyList<ParsedToken> tokens,
 		TerminalWorkspaceCommandParseContext context)
 	{
+		// Without a workspace the extension list is empty, so the value cannot be judged as unknown.
+		if (tokens.Count == 2 &&
+			context.AvailableExtensions.Count > 0 &&
+			!Contains(context.AvailableExtensions, tokens[1].Value))
+		{
+			return Unknown(tokens[1], context.AvailableExtensions);
+		}
 		if (tokens.Count < 3)
 			return Missing(tokens, tokens.Count == 1 ? context.AvailableExtensions : ToggleValues);
 
