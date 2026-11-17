@@ -3,7 +3,7 @@
   "name": "io.github.Avazbek22/devprojex",
   "title": "DevProjex: Codebase Context for AI Agents",
   "description": "Codebase context for AI agents: up to 40% fewer tokens than Repomix. Secrets masked. Live Context.",
-  "version": "5.2.1",
+  "version": "5.2.5",
   "websiteUrl": "https://github.com/Avazbek22/DevProjex",
   "repository": {
     "url": "https://github.com/Avazbek22/DevProjex",
@@ -21,7 +21,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "devprojex",
-      "version": "5.2.1",
+      "version": "5.2.5",
       "runtimeHint": "npx",
       "transport": {
         "type": "stdio"
@@ -44,7 +44,7 @@
       "registryType": "nuget",
       "registryBaseUrl": "https://api.nuget.org/v3/index.json",
       "identifier": "devprojex",
-      "version": "5.2.1",
+      "version": "5.2.5",
       "runtimeHint": "dnx",
       "transport": {
         "type": "stdio"

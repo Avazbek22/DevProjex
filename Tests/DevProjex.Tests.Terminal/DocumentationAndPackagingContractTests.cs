@@ -725,9 +725,9 @@ public sealed class DocumentationAndPackagingContractTests
 		{
 			Assert.Contains($"'{tool}'", mcpSmoke, StringComparison.Ordinal);
 		}
-		Assert.Contains("Expand-Archive DevProjex-headless.v5.2.win-x64.zip -DestinationPath $destination", installation, StringComparison.Ordinal);
+		Assert.Contains("Expand-Archive DevProjex-headless.v5.2.5.win-x64.zip -DestinationPath $destination", installation, StringComparison.Ordinal);
 		Assert.Contains("& (Join-Path $destination 'devprojex.exe') --version", installation, StringComparison.Ordinal);
-		Assert.DoesNotContain("Expand-Archive DevProjex-headless.v5.2.win-x64.zip\n./devprojex.exe", installation.ReplaceLineEndings("\n"), StringComparison.Ordinal);
+		Assert.DoesNotContain("Expand-Archive DevProjex-headless.v5.2.5.win-x64.zip\n./devprojex.exe", installation.ReplaceLineEndings("\n"), StringComparison.Ordinal);
 		Assert.Contains("verify-source-gates:", workflow, StringComparison.Ordinal);
 		Assert.Contains("actions: read", workflow, StringComparison.Ordinal);
 		Assert.Contains("for workflow in dotnet.yml release-validate.yml", workflow, StringComparison.Ordinal);

@@ -9,9 +9,9 @@ and published only by `.github/workflows/publish-packages.yml` after static and
 three-OS functional gates pass.
 
 ```powershell
-./Scripts/build-headless-packages.ps1 -Version 5.2 -DryRun
-./Scripts/Test-HeadlessPackages.ps1 -ArtifactsRoot artifacts/headless -Version 5.2.0
-./Scripts/Test-HeadlessPackageGateMutation.ps1 -ArtifactsRoot artifacts/headless -Version 5.2.0
+./Scripts/build-headless-packages.ps1 -Version 5.2.5 -DryRun
+./Scripts/Test-HeadlessPackages.ps1 -ArtifactsRoot artifacts/headless -Version 5.2.5
+./Scripts/Test-HeadlessPackageGateMutation.ps1 -ArtifactsRoot artifacts/headless -Version 5.2.5
 ```
 
 The stable RID and grammar naming contract is centralized in
