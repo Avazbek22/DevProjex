@@ -342,6 +342,8 @@ internal sealed class TerminalWorkspaceCommandParser
 		TerminalWorkspaceCommandDefinition definition,
 		IReadOnlyList<ParsedToken> tokens)
 	{
+		if (tokens.Count == 2 && !Contains(SetTargets, tokens[1].Value))
+			return Unknown(tokens[1], SetTargets);
 		if (tokens.Count < 3)
 		{
 			var candidates = tokens.Count == 1
@@ -397,6 +399,8 @@ internal sealed class TerminalWorkspaceCommandParser
 		TerminalWorkspaceCommandDefinition definition,
 		IReadOnlyList<ParsedToken> tokens)
 	{
+		if (tokens.Count == 2 && !Contains(AggregateTargets, tokens[1].Value))
+			return Unknown(tokens[1], AggregateTargets);
 		if (tokens.Count < 3)
 			return Missing(tokens, tokens.Count == 1 ? AggregateTargets : ToggleValues);
 		if (tokens.Count > 3)
@@ -1481,7 +1485,7 @@ internal sealed class TerminalWorkspaceCommandParser
 			foreach (var path in Directory.EnumerateFileSystemEntries(directory))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
-				if (!Path.GetFileName(path).StartsWith(prefix, StringComparison.CurrentCultureIgnoreCase))
+				if (!Path.GetFileName(path).StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
 					continue;
 				if (outsideWorkingDirectoryOnly && PathUtility.IsPathInside(path, baseDirectory))
 					continue;
@@ -1519,12 +1523,12 @@ internal sealed class TerminalWorkspaceCommandParser
 				cancellationToken.ThrowIfCancellationRequested();
 				var name = Path.GetFileNameWithoutExtension(path);
 				if (string.IsNullOrWhiteSpace(name) ||
-					!name.StartsWith(current, StringComparison.CurrentCultureIgnoreCase))
+					!name.StartsWith(current, StringComparison.OrdinalIgnoreCase))
 					continue;
 				AddBoundedCompletionCandidate(
 					names,
 					name,
-					StringComparer.CurrentCultureIgnoreCase);
+					StringComparer.OrdinalIgnoreCase);
 			}
 			return names;
 		}

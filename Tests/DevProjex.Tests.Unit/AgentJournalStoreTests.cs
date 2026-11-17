@@ -7,6 +7,28 @@ namespace DevProjex.Tests.Unit;
 public sealed class AgentJournalStoreTests(ITestOutputHelper output)
 {
 	[Fact]
+	public async Task ASessionRemainsReadableAfterTheCalendarChanges()
+	{
+		using var temporary = new TemporaryDirectory();
+		using var store = CreateStore(temporary.Path);
+		var previous = System.Globalization.CultureInfo.CurrentCulture;
+		try
+		{
+			System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("th-TH");
+			var session = CreateSession(temporary.Path, 42, new DateTimeOffset(2026, 9, 20, 1, 2, 3, TimeSpan.Zero));
+			await store.StartSession(session, TestContext.Current.CancellationToken);
+			System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("en-US");
+			var restored = Assert.Single(await store.ListSessionsAsync(cancellationToken: TestContext.Current.CancellationToken));
+			Assert.Equal(session.Id, restored.Id);
+			Assert.Equal(session.StartedUtc, restored.StartedUtc);
+		}
+		finally
+		{
+			System.Globalization.CultureInfo.CurrentCulture = previous;
+		}
+	}
+
+	[Fact]
 	public async Task SessionAndCallRoundTripThroughJsonLines()
 	{
 		var cancellationToken = TestContext.Current.CancellationToken;

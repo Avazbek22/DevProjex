@@ -380,7 +380,7 @@ internal sealed class McpProjectService(
 					cancellationToken,
 					resolvedDiffRange,
 					hasSelectionFilters
-						? path => MatchesRequested(path, requested.Paths, requested.Directories) &&
+						? path => MatchesRequested(path, requested) &&
 							globs.Includes(ToRelative(projectRoot, path))
 						: null)
 				.ConfigureAwait(false);
@@ -1184,7 +1184,7 @@ internal sealed class McpProjectService(
 		foreach (var path in includedFiles)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			if (MatchesRequested(path, requested.Paths, requested.Directories) &&
+			if (MatchesRequested(path, requested) &&
 				globs.Includes(ToRelative(projectRoot, path)))
 			{
 				selectedFiles.Add(path);
@@ -1201,7 +1201,7 @@ internal sealed class McpProjectService(
 			foreach (var path in includedFolders)
 			{
 				cancellationToken.ThrowIfCancellationRequested();
-				if (MatchesRequested(path, requested.Paths, requested.Directories) &&
+				if (MatchesRequested(path, requested) &&
 					!directoriesWithIncludedFiles.Contains(path) &&
 					globs.IncludesDirectory(ToRelative(projectRoot, path)))
 					projectionPaths.Add(path);
@@ -2172,6 +2172,12 @@ internal sealed class McpProjectService(
 		value is >= '!' and <= '/' or >= ':' and <= '@' or >= '[' and <= '`' or >= '{' and <= '~';
 
 	private sealed record McpGitScope(GitFilteringMode Mode, string? DiffRange);
+
+	// Requested paths that all failed to resolve narrow the selection to nothing; without this the
+	// empty resolved set would read as "no paths requested" and select the whole project.
+	private static bool MatchesRequested(string file, RequestedPathSelection requested) =>
+		(requested.Paths.Count > 0 || requested.Tokens.Count == 0) &&
+		MatchesRequested(file, requested.Paths, requested.Directories);
 
 	internal static bool MatchesRequested(
 		string file,

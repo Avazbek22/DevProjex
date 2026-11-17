@@ -385,17 +385,30 @@ internal static partial class McpLargeFileOutlineBuilder
 	private static IReadOnlyList<OutlineEntry> MarkdownEntries(IReadOnlyList<string> lines, CancellationToken cancellationToken)
 	{
 		var headings = new List<(int Line, int Level, string Title)>();
-		var inFence = false;
+		var fenceCharacter = '\0';
+		var fenceLength = 0;
 		for (var index = 0; index < lines.Count; index++)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			var line = lines[index].TrimEnd('\r');
-			if (line.TrimStart().StartsWith("```", StringComparison.Ordinal) || line.TrimStart().StartsWith("~~~", StringComparison.Ordinal))
+			var fence = line.AsSpan().TrimStart(' ');
+			if (line.Length - fence.Length <= 3 && fence.Length >= 3 && fence[0] is '`' or '~')
 			{
-				inFence = !inFence;
-				continue;
+				var length = 1;
+				while (length < fence.Length && fence[length] == fence[0]) length++;
+				if (length >= 3)
+				{
+					if (fenceCharacter == '\0' && (fence[0] != '`' || !fence[length..].Contains('`')))
+					{
+						fenceCharacter = fence[0];
+						fenceLength = length;
+					}
+					else if (fence[0] == fenceCharacter && length >= fenceLength && fence[length..].IndexOfAnyExcept(' ', '\t') < 0)
+						fenceCharacter = '\0';
+					continue;
+				}
 			}
-			if (!inFence && MarkdownHeadingRegex().Match(line) is { Success: true } heading)
+			if (fenceCharacter == '\0' && MarkdownHeadingRegex().Match(line) is { Success: true } heading)
 				headings.Add((index + 1, heading.Groups["level"].Value.Length, heading.Groups["title"].Value.Trim()));
 		}
 		var minimumLevel = headings.Count == 0 ? 1 : headings.Min(static heading => heading.Level);
@@ -439,6 +452,6 @@ internal static partial class McpLargeFileOutlineBuilder
 	[GeneratedRegex("^\\s*\"(?<key>[^\"\\\\]{1,120})\"\\s*:", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
 	private static partial Regex JsonKeyRegex();
 
-	[GeneratedRegex("^(?<level>#{1,6})\\s+(?<title>\\S.{0,160})", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
+	[GeneratedRegex("^ {0,3}(?<level>#{1,6})\\s+(?<title>\\S.{0,160})", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
 	private static partial Regex MarkdownHeadingRegex();
 }

@@ -62,6 +62,12 @@ public sealed class ExactOutputPathCommandTests
 	[InlineData("Con.txt")]
 	[InlineData("COM1")]
 	[InlineData("lpt9.json")]
+	[InlineData("COM¹")]
+	[InlineData("com².md")]
+	[InlineData("COM³")]
+	[InlineData("LPT¹")]
+	[InlineData("lpt².json")]
+	[InlineData("LPT³")]
 	public async Task WindowsRejectsDeviceNamesWithTheDryRunHint(string path)
 	{
 		if (!OperatingSystem.IsWindows())

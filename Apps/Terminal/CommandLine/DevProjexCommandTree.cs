@@ -3192,7 +3192,11 @@ public sealed class DevProjexCommandTree
 
 	private static bool TryParseDurationToken(string value, out TimeSpan duration)
 	{
-		if (TimeSpan.TryParse(
+		duration = default;
+		// TimeSpan reads a bare number as days, so "--timeout 10" would wait ten days;
+		// the clock form is accepted only when it actually contains a time separator.
+		if (value.Contains(':', StringComparison.Ordinal) &&
+			TimeSpan.TryParse(
 				value,
 				System.Globalization.CultureInfo.InvariantCulture,
 				out duration))

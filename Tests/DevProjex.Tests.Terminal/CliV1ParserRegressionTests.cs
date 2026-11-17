@@ -891,6 +891,19 @@ public sealed class CliV1ParserRegressionTests
 		Assert.NotEmpty(parseResult.Errors);
 	}
 
+	[Theory]
+	[InlineData("10")]
+	[InlineData("1")]
+	[InlineData("2.5")]
+	public void UiTimeoutWithoutUnitOrClockFormIsRejectedInsteadOfMeaningDays(string token)
+	{
+		var root = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();
+
+		var parseResult = root.Parse(["ui", "status", $"--timeout={token}"]);
+
+		Assert.NotEmpty(parseResult.Errors);
+	}
+
 	[Fact]
 	public void UiTimeoutBeyondCancellationTimerRangeIsRejectedBeforeTheAction()
 	{

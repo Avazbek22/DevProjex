@@ -3,6 +3,22 @@ namespace DevProjex.Tests.Terminal;
 public sealed class ExactOutputPathSyntaxTests
 {
 	[Theory]
+	[InlineData("COM¹")]
+	[InlineData("COM²")]
+	[InlineData("COM³")]
+	[InlineData("LPT¹")]
+	[InlineData("LPT²")]
+	[InlineData("LPT³")]
+	public void SuperscriptDeviceNamesAreReservedOnlyOnWindows(string name)
+	{
+		foreach (var path in new[] { name, name.ToLowerInvariant() + ".txt", "folder/" + name + " .zip" })
+		{
+			Assert.Equal(ExactOutputPathProblem.DeviceName, ExactOutputPathSyntax.Check(path, isWindows: true));
+			Assert.Equal(ExactOutputPathProblem.None, ExactOutputPathSyntax.Check(path, isWindows: false));
+		}
+	}
+
+	[Theory]
 	[InlineData(null)]
 	[InlineData("-")]
 	[InlineData("out.md")]

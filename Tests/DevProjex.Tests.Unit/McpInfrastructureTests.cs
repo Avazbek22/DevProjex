@@ -698,19 +698,100 @@ public sealed class McpInfrastructureTests
 		var project = workspace.CreateFolder("project");
 		var outside = workspace.CreateFolder("outside");
 		var link = Path.Combine(project, "escape");
+		CreateDirectoryAliasOrSkip(link, outside);
 		try
 		{
-			Directory.CreateSymbolicLink(link, outside);
+			var registry = new McpRootRegistry([project]);
+			var exception = Assert.Throws<McpToolException>(() =>
+				registry.ResolveExistingPath(project, "escape"));
+			Assert.Equal(McpErrorCodes.RootViolation, exception.Code);
 		}
-		catch (Exception creationException) when (creationException is UnauthorizedAccessException or IOException or PlatformNotSupportedException)
+		finally
 		{
-			return;
+			Directory.Delete(link);
 		}
+	}
 
+	[Theory]
+	[InlineData("escape/present.txt", false)]
+	[InlineData("escape/missing.txt", false)]
+	[InlineData("escape/missing/deeper.txt", false)]
+	[InlineData("escape/missing", true)]
+	public void RootRegistryHidesWhetherAPathBehindAnEscapingLinkExists(string path, bool requireDirectory)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var outside = workspace.CreateFolder("outside");
+		File.WriteAllText(Path.Combine(outside, "present.txt"), "outside");
+		var link = Path.Combine(project, "escape");
+		CreateDirectoryAliasOrSkip(link, outside);
+		try
+		{
+			var registry = new McpRootRegistry([project]);
+			var root = registry.ResolveProject(project);
+
+			var exception = Assert.Throws<McpToolException>(() =>
+				registry.ResolveExistingPath(root, path, requireDirectory));
+			var batchException = Assert.Throws<McpToolException>(() =>
+				registry.EnsureExistingPathsWithin(root, [path], TestContext.Current.CancellationToken));
+
+			Assert.Equal(McpErrorCodes.RootViolation, exception.Code);
+			Assert.Equal(McpErrorCodes.RootViolation, batchException.Code);
+			Assert.Equal(exception.Message, batchException.Message);
+		}
+		finally
+		{
+			Directory.Delete(link);
+		}
+	}
+
+	[Theory]
+	[InlineData("dangling")]
+	[InlineData("dangling/child.txt")]
+	public void RootRegistryRejectsADanglingLinkToOutsideTheRoot(string path)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var outside = workspace.CreateFolder("outside-removed");
+		var link = Path.Combine(project, "dangling");
+		CreateDirectoryAliasOrSkip(link, outside);
+		try
+		{
+			Directory.Delete(outside);
+			var registry = new McpRootRegistry([project]);
+			var root = registry.ResolveProject(project);
+
+			var exception = Assert.Throws<McpToolException>(() =>
+				registry.ResolveExistingPath(root, path));
+
+			Assert.Equal(McpErrorCodes.RootViolation, exception.Code);
+		}
+		finally
+		{
+			if (new DirectoryInfo(link).LinkTarget is not null)
+			{
+				// Unix removes a link whose target is gone only as a file; a junction stays a directory.
+				if (OperatingSystem.IsWindows())
+					Directory.Delete(link);
+				else
+					File.Delete(link);
+			}
+		}
+	}
+
+	[Fact]
+	public void RootRegistryStillReportsMissingPathsInsideTheRoot()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		Directory.CreateDirectory(Path.Combine(project, "src"));
 		var registry = new McpRootRegistry([project]);
+		var root = registry.ResolveProject(project);
+
 		var exception = Assert.Throws<McpToolException>(() =>
-			registry.ResolveExistingPath(project, "escape"));
-		Assert.Equal(McpErrorCodes.RootViolation, exception.Code);
+			registry.ResolveExistingPath(root, "src/missing/deeper.txt"));
+
+		Assert.Equal(McpErrorCodes.PathNotFound, exception.Code);
 	}
 
 	[Fact]

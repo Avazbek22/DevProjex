@@ -1,3 +1,4 @@
+using System.Globalization;
 using DevProjex.Application.Ranking;
 using Terminal.Gui.Input;
 
@@ -673,6 +674,34 @@ public sealed class TerminalWorkspaceCommandParserTests
 	}
 
 	[Fact]
+	public void PathAndProfileCompletionIgnoresCaseIndependentlyOfTheCurrentCulture()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.CreateDirectory("Index");
+		workspace.WriteFile("Item Settings.json", "{}");
+		var context = new TerminalWorkspaceCommandParseContext(
+			[".cs"],
+			WorkingDirectory: workspace.Path,
+			ProfileDirectory: workspace.Path);
+		var originalCulture = CultureInfo.CurrentCulture;
+		try
+		{
+			// Turkish casing maps 'i' to dotted 'İ', so culture-aware matching misses "Index".
+			CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("tr-TR");
+
+			var select = _parser.GetCompletion("select i", 8, context);
+			var profile = _parser.GetCompletion("profile load i", 14, context);
+
+			Assert.Contains(select.Candidates, static item => item.Token == "Index");
+			Assert.Contains(profile.Candidates, static item => item.Token == "Item Settings");
+		}
+		finally
+		{
+			CultureInfo.CurrentCulture = originalCulture;
+		}
+	}
+
+	[Fact]
 	public void EmptyFileSystemPrefixCompletesFromTheProjectDirectory()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -1180,7 +1209,9 @@ public sealed class TerminalWorkspaceCommandParserTests
 		["set hide-secrets maybe", TerminalWorkspaceCommandErrorCode.InvalidValue, 17, "on"],
 		["set hide-secrets on extra", TerminalWorkspaceCommandErrorCode.UnexpectedArgument, 20, (string?)null],
 		["set git diff:main...feature", TerminalWorkspaceCommandErrorCode.UnknownToken, 8, "diff:<ref>..<ref>"],
+		["set hide-secret", TerminalWorkspaceCommandErrorCode.UnknownToken, 4, "hide-secrets"],
 		["all unknown on", TerminalWorkspaceCommandErrorCode.UnknownToken, 4, "content"],
+		["all unknown", TerminalWorkspaceCommandErrorCode.UnknownToken, 4, "content"],
 		["type .cs", TerminalWorkspaceCommandErrorCode.MissingArgument, 8, "on"],
 		["select src maybe", TerminalWorkspaceCommandErrorCode.InvalidValue, 11, "on"],
 		["select all src on", TerminalWorkspaceCommandErrorCode.UnexpectedArgument, 11, (string?)null],

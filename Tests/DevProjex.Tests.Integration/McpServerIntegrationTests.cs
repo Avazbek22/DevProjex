@@ -8742,6 +8742,45 @@ public sealed partial class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task PathsThatAllMissNeverFallBackToTheProject()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "other.txt"), "other-marker\n");
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			gitMode: GitFilteringMode.None,
+			exclusions: []);
+
+		var search = await server.CallAsync(
+			"search_project",
+			new Dictionary<string, object?>
+			{
+				["pattern"] = "marker",
+				["paths"] = new[] { "missing.txt", "gone/deeper.txt" },
+				["context_lines"] = 0
+			});
+		var tree = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["paths"] = new[] { "missing.txt" },
+				["format"] = "text"
+			});
+
+		foreach (var result in new[] { search, tree })
+		{
+			var text = Text(result);
+			Assert.False(result.IsError == true, text);
+			Assert.DoesNotContain("other.txt", text, StringComparison.Ordinal);
+			Assert.DoesNotContain("other-marker", text, StringComparison.Ordinal);
+			Assert.Contains("DPX-SELECTION-PATH-MISSING", text, StringComparison.Ordinal);
+		}
+		Assert.Contains("[Empty selection] stage=paths.", Text(tree), StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task GetTreeAndSearchPathsHonorCaseRootJailAndGitScope()
 	{
 		using var workspace = new TemporaryDirectory();
