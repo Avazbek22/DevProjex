@@ -256,6 +256,7 @@ public sealed class McpRootRegistry
 		}
 		catch (FileNotFoundException)
 		{
+			EnsureExistingAncestorIsWithin(projectRoot, path, lexicalPath, physicalPathResolver);
 			if (FlatpakEnvironment.Current.IsActive)
 				throw FlatpakPathUnavailable(lexicalPath);
 			throw new McpToolException(
@@ -264,6 +265,7 @@ public sealed class McpRootRegistry
 		}
 		catch (DirectoryNotFoundException)
 		{
+			EnsureExistingAncestorIsWithin(projectRoot, path, lexicalPath, physicalPathResolver);
 			if (FlatpakEnvironment.Current.IsActive)
 				throw FlatpakPathUnavailable(lexicalPath);
 			throw new McpToolException(
@@ -275,6 +277,45 @@ public sealed class McpRootRegistry
 			throw RootViolation(path);
 		return physical;
 	}
+
+	/// <summary>
+	/// A missing path is reported as missing only when the deepest directory that does exist above
+	/// it resolves inside the project. Under a link that leaves the root, "not found" against
+	/// "outside the root" would otherwise tell the caller whether a file exists out there.
+	/// </summary>
+	private void EnsureExistingAncestorIsWithin(
+		string projectRoot,
+		string path,
+		string lexicalPath,
+		Func<string, bool, string> physicalPathResolver)
+	{
+		var ancestor = Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(lexicalPath));
+		while (!string.IsNullOrEmpty(ancestor) && !IsConfiguredLexicalRoot(projectRoot, ancestor))
+		{
+			McpProjectPathProbe.Record();
+			if (Directory.Exists(ancestor))
+			{
+				string physicalAncestor;
+				try
+				{
+					physicalAncestor = physicalPathResolver(ancestor, true);
+				}
+				catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+				{
+					return;
+				}
+				if (!IsWithin(projectRoot, physicalAncestor))
+					throw RootViolation(path);
+				return;
+			}
+			ancestor = Path.GetDirectoryName(ancestor);
+		}
+	}
+
+	private bool IsConfiguredLexicalRoot(string projectRoot, string path) =>
+		_lexicalRootsByPhysical.TryGetValue(projectRoot, out var lexicalRoots)
+			? lexicalRoots.Contains(path, StringComparer.Ordinal)
+			: StringComparer.Ordinal.Equals(projectRoot, path);
 
 	internal string? FindLexicalRoot(string path)
 	{
