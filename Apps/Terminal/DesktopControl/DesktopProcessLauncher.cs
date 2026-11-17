@@ -21,7 +21,7 @@ public sealed class DesktopProcessLauncher(
 			throw new DesktopControlException(
 				"DPX-DESKTOP-NOT-INCLUDED",
 				"This distribution has no desktop app; install DevProjex Desktop from " +
-				"https://github.com/Avazbek22/DevProjex/blob/v5.2/Docs/Installation.md.");
+				DevProjex.Application.ProjectLinks.InstallationDocumentationUrl + ".");
 		}
 
 		var requestPath = await DesktopLaunchRequestStore

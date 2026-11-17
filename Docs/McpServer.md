@@ -313,7 +313,9 @@ extensionless files, hidden entries, and empty files stay visible. Those
 toggles exist for a person who can see what a checkbox hides; an agent cannot,
 and a hidden `Dockerfile`, `.github/` workflow, `.env.example`, or empty
 `__init__.py` becomes a confident wrong answer about the project. `list_projects`
-reports this baseline, and `analyze` echoes the effective set on every call.
+reports this baseline, and `analyze` echoes the effective set on every call
+(`analyze` is published with `--tool-set full`; `list_projects` also with several local
+roots or `--allow-remote`).
 
 The baseline exclusion set is selected at startup with `--exclude <NAME>`
 (repeatable). The names are the exclusion tokens the CLI and TUI already speak:
@@ -386,7 +388,8 @@ Because the standard-mode parameter is a full desired state, growing the
 exclusion vocabulary in a future version is a compatibility checkpoint: a token
 absent from a replayed full-state array is turned off, including tokens the caller
 predates. The supported standard-mode workflow is read-modify-write: call
-`analyze`, copy its echoed `exclusions` array, edit, and send. In live mode, send
+`analyze` (published with `--tool-set full`), copy its echoed `exclusions` array, edit,
+and send. In live mode, send
 only the additional exclusions needed for the call. A `paths` entry that the
 effective exclusion set hides yields an empty selection rather than an error.
 
@@ -398,10 +401,12 @@ enforced. Per-call exclusions can only add filters.`
 Project discovery is conditional. With exactly one configured local root, omit
 `project`, use project-relative paths, and begin with the project operation that
 answers the question. Use `list_projects` for profiles and the active policy, not
-only to learn that root's name. With several roots, use `list_projects` when the
-project is not already known.
+only to learn that root's name; with one local root the default set publishes it only
+under `--allow-remote`, and `--tool-set full` always does. With several roots, use
+`list_projects` when the project is not already known.
 
-A typical multi-root sequence is:
+A typical multi-root sequence with `--tool-set full` is the following; the default set
+skips `analyze` and `pack_context`:
 
 ```text
 list_projects -> get_tree/analyze -> search_project/related_files/get_file -> pack_context -> read_pack
@@ -417,8 +422,9 @@ named alternative, its result, and its key limit.
 Use `get_tree` for structure without content, `analyze`
 for transformed size and token estimates before packing, `search_project` for
 textual locations, `related_files` for statically evidenced relationships,
-`get_file` for one file page, and `pack_context` for multi-file context. A large
-pack returns an id that `read_pack` pages; `read_pack` does not recreate expired
+`get_file` for one file page, and `pack_context` for multi-file context; `analyze`
+and `pack_context` require `--tool-set full`, and the default set reads several files
+with batched `get_file`. A large pack returns an id that `read_pack` pages; `read_pack` does not recreate expired
 packs. When a step wants more than one file or more than one range, send one
 batched `get_file` call instead of several single reads; see
 [Search, then one batched read](#search-then-one-batched-read).
@@ -647,7 +653,9 @@ Discovery is conditional rather than a mandatory sequence. Use `list_projects` o
 when the project is unknown, `get_tree` or `search_project` when its location is
 unknown, scalar `get_file` for one known location, and batch `get_file` for several
 independent known locations. `pack_context` is for a multi-file document, while
-`analyze` is useful when sizing or admission must be known before producing one.
+`analyze` is useful when sizing or admission must be known before producing one; both
+are published with `--tool-set full`, and `list_projects` is published by default only
+with several local roots or `--allow-remote`.
 Every tool publishes one short `anthropic/searchHint` in `_meta` as optional discovery
 help. No tool publishes `anthropic/alwaysLoad`; clients that do not recognize the hint
 can ignore it without changing any route or result.

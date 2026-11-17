@@ -169,6 +169,47 @@ public sealed class CommandTreeContractTests
 		Assert.Empty(environment.StandardError);
 	}
 
+	[Theory]
+	[InlineData("--version|--plain")]
+	[InlineData("--plain|--version")]
+	[InlineData("--version|--color|never")]
+	[InlineData("--color|always|--version")]
+	[InlineData("--language|ru|--version")]
+	[InlineData("--version|--language|en")]
+	[InlineData("-v|--plain|--color|never|--language|ru")]
+	public async Task VersionCombinedWithOutputGlobalsPrintsTheSameValue(string arguments)
+	{
+		var alone = new TestTerminalEnvironment();
+		await new TerminalApplication(alone)
+			.RunAsync(["--version"], TestContext.Current.CancellationToken);
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(environment)
+			.RunAsync(arguments.Split('|'), TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Equal(alone.StandardOutput, environment.StandardOutput);
+		Assert.Empty(environment.StandardError);
+	}
+
+	[Theory]
+	[InlineData("--version|analyze")]
+	[InlineData("analyze|--version")]
+	[InlineData("--version|extra")]
+	[InlineData("--version|--plain|extra")]
+	[InlineData("--version|--quiet")]
+	public async Task VersionWithACommandOrExtraInputStaysASyntaxError(string arguments)
+	{
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(environment)
+			.RunAsync([.. arguments.Split('|'), "--language", "en"], TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("error[DPX-CLI-", environment.StandardError, StringComparison.Ordinal);
+	}
+
 	[Fact]
 	public async Task SingleDashVersionProducesOneTargetedErrorAndOneHint()
 	{

@@ -593,7 +593,7 @@ X-Schaltfläche (Abbrechen) in der Statusleiste:
 * bei Operationen ohne Abbruchunterstützung wird nur die Statusleisten-Anzeige beendet, die Operation selbst kann im Hintergrund weiterlaufen.
 
 ## 19) MCP und KI-Agenten
-DevProjex enthält einen lokalen MCP-Server im Nur-Lese-Modus. KI-Agenten wie Claude Code, Codex, Cursor und VS Code lesen das Projekt über ihn: Die Maskierung von Geheimnissen ist immer aktiv, und der Agent kann keine Projektdateien ändern. Der Server stellt neun Werkzeuge bereit: `list_projects`, `get_tree`, `analyze`, `search_project`, `related_files`, `get_file`, `get_diff`, `pack_context` und `read_pack`.
+DevProjex enthält einen lokalen MCP-Server im Nur-Lese-Modus. KI-Agenten wie Claude Code, Codex, Cursor und VS Code lesen das Projekt über ihn: Die Maskierung von Geheimnissen ist immer aktiv, und der Agent kann keine Projektdateien ändern. Standardmäßig stellt der Server sechs Werkzeuge bereit: `get_tree`, `search_project`, `get_file`, `related_files`, `get_diff` und `read_pack`. `list_projects` kommt hinzu, wenn der Server mehrere Projekte bedient oder mit `--allow-remote` läuft. Mit `--tool-set full` stellt der Server alle neun Werkzeuge bereit und ergänzt `analyze` und `pack_context`.
 
 ### 19.1 Einen Client verbinden
 Das Menü „MCP“ enthält:

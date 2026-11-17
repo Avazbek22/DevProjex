@@ -539,7 +539,7 @@ Effects are mutually exclusive. Clicking the selected effect again disables it a
 
 Available settings:
 * Background transparency — available for Transparency and Blur.
-* Top panel contrast — adjusts the main panel containing Preview, Search, Filter, and tree-format commands.
+* Top bar contrast — adjusts the main panel containing Preview, Search, Filter, and tree-format commands.
 * Menu transparency — applies equally to the main menu and its submenus.
 * Border visibility — adjusts how strongly interface borders are shown.
 
@@ -593,7 +593,7 @@ X button (cancel) in the status bar:
 * for operations without cancellation support, it stops status-bar indication, while the operation itself may still finish in background.
 
 ## 19) MCP and AI agents
-DevProjex includes a local read-only MCP server. AI agents such as Claude Code, Codex, Cursor, and VS Code read the project through it: secret masking is always on, and the agent cannot change project files. The server provides nine tools: `list_projects`, `get_tree`, `analyze`, `search_project`, `related_files`, `get_file`, `get_diff`, `pack_context`, and `read_pack`.
+DevProjex includes a local read-only MCP server. AI agents such as Claude Code, Codex, Cursor, and VS Code read the project through it: secret masking is always on, and the agent cannot change project files. By default, the server provides six tools: `get_tree`, `search_project`, `get_file`, `related_files`, `get_diff`, and `read_pack`. `list_projects` is added when the server serves several projects or runs with `--allow-remote`. With `--tool-set full`, the server provides all nine tools, adding `analyze` and `pack_context`.
 
 ### 19.1 Connecting a client
 The MCP menu contains:
