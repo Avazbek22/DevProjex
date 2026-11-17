@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using ModelContextProtocol;
 using ModelContextProtocol.Protocol;
 
@@ -68,8 +69,13 @@ public sealed partial class McpServerProcessTests
 		try
 		{
 			await client.ListToolsAsync(options: null, TestContext.Current.CancellationToken);
-			var hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(ReadToolsListResult(output.GetRecordedText()))));
-			Assert.Equal("5f002f57c051cd506a6ec1ef0e14bd694d25dafa16001e1cb58917fd93b5a988", hash);
+			// The result carries the server version in its metadata; it is replaced so a release bump does not move the hash.
+			var catalog = Regex.Replace(
+				ReadToolsListResult(output.GetRecordedText()),
+				@"(""io\.modelcontextprotocol/serverInfo"":\{[^{}]*""version"":"")[^""]+("")",
+				"${1}0.0.0${2}");
+			var hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(catalog)));
+			Assert.Equal("1ca779b379ed7853ee89da47d599d3bf2f9ade4cb75e8bf2268e9e96249d5559", hash);
 		}
 		finally { process.StandardInput.Close(); await client.DisposeAsync(); }
 		await CompletePublishedMcpAsync(process, error, output);
