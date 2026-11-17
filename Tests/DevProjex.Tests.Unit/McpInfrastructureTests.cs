@@ -744,6 +744,33 @@ public sealed class McpInfrastructureTests
 		}
 	}
 
+	[Theory]
+	[InlineData("dangling")]
+	[InlineData("dangling/child.txt")]
+	public void RootRegistryRejectsADanglingLinkToOutsideTheRoot(string path)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var outside = workspace.CreateFolder("outside-removed");
+		var link = Path.Combine(project, "dangling");
+		CreateDirectoryAliasOrSkip(link, outside);
+		try
+		{
+			Directory.Delete(outside);
+			var registry = new McpRootRegistry([project]);
+
+			var exception = Assert.Throws<McpToolException>(() =>
+				registry.ResolveExistingPath(project, path));
+
+			Assert.Equal(McpErrorCodes.RootViolation, exception.Code);
+		}
+		finally
+		{
+			if (new DirectoryInfo(link).LinkTarget is not null)
+				Directory.Delete(link);
+		}
+	}
+
 	[Fact]
 	public void RootRegistryStillReportsMissingPathsInsideTheRoot()
 	{

@@ -289,9 +289,11 @@ public sealed class McpRootRegistry
 		string lexicalPath,
 		Func<string, bool, string> physicalPathResolver)
 	{
-		var ancestor = Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(lexicalPath));
+		var ancestor = Path.TrimEndingDirectorySeparator(lexicalPath);
 		while (!string.IsNullOrEmpty(ancestor) && !IsConfiguredLexicalRoot(projectRoot, ancestor))
 		{
+			if (DanglingLinkLeavesRoot(projectRoot, ancestor))
+				throw RootViolation(path);
 			McpProjectPathProbe.Record();
 			if (Directory.Exists(ancestor))
 			{
@@ -310,6 +312,26 @@ public sealed class McpRootRegistry
 			}
 			ancestor = Path.GetDirectoryName(ancestor);
 		}
+	}
+
+	// Unix reports a link whose target is gone as neither a file nor a directory, so the walk above
+	// would pass over it; its own target text still says where it points.
+	private bool DanglingLinkLeavesRoot(string projectRoot, string entry)
+	{
+		string? target;
+		try
+		{
+			McpProjectPathProbe.Record();
+			target = new FileInfo(entry).LinkTarget;
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+		{
+			return false;
+		}
+		if (target is null || Path.GetDirectoryName(entry) is not { } directory)
+			return false;
+		var targetPath = Path.GetFullPath(target, directory);
+		return !IsWithin(projectRoot, targetPath) && !IsWithinConfiguredLexicalRoot(projectRoot, targetPath);
 	}
 
 	private bool IsConfiguredLexicalRoot(string projectRoot, string path) =>
