@@ -84,7 +84,7 @@ previous screen, selected row, and keyboard focus.
   Tree filter or Preview search, and otherwise asks before returning from a
   workspace to Welcome.
 - Ctrl+C cancels active work first and otherwise asks before exiting.
-- `q` exits only from a root screen.
+- `q` exits only from a root screen and, like Ctrl+C, asks for confirmation first.
 - Errors remain visible until dismissed and then return to a usable prior state.
 
 Only an explicit Exit action, root-level `q`, or confirmed Ctrl+C ends the TUI.
@@ -461,6 +461,7 @@ the existing confirmation and blocking progress surfaces.
 | Enter | open or activate |
 | Space | toggle the selected node |
 | `/` | search |
+| `n` / Shift+`N` | next / previous Preview Search match when Context Preview has focus |
 | `:` | open the workspace command line |
 | Ctrl+P | searchable Action Palette |
 | Tab / F6 | focus the next major pane |
@@ -486,7 +487,8 @@ The footer shows actions relevant to the active layout.
 When Context Preview has focus, Up/Down and `j`/`k` scroll by line,
 Page Up/Page Down scroll by page, and Home/End move to the start or end.
 Left/Right scroll horizontally when content overflows. `{` and `}` move to the
-previous or next file section, Ctrl+G jumps to a line, and `W` toggles line
+previous or next file section, `n` and Shift+`N` move to the next or previous
+Preview Search match, Ctrl+G jumps to a line, and `W` toggles line
 wrapping. Changing the selected tree file scrolls Preview to that file after a
 short debounce. In compact layouts, moving focus also makes the corresponding
 Tree, Preview, or Parameters pane visible. Pane
