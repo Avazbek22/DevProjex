@@ -839,7 +839,8 @@ unsupported=N, extraction-failed=N` with a short explanation that supported file
 produced facts for a recognized language while unsupported files had no extractor.
 Configuration state is summarized outside the block as `[Dependency configuration]
 problems=N · missing=A · corrupt=B · unsupported-semantics=C · affected-scopes=M`.
-At most eight `path · problem` rows plus an `and N more` row stay inside the
+At most eight `path · problem` rows, with the problem spelled as in that summary
+(`missing`, `corrupt`, or `unsupported-semantics`), plus an `and N more` row stay inside the
 untrusted block; parser reasons are not returned. After relation rows, the same block includes
 up to eight `[Dependency partial parse] path=... · dropped=N · lines=...` rows when recognized
 syntax was discarded. No partial-parse row is added when the manifest has no discarded syntax,

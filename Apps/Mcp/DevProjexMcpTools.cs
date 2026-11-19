@@ -3822,7 +3822,13 @@ internal sealed partial class DevProjexMcpTools(
 			   $"affected-scopes={affectedScopes.ToString(CultureInfo.InvariantCulture)}";
 	}
 
-	private static string? FormatDependencyConfigurationData(
+	// Rows spell each problem the way the summary line above them counts it.
+	private static string FormatDependencyConfigurationProblem(DependencyConfigurationState state) =>
+		state == DependencyConfigurationState.UnsupportedSemantics
+			? "unsupported-semantics"
+			: state.ToString().ToLowerInvariant();
+
+	internal static string? FormatDependencyConfigurationData(
 		IReadOnlyList<DependencyConfigurationDiagnostic> diagnostics)
 	{
 		if (diagnostics.Count == 0)
@@ -3835,7 +3841,7 @@ internal sealed partial class DevProjexMcpTools(
 			output.Append("[Dependency configuration] ")
 				.Append(McpTextEscaping.EscapeSingleLine(diagnostic.Path))
 				.Append(" · ")
-				.Append(diagnostic.State.ToString().ToLowerInvariant());
+				.Append(FormatDependencyConfigurationProblem(diagnostic.State));
 		}
 		if (diagnostics.Count > 8)
 		{
