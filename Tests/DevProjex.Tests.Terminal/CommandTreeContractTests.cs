@@ -44,9 +44,23 @@ public sealed class CommandTreeContractTests
 			Assert.Contains("--language", environment.StandardOutput, StringComparison.Ordinal);
 			Assert.DoesNotContain("\u001b", environment.StandardOutput, StringComparison.Ordinal);
 			Assert.Empty(environment.StandardError);
+			// Examples are printed on one line so they can be copied; every other line wraps.
 			Assert.All(
-				environment.StandardOutput.Split(Environment.NewLine),
+				ExceptExamples(environment.StandardOutput.Split(Environment.NewLine)),
 				static line => Assert.True(line.Length <= 82, $"Help line is too wide: {line}"));
+		}
+	}
+
+	private static IEnumerable<string> ExceptExamples(IEnumerable<string> lines)
+	{
+		var inExamples = false;
+		foreach (var line in lines)
+		{
+			if (!line.StartsWith(' ') && line.Length > 0)
+				inExamples = line == "EXAMPLES";
+			else if (inExamples)
+				continue;
+			yield return line;
 		}
 	}
 
