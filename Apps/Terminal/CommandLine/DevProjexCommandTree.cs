@@ -2560,7 +2560,11 @@ public sealed class DevProjexCommandTree
 	{
 		command.Validators.Add(result =>
 		{
-			if (!result.GetValue(force) && !result.GetValue(dryRun))
+			// A missing required argument is the more useful error, so confirmation is checked after it.
+			var missingRequiredArgument = command.Arguments.Any(argument =>
+				argument.Arity.MinimumNumberOfValues > 0 &&
+				result.GetResult(argument) is not ArgumentResult { Tokens.Count: > 0 });
+			if (!missingRequiredArgument && !result.GetValue(force) && !result.GetValue(dryRun))
 			{
 				result.AddError(LocalizedParseError.Create(
 					L("Terminal.Validation.CacheForceRequired")));
