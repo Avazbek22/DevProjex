@@ -38,6 +38,13 @@ internal sealed class McpLiveContextState(
 
 	public int RefreshProfile(string projectRoot) => ReadCurrentProfile(projectRoot).Revision;
 
+	public bool HasPendingWindowFilterChange(string projectRoot)
+	{
+		lock (sync)
+			return states.TryGetValue(PathUtility.Normalize(projectRoot), out var state) &&
+				state.PendingChange is not null && McpWindowFilters.Changes(state.ChangeBaselineProfile, state.Profile).Length > 0;
+	}
+
 	public int? CurrentInvocationRevision(string projectRoot)
 	{
 		var normalizedRoot = PathUtility.Normalize(projectRoot);
@@ -114,7 +121,8 @@ internal sealed class McpLiveContextState(
 	public void RecordPlan(
 		string projectRoot,
 		ProjectContextPlan plan,
-		McpRootMonitorStamp? rootRevision = null)
+		McpRootMonitorStamp? rootRevision = null,
+		bool captureReadableBoundary = true)
 	{
 		ArgumentNullException.ThrowIfNull(plan);
 		var normalizedRoot = PathUtility.Normalize(projectRoot);
@@ -128,12 +136,18 @@ internal sealed class McpLiveContextState(
 				profile.Value is not { } current ||
 				current.Revision != state.Revision)
 				return;
-			if (state.SelectableFileCount is null || !ReferenceEquals(GetEffectiveTree(state), plan.EffectiveTree))
+			var sameTree = ReferenceEquals(GetEffectiveTree(state), plan.EffectiveTree);
+			if (state.SelectableFileCount is null || !sameTree)
 				state.SelectableFileCount = CountFiles(plan.EffectiveTree);
 			state.EffectiveTree = new WeakReference<TreeNodeDescriptor>(plan.EffectiveTree);
 			state.PendingChange = ClassifyPendingChange(state.Root, state.PendingChange, plan.EffectiveTree);
 			state.SelectedFileCount = plan.IncludedFiles.Count;
 			state.SelectedFileRootRevision = rootRevision;
+			if (captureReadableBoundary && (!sameTree || !state.HasReadableBoundaryObservation))
+			{
+				state.ReadableFiles = McpWindowFilters.CaptureReadableFiles(plan);
+				state.HasReadableBoundaryObservation = true;
+			}
 			active.Roots.Add(normalizedRoot);
 		}
 	}
@@ -381,12 +395,20 @@ internal sealed class McpLiveContextState(
 		}
 		if (!StringComparer.Ordinal.Equals(state.Fingerprint, fingerprint))
 		{
-			var previousRevision = state.Revision;
+			var previousRevision = state.PendingChange?.PreviousRevision ?? state.Revision;
+			if (state.PendingChange is null)
+			{
+				state.ChangeBaselineProfile = state.Profile;
+				state.ChangeBaselineFiles = state.ReadableFiles;
+				state.ChangeBaselineFrontier = state.Frontier;
+			}
 			state.Revision++;
+			state.ReadableFiles = null;
+			state.HasReadableBoundaryObservation = false;
 			state.SelectedFileCount = null;
 			state.SelectableFileCount = null;
 			state.SelectedFileRootRevision = null;
-			var frontierChanges = BuildFrontierChanges(state.Frontier, frontier);
+			var frontierChanges = BuildFrontierChanges(state.ChangeBaselineFrontier, frontier);
 			state.PendingChange = ClassifyPendingChange(
 				state.Root,
 				new PendingChange(previousRevision, frontierChanges),
@@ -594,10 +616,20 @@ internal sealed class McpLiveContextState(
 
 		if (state.PendingChange is { } changed)
 		{
+			var filterChanges = McpWindowFilters.Changes(state.ChangeBaselineProfile, state.Profile);
+			var filterSummary = filterChanges.Length > 0
+				? "window filters changed" + McpWindowFilters.FormatCounts(state.ChangeBaselineFiles, state.ReadableFiles)
+				: null;
+			if (filterSummary is not null)
+			{
+				var rootLabel = includeRoot ? $"Root {rootIndex} of {rootCount}{Environment.NewLine}" : "";
+				untrustedDetails.Add($"Window filters changed since revision {changed.PreviousRevision}:" + Environment.NewLine +
+					rootLabel + McpWindowFilters.FormatValues(filterChanges));
+			}
 			if (changed.Changes.Count == 0)
 			{
 				notices.Add(
-					$"[Live context] changed since revision {changed.PreviousRevision}: selection settings changed");
+					$"[Live context] changed since revision {changed.PreviousRevision}: {filterSummary ?? "selection settings changed"}");
 			}
 			else
 			{
@@ -607,7 +639,8 @@ internal sealed class McpLiveContextState(
 					? $" · {shownPaths.Length} names shown, {remainingPaths} more"
 					: string.Empty;
 				notices.Add(
-					$"[Live context] changed since revision {changed.PreviousRevision}: {FormatChangeSummary(changed.Changes)}{suffix}");
+					$"[Live context] changed since revision {changed.PreviousRevision}: " +
+					(filterSummary is null ? "" : filterSummary + " · ") + $"{FormatChangeSummary(changed.Changes)}{suffix}");
 				if (shownPaths.Length > 0)
 				{
 					untrustedDetails.Add(
@@ -619,6 +652,9 @@ internal sealed class McpLiveContextState(
 				}
 			}
 			state.PendingChange = null;
+			state.ChangeBaselineProfile = null;
+			state.ChangeBaselineFiles = null;
+			state.ChangeBaselineFrontier = null;
 		}
 
 		// The count is known only once a plan exists for this revision; a "0" before that reads as an
@@ -666,7 +702,10 @@ internal sealed class McpLiveContextState(
 			McpLiveFocusUse.Search => single ? "was not searched" : "were not searched",
 			McpLiveFocusUse.Analysis => single ? "was not measured" : "were not measured",
 			McpLiveFocusUse.Pack => single ? "was not packed" : "were not packed",
-			McpLiveFocusUse.Related => single ? "was not traced" : "were not traced",
+			McpLiveFocusUse.Related => single
+				? "was checked only for links to the seeds"
+				: "were checked only for links to the seeds",
+			McpLiveFocusUse.Diff => single ? "was not compared" : "were not compared",
 			_ => throw new ArgumentOutOfRangeException(nameof(use), use, null)
 		};
 		return $"[Live context] focus: {focus.ToString(CultureInfo.InvariantCulture)} of " +
@@ -765,6 +804,11 @@ internal sealed class McpLiveContextState(
 		public McpRootMonitorStamp? SelectedFileRootRevision { get; set; }
 		public WeakReference<TreeNodeDescriptor>? EffectiveTree { get; set; }
 		public PendingChange? PendingChange { get; set; }
+		public ProjectSelectionProfile? ChangeBaselineProfile { get; set; }
+		public string[]? ChangeBaselineFrontier { get; set; }
+		public IReadOnlySet<string>? ChangeBaselineFiles { get; set; }
+		public IReadOnlySet<string>? ReadableFiles { get; set; }
+		public bool HasReadableBoundaryObservation { get; set; }
 	}
 
 	private sealed class InvocationState
@@ -811,7 +855,8 @@ internal enum McpLiveFocusUse
 	Search,
 	Analysis,
 	Pack,
-	Related
+	Related,
+	Diff
 }
 
 internal sealed record McpLiveProfileSnapshot(

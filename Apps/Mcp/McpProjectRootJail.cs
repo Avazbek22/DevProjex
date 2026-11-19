@@ -20,6 +20,25 @@ internal sealed class McpProjectRootJail(
 		}
 	}
 
+	public void EnsureExistingPathsWithin(
+		string projectRoot,
+		IReadOnlyList<string> paths,
+		CancellationToken cancellationToken)
+	{
+		if (paths.Count == 0)
+			return;
+		cancellationToken.ThrowIfCancellationRequested();
+		var scope = ResolveScope(projectRoot);
+		try
+		{
+			scope.Registry.EnsureExistingPathsWithin(projectRoot, paths, cancellationToken);
+		}
+		catch (McpToolException exception)
+		{
+			throw Translate(exception, scope);
+		}
+	}
+
 	public McpRootJailScope? FindLexicalRoot(string path)
 	{
 		var candidates = new List<McpRootJailScope>();

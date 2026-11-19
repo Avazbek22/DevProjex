@@ -4,7 +4,8 @@ These measurements are reproducible observations, not general performance
 claims. The harness and pinned inputs are in
 [`tools/ScanBenchmark`](../tools/ScanBenchmark/README.md).
 How these numbers, and the agent-session comparisons with Repomix, changed between
-5.1 and 5.2 is told in [Benchmark-History.md](Benchmark-History.md).
+5.1 and 5.2 is told in [Benchmark-History.md](Benchmark-History.md); every agent benchmark day,
+with what was kept and what was rolled back, is logged in [Benchmarks/](Benchmarks/README.md).
 
 ## Cold scan against Repomix
 
@@ -110,7 +111,7 @@ The one-run Godot export comparison above increased peak RSS from 910.6 MiB to
 967.6 MiB (+57.0 MiB). That increase is an explicit memory price of the measured
 speedup; bounded retained source text did not translate into a lower process peak.
 
-After the correctness review, the defensive series was repeated three times per
+After the correctness fixes, the defensive series was repeated three times per
 temperature without a profiler. The table reports medians; every repetition used
 the same pinned manifest and arguments as the baseline. Compared with the earlier
 single optimized controls, the cold medians were 1,003/1,092 ms instead of
@@ -123,13 +124,13 @@ and 9,204/10,391 ms instead of 11,719/11,014 ms for Godot (analyze/export).
 | Repomix | 1,451 / 1,385 | 1,541 / 1,512 | 2,992 / 2,897 | 159.9 / 158.1 | 155.1 / 157.8 |
 | Godot | 9,204 / 8,626 | 10,391 / 10,404 | 19,595 / 19,030 | 996.4 / 816.9 | 949.5 / 969.5 |
 
-Against the original cold baseline, the reviewed Godot medians are 3.02× faster
+Against the original cold baseline, the Godot medians of that series are 3.02× faster
 for analyze and 3.25× faster for export context. They still do not meet the 4×
 target. The three Godot export samples were 10,391, 10,411, and 10,377 ms cold,
 and 10,404, 12,306, and 10,224 ms warm; the slower second warm sample is retained
 rather than discarded.
 
-The reviewed harness reports 77,689,944 estimated tree-plus-content tokens for
+The corrected harness reports 77,689,944 estimated tree-plus-content tokens for
 Godot instead of the earlier 70,191,036. This is an intentional correctness
 change: detector policy exclusions such as lock files now contribute their
 unchanged source metrics to analyze even though the detector is not invoked for

@@ -1,0 +1,10 @@
+{
+ "product": "v5.2.2",
+ "kind": "devprojex",
+ "host": "v522",
+ "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+ "repomix": null,
+ "model": "claude-haiku-4-5-20251001",
+ "maxTurns": "40",
+ "prompt": "prompt"
+}

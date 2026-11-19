@@ -51,6 +51,8 @@ DevProjex works differently: visual, precise, and local-first.
 
 The numbers, with their caveats. In the final blind series against Repomix (11 tasks, 8 repositories, 6 languages, 22 sessions per side, Claude Haiku 4.5 as the agent and as the judge), DevProjex used 973,020 tokens against 1,174,907, and the judge trusted the DevProjex answer in 17 pairs of 22 against 3. With seven planted credentials, neither tool leaked a value, but the code around them stayed readable through DevProjex in 7 files of 7 against 1 of 7. The tasks were written by the author, Repomix needs fewer tool calls, and it wins broad "how does X work" questions. The whole series, with the agents' and the judge's verdicts verbatim, is in [Docs/Benchmark-History.md](Docs/Benchmark-History.md).
 
+In the two 18-task runs of 12 November 2026 against Repomix 1.19.0 (Claude Haiku 4.5 in Claude Code), agents used 28.8% and 40.9% fewer context tokens through DevProjex; in the 28.8% run they also named 78 of 84 required files against 66. Both runs are in [Docs/Benchmarks](Docs/Benchmarks/README.md).
+
 ### Use it for
 
 * **AI assistants:** clean input for ChatGPT, Claude, DeepSeek, Qwen, Kimi.
@@ -80,7 +82,7 @@ Works with any language, repository, or project structure.
 * **[Git modes](#how-smart-ignore-works-):** `.gitignore`, tracked files, staged files, all current changes, or a ref-to-ref diff.
 
 **AI agents**
-* **[Read-only MCP server](#mcp-server-):** eight tools for any MCP client, on the same engine as the desktop app.
+* **[Read-only MCP server](#mcp-server-):** six tools by default and all nine with `--tool-set full`, for any MCP client, on the same engine as the desktop app.
 * **[Live Context](#live-context-your-checkboxes-become-the-agents-focus):** tick files in the desktop app and the agent works with that selection on its very next call.
 * **[Agent journal](#agent-journal-a-receipt-for-every-session):** a receipt for every session with calls, delivered paths, tokens, and masked values, never file bodies.
 * **[Hard boundaries](#security-boundaries):** root jail, untrusted-data markers, and an agent that can only narrow what it sees.
@@ -137,15 +139,18 @@ Open the project in the desktop app and connect through **MCP → Live context**
 
 Live context uses `--live`; **Standard** connects the same server but does not follow the window selection.
 
-### Eight read-only tools
+### Nine read-only tools
 
-Eight read-only tools cover the whole workflow: `list_projects`, `get_tree`, `analyze`, `search_project`, `related_files`, `get_file`, `pack_context`, and `read_pack`.
+Nine read-only tools cover the whole workflow: `list_projects`, `get_tree`, `analyze`, `search_project`, `related_files`, `get_file`, `get_diff`, `pack_context`, and `read_pack`.
 
-* `search_project` finds text or declarations by name, and `get_file` reads an exact line range or one declaration instead of a whole file.
-* `related_files` answers "what does this file actually use, and who uses it" from real imports, for one file or a handful of seeds, so following a thread never widens the selection.
+By default the server publishes the tools an agent reaches for in everyday work, `get_tree`, `search_project`, `get_file`, `related_files`, `get_diff` and `read_pack`, so the tool list costs the model less on every request. Start it with `--tool-set full` to publish `analyze` and `pack_context` as well.
+
+* `search_project` finds text or declarations by name, and `get_file` reads an exact line range, one declaration, or up to sixteen files in one call. A large file comes back as its start and a structure with line ranges, so the agent reads only the part it needs.
+* `related_files` answers "what does this file actually use, and who uses it" from real imports, for one file, several seeds, or the files in a folder, so following a thread never widens the selection.
+* `get_diff` reviews a change: staged files, current changes, or a ref-to-ref diff as unified hunks, largest changes first, with secrets masked in both versions, so the agent reads only the lines that changed.
 * `pack_context` packs a selection under `max_tokens`: files are admitted in a deterministic order while they fit, the rest are reported as skipped, and `top_files` shows where the tokens go.
 * `pack_context` and `related_files` store an oversized result as a session pack; `read_pack` reads it back in line ranges instead of flooding the agent's context. Long operations report standard MCP progress notifications.
-* Trees default to compact Markdown, content declares the root once and uses relative paths, and every tree ends with a line naming the active filters, so the agent knows what it did not see. `git_scope` narrows any tool to staged files, current changes, or a ref-to-ref diff; `profile` switches between built-in defaults, your saved desktop selections, or a portable profile file.
+* Trees default to compact Markdown, content declares the root once and uses relative paths, and every tree ends with a line naming the active filters, so the agent knows what it did not see. `git_scope` narrows a call to staged files, current changes, or a ref-to-ref diff; `profile` switches between built-in defaults, your saved desktop selections, or a portable profile file. The default set publishes `git_scope` only on `get_diff` and does not publish `profile`; both are still accepted where a tool takes them, and `--tool-set full` publishes every parameter.
 
 ### Agent journal: a receipt for every session
 

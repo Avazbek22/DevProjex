@@ -129,7 +129,7 @@ public sealed partial class McpServerProcessTests
 	}
 
 	[Fact]
-	public async Task RealProcessCountsTreeDepthFromTheProjectRootWhateverPathsNarrowsTo()
+	public async Task RealProcessCountsTreeDepthFromEachRequestedDirectory()
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("depth-project");
@@ -155,16 +155,14 @@ public sealed partial class McpServerProcessTests
 			return AllProcessText(result);
 		}
 
-		// max_depth counts levels below the project root, never below a paths entry:
-		// src is level 1, router level 2, trie level 3 and node.ts level 4.
 		var depthOne = await TreeAsync(1);
 		var depthTwo = await TreeAsync(2);
 		var depthFour = await TreeAsync(4);
 
 		Assert.Contains("src", depthOne, StringComparison.Ordinal);
-		Assert.DoesNotContain("router", depthOne, StringComparison.Ordinal);
+		Assert.Contains("router", depthOne, StringComparison.Ordinal);
 		Assert.Contains("router", depthTwo, StringComparison.Ordinal);
-		Assert.DoesNotContain("trie", depthTwo, StringComparison.Ordinal);
+		Assert.Contains("node.ts", depthTwo, StringComparison.Ordinal);
 		Assert.Contains("node.ts", depthFour, StringComparison.Ordinal);
 	}
 }

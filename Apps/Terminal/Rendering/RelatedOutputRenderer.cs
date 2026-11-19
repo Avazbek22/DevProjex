@@ -16,22 +16,26 @@ internal static class RelatedOutputRenderer
 	public static async Task WriteAsync(
 		TextWriter writer,
 		DependencyRelatedResult result,
+		DependencyOutsideSelectionResult? outside,
 		DependencyDirection direction,
 		AnalysisOutputFormat format,
 		LocalizationService localization,
 		CancellationToken cancellationToken)
 	{
+		// A narrowed call answers from the readable project; the selection only places each file.
+		result = outside?.Selection ?? result;
+		var outsideSeeds = outside is { Seeds.Count: > 0 } ? outside.Seeds : null;
 		if (format == AnalysisOutputFormat.Json)
 		{
 			var jsonCoverage = result.Index.Coverage;
-			var resolution = CountResolution(result, direction);
-			var document = new
-			{
-				schemaVersion = 1,
-				kind = "devprojex-related-files",
-				direction,
-				seeds = result.Seeds,
-				coverage = new
+			var resolution = CountResolution(result, outside, direction);
+			var document = new RelatedDocument(
+				SchemaVersion: 1,
+				Kind: "devprojex-related-files",
+				Direction: direction,
+				Seeds: result.Seeds,
+				OutsideSelection: outsideSeeds,
+				Coverage: new
 				{
 					jsonCoverage.Files,
 					jsonCoverage.Supported,
@@ -43,14 +47,14 @@ internal static class RelatedOutputRenderer
 					jsonCoverage.PartialParseDiagnostics,
 					configurationDiagnostics = jsonCoverage.ConfigurationDiagnostics.Select(ProjectConfigurationDiagnostic)
 				},
-				resolution,
-				searchScope = new { files = result.Index.Files.Count }
-			};
+				Resolution: resolution,
+				SearchScope: new { files = result.Index.Files.Count });
 			await writer.WriteLineAsync(JsonSerializer.Serialize(document, JsonOptions).AsMemory(), cancellationToken)
 				.ConfigureAwait(false);
 			return;
 		}
 
+		var outsideBySeed = outsideSeeds?.ToDictionary(static seed => seed.Seed, StringComparer.Ordinal);
 		foreach (var seed in result.Seeds)
 		{
 			await writer.WriteLineAsync($"{localization["Terminal.Related.Seed"]}: {TerminalTextEscaping.EscapeSingleLine(seed.Seed)}")
@@ -66,11 +70,34 @@ internal static class RelatedOutputRenderer
 				await WriteSection(writer, localization["Terminal.Related.Dependents"], seed.Dependents, localization).ConfigureAwait(false);
 			if (seed.Dependencies.Count == 0 && seed.Dependents.Count == 0)
 				await writer.WriteLineAsync(localization["Terminal.Related.None"]).ConfigureAwait(false);
+			if (outsideBySeed?.GetValueOrDefault(seed.Seed) is not { } outsideSeed)
+				continue;
+			if (outsideSeed.DependencyCount > 0)
+				await WriteSection(
+					writer,
+					OutsideTitle(localization, "Terminal.Related.OutsideDependencies", outsideSeed.Dependencies.Count, outsideSeed.DependencyCount),
+					outsideSeed.Dependencies,
+					localization).ConfigureAwait(false);
+			if (outsideSeed.DependentCount > 0)
+				await WriteSection(
+					writer,
+					OutsideTitle(localization, "Terminal.Related.OutsideDependents", outsideSeed.Dependents.Count, outsideSeed.DependentCount),
+					outsideSeed.Dependents,
+					localization).ConfigureAwait(false);
 		}
-		var resolutionCounts = CountResolution(result, direction);
+		var resolutionCounts = CountResolution(result, outside, direction);
 		await writer.WriteLineAsync(
 			$"[Resolution] resolved={resolutionCounts.Resolved} · ambiguous={resolutionCounts.Ambiguous} · " +
-			$"unresolved={resolutionCounts.Unresolved} · external={resolutionCounts.External}").ConfigureAwait(false);
+			$"unresolved={resolutionCounts.Unresolved} · external={resolutionCounts.External}" +
+			(resolutionCounts.OutsideSelection > 0 ? $" · outside-selection={resolutionCounts.OutsideSelection}" : string.Empty))
+			.ConfigureAwait(false);
+		if (outside is { SelectionAnsweredSeeds: > 0 and var selectionAnsweredSeeds })
+		{
+			await writer.WriteLineAsync(
+				$"[Dependency facts limited] project index partial · selection-answer-seeds={selectionAnsweredSeeds}; " +
+				"a fact or work limit dropped facts these seeds rely on, so they keep the selection's own answer and list no files outside it.")
+				.ConfigureAwait(false);
+		}
 		var coverage = result.Index.Coverage;
 		await writer.WriteLineAsync(localization.Format(
 			"Terminal.Related.Coverage",
@@ -100,24 +127,26 @@ internal static class RelatedOutputRenderer
 		}
 	}
 
-	private static ResolutionCounts CountResolution(DependencyRelatedResult result, DependencyDirection direction)
+	private static string OutsideTitle(LocalizationService localization, string key, int listed, int total) =>
+		listed == total
+			? localization[key]
+			: $"{localization[key]} ({localization.Format("Terminal.Related.OutsideListed", listed, total)})";
+
+	private static ResolutionCounts CountResolution(
+		DependencyRelatedResult result,
+		DependencyOutsideSelectionResult? outside,
+		DependencyDirection direction)
 	{
-		var edges = new HashSet<DependencyEdge>();
-		foreach (var seed in result.Seeds)
-		{
-			if (direction is DependencyDirection.Dependencies or DependencyDirection.Both)
-				foreach (var edge in result.Index.EdgesBySource.GetValueOrDefault(seed.Seed) ?? [])
-					edges.Add(edge);
-			if (direction is DependencyDirection.Dependents or DependencyDirection.Both)
-				foreach (var edge in result.Index.EdgesByTarget.GetValueOrDefault(seed.Seed) ?? [])
-					if (string.Equals(edge.Target, seed.Seed, StringComparison.Ordinal))
-						edges.Add(edge);
-		}
+		var counts = outside?.Resolution ?? DependencyFactsEngine.CountResolution(
+			result.Index,
+			result.Seeds.Select(static seed => seed.Seed),
+			direction);
 		return new ResolutionCounts(
-			edges.Count(static edge => edge.Status == ResolutionStatus.Resolved),
-			edges.Count(static edge => edge.Status == ResolutionStatus.Ambiguous),
-			edges.Count(static edge => edge.Status == ResolutionStatus.Unresolved),
-			edges.Count(static edge => edge.Status == ResolutionStatus.External));
+			counts.Resolved,
+			counts.Ambiguous,
+			counts.Unresolved,
+			counts.External,
+			counts.OutsideSelection);
 	}
 
 	private static async Task WriteSection(
@@ -137,8 +166,10 @@ internal static class RelatedOutputRenderer
 					"Terminal.Related.Candidates",
 					string.Join(", ", file.Candidates.Select(TerminalTextEscaping.EscapeSingleLine)))
 				: string.Empty;
+			var reasons = RelatedReasonCompaction.Compact(file.Reasons)
+				.Select(TerminalTextEscaping.EscapeSingleLine);
 			var line = $"{TerminalTextEscaping.EscapeSingleLine(file.Path)} — " +
-			           $"{string.Join(" · ", file.Reasons.Select(TerminalTextEscaping.EscapeSingleLine))} — " +
+			           $"{string.Join(" · ", reasons)} — " +
 			           $"{file.Status.ToString().ToLowerInvariant()} — " +
 			           localization.Format("Terminal.Related.Tokens", file.EstimatedTokens) +
 			           crossScope + candidates;
@@ -153,5 +184,24 @@ internal static class RelatedOutputRenderer
 			diagnostic.ScopeIds.Count);
 
 	private sealed record ConfigurationDiagnosticOutput(string Path, string Problem, int AffectedScopes);
-	private sealed record ResolutionCounts(int Resolved, int Ambiguous, int Unresolved, int External);
+
+	// The outside-selection members are additive: a selection that narrows nothing, or finds
+	// nothing outside itself, keeps the original document byte for byte.
+	private sealed record ResolutionCounts(
+		int Resolved,
+		int Ambiguous,
+		int Unresolved,
+		int External,
+		[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] int OutsideSelection);
+
+	private sealed record RelatedDocument(
+		int SchemaVersion,
+		string Kind,
+		DependencyDirection Direction,
+		IReadOnlyList<SeedRelatedFiles> Seeds,
+		[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+		IReadOnlyList<SeedOutsideSelection>? OutsideSelection,
+		object Coverage,
+		ResolutionCounts Resolution,
+		object SearchScope);
 }

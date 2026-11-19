@@ -361,6 +361,52 @@ public sealed class CliUrlSourceCommandTests
 	}
 
 	[Fact]
+	public async Task RemoteDiffScopeNamingATagIsResolvedBeforeLocalComparison()
+	{
+		// The shallow clone fetches only the branch tip (--depth 1), so a tag pointing to an
+		// earlier commit is not present locally at all. "diff" must resolve "v1" against the
+		// remote into a commit the shallow clone can compare, exactly as get_diff does over MCP.
+		using var fileTransport = RepositoryTransportPolicy.AllowLocalFileTransport();
+		if (!IsGitAvailable())
+			GitTestRequirement.ReportUnavailable("Git is unavailable on this test host.");
+
+		using var workspace = new TemporaryDirectory();
+		using var data = new TemporaryDirectory();
+		var source = workspace.CreateDirectory("tag-diff-source");
+		RunGit(source, "init", "--initial-branch=main");
+		RunGit(source, "config", "user.email", "terminal-tests@devprojex.local");
+		RunGit(source, "config", "user.name", "DevProjex Terminal Tests");
+		workspace.WriteFile("tag-diff-source/Baseline.txt", "baseline\n");
+		RunGit(source, "add", ".");
+		RunGit(source, "commit", "-m", "baseline");
+		RunGit(source, "tag", "v1");
+		workspace.WriteFile("tag-diff-source/Last.txt", "last-marker\n");
+		RunGit(source, "add", ".");
+		RunGit(source, "commit", "-m", "last");
+		var bare = Path.Combine(workspace.Path, "tag-diff-origin.git");
+		RunGit(workspace.Path, "clone", "--bare", source, bare);
+		var repositoryUrl = new Uri(bare + Path.DirectorySeparatorChar).AbsoluteUri;
+		var factory = CreateFileRemoteFactory(() => data.Path);
+
+		var environment = new TestTerminalEnvironment();
+		var exitCode = await new TerminalApplication(environment, factory).RunAsync(
+			[
+				"diff", "--project", repositoryUrl,
+				"--branch", "main", "--git-mode", "diff:v1..HEAD",
+				"--format", "json", "-o", "-", "--progress", "never"
+			],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Empty(environment.StandardError);
+		using var payload = JsonDocument.Parse(environment.StandardOutput);
+		var files = payload.RootElement.GetProperty("files").EnumerateArray().ToArray();
+		Assert.Single(files);
+		Assert.Equal("Last.txt", files[0].GetProperty("path").GetString());
+		Assert.Equal("added", files[0].GetProperty("status").GetString());
+	}
+
+	[Fact]
 	public async Task RedirectedUrlCloneProgressNeverContaminatesContextPayloadAndStaysBounded()
 	{
 		using var fileTransport = RepositoryTransportPolicy.AllowLocalFileTransport();

@@ -603,6 +603,32 @@ public sealed partial class TerminalLocalizationContractTests
 			catalogs["ru"]["Settings.Secrets.Status.SizeLimit"]);
 	}
 
+	[Theory]
+	[InlineData("Terminal.Option.Timeout", 2)]
+	[InlineData("Terminal.Validation.Timeout", 3)]
+	public void EveryLocale_TimeoutExamplesAreAcceptedByTheDurationParser(string key, int expectedExamples)
+	{
+		var root = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();
+		foreach (var (locale, catalog) in ReadCatalogs())
+		{
+			// A localized unit such as "10 detik" yields a bare "10", which the parser rejects.
+			var examples = DurationExampleRegex().Matches(catalog[key])
+				.Select(static match => match.Value)
+				.ToArray();
+
+			Assert.True(
+				examples.Length == expectedExamples,
+				$"{locale}: {key} has {examples.Length} duration examples: {catalog[key]}");
+			foreach (var example in examples)
+			{
+				var parseResult = root.Parse(["ui", "status", $"--timeout={example}"]);
+				Assert.True(
+					parseResult.Errors.Count == 0,
+					$"{locale}: {key} example '{example}' is rejected by --timeout.");
+			}
+		}
+	}
+
 	private static Dictionary<string, Dictionary<string, string>> ReadCatalogs()
 	{
 		var directory = Path.Combine(FindRepositoryRoot(), "Assets", "Localization");
@@ -778,4 +804,7 @@ public sealed partial class TerminalLocalizationContractTests
 
 	[GeneratedRegex("\"((?:Terminal|Content)\\.[A-Za-z0-9_.-]+)\"", RegexOptions.CultureInvariant)]
 	private static partial Regex SourceLocalizationKeyRegex();
+
+	[GeneratedRegex(@"\d+(?:\.\d+)?(?::\d+)*[A-Za-z]*", RegexOptions.CultureInvariant)]
+	private static partial Regex DurationExampleRegex();
 }

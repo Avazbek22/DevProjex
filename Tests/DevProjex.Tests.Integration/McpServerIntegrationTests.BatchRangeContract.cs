@@ -50,7 +50,7 @@ public sealed partial class McpServerIntegrationTests
 		var project = workspace.CreateDirectory("project");
 		File.WriteAllText(
 			Path.Combine(project, "Ranges.txt"),
-			string.Concat(Enumerable.Range(1, 1_600).Select(static line => $"line-{line:D4}\n")));
+			string.Concat(Enumerable.Range(1, 1_600).Select(static line => $"line-{line:D4}:{new string('x', 60)}\n")));
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
 
 		var result = await server.CallAsync("get_file", new Dictionary<string, object?>
@@ -72,11 +72,12 @@ public sealed partial class McpServerIntegrationTests
 		var text = Text(result).Replace("\r\n", "\n", StringComparison.Ordinal);
 
 		Assert.NotEqual(true, result.IsError);
-		Assert.Contains("Lines: 1-992 of 1601", text, StringComparison.Ordinal);
+		Assert.Matches(@"Lines: 1-[1-9][0-9]+ of 1601", text);
+		Assert.Contains("[Batch partial] requests=1.2;", text, StringComparison.Ordinal);
 		Assert.Contains("1.1 — ok", text, StringComparison.Ordinal);
 		Assert.Contains("1.2 — partial", text, StringComparison.Ordinal);
 		Assert.Contains("1.3 — not-returned", text, StringComparison.Ordinal);
-		Assert.Contains("[Batch read] ok=1 · partial=1 · not-returned=1 · unavailable=0.", text,
+		Assert.Contains("[Batch read] ok=1 · structure=0 · partial=1 · not-returned=1 · unavailable=0.", text,
 			StringComparison.Ordinal);
 	}
 
@@ -118,13 +119,13 @@ public sealed partial class McpServerIntegrationTests
 	}
 
 	[Fact]
-	public async Task BatchReadUsesValidRequestsForLineContinuation()
+	public async Task BatchReadReportsLineContinuationAsABoundedFact()
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
 		File.WriteAllText(
 			Path.Combine(project, "Lines.txt"),
-			string.Concat(Enumerable.Range(1, 1_600).Select(static line => $"line-{line:D4}\n")));
+			string.Concat(Enumerable.Range(1, 1_600).Select(static line => $"line-{line:D4}:{new string('x', 60)}\n")));
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
 
 		var result = await server.CallAsync("get_file", new Dictionary<string, object?>
@@ -141,15 +142,10 @@ public sealed partial class McpServerIntegrationTests
 		var text = Text(result);
 
 		Assert.NotEqual(true, result.IsError);
-		var arguments = ReadContinuationArguments(text, "Lines.txt");
-		Assert.True(arguments.TryGetProperty("project", out _));
-		Assert.False(arguments.TryGetProperty("branch", out _));
-		Assert.False(arguments.TryGetProperty("start_column", out _));
-		var request = Assert.Single(arguments.GetProperty("requests").EnumerateArray().ToArray());
-		Assert.Equal("Lines.txt", request.GetProperty("path").GetString());
-		var range = Assert.Single(request.GetProperty("ranges").EnumerateArray().ToArray());
-		Assert.True(range.GetProperty("start_line").GetInt32() > 1);
-		Assert.Equal(1_600, range.GetProperty("end_line").GetInt32());
+		Assert.Contains("[Batch partial] requests=1.1; returned through line ", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("Continue with batched get_file", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("get_file {", text, StringComparison.Ordinal);
+		Assert.True(text.Length <= 50_000);
 	}
 
 	[Fact]
@@ -186,13 +182,13 @@ public sealed partial class McpServerIntegrationTests
 	}
 
 	[Fact]
-	public async Task BatchReadLineContinuationRetainsDelegatedExclusions()
+	public async Task BatchReadPartialFactsPreserveDelegatedFileAccess()
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
 		File.WriteAllText(
 			Path.Combine(project, ".Hidden.txt"),
-			string.Concat(Enumerable.Range(1, 1_600).Select(static line => $"line-{line:D4}\n")));
+			string.Concat(Enumerable.Range(1, 1_600).Select(static line => $"line-{line:D4}:{new string('x', 60)}\n")));
 		await using var server = await McpTestServer.StartAsync(
 			project,
 			workspace.Path,
@@ -213,13 +209,20 @@ public sealed partial class McpServerIntegrationTests
 		});
 		Assert.NotEqual(true, result.IsError);
 
-		var arguments = ReadContinuationArguments(Text(result), ".Hidden.txt");
-		Assert.Empty(arguments.GetProperty("exclusions").EnumerateArray());
-		Assert.True(arguments.TryGetProperty("requests", out _));
-		var continued = await server.CallAsync("get_file",
-			JsonSerializer.Deserialize<Dictionary<string, object?>>(arguments.GetRawText()));
+		var text = Text(result);
+		Assert.Contains("[Batch partial] requests=1.1;", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("Continue with batched get_file", text, StringComparison.Ordinal);
+		var through = Regex.Match(text, @"returned through line (?<line>\d+) of 1601");
+		Assert.True(through.Success, text);
+		var next = int.Parse(through.Groups["line"].Value, System.Globalization.CultureInfo.InvariantCulture) + 1;
+		var continued = await server.CallAsync("get_file", new Dictionary<string, object?>
+		{
+			["exclusions"] = Array.Empty<string>(),
+			["requests"] = new[] { new { path = ".Hidden.txt", ranges = new[] { new { start_line = next, end_line = 1600 } } } }
+		});
 		Assert.NotEqual(true, continued.IsError);
-		Assert.Contains("line-1600", Text(continued), StringComparison.Ordinal);
+		Assert.Contains($"Lines: {next}-", Text(continued), StringComparison.Ordinal);
+		Assert.DoesNotContain("outside effective selection", Text(continued), StringComparison.Ordinal);
 	}
 
 	private static JsonElement ReadContinuationArguments(string text, string expectedPath)

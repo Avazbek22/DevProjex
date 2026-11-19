@@ -156,6 +156,8 @@ public sealed class CompressionAvailabilityProcessTests
 
 		var startInfo = CreateStartInfo(host, workspace.CreateDirectory("data"));
 		startInfo.ArgumentList.Add("mcp");
+		startInfo.ArgumentList.Add("--tool-set");
+		startInfo.ArgumentList.Add("full");
 		startInfo.ArgumentList.Add("--root");
 		startInfo.ArgumentList.Add(project);
 		startInfo.ArgumentList.Add("--git-mode");

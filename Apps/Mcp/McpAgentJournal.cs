@@ -14,7 +14,7 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 		"path", "mode", "detail", "max_tokens", "direction", "pack_id"
 	};
 	private static readonly Lazy<IReadOnlyList<ISecretDetector>> ArgumentDetectors = new(
-		static () => [new GitleaksSecretDetector(), new PrivateDataDetector()],
+		static () => [McpSecretDetectors.Create(), new PrivateDataDetector()],
 		LazyThreadSafetyMode.ExecutionAndPublication);
 	private const string RedactedArgumentMarker = "[redacted]";
 	private const string HistoryIncompleteNotice = "history-incomplete";
@@ -138,6 +138,7 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 	public IDisposable BeginCall(string tool, CallToolRequestParams request)
 	{
 		var previous = invocation.Value;
+		if (previous?.Tool == tool) return new InvocationScope(this, previous, previous);
 		var current = new Invocation(tool, CaptureArguments(request), Stopwatch.GetTimestamp());
 		invocation.Value = current;
 		return new InvocationScope(this, previous, current);
@@ -248,10 +249,10 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 			current.Notices.Add(notice);
 	}
 
-	public void Complete(CallToolResult result)
+	public void Complete(CallToolResult result, string? outcome = null)
 	{
 		var current = invocation.Value;
-		if (current is null || Volatile.Read(ref disposed) != 0)
+		if (current is null || Volatile.Read(ref disposed) != 0 || Interlocked.Exchange(ref current.Completed, 1) != 0)
 			return;
 		if (Volatile.Read(ref startState) != 2)
 		{
@@ -283,7 +284,8 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 			current.SecretsMasked,
 			current.PrivateDataMasked,
 			current.Notices.ToArray(),
-			result.IsError == true ? CaptureErrorCode(trustedText) : null);
+			result.IsError == true ? CaptureErrorCode(trustedText) : null)
+		{ Outcome = outcome };
 		operations.Writer.TryWrite(new JournalOperation(call));
 	}
 
@@ -315,6 +317,7 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 			{
 				try
 				{
+					using var activity = McpMemoryActivity.Enter();
 					var call = operation.Call;
 					var skipped = Math.Max(0, call.Sequence - lastProcessedSequence - 1);
 					if (skipped > 0)
@@ -358,6 +361,7 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 
 	private async ValueTask CompleteSessionAsync(CancellationToken cancellationToken)
 	{
+		using var activity = McpMemoryActivity.Enter();
 		var lost = Volatile.Read(ref lostEvents);
 		if (lost > 0)
 		{
@@ -489,7 +493,28 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 		}
 		if (source.TryGetValue("paths", out var paths))
 			result["paths"] = CountValues(paths).ToString(CultureInfo.InvariantCulture);
-		if (source.TryGetValue("requests", out var requests) && requests.ValueKind == JsonValueKind.Array)
+		if (source.TryGetValue("requests", out var requests))
+		{
+			// get_file accepts 'requests' as a JSON-encoded string as well as a literal array; count
+			// it the same way get_file itself parses it, instead of only the literal array form.
+			if (requests.ValueKind == JsonValueKind.String)
+			{
+				var encoded = requests.GetString()?.Trim();
+				if (encoded is { Length: > 0 } && encoded.StartsWith('['))
+				{
+					try
+					{
+						using var document = JsonDocument.Parse(encoded);
+						if (document.RootElement.ValueKind == JsonValueKind.Array)
+							requests = document.RootElement.Clone();
+					}
+					catch (JsonException)
+					{
+					}
+				}
+			}
+		}
+		if (requests.ValueKind == JsonValueKind.Array)
 		{
 			result["paths"] = requests.GetArrayLength().ToString(CultureInfo.InvariantCulture);
 			var symbols = requests.EnumerateArray().Count(static item =>
@@ -622,6 +647,7 @@ internal sealed partial class McpAgentJournal : IAsyncDisposable
 		IReadOnlyDictionary<string, string> arguments,
 		long startTimestamp)
 	{
+		public int Completed;
 		public string Tool { get; } = tool;
 		public IReadOnlyDictionary<string, string> Arguments { get; } = arguments;
 		public long StartTimestamp { get; } = startTimestamp;

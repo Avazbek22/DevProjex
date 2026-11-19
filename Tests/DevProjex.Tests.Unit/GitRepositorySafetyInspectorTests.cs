@@ -56,6 +56,24 @@ public sealed class GitRepositorySafetyInspectorTests
 	}
 
 	[Fact]
+	public void PromisorQueryMatchesPromisorRemotesAndThePartialCloneExtension()
+	{
+		var arguments = GitProcessStartInfoFactory.Create(
+			Path.GetFullPath("repository"),
+			GitProcessOperation.ReadConfigValue(GitConfigReadKind.PromisorRemotes)).ArgumentList.ToArray()[^4..];
+
+		Assert.Equal(
+			["config", "--name-only", "--get-regexp", "^(remote\\..*\\.promisor|extensions\\.partialclone)$"],
+			arguments);
+		Assert.True(GitRepositorySafetyInspector.InterpretPromisorResult(new GitInspectionProcessResult(0, "extensions.partialclone\n")));
+		Assert.True(GitRepositorySafetyInspector.InterpretPromisorResult(new GitInspectionProcessResult(0, "remote.origin.promisor\n")));
+		Assert.False(GitRepositorySafetyInspector.InterpretPromisorResult(new GitInspectionProcessResult(1, string.Empty)));
+		Assert.Null(GitRepositorySafetyInspector.InterpretPromisorResult(new GitInspectionProcessResult(1, "unexpected")));
+		Assert.Null(GitRepositorySafetyInspector.InterpretPromisorResult(new GitInspectionProcessResult(128, string.Empty)));
+		Assert.Null(GitRepositorySafetyInspector.InterpretPromisorResult(null));
+	}
+
+	[Fact]
 	public void InterpretUnsafeDriverResult_OutputLimitIsUnavailable()
 	{
 		var inspection = GitRepositorySafetyInspector.InterpretUnsafeDriverResult(

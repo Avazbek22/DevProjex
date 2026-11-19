@@ -64,7 +64,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		"key", "api", "token", "secret", "client", "passwd", "password", "auth", "access",
 		"credential", "creds"
 	];
-	private readonly Lazy<CompiledConfiguration> _configuration;
+	private readonly ResettableValue<CompiledConfiguration> _configuration;
 
 	public GitleaksSecretDetector()
 		: this(LoadEmbeddedConfiguration)
@@ -74,10 +74,11 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 	internal GitleaksSecretDetector(Func<string> configurationLoader)
 	{
 		ArgumentNullException.ThrowIfNull(configurationLoader);
-		_configuration = new Lazy<CompiledConfiguration>(
-			() => Compile(configurationLoader()),
-			LazyThreadSafetyMode.ExecutionAndPublication);
+		_configuration = new ResettableValue<CompiledConfiguration>(
+			() => Compile(configurationLoader()));
 	}
+
+	public void Reset() => _configuration.Reset();
 
 	public int RuleCount => _configuration.Value.Rules.Count;
 	// The "+pkb" marker records the reviewed private-key override so cached findings produced by
@@ -1444,13 +1445,12 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		}
 	}
 
-	private static Lazy<Regex> CreateDeferredRegex(
+	private static ResettableValue<Regex> CreateDeferredRegex(
 		string pattern,
 		string context,
 		bool useNonBacktracking = true) =>
 		new(
-			() => CompileRegex(pattern, context, useNonBacktracking),
-			LazyThreadSafetyMode.ExecutionAndPublication);
+			() => CompileRegex(pattern, context, useNonBacktracking));
 
 	private static string GetRequiredString(TomlTable table, string key) =>
 		GetOptionalString(table, key) is { Length: > 0 } value
@@ -1499,8 +1499,8 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 
 	private sealed record CompiledRule(
 		string Id,
-		Lazy<Regex>? ContentRegex,
-		Lazy<Regex>? PathRegex,
+		ResettableValue<Regex>? ContentRegex,
+		ResettableValue<Regex>? PathRegex,
 		double Entropy,
 		int SecretGroup,
 		IReadOnlyList<string> Keywords,
@@ -1825,8 +1825,8 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		private readonly SearchValues<string>? _stopwordSearchValues;
 
 		public CompiledAllowlist(
-			IReadOnlyList<Lazy<Regex>> paths,
-			IReadOnlyList<Lazy<Regex>> regexes,
+			IReadOnlyList<ResettableValue<Regex>> paths,
+			IReadOnlyList<ResettableValue<Regex>> regexes,
 			IReadOnlyList<string> stopwords,
 			AllowlistRegexTarget regexTarget,
 			bool requireAll)
@@ -1841,8 +1841,8 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 				: SearchValues.Create(stopwords.ToArray(), StringComparison.OrdinalIgnoreCase);
 		}
 
-		public IReadOnlyList<Lazy<Regex>> Paths { get; }
-		public IReadOnlyList<Lazy<Regex>> Regexes { get; }
+		public IReadOnlyList<ResettableValue<Regex>> Paths { get; }
+		public IReadOnlyList<ResettableValue<Regex>> Regexes { get; }
 		public IReadOnlyList<string> Stopwords { get; }
 		public AllowlistRegexTarget RegexTarget { get; }
 		public bool RequireAll { get; }
@@ -1924,7 +1924,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		private static bool ContainsAny(ReadOnlySpan<char> value, SearchValues<string> candidates) =>
 			value.IndexOfAny(candidates) >= 0;
 
-		private static bool MatchesAny(ReadOnlySpan<char> value, IReadOnlyList<Lazy<Regex>> regexes)
+		private static bool MatchesAny(ReadOnlySpan<char> value, IReadOnlyList<ResettableValue<Regex>> regexes)
 		{
 			foreach (var regex in regexes)
 			{

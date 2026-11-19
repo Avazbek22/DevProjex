@@ -13,13 +13,16 @@ internal sealed class McpNavigationDeclarationIndex
 	private readonly PriorityQueue<Entry, DeclarationPriority> active = new(DeclarationPriorityComparer.Instance);
 	private int nextDeclaration;
 	private int lastLine = int.MinValue;
+	private readonly McpDeclarationComments? comments;
 
 	public McpNavigationDeclarationIndex(
 		IReadOnlyList<NavigationDeclaration> declarations,
-		Action? declarationVisited = null)
+		Action? declarationVisited = null,
+		McpDeclarationComments? comments = null)
 	{
 		ArgumentNullException.ThrowIfNull(declarations);
 		sourceDeclarations = declarations;
+		this.comments = comments;
 		var sorted = true;
 		for (var index = 0; index < declarations.Count; index++)
 		{
@@ -53,7 +56,8 @@ internal sealed class McpNavigationDeclarationIndex
 		}
 		while (active.TryPeek(out var expired, out _) && expired.Declaration.EndLine < line)
 			active.Dequeue();
-		return active.TryPeek(out var current, out _) ? current.Declaration : null;
+		var original = active.TryPeek(out var current, out _) ? current.Declaration : null;
+		return comments?.Find(line, original) ?? original;
 	}
 
 	private void Reset()

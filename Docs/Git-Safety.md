@@ -19,7 +19,7 @@ This boundary applies equally to Desktop, Terminal Workspace, direct CLI command
 | Credential helpers and askpass | Network authentication | Clears `credential.helper` and `core.askPass`. Interactive prompts are disabled. An authenticated URL may use only the temporary DevProjex askpass session. |
 | `core.gitProxy`, `core.sshCommand`, HTTP proxy/header/cookie settings, upload-pack overrides | Network setup | Explicit network operations reject declared repository overrides and also clear the fixed HTTP/upload-pack keys on the command line. |
 | `url.<base>.insteadOf` | URL rewrite before transport selection | Global configuration is isolated. A managed repository declaring a local rewrite is rejected before network access. Fetch receives the saved, verified URL directly rather than trusting `origin`. |
-| Promisor remote and missing objects | Demand fetch during an apparently local read | Sets `GIT_NO_LAZY_FETCH=1`. A partial clone is refused on Git older than 2.45, where that guarantee is unavailable. A missing object is an error, never an empty result. |
+| Promisor remote and missing objects | Demand fetch during an apparently local read | Sets `GIT_NO_LAZY_FETCH=1`. A partial clone, declared by a promisor remote or by `extensions.partialClone`, is refused on Git older than 2.45, where that guarantee is unavailable. A missing object is an error, never an empty result. |
 | `protocol.*`, remote helpers, and `ext` | Local or network transport dispatch | `LocalRead` and `ManagedCheckout` allow no protocol. `ExplicitNetwork` allows only the transport selected by a validated URL; `ext` and unknown helpers are never allowed. |
 | `git`, `git.exe`, or `ssh` inside the project | Executable resolution through a relative/current-directory `PATH` entry | Resolves once from absolute `PATH` entries, rejects candidates in the current project tree or its parent directories, and pins the absolute path. |
 | Inherited `GIT_*` variables | Repository, object, index, config, or namespace redirection | Builds a small environment allowlist, then removes repository/config injection variables as a second barrier. |
@@ -100,14 +100,62 @@ rev-parse --verify --quiet --end-of-options <validated-ref>^{commit}
 config --get remote.origin.url
 config --show-scope --type=bool --get-regexp <fixed-path-semantics-pattern>
 config --name-only --get-regexp <fixed-safety-pattern>
+config -z --get-regexp ^core\.(autocrlf|eol)$
+config --system -z --get-regexp ^core\.(autocrlf|eol)$
+config --file <user-configuration-file> -z --get-regexp ^core\.(autocrlf|eol)$
 branch
 branch -r
 rev-parse --abbrev-ref HEAD
 symbolic-ref refs/remotes/origin/HEAD
 worktree list --porcelain
+log --topo-order --no-renames --no-decorate --format=%x1e%H%x00 --name-only -z -n 200 --
+rev-parse --is-shallow-repository
+--literal-pathspecs ls-tree -r -z --full-tree <validated-commit-id> -- <selected-paths>
+--literal-pathspecs ls-files --stage -z -- <selected-paths>
+--literal-pathspecs ls-tree -r -z --full-tree <validated-commit-id>
+--literal-pathspecs ls-files --stage -z
+cat-file --batch-check
+cat-file --batch
 ```
 
-The fixed safety query detects filter, external-diff, transport-override, and promisor keys. DevProjex does not use a fictional `GIT_CONFIG_LOCAL` switch and does not write `safe.directory`, the user's global config, or `.git/config` to obtain isolation.
+The last four read committed and staged file versions for a Git-scoped diff. A revision is first
+resolved to a commit id with the `rev-parse` form above, and only that full hexadecimal id reaches
+`ls-tree`. The paths come from the call's effective selection, after `--` and with
+`--literal-pathspecs`, so a leading `-` or pathspec magic such as `:(glob)` is an ordinary file name;
+a path with a control character, an empty, `.` or `..` segment, or a backslash is refused before Git
+starts, and one path list is limited to 24,000 characters. Only on Windows does a selected path's `\`
+become the `/` Git separates directories with; on Linux and macOS a backslash is part of a file name,
+so a file such as `config\.env` is listed as unsupported without being read, never as the old side of
+`config/.env`. Both `cat-file` forms receive only full
+lowercase hexadecimal object ids on standard input, one per line, so Git's revision-name resolution
+never sees caller text. Without `--textconv` or `--filters`, `cat-file` returns stored bytes and runs
+no repository program; none of these forms compares against the working tree, so no clean, smudge,
+process or external-diff driver can run. One object is read only when it is at most 16 MiB, and one
+call reads at most 64 MiB of object content.
+
+The two full-listing forms, without a path filter, are a fallback and run at most once per read,
+only when a path the literal-pathspec listing above missed differs from the tree's or index's
+recorded spelling only by case or Unicode normalization form, and only when the repository's own
+comparison semantics call for that (`core.ignorecase`, or `core.precomposeunicode` on macOS). A
+fallback match is accepted only when the requested spelling currently and unambiguously exists on
+disk under the same identity the tracked-path index uses to reconcile a disk path with Git's index;
+a path that cannot be confirmed that way is reported the same as before the fallback, never guessed.
+
+The working-tree comparison of the `changes` scope is the one read that also honors user
+configuration, and only for line endings. Git for Windows keeps `core.autocrlf` in its system
+configuration, which isolation skips; without it a CRLF checkout compares as modified whenever Git
+rechecks file content, as it does after a fresh clone or a copy, and the scope would select nearly
+every file. Before that comparison DevProjex reads `core.autocrlf` and `core.eol` from the system
+file (unless `GIT_CONFIG_NOSYSTEM` is set for DevProjex), the user's files (`GIT_CONFIG_GLOBAL`, or
+the XDG file and then `~/.gitconfig`), and the repository, in Git's own precedence. It passes only
+validated values to that one `diff` as `-c core.autocrlf=true|false|input` and
+`-c core.eol=lf|crlf|native`. Any other value is ignored, no other setting from those files reaches
+Git, and an unreadable repository scope leaves the comparison without these settings.
+
+The fixed safety query detects filter, external-diff, transport-override, and promisor keys. A
+partial clone is recognized by either key Git itself honors, a `remote.<name>.promisor` setting or
+`extensions.partialClone`, with the pinned query
+`config --name-only --get-regexp ^(remote\..*\.promisor|extensions\.partialclone)$`. DevProjex does not use a fictional `GIT_CONFIG_LOCAL` switch and does not write `safe.directory`, the user's global config, or `.git/config` to obtain isolation.
 
 ## ManagedCheckout
 
@@ -188,6 +236,12 @@ that was actually downloaded. Unix symbolic-link entries are skipped with a coun
 | `ManagedWorktreeAdd`, `ManagedWorktreeRemove`, `ManagedWorktreePrune` | ManagedCheckout | Manage leased cache worktrees. |
 | `ManagedWorktreeList` | LocalRead | Probe/list cache worktrees without writing. |
 | `ManagedConfigWrite` | ManagedCheckout | Write only fixed DevProjex cache metadata keys or the fixed tracked-branch setting. |
+| `ReadHistoryWindow` | LocalRead | Read changed paths of the last 200 commits for importance ranking. |
+| `ReadShallowRepositoryState` | LocalRead | Report whether the repository is a shallow clone. |
+| `ReadTreeEntries` | LocalRead | List blob entries of one resolved commit for literal selected paths. |
+| `ReadIndexEntries` | LocalRead | List index entries for literal selected paths. |
+| `ReadObjectHeaders` | LocalRead | Report type and size for validated object ids read from standard input; an object whose loose file is physically gone is reported as missing, which only marks the file(s) that name it as unsupported and never fails the rest of the batch. |
+| `ReadObjectContents` | LocalRead | Stream stored bytes for validated object ids read from standard input. |
 
 No MCP argument, repository value, profile file, or command-line token selects a Git subcommand. Callers supply only the validated operands accepted by a registered operation.
 
@@ -196,7 +250,8 @@ No MCP argument, repository value, profile file, or command-line token selects a
 - Full no-demand-fetch guarantees require Git 2.45 or newer. Older versions ignore `GIT_NO_LAZY_FETCH`; ordinary repositories continue to work, but DevProjex refuses LocalRead for a partial clone with a promisor remote.
 - Disabling fsmonitor can make reads slower in very large working trees. It avoids executing an untrusted monitor and does not change the selected file set.
 - Isolating system/global config intentionally removes user `insteadOf`, exclude,
-  and credential-helper behavior. Explicit network operations retain only the
+  and credential-helper behavior. Line-ending settings are the single exception, read only for
+  the `changes` working-tree comparison as described under LocalRead. Explicit network operations retain only the
   operator environment proxy and certificate variables listed above; repository
   proxy, TLS, header, cookie, and transport overrides remain rejected.
 - Disabling smudge/clean/process during managed materialization leaves LFS and similar pointer files unchanged. No background download is attempted.

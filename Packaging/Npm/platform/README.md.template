@@ -10,6 +10,6 @@ that package instead of this one:
 npx -y devprojex --help
 ```
 
-DevProjex turns a folder or repository into focused context for AI from the CLI, the
-interactive Terminal Workspace, or a read-only MCP server. Documentation and source:
+DevProjex turns any folder or Git repository into token-efficient codebase context for AI
+coding agents, with secrets always masked. Documentation and source:
 [github.com/Avazbek22/DevProjex](https://github.com/Avazbek22/DevProjex).

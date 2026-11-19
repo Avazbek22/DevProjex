@@ -55,7 +55,11 @@ pull request shows them without running anything twice.
 channel: packaging-path pull requests (excluding master), pushes to master/v*,
 dispatch and reusable calls share one definition. It uses the Flathub SDK
 container, does not publish to Flathub and adds no GitHub release assets. Its
-release-candidate call pins `checkout_ref` like the other packaging gates.
+release-candidate call pins `checkout_ref` like the other packaging gates. The
+container keeps `/var/lib/flatpak` on an anonymous volume: flatpak-builder
+updates the image's preinstalled SDK in place, and on the image's overlay root
+that update fails with "Invalid cross-device link" on hosts without overlay
+`redirect_dir` support.
 
 Pick the cheapest tier that can prove the property. In order:
 

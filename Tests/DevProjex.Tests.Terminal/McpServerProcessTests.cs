@@ -20,14 +20,15 @@ public sealed partial class McpServerProcessTests
 		"read_pack",
 		"search_project",
 		"related_files",
-		"get_file"
+		"get_file",
+		"get_diff"
 	];
 	private const string Secret = "ghp_" + "a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL";
 	private const string PrivateEmail = "alice.smith" + "@company.io";
 	private const string PrivatePath = "/home/alice-smith/DevProjexMcpProcessProbe/project";
 
 	[Fact]
-	public async Task RealProcessListsEveryCatalogToolAndRejectsMissingOrConflictingFileSelectors()
+	public async Task RealProcessListsEveryCatalogToolAndRejectsMissingFileSelectors()
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
@@ -43,6 +44,8 @@ public sealed partial class McpServerProcessTests
 		};
 		startInfo.ArgumentList.Add(PublishedApplicationLocator.FindApplicationAssembly());
 		startInfo.ArgumentList.Add("mcp");
+		startInfo.ArgumentList.Add("--tool-set");
+		startInfo.ArgumentList.Add("full");
 		startInfo.ArgumentList.Add("--root");
 		startInfo.ArgumentList.Add(project);
 		startInfo.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = workspace.CreateDirectory("data");
@@ -60,7 +63,7 @@ public sealed partial class McpServerProcessTests
 			clientPhase.Token))
 		{
 			var tools = await client.ListToolsAsync(options: null, clientPhase.Token);
-			Assert.Equal(8, tools.Count);
+			Assert.Equal(9, tools.Count);
 			Assert.Equal(ExpectedTools, tools.Select(static tool => tool.Name));
 
 			var missing = await client.CallToolAsync(
@@ -75,7 +78,7 @@ public sealed partial class McpServerProcessTests
 				Assert.IsType<TextContentBlock>(Assert.Single(missing.Content)).Text,
 				StringComparison.Ordinal);
 
-			var conflicting = await client.CallToolAsync(
+			var combined = await client.CallToolAsync(
 				"get_file",
 				new Dictionary<string, object?>
 				{
@@ -88,11 +91,9 @@ public sealed partial class McpServerProcessTests
 				progress: null,
 				options: null,
 				clientPhase.Token);
-			Assert.True(conflicting.IsError);
-			Assert.StartsWith(
-				McpErrorCodes.InvalidArguments,
-				Assert.IsType<TextContentBlock>(Assert.Single(conflicting.Content)).Text,
-				StringComparison.Ordinal);
+			Assert.NotEqual(true, combined.IsError);
+			Assert.Contains("1.1 — ok", AllProcessText(combined), StringComparison.Ordinal);
+			Assert.DoesNotContain("2.1", BatchData(combined), StringComparison.Ordinal);
 		}
 
 		process.StandardInput.Close();
@@ -121,6 +122,8 @@ public sealed partial class McpServerProcessTests
 		};
 		startInfo.ArgumentList.Add(PublishedApplicationLocator.FindApplicationAssembly());
 		startInfo.ArgumentList.Add("mcp");
+		startInfo.ArgumentList.Add("--tool-set");
+		startInfo.ArgumentList.Add("full");
 		startInfo.ArgumentList.Add("--root");
 		startInfo.ArgumentList.Add(project);
 		startInfo.ArgumentList.Add("--git-mode");
@@ -162,6 +165,8 @@ public sealed partial class McpServerProcessTests
 		};
 		startInfo.ArgumentList.Add(PublishedApplicationLocator.FindApplicationAssembly());
 		startInfo.ArgumentList.Add("mcp");
+		startInfo.ArgumentList.Add("--tool-set");
+		startInfo.ArgumentList.Add("full");
 		startInfo.ArgumentList.Add("--root");
 		startInfo.ArgumentList.Add(project);
 		if (agentExclusions)
@@ -236,6 +241,8 @@ public sealed partial class McpServerProcessTests
 		};
 		startInfo.ArgumentList.Add(PublishedApplicationLocator.FindApplicationAssembly());
 		startInfo.ArgumentList.Add("mcp");
+		startInfo.ArgumentList.Add("--tool-set");
+		startInfo.ArgumentList.Add("full");
 		startInfo.ArgumentList.Add("--root");
 		startInfo.ArgumentList.Add(project);
 		foreach (var exclusion in exclusions)
@@ -318,6 +325,8 @@ public sealed partial class McpServerProcessTests
 		};
 		startInfo.ArgumentList.Add(PublishedApplicationLocator.FindApplicationAssembly());
 		startInfo.ArgumentList.Add("mcp");
+		startInfo.ArgumentList.Add("--tool-set");
+		startInfo.ArgumentList.Add("full");
 		startInfo.ArgumentList.Add("--root");
 		startInfo.ArgumentList.Add(project);
 		startInfo.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = workspace.CreateDirectory("data");
@@ -352,14 +361,15 @@ public sealed partial class McpServerProcessTests
 			var descriptionContracts = new Dictionary<string, (string Purpose, string Alternative, string Limit)>(
 				StringComparer.Ordinal)
 			{
-				["list_projects"] = ("Lists local projects", "get_tree for structure", "unique listed name"),
+				["list_projects"] = ("Lists the configured local roots, saved profiles, and baseline filters.", "get_tree for structure", "unique listed name"),
 				["get_tree"] = ("Returns filtered structure", "analyze instead", "format=markdown|text|json|xml"),
 				["analyze"] = ("Measures a selection", "pack_context", "detail=full|compact|signatures"),
 				["pack_context"] = ("Builds multi-file project context", "use get_file for", "view=tree|content|tree-content"),
 				["read_pack"] = ("Reads a stored result page", "pack_context instead", "1,000 lines"),
 				["search_project"] = ("Searches transformed text", "use related_files for", "max_results=1..200"),
-				["related_files"] = ("Finds evidenced dependencies", "use search_project for", "direction=dependencies|dependents|both"),
-				["get_file"] = ("Reads selected text", "pack_context for", "sixteen file/range/symbol")
+				["related_files"] = ("Get dependencies and usages of a file", "use search_project for text", "direction=dependencies|dependents|both"),
+				["get_file"] = ("Reads project files with secrets and configured private data replaced.", "pack_context for", "paths reads up to sixteen whole files"),
+				["get_diff"] = ("Shows what changed", "use get_file for whole files", "context_lines=0..20")
 			};
 			foreach (var tool in tools)
 			{
@@ -510,6 +520,8 @@ public sealed partial class McpServerProcessTests
 		};
 		startInfo.ArgumentList.Add(PublishedApplicationLocator.FindApplicationAssembly());
 		startInfo.ArgumentList.Add("mcp");
+		startInfo.ArgumentList.Add("--tool-set");
+		startInfo.ArgumentList.Add("full");
 		startInfo.ArgumentList.Add("--root");
 		startInfo.ArgumentList.Add(project);
 		if (unrestricted)
@@ -591,6 +603,8 @@ public sealed partial class McpServerProcessTests
 		};
 		startInfo.ArgumentList.Add(PublishedApplicationLocator.FindApplicationAssembly());
 		startInfo.ArgumentList.Add("mcp");
+		startInfo.ArgumentList.Add("--tool-set");
+		startInfo.ArgumentList.Add("full");
 		startInfo.ArgumentList.Add("--root");
 		startInfo.ArgumentList.Add(project);
 		startInfo.ArgumentList.Add("--unrestricted");
@@ -679,6 +693,8 @@ public sealed partial class McpServerProcessTests
 		};
 		startInfo.ArgumentList.Add(application);
 		startInfo.ArgumentList.Add("mcp");
+		startInfo.ArgumentList.Add("--tool-set");
+		startInfo.ArgumentList.Add("full");
 		startInfo.ArgumentList.Add("--root");
 		startInfo.ArgumentList.Add(project);
 		if (hidePrivateData)
@@ -839,6 +855,8 @@ public sealed partial class McpServerProcessTests
 		startInfo.ArgumentList.Add(application);
 		startInfo.ArgumentList.Add(TerminalTransportPolicyProtocol.TerminalCommandArgument);
 		startInfo.ArgumentList.Add("mcp");
+		startInfo.ArgumentList.Add("--tool-set");
+		startInfo.ArgumentList.Add("full");
 		startInfo.ArgumentList.Add("--root");
 		startInfo.ArgumentList.Add(root);
 		startInfo.ArgumentList.Add("--allow-remote");
@@ -917,6 +935,8 @@ public sealed partial class McpServerProcessTests
 			WorkingDirectory = project
 		};
 		startInfo.ArgumentList.Add("mcp");
+		startInfo.ArgumentList.Add("--tool-set");
+		startInfo.ArgumentList.Add("full");
 		startInfo.ArgumentList.Add("--root");
 		startInfo.ArgumentList.Add(project);
 		startInfo.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = workspace.CreateDirectory("data");
@@ -1280,6 +1300,8 @@ public sealed partial class McpServerProcessTests
 		};
 		startInfo.ArgumentList.Add(application);
 		startInfo.ArgumentList.Add("mcp");
+		startInfo.ArgumentList.Add("--tool-set");
+		startInfo.ArgumentList.Add("full");
 		startInfo.ArgumentList.Add("--root");
 		startInfo.ArgumentList.Add(project);
 		startInfo.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = workspace.CreateDirectory("data");

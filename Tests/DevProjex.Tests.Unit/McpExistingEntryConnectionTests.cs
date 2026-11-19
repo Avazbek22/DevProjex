@@ -14,7 +14,7 @@ public sealed class McpExistingEntryConnectionTests
 	public async Task ClaudeKeepsAnEquivalentNpxEntryWithoutRunningTheClient()
 	{
 		using var setup = new ClaudeSetup();
-		setup.WriteEntry(Entry("npx", "-y", "devprojex", "mcp", "--root", setup.Project));
+		setup.WriteEntry(StartableEntry("npx", "-y", "devprojex", "mcp", "--root", setup.Project));
 		var before = setup.ReadRawEntry();
 
 		var result = await setup.Service().ConnectAsync(setup.Request(McpConnectionMode.Standard), Token);
@@ -35,7 +35,7 @@ public sealed class McpExistingEntryConnectionTests
 	public async Task ClaudeKeepsALiveLauncherOnlyWhenItReadsThisApplicationsSelection(bool isolated, bool expectedKept)
 	{
 		using var setup = new ClaudeSetup(applicationDataIsIsolated: isolated);
-		setup.WriteEntry(Entry("npx", "-y", "devprojex", "mcp", "--root", setup.Project, "--live"));
+		setup.WriteEntry(StartableEntry("npx", "-y", "devprojex", "mcp", "--root", setup.Project, "--live"));
 
 		var result = await setup.Service().ConnectAsync(setup.Request(McpConnectionMode.Live), Token);
 
@@ -136,6 +136,23 @@ public sealed class McpExistingEntryConnectionTests
 		Assert.Equal(request.ExecutablePath, entry["command"]!.GetValue<string>());
 		Assert.Equal(new[] { "mcp", "--root", setup.Project, "--live" },
 			entry["args"]!.AsArray().Select(static item => item!.GetValue<string>()));
+	}
+
+	[Theory]
+	[InlineData("npx", new[] { "-y", "devprojex" })]
+	[InlineData("dnx", new[] { "devprojex" })]
+	public async Task ABareWindowsLauncherForThisProjectIsRepairedWithoutAQuestion(string launcher, string[] prefix)
+	{
+		Assert.SkipUnless(OperatingSystem.IsWindows(), "Only Windows clients cannot start npx and dnx directly.");
+		using var setup = new ClaudeSetup();
+		setup.WriteEntry(Entry(launcher, [.. prefix, "mcp", "--root", setup.Project], []));
+
+		var result = await setup.Service().ConnectAsync(setup.Request(McpConnectionMode.Standard), Token);
+
+		Assert.Equal(McpConnectionStatus.Updated, result.Status);
+		Assert.False(result.KeptExistingEntry);
+		Assert.Null(result.ExistingEntryConflict);
+		Assert.Equal(setup.Request(McpConnectionMode.Standard).ExecutablePath, setup.ReadEntry()!["command"]!.GetValue<string>());
 	}
 
 	[Fact]
@@ -284,7 +301,8 @@ public sealed class McpExistingEntryConnectionTests
 	public async Task CodexKeepsAnEquivalentDnxEntry()
 	{
 		using var setup = new CodexSetup();
-		setup.WriteEntry("dnx", ["devprojex", "mcp", "--root", setup.Project]);
+		var (command, arguments) = Startable("dnx", "devprojex", "mcp", "--root", setup.Project);
+		setup.WriteEntry(command, arguments);
 		var before = setup.ReadConfiguration();
 
 		var result = await setup.Service().ConnectAsync(setup.Request(McpConnectionMode.Standard), Token);
@@ -368,6 +386,16 @@ public sealed class McpExistingEntryConnectionTests
 	private static CancellationToken Token => TestContext.Current.CancellationToken;
 
 	private static JsonObject Entry(string command, params string[] arguments) => Entry(command, arguments, []);
+
+	/// <summary>The launcher entry a client can start here: Windows needs cmd /c in front of npx and dnx.</summary>
+	private static (string Command, string[] Arguments) Startable(string launcher, params string[] arguments) =>
+		OperatingSystem.IsWindows() ? ("cmd", ["/c", launcher, .. arguments]) : (launcher, arguments);
+
+	private static JsonObject StartableEntry(string launcher, params string[] arguments)
+	{
+		var (command, startArguments) = Startable(launcher, arguments);
+		return Entry(command, startArguments, []);
+	}
 
 	private static JsonObject Entry(string command, string[] arguments, params (string Name, string Value)[] environment)
 	{

@@ -26,19 +26,32 @@ internal sealed class TerminalAggregateControl : Label
 	public event EventHandler? InteractionStarted;
 	public event EventHandler? CommandLineRequested;
 	public bool IsOnBorder { get; }
-	private string Leading => IsOnBorder ? " " : "  ";
+	private string Leading => ResolveLeading(IsOnBorder);
 
-	public void SetRow(TerminalParameterRow row)
+	/// <param name="displayLabel">A shorter label that keeps the frame title whole; null shows the row label.</param>
+	public void SetRow(TerminalParameterRow row, string? displayLabel = null)
 	{
 		ArgumentNullException.ThrowIfNull(row);
 		var marker = row.IsSelected == true ? "[x]" : "[ ]";
-		var trailing = IsOnBorder ? " " : string.Empty;
-		var text = $"{Leading}{marker} {row.Label}{trailing}";
+		var text = FormatText(IsOnBorder, marker, displayLabel ?? row.Label);
 		_isEnabled = row.IsEnabled;
 		Text = text;
 		Width = text.GetColumns();
 		SetNeedsDraw();
 	}
+
+	internal static int MeasureText(bool isOnBorder, string label) =>
+		FormatText(isOnBorder, "[ ]", label).GetColumns();
+
+	private static string FormatText(bool isOnBorder, string marker, string label)
+	{
+		var trailing = isOnBorder ? " " : string.Empty;
+		return label.Length == 0
+			? $"{ResolveLeading(isOnBorder)}{marker}{trailing}"
+			: $"{ResolveLeading(isOnBorder)}{marker} {label}{trailing}";
+	}
+
+	private static string ResolveLeading(bool isOnBorder) => isOnBorder ? " " : "  ";
 
 	public void SetActive(bool value)
 	{

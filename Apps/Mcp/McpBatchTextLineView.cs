@@ -61,6 +61,16 @@ internal sealed class McpBatchTextLineView
 	}
 
 	public int FullTextScans { get; private set; }
+	public int TotalLines => _totalLines;
+
+	public string? DescribeInvalidRange(McpGetFileRange range)
+	{
+		if (range.IsWholeFile || _totalLines > 0 && range.StartLine >= 1 &&
+			range.StartLine <= _totalLines && range.EndLine >= range.StartLine)
+			return null;
+		var boundary = _totalLines == 0 ? "file is empty" : $"valid lines 1-{_totalLines}";
+		return $"requested lines {range.StartLine}-{range.EndLine}; {boundary}";
+	}
 
 	public McpTextPage Slice(
 		int? startLine,

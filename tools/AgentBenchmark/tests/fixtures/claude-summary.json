@@ -1,0 +1,46 @@
+{
+  "id": "T1-server_b-r1",
+  "task": "T1",
+  "repo": "httpx",
+  "server": "server_b",
+  "product": "v5.2.2",
+  "repeat": 1,
+  "exitCode": 0,
+  "durationMs": 1234,
+  "wallMs": 5000,
+  "numTurns": 3,
+  "error": null,
+  "apiErrorStatus": null,
+  "usage": {
+    "input": 15,
+    "output": 123,
+    "cacheRead": 300,
+    "cacheCreation": 40,
+    "costUsd": 0.011,
+    "model": "claude-haiku-4-5-20251001",
+    "firstRequestContextTokens": null,
+    "totalContextTokens": 178
+  },
+  "toolCalls": [
+    {
+      "name": "mcp__server_b__get_tree",
+      "input": {
+        "path": "src"
+      },
+      "id": "t1",
+      "responseChars": 17,
+      "isError": false
+    },
+    {
+      "name": "mcp__server_b__get_file",
+      "input": {
+        "path": "src/missing.py"
+      },
+      "id": "t2",
+      "responseChars": 9,
+      "isError": true
+    }
+  ],
+  "toolResponseChars": 26,
+  "answer": "## Answer\nIt is in src/a.py.\n\n## Experience\nTrust score 4."
+}

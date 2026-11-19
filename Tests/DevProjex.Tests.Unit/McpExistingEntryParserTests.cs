@@ -29,6 +29,10 @@ public sealed class McpExistingEntryParserTests
 	[InlineData("dnx", "dnx", false, "--yes", "devprojex", "mcp", "--root", RootToken)]
 	[InlineData("dnx", "dnx", false, "devprojex", "--version", "5.2.1", "--prerelease", "--", "mcp", "--root", RootToken)]
 	[InlineData("dotnet", "dnx", false, "dnx", "devprojex", "mcp", "--root", RootToken)]
+	// A dotnet-tool shim: Claude Code on Windows starts it through cmd /c call.
+	[InlineData("cmd", "devprojex", false, "/c", "call", "C:\\Users\\me\\.dotnet\\tools\\devprojex.cmd", "mcp", "--root", RootToken)]
+	[InlineData("CMD.EXE", "devprojex", true, "/d", "/s", "/C", "call", "devprojex.cmd", "mcp", "--root", RootToken, "--live")]
+	[InlineData("/home/me/.dotnet/tools/devprojex", "devprojex", false, "mcp", "--root", RootToken)]
 	// Flathub, registered from outside the sandbox or with explicit run options.
 	[InlineData("flatpak", "flatpak", false, "run", "io.github.Avazbek22.DevProjex", "mcp", "--root", RootToken)]
 	[InlineData("/usr/bin/flatpak", "flatpak", true, "run", "--command=devprojex", "--branch=stable", "io.github.Avazbek22.DevProjex", "mcp", "--root", RootToken, "--live")]
@@ -67,6 +71,8 @@ public sealed class McpExistingEntryParserTests
 	[InlineData("flatpak", "run", "com.example.Other", "mcp", "--root", RootToken)]
 	[InlineData("flatpak", "run", "io.github.Avazbek22.DevProjex.Devel", "mcp", "--root", RootToken)]
 	[InlineData("flatpak", "install", "io.github.Avazbek22.DevProjex", "mcp", "--root", RootToken)]
+	[InlineData("cmd", "/c", "call", "call", "devprojex.cmd", "mcp", "--root", RootToken)]
+	[InlineData("cmd", "/c", "devprojexx", "mcp", "--root", RootToken)]
 	public void TreatsAnythingElseAsAForeignEntry(string command, params string[] arguments)
 	{
 		var entry = Parse(command, arguments);
@@ -122,7 +128,48 @@ public sealed class McpExistingEntryParserTests
 			? ["-y", "devprojex", "mcp", "--root", RootToken, "--live"]
 			: ["-y", "devprojex", "mcp", "--root", RootToken]);
 
-		Assert.True(McpExistingEntryParser.IsEquivalent(entry, Request(mode, Root), sharesData));
+		Assert.True(McpExistingEntryParser.IsEquivalent(entry, Request(mode, Root), sharesData, windows: false));
+	}
+
+	[Theory]
+	[InlineData("npx", new[] { "-y", "devprojex" })]
+	[InlineData("npx.cmd", new[] { "-y", "devprojex" })]
+	[InlineData("dnx", new[] { "devprojex" })]
+	[InlineData("C:\\Users\\me\\.dotnet\\tools\\devprojex.cmd", new string[] { })]
+	public void ABareBatchLauncherIsUnstartableOnWindowsAndRepairedThere(string command, string[] prefix)
+	{
+		var entry = Parse(command, [.. prefix, "mcp", "--root", RootToken]);
+		var request = Request(McpConnectionMode.Standard, Root);
+
+		Assert.True(entry.StartsBatchLauncherDirectly);
+		Assert.True(McpExistingEntryParser.IsEquivalent(entry, request, true, windows: false));
+		Assert.False(McpExistingEntryParser.IsEquivalent(entry, request, true, windows: true));
+		Assert.True(McpExistingEntryParser.IsUnstartableOnWindows(entry, request, windows: true));
+		Assert.False(McpExistingEntryParser.IsUnstartableOnWindows(entry, request, windows: false));
+	}
+
+	[Theory]
+	[InlineData("cmd", new[] { "/c", "npx", "-y", "devprojex" })]
+	[InlineData("cmd", new[] { "/c", "dnx", "devprojex" })]
+	[InlineData("dotnet", new[] { "dnx", "devprojex" })]
+	[InlineData("cmd", new[] { "/c", "call", "C:\\Users\\me\\.dotnet\\tools\\devprojex.cmd" })]
+	public void ALauncherStartedThroughCmdOrDotnetStaysEquivalentOnWindows(string command, string[] prefix)
+	{
+		var entry = Parse(command, [.. prefix, "mcp", "--root", RootToken]);
+		var request = Request(McpConnectionMode.Standard, Root);
+
+		Assert.False(entry.StartsBatchLauncherDirectly);
+		Assert.True(McpExistingEntryParser.IsEquivalent(entry, request, true, windows: true));
+		Assert.False(McpExistingEntryParser.IsUnstartableOnWindows(entry, request, windows: true));
+	}
+
+	[Fact]
+	public void ABareLauncherForAnotherProjectIsNeverReplacedSilently()
+	{
+		var entry = Parse("npx", ["-y", "devprojex", "mcp", "--root", OtherRootToken]);
+
+		Assert.False(McpExistingEntryParser.IsUnstartableOnWindows(
+			entry, Request(McpConnectionMode.Standard, Root), windows: true));
 	}
 
 	[Fact]

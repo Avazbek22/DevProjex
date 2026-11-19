@@ -1,4 +1,5 @@
 using System.CommandLine;
+using DevProjex.Infrastructure.ResourceStore;
 using DevProjex.Terminal.DesktopControl;
 
 namespace DevProjex.Tests.Terminal;
@@ -13,7 +14,7 @@ public sealed class CommandTreeContractTests
 
 		Assert.Equal(
 			[
-				"analyze", "cache", "completion", "doctor", "export", "help", "mcp", "open", "profile",
+				"analyze", "cache", "completion", "diff", "doctor", "export", "help", "mcp", "open", "profile",
 				"recent", "related", "search", "tree", "tui", "ui"
 			],
 			root.Subcommands
@@ -43,9 +44,23 @@ public sealed class CommandTreeContractTests
 			Assert.Contains("--language", environment.StandardOutput, StringComparison.Ordinal);
 			Assert.DoesNotContain("\u001b", environment.StandardOutput, StringComparison.Ordinal);
 			Assert.Empty(environment.StandardError);
+			// Examples are printed on one line so they can be copied; every other line wraps.
 			Assert.All(
-				environment.StandardOutput.Split(Environment.NewLine),
+				ExceptExamples(environment.StandardOutput.Split(Environment.NewLine)),
 				static line => Assert.True(line.Length <= 82, $"Help line is too wide: {line}"));
+		}
+	}
+
+	private static IEnumerable<string> ExceptExamples(IEnumerable<string> lines)
+	{
+		var inExamples = false;
+		foreach (var line in lines)
+		{
+			if (!line.StartsWith(' ') && line.Length > 0)
+				inExamples = line == "EXAMPLES";
+			else if (inExamples)
+				continue;
+			yield return line;
 		}
 	}
 
@@ -166,6 +181,47 @@ public sealed class CommandTreeContractTests
 		Assert.Contains("--format <text|json>", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.DoesNotContain("\u001b", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Empty(environment.StandardError);
+	}
+
+	[Theory]
+	[InlineData("--version|--plain")]
+	[InlineData("--plain|--version")]
+	[InlineData("--version|--color|never")]
+	[InlineData("--color|always|--version")]
+	[InlineData("--language|ru|--version")]
+	[InlineData("--version|--language|en")]
+	[InlineData("-v|--plain|--color|never|--language|ru")]
+	public async Task VersionCombinedWithOutputGlobalsPrintsTheSameValue(string arguments)
+	{
+		var alone = new TestTerminalEnvironment();
+		await new TerminalApplication(alone)
+			.RunAsync(["--version"], TestContext.Current.CancellationToken);
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(environment)
+			.RunAsync(arguments.Split('|'), TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Equal(alone.StandardOutput, environment.StandardOutput);
+		Assert.Empty(environment.StandardError);
+	}
+
+	[Theory]
+	[InlineData("--version|analyze")]
+	[InlineData("analyze|--version")]
+	[InlineData("--version|extra")]
+	[InlineData("--version|--plain|extra")]
+	[InlineData("--version|--quiet")]
+	public async Task VersionWithACommandOrExtraInputStaysASyntaxError(string arguments)
+	{
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(environment)
+			.RunAsync([.. arguments.Split('|'), "--language", "en"], TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("error[DPX-CLI-", environment.StandardError, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -436,6 +492,33 @@ public sealed class CommandTreeContractTests
 			foreach (var child in command.Subcommands)
 				stack.Push(child);
 		}
+	}
+
+	[Fact]
+	public void EveryVisibleArgumentOfAPublicCommandHasADescriptionInEveryLanguage()
+	{
+		var missing = new List<string>();
+		foreach (var language in Enum.GetValues<AppLanguage>())
+		{
+			var localization = new LocalizationService(new JsonLocalizationCatalog(), language);
+			var root = new DevProjexCommandTree(
+					new TestTerminalEnvironment(),
+					localization: localization)
+				.Build();
+			foreach (var path in EnumeratePublicCommandPaths(root))
+			{
+				var command = path.Aggregate<string, Command>(
+					root,
+					static (parent, name) => parent.Subcommands.Single(child => child.Name == name));
+				missing.AddRange(command.Arguments
+					.Where(static argument => !argument.Hidden && string.IsNullOrWhiteSpace(argument.Description))
+					.Select(argument => $"{language}: devprojex {string.Join(' ', path)} {argument.Name}"));
+			}
+		}
+
+		Assert.True(
+			missing.Count == 0,
+			$"Arguments without a description:{Environment.NewLine}{string.Join(Environment.NewLine, missing)}");
 	}
 
 	[Fact]

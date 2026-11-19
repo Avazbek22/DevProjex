@@ -30,7 +30,7 @@ public sealed class TreeCommandHandler(
 		new ContextDiagnosticRenderer(environment, request.Output, services.Localization)
 			.Write(plan.Diagnostics);
 		if (plan.HasErrors)
-			return CommandLineExitCodes.PolicyFailure;
+			return PlanDiagnosticExitCode.For(plan.Diagnostics);
 
 		if (request.OutputPath is null or "-")
 		{

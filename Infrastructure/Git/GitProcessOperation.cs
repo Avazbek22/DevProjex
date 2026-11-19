@@ -31,7 +31,13 @@ internal enum GitOperationKind
 	ManagedWorktreeList,
 	ManagedConfigWrite,
 	ReadHistoryWindow,
-	ReadShallowRepositoryState
+	ReadShallowRepositoryState,
+	ReadTreeEntries,
+	ReadIndexEntries,
+	ReadFullTreeEntries,
+	ReadFullIndexEntries,
+	ReadObjectHeaders,
+	ReadObjectContents
 }
 
 internal enum GitConfigReadKind
@@ -40,7 +46,10 @@ internal enum GitConfigReadKind
 	UnsafeDrivers,
 	WorktreeBranch,
 	PromisorRemotes,
-	NetworkOverrides
+	NetworkOverrides,
+	RepositoryLineEndings,
+	SystemLineEndings,
+	FileLineEndings
 }
 
 internal enum GitBranchListKind
@@ -81,7 +90,9 @@ internal sealed record GitProcessOperation
 		GitManagedCheckoutKind checkoutKind = default,
 		GitManagedConfigWriteKind configWriteKind = default,
 		IReadOnlyList<string>? filterDrivers = null,
-		string? allowedProtocols = null)
+		string? allowedProtocols = null,
+		IReadOnlyList<string>? lineEndingSettings = null,
+		IReadOnlyList<string>? paths = null)
 	{
 		Kind = kind;
 		Profile = profile;
@@ -94,6 +105,8 @@ internal sealed record GitProcessOperation
 		ConfigWriteKind = configWriteKind;
 		FilterDrivers = filterDrivers ?? [];
 		AllowedProtocols = allowedProtocols;
+		LineEndingSettings = lineEndingSettings ?? [];
+		Paths = paths ?? [];
 	}
 
 	public GitOperationKind Kind { get; }
@@ -107,6 +120,8 @@ internal sealed record GitProcessOperation
 	public GitManagedConfigWriteKind ConfigWriteKind { get; }
 	public IReadOnlyList<string> FilterDrivers { get; }
 	public string? AllowedProtocols { get; }
+	public IReadOnlyList<string> LineEndingSettings { get; }
+	public IReadOnlyList<string> Paths { get; }
 
 	public TimeSpan Deadline => Profile switch
 	{
@@ -122,8 +137,11 @@ internal sealed record GitProcessOperation
 	public static GitProcessOperation ReadStagedChanges() =>
 		new(GitOperationKind.ReadStagedChanges, GitProcessProfile.LocalRead);
 
-	public static GitProcessOperation ReadWorkingChanges() =>
-		new(GitOperationKind.ReadWorkingChanges, GitProcessProfile.LocalRead);
+	public static GitProcessOperation ReadWorkingChanges(IReadOnlyList<string>? lineEndingSettings = null) =>
+		new(
+			GitOperationKind.ReadWorkingChanges,
+			GitProcessProfile.LocalRead,
+			lineEndingSettings: ValidateLineEndingSettings(lineEndingSettings));
 
 	public static GitProcessOperation ReadUntracked() =>
 		new(GitOperationKind.ReadUntracked, GitProcessProfile.LocalRead);
@@ -144,11 +162,26 @@ internal sealed record GitProcessOperation
 			range);
 	}
 
-	public static GitProcessOperation ReadConfigValue(GitConfigReadKind kind) =>
-		new(
+	public static GitProcessOperation ReadConfigValue(GitConfigReadKind kind)
+	{
+		if (kind == GitConfigReadKind.FileLineEndings)
+			throw new ArgumentException("A configuration file read needs its path.", nameof(kind));
+		return new GitProcessOperation(
 			GitOperationKind.ReadConfigValue,
 			GitProcessProfile.LocalRead,
 			configReadKind: kind);
+	}
+
+	public static GitProcessOperation ReadLineEndingsFromFile(string configurationFile)
+	{
+		if (string.IsNullOrWhiteSpace(configurationFile) || !Path.IsPathFullyQualified(configurationFile))
+			throw new ArgumentException("A configuration file path must be absolute.", nameof(configurationFile));
+		return new GitProcessOperation(
+			GitOperationKind.ReadConfigValue,
+			GitProcessProfile.LocalRead,
+			configurationFile,
+			configReadKind: GitConfigReadKind.FileLineEndings);
+	}
 
 	public static GitProcessOperation ReadRemoteUrl() =>
 		new(GitOperationKind.ReadRemoteUrl, GitProcessProfile.LocalRead);
@@ -306,6 +339,120 @@ internal sealed record GitProcessOperation
 	public static GitProcessOperation ReadShallowRepositoryState() =>
 		new(GitOperationKind.ReadShallowRepositoryState, GitProcessProfile.LocalRead);
 
+	/// <summary>
+	/// Lists the blob entries a resolved commit holds for repository-relative paths. Paths are
+	/// literal and follow <c>--</c>, so neither a leading '-' nor pathspec magic can change the
+	/// command.
+	/// </summary>
+	public static GitProcessOperation ReadTreeEntries(string commitObjectId, IReadOnlyList<string> paths) =>
+		new(
+			GitOperationKind.ReadTreeEntries,
+			GitProcessProfile.LocalRead,
+			ValidateObjectId(commitObjectId),
+			paths: ValidatePaths(paths));
+
+	/// <summary>Lists the index entries, all stages, for repository-relative literal paths.</summary>
+	public static GitProcessOperation ReadIndexEntries(IReadOnlyList<string> paths) =>
+		new(
+			GitOperationKind.ReadIndexEntries,
+			GitProcessProfile.LocalRead,
+			paths: ValidatePaths(paths));
+
+	/// <summary>
+	/// Lists every blob entry a resolved commit holds, without a path filter. Used only as a
+	/// fallback when a literal-pathspec lookup misses a path that differs from the tree's recorded
+	/// spelling only by case or Unicode normalization form.
+	/// </summary>
+	public static GitProcessOperation ReadFullTreeEntries(string commitObjectId) =>
+		new(
+			GitOperationKind.ReadFullTreeEntries,
+			GitProcessProfile.LocalRead,
+			ValidateObjectId(commitObjectId));
+
+	/// <summary>
+	/// Lists every index entry, all stages, without a path filter. Used only as the staged-side
+	/// counterpart of <see cref="ReadFullTreeEntries"/>.
+	/// </summary>
+	public static GitProcessOperation ReadFullIndexEntries() =>
+		new(GitOperationKind.ReadFullIndexEntries, GitProcessProfile.LocalRead);
+
+	/// <summary>
+	/// Reports type and size for object ids written to standard input. The caller writes only ids
+	/// accepted by <see cref="ValidateObjectId"/>, one per line, so no revision expression reaches
+	/// Git's name resolution.
+	/// </summary>
+	public static GitProcessOperation ReadObjectHeaders() =>
+		new(GitOperationKind.ReadObjectHeaders, GitProcessProfile.LocalRead);
+
+	/// <summary>
+	/// Streams raw object contents for object ids written to standard input. Without
+	/// <c>--textconv</c> or <c>--filters</c>, <c>cat-file</c> runs no repository-configured program.
+	/// </summary>
+	public static GitProcessOperation ReadObjectContents() =>
+		new(GitOperationKind.ReadObjectContents, GitProcessProfile.LocalRead);
+
+	/// <summary>The longest path list one tree or index read accepts, in characters.</summary>
+	public const int MaximumPathArgumentCharacters = 24_000;
+
+	/// <summary>Accepts only a full lowercase SHA-1 or SHA-256 object id.</summary>
+	public static string ValidateObjectId(string objectId)
+	{
+		if (!IsObjectId(objectId))
+			throw new ArgumentException("A Git object id must be 40 or 64 lowercase hexadecimal characters.", nameof(objectId));
+		return objectId;
+	}
+
+	public static bool IsObjectId(string? value)
+	{
+		if (value is not { Length: 40 or 64 })
+			return false;
+		foreach (var character in value)
+		{
+			if (character is not (>= '0' and <= '9') and not (>= 'a' and <= 'f'))
+				return false;
+		}
+		return true;
+	}
+
+	/// <summary>
+	/// Whether a repository-relative path can be passed to a tree or index read: '/'-separated,
+	/// without empty, '.' or '..' segments, and without control characters, which Git output
+	/// framing and command lines do not carry safely.
+	/// </summary>
+	public static bool IsSafeRepositoryPath(string? path)
+	{
+		if (string.IsNullOrEmpty(path) || path.Length > 4096 || path[0] == '/' || path[^1] == '/')
+			return false;
+		foreach (var character in path)
+		{
+			if (char.IsControl(character) || character == '\\')
+				return false;
+		}
+		foreach (var segment in path.Split('/'))
+		{
+			if (segment is "" or "." or "..")
+				return false;
+		}
+		return true;
+	}
+
+	private static IReadOnlyList<string> ValidatePaths(IReadOnlyList<string> paths)
+	{
+		ArgumentNullException.ThrowIfNull(paths);
+		if (paths.Count == 0)
+			throw new ArgumentException("At least one repository path is required.", nameof(paths));
+		var characters = 0L;
+		foreach (var path in paths)
+		{
+			if (!IsSafeRepositoryPath(path))
+				throw new ArgumentException("A repository path is invalid.", nameof(paths));
+			characters += path.Length + 1;
+		}
+		if (characters > MaximumPathArgumentCharacters)
+			throw new ArgumentException("The repository path list is too long for one read.", nameof(paths));
+		return paths.ToArray();
+	}
+
 	internal IReadOnlyList<string> BuildArguments(GitIsolationPaths isolation)
 	{
 		ArgumentNullException.ThrowIfNull(isolation);
@@ -339,6 +486,16 @@ internal sealed record GitProcessOperation
 				["log", "--topo-order", "--no-renames", "--no-decorate", "--format=%x1e%H%x00", "--name-only", "-z", "-n", Depth.ToString(CultureInfo.InvariantCulture), "--"],
 			GitOperationKind.ReadShallowRepositoryState =>
 				["rev-parse", "--is-shallow-repository"],
+			GitOperationKind.ReadTreeEntries =>
+				["--literal-pathspecs", "ls-tree", "-r", "-z", "--full-tree", Value!, "--", .. Paths],
+			GitOperationKind.ReadIndexEntries =>
+				["--literal-pathspecs", "ls-files", "--stage", "-z", "--", .. Paths],
+			GitOperationKind.ReadFullTreeEntries =>
+				["--literal-pathspecs", "ls-tree", "-r", "-z", "--full-tree", Value!],
+			GitOperationKind.ReadFullIndexEntries =>
+				["--literal-pathspecs", "ls-files", "--stage", "-z"],
+			GitOperationKind.ReadObjectHeaders => ["cat-file", "--batch-check"],
+			GitOperationKind.ReadObjectContents => ["cat-file", "--batch"],
 			_ => throw new ArgumentOutOfRangeException()
 		};
 	}
@@ -351,11 +508,31 @@ internal sealed record GitProcessOperation
 			["config", "--name-only", "--get-regexp", "^(filter\\..*\\.(clean|smudge|process|required)|diff\\..*\\.(command|textconv)|diff\\.external)$"],
 		GitConfigReadKind.WorktreeBranch => ["config", "--worktree", "--get", "devprojex.branch"],
 		GitConfigReadKind.PromisorRemotes =>
-			["config", "--name-only", "--get-regexp", "^remote\\..*\\.promisor$"],
+			["config", "--name-only", "--get-regexp", "^(remote\\..*\\.promisor|extensions\\.partialclone)$"],
 		GitConfigReadKind.NetworkOverrides =>
 			["config", "--name-only", "--get-regexp", "^(url\\..*\\.insteadof|http(\\..*)?\\.(extraheader|cookiefile|proxy)|core\\.(gitproxy|sshcommand)|remote\\..*\\.uploadpack)$"],
+		GitConfigReadKind.RepositoryLineEndings => ["config", "-z", "--get-regexp", LineEndingPattern],
+		GitConfigReadKind.SystemLineEndings => ["config", "--system", "-z", "--get-regexp", LineEndingPattern],
+		GitConfigReadKind.FileLineEndings => ["config", "--file", Value!, "-z", "--get-regexp", LineEndingPattern],
 		_ => throw new ArgumentOutOfRangeException()
 	};
+
+	private const string LineEndingPattern = "^core\\.(autocrlf|eol)$";
+
+	// Only the two line-ending settings, with a value Git itself accepts, may reach a working-tree
+	// comparison; nothing a configuration file holds can add any other option.
+	private static IReadOnlyList<string> ValidateLineEndingSettings(IReadOnlyList<string>? settings)
+	{
+		if (settings is null || settings.Count == 0)
+			return [];
+		foreach (var setting in settings)
+		{
+			if (setting is not ("core.autocrlf=true" or "core.autocrlf=false" or "core.autocrlf=input" or
+				"core.eol=lf" or "core.eol=crlf" or "core.eol=native"))
+				throw new ArgumentException("A Git line-ending setting is invalid.", nameof(settings));
+		}
+		return settings.ToArray();
+	}
 
 	private IReadOnlyList<string> BuildBranchListArguments() => BranchListKind switch
 	{

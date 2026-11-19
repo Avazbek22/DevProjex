@@ -2,7 +2,7 @@ using DevProjex.Infrastructure.FileSystem;
 
 namespace DevProjex.Tests.Unit;
 
-public sealed class GitTrackedPathIndexTests
+public sealed partial class GitTrackedPathIndexTests
 {
 	[Fact]
 	public void GitDirectoryPointer_RejectsActualContentBeyondMaximumAfterLengthProbe()

@@ -74,7 +74,11 @@ public sealed class CommandHelpRenderer(
 
 		WriteSection(output, _localization["Terminal.Help.Examples"], terminalWidth);
 		foreach (var example in CliExamplesRegistry.Get(command, path))
-			WriteIndented(output, example, terminalWidth);
+		{
+			// Examples are copied verbatim, so a wrapped command line would paste as two commands.
+			output.Write("  ");
+			output.WriteLine(example);
+		}
 
 		WriteSection(output, _localization["Terminal.Help.ExitCodes"], terminalWidth);
 		foreach (var code in ResolveExitCodes(command))
@@ -104,18 +108,20 @@ public sealed class CommandHelpRenderer(
 		return path switch
 		{
 			"open" => [0, 1, 2, 3, 4, 5, 130],
-			"analyze" or "search" or "related" or "tree" or "export context" or "export project" or
+			"analyze" or "search" or "related" or "diff" or "tree" or "export context" or "export project" or
 				"profile export" => [0, 1, 2, 3, 4, 130],
-			"profile import" or "profile save" or
+			"profile import" or "profile save" or "profile reset" or
 				"cache list" or "cache remove" or "cache clear" or "cache update" or
 				"doctor" => [0, 1, 2, 3, 130],
-			"ui list" => [0, 1, 2, 5, 130],
 			"tui" => [0, 1, 2, 3, 130],
 			"mcp log" => [0, 1, 2, 4, 130],
-			"export" or "profile" or "cache" or "ui" => [0, 2, 130],
-			"recent" or "profile show" or "profile validate" or "profile reset" or
+			"export" or "profile" or "cache" or "ui" or
+				"ui preview" or "ui tree" or "ui filter" or "ui search" => [0, 2, 130],
+			"recent" or "profile show" or "profile validate" or
 			"cache path" or "completion" or "mcp" or "mcp connect" => [0, 1, 2, 130],
-			_ when path.StartsWith("ui ", StringComparison.Ordinal) => [0, 1, 2, 3, 4, 5, 130],
+			// Desktop requests other than open never receive the tracked-index refusal (3), and
+			// nothing on their path writes a destination (4); desktop failures map to 5.
+			_ when path.StartsWith("ui ", StringComparison.Ordinal) => [0, 1, 2, 5, 130],
 			_ => [0, 2, 130]
 		};
 	}

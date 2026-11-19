@@ -28,6 +28,11 @@ internal sealed record McpExistingEntry(
 {
 	public bool IsDevProjexLauncher => Kind == McpExistingEntryKind.Launcher;
 
+	/// <summary>
+	/// npx or dnx named directly; both are batch files on Windows, where clients start servers without a shell.
+	/// </summary>
+	public bool StartsBatchLauncherDirectly { get; init; }
+
 	public string DisplayCommand => McpExistingEntryParser.FormatCommandLine(Command, Arguments);
 
 	/// <summary>Identifies the entry the user saw when confirming, so a changed entry is never replaced.</summary>
@@ -83,6 +88,7 @@ internal static class McpExistingEntryParser
 			arguments[serverStart] == ServerCommand)
 		{
 			var (projectRoot, mode, unsupported) = ParseServerArguments(arguments, serverStart + 1);
+			var directCommand = NormalizeCommandName(command);
 			return new McpExistingEntry(
 				McpExistingEntryKind.Launcher,
 				command,
@@ -92,7 +98,14 @@ internal static class McpExistingEntryParser
 				launcher,
 				projectRoot,
 				mode,
-				unsupported);
+				unsupported)
+			{
+				// npx, dnx, and a dotnet-tool shim are all batch files on Windows; naming one directly as the
+				// command, instead of through `cmd /c [call]`, never starts there.
+				StartsBatchLauncherDirectly = directCommand is "npx" or "dnx" ||
+					command.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase) ||
+					command.EndsWith(".bat", StringComparison.OrdinalIgnoreCase)
+			};
 		}
 
 		return new McpExistingEntry(
@@ -115,17 +128,46 @@ internal static class McpExistingEntryParser
 	public static bool IsEquivalent(
 		McpExistingEntry entry,
 		McpConnectionRequest request,
-		bool launcherSharesApplicationData)
+		bool launcherSharesApplicationData) =>
+		IsEquivalent(entry, request, launcherSharesApplicationData, OperatingSystem.IsWindows());
+
+	internal static bool IsEquivalent(
+		McpExistingEntry entry,
+		McpConnectionRequest request,
+		bool launcherSharesApplicationData,
+		bool windows)
 	{
 		ArgumentNullException.ThrowIfNull(entry);
 		ArgumentNullException.ThrowIfNull(request);
 		return entry.IsDevProjexLauncher &&
+			   !(windows && entry.StartsBatchLauncherDirectly) &&
 			   entry.ProjectRoot is not null &&
 			   PathsEqual(entry.ProjectRoot, request.ProjectRoot) &&
 			   entry.Mode == request.Mode &&
 			   entry.UnsupportedArguments.Count == 0 &&
 			   entry.Environment.Count == 0 &&
 			   (request.Mode == McpConnectionMode.Standard || launcherSharesApplicationData);
+	}
+
+	/// <summary>
+	/// An entry that serves the requested project and mode but names npx or dnx without cmd /c on Windows,
+	/// as earlier versions wrote it, never starts there; replacing it loses nothing, so no confirmation is asked.
+	/// </summary>
+	public static bool IsUnstartableOnWindows(McpExistingEntry entry, McpConnectionRequest request) =>
+		IsUnstartableOnWindows(entry, request, OperatingSystem.IsWindows());
+
+	internal static bool IsUnstartableOnWindows(McpExistingEntry entry, McpConnectionRequest request, bool windows)
+	{
+		ArgumentNullException.ThrowIfNull(entry);
+		ArgumentNullException.ThrowIfNull(request);
+		return windows &&
+			   entry.IsDevProjexLauncher &&
+			   entry.StartsBatchLauncherDirectly &&
+			   entry.ProjectRoot is not null &&
+			   PathsEqual(entry.ProjectRoot, request.ProjectRoot) &&
+			   entry.Mode == request.Mode &&
+			   entry.UnsupportedArguments.Count == 0 &&
+			   entry.Environment.Count == 0;
 	}
 
 	public static string FormatCommandLine(string command, IEnumerable<string> arguments) =>
@@ -148,9 +190,14 @@ internal static class McpExistingEntryParser
 				var index = start;
 				while (index < arguments.Count && arguments[index] is "/d" or "/D" or "/s" or "/S" or "/q" or "/Q")
 					index++;
-				return index + 1 < arguments.Count &&
-					   arguments[index] is "/c" or "/C" &&
-					   TryFindServerArguments(arguments[index + 1], arguments, index + 2, false, out launcher, out serverStart);
+				if (index + 1 >= arguments.Count || arguments[index] is not ("/c" or "/C"))
+					return false;
+				index++;
+				// A dotnet-tool shim is a batch file too, so Windows writes it as `cmd /c call <shim> ...`.
+				if (index < arguments.Count && string.Equals(arguments[index], "call", StringComparison.OrdinalIgnoreCase))
+					index++;
+				return index < arguments.Count &&
+					   TryFindServerArguments(arguments[index], arguments, index + 1, false, out launcher, out serverStart);
 			case "npx":
 				launcher = "npx";
 				return TryFindNpxServer(arguments, start, out serverStart);
@@ -165,6 +212,11 @@ internal static class McpExistingEntryParser
 			case "flatpak":
 				launcher = "flatpak";
 				return TryFindFlatpakServer(arguments, start, out serverStart);
+			case PackageName:
+				// The dotnet-tool shim or apphost named directly: the server arguments follow with no package token.
+				launcher = PackageName;
+				serverStart = start;
+				return true;
 			default:
 				return false;
 		}

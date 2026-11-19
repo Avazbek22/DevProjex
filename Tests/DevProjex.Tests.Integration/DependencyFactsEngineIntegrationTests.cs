@@ -2115,6 +2115,7 @@ public sealed class DependencyFactsEngineIntegrationTests
 		Assert.Equal(DependencyConfigurationState.UnsupportedSemantics, oversizedScope.ConfigurationState);
 		Assert.Contains("byte limit", oversizedScope.ConfigurationDiagnostic, StringComparison.Ordinal);
 
+		File.Delete(oversized);
 		var missingConfiguration = await provider.ReadAsync(
 			fixture.Path,
 			[source, target],

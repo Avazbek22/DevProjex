@@ -170,6 +170,8 @@ public sealed partial class McpServerProcessTests
 		startInfo.ArgumentList.Add("--language");
 		startInfo.ArgumentList.Add("en");
 		startInfo.ArgumentList.Add("mcp");
+		startInfo.ArgumentList.Add("--tool-set");
+		startInfo.ArgumentList.Add("full");
 		startInfo.ArgumentList.Add("log");
 		startInfo.ArgumentList.Add(project);
 		startInfo.ArgumentList.Add("--session");

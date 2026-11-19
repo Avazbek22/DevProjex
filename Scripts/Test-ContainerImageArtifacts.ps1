@@ -10,12 +10,13 @@ param(
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot 'ContainerPublishing.ps1')
 
 $root = [System.IO.Path]::GetFullPath($ArtifactsRoot)
 $receiptPath = Join-Path $root 'container-images.json'
 if (-not (Test-Path -LiteralPath $receiptPath -PathType Leaf)) { throw 'Container image artifact receipt is missing.' }
 $receipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
-if ($receipt.schemaVersion -ne 1 -or [string]$receipt.version -cne $Version -or
+if ($receipt.schemaVersion -ne 2 -or [string]$receipt.version -cne $Version -or
     [string]$receipt.sourceSha -cne $SourceSha) {
     throw 'Container image artifact receipt identity does not match the requested source and version.'
 }
@@ -33,12 +34,13 @@ foreach ($image in $images) {
     if ($actualHash -cne [string]$image.sha256) {
         throw "Container image archive '$($image.archive)' does not match its SHA-256 receipt."
     }
+    $configDigest = Get-ContainerArchiveConfigDigest $archivePath ([string]$image.localTag)
+    if ($configDigest -cne [string]$image.configDigest) {
+        throw "Container image archive '$($image.archive)' does not match its config digest receipt."
+    }
     if ($VerifyLoadedImages -and ([string]::IsNullOrEmpty($LoadedPlatform) -or
         [string]$image.platform -ceq $LoadedPlatform)) {
-        $actualId = (& docker image inspect --format '{{.Id}}' ([string]$image.localTag)).Trim()
-        if ($LASTEXITCODE -ne 0 -or $actualId -cne [string]$image.imageId) {
-            throw "Loaded container image '$($image.localTag)' does not match its tested image ID."
-        }
+        Assert-ContainerLoadedImage ([string]$image.localTag) $configDigest
     }
 }
 Write-Host "Container promotion artifact receipt passed for source $SourceSha and version $Version."

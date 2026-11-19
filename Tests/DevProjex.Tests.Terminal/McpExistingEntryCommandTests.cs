@@ -49,7 +49,12 @@ public sealed class McpExistingEntryCommandTests
 		var project = workspace.CreateDirectory("project");
 		var claudeHome = workspace.CreateDirectory("claude-home");
 		var configuration = Path.Combine(claudeHome, ".claude.json");
-		WriteEntry(configuration, project, ["-y", "devprojex", "mcp", "--root", project]);
+		// Windows clients can start npx only through cmd /c; a bare npx entry is repaired there instead.
+		string[] launch = ["-y", "devprojex", "mcp", "--root", project];
+		if (OperatingSystem.IsWindows())
+			WriteEntry(configuration, project, ["/c", "npx", .. launch], command: "cmd");
+		else
+			WriteEntry(configuration, project, launch);
 		var original = await File.ReadAllTextAsync(configuration, TestContext.Current.CancellationToken);
 		var cli = new FakeClaudeCli(configuration, project);
 

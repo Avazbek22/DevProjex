@@ -99,7 +99,9 @@ public sealed class TerminalApplication
 			arguments.ToArray(),
 			new ParserConfiguration
 			{
-				EnablePosixBundling = false
+				EnablePosixBundling = false,
+				// A leading '@' is literal data (annotations, npm scopes), never a response file.
+				ResponseFileTokenReplacer = null
 			});
 		if (CliInputIntegrityGuard.TryFindError(
 			    arguments,
@@ -143,6 +145,19 @@ public sealed class TerminalApplication
 				runtimeEnvironment.Error.WriteLine(localization.Format("Terminal.Hint.DidYouMean", suggestion));
 			else
 				runtimeEnvironment.Error.WriteLine(localization["Terminal.Hint.Help"]);
+			return CommandLineExitCodes.UsageError;
+		}
+		// Help and version short-circuit option parsing, so an unknown language code would
+		// otherwise fall back silently instead of failing like every other command.
+		if (TerminalLanguageResolver.TryFindUnsupportedExplicitLanguage(arguments, out _))
+		{
+			runtimeEnvironment.Error.WriteLine(
+				$"{TerminalErrorHeader.Format(localization, "DPX-CLI-INVALID-VALUE")} " +
+				localization.Format(
+					"Terminal.Validation.Choice",
+					"--language",
+					string.Join(", ", CliChoiceSets.Language.Tokens)));
+			runtimeEnvironment.Error.WriteLine(localization["Terminal.Hint.Help"]);
 			return CommandLineExitCodes.UsageError;
 		}
 		if (parseResult.Action is HelpAction)

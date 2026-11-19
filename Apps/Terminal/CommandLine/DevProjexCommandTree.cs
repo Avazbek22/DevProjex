@@ -69,7 +69,7 @@ public sealed class DevProjexCommandTree
 		var root = new DevProjexRootCommand(L("Terminal.Command.Root"));
 		var defaultVersionOption = root.Options.OfType<VersionOption>().Single();
 		root.Options.Remove(defaultVersionOption);
-		root.Options.Add(new VersionOption("--version", "-v"));
+		root.Options.Add(CreateVersionOption());
 		_language.Recursive = true;
 		root.Options.Add(_language);
 		_output.AddGlobalsTo(root);
@@ -79,6 +79,7 @@ public sealed class DevProjexCommandTree
 		root.Subcommands.Add(BuildAnalyzeCommand());
 		root.Subcommands.Add(BuildSearchCommand());
 		root.Subcommands.Add(BuildRelatedCommand());
+		root.Subcommands.Add(BuildDiffCommand());
 		root.Subcommands.Add(BuildTreeCommand());
 		root.Subcommands.Add(BuildExportCommand());
 		root.Subcommands.Add(BuildProfileCommand());
@@ -97,6 +98,31 @@ public sealed class DevProjexCommandTree
 			"devprojex export context . -o ../devprojex-context.md");
 		return root;
 	}
+
+	private VersionOption CreateVersionOption()
+	{
+		var version = new VersionOption("--version", "-v");
+		// The built-in check refuses every other token. --plain, --color, and --language only
+		// shape presentation, so they may accompany --version; commands and other input still fail.
+		version.Validators.Clear();
+		version.Validators.Add(result =>
+		{
+			if (result.Parent is CommandResult parent &&
+				parent.Children.Any(child => !IsVersionCompanion(child)))
+			{
+				result.AddError("--version cannot be combined with other arguments.");
+			}
+		});
+		return version;
+	}
+
+	private bool IsVersionCompanion(SymbolResult result) =>
+		result is OptionResult option &&
+		(option.Implicit ||
+		 option.Option is VersionOption ||
+		 option.Option == _language ||
+		 option.Option == _output.Plain ||
+		 option.Option == _output.Color);
 
 	private Command BuildMcpCommand()
 	{
@@ -133,7 +159,7 @@ public sealed class DevProjexCommandTree
 		var toolSet = CliChoiceSymbols.Option(
 			"--tool-set",
 			L("Terminal.Option.McpToolSet"),
-			McpToolSet.Full,
+			McpToolSet.Reduced,
 			CliChoiceSets.McpToolSet,
 			_localization);
 		var exclude = CreateMcpExcludeOption();
@@ -272,7 +298,15 @@ public sealed class DevProjexCommandTree
 	private void WriteMcpStartupError(Exception exception) =>
 		environment.Error.WriteLine(
 			$"{TerminalErrorHeader.Format(_localization, "DPX-MCP-STARTUP")} " +
-			TerminalTextEscaping.EscapeSingleLine(exception.Message));
+			TerminalTextEscaping.EscapeSingleLine(FormatMcpStartupMessage(exception)));
+
+	private string FormatMcpStartupMessage(Exception exception) => exception switch
+	{
+		// The root registry reports a missing or non-directory root with the bare path as the message.
+		DirectoryNotFoundException when Path.IsPathFullyQualified(exception.Message) =>
+			_localization.Format("Terminal.Error.McpRootNotFound", exception.Message),
+		_ => exception.Message
+	};
 
 	private static bool IsValidSearchBodyCharacters(string? value)
 	{
@@ -323,6 +357,7 @@ public sealed class DevProjexCommandTree
 		outputPath.CompletionSources.Add(context => FileSystemCompletionSource.Complete(
 			context,
 			FileSystemCompletionKind.FilesAndDirectories));
+		AddExactOutputPathValidator(outputPath);
 		command.Arguments.Add(project);
 		command.Options.Add(session);
 		command.Options.Add(last);
@@ -1173,6 +1208,12 @@ public sealed class DevProjexCommandTree
 						services,
 						selectedPaths,
 						cancellationToken).ConfigureAwait(false);
+					var projectSpec = await selection.ResolveWithoutNarrowingAsync(
+						parseResult,
+						resolvedSource.ProjectPath,
+						services,
+						selectedPaths,
+						cancellationToken).ConfigureAwait(false);
 					return await new RelatedCommandHandler(services, environment).ExecuteAsync(
 						new RelatedCommandRequest(
 							resolvedSource.ProjectPath,
@@ -1193,6 +1234,110 @@ public sealed class DevProjexCommandTree
 							selection.GetMaxFileBytes(parseResult),
 							resolvedSource.RepositorySourceUrl,
 							parseResult.GetValue(depth),
+							parseResult.GetValue(outputPath),
+							projectSpec),
+						cancellationToken).ConfigureAwait(false);
+				},
+				_localization,
+				forceReplacementAvailable: false).ConfigureAwait(false);
+		});
+		return command;
+	}
+
+	private Command BuildDiffCommand()
+	{
+		var command = new Command("diff", L("Terminal.Command.Diff"));
+		CliExamplesRegistry.Set(
+			command,
+			"devprojex diff",
+			"devprojex diff --git-mode staged --context 1",
+			"devprojex diff --git-mode diff:main..HEAD --format json -o -");
+		var project = new Option<string?>("--project")
+		{
+			Description = L("Terminal.Option.DiffProject"),
+			HelpName = "PROJECT",
+			DefaultValueFactory = _ => Directory.GetCurrentDirectory()
+		};
+		project.CompletionSources.Add(context => FileSystemCompletionSource.Complete(
+			context,
+			FileSystemCompletionKind.Directories));
+		CliHelpMetadataRegistry.SuppressParserDefault(project);
+		var contextLines = new Option<int>("--context")
+		{
+			Description = L("Terminal.Option.DiffContext"),
+			HelpName = "N",
+			DefaultValueFactory = _ => DiffQueryRunner.DefaultContextLines
+		};
+		var format = CliChoiceSymbols.Option(
+			"--format",
+			L("Terminal.Option.Format"),
+			CliTextJsonFormat.Text,
+			CliChoiceSets.TextJson,
+			_localization);
+		format.Aliases.Add("-f");
+		var outputPath = OutputPathOption();
+		var branch = BranchOption();
+		var selection = new SelectionOptions(
+			_localization,
+			environment,
+			includeCodeTransformations: false,
+			includeMaxFileBytes: true,
+			gitModeCapability: GitModeOptionCapability.Momentary);
+		command.Options.Add(project);
+		command.Options.Add(contextLines);
+		command.Options.Add(format);
+		command.Options.Add(outputPath);
+		command.Options.Add(branch);
+		selection.AddTo(command);
+		_output.AddProgressTo(command);
+		command.Validators.Add(result =>
+		{
+			if (CliParseValue.TryGet(result, contextLines, out var value) &&
+				value is < 0 or > DiffQueryRunner.MaximumContextLines)
+			{
+				result.AddError(LocalizedParseError.Create(L("Terminal.Validation.DiffContext")));
+			}
+		});
+		command.SetAction(async (parseResult, cancellationToken) =>
+		{
+			var output = _output.Get(parseResult);
+			return await CommandExecution.RunAsync(
+				environment,
+				output,
+				async () =>
+				{
+					using var serviceScope = CreateServiceScope(parseResult);
+					var services = serviceScope.Services;
+					var projectSource = parseResult.GetValue(project) ?? Directory.GetCurrentDirectory();
+					await using var resolvedSource = await new TerminalProjectSourceResolver(
+							services,
+							environment,
+							output)
+						.ResolveAsync(projectSource, parseResult.GetValue(branch), cancellationToken)
+						.ConfigureAwait(false);
+					var selectedPaths = await selection.ReadSelectedPathsAsync(parseResult, cancellationToken)
+						.ConfigureAwait(false);
+					var spec = await selection.ResolveAsync(
+						parseResult,
+						resolvedSource.ProjectPath,
+						services,
+						selectedPaths,
+						cancellationToken).ConfigureAwait(false);
+					// Without --git-mode the command reviews uncommitted changes, whatever Git mode
+					// the profile keeps for other commands.
+					if (parseResult.GetResult(selection.GitMode) is null)
+						spec = spec with { GitMode = GitFilteringMode.Changes, GitDiffRange = null };
+					return await new DiffCommandHandler(services, environment).ExecuteAsync(
+						new DiffCommandRequest(
+							resolvedSource.ProjectPath,
+							spec,
+							parseResult.GetValue(contextLines),
+							parseResult.GetValue(format) == CliTextJsonFormat.Json
+								? AnalysisOutputFormat.Json
+								: AnalysisOutputFormat.Text,
+							output,
+							selection.GetMaxFileBytes(parseResult),
+							resolvedSource.RepositorySourceUrl,
 							parseResult.GetValue(outputPath)),
 						cancellationToken).ConfigureAwait(false);
 				},
@@ -1497,12 +1642,18 @@ public sealed class DevProjexCommandTree
 			if (outputKind == ProjectCopyExportFormat.Zip &&
 				CliParseValue.TryGet(result, outputPath, out var destination) &&
 				destination is not null &&
-				destination != "-" &&
-				!destination.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+				destination != "-")
 			{
-				result.AddError(LocalizedParseError.Create(
-					"DPX-CLI-ZIP-EXTENSION-REQUIRED",
-					L("Terminal.Error.ZipExtensionRequired")));
+				if (DescribeExactOutputPathProblem(destination) is { } problem)
+				{
+					result.AddError(problem);
+				}
+				else if (!destination.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+				{
+					result.AddError(LocalizedParseError.Create(
+						"DPX-CLI-ZIP-EXTENSION-REQUIRED",
+						L("Terminal.Error.ZipExtensionRequired")));
+				}
 			}
 		});
 		command.SetAction(async (parseResult, cancellationToken) =>
@@ -1785,6 +1936,7 @@ public sealed class DevProjexCommandTree
 		output.CompletionSources.Add(context => FileSystemCompletionSource.Complete(
 			context,
 			FileSystemCompletionKind.FilesAndDirectories));
+		AddExactOutputPathValidator(output);
 		var force = new Option<bool>("--force") { Description = L("Terminal.Option.ForceProfile") };
 		var dryRun = new Option<bool>("--dry-run", "-n") { Description = L("Terminal.Option.DryRun") };
 		command.Arguments.Add(project);
@@ -1818,6 +1970,7 @@ public sealed class DevProjexCommandTree
 			"devprojex profile import ../devprojex-profile.json .",
 			"devprojex profile import ../devprojex-profile.json . --apply");
 		var file = RequiredArgument("FILE");
+		file.Description = L("Terminal.Argument.ProfileImportFile");
 		var project = ProjectArgument();
 		var apply = new Option<bool>("--apply") { Description = L("Terminal.Option.ApplyProfile") };
 		command.Arguments.Add(file);
@@ -1841,6 +1994,7 @@ public sealed class DevProjexCommandTree
 			command,
 			"devprojex profile validate ../devprojex-profile.json");
 		var file = RequiredArgument("FILE");
+		file.Description = L("Terminal.Argument.ProfileValidateFile");
 		var format = CliChoiceSymbols.Option(
 			"--format",
 			L("Terminal.Option.Format"),
@@ -2017,6 +2171,7 @@ public sealed class DevProjexCommandTree
 			"VIEW",
 			CliChoiceSets.DesktopView,
 			_localization);
+		view.Description = L("Terminal.Argument.UiPreviewView");
 		setView.Arguments.Add(view);
 		AddDesktopAction(
 			setView,
@@ -2041,6 +2196,7 @@ public sealed class DevProjexCommandTree
 			"FORMAT",
 			CliChoiceSets.TreeFormat,
 			_localization);
+		format.Description = L("Terminal.Argument.UiTreeFormat");
 		setFormat.Arguments.Add(format);
 		AddDesktopAction(
 			setFormat,
@@ -2063,6 +2219,7 @@ public sealed class DevProjexCommandTree
 			set,
 			"devprojex ui filter set Program --project .");
 		var query = RequiredArgument("QUERY");
+		query.Description = L("Terminal.Argument.UiFilterQuery");
 		set.Arguments.Add(query);
 		AddDesktopAction(set, "filter.set", result => new { query = result.GetValue(query) });
 		command.Subcommands.Add(set);
@@ -2089,6 +2246,7 @@ public sealed class DevProjexCommandTree
 			set,
 			"devprojex ui search set TODO --project .");
 		var query = RequiredArgument("QUERY");
+		query.Description = L("Terminal.Argument.UiSearchQuery");
 		set.Arguments.Add(query);
 		AddDesktopAction(set, "search.set", result => new { query = result.GetValue(query) });
 		command.Subcommands.Add(set);
@@ -2410,7 +2568,11 @@ public sealed class DevProjexCommandTree
 	{
 		command.Validators.Add(result =>
 		{
-			if (!result.GetValue(force) && !result.GetValue(dryRun))
+			// A missing required argument is the more useful error, so confirmation is checked after it.
+			var missingRequiredArgument = command.Arguments.Any(argument =>
+				argument.Arity.MinimumNumberOfValues > 0 &&
+				result.GetResult(argument) is not ArgumentResult { Tokens.Count: > 0 });
+			if (!missingRequiredArgument && !result.GetValue(force) && !result.GetValue(dryRun))
 			{
 				result.AddError(LocalizedParseError.Create(
 					L("Terminal.Validation.CacheForceRequired")));
@@ -2541,6 +2703,7 @@ public sealed class DevProjexCommandTree
 			"SHELL",
 			CliChoiceSets.CompletionShell,
 			_localization);
+		shell.Description = L("Terminal.Argument.CompletionShell");
 		command.Arguments.Add(shell);
 		command.SetAction(parseResult =>
 		{
@@ -2882,8 +3045,9 @@ public sealed class DevProjexCommandTree
 		return argument;
 	}
 
-	private Option<string?> OutputPathOption() =>
-		new("--output", "-o")
+	private Option<string?> OutputPathOption()
+	{
+		var option = new Option<string?>("--output", "-o")
 		{
 			Description = L("Terminal.Option.Output"),
 			HelpName = "PATH|-",
@@ -2895,6 +3059,34 @@ public sealed class DevProjexCommandTree
 					FileSystemCompletionKind.FilesAndDirectories)
 			}
 		};
+		AddExactOutputPathValidator(option);
+		return option;
+	}
+
+	private void AddExactOutputPathValidator(Option option) =>
+		option.Validators.Add(result =>
+		{
+			if (result.Implicit || result.Tokens.Count != 1)
+				return;
+			if (DescribeExactOutputPathProblem(result.Tokens[0].Value) is { } problem)
+				result.AddError(problem);
+		});
+
+	private string? DescribeExactOutputPathProblem(string path)
+	{
+		var message = ExactOutputPathSyntax.Check(path) switch
+		{
+			ExactOutputPathProblem.None => null,
+			ExactOutputPathProblem.Empty => L("Terminal.Error.OutputPathEmpty"),
+			ExactOutputPathProblem.TrailingSeparator => L("Terminal.Error.OutputPathTrailingSeparator"),
+			ExactOutputPathProblem.InvalidSyntax => _localization.Format("Terminal.Error.OutputPathInvalid", path),
+			ExactOutputPathProblem.DeviceName => _localization.Format("Terminal.Error.OutputPathDevice", path),
+			var problem => throw new ArgumentOutOfRangeException(nameof(path), problem, null)
+		};
+		return message is null
+			? null
+			: LocalizedParseError.Create("DPX-CLI-INVALID-VALUE", message);
+	}
 
 	private Option<string?> OptionalOutputPath() =>
 		new("--output", "-o")
@@ -3044,7 +3236,11 @@ public sealed class DevProjexCommandTree
 
 	private static bool TryParseDurationToken(string value, out TimeSpan duration)
 	{
-		if (TimeSpan.TryParse(
+		duration = default;
+		// TimeSpan reads a bare number as days, so "--timeout 10" would wait ten days;
+		// the clock form is accepted only when it actually contains a time separator.
+		if (value.Contains(':', StringComparison.Ordinal) &&
+			TimeSpan.TryParse(
 				value,
 				System.Globalization.CultureInfo.InvariantCulture,
 				out duration))

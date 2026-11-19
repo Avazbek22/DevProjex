@@ -260,7 +260,7 @@ public sealed partial class McpServerProcessTests
 			.GetProperty("properties")
 			.GetProperty("focus");
 		Assert.Equal(2, focusSchema.GetProperty("oneOf").GetArrayLength());
-		Assert.Equal(16, focusSchema.GetProperty("oneOf")[1].GetProperty("maxItems").GetInt32());
+		Assert.False(focusSchema.GetProperty("oneOf")[1].TryGetProperty("maxItems", out _));
 
 		var focused = await server.Client.CallToolAsync(
 			"pack_context",

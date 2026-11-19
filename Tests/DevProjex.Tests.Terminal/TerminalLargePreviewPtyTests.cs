@@ -28,6 +28,7 @@ public sealed class TerminalLargePreviewPtyTests
 			"PROJECT TREE",
 			timeout: TimeSpan.FromSeconds(45),
 			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.WaitForTerminalNegotiationAsync(cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendAsync("2", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"LargeMarker001",

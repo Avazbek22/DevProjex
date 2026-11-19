@@ -66,24 +66,25 @@ jobs:
       - name: Record tested image identities
         shell: pwsh
         run: |
+          . ./Scripts/ContainerPublishing.ps1
           $images = @(
             [ordered]@{
               platform = 'linux/amd64'
               localTag = 'devprojex-ci:amd64'
               archive = 'devprojex-amd64.tar.gz'
-              imageId = (& docker image inspect --format '{{.Id}}' devprojex-ci:amd64).Trim()
+              configDigest = Get-ContainerArchiveConfigDigest artifacts/container-images/devprojex-amd64.tar.gz devprojex-ci:amd64
               sha256 = (Get-FileHash artifacts/container-images/devprojex-amd64.tar.gz -Algorithm SHA256).Hash.ToLowerInvariant()
             },
             [ordered]@{
               platform = 'linux/arm64'
               localTag = 'devprojex-ci:arm64'
               archive = 'devprojex-arm64.tar.gz'
-              imageId = (& docker image inspect --format '{{.Id}}' devprojex-ci:arm64).Trim()
+              configDigest = Get-ContainerArchiveConfigDigest artifacts/container-images/devprojex-arm64.tar.gz devprojex-ci:arm64
               sha256 = (Get-FileHash artifacts/container-images/devprojex-arm64.tar.gz -Algorithm SHA256).Hash.ToLowerInvariant()
             }
           )
           $receipt = [ordered]@{
-            schemaVersion = 1
+            schemaVersion = 2
             sourceSha = '${{ inputs.checkout_ref }}'
             version = '${{ inputs.version }}'
             images = $images

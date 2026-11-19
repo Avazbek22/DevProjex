@@ -24,6 +24,7 @@ internal static class DependencyEngineDiagnostics
 	public static void RecordResolverCandidateProbes(int count) => Add(static state => ref state.ResolverCandidateProbes, count);
 	public static void RecordFileCacheHit() => Increment(static state => ref state.FileCacheHits);
 	public static void RecordIndexCacheJoin() => Increment(static state => ref state.IndexCacheJoins);
+	public static void RecordExtractionPipelineResourceCreation() => Increment(static state => ref state.ExtractionPipelineResourceCreations);
 	public static void RecordResolutionCacheHit() => Increment(static state => ref state.ResolutionCacheHits);
 
 	private delegate ref long Counter(State state);
@@ -48,6 +49,7 @@ internal static class DependencyEngineDiagnostics
 		public long FileCacheHits;
 		public long IndexCacheJoins;
 		public long ResolutionCacheHits;
+		public long ExtractionPipelineResourceCreations;
 
 		public DependencyEngineDiagnosticSnapshot Capture() => new(
 			Volatile.Read(ref PathNormalizations),
@@ -58,7 +60,10 @@ internal static class DependencyEngineDiagnostics
 			Volatile.Read(ref ResolverCandidateProbes),
 			Volatile.Read(ref FileCacheHits),
 			Volatile.Read(ref IndexCacheJoins),
-			Volatile.Read(ref ResolutionCacheHits));
+			Volatile.Read(ref ResolutionCacheHits))
+		{
+			ExtractionPipelineResourceCreations = Volatile.Read(ref ExtractionPipelineResourceCreations)
+		};
 	}
 
 	internal sealed class Measurement(State state, State? previous) : IDisposable
@@ -87,4 +92,7 @@ internal readonly record struct DependencyEngineDiagnosticSnapshot(
 	long ResolverCandidateProbes,
 	long FileCacheHits,
 	long IndexCacheJoins,
-	long ResolutionCacheHits);
+	long ResolutionCacheHits)
+{
+	public long ExtractionPipelineResourceCreations { get; init; }
+}

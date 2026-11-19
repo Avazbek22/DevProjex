@@ -177,6 +177,15 @@ try {
     Assert-Artifact ($readmeEntry.Count -eq 1) $pointerName "README.md"
     $pointerReadme = [System.Text.Encoding]::UTF8.GetString((Get-ZipEntryBytes $readmeEntry[0]))
     Assert-Artifact ($pointerReadme -cmatch "mcp-name: $([regex]::Escape($mcpServer.name))(\s|-->)") $pointerName "MCP Registry ownership marker 'mcp-name: $($mcpServer.name)'"
+    # nuget.org copies these fields into the listing of the package people install.
+    $pointerDescription = $pointerNuspec.SelectSingleNode("//*[local-name()='metadata']/*[local-name()='description']")
+    Assert-Artifact `
+        ($null -ne $pointerDescription -and $pointerDescription.InnerText.Length -ge 1 -and
+            $pointerDescription.InnerText.Length -le 4000 -and
+            -not $pointerDescription.InnerText.Contains("Install devprojex instead", [System.StringComparison]::Ordinal)) `
+        $pointerName "the full package description of 1 to 4000 characters"
+    $pointerTags = $pointerNuspec.SelectSingleNode("//*[local-name()='metadata']/*[local-name()='tags']")
+    Assert-Artifact ($null -ne $pointerTags -and -not [string]::IsNullOrWhiteSpace($pointerTags.InnerText)) $pointerName "search tags"
 }
 finally {
     $pointerZip.Dispose()
@@ -187,6 +196,17 @@ foreach ($rid in $manifest.rids) {
     $packagePath = Join-Path $nugetPath $packageName
     $archive = Open-Zip $packagePath
     try {
+        # A RID package is installed through devprojex: its listing says so and carries no tags.
+        $ridNuspecEntry = @($archive.Entries | Where-Object { $_.FullName -like "*.nuspec" })
+        Assert-Artifact ($ridNuspecEntry.Count -eq 1) $packageName "one nuspec"
+        [xml] $ridNuspec = [System.Text.Encoding]::UTF8.GetString((Get-ZipEntryBytes $ridNuspecEntry[0])).TrimStart([char]0xFEFF)
+        $ridDescription = $ridNuspec.SelectSingleNode("//*[local-name()='metadata']/*[local-name()='description']")
+        Assert-Artifact `
+            ($null -ne $ridDescription -and
+                $ridDescription.InnerText.Contains("Install devprojex instead.", [System.StringComparison]::Ordinal)) `
+            $packageName "a description that points to the devprojex package"
+        $ridTags = $ridNuspec.SelectSingleNode("//*[local-name()='metadata']/*[local-name()='tags']")
+        Assert-Artifact ($null -eq $ridTags -or [string]::IsNullOrWhiteSpace($ridTags.InnerText)) $packageName "a listing without search tags"
         $binaryEntries = @($archive.Entries | Where-Object {
             [System.IO.Path]::GetFileName($_.FullName) -ceq $rid.binary
         })
@@ -288,6 +308,9 @@ try {
         Assert-Artifact ($packageJson.version -ceq $Version) $packageName "version '$Version'"
         Assert-Artifact (@($packageJson.os).Count -eq 1 -and $packageJson.os[0] -ceq $rid.os) $packageName "os '$($rid.os)'"
         Assert-Artifact (@($packageJson.cpu).Count -eq 1 -and $packageJson.cpu[0] -ceq $rid.cpu) $packageName "cpu '$($rid.cpu)'"
+        Assert-Artifact `
+            (([string] $packageJson.description).Contains("Install devprojex instead of this package.", [System.StringComparison]::Ordinal)) `
+            $packageName "a description that points to the devprojex package"
         if ($rid.os -ceq "linux") {
             Assert-Artifact (@($packageJson.libc).Count -eq 1 -and $packageJson.libc[0] -ceq "glibc") $packageName "libc 'glibc'"
         }
@@ -351,6 +374,9 @@ try {
     Assert-Artifact ($mainJson.name -ceq "devprojex") $mainName "package name 'devprojex'"
     Assert-Artifact ($mainJson.version -ceq $Version) $mainName "version '$Version'"
     Assert-Artifact ($mainJson.engines.node -ceq ">=20") $mainName "Node engine >=20"
+    # The npm registry cuts a description at 255 characters.
+    $mainDescriptionLength = ([string] $mainJson.description).Length
+    Assert-Artifact ($mainDescriptionLength -ge 1 -and $mainDescriptionLength -le 255) $mainName "a description of 1 to 255 characters"
     Assert-Artifact (($mainJson.PSObject.Properties.Name -contains "mcpName") -and $mainJson.mcpName -ceq $mcpServer.name) `
         $mainName "MCP Registry ownership field 'mcpName: $($mcpServer.name)'"
     Assert-Artifact (-not ($mainJson.PSObject.Properties.Name -contains "dependencies")) $mainName "absence of dependencies"

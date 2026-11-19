@@ -6,8 +6,8 @@ namespace DevProjex.Tests.Terminal;
 [Collection(TerminalProcessCollection.Name)]
 public sealed class TerminalSettingsPanelPtyTests
 {
-	// The 38-column wide panel shortens the title to "Content processi…"; other layouts show it whole.
-	private const string ContentProcessingTitle = "Content processi";
+	// Every layout shows the mini-panel title whole.
+	private const string ContentProcessingTitle = "Content processing";
 
 	[Fact(Timeout = 90_000)]
 	public async Task SelectionStatusShowsOnlyFailureAfterSelectionChanges()
@@ -345,7 +345,7 @@ public sealed class TerminalSettingsPanelPtyTests
 		Assert.DoesNotContain('▼', fileTypes);
 
 		await terminal.ResizeAsync(160, 30, TestContext.Current.CancellationToken);
-		var wide = await WaitForStableScreenAsync(terminal, "┤Content processi…├");
+		var wide = await WaitForStableScreenAsync(terminal, "┤Content processing├");
 		Assert.DoesNotContain("Saved settings", wide, StringComparison.Ordinal);
 		await ExitAsync(terminal);
 	}
@@ -1332,8 +1332,8 @@ public sealed class TerminalSettingsPanelPtyTests
 	}
 
 	[Theory(Timeout = 90_000)]
-	[InlineData("ru", "Обработка содерж…", "Исключения")]
-	[InlineData("uz", "Tarkibni qa…", "Istisnolar")]
+	[InlineData("ru", "Обработка содержимого", "Исключения")]
+	[InlineData("uz", "Tarkibni qayta ishlash", "Istisnolar")]
 	public async Task LocalizedRedactionLabelsKeepTheirCountersWhenEllipsized(
 		string language,
 		string contentTitle,

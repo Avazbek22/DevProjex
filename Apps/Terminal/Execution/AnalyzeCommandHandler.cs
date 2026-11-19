@@ -216,13 +216,14 @@ public sealed class AnalyzeCommandHandler(
 				Findings = request.IncludeFindings ? effectiveFindings : null
 			};
 		}
-		var policyExitCode = plan.HasErrors ||
-		                     request.Strict && plan.Diagnostics.Any(static diagnostic =>
-			                     diagnostic.Code != CodeCompressionAvailabilitySnapshot.DiagnosticCode) ||
-		                     request.FailOnFindings &&
-		                     (effectiveFindingCount > 0 || plan.UnscannableFiles is { Count: > 0 })
-			? CommandLineExitCodes.PolicyFailure
-			: CommandLineExitCodes.Success;
+		var policyExitCode = plan.HasErrors
+			? PlanDiagnosticExitCode.For(plan.Diagnostics)
+			: request.Strict && plan.Diagnostics.Any(static diagnostic =>
+				  diagnostic.Code != CodeCompressionAvailabilitySnapshot.DiagnosticCode) ||
+			  request.FailOnFindings &&
+			  (effectiveFindingCount > 0 || plan.UnscannableFiles is { Count: > 0 })
+				? CommandLineExitCodes.PolicyFailure
+				: CommandLineExitCodes.Success;
 		try
 		{
 			new ContextDiagnosticRenderer(environment, request.Output, services.Localization)

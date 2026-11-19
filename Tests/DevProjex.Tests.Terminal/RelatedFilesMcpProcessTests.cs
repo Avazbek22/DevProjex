@@ -68,6 +68,34 @@ public sealed partial class McpServerProcessTests
 	}
 
 	[Fact]
+	public async Task RealProcessRelatedFilesKeepsTheConfigurationThatIncludePatternsFilterOut()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("ts-project");
+		workspace.WriteFile("ts-project/tsconfig.json", "{\"compilerOptions\":{\"paths\":{\"@lib/*\":[\"./lib/*\"]}}}");
+		workspace.WriteFile("ts-project/lib/util.ts", "export const util = 1;\n");
+		workspace.WriteFile("ts-project/app/main.ts", "import { util } from '@lib/util';\n");
+		await using var server = await ActualMcpProcess.StartAsync(
+			project,
+			workspace.CreateDirectory("data"));
+
+		var result = await CallAsync(
+			server,
+			"related_files",
+			new Dictionary<string, object?>
+			{
+				["path"] = "app/main.ts",
+				["direction"] = "dependencies",
+				["include_patterns"] = new[] { "**/*.ts" }
+			});
+		var text = Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
+
+		Assert.Contains("lib/util.ts", text, StringComparison.Ordinal);
+		Assert.DoesNotContain(" — unresolved — ", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("tsconfig.json", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task RealProcessRelatedFilesReportsRustManifestDependencies()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -256,6 +284,8 @@ public sealed partial class McpServerProcessTests
 		};
 		startInfo.ArgumentList.Add(PublishedApplicationLocator.FindApplicationAssembly());
 		startInfo.ArgumentList.Add("mcp");
+		startInfo.ArgumentList.Add("--tool-set");
+		startInfo.ArgumentList.Add("full");
 		startInfo.ArgumentList.Add("--root");
 		startInfo.ArgumentList.Add(project);
 		startInfo.ArgumentList.Add("--git-mode");
@@ -375,6 +405,8 @@ public sealed partial class McpServerProcessTests
 		};
 		startInfo.ArgumentList.Add(PublishedApplicationLocator.FindApplicationAssembly());
 		startInfo.ArgumentList.Add("mcp");
+		startInfo.ArgumentList.Add("--tool-set");
+		startInfo.ArgumentList.Add("full");
 		startInfo.ArgumentList.Add("--root");
 		startInfo.ArgumentList.Add(project);
 		startInfo.ArgumentList.Add("--git-mode");

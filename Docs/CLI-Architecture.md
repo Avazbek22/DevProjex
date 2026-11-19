@@ -38,7 +38,7 @@ completion. There is no manual flat argument loop or parallel public parser.
 Human descriptions come from the shared 20-locale localization catalog.
 
 One bounded parser-boundary integrity check retains the distinction that
-System.CommandLine 2.0.10 loses for an empty inline assignment: `--name=`.
+System.CommandLine 2.0.11 loses for an empty inline assignment: `--name=`.
 It inspects only exact tokens before `--`, matches them to value-taking options
 on the already resolved command model, and returns a missing-value error. It
 does not resolve commands, parse option values, or reinterpret positional data.

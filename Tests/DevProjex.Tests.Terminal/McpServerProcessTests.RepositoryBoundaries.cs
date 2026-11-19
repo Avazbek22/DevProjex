@@ -29,7 +29,7 @@ public sealed partial class McpServerProcessTests
 		Assert.Equal(expected.Length, report.RootElement.GetProperty("inventory").GetProperty("files").GetInt32());
 
 		var server = CreateBoundaryProcess(repository, state.CreateDirectory("mcp-state"));
-		foreach (var argument in new[] { "mcp", "--root", repository })
+		foreach (var argument in new[] { "mcp", "--root", repository, "--tool-set", "full" })
 			server.ArgumentList.Add(argument);
 		using var process = Process.Start(server) ?? throw new InvalidOperationException("MCP did not start.");
 		var errors = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
@@ -115,7 +115,7 @@ public sealed partial class McpServerProcessTests
 		}
 
 		var server = CreateBoundaryProcess(project, workspace.CreateDirectory("mcp-state"));
-		foreach (var argument in new[] { "mcp", "--root", project })
+		foreach (var argument in new[] { "mcp", "--root", project, "--tool-set", "full" })
 			server.ArgumentList.Add(argument);
 		if (mode == "unrestricted")
 			server.ArgumentList.Add("--unrestricted");

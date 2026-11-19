@@ -5,6 +5,33 @@ namespace DevProjex.Tests.Unit;
 public sealed class ProjectProfilePersistenceCoordinatorTests
 {
 	[Fact]
+	public async Task AwaitedApplyPersistencePublishesItsFailedAttemptBeforeTheTransitionFlush()
+	{
+		var projectPath = Path.GetFullPath("profile-apply-project");
+		var (viewModel, selectionCoordinator) = CreateSelectionCoordinator(projectPath);
+		using (selectionCoordinator)
+		using (var secretSession = new SecretRedactionSession(new EmptySecretDetector()))
+		{
+			viewModel.Extensions.Add(new SelectionOptionViewModel(".cs", true));
+			viewModel.Extensions.Add(new SelectionOptionViewModel(".md", false));
+			selectionCoordinator.AcceptCurrentSelectionsAsApplied(projectPath);
+			var store = new RetryProfileStore(projectPath, failures: 1);
+			var persistence = new ProjectProfilePersistenceCoordinator(
+				viewModel, selectionCoordinator, store, secretSession);
+			await persistence.PersistIfNeededAsync(projectPath, TestContext.Current.CancellationToken);
+			Assert.True(persistence.HasPendingWrites);
+			Assert.Empty(store.SavedProfiles);
+
+			var result = await persistence.FlushPendingAsync(
+				TimeSpan.FromSeconds(1), TestContext.Current.CancellationToken);
+			Assert.True(result.Succeeded);
+			Assert.Equal(1, result.Attempted);
+			Assert.False(persistence.HasPendingWrites);
+			Assert.Equal([".cs"], store.SavedProfiles[projectPath].SelectedExtensions);
+		}
+	}
+
+	[Fact]
 	public async Task SelectionPersist_WritesTheFrontierWithoutPublishingDraftFilters()
 	{
 		const string projectPath = @"C:\Project";

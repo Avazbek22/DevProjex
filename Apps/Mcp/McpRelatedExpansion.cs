@@ -79,7 +79,8 @@ internal static class McpRelatedExpansion
 					frontier,
 					request.Direction,
 					hop == 0 ? progress : null,
-					cancellationToken)
+					cancellationToken,
+					readableProjectFiles: plan.IncludedFiles)
 				.ConfigureAwait(false);
 			if (hop == 0)
 			{

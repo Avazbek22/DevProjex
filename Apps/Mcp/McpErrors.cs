@@ -27,4 +27,16 @@ internal sealed class McpToolException(string code, string message) : Exception(
 	/// carries a path: the request index already identifies the file.
 	/// </summary>
 	public string? BatchReason { get; init; }
+
+	/// <summary>
+	/// The message names a directory's readable entries, the next step for that batch item, so a
+	/// batched read prints the whole message inside its untrusted block instead of a bare status.
+	/// </summary>
+	public bool NamesReadableEntries { get; init; }
+
+	/// <summary>
+	/// The project root quoted in the message. It is an address, so the error presents it under the
+	/// same private-data policy as the <c>get_tree</c> root label instead of the stricter detail scan.
+	/// </summary>
+	public string? ProjectRoot { get; init; }
 }

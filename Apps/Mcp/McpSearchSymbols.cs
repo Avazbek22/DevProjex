@@ -14,9 +14,25 @@ namespace DevProjex.Mcp;
 /// </remarks>
 internal static class McpSearchSymbols
 {
+	internal const string RegularExpressionFallbackNotice = "[Symbols] symbols=true takes declaration names; this pattern is a regular expression, so it was searched as text.";
+
+	internal static bool IsDocumentationPath(string relativePath)
+	{
+		var path = relativePath.Replace('\\', '/');
+		var segments = path.Split('/');
+		if (segments.Take(segments.Length - 1).Any(static segment =>
+			segment.Equals("docs", StringComparison.OrdinalIgnoreCase) || segment.Equals("doc", StringComparison.OrdinalIgnoreCase)))
+			return true;
+		var extension = Path.GetExtension(path);
+		return extension.Equals(".md", StringComparison.OrdinalIgnoreCase) ||
+			extension.Equals(".mdx", StringComparison.OrdinalIgnoreCase) ||
+			extension.Equals(".rst", StringComparison.OrdinalIgnoreCase) ||
+			extension.Equals(".txt", StringComparison.OrdinalIgnoreCase) ||
+			extension.Equals(".adoc", StringComparison.OrdinalIgnoreCase);
+	}
+
 	/// <summary>
 	/// Limits final declaration annotations, not the navigation parses used to score search candidates.
-	/// Additional matching files are counted as unannotated.
 	/// </summary>
 	public const int MaximumAnnotatedFiles = 64;
 
@@ -44,7 +60,7 @@ internal static class McpSearchSymbols
 
 	/// <summary>
 	/// Tells a regular expression from a declaration-name query, so a regex sent in declaration
-	/// mode is refused instead of answering a confident "no matches". No supported language puts
+	/// mode is searched as text instead of answering a confident "no matches". No supported language puts
 	/// a backslash, '^', '+', ".*" or "(?" in a declaration, and a declared name never holds a
 	/// quantifier, bracket, brace or parenthesis: those may only follow the name as its parameter
 	/// list, type arguments or body, as in "def foo(" or "interface Box&lt;T&gt; {". One trailing
@@ -85,6 +101,70 @@ internal static class McpSearchSymbols
 		}
 		return string.Empty;
 	}
+
+	public static bool TryReadDeclarationNames(string pattern, out IReadOnlyList<string> names)
+	{
+		ArgumentNullException.ThrowIfNull(pattern);
+		var parsed = new List<string>();
+		names = [];
+		foreach (var alternative in pattern.Split('|', StringSplitOptions.TrimEntries))
+		{
+			var text = alternative.StartsWith('^') ? alternative[1..] : alternative;
+			if (text.EndsWith('$'))
+				text = text[..^1];
+			if (IsOpenEnded(text))
+				return false;
+			text = text.Replace(@"\s+", " ", StringComparison.Ordinal)
+				.Replace(@"\s*", " ", StringComparison.Ordinal)
+				.Replace(@"\s", " ", StringComparison.Ordinal)
+				.Replace(".*", " ", StringComparison.Ordinal)
+				.Replace(".+", " ", StringComparison.Ordinal)
+				.Replace(@"\b", " ", StringComparison.Ordinal);
+			string? name = null;
+			foreach (var word in text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
+			{
+				if (IsDeclarationKeyword(word))
+					continue;
+				if (name is not null || !word.EnumerateRunes().All(static rune =>
+					Rune.IsLetter(rune) || Rune.GetUnicodeCategory(rune) is UnicodeCategory.DecimalDigitNumber or
+						UnicodeCategory.LetterNumber or UnicodeCategory.OtherNumber || rune.Value == '_'))
+				{
+					return false;
+				}
+				name = word;
+			}
+			if (name is null)
+				return false;
+			if (!parsed.Contains(name, StringComparer.Ordinal))
+				parsed.Add(name);
+		}
+		names = parsed;
+		return true;
+	}
+
+	/// <summary>
+	/// A wildcard at either end of an alternative, as in "def\s+test_.*" or ".*Handler", asks for
+	/// every name with that prefix or suffix. Reading it as the bare name would turn the query into
+	/// a different one and answer a confident "no matches", so such a pattern stays a text search.
+	/// A wildcard between a keyword and the name, as in "func.*RemoteIP", only skips the signature.
+	/// </summary>
+	private static bool IsOpenEnded(string alternative)
+	{
+		var text = alternative.AsSpan();
+		while (text.StartsWith(@"\b", StringComparison.Ordinal))
+			text = text[2..];
+		while (text.EndsWith(@"\b", StringComparison.Ordinal))
+			text = text[..^2];
+		return text.StartsWith(".*", StringComparison.Ordinal) || text.StartsWith(".+", StringComparison.Ordinal) ||
+			text.EndsWith(".*", StringComparison.Ordinal) || text.EndsWith(".+", StringComparison.Ordinal);
+	}
+
+	private static bool IsDeclarationKeyword(string word) => word is
+		"abstract" or "async" or "class" or "const" or "data" or "def" or "default" or "enum" or "export" or
+		"extern" or "final" or "fn" or "fun" or "func" or "function" or "impl" or "interface" or "internal" or
+		"let" or "module" or "namespace" or "object" or "override" or "partial" or "private" or "protected" or
+		"pub" or "public" or "readonly" or "record" or
+		"sealed" or "static" or "struct" or "trait" or "type" or "typedef" or "union" or "val" or "var" or "virtual";
 
 	private static bool IsPlainDeclaredName(string name)
 	{
@@ -232,7 +312,8 @@ internal static class McpSearchSymbols
 				var firstLine = Math.Max(1, declaration.StartLine - contextLines);
 				var lastLine = checked(declaration.StartLine + contextLines);
 				var evidence = lines
-					.Where(line => line.LineNumber >= firstLine && line.LineNumber <= lastLine)
+					.Where(line => line.LineNumber >= firstLine && line.LineNumber <= lastLine &&
+						(line.Offset < content.Length || line.LineNumber == declaration.StartLine))
 					.ToArray();
 				if (evidence.Length > 0)
 				{
@@ -253,7 +334,8 @@ internal static class McpSearchSymbols
 	public static McpSearchSymbolResult Resolve(
 		IReadOnlyList<McpSearchHit> hits,
 		IReadOnlyDictionary<string, IReadOnlyList<NavigationDeclaration>> navigationByFile,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		IReadOnlyDictionary<string, McpNavigationDeclarationIndex>? declarationIndexes = null)
 	{
 		ArgumentNullException.ThrowIfNull(hits);
 		ArgumentNullException.ThrowIfNull(navigationByFile);
@@ -262,21 +344,18 @@ internal static class McpSearchSymbols
 
 		var files = new List<McpSearchHit>();
 		var seen = new HashSet<string>(StringComparer.Ordinal);
-		var skippedFiles = 0;
 		foreach (var hit in hits)
 		{
 			if (!seen.Add(hit.RelativePath))
 				continue;
 			if (files.Count >= MaximumAnnotatedFiles)
-			{
-				skippedFiles++;
-				continue;
-			}
+				break;
 
 			files.Add(hit);
 		}
 
 		var spansByFile = new Dictionary<string, List<DeclarationSpan>>(StringComparer.Ordinal);
+		var indexes = new Dictionary<string, McpNavigationDeclarationIndex>(StringComparer.Ordinal);
 		foreach (var file in files)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
@@ -292,7 +371,11 @@ internal static class McpSearchSymbols
 				.ToList();
 
 			if (spans.Count > 0)
+			{
 				spansByFile[file.RelativePath] = spans;
+				indexes[file.RelativePath] = declarationIndexes is not null && declarationIndexes.TryGetValue(file.RelativePath, out var index)
+					? index : new McpNavigationDeclarationIndex(fileDeclarations);
+			}
 		}
 
 		var names = new Dictionary<McpSearchHitKey, string>();
@@ -300,32 +383,18 @@ internal static class McpSearchSymbols
 		var repeatedNameRanges = new Dictionary<McpSearchDeclaration, IReadOnlyList<(int StartLine, int EndLine)>>();
 		var declared = new HashSet<string>(StringComparer.Ordinal);
 		var annotated = 0;
-		var unannotatedFiles = new HashSet<string>(StringComparer.Ordinal);
 		foreach (var hit in hits)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			if (!spansByFile.TryGetValue(hit.RelativePath, out var spans))
-			{
-				unannotatedFiles.Add(hit.RelativePath);
 				continue;
-			}
 
-			// The innermost declaration is the narrowest one that still contains the line.
-			DeclarationSpan? best = null;
-			foreach (var span in spans)
-			{
-				if (hit.Line < span.Start || hit.Line > span.End)
-					continue;
-				if (best is null || span.End - span.Start < best.End - best.Start ||
-					span.End - span.Start == best.End - best.Start && span.CharacterLength < best.CharacterLength)
-					best = span;
-			}
+			var located = indexes[hit.RelativePath].Find(hit.Line);
+			var best = located is null ? null : new DeclarationSpan(
+				located.StartLine, located.EndLine, located.Name, located.EndIndex - located.StartIndex);
 
 			if (best is null || string.IsNullOrEmpty(best.Name))
-			{
-				unannotatedFiles.Add(hit.RelativePath);
 				continue;
-			}
 
 			names[new McpSearchHitKey(hit.RelativePath, hit.Line)] = best.Name;
 			// One entry per declaration, not per hit: this is the list a caller reads back, and a
@@ -350,9 +419,7 @@ internal static class McpSearchSymbols
 		return new McpSearchSymbolResult(
 			names,
 			declarations,
-			annotated,
-			unannotatedFiles.Count,
-			skippedFiles)
+			annotated)
 		{
 			DeclarationRanges = new McpDeclarationLineRanges(repeatedNameRanges)
 		};
@@ -393,9 +460,7 @@ internal static class McpSearchSymbols
 		if (declarations.Count == 0)
 			return null;
 
-		if (!regex.HasDeclarationBodyLiteralTerms)
-			return FindPreview(candidates, declarations[0]);
-
+		var hasLiteralTerms = regex.HasDeclarationBodyLiteralTerms;
 		var declarationSet = declarations.ToHashSet();
 		var previews = new Dictionary<McpSearchDeclaration, McpSearchDeclarationPreview>();
 		var matchedLines = new Dictionary<McpSearchDeclaration, int>();
@@ -404,6 +469,11 @@ internal static class McpSearchSymbols
 		{
 			var preview = candidate.DeclarationPreview;
 			if (preview is null || !declarationSet.Contains(preview.Declaration))
+				continue;
+			var ownLine = candidate.MatchLine >= preview.Declaration.StartLine &&
+				candidate.MatchLine <= preview.Declaration.EndLine;
+			if (!ownLine && (!hasLiteralTerms ||
+				regex.DeclarationBodyNameMatchQuality(preview.Declaration.Name) == McpDeclarationBodyNameMatchQuality.None))
 				continue;
 
 			previews.TryAdd(preview.Declaration, preview);
@@ -419,6 +489,8 @@ internal static class McpSearchSymbols
 		{
 			if (!previews.TryGetValue(declaration, out var preview))
 				continue;
+			if (!hasLiteralTerms)
+				return preview;
 
 			var nameQuality = regex.DeclarationBodyNameMatchQuality(declaration.Name);
 			var lineCount = matchedLines.GetValueOrDefault(declaration);
@@ -643,8 +715,10 @@ internal readonly record struct McpSearchHitKey(string RelativePath, int Line);
 /// <summary>
 /// One rendered line of one group, kept so that the slice a response shows can be chosen after the
 /// whole result is known rather than as each file streams past.
+/// A line inside a multi-line match after its first is shown as matched but counts nothing:
+/// <see cref="IsMatch"/> stays on the first line only, and <see cref="InMatchSpan"/> marks the rest.
 /// </summary>
-internal readonly record struct McpSearchGroupLine(int LineNumber, bool IsMatch, string Text);
+internal readonly record struct McpSearchGroupLine(int LineNumber, bool IsMatch, string Text, bool InMatchSpan = false);
 
 /// <summary>
 /// One context group, rendered and set aside. The path heading and the group separator are not in
@@ -752,20 +826,10 @@ internal sealed class McpSearchDeclarationPreviewCache
 		for (var line = startLine; line <= endLine; line++)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			var start = starts[line - 1];
-			var end = line < starts.Length ? starts[line] : content.Length;
-			if (end > start && content[end - 1] == '\n')
-				end--;
-			if (end > start && content[end - 1] == '\r')
-				end--;
-			var lineText = content.AsSpan(start, end - start);
+			var lineText = ReadLine(line);
 			var separator = hasLine ? 1 : 0;
 			if ((long)output.Length + separator + lineText.Length > maximumCharacters)
-			{
-				if (!hasLine)
-					AppendPrefix(output, lineText, maximumCharacters);
-				return (output.ToString(), endLine - line + 1);
-			}
+				return SliceHead(startLine, endLine);
 
 			if (hasLine)
 				output.Append('\n');
@@ -774,6 +838,50 @@ internal sealed class McpSearchDeclarationPreviewCache
 		}
 
 		return (output.ToString(), 0);
+	}
+
+	/// <summary>
+	/// A body over the limit is read in full anyway, so only its head is shown: whole leading
+	/// lines within <see cref="McpDeclarationHead.MaximumCharacters"/>, cut after the signature.
+	/// </summary>
+	private (string Text, int RemainingLines) SliceHead(int startLine, int endLine)
+	{
+		var budget = Math.Min(McpDeclarationHead.MaximumCharacters, maximumCharacters);
+		var candidates = new List<string>();
+		var length = 0;
+		for (var line = startLine; line <= endLine; line++)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var lineText = ReadLine(line);
+			var separator = candidates.Count > 0 ? 1 : 0;
+			if (length + separator + lineText.Length > budget)
+			{
+				if (candidates.Count == 0)
+				{
+					var prefix = new StringBuilder(budget);
+					AppendPrefix(prefix, lineText, budget);
+					return (prefix.ToString(), endLine - startLine + 1);
+				}
+				break;
+			}
+			candidates.Add(lineText.ToString());
+			length += separator + lineText.Length;
+		}
+
+		var headLines = McpDeclarationHead.CountHeadLines(relativePath, candidates);
+		return (string.Join('\n', candidates.Take(headLines)), endLine - startLine + 1 - headLines);
+	}
+
+	private ReadOnlySpan<char> ReadLine(int line)
+	{
+		var starts = lineStarts!;
+		var start = starts[line - 1];
+		var end = line < starts.Length ? starts[line] : content.Length;
+		if (end > start && content[end - 1] == '\n')
+			end--;
+		if (end > start && content[end - 1] == '\r')
+			end--;
+		return content.AsSpan(start, end - start);
 	}
 
 	private static int[] BuildLineStarts(string content, CancellationToken cancellationToken)
@@ -821,12 +929,10 @@ internal sealed class McpSearchDeclarationPreviewCache
 internal sealed record McpSearchSymbolResult(
 	IReadOnlyDictionary<McpSearchHitKey, string> Names,
 	IReadOnlyList<McpSearchDeclaration> Declarations,
-	int AnnotatedHits,
-	int FilesWithoutDeclarations,
-	int FilesBeyondTheLimit)
+	int AnnotatedHits)
 {
 	public static readonly McpSearchSymbolResult None =
-		new(new Dictionary<McpSearchHitKey, string>(), [], 0, 0, 0);
+		new(new Dictionary<McpSearchHitKey, string>(), [], 0);
 
 	public McpDeclarationLineRanges DeclarationRanges { get; init; } = McpDeclarationLineRanges.None;
 }

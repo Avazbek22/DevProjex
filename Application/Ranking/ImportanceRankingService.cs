@@ -16,6 +16,8 @@ public sealed class ImportanceRankingService(
 		ImportanceMissingSignalPolicy.ConfidenceLimited;
 	private const int MaximumTopEntries = 10;
 	private const int PageRankIterations = 30;
+	private const int MinimumParallelSourceVersionFiles = 512;
+	private const int MaximumSourceVersionHashConcurrency = 4;
 	private static readonly HashSet<string> TestFrameworks = new(StringComparer.OrdinalIgnoreCase)
 	{
 		"xunit", "nunit", "microsoft.visualstudio.testtools.unittesting",
@@ -133,7 +135,7 @@ public sealed class ImportanceRankingService(
 		var internalReferenceCandidates = dependency.Edges.Count(static edge =>
 			edge.Status != ResolutionStatus.External);
 		var resolvedInternalReferences = dependency.Edges.Count(edge =>
-			edge.Status == ResolutionStatus.Resolved &&
+			IsGraphEvidence(edge) &&
 			ResolvedTargets(edge).Any(candidateRelativePaths.Contains));
 		var resolvedInternalReferenceCoverage = internalReferenceCandidates == 0
 			? 0
@@ -242,6 +244,11 @@ public sealed class ImportanceRankingService(
 			? edge.DeclarationFiles
 			: edge.Target is null ? [] : [edge.Target];
 
+	// A module-only import names no declaration, so ranking sees it exactly as it saw the
+	// unresolved import it replaced: outside the graph and outside the resolved fraction.
+	private static bool IsGraphEvidence(DependencyEdge edge) =>
+		edge.Status == ResolutionStatus.Resolved && !edge.ModuleOnly;
+
 	internal static double CalculateExtractedFactsCoverage(
 		DependencyFactsCoverage coverage,
 		int candidateCount) =>
@@ -265,13 +272,17 @@ public sealed class ImportanceRankingService(
 					static pair => pair.Key,
 					static pair => pair.Value.ContentHash ?? string.Empty,
 					PathComparer.Default));
+			// Bounding configuration reads to the ranked candidates keeps a hidden or excluded
+			// configuration file, such as a gitignored tsconfig path-alias map, from feeding edges
+			// that favor files the ranked set never actually shows.
 			var snapshot = await dependencyFactsEngine
 				.IndexAsync(
 					root,
 					candidatePaths,
 					progress,
 					cancellationToken,
-					contentIdentities)
+					contentIdentities,
+					readableProjectFiles: candidatePaths)
 				.ConfigureAwait(false);
 			if (!ContentChangedDuringIndexing(versions, snapshot.ContentObservations))
 				return (snapshot, versions);
@@ -305,7 +316,14 @@ public sealed class ImportanceRankingService(
 		return false;
 	}
 
-	private static async Task<IReadOnlyDictionary<string, RankingSourceVersion>> CaptureVersionsAsync(
+	private static Task<IReadOnlyDictionary<string, RankingSourceVersion>> CaptureVersionsAsync(
+		IReadOnlyList<string> paths,
+		CancellationToken cancellationToken) =>
+		paths.Count < MinimumParallelSourceVersionFiles
+			? CaptureVersionsSerialAsync(paths, cancellationToken)
+			: CaptureVersionsInParallelAsync(paths, cancellationToken);
+
+	private static async Task<IReadOnlyDictionary<string, RankingSourceVersion>> CaptureVersionsSerialAsync(
 		IReadOnlyList<string> paths,
 		CancellationToken cancellationToken)
 	{
@@ -316,6 +334,31 @@ public sealed class ImportanceRankingService(
 			versions[Path.GetFullPath(path)] = await RankingSourceVersion
 				.CaptureAsync(path, cancellationToken)
 				.ConfigureAwait(false);
+		}
+		return versions;
+	}
+
+	private static async Task<IReadOnlyDictionary<string, RankingSourceVersion>> CaptureVersionsInParallelAsync(
+		IReadOnlyList<string> paths,
+		CancellationToken cancellationToken)
+	{
+		var captured = new RankingSourceVersion[paths.Count];
+		await Parallel.ForEachAsync(
+			Enumerable.Range(0, paths.Count),
+			new ParallelOptions
+			{
+				MaxDegreeOfParallelism = MaximumSourceVersionHashConcurrency,
+				CancellationToken = cancellationToken
+			},
+			async (index, token) =>
+				captured[index] = await RankingSourceVersion.CaptureAsync(paths[index], token).ConfigureAwait(false))
+			.ConfigureAwait(false);
+		var versions = new Dictionary<string, RankingSourceVersion>(paths.Count, PathComparer.Default);
+		// Preserve insertion order and serial overwrite semantics for duplicate paths.
+		for (var index = 0; index < paths.Count; index++)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			versions[Path.GetFullPath(paths[index])] = captured[index];
 		}
 		return versions;
 	}
@@ -571,7 +614,7 @@ public sealed class ImportanceRankingService(
 		foreach (var edge in snapshot.Edges)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			if (edge.Status != ResolutionStatus.Resolved ||
+			if (!IsGraphEvidence(edge) ||
 				!nodeByPath.TryGetValue(edge.Source, out var sourceNode))
 			{
 				continue;

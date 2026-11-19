@@ -110,7 +110,7 @@ public sealed class ProfileCommandHandler(
 						new TerminalOutputOptions(),
 						services.Localization)
 					.Write(plan.Diagnostics);
-				return CommandLineExitCodes.PolicyFailure;
+				return PlanDiagnosticExitCode.For(plan.Diagnostics);
 			}
 			var legacy = ToLegacyProfile(plan, selection);
 			var saveResult = services.LocalProfileStore.TrySaveProfileWithResult(
@@ -209,7 +209,7 @@ public sealed class ProfileCommandHandler(
 		{
 			new ContextDiagnosticRenderer(environment, new TerminalOutputOptions(), services.Localization)
 				.Write(plan.Diagnostics);
-			return CommandLineExitCodes.PolicyFailure;
+			return PlanDiagnosticExitCode.For(plan.Diagnostics);
 		}
 
 		SaveLocalProfile(projectPath, plan, selection, expectedUpdatedUtc);

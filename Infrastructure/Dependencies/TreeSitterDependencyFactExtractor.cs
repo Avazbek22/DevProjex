@@ -97,6 +97,17 @@ public sealed partial class TreeSitterDependencyFactExtractor : IDependencyFactE
 		}
 	}
 
+	public (LanguageId LanguageId, string ScopeId) DescribePath(
+		string fullPath,
+		DependencyResolverConfiguration configuration)
+	{
+		ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+		var language = ForPath(fullPath);
+		var scope = ScopeOwners.GetValue(configuration, static value => new ScopeOwnerIndex(value.Scopes))
+			.Resolve(language, fullPath);
+		return (language, scope);
+	}
+
 	public async ValueTask<PreparedDependencySource> PrepareAsync(
 		string sourceRoot,
 		string fullPath,
@@ -411,7 +422,9 @@ public sealed partial class TreeSitterDependencyFactExtractor : IDependencyFactE
 				ReadQuery(definition.QueryDirectory, "references.scm") + "\0" +
 				ReadQuery(definition.QueryDirectory, "navigation.scm") + "\0" + DiagnosticErrorQuery));
 			var projectionIdentity = id == LanguageId.CSharp ? ":conditional-projection-v3" : string.Empty;
-			return $"{definition.Library}:TreeSitter.DotNet-1.3.0:{queryHash}{projectionIdentity}";
+			var callableHeaderIdentity = id is LanguageId.TypeScript or LanguageId.Tsx ? ":callable-headers-v2" : string.Empty;
+			var pythonNavigationIdentity = id == LanguageId.Python ? ":module-navigation-v1" : string.Empty;
+			return $"{definition.Library}:TreeSitter.DotNet-1.3.0:{queryHash}{projectionIdentity}:root-recovery-v1{callableHeaderIdentity}{pythonNavigationIdentity}";
 		});
 
 	public FileFacts Extract(PreparedDependencySource source, DependencyFactsLimits limits) =>
@@ -434,21 +447,21 @@ public sealed partial class TreeSitterDependencyFactExtractor : IDependencyFactE
 		cancellationToken.ThrowIfCancellationRequested();
 		var runtime = GetRuntime(language);
 		using var lease = runtime.Rent(_workerBudget);
-		using var tree = ParseWithConditionalProjection(lease.Parser, language, source, relativePath,
-			cancellationToken, out var omittedRegions);
+		using var tree = ParseWithSyntaxRecovery(lease.Parser, language, source, relativePath,
+			cancellationToken, out var omittedRegions, out var recoveredHeaders);
 		var syntaxDamage = AnalyzeSyntaxDamage(
 			tree.RootNode,
 			relativePath,
 			cancellationToken,
 			omittedRegions);
-		return CaptureNavigation(
+		return AddRecoveredNavigation(CaptureNavigation(
 			runtime.Navigation,
 			tree.RootNode,
 			language,
 			relativePath,
 			contentFingerprint,
 			cancellationToken,
-			syntaxDamage);
+			syntaxDamage), recoveredHeaders, contentFingerprint);
 	}
 
 	public FileFacts Extract(
@@ -468,8 +481,8 @@ public sealed partial class TreeSitterDependencyFactExtractor : IDependencyFactE
 			cancellationToken.ThrowIfCancellationRequested();
 			var runtime = GetRuntime(source.LanguageId);
 			using var lease = runtime.Rent(_workerBudget);
-			using var tree = ParseWithConditionalProjection(lease.Parser, source.LanguageId, source.Source,
-				source.RelativePath, cancellationToken, out var omittedRegions);
+			using var tree = ParseWithSyntaxRecovery(lease.Parser, source.LanguageId, source.Source,
+				source.RelativePath, cancellationToken, out var omittedRegions, out var recoveredHeaders);
 			var syntaxDamage = AnalyzeSyntaxDamage(
 				tree.RootNode,
 				source.RelativePath,
@@ -482,7 +495,7 @@ public sealed partial class TreeSitterDependencyFactExtractor : IDependencyFactE
 				limits.MaximumRawCapturesPerFile,
 				cancellationToken,
 				syntaxDamage);
-			if (rawCaptureLimitExceeded)
+			if (rawCaptureLimitExceeded || declarations.Count + references.Count + recoveredHeaders.Count > limits.MaximumRawCapturesPerFile)
 				return StatusOnly(source, DependencyFileStatus.ExtractionFailed, "fact limit exceeded");
 			var context = new DependencyExtractionContext(
 				source.RelativePath,
@@ -492,18 +505,18 @@ public sealed partial class TreeSitterDependencyFactExtractor : IDependencyFactE
 				source.ContentFingerprint,
 				syntaxDamage is not null,
 				errorKinds,
-				declarations,
+				recoveredHeaders.Count == 0 ? declarations : [.. declarations, .. recoveredHeaders],
 				references,
 				partialParse);
 			var result = runtime.Adapter.Extract(context, limits);
-			var navigation = CaptureNavigation(
+			var navigation = AddRecoveredNavigation(CaptureNavigation(
 				runtime.Navigation,
 				tree.RootNode,
 				source.LanguageId,
 				source.RelativePath,
 				source.ContentFingerprint,
 				cancellationToken,
-				syntaxDamage);
+				syntaxDamage), recoveredHeaders, source.ContentFingerprint);
 			Interlocked.Add(ref _adapterVisitedRanges, context.Work.VisitedRanges);
 			Interlocked.Add(ref _adapterComparisons, context.Work.Comparisons);
 			Interlocked.Add(ref _createdFacts,
@@ -737,6 +750,8 @@ public sealed partial class TreeSitterDependencyFactExtractor : IDependencyFactE
 				});
 			}
 		}
+		if (language == LanguageId.Python)
+			AddPythonModuleAssignments(declarations, root, contentFingerprint, cancellationToken, syntaxDamage);
 		return declarations
 			.OrderBy(static declaration => declaration.StartLine)
 			.ThenBy(static declaration => declaration.EndLine)
@@ -774,6 +789,7 @@ public sealed partial class TreeSitterDependencyFactExtractor : IDependencyFactE
 	{
 		if (!root.HasError && omittedRegions is not { Count: > 0 })
 			return null;
+		cancellationToken.ThrowIfCancellationRequested();
 		var damaged = new HashSet<(int StartIndex, int EndIndex, int StartLine, int EndLine)>(
 			omittedRegions?.Select(static region => (
 				region.StartIndex,
@@ -781,7 +797,8 @@ public sealed partial class TreeSitterDependencyFactExtractor : IDependencyFactE
 				region.StartLine,
 				region.EndLine)) ?? []);
 		var pending = new Stack<Node>();
-		pending.Push(root);
+		if (root.HasError)
+			pending.Push(root);
 		var visited = 0;
 		while (pending.TryPop(out var node))
 		{
@@ -1333,6 +1350,9 @@ public sealed partial class TreeSitterDependencyFactExtractor : IDependencyFactE
 		var typeParameters = node.Children.FirstOrDefault(static child =>
 			child.Type is "type_parameter_list" or "type_parameters");
 		var genericArity = typeParameters is null ? 0 : CountGenericArity(materialization.Read(typeParameters));
+		if (node.Type == "variable_declarator" &&
+			node.GetChildForField("value")?.GetChildForField("type_parameters") is { } initializerParameters)
+			genericArity = initializerParameters.NamedChildren.Count(static parameter => parameter.Type == "type_parameter");
 		var evidence = string.IsNullOrEmpty(capturedName)
 			? string.Empty
 			: capturedName + (genericArity == 0 ? string.Empty : $"`{genericArity}");

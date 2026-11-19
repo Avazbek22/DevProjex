@@ -145,9 +145,13 @@ public sealed class HelpReleaseRegressionTests
 	[InlineData("profile validate", "0,1,2,130")]
 	[InlineData("profile export", "0,1,2,3,4,130")]
 	[InlineData("ui list", "0,1,2,5,130")]
-	[InlineData("ui status", "0,1,2,3,4,5,130")]
+	[InlineData("ui status", "0,1,2,5,130")]
+	[InlineData("ui filter set", "0,1,2,5,130")]
+	[InlineData("ui preview", "0,2,130")]
+	[InlineData("profile reset", "0,1,2,3,130")]
 	[InlineData("search", "0,1,2,3,4,130")]
 	[InlineData("related", "0,1,2,3,4,130")]
+	[InlineData("diff", "0,1,2,3,4,130")]
 	[InlineData("mcp", "0,1,2,130")]
 	[InlineData("mcp connect", "0,1,2,130")]
 	[InlineData("mcp log", "0,1,2,4,130")]
@@ -163,6 +167,15 @@ public sealed class HelpReleaseRegressionTests
 		Assert.Equal(
 			expectedCodes.Split(',').Select(int.Parse),
 			CommandHelpRenderer.ResolveExitCodes(command));
+	}
+
+	[Fact]
+	public async Task DiffHelpListsTheGitStateRefusalAndDestinationConflict()
+	{
+		var help = await RenderHelpAsync(120, "en", "diff");
+
+		Assert.Contains("Policy or check failure", help, StringComparison.Ordinal);
+		Assert.Contains("Destination conflict", help, StringComparison.Ordinal);
 	}
 
 	// The renderer appends "Default: X." and "Repeatable." itself, so a description that
@@ -294,6 +307,7 @@ public sealed class HelpReleaseRegressionTests
 	{
 		int[] widths = [60, 80, 120];
 		var root = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();
+		var exampleLines = CollectExampleLines(root);
 		foreach (var language in CliChoiceSets.Language.Tokens)
 		{
 			foreach (var width in widths)
@@ -304,13 +318,66 @@ public sealed class HelpReleaseRegressionTests
 					Assert.All(
 						help.Split(Environment.NewLine),
 						line => Assert.True(
-							line.GetColumns() <= width,
+							line.GetColumns() <= width || exampleLines.Contains(line),
 							$"{language} help exceeds {width} cells for " +
 							$"`devprojex {string.Join(' ', path)}`: {line}"));
 					Assert.DoesNotContain("<VALUE>", help, StringComparison.Ordinal);
 					Assert.DoesNotContain("[[", help, StringComparison.Ordinal);
 				}
 			}
+		}
+	}
+
+	[Theory]
+	[InlineData(80)]
+	[InlineData(40)]
+	public async Task HelpExamplesStayOnOneLineAtNarrowWidths(int width)
+	{
+		var root = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();
+		foreach (var (command, path) in EnumeratePublicCommands(root))
+		{
+			var help = await RenderHelpAsync(width, "en", path.ToArray());
+			var lines = help.Split(Environment.NewLine);
+			foreach (var example in CliExamplesRegistry.Get(command, FormatCommandPath(path)))
+				Assert.Contains("  " + example, lines);
+		}
+
+		var longest = CollectExampleLines(root).MaxBy(static line => line.Length)!;
+		Assert.True(longest.Length > 80, longest);
+	}
+
+	[Fact]
+	public async Task ExportContextAliasHelpKeepsLongExampleOnOneLine()
+	{
+		var help = await RenderHelpAsync(80, "en", "export", "ctx");
+
+		Assert.Contains(
+			"  devprojex export context . --view tree-content --format markdown -o ../devprojex-context.md",
+			help.Split(Environment.NewLine));
+	}
+
+	private static HashSet<string> CollectExampleLines(RootCommand root) =>
+		EnumeratePublicCommands(root)
+			.SelectMany(static entry => CliExamplesRegistry.Get(entry.Command, FormatCommandPath(entry.Path)))
+			.Select(static example => "  " + example)
+			.ToHashSet(StringComparer.Ordinal);
+
+	private static string FormatCommandPath(IReadOnlyList<string> path) =>
+		string.Join(' ', new[] { "devprojex" }.Concat(path));
+
+	private static IEnumerable<(Command Command, IReadOnlyList<string> Path)> EnumeratePublicCommands(
+		RootCommand root)
+	{
+		yield return (root, []);
+		var stack = new Stack<(Command Command, IReadOnlyList<string> Path)>();
+		foreach (var child in root.Subcommands.Where(static command => !command.Hidden))
+			stack.Push((child, [child.Name]));
+		while (stack.Count > 0)
+		{
+			var entry = stack.Pop();
+			yield return entry;
+			foreach (var child in entry.Command.Subcommands.Where(static child => !child.Hidden))
+				stack.Push((child, [.. entry.Path, child.Name]));
 		}
 	}
 

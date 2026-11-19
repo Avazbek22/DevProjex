@@ -9,9 +9,11 @@ public sealed class McpRootRegistry
 	private readonly Dictionary<string, List<string>> _lexicalRootsByPhysical;
 	private readonly Dictionary<string, List<string>> _rootsByName;
 	private readonly Func<string, bool, string> _physicalPathResolver;
+	private readonly bool _resolvesWithFilesystemWalk;
 
 	public McpRootRegistry(IEnumerable<string> roots) : this(roots, ResolvePhysicalExistingPath)
 	{
+		_resolvesWithFilesystemWalk = true;
 	}
 
 	internal McpRootRegistry(
@@ -111,7 +113,9 @@ public sealed class McpRootRegistry
 				$"{McpErrorCodes.InvalidArguments}: 'project' is written as a path that names a host. " +
 				"Such a form is refused before 'project' is resolved against the allowed roots, so that " +
 				"naming one cannot make the server reach it. " +
-				$"Call list_projects and use a listed project index: {FormatRoots()}.");
+				(_roots.Count == 1
+					? "One local root is configured: omit 'project'."
+					: $"Call list_projects and use a listed project index: {FormatRoots()}."));
 		}
 
 		string physical;
@@ -192,7 +196,47 @@ public sealed class McpRootRegistry
 		}
 	}
 
-	public string ResolveExistingPath(string projectRoot, string path, bool requireDirectory = false)
+	public string ResolveExistingPath(string projectRoot, string path, bool requireDirectory = false) =>
+		ResolveExistingPath(projectRoot, path, requireDirectory, _physicalPathResolver);
+
+	/// <summary>
+	/// Applies <see cref="ResolveExistingPath(string, string, bool)"/> to every path of one project and
+	/// fails on the first one it would reject. Paths of a project share most of their directories, so
+	/// one pass resolves each shared directory once instead of once per file; the final segment of
+	/// every path is still opened and resolved on its own. Nothing is kept after the pass.
+	/// </summary>
+	internal void EnsureExistingPathsWithin(
+		string projectRoot,
+		IReadOnlyList<string> paths,
+		CancellationToken cancellationToken)
+	{
+		Func<string, bool, string> resolver = _physicalPathResolver;
+		if (_resolvesWithFilesystemWalk)
+		{
+			var resolvedDirectories = new Dictionary<string, string>(StringComparer.Ordinal);
+			resolver = (path, requireDirectory) =>
+				ResolvePhysicalExistingPath(path, requireDirectory, resolvedDirectories);
+		}
+		foreach (var path in paths)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			_ = ResolveExistingPath(projectRoot, path, requireDirectory: false, resolver);
+		}
+	}
+
+	private static McpToolException PathNotFound(string path, string projectRoot) =>
+		new(
+			McpErrorCodes.PathNotFound,
+			$"{McpErrorCodes.PathNotFound}: path '{path}' does not exist inside project '{projectRoot}'.")
+		{
+			ProjectRoot = projectRoot
+		};
+
+	private string ResolveExistingPath(
+		string projectRoot,
+		string path,
+		bool requireDirectory,
+		Func<string, bool, string> physicalPathResolver)
 	{
 		if (PathUtility.IsMissingPath(path))
 			throw InvalidPath();
@@ -216,29 +260,88 @@ public sealed class McpRootRegistry
 		string physical;
 		try
 		{
-			physical = _physicalPathResolver(candidate, requireDirectory);
+			physical = physicalPathResolver(candidate, requireDirectory);
 		}
 		catch (FileNotFoundException)
 		{
+			EnsureExistingAncestorIsWithin(projectRoot, path, lexicalPath, physicalPathResolver);
 			if (FlatpakEnvironment.Current.IsActive)
 				throw FlatpakPathUnavailable(lexicalPath);
-			throw new McpToolException(
-				McpErrorCodes.PathNotFound,
-				$"{McpErrorCodes.PathNotFound}: path '{path}' does not exist inside project '{projectRoot}'.");
+			throw PathNotFound(path, projectRoot);
 		}
 		catch (DirectoryNotFoundException)
 		{
+			EnsureExistingAncestorIsWithin(projectRoot, path, lexicalPath, physicalPathResolver);
 			if (FlatpakEnvironment.Current.IsActive)
 				throw FlatpakPathUnavailable(lexicalPath);
-			throw new McpToolException(
-				McpErrorCodes.PathNotFound,
-				$"{McpErrorCodes.PathNotFound}: path '{path}' does not exist inside project '{projectRoot}'.");
+			throw PathNotFound(path, projectRoot);
 		}
 
 		if (!IsWithin(projectRoot, physical))
 			throw RootViolation(path);
 		return physical;
 	}
+
+	/// <summary>
+	/// A missing path is reported as missing only when the deepest directory that does exist above
+	/// it resolves inside the project. Under a link that leaves the root, "not found" against
+	/// "outside the root" would otherwise tell the caller whether a file exists out there.
+	/// </summary>
+	private void EnsureExistingAncestorIsWithin(
+		string projectRoot,
+		string path,
+		string lexicalPath,
+		Func<string, bool, string> physicalPathResolver)
+	{
+		var ancestor = Path.TrimEndingDirectorySeparator(lexicalPath);
+		while (!string.IsNullOrEmpty(ancestor) && !IsConfiguredLexicalRoot(projectRoot, ancestor))
+		{
+			if (DanglingLinkLeavesRoot(projectRoot, ancestor))
+				throw RootViolation(path);
+			McpProjectPathProbe.Record();
+			if (Directory.Exists(ancestor))
+			{
+				string physicalAncestor;
+				try
+				{
+					physicalAncestor = physicalPathResolver(ancestor, true);
+				}
+				catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+				{
+					return;
+				}
+				if (!IsWithin(projectRoot, physicalAncestor))
+					throw RootViolation(path);
+				return;
+			}
+			ancestor = Path.GetDirectoryName(ancestor);
+		}
+	}
+
+	// Unix reports a link whose target is gone as neither a file nor a directory, so the walk above
+	// would pass over it; its own target text still says where it points.
+	private bool DanglingLinkLeavesRoot(string projectRoot, string entry)
+	{
+		string? target;
+		try
+		{
+			McpProjectPathProbe.Record();
+			target = new FileInfo(entry).LinkTarget;
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+		{
+			return false;
+		}
+		if (target is null || Path.GetDirectoryName(entry) is not { } directory)
+			return false;
+		var targetPath = Path.GetFullPath(target, directory);
+		return !IsWithin(projectRoot, targetPath) && !IsWithinConfiguredLexicalRoot(projectRoot, targetPath);
+	}
+
+	private bool IsConfiguredLexicalRoot(string projectRoot, string path) =>
+		_lexicalRootsByPhysical.TryGetValue(projectRoot, out var lexicalRoots)
+			? lexicalRoots.Contains(path, StringComparer.Ordinal)
+			: StringComparer.Ordinal.Equals(projectRoot, path);
 
 	internal string? FindLexicalRoot(string path)
 	{
@@ -274,7 +377,17 @@ public sealed class McpRootRegistry
 			throw RootViolation(requestedPath);
 	}
 
-	public static string ResolvePhysicalExistingPath(string path, bool requireDirectory)
+	public static string ResolvePhysicalExistingPath(string path, bool requireDirectory) =>
+		ResolvePhysicalExistingPath(path, requireDirectory, resolvedDirectories: null);
+
+	/// <param name="resolvedDirectories">
+	/// Physical results of directories already walked in the same pass, keyed by their lexical path.
+	/// Only segments above the final one are shared, so the path itself is always opened.
+	/// </param>
+	private static string ResolvePhysicalExistingPath(
+		string path,
+		bool requireDirectory,
+		Dictionary<string, string>? resolvedDirectories)
 	{
 		var fullPath = Path.GetFullPath(path);
 		McpProjectPathProbe.Record();
@@ -293,10 +406,23 @@ public sealed class McpRootRegistry
 		if (current.Length == 0)
 			current = pathRoot;
 		var relative = Path.GetRelativePath(pathRoot, fullPath);
-		foreach (var segment in relative.Split(
-					 [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
-					 StringSplitOptions.RemoveEmptyEntries))
+		var segments = relative.Split(
+			[Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+			StringSplitOptions.RemoveEmptyEntries);
+		var lexicalDirectory = current;
+		for (var index = 0; index < segments.Length; index++)
 		{
+			var segment = segments[index];
+			var isSharedDirectory = resolvedDirectories is not null && index < segments.Length - 1;
+			if (isSharedDirectory)
+			{
+				lexicalDirectory = Path.Combine(lexicalDirectory, segment);
+				if (resolvedDirectories!.TryGetValue(lexicalDirectory, out var resolved))
+				{
+					current = resolved;
+					continue;
+				}
+			}
 			var candidate = Path.Combine(current, segment);
 			// Each segment is opened in turn, so each one reports itself.
 			McpProjectPathProbe.Record();
@@ -305,6 +431,8 @@ public sealed class McpRootRegistry
 				: new FileInfo(candidate);
 			var target = info.ResolveLinkTarget(returnFinalTarget: true);
 			current = Path.GetFullPath(target?.FullName ?? candidate);
+			if (isSharedDirectory)
+				resolvedDirectories![lexicalDirectory] = current;
 		}
 		return Path.TrimEndingDirectorySeparator(current);
 	}
@@ -343,8 +471,10 @@ public sealed class McpRootRegistry
 	private McpToolException UnknownProject() =>
 		new(
 			McpErrorCodes.UnknownProject,
-			$"{McpErrorCodes.UnknownProject}: project is not an allowed root name, path, or index. " +
-			$"Call list_projects and use a listed project index: {FormatRoots()}.");
+			_roots.Count == 1
+				? "DPX-MCP-UNKNOWN-PROJECT: 'project' does not name the configured root. One local root is configured: omit 'project'."
+				: $"{McpErrorCodes.UnknownProject}: project is not an allowed root name, path, or index. " +
+				  $"Call list_projects and use a listed project index: {FormatRoots()}.");
 
 	private McpToolException RootViolation(string path) =>
 		new(

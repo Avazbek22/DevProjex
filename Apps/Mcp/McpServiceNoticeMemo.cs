@@ -52,15 +52,18 @@ internal sealed class McpServiceNoticeMemo
 		string? identity,
 		string? filters,
 		string? protection,
-		bool alwaysSend)
+		bool alwaysSend,
+		string? effectiveFiltersIdentity = null)
 	{
 		if (filters is null && protection is null)
 			return new McpServiceNotices(null, null, null);
 
 		lock (gate)
 		{
-			var filtersIdentity = filters;
+			var filtersIdentity = effectiveFiltersIdentity ?? filters;
 			var filtersForResponse = MaterializeUntrustedData(filters);
+			if (effectiveFiltersIdentity is not null && filtersForResponse is not null)
+				filtersForResponse = McpToolResults.NormalizeLineEndings(filtersForResponse);
 			var sameProject = identity is not null &&
 				string.Equals(identity, deliveredIdentity, StringComparison.Ordinal);
 			var alreadyDelivered = sameProject &&

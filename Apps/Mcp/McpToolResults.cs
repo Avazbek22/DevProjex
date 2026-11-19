@@ -10,10 +10,10 @@ internal static class McpToolResults
 	private const string MaxResultSizeKey = "anthropic/maxResultSizeChars";
 	private const string RedactedMetadataMarker = "[redacted]";
 	private static readonly Lazy<IReadOnlyList<ISecretDetector>> MetadataDetectors = new(
-		static () => [new GitleaksSecretDetector(), new PrivateDataDetector()],
+		static () => [McpSecretDetectors.Create(), new PrivateDataDetector()],
 		LazyThreadSafetyMode.ExecutionAndPublication);
 	private static readonly Lazy<IReadOnlyList<ISecretDetector>> SecretMetadataDetectors = new(
-		static () => [new GitleaksSecretDetector()],
+		static () => [McpSecretDetectors.Create()],
 		LazyThreadSafetyMode.ExecutionAndPublication);
 	/// <summary>
 	/// JSON an agent reads rather than HTML embeds: a quote costs two characters instead of six and
@@ -102,6 +102,11 @@ internal static class McpToolResults
 	}
 
 	public static CallToolResult Error(McpToolException exception) =>
+		Error(exception, isPrivateDataHidden: null);
+
+	public static CallToolResult Error(
+		McpToolException exception,
+		Func<string, bool>? isPrivateDataHidden) =>
 		new()
 		{
 			Content =
@@ -109,11 +114,46 @@ internal static class McpToolResults
 				new TextContentBlock
 				{
 					Text = $"{exception.Code}: request failed.\n\n" +
-						   McpSpotlight.Wrap(McpTextEscaping.EscapeSingleLine(ProtectMetadataString(exception.Message)))
+						   McpSpotlight.Wrap(McpTextEscaping.EscapeSingleLine(
+							   ProtectErrorMessage(exception, isPrivateDataHidden)))
 				}
 			],
 			IsError = true
 		};
+
+	// Requested paths and other details keep the full secret and private-data scan. Only the quoted
+	// project root, an address the agent already sees in list_projects and the get_tree root label,
+	// follows that same policy: exact without it, local-user segment masked with it.
+	internal static string ProtectErrorMessage(
+		McpToolException exception,
+		Func<string, bool>? isPrivateDataHidden)
+	{
+		var message = exception.Message;
+		var root = exception.ProjectRoot;
+		if (isPrivateDataHidden is null || string.IsNullOrEmpty(root))
+			return ProtectMetadataString(message);
+		var quotedRoot = $"'{root}'";
+		var rootIndex = message.LastIndexOf(quotedRoot, StringComparison.Ordinal);
+		if (rootIndex < 0)
+			return ProtectMetadataString(message);
+
+		bool hidePrivateData;
+		try
+		{
+			hidePrivateData = isPrivateDataHidden(root);
+		}
+		catch (Exception policyException) when (policyException is not OperationCanceledException)
+		{
+			// An unreadable live profile must not reveal more than the stricter policy would.
+			hidePrivateData = true;
+		}
+		var protectedRoot = hidePrivateData
+			? ProtectMetadataString(OutputRootPathPresentation.MaskLocalUserSegment(root))
+			: ProtectMetadataString(root, detectPrivateData: false);
+		return ProtectMetadataString(message[..rootIndex]) +
+			$"'{protectedRoot}'" +
+			ProtectMetadataString(message[(rootIndex + quotedRoot.Length)..]);
+	}
 
 	public static CallToolResult Error(Exception exception) =>
 		new()
@@ -134,6 +174,32 @@ internal static class McpToolResults
 		ArgumentNullException.ThrowIfNull(result);
 		foreach (var block in result.Content.OfType<TextContentBlock>())
 			McpSpotlight.EnsureBalanced(block.Text);
+	}
+
+	/// <summary>
+	/// Every text block the server composes uses LF, on every platform, so a response does not
+	/// depend on <see cref="Environment.NewLine"/> and two agents never pay a different token
+	/// cost for the same call. This runs once at the response boundary, after every tool's own
+	/// builder has produced its text, so no individual builder needs to track line endings itself.
+	/// </summary>
+	public static void NormalizeLineEndings(CallToolResult result)
+	{
+		ArgumentNullException.ThrowIfNull(result);
+		foreach (var block in result.Content.OfType<TextContentBlock>())
+			block.Text = NormalizeLineEndings(block.Text);
+	}
+
+	/// <summary>
+	/// Same normalization as <see cref="NormalizeLineEndings(CallToolResult)"/>, for text a builder
+	/// measures before the response boundary. A token or character estimate the server reports
+	/// about its own reply has to be computed on the text that boundary will actually deliver, so a
+	/// CRLF source upstream of that estimate (a shared document writer, a file read back into a
+	/// pack body) cannot be left for the boundary alone to normalize.
+	/// </summary>
+	internal static string NormalizeLineEndings(string text)
+	{
+		ArgumentNullException.ThrowIfNull(text);
+		return text.Contains('\r') ? text.Replace("\r\n", "\n").Replace('\r', '\n') : text;
 	}
 
 	// Secrets are always masked. Private data is masked only when the caller's effective policy

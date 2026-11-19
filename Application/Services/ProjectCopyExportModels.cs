@@ -113,6 +113,12 @@ public sealed class ProjectCopyExportException(
 {
 	public ProjectCopyExportError Error { get; } = error;
 	public string? PathContext { get; } = pathContext;
+
+	/// <summary>
+	/// True when the destination was proven to resolve into the source project, as opposed to an
+	/// unsafe destination that could not be inspected and is refused out of caution.
+	/// </summary>
+	public bool ResolvesInsideSource { get; init; }
 }
 
 internal static class ProjectCopyExportTestHooks

@@ -44,7 +44,7 @@ public sealed class ExportContextCommandHandler(
 		if (plan.HasErrors)
 		{
 			diagnosticRenderer.Write(plan.Diagnostics);
-			return CommandLineExitCodes.PolicyFailure;
+			return PlanDiagnosticExitCode.For(plan.Diagnostics);
 		}
 		var outputPath = request.OutputPath is not null and not "-"
 			? ExactOutputDestinationValidator.ValidateContext(

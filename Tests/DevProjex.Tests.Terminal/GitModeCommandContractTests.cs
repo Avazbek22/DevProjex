@@ -2,7 +2,7 @@ using System.Diagnostics;
 
 namespace DevProjex.Tests.Terminal;
 
-public sealed class GitModeCommandContractTests
+public sealed partial class GitModeCommandContractTests
 {
 	[Fact]
 	public void RealProcessNormalizesOffAndNoneToTheSameMachineToken()

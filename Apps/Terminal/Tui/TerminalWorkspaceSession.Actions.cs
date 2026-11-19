@@ -49,11 +49,11 @@ internal enum TerminalControlRefreshKind
 
 internal sealed partial class TerminalWorkspaceSession
 {
-	private const int WideControlsWidth = 38;
+	internal const int WideControlsWidth = 39;
 	private const int ContentControlsFrameHeight = 7;
 	// Terminal.Gui hides a vertical scrollbar whose viewport is a single row.
 	private const int MinimumVisibleFilterRows = 2;
-	private const int AggregateTrailingBorderColumns = 3;
+	private const int AggregateTrailingBorderColumns = TerminalAggregateFrameLayout.TrailingBorderColumns;
 
 	private WorkspaceControlViewGraph? ControlViews => _workspaceViews?.Controls;
 	private FrameView? _controlsFrame => ControlViews?.Frame;
@@ -379,7 +379,8 @@ internal sealed partial class TerminalWorkspaceSession
 		_contentAllControlRows = UpdateAggregateRow(
 			_contentAllControl,
 			_contentAllControlRows,
-			_parameterRowsBuilder.BuildContentAggregate(selection));
+			_parameterRowsBuilder.BuildContentAggregate(selection),
+			L("Settings.Secrets.Title"));
 		_contentControlRows = UpdateControlRows(
 			TerminalControlSection.Content,
 			_contentControls,
@@ -389,7 +390,8 @@ internal sealed partial class TerminalWorkspaceSession
 		_exclusionAllControlRows = UpdateAggregateRow(
 			_exclusionAllControl,
 			_exclusionAllControlRows,
-			_parameterRowsBuilder.BuildExclusionAggregate(_state.Plan, selection));
+			_parameterRowsBuilder.BuildExclusionAggregate(_state.Plan, selection),
+			L("Terminal.Tui.Exclusions"));
 		_exclusionControlRows = UpdateControlRows(
 			TerminalControlSection.Exclusions,
 			_exclusionControls,
@@ -399,7 +401,8 @@ internal sealed partial class TerminalWorkspaceSession
 		_extensionAllControlRows = UpdateAggregateRow(
 			_extensionAllControl,
 			_extensionAllControlRows,
-			_parameterRowsBuilder.BuildExtensionAggregate(_state.Plan, selectedExtensions));
+			_parameterRowsBuilder.BuildExtensionAggregate(_state.Plan, selectedExtensions),
+			L("Terminal.Tui.FileTypes"));
 		_extensionControlRows = UpdateControlRows(
 			TerminalControlSection.Extensions,
 			_extensionControls,
@@ -452,9 +455,14 @@ internal sealed partial class TerminalWorkspaceSession
 	private ObservableCollection<TerminalParameterRow> UpdateAggregateRow(
 		TerminalAggregateControl control,
 		ObservableCollection<TerminalParameterRow>? source,
-		TerminalParameterRow row)
+		TerminalParameterRow row,
+		string frameTitle)
 	{
-		control.SetRow(row);
+		control.SetRow(row, TerminalAggregateFrameLayout.FitAggregateLabel(
+			frameTitle,
+			[row.Label, L("Settings.All"), string.Empty],
+			ResolveControlsPanelWidth(),
+			control.IsOnBorder));
 		if (control.IsOnBorder)
 			control.X = Pos.AnchorEnd(
 				control.Text.GetColumns() + AggregateTrailingBorderColumns);
@@ -562,7 +570,8 @@ internal sealed partial class TerminalWorkspaceSession
 		_contentAllControlRows = UpdateAggregateRow(
 			_contentAllControl,
 			_contentAllControlRows,
-			_parameterRowsBuilder.BuildContentAggregate(selection));
+			_parameterRowsBuilder.BuildContentAggregate(selection),
+			L("Settings.Secrets.Title"));
 		_contentControlRows = UpdateControlRows(
 			TerminalControlSection.Content,
 			_contentControls,
@@ -710,13 +719,10 @@ internal sealed partial class TerminalWorkspaceSession
 		TerminalAggregateControl? aggregate)
 	{
 		var aggregateColumns = aggregate?.Text.GetColumns() ?? 0;
-		var panelWidth = ResolveControlsPanelWidth();
-		// A mini-panel spans the controls panel inside its border. Its title needs the corner
-		// and both title caps ("┌┤" and "├") to the left of the aggregate anchored on the right.
 		// Plain mode has no frames and prints the title and the aggregate side by side.
-		var maxColumns = aggregate?.IsOnBorder == false
-			? panelWidth - aggregateColumns
-			: panelWidth - 2 - aggregateColumns - AggregateTrailingBorderColumns - 3;
+		var maxColumns = TerminalAggregateFrameLayout.ResolveAvailableColumns(
+			ResolveControlsPanelWidth(),
+			aggregate?.IsOnBorder != false) - aggregateColumns;
 		return TerminalFrameTitle.Fit(
 			value,
 			Math.Max(4, maxColumns),
@@ -1843,7 +1849,10 @@ internal sealed partial class TerminalWorkspaceSession
 		{
 			ShowError(
 				"DPX-DESKTOP-NOT-INCLUDED",
-				L("Terminal.Error.DesktopNotIncluded"));
+				string.Format(
+					CultureInfo.CurrentCulture,
+					L("Terminal.Error.DesktopNotIncluded"),
+					DevProjex.Application.ProjectLinks.InstallationDocumentationUrl));
 			return;
 		}
 		TrackActiveOperation(RunOperationAsync(

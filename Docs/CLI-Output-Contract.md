@@ -314,6 +314,11 @@ prints the same ranges (at most six, then `and N more`). Declaration `body` is n
 when body output is disabled or no body fits, and `remainingBodyLines` reports a
 bounded prefix honestly.
 
+A `--symbols` pattern that looks like a regular expression still runs as a declaration-name
+search when every alternative reduces to one plain name after declaration keywords and
+separators are removed; stdout is unaffected, but stderr gets one additional line:
+`hint: --symbols read the pattern as declaration names: <names>`.
+
 `resolution` has the same four stable field names as the text `[Resolution]` line.
 For search it describes containing-declaration evidence for written matches:
 `resolved` means one containing declaration was named and `unresolved` means none
@@ -336,8 +341,18 @@ empty result emits `[Search partial]`. Neither state is described as `[No matche
 When a declaration body is included, text and Markdown print its project-relative
 address followed by an executable `devprojex export context ... --view content`
 command for reading that file through the CLI; they never print an MCP-only call.
-A cut body ends with `[Declaration body truncated: N line(s) remain: lines A-B.]`,
+A body longer than the limit shows only its signature head, at most 400 characters of
+whole lines, and ends with `[Declaration body truncated: N line(s) remain: lines A-B.]`,
 naming the unshown lines of that declaration.
+
+`--regex` and `--symbols` follow the same "Multi-line patterns" rule as MCP
+`search_project` (`Docs/McpServer.md`): a pattern that can only mean to cross a line
+break is matched against each file's whole text instead of line by line, one match
+spanning lines A–B counts once at line A, and `--symbols` is never affected. Text and
+Markdown add the line
+`[Search] multi-line pattern: a match may span lines and counts once at its first line.`
+when this mode ran; JSON carries no separate flag for it, since `matches[].line` and the
+declaration ranges already describe the match the same way for both modes.
 
 ## Related-files JSON
 
@@ -403,9 +418,11 @@ contains each file reached through resolved edges, once, in deterministic
 breadth-first order. Seeds and related paths use portable project-relative `/`
 separators. Each related item retains its aggregate
 evidence reasons, resolution status, sorted candidate list, cross-compilation-scope
-flag, and estimated source tokens. Ambiguous references have `status: "ambiguous"`
-and list every allowed candidate; self-file edges are absent. A seed whose language
-has no adapter has empty relationship arrays and a non-null `noFactsReason`.
+flag, and estimated source tokens. Every reference site stays its own `at line N` reason
+here, although text output writes sites that share the same reason text as one entry.
+Ambiguous references have `status: "ambiguous"` and list every allowed candidate;
+self-file edges are absent. A seed whose language has no adapter has empty
+relationship arrays and a non-null `noFactsReason`.
 
 `coverage` describes the complete effective manifest, not only the seeds. Its
 unsupported-language and C# error-node dictionaries use stable ordinal keys.
@@ -424,7 +441,24 @@ scopes that depend on that file. Text output reports at most eight of each as
 `[Dependency configuration] affected-scopes=N · problem=... · path=...`.
 `resolution` reports `resolved`, `ambiguous`, `unresolved`, and `external` evidence groups for every
 seed section emitted at the requested depth and direction. Text output carries the same values in `[Resolution]`; consequently an
-empty related-file list does not imply that every observed reference was resolved.
+empty related-file list does not imply that every observed reference was resolved. The counts cover the edges the items are
+drawn from, so a dependent counts for every seed it is listed under, and a reference from a seed to its own file is neither
+listed nor counted.
+When the selection is narrowed, the seeds' relations are resolved against the readable project
+without that narrowing, and the selection only decides where each related file is listed: `seeds`
+holds the related files the selection contains, and an ambiguous item appears there only when the
+candidate it names is selected. When related files lie outside the selection, the document adds
+two additive members. `outsideSelection` follows `seeds` and holds one object per seed with such
+files: `seed`, `dependencies`, `dependencyCount`, `dependents`, and `dependentCount`. Each list
+uses the related-item shape above, holds resolved items only, at most 20 in path order, and its
+count reports how many exist. `resolution` counts evidence groups exactly as the command without
+narrowing does, except that `resolution.outsideSelection` holds the resolved groups that reach
+only files outside the selection and `resolved` the rest, at depth 1; `resolved` plus
+`outsideSelection` is therefore what the unnarrowed command resolves at that depth, and `coverage`
+and `searchScope` still describe the selection. Text output prints those lists under
+`Dependencies outside the selection` and `Dependents outside the selection` and appends
+`· outside-selection=N` to `[Resolution]`. A document with nothing outside its selection omits both
+members, and a command that narrows nothing writes exactly the document it wrote before.
 Traversal follows only resolved edges and is limited to 256 distinct seed files.
 Crossing that limit emits `DPX-DEPENDENCY-TRAVERSAL-LIMIT`, returns policy exit
 code `3`, and writes no partial related-files document.
@@ -432,6 +466,72 @@ code `3`, and writes no partial related-files document.
 Git mode, exclusions, and file-size limit. No field can contain a file or candidate
 outside that manifest. See [Dependencies.md](Dependencies.md) for the evidence and
 resolution semantics.
+
+## Diff JSON
+
+`diff --format json` emits one deterministic document on stdout. Operational progress and
+selection diagnostics stay on stderr. The shape is:
+
+```json
+{
+  "schemaVersion": 1,
+  "kind": "devprojex-diff",
+  "scope": "changes",
+  "files": [
+    {
+      "path": "src/app.py",
+      "status": "modified",
+      "added": 1,
+      "removed": 1,
+      "hunks": [
+        {
+          "oldStart": 1,
+          "oldLines": 3,
+          "newStart": 1,
+          "newLines": 3,
+          "lines": [" import os", "-TIMEOUT = 5", "+TIMEOUT = 10", " RETRIES = 3"]
+        }
+      ]
+    }
+  ],
+  "notShown": [
+    { "path": "assets/logo.png", "status": "modified", "reason": "binary" }
+  ],
+  "counts": {
+    "files": 2,
+    "shown": 1,
+    "added": 1,
+    "removed": 1,
+    "binary": 1,
+    "tooLarge": 0,
+    "changeTooLarge": 0,
+    "lineEndingsOnly": 0,
+    "deleted": 0,
+    "notInWorkingTree": 0
+  },
+  "complete": false
+}
+```
+
+`scope` is `changes`, `staged`, or the full `diff:<ref>..<ref>` token. `files` holds every file
+shown with hunks, largest change first and then by path in ordinal order; `path` is portable and
+project-relative, and `oldPath` appears only for a rename shown against its source. `status` is
+`added`, `modified`, `deleted`, or `renamed`. Each hunk carries the unified ranges: a side with no
+lines starts at the line before the hunk, `0` at the top of the file. `lines` holds the hunk lines
+with their unified prefix (` `, `-`, or `+`), unescaped, and the separate entry
+`\ No newline at end of file` after a line that has no newline. `notShown` lists the changed files
+without hunks, with `reason` `binary`, `too-large`, `change-too-large`, `line-endings-only`, or
+`content-unchanged`; `change-too-large` means both versions fit but the change needs more than 2,000
+added and removed lines of search, and `counts.changeTooLarge` counts those files.
+`content-unchanged` means the bytes are identical on both sides and Git reported the file as
+changed only because its mode changed, such as a `chmod` that flips the executable bit; `line-endings-only`
+is reserved for an actual line-ending or byte-order-mark difference. `counts.deleted` counts
+deleted files that are no longer in the working tree, and `counts.notInWorkingTree` counts files a
+`staged` or ref-to-ref scope adds, changes, or renames to that the working tree does not have; both
+apply only the selection rules a path alone decides, and their paths are never listed. `complete`
+is `true` when every changed file is in `files` and neither count is above zero. When
+the selection hides secrets or private data, both versions are redacted before they are compared,
+so placeholders appear in `lines` exactly as in text output.
 
 ## Tree JSON and XML
 

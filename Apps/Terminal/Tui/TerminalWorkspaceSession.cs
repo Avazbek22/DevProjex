@@ -1071,7 +1071,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		{
 			ShowError(
 				"DPX-DESKTOP-NOT-INCLUDED",
-				L("Terminal.Error.DesktopNotIncluded"));
+				string.Format(
+					CultureInfo.CurrentCulture,
+					L("Terminal.Error.DesktopNotIncluded"),
+					DevProjex.Application.ProjectLinks.InstallationDocumentationUrl));
 			return;
 		}
 

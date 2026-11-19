@@ -9,14 +9,15 @@ public sealed partial class McpServerProcessTests
 	// recorded measurement, not the measurement itself: a ceiling with a few characters to spare is
 	// a tripwire for the next honest addition rather than a budget.
 	//
-	// Recorded on 2026-09-29 from the wire JSON the client received: tools/list result 28,058 on a
-	// default server and 30,674 when per-call exclusions are enabled, after the search_project
-	// symbols parameter added 237 characters. The 28,300 ceiling leaves 242 characters for the next
-	// intentional catalog change while the exact mode difference below isolates the optional
-	// exclusion parameter.
-	private const int ToolsListResultCeiling = 28_300;
-	private const int ToolsListResultFloor = 27_700;
-	private const int ExclusionsParameterCost = 2_616;
+	// Recorded on 2026-11-12 from the wire JSON with one local root: 13,770 characters.
+	// Three additions are pinned as exact differences, so a growing parameter is reported by
+	// name: a second local root publishes project, --allow-remote publishes project and branch,
+	// and --allow-agent-exclusions publishes exclusions. The ceiling leaves 250 characters.
+	private const int ToolsListResultCeiling = 14_020;
+	private const int ToolsListResultFloor = 13_270;
+	private const int ExclusionsParameterCost = 2_115;
+	private const int ProjectParameterCost = 1_820;
+	private const int RemoteParameterCost = 2_265;
 	private const int InstructionsCeiling = 1_200;
 	private const int InstructionsFloor = 900;
 
@@ -27,7 +28,7 @@ public sealed partial class McpServerProcessTests
 		Assert.InRange(defaultPayload, ToolsListResultFloor, ToolsListResultCeiling);
 		Assert.InRange(instructions.Length, InstructionsFloor, InstructionsCeiling);
 
-		// A delegation server publishes the exclusion parameter on six tools and pays for nothing
+		// A delegation server publishes the exclusion parameter on five tools and pays for nothing
 		// else, so the whole difference is that parameter. Pinning it exactly reports a growing
 		// parameter by name instead of waiting for a total to cross a line.
 		var (delegationPayload, delegationInstructions) =
@@ -36,25 +37,40 @@ public sealed partial class McpServerProcessTests
 			$"tools/list result: default={defaultPayload} characters; delegated={delegationPayload} characters; " +
 			$"instructions={instructions.Length} characters.");
 		Assert.Equal(ExclusionsParameterCost, delegationPayload - defaultPayload);
+		Assert.InRange(delegationPayload, ToolsListResultFloor + ExclusionsParameterCost,
+			ToolsListResultCeiling + ExclusionsParameterCost);
 		Assert.Equal(instructions, delegationInstructions);
+
+		var (multiplePayload, multipleInstructions) = await MeasureConnectionPayloadAsync([], secondRoot: true);
+		var (remotePayload, remoteInstructions) = await MeasureConnectionPayloadAsync(["--allow-remote"]);
+		Assert.Equal(ProjectParameterCost, multiplePayload - defaultPayload);
+		Assert.Equal(RemoteParameterCost, remotePayload - defaultPayload);
+		Assert.InRange(multipleInstructions.Length, InstructionsFloor, InstructionsCeiling);
+		Assert.Contains("list_projects", remoteInstructions, StringComparison.Ordinal);
+		TestContext.Current.TestOutputHelper?.WriteLine(
+			$"tools/list result: two roots={multiplePayload}; remote={remotePayload}.");
 	}
 
 	private static async Task<(int ToolsListResultCharacters, string Instructions)>
-		MeasureConnectionPayloadAsync(IReadOnlyList<string> additionalArguments)
+		MeasureConnectionPayloadAsync(IReadOnlyList<string> additionalArguments, bool secondRoot = false)
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
 		workspace.WriteFile("project/App.cs", "internal sealed class App;\n");
+		if (secondRoot)
+			additionalArguments = additionalArguments.Concat(["--root", workspace.CreateDirectory("second")]).ToArray();
 		var (process, client, errorTask, output) =
-			await StartPublishedMcpAsync(workspace, project, additionalArguments);
+			await StartPublishedMcpAsync(workspace, project, additionalArguments, useDefaultToolSet: true);
 		string instructions;
 		int payload;
 		try
 		{
 			instructions = Assert.IsType<string>(client.ServerInstructions);
 			var tools = await client.ListToolsAsync(options: null, TestContext.Current.CancellationToken);
-			Assert.Equal(ExpectedTools, tools.Select(static tool => tool.Name));
-			payload = ReadToolsListResult(output.GetRecordedText()).Length;
+			Assert.Equal(secondRoot || additionalArguments.Contains("--allow-remote", StringComparer.Ordinal)
+				? new[] { "list_projects" }.Concat(ReducedTools) : ReducedTools, tools.Select(static tool => tool.Name));
+			var delivered = ReadToolsListResult(output.GetRecordedText());
+			payload = delivered.Length;
 		}
 		finally
 		{

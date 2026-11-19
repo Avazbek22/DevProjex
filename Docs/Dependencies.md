@@ -50,6 +50,37 @@ There are three separate scopes. The **allowed manifest** is the effective DevPr
 Seeds do not reduce the manifest that must be indexed. No declaration, candidate, path, or cached
 reason can cross the current manifest gate, and self-file relationships are suppressed.
 
+One documented projection looks past a narrowed selection without changing it. A selection cannot
+see the files it left out, and some of them decide what a reference inside it means: a C#
+`global using`, a Python package's `__init__.py`, a child module that a package assignment only
+stands in for, or a second declaration that makes a name ambiguous. So `related`, the Terminal
+Workspace `related` command, and `related_files` resolve their seeds' relations against a second
+index of the files the caller may read. That index honors every access filter and lifts only the
+call's own narrowing; the [MCP server](McpServer.md#related_files),
+[command line](CommandLine.md#related), and [Terminal Workspace](TerminalWorkspace.md) documents
+define it per surface. The selection only decides where each related file is listed: in the seed's own
+sections when the selection holds it, and as an outside entry otherwise, so together they hold what
+the call relates without narrowing at depth 1, and the resolution counts add up to that call's
+counts. An
+ambiguous relation stays in the seed's sections when the candidate it names is in the selection and
+is otherwise only counted; a module-only Python relation is placed and counted like any other
+resolved one. A seed the second index has no facts for keeps the selection's own answer, and the
+selection's coverage and scope are reported unchanged. Outside entries name a path, the same
+evidence reasons, and an estimated token count, never content; they and the candidate lists of a
+narrowed call's ambiguous rows are the only results that name a file outside the manifest.
+
+Configuration describes the project, not the selection. For each language present in the manifest,
+the engine also reads that language's control files (`.csproj`, `tsconfig.json`, `jsconfig.json`,
+`package.json`, `pyproject.toml`, `setup.cfg`, Maven and Gradle builds, `Cargo.toml`, `Gemfile`,
+`*.gemspec`, `composer.json`, `CMakeLists.txt`, `build.sbt`, and `build.sc`) from the directories that
+hold manifest files and their parents up to the project root, even when a path selection or an
+extension filter leaves them out of the view. A sibling directory's configuration and anything above
+the root are never read, and a control-file link that leaves the root is ignored. These files only
+decide how references resolve: they are not delivered, never become targets, and do not widen the
+manifest, so narrowing a view changes what is shown, not how the shown files relate. Each such file
+and each searched directory is stamped before it is read, so editing it or creating a new control
+file there invalidates the retained snapshot.
+
 C# compilation scopes come from `.csproj` ownership and `ProjectReference` entries read as XML.
 Both `/` and `\` in an MSBuild `Include` are normalized as project-reference separators on every OS;
 this normalization never applies to ordinary Unix filenames. Project-reference visibility is
@@ -79,7 +110,8 @@ guessed as the target. Current and enclosing namespaces take precedence over imp
 multiple visible imported declarations remain ambiguous. Namespace lookup considers only immediate
 members of that namespace: a nested type is visible through an explicit qualification such as
 `Holder.Task` or through the source type's nearest-to-farthest containing-type chain. Without an
-owning `.csproj` inside the effective manifest, cross-file C# type references stay unresolved.
+owning `.csproj` in the file's directory or a parent directory inside the project root, cross-file C#
+type references stay unresolved.
 Declaration accessibility is not modeled across project boundaries; candidates that differ only by
 that unavailable evidence remain `Ambiguous`. Files containing conditional-compilation directives
 do not claim configuration-specific type edges: their type references stay `Unresolved` because no
@@ -166,9 +198,9 @@ bare specifiers, and paths outside the root are reported as unsupported semantic
 the configuration file that declared them, matching TypeScript's configuration-origin semantics;
 the existing legacy `baseUrl` resolution limitation described above still applies.
 Every extended file is included in the configuration fingerprint. A missing base is also recorded as
-an absent control file, so its later appearance invalidates a cached dependency snapshot. When an
-existing base is outside the effective manifest, the manifest-snapshot shortcut is bypassed; this
-keeps later edits observable without widening the selected dependency manifest.
+an absent control file, so its later appearance invalidates a cached dependency snapshot. An existing
+base outside the effective manifest is stamped before it is read, so a later edit invalidates the
+snapshot without widening the selected dependency manifest.
 
 Java source files contribute classes, interfaces, enums, records, and annotation types under their
 declared package and complete nesting chain. Exact imports resolve only to matching declarations in
@@ -338,6 +370,16 @@ configuration files of one language have the same root, ownership is diagnosed a
 of choosing one by filename order. A nested Python configuration owns only its subtree; files outside
 that subtree retain the root fallback scope.
 
+Python imports need no configuration file. Without one, the project root and its `src/` directory are
+the import roots, relative imports start at the source package, and standard-library names are
+external; only a configuration that exists but cannot be read makes its imports unresolved. Running a
+script puts its own directory first on `sys.path`, so in a plain directory without `__init__.py` a
+bare import of a sibling module or package resolves to it with the reason `script-directory import`.
+When an import root also provides that top-level name, the file may be run as a script or imported as
+a module, so the import is `Ambiguous` with both candidates, or `Unresolved` when fewer than two files
+remain. A standard-library or declared package name keeps its external meaning, and a regular package
+never gains implicit relative imports.
+
 Python relative imports start at the source package, and evidence names the relative module as
 written, leading dots included: `from . import types` is `import . at line N` and
 `from ..pkg import Name` is `import ..pkg at line N`. `from module import Name` first checks classes,
@@ -360,8 +402,14 @@ ordinary module cannot acquire children from a same-named directory. `__all__` a
 wildcard imports only. A missing imported name remains `Unresolved` with a constant reason instead of
 turning the existence of the module into evidence for that name. Relative imports that would escape the top-level package remain unresolved.
 Only a module-level assignment can establish `__all__` policy; docstrings and assignments inside a
-function or class do not. Module-level value assignments and wildcard re-export expansion are not
-indexed, and report explicit unresolved limitations rather than guessed bindings. Dynamic `__all__`,
+function or class do not. Module-level value assignments, plain or annotated, are not indexed as
+declarations; importing such a name still relates the file to the module that assigns it as
+`Resolved` with the reason `imported name not indexed`, and importance ranking leaves this
+module-only relation out of its graph. This covers a package initializer, including
+`from . import name`, unless a child module of that name exists, and static re-export chains
+within the same depth bound as re-exported declarations; a chain that reaches no assignment
+remains `Unresolved` as `re-exported name not indexed`. Wildcard re-export expansion reports an
+explicit unresolved limitation rather than a guessed binding. Dynamic `__all__`,
 `setup.py`, and import hooks are not executed and remain unresolved. Separate
 complete `sys.stdlib_module_names` snapshots cover Python
 3.12 and 3.13. A decisive `requires-python`/`python_requires` constraint selects its snapshot;
@@ -582,12 +630,38 @@ Opt-in dependency diagnostics count canonical path normalization, manifest sorti
 construction, gated fact clones, resolver candidate probes, and cache hits. No project text is recorded,
 and when measurement is inactive hot resolver loops do not call the counter path.
 
+## Package publication hints
+
+MCP whole-file reads can name the `package.json`, `jsr.json`, or `deno.json` export that publishes
+a JavaScript/TypeScript source, and `related_files` can list that manifest as a dependent. These
+publication hints do not add edges to the dependency index or the ranking graph.
+
+A compiled target requires an unambiguous visible `.ts`, `.mts`, or `.cts` source and no existing
+output file. The package's `tsconfig.json` and one level of at most 16 `references` are candidates;
+a reference names a JSON file or a folder's `tsconfig.json`. Each candidate must explicitly own
+`rootDir` and `outDir`, relative to itself and without template variables. A readable relative
+`extends` chain of at most four links is allowed, with no cycle, package or array form. All
+configurations remain inside the effective project selection and pass the protected text pipeline
+without replacements. An `outFile`, `declarationDir`, or `noEmit` other than `false` anywhere in
+the chain prevents that candidate's mapping.
+
+Membership uses the candidate's own `files`, `include`, and `exclude`, not inherited lists.
+Exact files and unambiguous `*`, `?`, and `**/` patterns are supported; a folder name means its
+subtree. Without an explicit `files` or `include`, an extending candidate is not inferred.
+Candidate mappings are combined, but outputs reached from different sources are omitted.
+These rules are separate from the import-resolution inheritance rules above.
+
 ## User-facing results
 
-`devprojex related PATH` and MCP `related_files` show dependencies, dependents, or both. Every row
+`devprojex related PATH` and MCP `related_files` show dependencies, dependents, or both. A folder
+seed stands for its directly contained files in the effective selection, in ordinal path order,
+with at most 16 seeds after expansion. Empty folders and expansions beyond the limit keep their
+existing refusal. Every row
 contains a portable relative path, aggregated evidence reasons, resolution status, estimated tokens,
 and a cross-scope marker when applicable. Ambiguous references remain one group with their candidate
-list. Coverage reports manifest files, supported and unsupported languages, and extraction failures.
+list. Text rows write reference sites that share the same reason text as one `at lines ...` entry;
+CLI JSON keeps one reason per site. Coverage reports manifest files, supported and unsupported
+languages, and extraction failures.
 File-status reasons and configuration diagnostics use a fixed vocabulary; project-controlled mapping
 keys and paths remain in their dedicated structured fields rather than being interpolated into trusted
 diagnostic text. Edge evidence is project data: it deliberately includes the referenced symbol or

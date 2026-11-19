@@ -160,7 +160,8 @@ log: { type: stdout, format: pretty, level: warn }
         & (Join-Path $repoRoot "Scripts/Test-InstalledHeadlessArtifact.ps1") `
             -Executable $installedBinary `
             -WorkingRoot (Join-Path $temporaryRoot "npm-command-smoke") `
-            -ExpectedVersion $ExpectedDisplayVersion
+            -ExpectedVersion $ExpectedDisplayVersion `
+            -ExpectedLauncher Npm
         if ($LASTEXITCODE -ne 0) { throw "Installed npm command smoke failed." }
         if ($IsWindows) {
             & $node (Join-Path $repoRoot "Scripts/smoke-headless-mcp.mjs") `

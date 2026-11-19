@@ -219,6 +219,41 @@ public sealed class MainWindowDropAndTitleBehaviorTests
 	}
 
 	[Fact]
+	public void BaseTitle_ShowsTheVersionDeclaredInDirectoryBuildProps()
+	{
+		var props = System.Xml.Linq.XDocument.Load(Path.Combine(FindRepositoryRoot(), "Directory.Build.props"));
+		var declaredVersion = props.Descendants("DevProjexVersion").Single().Value.Trim();
+
+		Assert.Equal(declaredVersion, MainWindowViewModel.TitleVersion);
+		Assert.Equal($"DevProjex v{declaredVersion}", MainWindowViewModel.BaseTitle);
+	}
+
+	[Theory]
+	[InlineData("5.2.5", "5.2.5")]
+	[InlineData("5.2.5+0123abcd", "5.2.5")]
+	[InlineData(" 5.3.0-rc.1+0123abcd ", "5.3.0-rc.1")]
+	[InlineData("", "")]
+	[InlineData(null, "")]
+	public void ResolveTitleVersion_DropsBuildMetadata(string? informationalVersion, string expected)
+	{
+		Assert.Equal(expected, MainWindowViewModel.ResolveTitleVersion(informationalVersion));
+	}
+
+	private static string FindRepositoryRoot()
+	{
+		var current = new DirectoryInfo(AppContext.BaseDirectory);
+		while (current is not null)
+		{
+			if (File.Exists(Path.Combine(current.FullName, "DevProjex.sln")))
+				return current.FullName;
+
+			current = current.Parent;
+		}
+
+		throw new DirectoryNotFoundException("Repository root was not found.");
+	}
+
+	[Fact]
 	public void RemoveTitleVersion_LeavesForeignTitlesUnchanged()
 	{
 		var method = GetPrivateStaticMethod("RemoveTitleVersion");

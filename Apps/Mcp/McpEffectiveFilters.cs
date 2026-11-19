@@ -71,10 +71,18 @@ internal static class McpEffectiveFilters
 	/// Footer for tree-bearing responses: the agent reads which filters were active next to
 	/// the tree they shaped, and learns who can change them.
 	/// </summary>
-	public static string Notice(ProjectContextPlan plan, bool agentExclusions, bool live = false)
+	public static string Notice(ProjectContextPlan plan, bool agentExclusions, bool live = false,
+		ProjectSelectionProfile? windowProfile = null)
 	{
 		var trusted = $"[Effective filters] {Describe(plan)}. " + WideningHint(agentExclusions, live);
-		return DescribeUntrustedGitScope(plan.Selection) is { } scope
+		var scope = DescribeUntrustedGitScope(plan.Selection);
+		if (live && windowProfile is not null)
+		{
+			trusted += " Saved window filters apply.";
+			var window = "[Window filters]" + Environment.NewLine + McpWindowFilters.FormatValues(McpWindowFilters.Values(windowProfile));
+			scope = scope is null ? window : scope + Environment.NewLine + window;
+		}
+		return scope is not null
 			? McpServiceNoticeMemo.DeferUntrustedData(trusted, scope)
 			: trusted;
 	}
@@ -96,7 +104,8 @@ internal static class McpEffectiveFilters
 		bool agentExclusions,
 		bool includeFilters,
 		McpSelectionNoticeContext request,
-		bool live = false)
+		bool live = false,
+		ProjectSelectionProfile? windowProfile = null)
 	{
 		ArgumentNullException.ThrowIfNull(plan);
 		var isEmpty = plan.IncludedFiles.Count == 0;
@@ -104,7 +113,7 @@ internal static class McpEffectiveFilters
 			return new McpSelectionNotices(null, null);
 
 		return new McpSelectionNotices(
-			Notice(plan, agentExclusions, live),
+			Notice(plan, agentExclusions, live, windowProfile),
 			isEmpty ? EmptySelectionNotice(plan, request) : null);
 	}
 

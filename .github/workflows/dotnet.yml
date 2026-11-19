@@ -193,6 +193,9 @@ jobs:
 
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v6
+        env:
+          # The SDK copy that ships in the runner image fails GenerateBundle for single-file publish; install a fresh one.
+          DOTNET_INSTALL_DIR: ${{ runner.os == 'Linux' && format('{0}/dotnet', runner.temp) || env.DOTNET_INSTALL_DIR }}
         with:
           dotnet-version: 10.0.x
 
@@ -634,6 +637,15 @@ jobs:
 
       - name: Test MCP usage recorder
         run: node --test tools/McpUsageRecorder/tests/recorder.test.mjs
+
+      - name: Test agent benchmark scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          for script in tools/AgentBenchmark/*.mjs; do node --check "$script"; done
+          node --test tools/AgentBenchmark/tests/session.test.mjs
+          python3 -m py_compile tools/AgentBenchmark/*.py
+          python3 -m unittest discover -s tools/AgentBenchmark/tests -v
 
       - name: Confirm the ranking evaluator tests executed
         if: ${{ success() }}

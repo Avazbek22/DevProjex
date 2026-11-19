@@ -138,6 +138,9 @@ jobs:
         with:
           node-version: 24
 
+      - name: Test npm launcher contract on this OS
+        run: node --test Packaging/Npm/test/launcher.test.js
+
       - name: Install Verdaccio
         run: npm install --global verdaccio@6
 
@@ -214,7 +217,8 @@ jobs:
           ./Scripts/Test-InstalledHeadlessArtifact.ps1 `
             -Executable $binary `
             -WorkingRoot (Join-Path $env:RUNNER_TEMP 'devprojex-nuget-command-smoke') `
-            -ExpectedVersion '${{ inputs.display_version }}'
+            -ExpectedVersion '${{ inputs.display_version }}' `
+            -ExpectedLauncher NuGetToolPath
 
           $sample = Join-Path $env:RUNNER_TEMP 'devprojex-headless-sample'
           New-Item -ItemType Directory -Path $sample -Force | Out-Null

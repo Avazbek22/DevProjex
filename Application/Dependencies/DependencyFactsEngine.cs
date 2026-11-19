@@ -13,14 +13,19 @@ public sealed partial class DependencyFactsEngine : IDisposable
 {
 	public const int MaximumRelatedTraversalSeeds = 256;
 	internal const string AccumulatedFactBudgetReason = "index fact memory limit exceeded";
+	// The reference of the one edge that stands in for a file whose facts were not resolved
+	// because the file exceeded the edge limit or the index ran out of resolution work.
+	private const string LimitReference = "<limit>";
 	private const int MaximumCachedNavigationFiles = 2_048;
-	private const long MaximumNavigationCacheBytes = 8L * 1024 * 1024;
+	internal const long MaximumNavigationCacheBytes = 8L * 1024 * 1024;
 	private const int MaximumCachedPhysicalFileProbes = 4_096;
 	private const int MaximumSharedIndexCancellationRetries = 1;
 
 	private readonly IDependencyFactExtractor _extractor;
 	private readonly IDependencyConfigurationProvider _configurationProvider;
 	private readonly DependencyFactsLimits _limits;
+	private readonly int _extractionParallelism;
+	private readonly int _minimumPipelinedFiles;
 	private readonly ConcurrentDictionary<FileCacheKey, FileCacheEntry> _fileCache = [];
 	private readonly LinkedList<FileCacheEntry> _fileCacheOrder = [];
 	private readonly ConcurrentDictionary<IndexCacheKey, IndexCacheEntry> _indexCache = [];
@@ -34,17 +39,37 @@ public sealed partial class DependencyFactsEngine : IDisposable
 	private long _fileCacheBytes;
 	private long _indexCacheBytes;
 	private long _navigationCacheBytes;
+	private bool _compactNavigationCache;
+	internal (int Entries, long Bytes, int Packed) NavigationCacheState
+	{
+		get { lock (_navigationCacheSync) return (_navigationCache.Count, _navigationCacheBytes, _navigationCacheOrder.Count(entry => entry.Packed is not null)); }
+	}
 	private int _disposed;
 
 	public DependencyFactsEngine(
 		IDependencyFactExtractor extractor,
 		IDependencyConfigurationProvider configurationProvider,
 		DependencyFactsLimits? limits = null)
+		: this(extractor, configurationProvider, limits, Math.Clamp(Environment.ProcessorCount, 1, 8))
+	{
+	}
+
+	internal DependencyFactsEngine(
+		IDependencyFactExtractor extractor,
+		IDependencyConfigurationProvider configurationProvider,
+		DependencyFactsLimits? limits,
+		int extractionParallelism,
+		int minimumPipelinedFiles = 1024)
 	{
 		_extractor = extractor ?? throw new ArgumentNullException(nameof(extractor));
 		_configurationProvider = configurationProvider ??
 			throw new ArgumentNullException(nameof(configurationProvider));
 		_limits = limits ?? new DependencyFactsLimits();
+		ArgumentOutOfRangeException.ThrowIfLessThan(extractionParallelism, 1);
+		ArgumentOutOfRangeException.ThrowIfGreaterThan(extractionParallelism, 8);
+		_extractionParallelism = extractionParallelism;
+		ArgumentOutOfRangeException.ThrowIfLessThan(minimumPipelinedFiles, 1);
+		_minimumPipelinedFiles = minimumPipelinedFiles;
 		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(_limits.MaximumAccumulatedFactBytes);
 	}
 
@@ -88,21 +113,19 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			_extractor is not IDependencyNavigationExtractor)
 			return [];
 		var key = new NavigationCacheKey(relativePath, contentFingerprint);
+		NavigationCacheEntry? hit = null;
 		lock (_navigationCacheSync)
 		{
 			if (_navigationCache.TryGetValue(key, out var cached))
 			{
-				cancellationToken.ThrowIfCancellationRequested();
 				_navigationCacheOrder.Remove(cached);
 				_navigationCacheOrder.AddLast(cached);
-				return cached.Value.Declarations;
+				hit = cached.Value;
 			}
 		}
-		var declarations = ExtractNavigation(
-			relativePath,
-			source,
-			contentFingerprint,
-			cancellationToken);
+		if (hit is not null)
+			return hit.Materialize(cancellationToken);
+		var declarations = ExtractNavigation(relativePath, source, contentFingerprint, cancellationToken);
 		cancellationToken.ThrowIfCancellationRequested();
 		var retained = Array.AsReadOnly(declarations.ToArray());
 		var weight = EstimateNavigationCacheBytes(key, retained);
@@ -112,26 +135,64 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		{
 			if (_navigationCache.TryGetValue(key, out var cached))
 			{
-				cancellationToken.ThrowIfCancellationRequested();
 				_navigationCacheOrder.Remove(cached);
 				_navigationCacheOrder.AddLast(cached);
-				return cached.Value.Declarations;
+				hit = cached.Value;
 			}
-			if (Volatile.Read(ref _disposed) != 0)
-				return retained;
-			var entry = new NavigationCacheEntry(key, retained, weight);
-			_navigationCache[key] = _navigationCacheOrder.AddLast(entry);
-			_navigationCacheBytes += weight;
-			while ((_navigationCache.Count > MaximumCachedNavigationFiles ||
-					_navigationCacheBytes > MaximumNavigationCacheBytes) &&
-				   _navigationCacheOrder.First is { Value: var oldest })
+			else if (Volatile.Read(ref _disposed) == 0)
 			{
-				_navigationCache.Remove(oldest.Key);
-				_navigationCacheOrder.RemoveFirst();
-				_navigationCacheBytes -= oldest.Weight;
+				var entry = new NavigationCacheEntry(key, retained, null, weight);
+				if (!_compactNavigationCache && (_navigationCacheBytes + weight > MaximumNavigationCacheBytes ||
+					_navigationCache.Count >= MaximumCachedNavigationFiles))
+				{
+					// Small working sets keep their existing allocation-free cache-hit path.
+					for (var node = _navigationCacheOrder.First; node is not null;)
+					{
+						cancellationToken.ThrowIfCancellationRequested();
+						var next = node.Next;
+						if (node.Value.Declarations is { Count: 0 })
+						{
+							_navigationCache.Remove(node.Value.Key);
+							_navigationCacheOrder.Remove(node);
+							_navigationCacheBytes -= node.Value.Weight;
+						}
+						else
+						{
+							var compacted = CompactNavigationEntry(node.Value, cancellationToken);
+							_navigationCacheBytes += compacted.Weight - node.Value.Weight;
+							node.Value = compacted;
+						}
+						node = next;
+					}
+					_compactNavigationCache = true;
+				}
+				if (_compactNavigationCache && retained.Count == 0)
+					return retained;
+				if (_compactNavigationCache)
+					entry = CompactNavigationEntry(entry, cancellationToken);
+				cancellationToken.ThrowIfCancellationRequested();
+				_navigationCache[key] = _navigationCacheOrder.AddLast(entry);
+				_navigationCacheBytes += entry.Weight;
+				while ((_navigationCache.Count > MaximumCachedNavigationFiles || _navigationCacheBytes > MaximumNavigationCacheBytes) &&
+				   _navigationCacheOrder.First is { Value: var oldest })
+				{
+					_navigationCache.Remove(oldest.Key);
+					_navigationCacheOrder.RemoveFirst();
+					_navigationCacheBytes -= oldest.Weight;
+				}
 			}
 		}
-		return retained;
+		return hit?.Materialize(cancellationToken) ?? retained;
+	}
+
+	private static NavigationCacheEntry CompactNavigationEntry(NavigationCacheEntry entry, CancellationToken cancellationToken)
+	{
+		if (entry.Declarations is not { Count: > 0 } declarations || entry.Weight < 4096)
+			return entry;
+		var packed = NavigationCachePayload.Encode(declarations, cancellationToken);
+		var strings = new RetainedStringEstimator();
+		var weight = 224 + strings.Add(entry.Key.RelativePath) + strings.Add(entry.Key.ContentFingerprint) + packed.Length;
+		return weight < entry.Weight ? new NavigationCacheEntry(entry.Key, null, packed, weight) : entry;
 	}
 
 	private static long EstimateNavigationCacheBytes(
@@ -161,12 +222,52 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		}
 	}
 
+	/// <summary>
+	/// The snapshot an earlier <see cref="IndexAsync"/> call cached for exactly this manifest, or null.
+	/// It never reads, parses or stats a file, so a hint built from it may lag edits made since that
+	/// call; callers that need current relations call <see cref="IndexAsync"/> instead.
+	/// </summary>
+	public DependencyIndexSnapshot? TryGetCachedIndex(
+		string sourceRoot,
+		IReadOnlyList<string> manifestFiles,
+		IReadOnlyCollection<string>? readableProjectFiles = null,
+		CancellationToken cancellationToken = default)
+	{
+		ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+		ArgumentException.ThrowIfNullOrWhiteSpace(sourceRoot);
+		ArgumentNullException.ThrowIfNull(manifestFiles);
+		var root = Path.GetFullPath(sourceRoot);
+		var manifestRelativePaths = CreateCanonicalManifest(root, manifestFiles, cancellationToken)
+			.Select(static file => file.RelativePath)
+			.ToArray();
+		var readableFiles = readableProjectFiles is null
+			? null
+			: CreateCanonicalManifest(root, [.. readableProjectFiles], cancellationToken);
+		var manifestRequestKey = new ManifestRequestKey(
+			root,
+			HashWithCancellation(manifestRelativePaths, cancellationToken),
+			readableFiles is null
+				? null
+				: HashWithCancellation(readableFiles.Select(static file => file.RelativePath), cancellationToken));
+		return _manifestSnapshots.TryGetValue(manifestRequestKey, out var cachedSnapshot) &&
+			cachedSnapshot.ManifestPaths.SequenceEqual(manifestRelativePaths, StringComparer.Ordinal) &&
+			_indexCache.ContainsKey(cachedSnapshot.IndexCacheKey)
+				? cachedSnapshot.Snapshot
+				: null;
+	}
+
+	/// <param name="readableProjectFiles">
+	/// The files of the readable project the manifest was narrowed from. Configuration that owns
+	/// manifest files is read from outside the manifest only when it is one of them, so a file the
+	/// caller may not read never decides how references resolve. Null applies no such bound.
+	/// </param>
 	public async Task<DependencyIndexSnapshot> IndexAsync(
 		string sourceRoot,
 		IReadOnlyList<string> manifestFiles,
 		IProgress<DependencyIndexProgress>? progress = null,
 		CancellationToken cancellationToken = default,
-		DependencyManifestContentIdentities? contentIdentities = null)
+		DependencyManifestContentIdentities? contentIdentities = null,
+		IReadOnlyCollection<string>? readableProjectFiles = null)
 	{
 		ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
 		ArgumentException.ThrowIfNullOrWhiteSpace(sourceRoot);
@@ -183,9 +284,15 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			manifest[index] = canonicalManifest[index].FullPath;
 			manifestRelativePaths[index] = canonicalManifest[index].RelativePath;
 		}
+		var readableFiles = readableProjectFiles is null
+			? null
+			: CreateCanonicalManifest(root, [.. readableProjectFiles], cancellationToken);
 		var manifestRequestKey = new ManifestRequestKey(
 			root,
-			HashWithCancellation(manifestRelativePaths, cancellationToken));
+			HashWithCancellation(manifestRelativePaths, cancellationToken),
+			readableFiles is null
+				? null
+				: HashWithCancellation(readableFiles.Select(static file => file.RelativePath), cancellationToken));
 		var initialStamps = TryCaptureFileStamps(manifest, cancellationToken);
 		var alignedContentIdentities = AlignContentIdentities(manifest, contentIdentities, cancellationToken);
 		if (initialStamps is not null &&
@@ -193,6 +300,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			cachedSnapshot.ManifestPaths.SequenceEqual(manifestRelativePaths, StringComparer.Ordinal) &&
 			cachedSnapshot.Stamps.SequenceEqual(initialStamps) &&
 			AreControlFilesStillAbsent(cachedSnapshot.AbsentControlFiles, cancellationToken) &&
+			AreObservedControlPathsCurrent(cachedSnapshot.ObservedControlPaths, cancellationToken) &&
 			ArePhysicalFileProbesCurrent(cachedSnapshot.PhysicalFileProbes, cancellationToken) &&
 			ContentIdentitiesMatch(cachedSnapshot.ContentIdentities, alignedContentIdentities) &&
 			_indexCache.ContainsKey(cachedSnapshot.IndexCacheKey))
@@ -222,109 +330,23 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			};
 		}
 		var configuration = await _configurationProvider
-			.ReadAsync(root, manifest, cancellationToken)
+			.ReadAsync(
+				root,
+				manifest,
+				readableFiles?.Select(static file => file.FullPath).ToHashSet(PathComparer),
+				cancellationToken)
 			.ConfigureAwait(false);
-		var prepared = new PreparedDependencyIdentity[manifest.Length];
-		var observations = new DependencySourceObservation[manifest.Length];
-		var parsedBefore = _extractor.ParseCount;
-		var facts = new FileFacts[prepared.Length];
-		var scopeIds = new string[prepared.Length];
-		var cacheable = new bool[prepared.Length];
-		var factBudget = new AccumulatedFactBudget(_limits.MaximumAccumulatedFactBytes);
-		var completed = 0;
-		var reusedFiles = 0;
-		var extractionParallelism = Math.Clamp(Environment.ProcessorCount, 1, 8);
-		for (var batchStart = 0; batchStart < prepared.Length; batchStart += extractionParallelism)
-		{
-			var batchCount = Math.Min(extractionParallelism, prepared.Length - batchStart);
-			await Parallel.ForEachAsync(
-				Enumerable.Range(batchStart, batchCount),
-				new ParallelOptions
-				{
-					CancellationToken = cancellationToken,
-					MaxDegreeOfParallelism = extractionParallelism
-				},
-				async (index, token) =>
-				{
-					var contentIdentity = alignedContentIdentities?[index];
-					var source = await _extractor
-						.PrepareAsync(root, manifest[index], configuration, _limits, token, contentIdentity)
-						.ConfigureAwait(false);
-					prepared[index] = new PreparedDependencyIdentity(
-						canonicalManifest[index].RelativePath,
-						source.ContentFingerprint,
-						source.LanguageId);
-					observations[index] = source.ContentObservation;
-					scopeIds[index] = source.ScopeId;
-					FileFacts extracted;
-					if (source.PreparedStatus != DependencyFileStatus.Supported)
-					{
-						extracted = _extractor.Extract(source, _limits, token);
-					}
-					else
-					{
-						var key = CreateFileCacheKey(source);
-						while (true)
-						{
-							token.ThrowIfCancellationRequested();
-							FileCacheEntry? created = null;
-							if (!_fileCache.TryGetValue(key, out var lazy))
-							{
-								created = new FileCacheEntry(key, new Lazy<Task<FileFacts>>(
-									() => Task.Run(() => _extractor.Extract(source, _limits, token), token),
-									LazyThreadSafetyMode.ExecutionAndPublication));
-								lazy = GetOrAddFileCacheEntry(created);
-							}
-							var shared = !ReferenceEquals(lazy, created);
-							if (shared)
-								DependencyEngineDiagnostics.RecordFileCacheHit();
-							try
-							{
-								var extraction = lazy.Value.Value;
-								extracted = await (shared ? extraction.WaitAsync(token) : extraction)
-									.ConfigureAwait(false);
-								if (shared)
-									Interlocked.Increment(ref reusedFiles);
-								if (!extracted.CanCache)
-									RemoveFileCacheEntry(key, lazy);
-								else if (!shared)
-									RegisterFileCacheWeight(key, lazy, EstimateFileFactsBytes(extracted));
-								break;
-							}
-							catch (OperationCanceledException) when (shared && token.IsCancellationRequested)
-							{
-								throw;
-							}
-							catch (OperationCanceledException) when (shared && !token.IsCancellationRequested)
-							{
-								// Retry with this caller's token if the shared producer was canceled.
-								RemoveFileCacheEntry(key, lazy);
-							}
-							catch
-							{
-								RemoveFileCacheEntry(key, lazy);
-								throw;
-							}
-						}
-					}
-
-					cacheable[index] = source.CanCache && extracted.CanCache;
-					facts[index] = extracted;
-				}).ConfigureAwait(false);
-
-			for (var index = batchStart; index < batchStart + batchCount; index++)
-			{
-				var extracted = facts[index];
-				facts[index] = factBudget.TryAdmit(EstimateFileFactsBytes(extracted))
-					? RebindScope(extracted, scopeIds[index])
-					: CreateFactBudgetLimited(extracted, scopeIds[index]);
-				progress?.Report(new DependencyIndexProgress(++completed, prepared.Length));
-			}
-		}
-
+		var extractedFiles = await ExtractFilesAsync(root, manifest, canonicalManifest, configuration,
+			alignedContentIdentities, progress, cancellationToken).ConfigureAwait(false);
+		var prepared = extractedFiles.Prepared;
+		var observations = extractedFiles.Observations;
+		var facts = extractedFiles.Facts;
+		var cacheable = extractedFiles.Cacheable;
+		var factBudget = extractedFiles.Budget;
+		var parsedFiles = extractedFiles.ParsedFiles;
+		var reusedFiles = extractedFiles.ReusedFiles;
 		var manifestGeneration = HashWithCancellation(prepared.Select(source =>
 			$"{source.RelativePath}\0{source.ContentFingerprint}\0{source.LanguageId}"), cancellationToken);
-		var parsedFiles = _extractor.ParseCount - parsedBefore;
 		// Parallel extraction writes by canonical manifest index, so this array is already ordered.
 		var orderedFacts = facts;
 		var declarations = MergeDeclarations(orderedFacts);
@@ -455,7 +477,8 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		var finalStamps = TryCaptureFileStamps(manifest, cancellationToken);
 		if (canCacheIndex && resolvedIndexEntry is not null &&
 			initialStamps is not null && finalStamps is not null && initialStamps.SequenceEqual(finalStamps) &&
-			AreControlFilesStillAbsent(configuration.AbsentControlFiles, cancellationToken))
+			AreControlFilesStillAbsent(configuration.AbsentControlFiles, cancellationToken) &&
+			AreObservedControlPathsCurrent(configuration.ObservedControlPaths, cancellationToken))
 		{
 			StoreManifestSnapshot(
 				manifestRequestKey,
@@ -463,6 +486,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 				initialStamps,
 				alignedContentIdentities,
 				configuration.AbsentControlFiles,
+				configuration.ObservedControlPaths,
 				resolved.PhysicalFileProbes,
 				cacheKey,
 				resolvedIndexEntry,
@@ -478,9 +502,11 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		IReadOnlyList<string> seedRelativePaths,
 		DependencyDirection direction = DependencyDirection.Both,
 		IProgress<DependencyIndexProgress>? progress = null,
-		CancellationToken cancellationToken = default)
+		CancellationToken cancellationToken = default,
+		IReadOnlyCollection<string>? readableProjectFiles = null)
 	{
-		var index = await IndexAsync(sourceRoot, manifestFiles, progress, cancellationToken)
+		var index = await IndexAsync(
+				sourceRoot, manifestFiles, progress, cancellationToken, readableProjectFiles: readableProjectFiles)
 			.ConfigureAwait(false);
 		return FindRelated(index, seedRelativePaths, direction);
 	}
@@ -492,14 +518,38 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		DependencyDirection direction,
 		int depth,
 		IProgress<DependencyIndexProgress>? progress = null,
-		CancellationToken cancellationToken = default)
+		CancellationToken cancellationToken = default,
+		IReadOnlyCollection<string>? readableProjectFiles = null)
 	{
 		if (depth < 1)
 			throw new ArgumentOutOfRangeException(nameof(depth));
 
-		var index = await IndexAsync(sourceRoot, manifestFiles, progress, cancellationToken)
+		var index = await IndexAsync(
+				sourceRoot, manifestFiles, progress, cancellationToken, readableProjectFiles: readableProjectFiles)
 			.ConfigureAwait(false);
-		var normalizedSeeds = seedRelativePaths.Select(Normalize).ToArray();
+		var seeds = TraverseRelated(
+			seedRelativePaths,
+			direction,
+			depth,
+			index.FileByPath,
+			frontier => FindRelated(index, frontier, direction).Seeds,
+			cancellationToken);
+		return new DependencyRelatedResult(index, seeds);
+	}
+
+	/// <summary>
+	/// Walks resolved relations level by level, expanding only into files of
+	/// <paramref name="traversable"/>, and returns every visited seed's answer in visiting order.
+	/// </summary>
+	private static IReadOnlyList<SeedRelatedFiles> TraverseRelated(
+		IReadOnlyList<string> seedRelativePaths,
+		DependencyDirection direction,
+		int depth,
+		IReadOnlyDictionary<string, FileFacts> traversable,
+		Func<IReadOnlyList<string>, IReadOnlyList<SeedRelatedFiles>> relate,
+		CancellationToken cancellationToken)
+	{
+		var normalizedSeeds = DistinctSeeds(seedRelativePaths);
 		var visited = new HashSet<string>(normalizedSeeds, StringComparer.Ordinal);
 		if (visited.Count > MaximumRelatedTraversalSeeds)
 			throw new DependencyTraversalLimitException(MaximumRelatedTraversalSeeds);
@@ -508,16 +558,16 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		for (var level = 0; level < depth && frontier.Count > 0; level++)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			var result = FindRelated(index, frontier, direction);
-			seeds.AddRange(result.Seeds);
+			var levelSeeds = relate(frontier);
+			seeds.AddRange(levelSeeds);
 			if (level + 1 >= depth)
 				break;
 
 			var next = new HashSet<string>(StringComparer.Ordinal);
-			foreach (var path in result.Seeds
+			foreach (var path in levelSeeds
 						 .SelectMany(seed => RelatedFiles(seed, direction))
 						 .Where(file => file.Status == ResolutionStatus.Resolved &&
-							 index.FileByPath.ContainsKey(file.Path))
+							 traversable.ContainsKey(file.Path))
 						 .Select(static file => file.Path))
 			{
 				if (visited.Contains(path) || !next.Add(path))
@@ -529,8 +579,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			frontier = next.Order(StringComparer.Ordinal).ToArray();
 			visited.UnionWith(frontier);
 		}
-
-		return new DependencyRelatedResult(index, seeds);
+		return seeds;
 	}
 
 	private static DependencyRelatedResult FindRelated(
@@ -540,9 +589,8 @@ public sealed partial class DependencyFactsEngine : IDisposable
 	{
 		var fileByPath = index.FileByPath;
 		var seeds = new List<SeedRelatedFiles>(seedRelativePaths.Count);
-		foreach (var rawSeed in seedRelativePaths)
+		foreach (var seed in DistinctSeeds(seedRelativePaths))
 		{
-			var seed = Normalize(rawSeed);
 			if (!fileByPath.TryGetValue(seed, out var facts))
 				throw new ArgumentException($"Seed '{seed}' is outside the dependency manifest.", nameof(seedRelativePaths));
 			if (facts.Status != DependencyFileStatus.Supported)
@@ -560,6 +608,10 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		}
 		return new DependencyRelatedResult(index, seeds);
 	}
+
+	// One seed is answered once, in the order it was first named, however a caller spelled it.
+	private static string[] DistinctSeeds(IEnumerable<string> seedRelativePaths) =>
+		seedRelativePaths.Select(Normalize).Distinct(StringComparer.Ordinal).ToArray();
 
 	private static IEnumerable<RelatedFile> RelatedFiles(
 		SeedRelatedFiles seed,
@@ -915,6 +967,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		IReadOnlyList<FileStamp> stamps,
 		IReadOnlyList<string>? contentIdentities,
 		IReadOnlyList<string> absentControlFiles,
+		IReadOnlyList<DependencyControlPathStamp> observedControlPaths,
 		IReadOnlyList<PhysicalFileProbe> physicalFileProbes,
 		IndexCacheKey indexCacheKey,
 		IndexCacheEntry expectedIndexEntry,
@@ -930,7 +983,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 				RemoveManifestSnapshotUnderLock(key, previous);
 			var entry = new ManifestSnapshotCacheEntry(
 				key, manifestPaths, stamps, contentIdentities, absentControlFiles,
-				physicalFileProbes, indexCacheKey, snapshot);
+				observedControlPaths, physicalFileProbes, indexCacheKey, snapshot);
 			_manifestSnapshots[key] = entry;
 			entry.OrderNode = _manifestSnapshotOrder.AddLast(entry);
 			while (_manifestSnapshots.Count > _limits.MaximumCachedIndexes &&
@@ -1068,6 +1121,19 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			if (File.Exists(path))
+				return false;
+		}
+		return true;
+	}
+
+	private static bool AreObservedControlPathsCurrent(
+		IReadOnlyList<DependencyControlPathStamp> stamps,
+		CancellationToken cancellationToken)
+	{
+		for (var index = 0; index < stamps.Count; index++)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (!stamps[index].IsCurrent())
 				return false;
 		}
 		return true;
@@ -1268,6 +1334,10 @@ public sealed partial class DependencyFactsEngine : IDisposable
 	private static string Normalize(string path) => path.Replace('\\', '/').TrimStart('/');
 	private const string MissingTypeScriptConfigurationReason =
 		"no owning tsconfig.json or jsconfig.json in the manifest";
+	private const string PythonScriptDirectoryReason = "script-directory import";
+	private const string PythonScriptDirectoryConflictReason =
+		"script directory and project root both provide this module";
+	private const string PythonUnindexedNameReason = "imported name not indexed";
 
 	private static StringComparer PathComparer => OperatingSystem.IsWindows()
 		? StringComparer.OrdinalIgnoreCase
@@ -1310,8 +1380,17 @@ public sealed partial class DependencyFactsEngine : IDisposable
 
 	private sealed record NavigationCacheEntry(
 		NavigationCacheKey Key,
-		IReadOnlyList<NavigationDeclaration> Declarations,
-		long Weight);
+		IReadOnlyList<NavigationDeclaration>? Declarations,
+		byte[]? Packed,
+		long Weight)
+	{
+		public IReadOnlyList<NavigationDeclaration> Materialize(CancellationToken cancellationToken)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			return Declarations ?? NavigationCachePayload.Decode(Packed!, cancellationToken);
+		}
+	}
+
 
 	private readonly record struct PreparedDependencyIdentity(
 		string RelativePath,
@@ -1347,9 +1426,16 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		string DeclarationRevision,
 		string ConfigurationFingerprint);
 
+	private readonly record struct PythonImportRoots(
+		IReadOnlyList<string> Roots,
+		bool FromScriptDirectory,
+		bool Conflicting,
+		IReadOnlyList<string> Conflict);
+
 	private readonly record struct ManifestRequestKey(
 		string SourceRoot,
-		string ManifestPathsFingerprint);
+		string ManifestPathsFingerprint,
+		string? ReadableFilesFingerprint);
 
 	private readonly record struct RelatedGroupKey(
 		string Path,
@@ -1386,6 +1472,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 		IReadOnlyList<FileStamp> Stamps,
 		IReadOnlyList<string>? ContentIdentities,
 		IReadOnlyList<string> AbsentControlFiles,
+		IReadOnlyList<DependencyControlPathStamp> ObservedControlPaths,
 		IReadOnlyList<PhysicalFileProbe> PhysicalFileProbes,
 		IndexCacheKey IndexCacheKey,
 		DependencyIndexSnapshot Snapshot)
@@ -1560,7 +1647,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 
 		private static DependencyEdge LimitEdge(FileFacts file, string reason) => new(
 			file.Path, null, EvidenceLayer.TypeReference, ResolutionStatus.Unresolved,
-			"<limit>", [reason], [new SourceSite(file.Path, 1, reason)], [], false);
+			LimitReference, [reason], [new SourceSite(file.Path, 1, reason)], [], false);
 
 		private static IReadOnlyList<DependencyEdge> Aggregate(IEnumerable<DependencyEdge> raw)
 		{
@@ -1568,7 +1655,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			foreach (var edge in raw)
 			{
 				var key = new EdgeAggregationKey(
-					edge.Source, edge.Target, edge.Layer, edge.Status, edge.Reference, edge.CrossScope);
+					edge.Source, edge.Target, edge.Layer, edge.Status, edge.Reference, edge.CrossScope, edge.ModuleOnly);
 				if (!groups.TryGetValue(key, out var accumulator))
 					groups.Add(key, accumulator = new EdgeAccumulator());
 				accumulator.Add(edge);
@@ -1580,13 +1667,16 @@ public sealed partial class DependencyFactsEngine : IDisposable
 				.ToArray();
 		}
 
+		// Module-only imports stay a group of their own, so an import that also names a declaration
+		// in the same module keeps its graph weight.
 		private readonly record struct EdgeAggregationKey(
 			string Source,
 			string? Target,
 			EvidenceLayer Layer,
 			ResolutionStatus Status,
 			string Reference,
-			bool CrossScope);
+			bool CrossScope,
+			bool ModuleOnly);
 
 		private sealed class EdgeAccumulator
 		{
@@ -1629,7 +1719,8 @@ public sealed partial class DependencyFactsEngine : IDisposable
 					_candidates!.Order(StringComparer.Ordinal).ToArray(),
 					key.CrossScope)
 				{
-					DeclarationFiles = _declarationFiles!.Order(StringComparer.Ordinal).ToArray()
+					DeclarationFiles = _declarationFiles!.Order(StringComparer.Ordinal).ToArray(),
+					ModuleOnly = key.ModuleOnly
 				};
 			}
 
@@ -1647,6 +1738,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 	private sealed partial class ResolverContext
 	{
 		private const int MaximumBashSuffixCandidates = 32;
+		private const int MaximumPythonReExportDepth = 8;
 		private const string BashWorkingDirectoryReason = "the Bash execution working directory is unknown";
 		private const string BashSearchPathReason =
 			"the Bash execution working directory is unknown; PATH and sourcepath settings are also unknown";
@@ -2711,7 +2803,10 @@ public sealed partial class DependencyFactsEngine : IDisposable
 
 		private DependencyEdge ResolvePythonImport(FileFacts source, ImportFact import)
 		{
-			if (FindScope(source.ScopeId) is { } scope && ConfigurationFailure(scope) is { } configurationFailure)
+			// Python needs no configuration file to import: only a configuration that exists and
+			// cannot be read blocks resolution.
+			if (FindScope(source.ScopeId) is { HasConfiguration: true } scope &&
+				ConfigurationFailure(scope) is { } configurationFailure)
 				return Edge(source, import, ResolutionStatus.Unresolved, null, configurationFailure, []);
 			var sourceModule = PythonModule(source);
 			var sourcePackage = Path.GetFileNameWithoutExtension(source.Path) == "__init__"
@@ -2728,7 +2823,20 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			var module = import.RelativeLevel == 0
 				? import.Specifier
 				: string.Join('.', parts.Concat(import.Specifier.Split('.', StringSplitOptions.RemoveEmptyEntries)));
-			var candidates = ProbePythonModule(source, module).ToList();
+			var searchRoots = PythonRootPrefixes(source);
+			string? resolvedReason = null;
+			if (import.RelativeLevel == 0)
+			{
+				var lookup = FindPythonImportRoots(source, module);
+				if (lookup.Conflicting)
+					return Edge(source, import,
+						lookup.Conflict.Count > 1 ? ResolutionStatus.Ambiguous : ResolutionStatus.Unresolved,
+						null, PythonScriptDirectoryConflictReason, lookup.Conflict);
+				searchRoots = lookup.Roots;
+				if (lookup.FromScriptDirectory)
+					resolvedReason = PythonScriptDirectoryReason;
+			}
+			var candidates = ProbePythonModule(searchRoots, module).ToList();
 			var moduleCandidates = candidates.ToArray();
 			var moduleEntityExists = moduleCandidates.Length > 0;
 			if (import.ImportedName is { Length: > 0 } and not "*")
@@ -2750,32 +2858,43 @@ public sealed partial class DependencyFactsEngine : IDisposable
 				else if (candidates.Any(IsPythonPackageInitializer))
 				{
 					var child = module.Length == 0 ? import.ImportedName : module + "." + import.ImportedName;
-					candidates = ProbePythonModule(source, child).ToList();
+					candidates = ProbePythonModule(searchRoots, child).ToList();
 				}
 				else
 					candidates.Clear();
 				if (candidates.Count == 0 && !moduleEntityExists)
 				{
 					var child = module.Length == 0 ? import.ImportedName : module + "." + import.ImportedName;
-					candidates = ProbePythonModule(source, child).ToList();
+					candidates = ProbePythonModule(searchRoots, child).ToList();
 					if (candidates.Count > 0)
-						return FinishImport(source, import, candidates);
+						return FinishImport(source, import, candidates, resolvedReason);
 				}
 				if (candidates.Count == 0 && moduleEntityExists)
 				{
-					if (moduleCandidates.Any(candidate => HasPythonModuleAssignment(candidate, import.ImportedName)))
-						return Edge(source, import, ResolutionStatus.Unresolved, null,
-							"Python module assignment bindings are not indexed", []);
+					var assigned = moduleCandidates
+						.SelectMany(candidate => ResolvePythonAssignedBinding(
+							candidate,
+							import.ImportedName,
+							0,
+							new HashSet<string>(StringComparer.Ordinal)))
+						.Distinct(StringComparer.Ordinal)
+						.Order(StringComparer.Ordinal)
+						.ToArray();
+					if (assigned.Length > 0)
+						return ModuleOnlyImport(source, import, assigned, resolvedReason);
 					if (moduleCandidates.Any(HasPythonWildcardReExport))
 						return Edge(source, import, ResolutionStatus.Unresolved, null,
 							"Python wildcard re-export bindings are not indexed", []);
+					if (moduleCandidates.Any(candidate => HasPythonModuleLevelBinding(candidate, import.ImportedName)))
+						return Edge(source, import, ResolutionStatus.Unresolved, null,
+							"re-exported name not indexed", []);
 					return Edge(source, import, ResolutionStatus.Unresolved, null,
 						"name not found in module", []);
 				}
 			}
 			if (candidates.Count == 0 && !moduleEntityExists)
 			{
-				var portionCount = CountPythonNamespacePortions(source, module);
+				var portionCount = CountPythonNamespacePortions(searchRoots, module);
 				if (portionCount > 0)
 					return Edge(source, import, ResolutionStatus.Resolved, "namespace:" + module,
 						"one namespace-package entity", []);
@@ -2789,7 +2908,7 @@ public sealed partial class DependencyFactsEngine : IDisposable
 				_files.TryGetValue(candidate, out var facts) && facts.Aliases.ContainsKey("$dynamic-all")))
 				return Edge(source, import, ResolutionStatus.Unresolved, null,
 					"dynamic __all__ is an unsupported mechanism", candidates);
-			return FinishImport(source, import, candidates);
+			return FinishImport(source, import, candidates, resolvedReason);
 		}
 
 		private IReadOnlyList<string> ResolvePythonStaticBinding(
@@ -2798,35 +2917,24 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			int depth,
 			ISet<string> visited)
 		{
-			if (depth >= 8 || !visited.Add(candidate) || !_files.TryGetValue(candidate, out var facts)) return [];
+			if (depth >= MaximumPythonReExportDepth || !visited.Add(candidate) ||
+				!_files.TryGetValue(candidate, out var facts)) return [];
 			if (facts.Declarations.Any(declaration => declaration.ContainingType is null &&
 				SimpleName(declaration.Identity.QualifiedName) == name))
 				return [candidate];
-			foreach (var import in facts.Imports.Where(import => import.ContainingDeclaration is null &&
-				string.Equals(PythonBoundName(import), name, StringComparison.Ordinal)).Reverse())
+			foreach (var import in PythonModuleLevelBindings(facts, name))
 			{
-				var sourceModule = PythonModule(facts);
-				var sourcePackage = Path.GetFileNameWithoutExtension(candidate) == "__init__"
-					? sourceModule
-					: sourceModule.Contains('.') ? sourceModule[..sourceModule.LastIndexOf('.')] : string.Empty;
-				var parts = sourcePackage.Split('.', StringSplitOptions.RemoveEmptyEntries).ToList();
-				if (import.RelativeLevel > 0)
-				{
-					var remove = import.RelativeLevel - 1;
-					if (remove >= parts.Count) continue;
-					parts.RemoveRange(parts.Count - remove, remove);
-				}
-				var module = import.RelativeLevel == 0 ? import.Specifier :
-					string.Join('.', parts.Concat(import.Specifier.Split('.', StringSplitOptions.RemoveEmptyEntries)));
+				if (FindPythonReExportModule(facts, import) is not { } lookup) continue;
+				var (searchRoots, module) = lookup;
 				if (import.ImportedName is { Length: > 0 } imported)
 				{
 					var child = module.Length == 0 ? imported : module + "." + imported;
 					if (import.Specifier.Length == 0)
 					{
-						var directChildTargets = ProbePythonModule(facts, child).ToArray();
+						var directChildTargets = ProbePythonModule(searchRoots, child).ToArray();
 						if (directChildTargets.Length > 0) return directChildTargets;
 					}
-					var moduleTargets = ProbePythonModule(facts, module).ToArray();
+					var moduleTargets = ProbePythonModule(searchRoots, module).ToArray();
 					var nested = moduleTargets
 						.SelectMany(next => ResolvePythonStaticBinding(next, imported, depth + 1, visited))
 						.Distinct(StringComparer.Ordinal)
@@ -2835,24 +2943,84 @@ public sealed partial class DependencyFactsEngine : IDisposable
 					if (nested.Length > 0) return nested;
 					if (moduleTargets.Any(IsPythonPackageInitializer))
 					{
-						var childTargets = ProbePythonModule(facts, child).ToArray();
+						var childTargets = ProbePythonModule(searchRoots, child).ToArray();
 						if (childTargets.Length > 0) return childTargets;
 					}
 				}
 				else
 				{
-					var moduleTargets = ProbePythonModule(facts, module).ToArray();
+					var moduleTargets = ProbePythonModule(searchRoots, module).ToArray();
 					if (moduleTargets.Length > 0) return moduleTargets;
 				}
 			}
 			return [];
 		}
 
-		private int CountPythonNamespacePortions(FileFacts source, string module)
+		// Follows the same static re-exports to the file whose module-level assignment binds the
+		// name. The index holds no declaration for that assignment, so the result only locates the
+		// module. It is consulted after declarations and child modules have found nothing.
+		private IReadOnlyList<string> ResolvePythonAssignedBinding(
+			string candidate,
+			string name,
+			int depth,
+			ISet<string> visited)
+		{
+			if (depth >= MaximumPythonReExportDepth || !visited.Add(candidate) ||
+				!_files.TryGetValue(candidate, out var facts)) return [];
+			if (HasPythonModuleAssignment(candidate, name))
+				return [candidate];
+			foreach (var import in PythonModuleLevelBindings(facts, name))
+			{
+				if (import.ImportedName is not { Length: > 0 } imported ||
+					FindPythonReExportModule(facts, import) is not { } lookup) continue;
+				var assigned = ProbePythonModule(lookup.Roots, lookup.Module)
+					.SelectMany(next => ResolvePythonAssignedBinding(next, imported, depth + 1, visited))
+					.Distinct(StringComparer.Ordinal)
+					.Order(StringComparer.Ordinal)
+					.ToArray();
+				if (assigned.Length > 0) return assigned;
+			}
+			return [];
+		}
+
+		// Unconditional module-level imports that bind the name, the last one first.
+		private static IEnumerable<ImportFact> PythonModuleLevelBindings(FileFacts facts, string name) =>
+			facts.Imports.Where(import => import.ContainingDeclaration is null &&
+				string.Equals(PythonBoundName(import), name, StringComparison.Ordinal)).Reverse();
+
+		// The module a re-exporting file's import names and the roots it is looked up from, or null
+		// when the import cannot resolve from that file.
+		private (IReadOnlyList<string> Roots, string Module)? FindPythonReExportModule(
+			FileFacts facts,
+			ImportFact import)
+		{
+			var sourceModule = PythonModule(facts);
+			var sourcePackage = Path.GetFileNameWithoutExtension(facts.Path) == "__init__"
+				? sourceModule
+				: sourceModule.Contains('.') ? sourceModule[..sourceModule.LastIndexOf('.')] : string.Empty;
+			var parts = sourcePackage.Split('.', StringSplitOptions.RemoveEmptyEntries).ToList();
+			if (import.RelativeLevel > 0)
+			{
+				var remove = import.RelativeLevel - 1;
+				if (remove >= parts.Count) return null;
+				parts.RemoveRange(parts.Count - remove, remove);
+			}
+			var module = import.RelativeLevel == 0 ? import.Specifier :
+				string.Join('.', parts.Concat(import.Specifier.Split('.', StringSplitOptions.RemoveEmptyEntries)));
+			if (import.RelativeLevel != 0)
+				return (PythonRootPrefixes(facts), module);
+			var lookup = FindPythonImportRoots(facts, module);
+			return lookup.Conflicting ? null : (lookup.Roots, module);
+		}
+
+		private bool HasPythonModuleLevelBinding(string candidate, string name) =>
+			_files.TryGetValue(candidate, out var facts) && PythonModuleLevelBindings(facts, name).Any();
+
+		private int CountPythonNamespacePortions(IReadOnlyList<string> roots, string module)
 		{
 			var segments = module.Split('.', StringSplitOptions.RemoveEmptyEntries);
 			if (segments.Length == 0) return 0;
-			var searchDirectories = PythonRootPrefixes(source).ToList();
+			var searchDirectories = roots.ToList();
 			for (var segmentIndex = 0; segmentIndex < segments.Length; segmentIndex++)
 			{
 				var namespaceDirectories = new List<string>();
@@ -2886,11 +3054,11 @@ public sealed partial class DependencyFactsEngine : IDisposable
 			return 0;
 		}
 
-		private IEnumerable<string> ProbePythonModule(FileFacts source, string module)
+		private IEnumerable<string> ProbePythonModule(IReadOnlyList<string> roots, string module)
 		{
 			var segments = module.Split('.', StringSplitOptions.RemoveEmptyEntries);
 			if (segments.Length == 0) yield break;
-			var searchDirectories = PythonRootPrefixes(source).ToList();
+			var searchDirectories = roots.ToList();
 			for (var segmentIndex = 0; segmentIndex < segments.Length; segmentIndex++)
 			{
 				var isLast = segmentIndex == segments.Length - 1;
@@ -2949,6 +3117,40 @@ public sealed partial class DependencyFactsEngine : IDisposable
 
 		private static string PythonBoundName(ImportFact import) =>
 			import.Alias ?? import.ImportedName ?? import.Specifier.Split('.')[0];
+
+		// A script run directly puts its own directory first on sys.path, so a plain directory can
+		// import a sibling by its bare name. The project roots compete with that directory because
+		// the same file may also be imported as a module, and a standard-library or declared
+		// package name keeps its external meaning.
+		private PythonImportRoots FindPythonImportRoots(FileFacts source, string module)
+		{
+			var roots = PythonRootPrefixes(source);
+			var separator = source.Path.LastIndexOf('/');
+			if (separator <= 0) return new PythonImportRoots(roots, false, false, []);
+			var directory = source.Path[..separator];
+			if (IsPythonRegularPackageDirectory(directory) || roots.Contains(directory, StringComparer.Ordinal))
+				return new PythonImportRoots(roots, false, false, []);
+			var topLevel = module.Split('.')[0];
+			if (topLevel.Length == 0 || !HasPythonTopLevelEntity(directory, topLevel) ||
+				DependencyPlatformCatalog.IsPythonExternal(_configuration, source.ScopeId, topLevel) ||
+				FindScope(source.ScopeId)?.PythonExternalPackages.Contains(topLevel) == true)
+				return new PythonImportRoots(roots, false, false, []);
+			if (!roots.Any(root => HasPythonTopLevelEntity(root, topLevel)))
+				return new PythonImportRoots([directory], true, false, []);
+			var conflict = ProbePythonModule([directory], module)
+				.Concat(ProbePythonModule(roots, module))
+				.Distinct(StringComparer.Ordinal)
+				.Order(StringComparer.Ordinal)
+				.ToArray();
+			return new PythonImportRoots(roots, false, true, conflict);
+		}
+
+		private bool HasPythonTopLevelEntity(string directory, string name)
+		{
+			var prefix = directory.Length == 0 ? name : directory + "/" + name;
+			return _files.ContainsKey(prefix + ".py") || _files.ContainsKey(prefix + ".pyi") ||
+				_manifestDirectoryPrefixes.Contains(prefix + '/');
+		}
 
 		private IReadOnlyList<string> PythonRootPrefixes(FileFacts source)
 		{
@@ -3446,6 +3648,20 @@ public sealed partial class DependencyFactsEngine : IDisposable
 					resolvedReason ?? "one module target", candidates),
 				_ => Edge(source, import, ResolutionStatus.Ambiguous, null, "multiple module targets", candidates)
 			};
+		}
+
+		// The imported name is bound by a module-level assignment the index does not hold as a
+		// declaration, so the edge relates the file to the assigning module without claiming one.
+		private DependencyEdge ModuleOnlyImport(
+			FileFacts source,
+			ImportFact import,
+			IReadOnlyList<string> moduleTargets,
+			string? resolvedReason)
+		{
+			var edge = FinishImport(source, import, moduleTargets, resolvedReason);
+			return edge.Status == ResolutionStatus.Resolved
+				? edge with { Reasons = [.. edge.Reasons, PythonUnindexedNameReason], ModuleOnly = true }
+				: edge;
 		}
 
 		private DependencyEdge Edge(FileFacts source, ImportFact import, ResolutionStatus status, string? target, string reason, IReadOnlyList<string> candidates) =>

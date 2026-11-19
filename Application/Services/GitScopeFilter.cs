@@ -26,6 +26,15 @@ public sealed record GitScopePathResult(
 	string? FailureDiagnosticCode = null,
 	string? FailureDetail = null)
 {
+	/// <summary>Absolute paths the scope deletes that the working tree no longer has.</summary>
+	public IReadOnlyCollection<string> DeletedPaths { get; init; } = [];
+
+	/// <summary>
+	/// Absolute paths a staged or ref-to-ref scope adds, changes or renames to that the working
+	/// tree does not have, so they cannot be listed in it.
+	/// </summary>
+	public IReadOnlyCollection<string> NotInWorkingTreePaths { get; init; } = [];
+
 	public static GitScopePathResult Unavailable(
 		string? reason = null,
 		string? diagnosticCode = null,
@@ -206,7 +215,8 @@ public static class GitScopeFilter
 		string? diffRange,
 		IReadOnlyCollection<string>? repositoryScopeFullPaths,
 		CancellationToken cancellationToken = default,
-		string? resolvedDiffRange = null)
+		string? resolvedDiffRange = null,
+		Func<string, bool>? missingPathFilter = null)
 	{
 		ArgumentNullException.ThrowIfNull(planner);
 		ArgumentNullException.ThrowIfNull(plan);
@@ -288,12 +298,20 @@ public static class GitScopeFilter
 				.ConfigureAwait(false);
 		}
 
+		var missingPathSelection = new MissingPathSelection(
+			plan,
+			missingPathFilter is null ? planner.GetGitScopeSelectedPathFrontier(plan) : null,
+			missingPathFilter);
+		var deletedCount = scope.DeletedPaths.Count == 0
+			? scope.DeletedPathCount
+			: missingPathSelection.Count(scope.DeletedPaths, cancellationToken);
+		var notInWorkingTreeCount = missingPathSelection.Count(scope.NotInWorkingTreePaths, cancellationToken);
 		var diagnostics = narrowed.Diagnostics;
-		if (scope.DeletedPathCount > 0)
+		if (deletedCount > 0)
 		{
 			diagnostics = AppendDiagnostic(
 				diagnostics,
-				CreateDeletedDiagnostic(plan.SourceRoot, scope.DeletedPathCount));
+				CreateDeletedDiagnostic(plan.SourceRoot, deletedCount));
 		}
 
 		var scoped = narrowed with
@@ -301,7 +319,8 @@ public static class GitScopeFilter
 			EffectiveTree = scopedTree,
 			SelectedExtensions = plan.SelectedExtensions,
 			HasIgnoreOptionCounts = plan.HasIgnoreOptionCounts,
-			Diagnostics = diagnostics
+			Diagnostics = diagnostics,
+			GitScopeFilesNotInWorkingTree = notInWorkingTreeCount
 		};
 		return planner.ApplyGitScopeProjection(
 			plan,
@@ -394,6 +413,56 @@ public static class GitScopeFilter
 			result[index] = diagnostics[index];
 		result[^1] = diagnostic;
 		return result;
+	}
+
+	/// <summary>
+	/// Decides, by path alone, whether the selection would list a file the working tree does not
+	/// have: the selected paths (or the caller's own path filter), the selected top-level folders
+	/// and the selected file types. A folder or type the project no longer shows anywhere is not
+	/// known to be excluded, so it keeps the file counted.
+	/// </summary>
+	private sealed class MissingPathSelection(
+		ProjectContextPlan plan,
+		IReadOnlySet<string>? selectedPathFrontier,
+		Func<string, bool>? pathFilter)
+	{
+		private readonly HashSet<string> excludedRoots = plan.AvailableRoots
+			.Except(plan.SelectedRoots, ProjectTreePathIdentity.CanonicalComparer)
+			.ToHashSet(ProjectTreePathIdentity.CanonicalComparer);
+		private readonly HashSet<string> excludedExtensions = plan.AvailableExtensions
+			.Except(plan.SelectedExtensions, StringComparer.OrdinalIgnoreCase)
+			.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+		public int Count(IReadOnlyCollection<string> paths, CancellationToken cancellationToken)
+		{
+			var count = 0;
+			foreach (var path in paths)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				if (Includes(path))
+					count++;
+			}
+			return count;
+		}
+
+		private bool Includes(string path)
+		{
+			if (!PathUtility.IsPathInside(path, plan.SourceRoot))
+				return false;
+			if (pathFilter is not null && !pathFilter(path))
+				return false;
+			if (selectedPathFrontier is not null &&
+			    !selectedPathFrontier.Any(selected => PathUtility.IsPathInside(path, selected)))
+			{
+				return false;
+			}
+			var relative = PathUtility.GetPortableRelativePath(plan.SourceRoot, path);
+			var separator = relative.IndexOf('/');
+			if (separator > 0 && excludedRoots.Contains(relative[..separator]))
+				return false;
+			var extension = Path.GetExtension(path);
+			return extension.Length == 0 || !excludedExtensions.Contains(extension);
+		}
 	}
 
 	public static Task<GitScopePathResult> ResolvePathsAsync(

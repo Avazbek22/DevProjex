@@ -6,7 +6,7 @@ using DevProjex.Infrastructure.ProjectProfiles;
 
 namespace DevProjex.Tests.Terminal;
 
-public sealed class TerminalSettingsStateContractTests
+public sealed partial class TerminalSettingsStateContractTests
 {
 	[Fact]
 	public void PathStateSnapshotsAndEvolutionPreserveCaseDistinctEntries()

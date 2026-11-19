@@ -1,3 +1,4 @@
+using System.Globalization;
 using DevProjex.Application.Ranking;
 using Terminal.Gui.Input;
 
@@ -8,6 +9,58 @@ public sealed class TerminalWorkspaceCommandParserTests
 	private static readonly TerminalWorkspaceCommandParseContext Context = new(
 		[".cs", ".md", ".generated"]);
 	private readonly TerminalWorkspaceCommandParser _parser = new();
+
+	[Fact]
+	public void GeneratedQuotedFreeTextRoundTripsWithoutCollapsingWhitespaceOrUnicode()
+	{
+		const int seed = 18427;
+		var random = new Random(seed);
+		string[] pieces = ["name", "  ", "\t", "Ж", "名前", "🙂", "'", "\"", "\\", "@file", ".*", "\r\n"];
+		for (var sample = 0; sample < 250; sample++)
+		{
+			var value = string.Concat(Enumerable.Range(0, random.Next(1, 30)).Select(_ => pieces[random.Next(pieces.Length)]));
+			foreach (var verb in new[] { "search", "filter" })
+			{
+				foreach (var quote in new[] { "'", "\"" })
+				{
+					var result = _parser.Parse(verb + " " + quote + value.Replace(quote, quote + quote, StringComparison.Ordinal) + quote, Context);
+					Assert.True(result.IsSuccess, $"seed={seed}; sample={sample}; error={result.Error}");
+					Assert.Equal(value, result.Command!.Text);
+				}
+			}
+		}
+	}
+
+	[Fact]
+	public void GeneratedMixedFreeTextKeepsTheOriginalGapsBetweenDecodedTokens()
+	{
+		const int seed = 73819;
+		var random = new Random(seed);
+		string[] gaps = [" ", "  ", "\t", " \t  "];
+		for (var sample = 0; sample < 200; sample++)
+		{
+			var input = new StringBuilder();
+			var expected = new StringBuilder();
+			for (var index = 0; index < 8; index++)
+			{
+				if (index > 0)
+				{
+					var gap = gaps[random.Next(gaps.Length)];
+					input.Append(gap);
+					expected.Append(gap);
+				}
+				var value = "名前🙂" + index;
+				expected.Append(value);
+				input.Append(random.Next(2) == 0 ? value : "'" + value + "'");
+			}
+			foreach (var verb in new[] { "search", "filter" })
+			{
+				var result = _parser.Parse(verb + " " + input, Context);
+				Assert.True(result.IsSuccess, $"seed={seed}; sample={sample}; error={result.Error}");
+				Assert.Equal(expected.ToString(), result.Command!.Text);
+			}
+		}
+	}
 
 	[Theory]
 	[MemberData(nameof(ValidCommands))]
@@ -90,6 +143,17 @@ public sealed class TerminalWorkspaceCommandParserTests
 	}
 
 	[Fact]
+	public void Parse_TypeWithoutKnownExtensionsKeepsReportingTheMissingValue()
+	{
+		var result = _parser.Parse("type .xyz");
+
+		Assert.False(result.IsSuccess);
+		Assert.Equal(TerminalWorkspaceCommandErrorCode.MissingArgument, result.Error!.Code);
+		Assert.Equal("type .xyz".Length, result.Error.Position);
+		Assert.Equal(["on", "off"], result.Error.Candidates);
+	}
+
+	[Fact]
 	public void Parse_TypeDeduplicatesExtensionsWithProjectTokenSemantics()
 	{
 		var result = _parser.Parse("type .CS .cs .md off", Context);
@@ -114,6 +178,70 @@ public sealed class TerminalWorkspaceCommandParserTests
 
 		Assert.True(result.IsSuccess);
 		Assert.Equal(expected, result.Command!.Text);
+	}
+
+	[Theory]
+	// Repeated/odd whitespace between unquoted words is kept exactly as typed.
+	[InlineData("search a  b", "a  b")]
+	[InlineData("search a\tb", "a\tb")]
+	[InlineData("search a \t b", "a \t b")]
+	[InlineData("search a   b   c", "a   b   c")]
+	// Outer whitespace around unquoted text is trimmed.
+	[InlineData("search   a b", "a b")]
+	[InlineData("search   a b   ", "a b")]
+	[InlineData("search    ", "")]
+	[InlineData("search\t\t", "")]
+	// A quoted argument spanning the whole remainder keeps its inner edge spaces exactly.
+	[InlineData("search \"  a  \"", "  a  ")]
+	[InlineData("filter '\ta\t'", "\ta\t")]
+	[InlineData("search \"\"", "")]
+	[InlineData("search \"   \"", "   ")]
+	// Doubling the quote character inside a quoted argument embeds a literal quote.
+	[InlineData("search \"a\"\"b\"", "a\"b")]
+	[InlineData("filter 'a''b'", "a'b")]
+	[InlineData("search \"a\"\"\"\"b\"", "a\"\"b")]
+	// A quoted segment followed by unquoted text is not re-trimmed; only the token values
+	// are dequoted, the raw gap between them is kept as typed (current, documented result).
+	[InlineData("search \"a\" b", "a b")]
+	[InlineData("search \"a\"   b", "a   b")]
+	[InlineData("search a   \"b\"", "a   b")]
+	[InlineData("search \"a\"\tb", "a\tb")]
+	// A quote that closes before the token ends keeps trailing literal characters attached
+	// (existing tokenizer behavior for e.g. "ab"cd).
+	[InlineData("search \"ab\"cd", "abcd")]
+	// Unicode and Cyrillic text round-trip untouched.
+	[InlineData("search привет  мир", "привет  мир")]
+	[InlineData("filter \"  привет  \"", "  привет  ")]
+	// Regex-special characters are passed through as literal text (no interpretation here).
+	[InlineData("search a.*+?[b](c)^$", "a.*+?[b](c)^$")]
+	internal void Parse_SearchAndFilterPreserveFreeTextSpacingAndQuoting(string text, string expected)
+	{
+		var result = _parser.Parse(text, Context);
+
+		Assert.True(result.IsSuccess, result.Error?.ToString());
+		Assert.Equal(expected, result.Command!.Text);
+	}
+
+	[Fact]
+	public void Parse_SearchPreservesFreeTextAcrossAVeryLongInput()
+	{
+		var longWord = new string('a', 5_000);
+		var text = $"search {longWord}  {longWord}";
+
+		var result = _parser.Parse(text, Context);
+
+		Assert.True(result.IsSuccess, result.Error?.ToString());
+		Assert.Equal($"{longWord}  {longWord}", result.Command!.Text);
+	}
+
+	[Fact]
+	public void Parse_SearchWithUnterminatedQuoteStillReportsTheExistingError()
+	{
+		var result = _parser.Parse("search \"unfinished", Context);
+
+		Assert.False(result.IsSuccess);
+		Assert.Equal(TerminalWorkspaceCommandErrorCode.UnterminatedQuote, result.Error!.Code);
+		Assert.Equal(7, result.Error.Position);
 	}
 
 	[Fact]
@@ -554,6 +682,34 @@ public sealed class TerminalWorkspaceCommandParserTests
 		Assert.Equal(
 			"profile load \"Team Settings\"",
 			Assert.Single(profile.Candidates, static item => item.Token == "Team Settings").CompletedText);
+	}
+
+	[Fact]
+	public void PathAndProfileCompletionIgnoresCaseIndependentlyOfTheCurrentCulture()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.CreateDirectory("Index");
+		workspace.WriteFile("Item Settings.json", "{}");
+		var context = new TerminalWorkspaceCommandParseContext(
+			[".cs"],
+			WorkingDirectory: workspace.Path,
+			ProfileDirectory: workspace.Path);
+		var originalCulture = CultureInfo.CurrentCulture;
+		try
+		{
+			// Turkish casing maps 'i' to dotted 'İ', so culture-aware matching misses "Index".
+			CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("tr-TR");
+
+			var select = _parser.GetCompletion("select i", 8, context);
+			var profile = _parser.GetCompletion("profile load i", 14, context);
+
+			Assert.Contains(select.Candidates, static item => item.Token == "Index");
+			Assert.Contains(profile.Candidates, static item => item.Token == "Item Settings");
+		}
+		finally
+		{
+			CultureInfo.CurrentCulture = originalCulture;
+		}
 	}
 
 	[Fact]
@@ -1028,6 +1184,9 @@ public sealed class TerminalWorkspaceCommandParserTests
 		["analyze", TerminalWorkspaceCommandVerb.Analyze],
 		["related src/App.cs", TerminalWorkspaceCommandVerb.Related],
 		["related src/App.cs --direction both --depth 2", TerminalWorkspaceCommandVerb.Related],
+		["diff", TerminalWorkspaceCommandVerb.Diff],
+		["diff staged", TerminalWorkspaceCommandVerb.Diff],
+		["diff diff:main..feature", TerminalWorkspaceCommandVerb.Diff],
 		["reveal src/App.cs", TerminalWorkspaceCommandVerb.Reveal],
 		["branch", TerminalWorkspaceCommandVerb.Branch],
 		["branch feature/review", TerminalWorkspaceCommandVerb.Branch],
@@ -1061,8 +1220,12 @@ public sealed class TerminalWorkspaceCommandParserTests
 		["set hide-secrets maybe", TerminalWorkspaceCommandErrorCode.InvalidValue, 17, "on"],
 		["set hide-secrets on extra", TerminalWorkspaceCommandErrorCode.UnexpectedArgument, 20, (string?)null],
 		["set git diff:main...feature", TerminalWorkspaceCommandErrorCode.UnknownToken, 8, "diff:<ref>..<ref>"],
+		["set hide-secret", TerminalWorkspaceCommandErrorCode.UnknownToken, 4, "hide-secrets"],
 		["all unknown on", TerminalWorkspaceCommandErrorCode.UnknownToken, 4, "content"],
+		["all unknown", TerminalWorkspaceCommandErrorCode.UnknownToken, 4, "content"],
 		["type .cs", TerminalWorkspaceCommandErrorCode.MissingArgument, 8, "on"],
+		["type .CS", TerminalWorkspaceCommandErrorCode.MissingArgument, 8, "on"],
+		["type .xyz", TerminalWorkspaceCommandErrorCode.UnknownToken, 5, ".cs"],
 		["select src maybe", TerminalWorkspaceCommandErrorCode.InvalidValue, 11, "on"],
 		["select all src on", TerminalWorkspaceCommandErrorCode.UnexpectedArgument, 11, (string?)null],
 		["view contents", TerminalWorkspaceCommandErrorCode.UnknownToken, 5, "content"],
