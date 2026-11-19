@@ -238,6 +238,8 @@ Commands, option names, enum tokens, JSON properties, and XML element names are
 stable English identifiers. Choice values such as `--format json`, `--tool-set
 reduced`, or `--client codex` are matched case-insensitively. `--language CODE`
 localizes human-readable help, status, diagnostics, and Terminal Workspace labels.
+An unsupported `--language` code is a usage error (exit code 2) for every
+invocation, including `--help` and `--version`.
 
 ## Command parity
 
