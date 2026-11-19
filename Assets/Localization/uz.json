@@ -781,6 +781,7 @@
   "Terminal.Error.ExportFailed": "Loyiha eksportini yakunlab bo‘lmadi.",
   "Terminal.Error.ProjectPathRequired": "Loyiha jildini ko‘rsatish kerak.",
   "Terminal.Error.ProjectNotFound": "Loyiha jildi topilmadi.",
+  "Terminal.Error.McpRootNotFound": "Loyiha ildizi mavjud emas yoki jild emas: {0}",
   "Terminal.Error.SelectionPathInvalid": "Tanlangan yo‘l noto‘g‘ri yoki loyiha ildizidan tashqariga chiqadi.",
   "Terminal.Error.ProfileUnresolved": "Tanlangan profilni aniqlab bo‘lmadi.",
   "Terminal.Hint.ProfileStandard": "Mahalliy profil bo‘lmasa, --profile standard parametridan foydalaning.",

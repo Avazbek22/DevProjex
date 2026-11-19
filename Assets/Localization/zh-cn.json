@@ -793,6 +793,7 @@
   "Terminal.Error.ExportFailed": "项目导出无法完成。",
   "Terminal.Error.ProjectPathRequired": "需要一个项目文件夹。",
   "Terminal.Error.ProjectNotFound": "找不到项目文件夹。",
+  "Terminal.Error.McpRootNotFound": "项目根目录不存在或不是文件夹：{0}",
   "Terminal.Error.SelectionPathInvalid": "所选路径无效或超出项目根目录。",
   "Terminal.Error.ProfileUnresolved": "无法解析所选的配置文件。",
   "Terminal.Hint.ProfileStandard": "本地配置文件不存在时，请使用--profile standard。",

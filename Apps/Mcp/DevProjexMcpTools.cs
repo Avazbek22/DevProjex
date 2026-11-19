@@ -253,11 +253,13 @@ internal sealed partial class DevProjexMcpTools(
 		}
 
 		// Live mode adds the window's own opt-in on top of the server flag.
-		bool IsPrivateDataHidden(string root) =>
-			Projects.HidePrivateData ||
-			liveContext?.ReadProfile(root).Profile?.SelectedIgnoreOptions
-				.Contains(IgnoreOptionId.HidePrivateData) == true;
+		bool IsPrivateDataHidden(string root) => IsPrivateDataHiddenForRoot(root);
 	}
+
+	private bool IsPrivateDataHiddenForRoot(string root) =>
+		Projects.HidePrivateData ||
+		liveContext?.ReadProfile(root).Profile?.SelectedIgnoreOptions
+			.Contains(IgnoreOptionId.HidePrivateData) == true;
 
 	[Description(
 		"Returns filtered structure without contents. Use it to find files by name; use analyze instead for size and token metrics, or pack_context for multi-file content. Returns Markdown/text/JSON/XML within 2,000 lines and 50,000 characters. paths selects literal locations; include_patterns selects names or directories in one call, e.g. include_patterns=[\"src/middleware/{powered-by,body-limit,bearer-auth}/**/*handler*.ts\"]. format=markdown|text|json|xml; max_depth=0..1000 counts levels below each paths entry, or the project root without paths; git_scope and filters only narrow.")]
@@ -2987,7 +2989,7 @@ internal sealed partial class DevProjexMcpTools(
 		}
 		catch (McpToolException exception)
 		{
-			var result = McpToolResults.Error(exception);
+			var result = McpToolResults.Error(exception, IsPrivateDataHiddenForRoot);
 			return Complete(result);
 		}
 		catch (PortableProjectProfileException exception)
@@ -3820,7 +3822,13 @@ internal sealed partial class DevProjexMcpTools(
 			   $"affected-scopes={affectedScopes.ToString(CultureInfo.InvariantCulture)}";
 	}
 
-	private static string? FormatDependencyConfigurationData(
+	// Rows spell each problem the way the summary line above them counts it.
+	private static string FormatDependencyConfigurationProblem(DependencyConfigurationState state) =>
+		state == DependencyConfigurationState.UnsupportedSemantics
+			? "unsupported-semantics"
+			: state.ToString().ToLowerInvariant();
+
+	internal static string? FormatDependencyConfigurationData(
 		IReadOnlyList<DependencyConfigurationDiagnostic> diagnostics)
 	{
 		if (diagnostics.Count == 0)
@@ -3833,7 +3841,7 @@ internal sealed partial class DevProjexMcpTools(
 			output.Append("[Dependency configuration] ")
 				.Append(McpTextEscaping.EscapeSingleLine(diagnostic.Path))
 				.Append(" · ")
-				.Append(diagnostic.State.ToString().ToLowerInvariant());
+				.Append(FormatDependencyConfigurationProblem(diagnostic.State));
 		}
 		if (diagnostics.Count > 8)
 		{

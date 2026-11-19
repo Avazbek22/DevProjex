@@ -781,6 +781,7 @@
   "Terminal.Error.ExportFailed": "Жоба экспортын аяқтау мүмкін болмады.",
   "Terminal.Error.ProjectPathRequired": "Жоба қалтасын көрсету қажет.",
   "Terminal.Error.ProjectNotFound": "Жоба қалтасы табылмады.",
+  "Terminal.Error.McpRootNotFound": "Жобаның түбірі жоқ немесе қалта емес: {0}",
   "Terminal.Error.SelectionPathInvalid": "Таңдалған жол жарамсыз немесе жоба түбірінен шығып кетеді.",
   "Terminal.Error.ProfileUnresolved": "Таңдалған профильді анықтау мүмкін болмады.",
   "Terminal.Hint.ProfileStandard": "Жергілікті профиль болмаса, --profile standard параметрін пайдаланыңыз.",

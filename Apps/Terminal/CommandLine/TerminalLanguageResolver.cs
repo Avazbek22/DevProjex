@@ -28,6 +28,32 @@ internal static class TerminalLanguageResolver
 		return AppLanguageUtility.DetectSystemLanguage();
 	}
 
+	public static bool TryFindUnsupportedExplicitLanguage(
+		IReadOnlyList<string> arguments,
+		out string value)
+	{
+		for (var index = 0; index < arguments.Count; index++)
+		{
+			var token = arguments[index];
+			string? candidate = null;
+			if (token.StartsWith("--language=", StringComparison.Ordinal))
+				candidate = token["--language=".Length..];
+			else if (token == "--language" && index + 1 < arguments.Count)
+				candidate = arguments[index + 1];
+			else if (token == "--")
+				break;
+			if (candidate is null)
+				continue;
+			if (CliChoiceSets.Language.TryParse(candidate, out _))
+				break;
+			value = candidate;
+			return true;
+		}
+
+		value = string.Empty;
+		return false;
+	}
+
 	public static AppLanguage ParseOrDefault(string? value) =>
 		value is not null &&
 		CliChoiceSets.Language.TryParse(value, out var language)

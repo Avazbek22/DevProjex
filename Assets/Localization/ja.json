@@ -793,6 +793,7 @@
   "Terminal.Error.ExportFailed": "プロジェクトのエクスポートを完了できませんでした。",
   "Terminal.Error.ProjectPathRequired": "プロジェクトディレクトリを指定してください。",
   "Terminal.Error.ProjectNotFound": "プロジェクトのディレクトリが見つかりません。",
+  "Terminal.Error.McpRootNotFound": "プロジェクトのルートが存在しないか、フォルダーではありません: {0}",
   "Terminal.Error.SelectionPathInvalid": "選択したパスが無効か、プロジェクトのルートの外を指しています。",
   "Terminal.Error.ProfileUnresolved": "選択したプロファイルを解決できませんでした。",
   "Terminal.Hint.ProfileStandard": "ローカルプロファイルがない場合は --profile standard を使用してください。",

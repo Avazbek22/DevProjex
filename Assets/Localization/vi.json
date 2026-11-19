@@ -793,6 +793,7 @@
   "Terminal.Error.ExportFailed": "Không thể hoàn tất việc xuất dự án.",
   "Terminal.Error.ProjectPathRequired": "Cần có thư mục dự án.",
   "Terminal.Error.ProjectNotFound": "Không tìm thấy thư mục dự án.",
+  "Terminal.Error.McpRootNotFound": "Thư mục gốc của dự án không tồn tại hoặc không phải là thư mục: {0}",
   "Terminal.Error.SelectionPathInvalid": "Đường dẫn đã chọn không hợp lệ hoặc rời khỏi thư mục gốc của dự án.",
   "Terminal.Error.ProfileUnresolved": "Không thể xác định hồ sơ đã chọn.",
   "Terminal.Hint.ProfileStandard": "Dùng --profile standard khi chưa có hồ sơ cục bộ.",

@@ -134,6 +134,42 @@ public sealed class McpCommandContractTests
 		Assert.Single(environment.StandardError.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries));
 	}
 
+	[Theory]
+	[InlineData("en", "The project root does not exist or is not a folder: ")]
+	[InlineData("ru", "Корень проекта не существует или не является папкой: ")]
+	public async Task McpStartupExplainsAMissingRoot(string language, string expectedMessage)
+	{
+		using var workspace = new TemporaryDirectory();
+		var missingRoot = Path.Combine(workspace.Path, "missing");
+
+		var environment = new TestTerminalEnvironment();
+		var exitCode = await new TerminalApplication(environment).RunAsync(
+			["mcp", "--root", missingRoot, "--language", language],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Contains("[DPX-MCP-STARTUP]", environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains(expectedMessage + missingRoot, environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task McpStartupExplainsARootThatIsAFile()
+	{
+		using var workspace = new TemporaryDirectory();
+		var fileRoot = workspace.WriteFile("notes.txt", "text");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(environment).RunAsync(
+			["mcp", "--root", fileRoot, "--language", "en"],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Contains(
+			"error[DPX-MCP-STARTUP]: The project root does not exist or is not a folder: " + fileRoot,
+			environment.StandardError,
+			StringComparison.Ordinal);
+	}
+
 	[Fact]
 	public async Task McpUnrestrictedComposesWithAgentDelegationAtParseTime()
 	{

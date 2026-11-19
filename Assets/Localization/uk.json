@@ -793,6 +793,7 @@
   "Terminal.Error.ExportFailed": "Не вдалося завершити експорт проєкту.",
   "Terminal.Error.ProjectPathRequired": "Потрібна папка проєкту.",
   "Terminal.Error.ProjectNotFound": "Папку проєкту не знайдено.",
+  "Terminal.Error.McpRootNotFound": "Корінь проєкту не існує або не є папкою: {0}",
   "Terminal.Error.SelectionPathInvalid": "Вибраний шлях недійсний або виходить із кореня проєкту.",
   "Terminal.Error.ProfileUnresolved": "Не вдалося визначити вибраний профіль.",
   "Terminal.Hint.ProfileStandard": "Використовуйте --profile standard, якщо локального профілю немає.",

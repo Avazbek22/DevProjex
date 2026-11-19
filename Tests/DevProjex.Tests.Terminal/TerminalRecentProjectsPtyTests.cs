@@ -289,9 +289,8 @@ public sealed class TerminalRecentProjectsPtyTests
 		Assert.DoesNotContain("Profile:", workspace, StringComparison.Ordinal);
 		await terminal.ResizeAsync(160, 40, TestContext.Current.CancellationToken);
 		await terminal.SendShiftF6Async(TestContext.Current.CancellationToken);
-		// The wide Parameters panel shortens the title to "Content processi…".
 		var parameters = await terminal.WaitForScreenAsync(
-			"Content processi",
+			"Content processing",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("PARAMETERS", parameters, StringComparison.Ordinal);
 		Assert.DoesNotContain("Saved settings", parameters, StringComparison.Ordinal);

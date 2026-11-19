@@ -84,7 +84,7 @@ previous screen, selected row, and keyboard focus.
   Tree filter or Preview search, and otherwise asks before returning from a
   workspace to Welcome.
 - Ctrl+C cancels active work first and otherwise asks before exiting.
-- `q` exits only from a root screen.
+- `q` exits only from a root screen and, like Ctrl+C, asks for confirmation first.
 - Errors remain visible until dismissed and then return to a usable prior state.
 
 Only an explicit Exit action, root-level `q`, or confirmed Ctrl+C ends the TUI.
@@ -99,12 +99,15 @@ focused detail pane, and contextual keyboard hints instead of a modal selector.
 ![DevProjex Terminal Welcome](Media/terminal-workspace/welcome.png)
 
 After a project opens, the wide layout keeps Project Tree, Context Preview, and
-Parameters visible together. Parameters uses a fixed 38-column panel so excess
+Parameters visible together. Parameters uses a fixed 39-column panel so excess
 width belongs to Preview. Parameters starts directly with three framed mini-panels:
 Content Processing, Exclusions, and File Types. Content Processing contains five
 fixed rows; Exclusions and File Types divide the remaining height and scroll
 independently. Their aggregate All controls remain fixed in the top frame while
 the lists scroll; plain mode renders the same controls as pinned first rows.
+Mini-panel titles are never shortened: when a localized title and its All control
+do not fit on one row, the control drops its count and then its label, keeping
+its checkbox.
 Only the focused mini-panel renders a selection highlight. Narrow layouts present
 the same three mini-panels at the full
 available width without losing selection or navigation state. Export commands
@@ -461,6 +464,7 @@ the existing confirmation and blocking progress surfaces.
 | Enter | open or activate |
 | Space | toggle the selected node |
 | `/` | search |
+| `n` / Shift+`N` | next / previous Preview Search match when Context Preview has focus |
 | `:` | open the workspace command line |
 | Ctrl+P | searchable Action Palette |
 | Tab / F6 | focus the next major pane |
@@ -486,7 +490,8 @@ The footer shows actions relevant to the active layout.
 When Context Preview has focus, Up/Down and `j`/`k` scroll by line,
 Page Up/Page Down scroll by page, and Home/End move to the start or end.
 Left/Right scroll horizontally when content overflows. `{` and `}` move to the
-previous or next file section, Ctrl+G jumps to a line, and `W` toggles line
+previous or next file section, `n` and Shift+`N` move to the next or previous
+Preview Search match, Ctrl+G jumps to a line, and `W` toggles line
 wrapping. Changing the selected tree file scrolls Preview to that file after a
 short debounce. In compact layouts, moving focus also makes the corresponding
 Tree, Preview, or Parameters pane visible. Pane

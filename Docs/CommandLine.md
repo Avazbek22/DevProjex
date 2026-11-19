@@ -238,6 +238,8 @@ Commands, option names, enum tokens, JSON properties, and XML element names are
 stable English identifiers. Choice values such as `--format json`, `--tool-set
 reduced`, or `--client codex` are matched case-insensitively. `--language CODE`
 localizes human-readable help, status, diagnostics, and Terminal Workspace labels.
+An unsupported `--language` code is a usage error (exit code 2) for every
+invocation, including `--help` and `--version`.
 
 ## Command parity
 
@@ -297,14 +299,15 @@ in the list below: `analyze`, `search`, `related`, `tree`, `export context`,
 --git-mode <MODE>
 --exclude <NAME>             repeatable
 --max-file-bytes <SIZE>      analyze, related, tree, and export context only
---hide-secrets [<true|false|on|off>]
---hide-private-data [<true|false|on|off>]
---compress-code [<true|false|on|off>]
---strip-comments [<true|false|on|off>]
---strip-blank-lines [<true|false|on|off>]
+--hide-secrets [<on|off>]
+--hide-private-data [<on|off>]
+--compress-code [<on|off>]
+--strip-comments [<on|off>]
+--strip-blank-lines [<on|off>]
 ```
 
-Boolean transformation values also accept `on|off`. Each has an explicit
+Boolean transformation values are `on|off`; `true|false` are accepted as
+synonyms. Each has an explicit
 negative form: `--no-hide-secrets`, `--no-hide-private-data`,
 `--no-compress-code`, `--no-strip-comments`, and
 `--no-strip-blank-lines`. Short aliases are `-p` profile, `-r` root,
@@ -762,7 +765,7 @@ Specific options are:
 --select-from <FILE|->
 -x, --exclude <NAME> ...
 --git-mode <MODE>
---hide-secrets [<true|false|on|off>] / --no-hide-secrets
+--hide-secrets [<on|off>] / --no-hide-secrets
 --progress <auto|always|never>
 <shared output options, including --plain>
 ```

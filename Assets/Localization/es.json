@@ -793,6 +793,7 @@
     "Terminal.Error.ExportFailed": "No se pudo exportar el proyecto.",
     "Terminal.Error.ProjectPathRequired": "Se necesita una carpeta de proyecto.",
     "Terminal.Error.ProjectNotFound": "No se encontró la carpeta del proyecto.",
+    "Terminal.Error.McpRootNotFound": "La raíz del proyecto no existe o no es una carpeta: {0}",
     "Terminal.Error.SelectionPathInvalid": "Una ruta seleccionada no es válida o sale del proyecto.",
   "Terminal.Error.ProfileUnresolved": "No se pudo resolver el perfil seleccionado.",
   "Terminal.Hint.ProfileStandard": "Use --profile standard cuando no exista un perfil local.",

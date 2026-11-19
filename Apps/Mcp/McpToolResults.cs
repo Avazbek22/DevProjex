@@ -102,6 +102,11 @@ internal static class McpToolResults
 	}
 
 	public static CallToolResult Error(McpToolException exception) =>
+		Error(exception, isPrivateDataHidden: null);
+
+	public static CallToolResult Error(
+		McpToolException exception,
+		Func<string, bool>? isPrivateDataHidden) =>
 		new()
 		{
 			Content =
@@ -109,11 +114,46 @@ internal static class McpToolResults
 				new TextContentBlock
 				{
 					Text = $"{exception.Code}: request failed.\n\n" +
-						   McpSpotlight.Wrap(McpTextEscaping.EscapeSingleLine(ProtectMetadataString(exception.Message)))
+						   McpSpotlight.Wrap(McpTextEscaping.EscapeSingleLine(
+							   ProtectErrorMessage(exception, isPrivateDataHidden)))
 				}
 			],
 			IsError = true
 		};
+
+	// Requested paths and other details keep the full secret and private-data scan. Only the quoted
+	// project root, an address the agent already sees in list_projects and the get_tree root label,
+	// follows that same policy: exact without it, local-user segment masked with it.
+	internal static string ProtectErrorMessage(
+		McpToolException exception,
+		Func<string, bool>? isPrivateDataHidden)
+	{
+		var message = exception.Message;
+		var root = exception.ProjectRoot;
+		if (isPrivateDataHidden is null || string.IsNullOrEmpty(root))
+			return ProtectMetadataString(message);
+		var quotedRoot = $"'{root}'";
+		var rootIndex = message.LastIndexOf(quotedRoot, StringComparison.Ordinal);
+		if (rootIndex < 0)
+			return ProtectMetadataString(message);
+
+		bool hidePrivateData;
+		try
+		{
+			hidePrivateData = isPrivateDataHidden(root);
+		}
+		catch (Exception policyException) when (policyException is not OperationCanceledException)
+		{
+			// An unreadable live profile must not reveal more than the stricter policy would.
+			hidePrivateData = true;
+		}
+		var protectedRoot = hidePrivateData
+			? ProtectMetadataString(OutputRootPathPresentation.MaskLocalUserSegment(root))
+			: ProtectMetadataString(root, detectPrivateData: false);
+		return ProtectMetadataString(message[..rootIndex]) +
+			$"'{protectedRoot}'" +
+			ProtectMetadataString(message[(rootIndex + quotedRoot.Length)..]);
+	}
 
 	public static CallToolResult Error(Exception exception) =>
 		new()

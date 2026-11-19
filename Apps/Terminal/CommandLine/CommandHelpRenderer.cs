@@ -74,7 +74,11 @@ public sealed class CommandHelpRenderer(
 
 		WriteSection(output, _localization["Terminal.Help.Examples"], terminalWidth);
 		foreach (var example in CliExamplesRegistry.Get(command, path))
-			WriteIndented(output, example, terminalWidth);
+		{
+			// Examples are copied verbatim, so a wrapped command line would paste as two commands.
+			output.Write("  ");
+			output.WriteLine(example);
+		}
 
 		WriteSection(output, _localization["Terminal.Help.ExitCodes"], terminalWidth);
 		foreach (var code in ResolveExitCodes(command))
