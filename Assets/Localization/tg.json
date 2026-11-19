@@ -781,6 +781,7 @@
   "Terminal.Error.ExportFailed": "Содироти лоиҳа анҷом дода нашуд.",
   "Terminal.Error.ProjectPathRequired": "Ҷузвдони лоиҳаро нишон додан лозим аст.",
   "Terminal.Error.ProjectNotFound": "Ҷузвдони лоиҳа ёфт нашуд.",
+  "Terminal.Error.McpRootNotFound": "Решаи лоиҳа вуҷуд надорад ё ҷузвдон нест: {0}",
   "Terminal.Error.SelectionPathInvalid": "Роҳи интихобшуда нодуруст аст ё аз решаи лоиҳа берун мебарояд.",
   "Terminal.Error.ProfileUnresolved": "Профили интихобшударо муайян кардан нашуд.",
   "Terminal.Hint.ProfileStandard": "Агар профили маҳаллӣ вуҷуд надошта бошад, --profile standard-ро истифода баред.",

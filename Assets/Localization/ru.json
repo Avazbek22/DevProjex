@@ -799,6 +799,7 @@
   "Terminal.Error.ExportFailed": "Не удалось экспортировать проект.",
   "Terminal.Error.ProjectPathRequired": "Необходимо указать каталог проекта.",
   "Terminal.Error.ProjectNotFound": "Каталог проекта не найден.",
+  "Terminal.Error.McpRootNotFound": "Корень проекта не существует или не является папкой: {0}",
   "Terminal.Error.SelectionPathInvalid": "Выбранный путь недопустим или выходит за пределы проекта.",
   "Terminal.Error.ProfileUnresolved": "Не удалось разрешить выбранный профиль.",
   "Terminal.Hint.ProfileStandard": "Если локального профиля нет, используйте --profile standard.",

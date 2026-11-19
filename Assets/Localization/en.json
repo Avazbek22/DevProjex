@@ -799,6 +799,7 @@
   "Terminal.Error.ExportFailed": "The project export could not be completed.",
   "Terminal.Error.ProjectPathRequired": "A project directory is required.",
   "Terminal.Error.ProjectNotFound": "The project directory was not found.",
+  "Terminal.Error.McpRootNotFound": "The project root does not exist or is not a folder: {0}",
   "Terminal.Error.SelectionPathInvalid": "A selected path is invalid or leaves the project root.",
   "Terminal.Error.ProfileUnresolved": "The selected profile could not be resolved.",
   "Terminal.Hint.ProfileStandard": "Use --profile standard when no local profile exists.",

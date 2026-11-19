@@ -793,6 +793,7 @@
   "Terminal.Error.ExportFailed": "Proje dışa aktarımı tamamlanamadı.",
   "Terminal.Error.ProjectPathRequired": "Bir proje dizini gereklidir.",
   "Terminal.Error.ProjectNotFound": "Proje dizini bulunamadı.",
+  "Terminal.Error.McpRootNotFound": "Proje kökü yok veya bir klasör değil: {0}",
   "Terminal.Error.SelectionPathInvalid": "Seçilen bir yol geçersiz veya proje kökünün dışına çıkıyor.",
   "Terminal.Error.ProfileUnresolved": "Seçilen profil çözümlenemedi.",
   "Terminal.Hint.ProfileStandard": "Yerel profil yoksa --profile standard kullanın.",

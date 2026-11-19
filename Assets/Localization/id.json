@@ -793,6 +793,7 @@
   "Terminal.Error.ExportFailed": "Ekspor proyek tidak dapat diselesaikan.",
   "Terminal.Error.ProjectPathRequired": "Direktori proyek diperlukan.",
   "Terminal.Error.ProjectNotFound": "Direktori proyek tidak ditemukan.",
+  "Terminal.Error.McpRootNotFound": "Root proyek tidak ada atau bukan folder: {0}",
   "Terminal.Error.SelectionPathInvalid": "Jalur yang dipilih tidak valid atau berada di luar akar proyek.",
   "Terminal.Error.ProfileUnresolved": "Profil yang dipilih tidak dapat ditentukan.",
   "Terminal.Hint.ProfileStandard": "Gunakan --profile standard jika belum ada profil lokal.",

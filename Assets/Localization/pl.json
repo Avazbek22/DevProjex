@@ -793,6 +793,7 @@
   "Terminal.Error.ExportFailed": "Nie można ukończyć eksportu projektu.",
   "Terminal.Error.ProjectPathRequired": "Wymagany jest katalog projektu.",
   "Terminal.Error.ProjectNotFound": "Nie znaleziono katalogu projektu.",
+  "Terminal.Error.McpRootNotFound": "Katalog główny projektu nie istnieje lub nie jest folderem: {0}",
   "Terminal.Error.SelectionPathInvalid": "Wybrana ścieżka jest nieprawidłowa lub wychodzi poza katalog główny projektu.",
   "Terminal.Error.ProfileUnresolved": "Nie można ustalić wybranego profilu.",
   "Terminal.Hint.ProfileStandard": "Użyj --profile standard, gdy nie istnieje żaden profil lokalny.",

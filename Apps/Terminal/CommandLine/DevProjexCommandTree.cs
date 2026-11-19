@@ -298,7 +298,15 @@ public sealed class DevProjexCommandTree
 	private void WriteMcpStartupError(Exception exception) =>
 		environment.Error.WriteLine(
 			$"{TerminalErrorHeader.Format(_localization, "DPX-MCP-STARTUP")} " +
-			TerminalTextEscaping.EscapeSingleLine(exception.Message));
+			TerminalTextEscaping.EscapeSingleLine(FormatMcpStartupMessage(exception)));
+
+	private string FormatMcpStartupMessage(Exception exception) => exception switch
+	{
+		// The root registry reports a missing or non-directory root with the bare path as the message.
+		DirectoryNotFoundException when Path.IsPathFullyQualified(exception.Message) =>
+			_localization.Format("Terminal.Error.McpRootNotFound", exception.Message),
+		_ => exception.Message
+	};
 
 	private static bool IsValidSearchBodyCharacters(string? value)
 	{

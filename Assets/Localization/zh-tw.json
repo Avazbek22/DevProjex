@@ -793,6 +793,7 @@
   "Terminal.Error.ExportFailed": "專案匯出無法完成。",
   "Terminal.Error.ProjectPathRequired": "需要一個專案資料夾。",
   "Terminal.Error.ProjectNotFound": "找不到專案資料夾。",
+  "Terminal.Error.McpRootNotFound": "專案根目錄不存在或不是資料夾：{0}",
   "Terminal.Error.SelectionPathInvalid": "所選路徑無效或超出專案根目錄。",
   "Terminal.Error.ProfileUnresolved": "無法解析所選的設定檔。",
   "Terminal.Hint.ProfileStandard": "本機設定檔不存在時，請使用--profile standard。",

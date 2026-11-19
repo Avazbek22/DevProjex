@@ -799,6 +799,7 @@
   "Terminal.Error.ExportFailed": "Das Projekt konnte nicht exportiert werden.",
   "Terminal.Error.ProjectPathRequired": "Ein Projektverzeichnis ist erforderlich.",
   "Terminal.Error.ProjectNotFound": "Das Projektverzeichnis wurde nicht gefunden.",
+  "Terminal.Error.McpRootNotFound": "Das Projektstammverzeichnis existiert nicht oder ist kein Ordner: {0}",
   "Terminal.Error.SelectionPathInvalid": "Ein ausgewählter Pfad ist ungültig oder verlässt das Projekt.",
   "Terminal.Error.ProfileUnresolved": "Das ausgewählte Profil konnte nicht aufgelöst werden.",
   "Terminal.Hint.ProfileStandard": "Verwenden Sie --profile standard, wenn kein lokales Profil vorhanden ist.",
