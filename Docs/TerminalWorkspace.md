@@ -99,12 +99,15 @@ focused detail pane, and contextual keyboard hints instead of a modal selector.
 ![DevProjex Terminal Welcome](Media/terminal-workspace/welcome.png)
 
 After a project opens, the wide layout keeps Project Tree, Context Preview, and
-Parameters visible together. Parameters uses a fixed 38-column panel so excess
+Parameters visible together. Parameters uses a fixed 39-column panel so excess
 width belongs to Preview. Parameters starts directly with three framed mini-panels:
 Content Processing, Exclusions, and File Types. Content Processing contains five
 fixed rows; Exclusions and File Types divide the remaining height and scroll
 independently. Their aggregate All controls remain fixed in the top frame while
 the lists scroll; plain mode renders the same controls as pinned first rows.
+Mini-panel titles are never shortened: when a localized title and its All control
+do not fit on one row, the control drops its count and then its label, keeping
+its checkbox.
 Only the focused mini-panel renders a selection highlight. Narrow layouts present
 the same three mini-panels at the full
 available width without losing selection or navigation state. Export commands

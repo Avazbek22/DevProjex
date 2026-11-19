@@ -6,8 +6,8 @@ namespace DevProjex.Tests.Terminal;
 [Collection(TerminalProcessCollection.Name)]
 public sealed class TerminalWorkspaceCommandLinePtyTests
 {
-	// The wide Parameters panel shortens the title to "Content processi…".
-	private const string WideContentProcessingTitle = "Content processi";
+	// The wide Parameters panel shows the title whole.
+	private const string WideContentProcessingTitle = "Content processing";
 
 	[Fact(Timeout = 120_000)]
 	public async Task CopyCommandPublishesAnInlineSuccessResult()

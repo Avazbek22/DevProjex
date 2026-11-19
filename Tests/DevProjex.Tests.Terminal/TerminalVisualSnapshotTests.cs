@@ -183,8 +183,7 @@ public sealed class TerminalVisualSnapshotTests
 
 		await WaitForStableScreenAsync(terminal, "PARAMETERS");
 		var parameters = terminal.CaptureScreen();
-		// The wide Parameters panel shortens the title to "Content processi…".
-		Assert.Contains("Content processi", parameters, StringComparison.Ordinal);
+		Assert.Contains("┤Content processing├", parameters, StringComparison.Ordinal);
 		Assert.Contains("Exclusions", parameters, StringComparison.Ordinal);
 		Assert.Contains("File types", parameters, StringComparison.Ordinal);
 		Assert.DoesNotContain("ROOT FOLDERS", parameters, StringComparison.Ordinal);
@@ -269,7 +268,7 @@ public sealed class TerminalVisualSnapshotTests
 
 		await WaitForStableScreenAsync(terminal, "ПАРАМЕТРЫ");
 		var workspace = terminal.CaptureScreen();
-		Assert.Contains("┤Обработка содерж…├", workspace, StringComparison.Ordinal);
+		Assert.Contains("┤Обработка содержимого├", workspace, StringComparison.Ordinal);
 		Assert.Contains("Исключения", workspace, StringComparison.Ordinal);
 		Assert.Contains("Типы файлов", workspace, StringComparison.Ordinal);
 		Assert.DoesNotContain("КОРНЕВЫЕ ПАПКИ", workspace, StringComparison.Ordinal);
