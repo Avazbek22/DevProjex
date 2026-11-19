@@ -224,6 +224,14 @@ public sealed class McpRootRegistry
 		}
 	}
 
+	private static McpToolException PathNotFound(string path, string projectRoot) =>
+		new(
+			McpErrorCodes.PathNotFound,
+			$"{McpErrorCodes.PathNotFound}: path '{path}' does not exist inside project '{projectRoot}'.")
+		{
+			ProjectRoot = projectRoot
+		};
+
 	private string ResolveExistingPath(
 		string projectRoot,
 		string path,
@@ -259,18 +267,14 @@ public sealed class McpRootRegistry
 			EnsureExistingAncestorIsWithin(projectRoot, path, lexicalPath, physicalPathResolver);
 			if (FlatpakEnvironment.Current.IsActive)
 				throw FlatpakPathUnavailable(lexicalPath);
-			throw new McpToolException(
-				McpErrorCodes.PathNotFound,
-				$"{McpErrorCodes.PathNotFound}: path '{path}' does not exist inside project '{projectRoot}'.");
+			throw PathNotFound(path, projectRoot);
 		}
 		catch (DirectoryNotFoundException)
 		{
 			EnsureExistingAncestorIsWithin(projectRoot, path, lexicalPath, physicalPathResolver);
 			if (FlatpakEnvironment.Current.IsActive)
 				throw FlatpakPathUnavailable(lexicalPath);
-			throw new McpToolException(
-				McpErrorCodes.PathNotFound,
-				$"{McpErrorCodes.PathNotFound}: path '{path}' does not exist inside project '{projectRoot}'.");
+			throw PathNotFound(path, projectRoot);
 		}
 
 		if (!IsWithin(projectRoot, physical))

@@ -72,4 +72,68 @@ public sealed class McpProtectedMetadataTests
 		Assert.Contains("[redacted]", text, StringComparison.Ordinal);
 		Assert.DoesNotContain(Secret, text, StringComparison.Ordinal);
 	}
+
+	[Theory]
+	[InlineData(@"C:\Users\alice\repo")]
+	[InlineData("/home/alice/repo")]
+	public void ToolErrorShowsProjectRootExactlyWithoutPrivateDataPolicy(string root)
+	{
+		var result = McpToolResults.Error(PathNotFound("missing.txt", root), static _ => false);
+
+		var text = Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
+		Assert.Contains(EscapedQuoted(root), text, StringComparison.Ordinal);
+		Assert.DoesNotContain("[redacted]", text, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData(@"C:\Users\alice\repo", @"C:\Users\[local-user-1]\repo")]
+	[InlineData("/home/alice/repo", "/home/[local-user-1]/repo")]
+	public void ToolErrorMasksOnlyTheLocalUserSegmentWithPrivateDataPolicy(string root, string expected)
+	{
+		var result = McpToolResults.Error(PathNotFound("missing.txt", root), static _ => true);
+
+		var text = Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
+		Assert.Contains(EscapedQuoted(expected), text, StringComparison.Ordinal);
+		Assert.DoesNotContain("alice", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void ToolErrorStillScansRequestedPathAndMasksSecretsInTheRoot()
+	{
+		var root = "/home/alice/" + Secret;
+		var requested = "docs/jane.roe@contoso.net/" + Secret + "/notes.txt";
+		var details = $"{McpErrorCodes.PathNotFound}: path '{requested}' does not exist inside project ";
+
+		var result = McpToolResults.Error(PathNotFound(requested, root), static _ => false);
+
+		var text = Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
+		Assert.DoesNotContain(Secret, text, StringComparison.Ordinal);
+		Assert.Contains(
+			McpTextEscaping.EscapeSingleLine(McpToolResults.ProtectMetadataString(details)),
+			text,
+			StringComparison.Ordinal);
+		Assert.Contains("'/home/alice/[redacted]'", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void ToolErrorFallsBackToThePrivatePolicyWhenItCannotBeRead()
+	{
+		var result = McpToolResults.Error(
+			PathNotFound("missing.txt", "/home/alice/repo"),
+			static _ => throw new IOException("profile unavailable"));
+
+		var text = Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
+		Assert.Contains("'/home/[local-user-1]/repo'", text, StringComparison.Ordinal);
+	}
+
+	private static McpToolException PathNotFound(string path, string root) =>
+		new(
+			McpErrorCodes.PathNotFound,
+			$"{McpErrorCodes.PathNotFound}: path '{path}' does not exist inside project '{root}'.")
+		{
+			ProjectRoot = root
+		};
+
+	private static string EscapedQuoted(string value) =>
+		"'" + McpTextEscaping.EscapeSingleLine(value) + "'";
 }
