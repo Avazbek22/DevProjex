@@ -32,9 +32,20 @@ public enum PreviewWorkspaceMode
 
 public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 {
-    public const string TitleVersion = "5.2";
     public const string ProductName = "DevProjex";
-    public const string BaseTitle = ProductName + " v" + TitleVersion;
+
+    // The title shows the version the assembly was built with, the same value the update section reports.
+    public static string TitleVersion { get; } = ResolveTitleVersion(
+        typeof(MainWindowViewModel).Assembly
+            .GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>()?
+            .InformationalVersion);
+
+    public static string BaseTitle { get; } = TitleVersion.Length == 0
+        ? ProductName
+        : ProductName + " v" + TitleVersion;
+
+    internal static string ResolveTitleVersion(string? informationalVersion) =>
+        informationalVersion?.Split('+', 2)[0].Trim() ?? string.Empty;
     public const double DefaultTreeFontSize = 15;
     public const double DefaultPreviewFontSize = 15;
 
