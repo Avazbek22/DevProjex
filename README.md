@@ -4,7 +4,9 @@
 
 [![Downloads](https://img.shields.io/github/downloads/Avazbek22/DevProjex/total)](https://github.com/Avazbek22/DevProjex/releases) [![npm](https://img.shields.io/npm/v/devprojex)](https://www.npmjs.com/package/devprojex) [![NuGet](https://img.shields.io/nuget/v/devprojex)](https://www.nuget.org/packages/devprojex) [![Build](https://img.shields.io/github/actions/workflow/status/Avazbek22/DevProjex/dotnet.yml)](https://github.com/Avazbek22/DevProjex/actions) [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE) ![Last commit](https://img.shields.io/github/last-commit/Avazbek22/DevProjex) ![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-green) [![Glama score](https://glama.ai/mcp/servers/Avazbek22/DevProjex/badges/score.svg)](https://glama.ai/mcp/servers/Avazbek22/DevProjex)
 
-**Clean, token-efficient codebase context for AI chats and coding agents. You see exactly what leaves your project, and secrets are masked before it goes.**
+**Clean, token-efficient codebase context for LLMs, AI chats, and coding agents. You see exactly what leaves your project, and secrets are masked before it goes.**
+
+**A Repomix alternative: agents used up to 40% fewer context tokens in [head-to-head benchmarks](#devprojex-vs-repomix-the-numbers).**
 
 DevProjex turns any folder or Git repository into clean context for AI. Paste it into ChatGPT or Claude, or let Claude Code, Codex, and Cursor read the project through its read-only MCP server. A desktop app, a Terminal Workspace, a CLI, and the MCP server share one engine, one set of filters, and one masking pipeline, on Windows, macOS, and Linux.
 
@@ -42,24 +44,40 @@ The npm and NuGet packages contain the CLI, the Terminal Workspace, and the MCP 
 
 Copying files into a chat window one by one **doesn't scale**. Packing tools are fast, but you **see the result after it's packed**, not while you choose. And a coding agent with plain file access **reads `.env` as easily as `Program.cs`**, unless every tool it uses is told to ignore it.
 
-DevProjex works differently: visual, precise, and local-first.
+DevProjex works differently: context engineering that is visual, precise, and local-first.
 
 * **You see what leaves your project:** file tree, live preview, token estimate, and an agent journal that keeps a receipt of every MCP session.
 * **You control what leaves it:** Smart Ignore, Git modes, secret and private-data masking, name filters, saved profiles.
 * **Your agent gets the same rules:** the MCP server is read-only, secret masking there has no off switch, and with Live Context the files you tick are the agent's focus.
 * **You get more than text:** a real project copy as a folder or ZIP.
 
-The numbers, with their caveats. In the final blind series against Repomix (11 tasks, 8 repositories, 6 languages, 22 sessions per side, Claude Haiku 4.5 as the agent and as the judge), DevProjex used 973,020 tokens against 1,174,907, and the judge trusted the DevProjex answer in 17 pairs of 22 against 3. With seven planted credentials, neither tool leaked a value, but the code around them stayed readable through DevProjex in 7 files of 7 against 1 of 7. The tasks were written by the author, Repomix needs fewer tool calls, and it wins broad "how does X work" questions. The whole series, with the agents' and the judge's verdicts verbatim, is in [Docs/Benchmark-History.md](Docs/Benchmark-History.md).
+### DevProjex vs Repomix: the numbers
 
-In the two 18-task runs of 12 November 2026 against Repomix 1.19.0 (Claude Haiku 4.5 in Claude Code), agents used 28.8% and 40.9% fewer context tokens through DevProjex; in the 28.8% run they also named 78 of 84 required files against 66. Both runs are in [Docs/Benchmarks](Docs/Benchmarks/README.md).
+Token savings measured in blind agent benchmarks: the same tasks and the same model on both sides, each MCP server under a neutral name, and a judge that sees only `Answer A` and `Answer B`. In the two 18-task runs of 12 November 2026 (Claude Haiku 4.5 in Claude Code), agents used **40.9% and 28.8% fewer context tokens** through DevProjex than through Repomix 1.19.0.
+
+| Measured | DevProjex | Repomix |
+|---|---:|---:|
+| Context tokens, 18 tasks, 12 Nov 2026 (DevProjex `059f95af`, Repomix 1.19.0) | 8,729,849 | 14,780,675 |
+| Context tokens, 18 tasks, 12 Nov 2026 (DevProjex `1f90ac4b`, Repomix 1.19.0) | 8,868,513 | 12,456,603 |
+| Required files named, of 84 (same run) | 78 | 66 |
+| Answers the blind judge preferred, of 18 (same run) | 15 | 2 |
+| Cost of the 18 sessions (same run) | $2.41 | $3.34 |
+| Tokens, 11 tasks in 6 languages, 29–30 Sep 2026 (DevProjex `02c0fde7`, Repomix 1.18.1) | 973,020 | 1,174,907 |
+| Answers the blind judge trusted, of 22 (same series) | 17 | 3 |
+| Files with a planted credential that stay readable, of 7 (11 Sep 2026) | 7 | 1 |
+
+In the second run Claude Code's own file tools (`Read`, `Grep`, `Glob`) were measured too: DevProjex cut token usage by 16.5% against them.
+
+Neither tool leaked any of the seven planted credentials; Repomix drops a file once it finds a secret in it, while DevProjex masks the value and keeps the code around it. Repomix is the stronger choice for broad "how does X work" questions, where packing once and searching the pack is cheaper. The tasks were written by the author, and the full tables are published: the November runs in [Docs/Benchmarks](Docs/Benchmarks/README.md), the September series with the agents' and the judge's verdicts verbatim in [Docs/Benchmark-History.md](Docs/Benchmark-History.md).
 
 ### Use it for
 
 * **AI assistants:** clean input for ChatGPT, Claude, DeepSeek, Qwen, Kimi.
+* **Code to prompt:** the job you would give Repomix, gitingest, or code2prompt, with a live preview, a token estimate, and secrets masked in place.
 * **AI agents:** any MCP client reads your project through a server that only reads and always masks, and you steer its focus with checkboxes.
 * **CI pipelines:** fail a build when secrets would leak into packed context, without ever printing the values.
 * **Restricted environments:** get the same clean context where AI agents, remote indexing, or IDE plugins are not allowed.
-* **Large codebases:** pull out one module instead of the whole repository.
+* **Large codebases:** pull out one module instead of the whole repository, and fit it into the model's context window.
 * **Code reviews and teaching:** share the structure and only the files that matter.
 
 ### Get started
@@ -75,7 +93,7 @@ Works with any language, repository, or project structure.
 **Choose and control**
 * **[Smart Ignore](#how-smart-ignore-works-):** hides build output, dependency folders, and caches, only when it finds evidence.
 * **[Hide Secrets](#how-hide-secrets-and-hide-private-data-work-):** masks detected credentials in place, in every export and every MCP response.
-* **[Hide private data](#how-hide-secrets-and-hide-private-data-work-):** optionally masks emails, IPs, MACs, phones, and user paths.
+* **[Hide private data](#how-hide-secrets-and-hide-private-data-work-):** optional PII redaction for emails, IPs, MACs, phones, and user paths.
 * **[Code compression](#how-code-compression-works-):** keeps signatures, empties function bodies; pure code gets about 3× smaller.
 * **[Strip comments and blank lines](#how-code-compression-works-):** syntax-aware cleanup in 20 language packs; source files untouched.
 * File tree with checkboxes, search, and name filters.
@@ -84,6 +102,9 @@ Works with any language, repository, or project structure.
 **AI agents**
 * **[Read-only MCP server](#mcp-server-):** six tools by default and all nine with `--tool-set full`, for any MCP client, on the same engine as the desktop app.
 * **[Live Context](#live-context-your-checkboxes-become-the-agents-focus):** tick files in the desktop app and the agent works with that selection on its very next call.
+* **Code search:** text, regular expressions, or declarations by name, across the whole selection.
+* **Dependency graph:** what a file uses and what uses it, from real imports and type references.
+* **Git diff review:** staged files, current changes, or a ref-to-ref diff, with secrets masked in both versions.
 * **[Agent journal](#agent-journal-a-receipt-for-every-session):** a receipt for every session with calls, delivered paths, tokens, and masked values, never file bodies.
 * **[Hard boundaries](#security-boundaries):** root jail, untrusted-data markers, and an agent that can only narrow what it sees.
 
@@ -108,7 +129,7 @@ Project copies respect your chosen root folders, file types, ignore rules, and c
 
 ## MCP server 🤖
 
-DevProjex ships a built-in **secure [Model Context Protocol](https://modelcontextprotocol.io) server**, on the official [C# MCP SDK](https://github.com/modelcontextprotocol/csharp-sdk), that turns any local folder or Git repository into token-efficient codebase context for AI agents: **Claude Code, Codex, Claude Desktop, Cursor, Google Antigravity, VS Code, or any MCP client**. It runs on the same engine as the desktop app, the Terminal Workspace, and the CLI. One line connects Claude Code, with or without the desktop app installed:
+DevProjex ships a built-in **secure [Model Context Protocol](https://modelcontextprotocol.io) server**, on the official [C# MCP SDK](https://github.com/modelcontextprotocol/csharp-sdk), that turns any local folder or Git repository into token-efficient codebase context for AI agents: **Claude Code, Codex, Claude Desktop, Cursor, Google Antigravity, VS Code, or any MCP client**. It runs on the same engine as the desktop app, the Terminal Workspace, and the CLI. It works as codebase RAG with zero infrastructure: the agent retrieves exactly what a task needs through code search, the dependency graph, and Git diffs, all computed locally from your source files, with no embeddings to build and no vector database to host. One line connects Claude Code, with or without the desktop app installed:
 
 ```bash
 claude mcp add devprojex -- npx -y devprojex mcp --root /absolute/path/to/project
@@ -139,7 +160,7 @@ Open the project in the desktop app and connect through **MCP → Live context**
 
 Live context uses `--live`; **Standard** connects the same server but does not follow the window selection.
 
-### Nine read-only tools
+### 6 tools by default, 9 with the full set
 
 Nine read-only tools cover the whole workflow: `list_projects`, `get_tree`, `analyze`, `search_project`, `related_files`, `get_file`, `get_diff`, `pack_context`, and `read_pack`.
 
