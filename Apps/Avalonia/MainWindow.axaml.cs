@@ -67,13 +67,13 @@ public partial class MainWindow : Window
     private void UpdateToastHostLayout()
         => _workspacePresentation.UpdateToastHostLayout();
 
-    private static void OnToastPointerEntered(object? sender, PointerEventArgs e)
+    private void OnToastPointerEntered(object? sender, PointerEventArgs e)
         => ResolveToast(sender)?.PauseDismissal();
 
-    private static void OnToastPointerExited(object? sender, PointerEventArgs e)
+    private void OnToastPointerExited(object? sender, PointerEventArgs e)
         => ResolveToast(sender)?.ResumeDismissal();
 
-    private static void OnToastPointerPressed(object? sender, PointerPressedEventArgs e)
+    private void OnToastPointerPressed(object? sender, PointerPressedEventArgs e)
     {
         ResolveToast(sender)?.Dismiss();
         e.Handled = true;
