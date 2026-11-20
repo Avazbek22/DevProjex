@@ -46,12 +46,13 @@ public sealed partial class McpServerProcessTests
 			.WaitAsync(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken);
 		Assert.Equal(0, server.ChildProcess.ExitCode);
 		await server.Client.DisposeAsync();
+		var unanswered = 0;
 		foreach (var call in calls)
 		{
 			try { await call; }
-			catch (McpException) { }
-			catch (OperationCanceledException) { }
-			catch (IOException) { }
+			catch (McpException) { unanswered++; }
+			catch (OperationCanceledException) { unanswered++; }
+			catch (IOException) { unanswered++; }
 		}
 		Assert.Empty(Directory.EnumerateFiles(temporaryRoot, "*.pack", SearchOption.AllDirectories));
 		var records = Directory.EnumerateFiles(dataRoot, "*.jsonl", SearchOption.AllDirectories)
@@ -59,8 +60,11 @@ public sealed partial class McpServerProcessTests
 		try
 		{
 			Assert.Contains(records, record => record.RootElement.GetProperty("type").GetString() == "end");
-			Assert.Contains(records, record => record.RootElement.GetProperty("type").GetString() == "call" &&
-				record.RootElement.GetProperty("call").TryGetProperty("outcome", out var outcome) && outcome.GetString() == "cancelled");
+			// A fast machine can answer every call before the input closes, and then nothing is left to cancel.
+			// Blocked-call cancellation itself is covered deterministically by McpTransportLifetimeIntegrationTests.
+			if (unanswered > 0)
+				Assert.Contains(records, record => record.RootElement.GetProperty("type").GetString() == "call" &&
+					record.RootElement.GetProperty("call").TryGetProperty("outcome", out var outcome) && outcome.GetString() == "cancelled");
 		}
 		finally { foreach (var record in records) record.Dispose(); }
 	}
