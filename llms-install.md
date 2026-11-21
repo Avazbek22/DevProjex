@@ -38,6 +38,8 @@ Windows (`npx` is a batch file, so it is started through `cmd`):
 }
 ```
 
+Write the entry to this client's own MCP settings file. In Cline that file is `cline_mcp_settings.json`, opened from MCP Servers → Configure. Do not read or edit the MCP settings of other applications.
+
 Keep the existing servers in the settings file and add only the `devprojex` entry.
 
 ## Step 3. Verify
