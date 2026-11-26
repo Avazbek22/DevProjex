@@ -1,10 +1,6 @@
-# DevProjex: MCP / GUI / CLI / TUI all in one
+# DevProjex: keep context clean, save tokens, hide secrets
 
-**🏆 Selected by the Avalonia UI team for the [App Showcase](https://avaloniaui.net/showcase)**
-
-[![Downloads](https://img.shields.io/github/downloads/Avazbek22/DevProjex/total)](https://github.com/Avazbek22/DevProjex/releases) [![npm](https://img.shields.io/npm/v/devprojex)](https://www.npmjs.com/package/devprojex) [![NuGet](https://img.shields.io/nuget/v/devprojex)](https://www.nuget.org/packages/devprojex) [![Build](https://img.shields.io/github/actions/workflow/status/Avazbek22/DevProjex/dotnet.yml)](https://github.com/Avazbek22/DevProjex/actions) [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE) ![Last commit](https://img.shields.io/github/last-commit/Avazbek22/DevProjex) ![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-green) [![Glama score](https://glama.ai/mcp/servers/Avazbek22/DevProjex/badges/score.svg)](https://glama.ai/mcp/servers/Avazbek22/DevProjex)
-
-**The local context layer for coding agents: the right files, fewer tokens, secrets masked.**
+**Smart codebase context for Claude Code, Codex, and Cursor over MCP.**
 
 **A Repomix alternative with up to 40% fewer context tokens for AI agents.**
 
@@ -14,11 +10,14 @@
 
 [See the head-to-head benchmarks →](#devprojex-vs-repomix-the-numbers)
 
-* 🎯 **Finds the right code.** Search that knows declarations, a dependency graph from real imports, and Git diffs.
-* 🧹 **Keeps the context clean.** Smart Ignore removes build output, dependencies, and caches.
-* 🔑 **Masks secrets.** Every response comes with secrets hidden, and the agent cannot switch that off.
-* 👀 **Keeps you in control.** Tick files to set the agent's focus, and see what it received in the journal.
-* ⚡ **Zero setup.** It runs locally from your source files: no embeddings, no vector database.
+[![Downloads](https://img.shields.io/github/downloads/Avazbek22/DevProjex/total)](https://github.com/Avazbek22/DevProjex/releases) [![npm](https://img.shields.io/npm/v/devprojex)](https://www.npmjs.com/package/devprojex) [![NuGet](https://img.shields.io/nuget/v/devprojex)](https://www.nuget.org/packages/devprojex) [![Build](https://img.shields.io/github/actions/workflow/status/Avazbek22/DevProjex/dotnet.yml)](https://github.com/Avazbek22/DevProjex/actions) [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE) ![Last commit](https://img.shields.io/github/last-commit/Avazbek22/DevProjex) [![Glama score](https://glama.ai/mcp/servers/Avazbek22/DevProjex/badges/score.svg)](https://glama.ai/mcp/servers/Avazbek22/DevProjex) ![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-green)
+
+* 🎯 **The right code in fewer calls.** Search hits name their function or class, and `related_files` follows real imports.
+* 🧹 **No junk in the context window.** Smart Ignore drops `node_modules`, build output, and caches before the agent sees them.
+* 🔑 **Secret masking that stays on.** Keys and tokens are masked in every response, and the agent can't switch it off.
+* 👀 **Live Context: checkboxes steer the agent.** Tick files in the desktop app, and the agent follows on its next call.
+* 🧾 **A receipt for every session.** The agent journal shows what each session received: calls, files, tokens, and masked values.
+* ⚡ **Codebase RAG without the vector database.** No embeddings to build, nothing to host, one command to connect.
 
 Connect Claude Code with one line. The agent keeps editing files with its own tools:
 
@@ -33,6 +32,8 @@ Codex, Cursor, VS Code, and other clients: [Connect a client](#connect-a-client)
 > 🔒 **Local and telemetry-free by design.** DevProjex only reads your project: it does not upload its contents or collect telemetry.
 
 ## App demo 🖼️
+
+**🏆 Selected by the Avalonia UI team for the [App Showcase](https://avaloniaui.net/showcase)**
 
 ![DevProjex demo: tick files in the desktop app, preview the exact context with its token estimate, mask secrets, compress code, then do the same in the Terminal Workspace](Docs/Media/readme-demo/devprojex-demo.gif)
 
@@ -87,14 +88,14 @@ DevProjex sits between your code and the model, and gives the agent better ways 
 * **Dependency graph:** what a file uses and what uses it, from real imports and type references.
 * **Git diff review:** staged files, current changes, or a ref-to-ref diff, with secrets masked in both versions.
 * **[Agent journal](#agent-journal-a-receipt-for-every-session):** a record of every session with calls, delivered paths, tokens, and masked values, never file contents.
-* **[Security boundaries](#security-boundaries):** the server stays inside the folders you allow, marks returned file contents as untrusted data, and lets the agent only narrow what it sees.
+* **[Security boundaries](#security-boundaries-️):** the server stays inside the folders you allow, marks returned file contents as untrusted data, and lets the agent only narrow what it sees.
 
 **Choose and control**
 * **[Smart Ignore](#how-smart-ignore-works-):** hides build output, dependency folders, and caches, but only where it finds real signs of them.
 * **[Hide Secrets](#how-hide-secrets-and-hide-private-data-work-):** masks detected credentials in place, in every export and every MCP response.
 * **[Hide private data](#how-hide-secrets-and-hide-private-data-work-):** optional masking of emails, IPs, MAC addresses, phone numbers, and user paths.
-* **[Code compression](#how-code-compression-works-):** keeps signatures, empties function bodies; pure code gets about 3× smaller.
-* **[Strip comments and blank lines](#how-code-compression-works-):** syntax-aware cleanup in 20 language packs; source files untouched.
+* **[Code compression](#how-code-compression-works-️):** keeps signatures, empties function bodies; pure code gets about 3× smaller.
+* **[Strip comments and blank lines](#how-code-compression-works-️):** syntax-aware cleanup in 20 language packs; source files untouched.
 * File tree with checkboxes, search, and name filters.
 * **[Git modes](#how-smart-ignore-works-):** `.gitignore`, tracked files, staged files, all current changes, or a ref-to-ref diff.
 
@@ -175,7 +176,7 @@ Each session shows the client, the mode, and its totals: calls, characters, toke
 
 Read the journal in the desktop app (**MCP → Journal**), the Terminal Workspace, or the CLI. You can export a session as a Markdown or JSON **context receipt** with calls, delivered paths, and totals.
 
-### Security boundaries
+### Security boundaries 🛡️
 
 The MCP server enforces these boundaries:
 
@@ -191,25 +192,27 @@ Masking cannot be turned off, but no detector finds every secret. DevProjex dete
 
 See [Docs/McpServer.md](Docs/McpServer.md) for client setup, the full tool reference, and the security model.
 
-### DevProjex vs Repomix: the numbers
+### <img src="Assets/AppIcon/MacOS/AppIconSet/64.png" alt="" width="22" height="22" align="absmiddle" hspace="5">DevProjex vs Repomix: the numbers
 
-The savings come from blind agent benchmarks. Both sides get the same tasks and the same model, each MCP server runs under a neutral name, and the judge sees only `Answer A` and `Answer B`. In two 18-task runs on 12 November 2026 (Claude Haiku 4.5 in Claude Code), agents used **40.9% and 28.8% fewer context tokens** with DevProjex than with Repomix 1.19.0.
+In two blind benchmark runs, agents used **40.9% and 28.8% fewer context tokens** with DevProjex than with Repomix. Each run has 18 tasks, the same model on every side, and a judge who sees only `Answer A` and `Answer B`.
 
-| Measured | DevProjex | Repomix | Claude Code's own tools |
-|---|---:|---:|---:|
-| Context tokens, 18 tasks, 12 Nov 2026 (DevProjex `059f95af`, Repomix 1.19.0) | 8,729,849 | 14,780,675 | — |
-| Context tokens, 18 tasks, 12 Nov 2026 (DevProjex `1f90ac4b`, Repomix 1.19.0) | 8,868,513 | 12,456,603 | 10,625,527 |
-| Required files named, of 84 (same run) | 78 | 66 | 64 |
-| Tool calls (same run) | 331 | 374 | 454 |
-| Total session time, seconds (same run) | 1,057 | 1,231 | 1,149 |
-| Sessions stopped by the turn limit, of 18 (same run) | 0 | 0 | 2 |
-| Answers the blind judge preferred against Repomix, of 18 (same run) | 15 | 2 | — |
-| Cost of the 18 sessions (same run) | $2.41 | $3.34 | $2.67 |
-| Files with a planted credential that stay readable, of 7 (11 Sep 2026) | 7 | 1 | — |
+The second run also measured Claude Code's own file tools:
 
-**What if the agent just reads the project itself?** That is the third column: Claude Code's own `Read`, `Grep`, and `Glob`, with no MCP server. With DevProjex the agent used 16.5% fewer tokens and 27% fewer tool calls, and named 14 more of the required files. The built-in tools ran out of turns on two tasks.
+| | DevProjex | Repomix | Claude Code's own tools |
+|---|:---:|:---:|:---:|
+| Context tokens | **8.9M** | 12.5M | 10.6M |
+| Required files found, of 84 | **78** | 66 | 64 |
+| Tool calls | **331** | 374 | 454 |
+| Sessions that ran out of turns | **0** | **0** | 2 |
+| Cost of 18 sessions | **$2.41** | $3.34 | $2.67 |
 
-Neither tool leaked any of the seven planted credentials. Repomix drops a file when it finds a secret in it; DevProjex masks the value and keeps the code around it. Repomix is the better choice for broad "how does X work" questions, where packing once and searching the pack is cheaper.
+*12 November 2026: DevProjex `1f90ac4b`, Repomix 1.19.0, Claude Haiku 4.5 in Claude Code.*
+
+The blind judge preferred DevProjex's answer in **15 of 18 tasks** against Repomix.
+
+**What if the agent just reads the project itself?** That is the third column: Claude Code's own `Read`, `Grep`, and `Glob`, with no MCP server. With DevProjex the agent used 16.5% fewer tokens and 27% fewer tool calls, and found 14 more of the required files.
+
+In a separate test with seven planted credentials, neither tool leaked one. Repomix drops a file when it finds a secret in it; DevProjex masks the value and keeps the code around it, so all seven files stayed readable, against one with Repomix. Repomix is the better choice for broad "how does X work" questions, where packing once and searching the pack is cheaper.
 
 The full tables are published. The November runs are in [Docs/Benchmarks](Docs/Benchmarks/README.md). The September series (11 tasks in six languages), with the agents' and the judge's verdicts word for word, is in [Docs/Benchmark-History.md](Docs/Benchmark-History.md).
 
@@ -318,7 +321,7 @@ var botToken = "110201543:AAHdqTcvE…";                          // in your fil
 var botToken = "DEVPROJEX_REDACTED[telegram-bot-api-token#1]";  // in the export
 ```
 
-Detection uses a reviewed [Gitleaks](https://github.com/gitleaks/gitleaks) rule set with a fixed version, running on DevProjex's own engine. You can exclude a false positive match by match right in the preview. Turn it on with one switch in the desktop app or with `--hide-secrets` in the CLI; in the MCP server it is always on, see [Security boundaries](#security-boundaries). In CI, `--fail-on-findings` fails the build without printing any value.
+Detection uses a reviewed [Gitleaks](https://github.com/gitleaks/gitleaks) rule set with a fixed version, running on DevProjex's own engine. You can exclude a false positive match by match right in the preview. Turn it on with one switch in the desktop app or with `--hide-secrets` in the CLI; in the MCP server it is always on, see [Security boundaries](#security-boundaries-️). In CI, `--fail-on-findings` fails the build without printing any value.
 
 **Hide private data** is the second, optional layer, for personal data: emails, global IPs, local-user paths, MAC addresses, and international phone numbers. They become `DEVPROJEX_REDACTED[email#1]`, `[ipv4#1]`, `[local-user#1]`, and so on. The same value gets the same placeholder in every interface, so exported code stays consistent.
 
