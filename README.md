@@ -10,7 +10,7 @@
 
 [See the head-to-head benchmarks →](#devprojex-vs-repomix-the-numbers)
 
-[![Downloads](https://img.shields.io/github/downloads/Avazbek22/DevProjex/total)](https://github.com/Avazbek22/DevProjex/releases) [![npm](https://img.shields.io/npm/v/devprojex)](https://www.npmjs.com/package/devprojex) [![NuGet](https://img.shields.io/nuget/v/devprojex)](https://www.nuget.org/packages/devprojex) [![Build](https://img.shields.io/github/actions/workflow/status/Avazbek22/DevProjex/dotnet.yml)](https://github.com/Avazbek22/DevProjex/actions) [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE) ![Last commit](https://img.shields.io/github/last-commit/Avazbek22/DevProjex) [![Glama score](https://glama.ai/mcp/servers/Avazbek22/DevProjex/badges/score.svg)](https://glama.ai/mcp/servers/Avazbek22/DevProjex) ![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-green)
+[![Downloads](https://img.shields.io/github/downloads/Avazbek22/DevProjex/total)](https://github.com/Avazbek22/DevProjex/releases) [![npm](https://img.shields.io/npm/v/devprojex)](https://www.npmjs.com/package/devprojex) [![NuGet](https://img.shields.io/nuget/v/devprojex)](https://www.nuget.org/packages/devprojex) [![Build](https://img.shields.io/github/actions/workflow/status/Avazbek22/DevProjex/dotnet.yml)](https://github.com/Avazbek22/DevProjex/actions) [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE) ![Last commit](https://img.shields.io/github/last-commit/Avazbek22/DevProjex) [![Glama score](https://glama.ai/mcp/servers/Avazbek22/DevProjex/badges/score.svg)](https://glama.ai/mcp/servers/Avazbek22/DevProjex)
 
 * 🎯 **The right code in fewer calls.** Search hits name their function or class, and `related_files` follows real imports.
 * 🧹 **No junk in the context window.** Smart Ignore drops `node_modules`, build output, and caches before the agent sees them.
@@ -27,11 +27,11 @@ claude mcp add devprojex -- npx -y devprojex mcp --root /absolute/path/to/projec
 
 Codex, Cursor, VS Code, and other clients: [Connect a client](#connect-a-client).
 
-**Not using an agent?** DevProjex is also a desktop app, a Terminal Workspace, and a CLI on the same engine, for Windows, macOS, and Linux. Tick files in a tree, watch the live preview and its token estimate, and paste clean context into ChatGPT or Claude. Export it as **ASCII, Markdown, JSON, or XML**, or as a project copy in a **folder or ZIP**.
+**Not using an agent?** DevProjex is also a desktop app, a [Terminal Workspace](#command-line-), and a [CLI](#command-line-) on the same engine, for Windows, macOS, and Linux. Tick files in a tree, watch the live preview and its token estimate, and paste clean context into ChatGPT or Claude. Export it as **ASCII, Markdown, JSON, or XML**, or as a project copy in a **folder or ZIP**.
 
 > 🔒 **Local and telemetry-free by design.** DevProjex only reads your project: it does not upload its contents or collect telemetry.
 
-## App demo 🖼️
+## 🖼️ App demo · [⌨️ Terminal UI / CLI ↓](#command-line-) · [🤖 MCP server ↓](#mcp-server-)
 
 **🏆 Selected by the Avalonia UI team for the [App Showcase](https://avaloniaui.net/showcase)**
 
@@ -88,14 +88,14 @@ DevProjex sits between your code and the model, and gives the agent better ways 
 * **Dependency graph:** what a file uses and what uses it, from real imports and type references.
 * **Git diff review:** staged files, current changes, or a ref-to-ref diff, with secrets masked in both versions.
 * **[Agent journal](#agent-journal-a-receipt-for-every-session):** a record of every session with calls, delivered paths, tokens, and masked values, never file contents.
-* **[Security boundaries](#security-boundaries-️):** the server stays inside the folders you allow, marks returned file contents as untrusted data, and lets the agent only narrow what it sees.
+* **[Security boundaries](#security-boundaries-):** the server stays inside the folders you allow, marks returned file contents as untrusted data, and lets the agent only narrow what it sees.
 
 **Choose and control**
 * **[Smart Ignore](#how-smart-ignore-works-):** hides build output, dependency folders, and caches, but only where it finds real signs of them.
 * **[Hide Secrets](#how-hide-secrets-and-hide-private-data-work-):** masks detected credentials in place, in every export and every MCP response.
 * **[Hide private data](#how-hide-secrets-and-hide-private-data-work-):** optional masking of emails, IPs, MAC addresses, phone numbers, and user paths.
-* **[Code compression](#how-code-compression-works-️):** keeps signatures, empties function bodies; pure code gets about 3× smaller.
-* **[Strip comments and blank lines](#how-code-compression-works-️):** syntax-aware cleanup in 20 language packs; source files untouched.
+* **[Code compression](#how-code-compression-works-):** keeps signatures, empties function bodies; pure code gets about 3× smaller.
+* **[Strip comments and blank lines](#how-code-compression-works-):** syntax-aware cleanup in 20 language packs; source files untouched.
 * File tree with checkboxes, search, and name filters.
 * **[Git modes](#how-smart-ignore-works-):** `.gitignore`, tracked files, staged files, all current changes, or a ref-to-ref diff.
 
@@ -176,6 +176,8 @@ Each session shows the client, the mode, and its totals: calls, characters, toke
 
 Read the journal in the desktop app (**MCP → Journal**), the Terminal Workspace, or the CLI. You can export a session as a Markdown or JSON **context receipt** with calls, delivered paths, and totals.
 
+<a name="security-boundaries-"></a>
+
 ### Security boundaries 🛡️
 
 The MCP server enforces these boundaries:
@@ -192,7 +194,7 @@ Masking cannot be turned off, but no detector finds every secret. DevProjex dete
 
 See [Docs/McpServer.md](Docs/McpServer.md) for client setup, the full tool reference, and the security model.
 
-### <img src="Assets/AppIcon/MacOS/AppIconSet/64.png" alt="" width="22" height="22" align="absmiddle" hspace="5">DevProjex vs Repomix: the numbers
+## <img src="Assets/AppIcon/MacOS/AppIconSet/64.png" alt="" width="28" height="28" align="absmiddle" hspace="5">DevProjex vs Repomix: the numbers
 
 In two blind benchmark runs, agents used **40.9% and 28.8% fewer context tokens** with DevProjex than with Repomix. Each run has 18 tasks, the same model on every side, and a judge who sees only `Answer A` and `Answer B`.
 
@@ -215,6 +217,8 @@ The blind judge preferred DevProjex's answer in **15 of 18 tasks** against Repom
 In a separate test with seven planted credentials, neither tool leaked one. Repomix drops a file when it finds a secret in it; DevProjex masks the value and keeps the code around it, so all seven files stayed readable, against one with Repomix. Repomix is the better choice for broad "how does X work" questions, where packing once and searching the pack is cheaper.
 
 The full tables are published. The November runs are in [Docs/Benchmarks](Docs/Benchmarks/README.md). The September series (11 tasks in six languages), with the agents' and the judge's verdicts word for word, is in [Docs/Benchmark-History.md](Docs/Benchmark-History.md).
+
+<a name="command-line-"></a>
 
 ## Command line ⚙️
 
@@ -285,6 +289,8 @@ Smart Ignore is a local, deterministic filter. It does not use an AI model, and 
 
 📖 Full technical details, including signature matching, worktree handling, and edge cases, are in [`Docs/SmartIgnore.md`](Docs/SmartIgnore.md).
 
+<a name="how-code-compression-works-"></a>
+
 ## How code compression works 🗜️
 
 An AI rarely needs every implementation line; it needs the shape of your code. Compression keeps declarations, signatures, fields, and class structure, and empties named implementation bodies:
@@ -321,7 +327,7 @@ var botToken = "110201543:AAHdqTcvE…";                          // in your fil
 var botToken = "DEVPROJEX_REDACTED[telegram-bot-api-token#1]";  // in the export
 ```
 
-Detection uses a reviewed [Gitleaks](https://github.com/gitleaks/gitleaks) rule set with a fixed version, running on DevProjex's own engine. You can exclude a false positive match by match right in the preview. Turn it on with one switch in the desktop app or with `--hide-secrets` in the CLI; in the MCP server it is always on, see [Security boundaries](#security-boundaries-️). In CI, `--fail-on-findings` fails the build without printing any value.
+Detection uses a reviewed [Gitleaks](https://github.com/gitleaks/gitleaks) rule set with a fixed version, running on DevProjex's own engine. You can exclude a false positive match by match right in the preview. Turn it on with one switch in the desktop app or with `--hide-secrets` in the CLI; in the MCP server it is always on, see [Security boundaries](#security-boundaries-). In CI, `--fail-on-findings` fails the build without printing any value.
 
 **Hide private data** is the second, optional layer, for personal data: emails, global IPs, local-user paths, MAC addresses, and international phone numbers. They become `DEVPROJEX_REDACTED[email#1]`, `[ipv4#1]`, `[local-user#1]`, and so on. The same value gets the same placeholder in every interface, so exported code stays consistent.
 
