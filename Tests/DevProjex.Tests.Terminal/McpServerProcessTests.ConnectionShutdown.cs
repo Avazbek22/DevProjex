@@ -39,8 +39,8 @@ public sealed partial class McpServerProcessTests
 		for (var index = 0; index < queued; index++)
 			calls.Add(server.Client.CallToolAsync("get_tree", new Dictionary<string, object?>(),
 				progress: null, options: null, TestContext.Current.CancellationToken).AsTask());
+		// The round trip only proves the server has read the calls; a fast machine may already have answered them.
 		await server.Client.ListToolsAsync(options: null, TestContext.Current.CancellationToken);
-		Assert.False(calls[0].IsCompleted);
 		server.ChildProcess.StandardInput.Close();
 		await server.ChildProcess.WaitForExitAsync(TestContext.Current.CancellationToken)
 			.WaitAsync(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken);
