@@ -67,15 +67,16 @@ public sealed class DocumentationAndPackagingContractTests
 		var readMe = File.ReadAllText(Path.Combine(rootPath, "README.md"));
 		var contract = File.ReadAllText(Path.Combine(rootPath, "Docs", "CLI-V1-Contract.md"));
 		var enumeration = FirstSentence(
-			ParagraphContaining(readMe, "read-only tools cover the whole workflow"));
+			ParagraphContaining(readMe, "tools cover the whole workflow"));
 
 		foreach (var name in toolNames)
 			Assert.Contains($"`{name}`", enumeration, StringComparison.Ordinal);
 
 		Assert.Contains(
-			$"{CountWord(toolNames.Length)} read-only tools",
+			$"{CountWord(toolNames.Length)} tools cover the whole workflow",
 			enumeration,
 			StringComparison.Ordinal);
+		Assert.Contains("none of them can change a file", enumeration, StringComparison.Ordinal);
 		Assert.Contains(
 			$"all {CountWord(toolNames.Length).ToLowerInvariant()} tool descriptions",
 			contract,
@@ -105,12 +106,18 @@ public sealed class DocumentationAndPackagingContractTests
 	public void McpSecretDocumentationSeparatesControlFromDetectionGuarantees()
 	{
 		var rootPath = FindRepositoryRoot();
+		var readme = File.ReadAllText(Path.Combine(rootPath, "README.md"));
 		var documents = new[]
 		{
-			File.ReadAllText(Path.Combine(rootPath, "README.md")),
 			File.ReadAllText(Path.Combine(rootPath, "Docs", "McpServer.md")),
 			File.ReadAllText(Path.Combine(rootPath, "Docs", "HideSecrets.md"))
 		};
+
+		// The README states the same two facts in plain words: the control cannot be switched off,
+		// and detection has limits, so a pack still needs a look before it leaves the environment.
+		Assert.Contains("Masking cannot be turned off", readme, StringComparison.Ordinal);
+		Assert.Contains("no detector finds every secret", readme, StringComparison.Ordinal);
+		Assert.Contains("review each pack", readme, StringComparison.OrdinalIgnoreCase);
 
 		Assert.All(documents, static document =>
 		{
@@ -120,7 +127,7 @@ public sealed class DocumentationAndPackagingContractTests
 			Assert.Contains("publishing", document, StringComparison.OrdinalIgnoreCase);
 		});
 
-		foreach (var document in documents.Skip(1))
+		foreach (var document in documents)
 		{
 			Assert.Contains("placeholder", document, StringComparison.OrdinalIgnoreCase);
 			Assert.Contains("EXAMPLE", document, StringComparison.Ordinal);
@@ -514,12 +521,12 @@ public sealed class DocumentationAndPackagingContractTests
 		var readme = File.ReadAllText(Path.Combine(rootPath, "README.md"));
 
 		Assert.Contains(
-			"network access is disabled unless `--allow-remote`",
+			"Network access is off unless you turn on `--allow-remote`",
 			readme,
 			StringComparison.Ordinal);
-		Assert.Contains("cannot modify project files", readme, StringComparison.Ordinal);
+		Assert.Contains("Tools cannot change project files or run project code", readme, StringComparison.Ordinal);
 		Assert.Contains(
-			"remote Git URL checkouts are pinned on first use",
+			"A remote Git URL checkout, if you allow it, is pinned on first use",
 			readme,
 			StringComparison.Ordinal);
 		Assert.DoesNotContain(
@@ -899,11 +906,27 @@ public sealed class DocumentationAndPackagingContractTests
 	public void MainReadmeIsPlainMarkdownSoListingsRenderItWhole()
 	{
 		// Glama shows the README of the default branch and drops raw HTML, so the title, badges,
-		// demo and banners must stay Markdown for the listing to show them.
+		// demo and banners must stay Markdown for the listing to show them. Two things may be HTML,
+		// because nothing is lost when a listing drops them: an empty named anchor in front of a
+		// heading, and a small inline icon from the repository inside a heading.
 		var rootPath = FindRepositoryRoot();
 		var readme = File.ReadAllText(Path.Combine(rootPath, "README.md"));
 		var prose = Regex.Replace(readme, "```.*?```", string.Empty, RegexOptions.Singleline);
 		prose = Regex.Replace(prose, "`[^`\n]*`", string.Empty);
+
+		const string inlineIcon =
+			@"<img src=""(?<url>(?:Docs/Media/readme-icons|Assets/AppIcon)/[^""]+)"" alt="""" " +
+			@"width=""\d{2}"" height=""\d{2}"" align=""absmiddle""(?: hspace=""\d"")?>";
+		foreach (Match icon in Regex.Matches(prose, inlineIcon))
+		{
+			var url = icon.Groups["url"].Value;
+			Assert.True(
+				File.Exists(Path.Combine(rootPath, url.Replace('/', Path.DirectorySeparatorChar))),
+				$"README icon is missing from the repository: {url}");
+		}
+
+		prose = Regex.Replace(prose, inlineIcon, string.Empty);
+		prose = Regex.Replace(prose, @"(?m)^<a name=""[a-z0-9-]+""></a>\r?$", string.Empty);
 
 		Assert.StartsWith("# DevProjex", readme, StringComparison.Ordinal);
 		Assert.DoesNotMatch(@"<\s*/?\s*(img|a|p|h\d|div|br|picture|source|sub|sup|strong|center)\b[^>]*>", prose);
@@ -1450,7 +1473,7 @@ public sealed class DocumentationAndPackagingContractTests
 		var readme = File.ReadAllText(Path.Combine(rootPath, "README.md"));
 		var advertised = Regex.Match(
 			readme,
-			"Localization in (?<count>\\d+) languages",
+			"Interface in (?<count>\\d+) languages",
 			RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 		var shippedCount = Directory
 			.EnumerateFiles(Path.Combine(rootPath, "Assets", "Localization"), "*.json")
