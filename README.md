@@ -4,32 +4,17 @@
 
 **A Repomix alternative with up to 40% fewer context tokens for AI agents.**
 
-| Up to 40% | 16.5% | 78 of 84 | 27% |
-|:---:|:---:|:---:|:---:|
-| fewer context tokens than Repomix | fewer tokens than Claude Code's own file tools | required files found, against 66 with Repomix | fewer tool calls than the built-in tools |
+| | DevProjex | Repomix | Claude Code's own tools |
+|---|:---:|:---:|:---:|
+| Context tokens | **8.7M** | 14.8M | 10.6M |
+| Required files found, of 84 | **78** | 66 | 64 |
+| Tool calls | **331** | 374 | 454 |
+| Sessions that ran out of turns | **0** | **0** | 2 |
+| Cost of 18 sessions | **$2.41** | $3.34 | $2.67 |
 
 [See the head-to-head benchmarks →](#devprojex-vs-repomix-the-numbers)
 
 [![Downloads](https://img.shields.io/github/downloads/Avazbek22/DevProjex/total)](https://github.com/Avazbek22/DevProjex/releases) [![npm](https://img.shields.io/npm/v/devprojex)](https://www.npmjs.com/package/devprojex) [![NuGet](https://img.shields.io/nuget/v/devprojex)](https://www.nuget.org/packages/devprojex) [![Build](https://img.shields.io/github/actions/workflow/status/Avazbek22/DevProjex/dotnet.yml)](https://github.com/Avazbek22/DevProjex/actions) [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE) ![Last commit](https://img.shields.io/github/last-commit/Avazbek22/DevProjex) [![Glama score](https://glama.ai/mcp/servers/Avazbek22/DevProjex/badges/score.svg)](https://glama.ai/mcp/servers/Avazbek22/DevProjex)
-
-* 🎯 **The right code in fewer calls.** Search hits name their function or class, and `related_files` follows real imports.
-* 🧹 **No junk in the context window.** Smart Ignore drops `node_modules`, build output, and caches before the agent sees them.
-* 🔑 **Secret masking that stays on.** Keys and tokens are masked in every response, and the agent can't switch it off.
-* 👀 **Live Context: checkboxes steer the agent.** Tick files in the desktop app, and the agent follows on its next call.
-* 🧾 **A receipt for every session.** The agent journal shows what each session received: calls, files, tokens, and masked values.
-* ⚡ **Codebase RAG without the vector database.** No embeddings to build, nothing to host, one command to connect.
-
-Connect Claude Code with one line. The agent keeps editing files with its own tools:
-
-```bash
-claude mcp add devprojex -- npx -y devprojex mcp --root /absolute/path/to/project
-```
-
-Codex, Cursor, VS Code, and other clients: [Connect a client](#connect-a-client).
-
-**Not using an agent?** DevProjex is also a desktop app, a [Terminal Workspace](#command-line-), and a [CLI](#command-line-) on the same engine, for Windows, macOS, and Linux. Tick files in a tree, watch the live preview and its token estimate, and paste clean context into ChatGPT or Claude. Export it as **ASCII, Markdown, JSON, or XML**, or as a project copy in a **folder or ZIP**.
-
-> 🔒 **Local and telemetry-free by design.** DevProjex only reads your project: it does not upload its contents or collect telemetry.
 
 ## 🖼️ App demo · [⌨️ Terminal UI / CLI ↓](#command-line-) · [🤖 MCP server ↓](#mcp-server-)
 
@@ -39,13 +24,9 @@ Codex, Cursor, VS Code, and other clients: [Connect a client](#connect-a-client)
 
 ## Download 🚀
 
-**Microsoft Store:**
-👉 [DevProjex](https://apps.microsoft.com/detail/9ndq3nq5m354)
+### 🖥️ Desktop app (all in one): <img src="Docs/Media/readme-icons/microsoft.svg" alt="" width="20" height="20" align="absmiddle"> [Microsoft Store](https://apps.microsoft.com/detail/9ndq3nq5m354) · 📦 [GitHub release](https://github.com/Avazbek22/DevProjex/releases/latest)
 
-**Latest GitHub release (Windows, macOS, Linux):**
-👉 [github.com/Avazbek22/DevProjex/releases/latest](https://github.com/Avazbek22/DevProjex/releases/latest)
-
-**WinGet (Windows):** `winget install OlimoffDev.DevProjex`
+### <img src="Docs/Media/readme-icons/microsoft.svg" alt="" width="20" height="20" align="absmiddle"> WinGet: `winget install OlimoffDev.DevProjex`
 
 ### Run without installing
 
@@ -58,6 +39,16 @@ dnx devprojex tree .    # .NET SDK 10
 ```
 
 The npm and NuGet packages contain the CLI, the Terminal Workspace, and the MCP server, but not the desktop app. Requirements per platform, the direct headless archives, and the non-root Docker image are all covered in [Docs/Installation.md](Docs/Installation.md).
+
+### Connect your coding agent
+
+One line connects Claude Code. The agent keeps editing files with its own tools:
+
+```bash
+claude mcp add devprojex -- npx -y devprojex mcp --root /absolute/path/to/project
+```
+
+Codex, Cursor, VS Code, and other clients: [Connect a client](#connect-a-client).
 
 ## Why DevProjex? 💡
 
@@ -198,21 +189,18 @@ See [Docs/McpServer.md](Docs/McpServer.md) for client setup, the full tool refer
 
 In two blind benchmark runs, agents used **40.9% and 28.8% fewer context tokens** with DevProjex than with Repomix. Each run has 18 tasks, the same model on every side, and a judge who sees only `Answer A` and `Answer B`.
 
-The second run also measured Claude Code's own file tools:
+| Context tokens | DevProjex | Repomix |
+|---|:---:|:---:|
+| Run 1 | **8.7M** | 14.8M |
+| Run 2 | **8.9M** | 12.5M |
 
-| | DevProjex | Repomix | Claude Code's own tools |
-|---|:---:|:---:|:---:|
-| Context tokens | **8.9M** | 12.5M | 10.6M |
-| Required files found, of 84 | **78** | 66 | 64 |
-| Tool calls | **331** | 374 | 454 |
-| Sessions that ran out of turns | **0** | **0** | 2 |
-| Cost of 18 sessions | **$2.41** | $3.34 | $2.67 |
+*12 November 2026: run 1 on DevProjex `059f95af`, run 2 on `1f90ac4b`; Repomix 1.19.0, Claude Haiku 4.5 in Claude Code.*
 
-*12 November 2026: DevProjex `1f90ac4b`, Repomix 1.19.0, Claude Haiku 4.5 in Claude Code.*
+In the table at the top of this page, the token figures for DevProjex and Repomix are from run 1. The other rows and the Claude Code column are from run 2, which also measured Claude Code's own file tools.
 
 The blind judge preferred DevProjex's answer in **15 of 18 tasks** against Repomix.
 
-**What if the agent just reads the project itself?** That is the third column: Claude Code's own `Read`, `Grep`, and `Glob`, with no MCP server. With DevProjex the agent used 16.5% fewer tokens and 27% fewer tool calls, and found 14 more of the required files.
+**What if the agent just reads the project itself?** That is the third column of the top table: Claude Code's own `Read`, `Grep`, and `Glob`, with no MCP server. In that run the agent used 16.5% fewer tokens with DevProjex (8.9M against 10.6M) and 27% fewer tool calls, and found 14 more of the required files.
 
 In a separate test with seven planted credentials, neither tool leaked one. Repomix drops a file when it finds a secret in it; DevProjex masks the value and keeps the code around it, so all seven files stayed readable, against one with Repomix. Repomix is the better choice for broad "how does X work" questions, where packing once and searching the pack is cheaper.
 
