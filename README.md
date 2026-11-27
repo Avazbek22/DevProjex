@@ -14,6 +14,8 @@
 
 [See the head-to-head benchmarks →](#devprojex-vs-repomix-the-numbers)
 
+DevProjex is a local MCP server, desktop app, and CLI. It gives your coding agent code search, a dependency graph, and Git diffs, and masks secrets in everything the agent reads.
+
 [![Downloads](https://img.shields.io/github/downloads/Avazbek22/DevProjex/total)](https://github.com/Avazbek22/DevProjex/releases) [![npm](https://img.shields.io/npm/v/devprojex)](https://www.npmjs.com/package/devprojex) [![NuGet](https://img.shields.io/nuget/v/devprojex)](https://www.nuget.org/packages/devprojex) [![Build](https://img.shields.io/github/actions/workflow/status/Avazbek22/DevProjex/dotnet.yml)](https://github.com/Avazbek22/DevProjex/actions) [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE) ![Last commit](https://img.shields.io/github/last-commit/Avazbek22/DevProjex) [![Glama score](https://glama.ai/mcp/servers/Avazbek22/DevProjex/badges/score.svg)](https://glama.ai/mcp/servers/Avazbek22/DevProjex)
 
 ## 🖼️ App demo · [⌨️ Terminal UI / CLI ↓](#command-line-) · [🤖 MCP server ↓](#mcp-server-)
@@ -54,12 +56,18 @@ Codex, Cursor, VS Code, and other clients: [Connect a client](#connect-a-client)
 
 A coding agent with plain file access **reads `.env` as easily as `Program.cs`**. It also **pays for every wrong turn in tokens**: each search and each full file goes into the context window. Packing tools give it the whole repository at once, and you **see the result only after it's packed**. Copying files into a chat by hand **doesn't scale**.
 
-DevProjex sits between your code and the model, and gives the agent better ways to read:
+DevProjex sits between your code and the model. The agent reads better, and you stay in control:
 
 * **Search that understands code.** Every match shows the declaration it sits in, so the agent knows where it is.
 * **A dependency graph without setup.** `related_files` shows what a file uses and what uses it, from real imports.
 * **Big files in small parts.** A large file comes as an outline first, and the agent reads only the part it needs.
 * **Changes instead of whole files.** `get_diff` shows staged files, current changes, or the difference between two refs.
+* **Secrets masked in every response.** Keys and tokens are replaced in place, and the agent can't switch that off.
+* **You steer, and you check.** With Live Context the files you tick become the agent's focus, and the agent journal shows what each session received.
+
+**Why use it if Claude Code already reads files?** The built-in tools work, but they cost more. In the same benchmark, with the same model, the agent with DevProjex used 16.5% fewer tokens and 27% fewer tool calls than with Claude Code's own `Read`, `Grep`, and `Glob`, and found 14 more of the required files. A built-in read also returns `.env` as it is. [See the numbers](#devprojex-vs-repomix-the-numbers).
+
+**Can the agent still edit files?** Yes. DevProjex adds tools for finding and reading code, and the agent keeps writing and editing with its own tools, as before. The server itself never changes a file.
 
 ### Use it for
 
@@ -202,7 +210,7 @@ The blind judge preferred DevProjex's answer in **15 of 18 tasks** against Repom
 
 **What if the agent just reads the project itself?** That is the third column of the top table: Claude Code's own `Read`, `Grep`, and `Glob`, with no MCP server. In that run the agent used 16.5% fewer tokens with DevProjex (8.9M against 10.6M) and 27% fewer tool calls, and found 14 more of the required files.
 
-In a separate test with seven planted credentials, neither tool leaked one. Repomix drops a file when it finds a secret in it; DevProjex masks the value and keeps the code around it, so all seven files stayed readable, against one with Repomix. Repomix is the better choice for broad "how does X work" questions, where packing once and searching the pack is cheaper.
+In a separate test with seven planted credentials, neither tool leaked one. Repomix drops a file when it finds a secret in it; DevProjex masks the value and keeps the code around it, so all seven files stayed readable, against one with Repomix.
 
 The full tables are published. The November runs are in [Docs/Benchmarks](Docs/Benchmarks/README.md). The September series (11 tasks in six languages), with the agents' and the judge's verdicts word for word, is in [Docs/Benchmark-History.md](Docs/Benchmark-History.md).
 
@@ -214,22 +222,34 @@ DevProjex also runs in the terminal: a keyboard-first **Terminal Workspace** for
 
 ![DevProjex Terminal Workspace: the project tree with checkboxes, the context preview, and the parameters panel with content processing, exclusions, and file types](Docs/Media/terminal-workspace/workspace.png)
 
+**Explore a project**
+
 ```bash
-devprojex                                                      # open the Terminal Workspace
-devprojex open . --preview                                     # desktop app on this folder, preview pane open
-devprojex tree .                                               # project tree
-devprojex tree https://github.com/owner/repo --branch main     # tree of a remote repository
-devprojex analyze . --format json                              # files, lines, tokens, largest files
-devprojex analyze . --git-mode tracked --exclude smart-ignore  # tracked files only, with Smart Ignore applied
-devprojex analyze . --hide-secrets --findings --fail-on-findings   # CI gate: findings, never values
+devprojex                                      # open the Terminal Workspace
+devprojex open . --preview                     # desktop app on this folder, preview pane open
+devprojex tree .                               # project tree
+devprojex tree https://github.com/owner/repo --branch main  # tree of a remote repository
+devprojex search Configure . --symbols         # declarations by name
+devprojex related src/App.cs --direction both  # what a file uses, and who uses it
+```
+
+**Export context**
+
+```bash
 devprojex export context . --format markdown -o ../context.md  # packed context for a chat
-devprojex export context https://github.com/owner/repo -o -    # straight from a Git URL to stdout
-git diff --name-only | devprojex export context . --select-from - -o -   # only the changed files
-devprojex export project . --as zip --hide-secrets -o ../submission.zip   # masked project copy
-devprojex search Configure . --symbols                         # declarations by name
-devprojex related src/App.cs --direction both                  # what a file uses, and who uses it
-devprojex profile save . --hide-secrets on                     # remember these settings for this project
-devprojex cache update https://github.com/owner/repo           # refresh a cached clone
+devprojex export context https://github.com/owner/repo -o -    # from a Git URL to stdout
+git diff --name-only | devprojex export context . --select-from - -o -  # only the changed files
+devprojex export project . --as zip --hide-secrets -o ../submission.zip  # masked project copy
+```
+
+**Analyze and automate**
+
+```bash
+devprojex analyze . --format json                     # files, lines, tokens, largest files
+devprojex analyze . --git-mode tracked --exclude smart-ignore  # tracked files with Smart Ignore
+devprojex analyze . --hide-secrets --findings --fail-on-findings  # CI gate: findings, no values
+devprojex profile save . --hide-secrets on            # remember these settings for this project
+devprojex cache update https://github.com/owner/repo  # refresh a cached clone
 ```
 
 ### What the CLI adds
